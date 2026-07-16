@@ -117,6 +117,7 @@ Used during file annotation (`/plannotator-annotate`).
 |----------|--------|---------|
 | `/api/plan` | GET | Returns the file content in annotate mode |
 | `/api/feedback` | POST | Submit annotation feedback |
+| `/api/share-html` | GET | Lazily prepare portable raw HTML for sharing |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |
 | `/api/external-annotations/stream` | GET | SSE stream for real-time external annotations |
@@ -172,7 +173,7 @@ Body:
 
 Returns: `{ "id": "aBcDeFgH" }` (201 Created)
 
-Limits: 512KB max payload. Auto-deleted after configured TTL (default: 7 days).
+Limits: 5 MB max encrypted payload. Auto-deleted after configured TTL (default: 7 days).
 
 ### GET `/api/paste/:id`
 

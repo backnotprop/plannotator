@@ -1,1 +1,1 @@
-export { getDraftDir, contentHash, saveDraft, loadDraft, deleteDraft } from "@plannotator/shared/draft";
+export { getDraftDir, contentHash, saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "@plannotator/shared/draft";

@@ -5,11 +5,11 @@
  * Self-hosted instances are supported via the --hostname flag.
  */
 
-import { homedir } from "os";
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-types";
 import { encodeApiFilePath } from "./pr-types";
+import { getPlannotatorDataDir } from "./data-dir";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -41,64 +41,14 @@ interface GitLabDiffEntry {
   new_file: boolean;
   deleted_file: boolean;
   renamed_file: boolean;
+  /** Content withheld because the file's diff exceeds GitLab's size limits. Absent on older GitLab. */
+  too_large?: boolean | null;
+  /** Diff collapsed (content omitted from the response). Absent on older GitLab. */
+  collapsed?: boolean | null;
 }
 
-/**
- * Parse output of `glab api --paginate`.
- *
- * glab concatenates pages as adjacent JSON arrays (`[...][...]`) which is not
- * valid JSON. Walk the output, split it into top-level arrays, and merge them.
- * Single-page output (the common case) round-trips through the same path.
- */
-export function parsePaginatedArray<T>(stdout: string): T[] {
-  const trimmed = stdout.trim();
-  if (!trimmed) return [];
-
-  const slices: string[] = [];
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let start = -1;
-
-  for (let i = 0; i < trimmed.length; i++) {
-    const c = trimmed[i];
-    if (inString) {
-      if (escape) {
-        escape = false;
-      } else if (c === "\\") {
-        escape = true;
-      } else if (c === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      continue;
-    }
-    if (c === "[" || c === "{") {
-      if (depth === 0 && c === "[") start = i;
-      depth++;
-    } else if (c === "]" || c === "}") {
-      depth--;
-      if (depth === 0 && c === "]" && start !== -1) {
-        slices.push(trimmed.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-
-  if (slices.length === 0) {
-    return JSON.parse(trimmed) as T[];
-  }
-
-  const merged: T[] = [];
-  for (const slice of slices) {
-    const page = JSON.parse(slice) as T[];
-    if (Array.isArray(page)) merged.push(...page);
-  }
-  return merged;
-}
+export { parsePaginatedArray } from "./cli-pagination";
+import { parsePaginatedArray } from "./cli-pagination";
 
 /**
  * Reconstruct a unified patch from GitLab's merge_request diffs API response.
@@ -117,6 +67,10 @@ function reconstructPatch(diffs: GitLabDiffEntry[]): string {
 
     let header = `diff --git a/${displayOld} b/${displayNew}`;
     if (d.renamed_file) {
+      // Diff parsers (e.g. Pierre's) key rename classification off the
+      // similarity line; the API doesn't expose the score, so emit 100% for
+      // pure renames (empty diff) and a synthetic <100% otherwise.
+      header += d.diff.trim() === "" ? "\nsimilarity index 100%" : "\nsimilarity index 99%";
       header += `\nrename from ${d.old_path}\nrename to ${d.new_path}`;
     }
     if (d.new_file) {
@@ -164,23 +118,42 @@ export async function getGlUser(runtime: PRRuntime, host: string): Promise<strin
 
 // --- Fetch MR ---
 
+/**
+ * True when a JSON diffs-API entry should carry diff content but doesn't.
+ *
+ * Modern GitLab marks withheld content explicitly per entry (`too_large`,
+ * `collapsed`) — authoritative both ways: a too-large ADDED file is caught
+ * (it would otherwise be indistinguishable from a legitimately empty new
+ * file), and binaries/empty files are never misflagged.
+ *
+ * Older GitLab (the same versions this JSON fallback exists for) omits the
+ * flags entirely; there an empty diff on a plain modification is the only
+ * reliable withheld signal — empty adds/deletes/renames stay exempt.
+ */
+function entryMissingContent(d: GitLabDiffEntry): boolean {
+  if (d.diff.trim() !== "") return false;
+  if (d.too_large || d.collapsed) return true;
+  // == null catches both absent (old GitLab) and explicit null (GitLab emits
+  // null for unknown on sibling fields like generated_file) — either way the
+  // flags are inconclusive and the heuristic must decide.
+  if (d.too_large == null && d.collapsed == null) {
+    return !d.renamed_file && !d.new_file && !d.deleted_file;
+  }
+  return false;
+}
+
 export async function fetchGlMR(
   runtime: PRRuntime,
   ref: GlMRRef,
-): Promise<{ metadata: PRMetadata; rawPatch: string }> {
+): Promise<{ metadata: PRMetadata; rawPatch: string; patchIncomplete?: boolean }> {
   const encoded = encodeProject(ref.projectPath);
 
-  // Fetch diff and metadata in parallel via glab api (supports --hostname for self-hosted)
+  // Primary: raw_diffs — preserves Git's binary-marker shape and includes
+  // collapsed/generated file contents that the JSON diffs API can omit.
   const [diffResult, viewResult] = await Promise.all([
-    runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/diffs?per_page=100`, ["--paginate"])),
+    runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/raw_diffs`)),
     runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}`)),
   ]);
-
-  if (diffResult.exitCode !== 0) {
-    throw new Error(
-      `Failed to fetch MR diff: ${diffResult.stderr.trim() || `exit code ${diffResult.exitCode}`}`,
-    );
-  }
 
   if (viewResult.exitCode !== 0) {
     throw new Error(
@@ -188,9 +161,39 @@ export async function fetchGlMR(
     );
   }
 
-  // Reconstruct unified patch from structured API response
-  const diffs = parsePaginatedArray<GitLabDiffEntry>(diffResult.stdout);
-  const rawPatch = reconstructPatch(diffs);
+  // Fall back to the paginated JSON diffs API when raw_diffs is unavailable
+  // (older self-hosted GitLab that doesn't expose the raw_diffs endpoint) or
+  // returns empty (very large MRs that exceed its safety limit). Reconstruct a
+  // unified patch from the JSON entries — the long-standing pre-raw_diffs path.
+  let rawPatch: string;
+  let patchIncomplete = false;
+  if (diffResult.exitCode === 0 && diffResult.stdout.trim()) {
+    rawPatch = diffResult.stdout;
+  } else {
+    const fallback = await runtime.runCommand(
+      "glab",
+      apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/diffs?per_page=100`, ["--paginate"]),
+    );
+    if (fallback.exitCode !== 0) {
+      const rawErr = diffResult.stderr.trim() || `exit code ${diffResult.exitCode}`;
+      const fbErr = fallback.stderr.trim() || `exit code ${fallback.exitCode}`;
+      throw new Error(`Failed to fetch MR diff (raw_diffs: ${rawErr}; diffs: ${fbErr}).`);
+    }
+    const entries = parsePaginatedArray<GitLabDiffEntry>(fallback.stdout);
+    rawPatch = reconstructPatch(entries);
+    if (!rawPatch.trim()) {
+      throw new Error(
+        "MR diff is empty — the diff may be too large to fetch via the GitLab API. Review it on the GitLab web UI.",
+      );
+    }
+    const missingContent = entries.filter(entryMissingContent).length;
+    if (missingContent > 0) {
+      console.error(
+        `Warning: GitLab omitted diff content for ${missingContent} file(s) (MR too large). They appear in the review without hunks; the full diff can be recomputed locally once the checkout is ready.`,
+      );
+      patchIncomplete = true;
+    }
+  }
 
   const raw = JSON.parse(viewResult.stdout) as {
     title: string;
@@ -233,10 +236,30 @@ export async function fetchGlMR(
     url: raw.web_url,
   };
 
-  return { metadata, rawPatch };
+  return { metadata, rawPatch, ...(patchIncomplete && { patchIncomplete }) };
 }
 
 // --- MR Context ---
+
+/**
+ * Best-effort GitLab bot detection. GitLab's note/approval user objects don't
+ * reliably carry a `bot` flag (unlike GitHub's `__typename`), so check it when
+ * present and otherwise fall back to the username conventions GitLab uses for
+ * automation accounts: project/group access-token bots (`project_<id>_bot…`,
+ * `group_<id>_bot…`), a `_bot`/`[bot]` suffix, and the `ghost` placeholder.
+ * Conservative on purpose — better to miss a bot than hide a real person.
+ */
+function isGitlabBot(user: any): boolean {
+  if (!user) return false;
+  if (user.bot === true) return true;
+  const name = String(user.username ?? "").toLowerCase();
+  return (
+    /^(project|group)_\d+_bot/.test(name) ||
+    name.endsWith("_bot") ||
+    name.endsWith("[bot]") ||
+    name === "ghost"
+  );
+}
 
 export async function fetchGlMRContext(
   runtime: PRRuntime,
@@ -256,11 +279,31 @@ export async function fetchGlMRContext(
 
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
   const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  // GitLab returns avatar URLs that are absolute on gitlab.com but often
+  // relative (`/uploads/...`) on self-hosted instances. A relative URL would
+  // resolve against our local server, not the GitLab host, so make it absolute.
+  const resolveAvatar = (v: unknown): string | undefined => {
+    const s = str(v);
+    if (!s) return undefined;
+    return s.startsWith("/") ? `https://${ref.host}${s}` : s;
+  };
 
   // --- MR details ---
-  let mr: Record<string, unknown> = {};
-  if (mrResult.exitCode === 0) {
-    try { mr = JSON.parse(mrResult.stdout); } catch { /* non-JSON response */ }
+  if (mrResult.exitCode !== 0) {
+    throw new Error(
+      `Failed to fetch MR context: ${mrResult.stderr.trim() || `exit code ${mrResult.exitCode}`}`,
+    );
+  }
+
+  let mr: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(mrResult.stdout);
+    if (!isRecord(parsed)) {
+      throw new Error("non-object MR response");
+    }
+    mr = parsed;
+  } catch {
+    throw new Error("Failed to fetch MR context: invalid MR response");
   }
 
   // Normalize state: GitLab uses "opened"/"closed"/"merged" → uppercase
@@ -311,9 +354,12 @@ export async function fetchGlMRContext(
       const rawNotes = JSON.parse(notesResult.stdout) as any[];
       for (const n of rawNotes) {
         if (n.system) continue;
+        const avatarUrl = resolveAvatar(n.author?.avatar_url);
         notes.push({
           id: String(n.id ?? ""),
           author: str(n.author?.username),
+          ...(avatarUrl ? { avatarUrl } : {}),
+          ...(isGitlabBot(n.author) ? { isBot: true } : {}),
           body: str(n.body),
           createdAt: str(n.created_at),
           url: str(n.web_url) || "",
@@ -335,9 +381,12 @@ export async function fetchGlMRContext(
       for (const a of approvedBy) {
         const user = (a as any)?.user;
         if (!user) continue;
+        const avatarUrl = resolveAvatar(user.avatar_url);
         reviews.push({
           id: String(user.id ?? ""),
           author: str(user.username),
+          ...(avatarUrl ? { avatarUrl } : {}),
+          ...(isGitlabBot(user) ? { isBot: true } : {}),
           state: "APPROVED",
           body: "",
           submittedAt: "",
@@ -415,6 +464,10 @@ export async function fetchGlMRContext(
     checks,
     linkedIssues,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 // --- File Content ---
@@ -562,7 +615,7 @@ export async function submitGlMRReview(
         .filter((c): c is PRReviewFileComment => c !== null);
       let savedTo: string | null = null;
       try {
-        const dir = join(homedir(), ".plannotator", "failed-comments");
+        const dir = join(getPlannotatorDataDir(), "failed-comments");
         mkdirSync(dir, { recursive: true });
         const slug = `${ref.host}-${ref.projectPath.replace(/\//g, "_")}-mr${ref.iid}-${Date.now()}`;
         savedTo = join(dir, `${slug}.json`);

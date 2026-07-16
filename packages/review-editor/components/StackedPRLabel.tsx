@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import { getPlatformLabel } from '@plannotator/shared/pr-types';
 import { buildMinimalStackTree } from '@plannotator/shared/pr-stack';
 import { getItem, setItem } from '@plannotator/ui/utils/storage';
@@ -146,13 +146,16 @@ export function StackedPRLabel({
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          disabled={isSwitchingScope}
-          title={`Stack: comparing vs ${scopeTarget}`}
-          className="text-[10px] text-accent/70 hover:text-accent inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
-        >
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            disabled={isSwitchingScope}
+            title={`Stack: comparing vs ${scopeTarget}`}
+            className="text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+          />
+        }
+      >
           <svg className="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 500 400" fill="none" stroke="currentColor" strokeWidth={28} strokeLinejoin="round" strokeLinecap="round">
             <polygon points="250,30 470,160 250,290 30,160" />
             <polyline points="30,220 250,350 470,220" />
@@ -168,15 +171,10 @@ export function StackedPRLabel({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content
-          side="bottom"
-          align="start"
-          sideOffset={6}
-          className="z-50 w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--radix-popover-content-transform-origin)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-        >
+        <Popover.Positioner side="bottom" align="start" sideOffset={6} className="z-50">
+          <Popover.Popup className="w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           {/* Section 1: Stack Tree */}
           <div className="px-3 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
@@ -223,7 +221,7 @@ export function StackedPRLabel({
                         </span>
                       )}
                       <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                        node.isCurrent ? 'bg-accent' : node.isDefaultBranch ? 'bg-muted-foreground/30' : merged ? 'bg-muted-foreground/20' : 'bg-muted-foreground/40'
+                        node.isCurrent ? 'bg-annotation-comment' : node.isDefaultBranch ? 'bg-muted-foreground/30' : merged ? 'bg-muted-foreground/20' : 'bg-muted-foreground/40'
                       }`} />
                     </div>
                     <button
@@ -233,19 +231,19 @@ export function StackedPRLabel({
                       title={tooltip}
                       className={`flex items-center gap-1.5 min-w-0 text-xs leading-6 ml-1.5 rounded px-1 -mx-0.5 transition-colors ${
                         node.isCurrent
-                          ? 'text-accent font-medium cursor-default'
+                          ? 'text-annotation-comment font-medium cursor-default'
                           : merged
                             ? 'text-muted-foreground/40 cursor-default'
                             : disabled
                               ? 'text-muted-foreground/40 cursor-not-allowed'
                               : action.kind === 'navigate'
                                 ? 'text-muted-foreground hover:text-foreground hover:bg-muted/30 cursor-pointer'
-                                : 'text-muted-foreground hover:text-accent hover:bg-muted/30 cursor-pointer'
+                                : 'text-muted-foreground hover:text-annotation-comment hover:bg-muted/30 cursor-pointer'
                       }`}
                     >
                       <span className={`truncate ${merged ? 'line-through' : ''}`}>{nodeLabel(node)}</span>
                       {node.isCurrent && (
-                        <span className="text-[9px] text-accent/60 whitespace-nowrap">reviewing</span>
+                        <span className="text-[9px] text-annotation-comment/60 whitespace-nowrap">reviewing</span>
                       )}
                       {merged && (
                         <span className="text-[9px] text-muted-foreground/40 whitespace-nowrap border border-muted-foreground/20 rounded px-0.5 leading-tight">merged</span>
@@ -342,7 +340,8 @@ export function StackedPRLabel({
               </svg>
             </a>
           </div>
-        </Popover.Content>
+          </Popover.Popup>
+        </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
   );

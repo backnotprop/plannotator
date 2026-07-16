@@ -8,9 +8,9 @@
  * Inspired by textarea.my's approach.
  */
 
-import { Annotation, AnnotationType, type ImageAttachment } from '../types';
-import { compress, decompress } from '@plannotator/shared/compress';
-import { encrypt, decrypt } from '@plannotator/shared/crypto';
+import { AnnotationType, type Annotation, type ImageAttachment } from '../types';
+import { compress, decompress } from '@plannotator/core/compress';
+import { encrypt, decrypt } from '@plannotator/core/crypto';
 
 // Image in shareable format: plain string (old) or [path, name] tuple (new)
 type ShareableImage = string | [string, string];
@@ -27,7 +27,7 @@ export interface SharePayload {
   g?: ShareableImage[];  // global attachments (path strings or [path, name] tuples)
   d?: (string | null)[];  // diffContext per annotation, parallel to `a`
   s?: (string | undefined)[];  // source per annotation (external tool identifier), parallel to `a`
-  h?: string;  // raw HTML content (render-html mode)
+  h?: string;  // raw HTML content (direct HTML rendering mode)
   r?: 'html';  // render mode flag (omitted = markdown)
 }
 
@@ -220,6 +220,13 @@ export function formatUrlSize(url: string): string {
 const DEFAULT_PASTE_API = 'https://plannotator-paste.plannotator.workers.dev';
 const DEFAULT_SHARE_BASE = 'https://share.plannotator.ai';
 
+export class ShortShareUrlError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShortShareUrlError';
+  }
+}
+
 /**
  * Create a short share URL by posting compressed plan data to the paste service.
  *
@@ -269,6 +276,9 @@ export async function createShortShareUrl(
     });
 
     if (!response.ok) {
+      if (response.status === 413) {
+        throw new ShortShareUrlError(await readPasteError(response, 'Share payload is too large'));
+      }
       console.warn(`[sharing] Paste service returned ${response.status}`);
       return null;
     }
@@ -283,10 +293,21 @@ export async function createShortShareUrl(
 
     return { shortUrl, id: result.id };
   } catch (e) {
+    if (e instanceof ShortShareUrlError) {
+      throw e;
+    }
     // Service unavailable — expected for self-hosted setups without a paste backend.
     // The caller is responsible for falling back to hash-based sharing silently.
-    console.debug('[sharing] Short URL service unavailable, using hash-based sharing:', e);
     return null;
+  }
+}
+
+async function readPasteError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    return typeof body.error === 'string' && body.error.trim() ? body.error : fallback;
+  } catch {
+    return fallback;
   }
 }
 

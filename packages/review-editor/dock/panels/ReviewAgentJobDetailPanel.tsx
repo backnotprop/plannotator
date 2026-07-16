@@ -2,12 +2,14 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { SEVERITY_STYLES, type AgentJobInfo, type CodeAnnotation } from '@plannotator/ui/types';
 import { isTerminalStatus } from '@plannotator/shared/agent-jobs';
+import { jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
 import { useReviewState } from '../ReviewStateContext';
 import { useJobLogs } from '../JobLogsContext';
 import { CopyButton } from '../../components/CopyButton';
 import { LiveLogViewer } from '../../components/LiveLogViewer';
 import { ScrollFade } from '../../components/ScrollFade';
 import { exportReviewFeedback } from '../../utils/exportFeedback';
+import { annotationScope, commentCopyText } from '../../utils/annotationDisplay';
 
 // ---------------------------------------------------------------------------
 // Panel
@@ -28,7 +30,8 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
   const terminal = job ? isTerminalStatus(job.status) : false;
   const isTour = job?.provider === 'tour';
-  const [activeTab, setActiveTab] = useState<DetailTab>(isTour ? 'logs' : 'findings');
+  const isGuide = job?.provider === 'guide';
+  const [activeTab, setActiveTab] = useState<DetailTab>(isTour || isGuide ? 'logs' : 'findings');
 
   const { fullCommand, userMessage, systemPrompt } = useMemo(() => {
     const cmd = job?.command ?? [];
@@ -83,9 +86,12 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   const dismissedCount = useMemo(() => displayAnnotations.filter((d) => d.dismissed).length, [displayAnnotations]);
 
   const handleAnnotationClick = useCallback((ann: CodeAnnotation) => {
-    state.openDiffFile(ann.filePath);
-    state.onSelectAnnotation(ann.id);
-  }, [state.openDiffFile, state.onSelectAnnotation]);
+    // General comments belong to no file — nothing to open in the diff.
+    if (ann.filePath) state.openDiffFile(ann.filePath);
+    // Navigate (select + scroll): clicking a finding should jump the diff to it,
+    // not merely toggle its highlight.
+    state.onNavigateToAnnotation(ann.id);
+  }, [state.openDiffFile, state.onNavigateToAnnotation]);
 
   // Copy All uses the diff context snapshotted on the JOB at launch, not the
   // current UI state — so if the reviewer switches modes/bases after the job
@@ -146,7 +152,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
               <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{userMessage}</pre>
             </Disclosure>
             {systemPrompt && (
-              <Disclosure title={isTour ? "Tour Prompt" : "Review Prompt"} copyText={systemPrompt} nested>
+              <Disclosure title={isTour ? "Tour Prompt" : isGuide ? "Guide Prompt" : "Review Prompt"} copyText={systemPrompt} nested>
                 <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{systemPrompt}</pre>
               </Disclosure>
             )}
@@ -156,12 +162,12 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
       {/* ── Tabs ── */}
       <div className="flex-shrink-0 px-8 flex gap-0.5 border-b border-border/40">
-        {!isTour && (
+        {!isTour && !isGuide && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
             Findings{activeAnnotations.length > 0 && ` (${activeAnnotations.length})`}
           </TabButton>
         )}
-        {isTour && (
+        {(isTour || isGuide) && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
             Status
           </TabButton>
@@ -179,6 +185,13 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
           <ScrollFade>
             <div className="px-8 py-3 space-y-4 max-w-2xl">
               <TourStatusCard summary={job.summary} terminal={terminal} jobId={jobId} />
+            </div>
+          </ScrollFade>
+        ) : isGuide ? (
+          /* Guide status view — no findings, just status + Open guide button */
+          <ScrollFade>
+            <div className="px-8 py-3 space-y-4 max-w-2xl">
+              <GuideStatusCard job={job} terminal={terminal} jobId={jobId} />
             </div>
           </ScrollFade>
         ) : (
@@ -331,6 +344,71 @@ function TourStatusCard({ summary, terminal, jobId }: {
   );
 }
 
+function GuideStatusCard({ job, terminal, jobId }: {
+  job: AgentJobInfo;
+  terminal: boolean;
+  jobId: string;
+}) {
+  const state = useReviewState();
+  const { summary } = job;
+  // Opening only sets activeGuideJobId/guideOpen — it does NOT switch PRs or
+  // worktrees — so a guide from another review context can't meaningfully
+  // open from here.
+  const inContext = jobMatchesReviewContext(job, state.prMetadata?.url, state.currentWorktreePath ?? null);
+
+  if (summary) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded px-3 py-2.5 bg-success/5">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xs font-semibold text-success">{summary.correctness} · {summary.explanation}</span>
+          </div>
+        </div>
+        {inContext ? (
+          <button
+            onClick={() => state.openGuide?.(jobId)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-xs font-medium active:scale-[0.98]"
+          >
+            Open guide
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M3 7h8M8 3.5L11 7l-3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : (
+          <p className="text-[11px] leading-snug text-muted-foreground/60">
+            {job.prUrl
+              ? 'This guide belongs to a different PR — switch to it to open the guide.'
+              : 'This guide belongs to the local diff — leave PR mode to open it.'}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded bg-muted/10 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          Guide Status
+        </span>
+        {!terminal && (
+          <span className="text-[10px] text-muted-foreground/40 animate-pulse">Generating...</span>
+        )}
+      </div>
+      {terminal ? (
+        <>
+          <p className="text-xs text-muted-foreground/50 mt-1">{job.error || 'Guide generation failed.'}</p>
+          <p className="text-[11px] text-muted-foreground/40 mt-1">
+            Open the Guide screen for recovery options — it can fix the captured output or run a fresh attempt.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground/50 mt-1">The guide will be ready when the agent finishes.</p>
+      )}
+    </div>
+  );
+}
+
 function StatusDot({ status }: { status: AgentJobInfo['status'] }) {
   if (status === 'starting' || status === 'running') {
     return (
@@ -349,12 +427,18 @@ function ProviderPill({ provider, engine, model }: { provider: string; engine?: 
   if (provider === 'tour') {
     const engineLabel = engine === 'codex' ? 'Codex' : 'Claude';
     label = model && engine !== 'codex' ? `Tour · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Tour · ${engineLabel}`;
+  } else if (provider === 'guide') {
+    // Guide's engine union is wider than Tour's (marker engines included) —
+    // only show the model for Claude, mirroring Tour's own "skip it for
+    // engines with verbose/technical model ids" convention.
+    const engineLabel = engine === 'codex' ? 'Codex' : engine === 'cursor' ? 'Cursor' : engine === 'opencode' ? 'OpenCode' : engine === 'pi' ? 'Pi' : engine === 'copilot' ? 'Copilot' : 'Claude';
+    label = model && engine === 'claude' ? `Guide · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Guide · ${engineLabel}`;
   } else {
-    label = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'Shell';
+    label = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : provider === 'cursor' ? 'Cursor' : provider === 'opencode' ? 'OpenCode' : provider === 'pi' ? 'Pi' : provider === 'copilot' ? 'Copilot' : 'Shell';
   }
   return (
     <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-      provider === 'tour' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
+      provider === 'tour' || provider === 'guide' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
     }`}>
       {label}
     </span>
@@ -408,7 +492,8 @@ function AnnotationRow({ annotation: ann, dismissed, onClick }: {
   dismissed: boolean;
   onClick: (ann: CodeAnnotation) => void;
 }) {
-  const copyText = ann.text ? `${ann.filePath}:${ann.lineStart}${ann.lineEnd !== ann.lineStart ? `-${ann.lineEnd}` : ''}\n${ann.text}${ann.reasoning ? `\n\nReasoning: ${ann.reasoning}` : ''}` : '';
+  const scope = annotationScope(ann);
+  const copyText = ann.text ? commentCopyText(ann, scope) : '';
   const severity = ann.severity ? SEVERITY_STYLES[ann.severity] : null;
   return (
     <div
@@ -421,12 +506,29 @@ function AnnotationRow({ annotation: ann, dismissed, onClick }: {
         {severity && (
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${severity.dot}`} title={severity.label} />
         )}
-        <span className={`font-mono truncate ${dismissed ? 'line-through text-muted-foreground' : 'text-primary'}`}>
-          {ann.filePath}
-        </span>
-        <span className="text-muted-foreground flex-shrink-0">
-          L{ann.lineStart}{ann.lineEnd !== ann.lineStart ? `–${ann.lineEnd}` : ''}
-        </span>
+        {scope === 'general' ? (
+          <span className={`font-mono uppercase tracking-wider flex-shrink-0 ${dismissed ? 'line-through text-muted-foreground' : 'text-primary'}`}>
+            general
+          </span>
+        ) : (
+          <>
+            <span className={`font-mono truncate ${dismissed ? 'line-through text-muted-foreground' : 'text-primary'}`}>
+              {ann.filePath}
+            </span>
+            {scope === 'file' ? (
+              <span className="text-muted-foreground flex-shrink-0 uppercase tracking-wider">file</span>
+            ) : (
+              <span className="text-muted-foreground flex-shrink-0">
+                L{ann.lineStart}{ann.lineEnd !== ann.lineStart ? `–${ann.lineEnd}` : ''}
+              </span>
+            )}
+          </>
+        )}
+        {ann.reviewProfileLabel && (
+          <span className="px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider bg-accent/10 text-accent/90 flex-shrink-0">
+            {ann.reviewProfileLabel}
+          </span>
+        )}
         {dismissed && (
           <span className="px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-muted text-muted-foreground/60">dismissed</span>
         )}
@@ -437,12 +539,12 @@ function AnnotationRow({ annotation: ann, dismissed, onClick }: {
         )}
       </div>
       {ann.text && (
-        <p className={`text-xs mt-1 leading-relaxed ${dismissed ? 'text-muted-foreground/40' : 'text-foreground/80'}`}>
+        <p className={`text-xs mt-1 leading-relaxed break-words [overflow-wrap:anywhere] ${dismissed ? 'text-muted-foreground/40' : 'text-foreground/80'}`}>
           {ann.text}
         </p>
       )}
       {ann.reasoning && (
-        <p className="text-[11px] text-muted-foreground/60 leading-relaxed mt-1.5">
+        <p className="text-[11px] text-muted-foreground/60 leading-relaxed mt-1.5 break-words [overflow-wrap:anywhere]">
           {ann.reasoning}
         </p>
       )}

@@ -1,8 +1,8 @@
 /**
  * HTML-to-Markdown conversion via Turndown.
  *
- * Shared between the CLI (single HTML file / URL) and the server
- * (on-demand conversion for HTML files in folder mode).
+ * Shared between URL fetching, `annotate --markdown`, and the server's
+ * on-demand conversion for HTML files in folder mode.
  */
 
 import TurndownService from "turndown";

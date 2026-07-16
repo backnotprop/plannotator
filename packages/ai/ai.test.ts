@@ -6,13 +6,20 @@ import {
   registerProviderFactory,
   createProvider,
 } from "./provider.ts";
-import { createAIEndpoints } from "./endpoints.ts";
+import { AI_ENDPOINT_PATHS, createAIEndpoints } from "./endpoints.ts";
 import type {
   AIProvider,
   AISession,
   AIMessage,
   AIContext,
 } from "./types.ts";
+import {
+  buildWindowsCommandScriptSpawnCommand,
+  killWindowsProcessTree,
+  resolveCommandFromWhichOutput,
+  resolveWindowsCommandShim,
+  shouldSpawnViaShell,
+} from "./providers/command-path.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers — mock provider/session for testing
@@ -70,6 +77,110 @@ function mockProvider(name = "mock"): AIProvider {
     dispose() {},
   };
 }
+
+// ---------------------------------------------------------------------------
+// Command path helpers
+// ---------------------------------------------------------------------------
+
+describe("command path helpers", () => {
+  test("resolveWindowsCommandShim prefers a sibling .cmd for npm shims", () => {
+    const raw = String.raw`C:\Users\Andrew\AppData\Roaming\npm\pi`;
+    const resolved = resolveWindowsCommandShim(
+      raw,
+      "win32",
+      (path) => path === `${raw}.cmd`,
+    );
+
+    expect(resolved).toBe(`${raw}.cmd`);
+  });
+
+  test("resolveCommandFromWhichOutput skips extensionless Windows shims", () => {
+    const raw = String.raw`C:\Users\Andrew\AppData\Roaming\npm\pi`;
+    const resolved = resolveCommandFromWhichOutput(
+      `${raw}\r\n${raw}.cmd\r\n`,
+      "win32",
+      () => false,
+    );
+
+    expect(resolved).toBe(`${raw}.cmd`);
+  });
+
+  test("resolveCommandFromWhichOutput preserves the first non-Windows result", () => {
+    expect(
+      resolveCommandFromWhichOutput("/usr/local/bin/pi\n/usr/bin/pi\n", "darwin"),
+    ).toBe("/usr/local/bin/pi");
+  });
+
+  test("shouldSpawnViaShell only flags Windows command scripts", () => {
+    expect(
+      shouldSpawnViaShell(
+        String.raw`C:\Users\Andrew\AppData\Roaming\npm\pi.cmd`,
+        "win32",
+      ),
+    ).toBe(true);
+    expect(shouldSpawnViaShell(String.raw`C:\tools\pi.exe`, "win32")).toBe(false);
+    expect(shouldSpawnViaShell("/usr/local/bin/pi.cmd", "darwin")).toBe(false);
+  });
+
+  test("buildWindowsCommandScriptSpawnCommand wraps command scripts for Bun.spawn", () => {
+    const command = buildWindowsCommandScriptSpawnCommand(
+      String.raw`C:\Users\Andrew Ramos\AppData\Roaming\npm\pi.cmd`,
+      ["--mode", "rpc"],
+      "win32",
+      String.raw`C:\Windows\System32\cmd.exe`,
+    );
+
+    expect(command).toEqual([
+      String.raw`C:\Windows\System32\cmd.exe`,
+      "/d",
+      "/s",
+      "/c",
+      String.raw`"C:\Users\Andrew Ramos\AppData\Roaming\npm\pi.cmd" --mode rpc`,
+    ]);
+  });
+
+  test("buildWindowsCommandScriptSpawnCommand ignores native executables", () => {
+    expect(
+      buildWindowsCommandScriptSpawnCommand(
+        String.raw`C:\tools\pi.exe`,
+        ["--mode", "rpc"],
+        "win32",
+      ),
+    ).toBeNull();
+  });
+
+  test("killWindowsProcessTree invokes taskkill with tree flags on Windows", () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { stdio: "ignore"; windowsHide: boolean };
+    }> = [];
+    const killed = killWindowsProcessTree(1234, "win32", (command, args, options) => {
+      calls.push({ command, args, options });
+      return { status: 0 };
+    });
+
+    expect(killed).toBe(true);
+    expect(calls).toEqual([
+      {
+        command: "taskkill",
+        args: ["/pid", "1234", "/t", "/f"],
+        options: { stdio: "ignore", windowsHide: true },
+      },
+    ]);
+  });
+
+  test("killWindowsProcessTree skips non-Windows platforms", () => {
+    let called = false;
+    const killed = killWindowsProcessTree(1234, "darwin", () => {
+      called = true;
+      return { status: 0 };
+    });
+
+    expect(killed).toBe(false);
+    expect(called).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // SessionManager
@@ -205,32 +316,55 @@ describe("Context builders", () => {
   test("buildSystemPrompt for plan-review", () => {
     const ctx: AIContext = {
       mode: "plan-review",
-      plan: { plan: "# My Plan\n\nStep 1: do things" },
+      plan: {
+        plan: "# My Plan\n\nStep 1: do things",
+        previousPlan: "# Old Plan",
+        version: 3,
+        totalVersions: 4,
+        project: "plannotator",
+      },
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("Plannotator");
     expect(prompt).toContain("# My Plan");
     expect(prompt).toContain("Step 1: do things");
+    expect(prompt).toContain("Plan version: 3 of 4");
+    expect(prompt).toContain("Project: plannotator");
+    expect(prompt).toContain("# Old Plan");
   });
 
-  test("buildSystemPrompt for code-review", () => {
+  test("buildSystemPrompt for code-review is role-only (diff rides on user messages)", () => {
     const ctx: AIContext = {
       mode: "code-review",
-      review: { patch: "diff --git a/foo.ts b/foo.ts\n+hello" },
+      review: { patch: "diff --git a/foo.ts b/foo.ts\n+hello", diffType: "branch", base: "main" },
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("Plannotator");
-    expect(prompt).toContain("diff --git");
+    expect(prompt).toContain("code changes");
+    // The diff and how-to-inspect-it are delivered on the user's messages now
+    // (the review server's shared machine builds them), not in the system prompt.
+    expect(prompt).not.toContain("diff --git");
+    expect(prompt).not.toContain("git diff");
+    expect(prompt).not.toContain("```diff");
   });
 
   test("buildSystemPrompt for annotate", () => {
     const ctx: AIContext = {
       mode: "annotate",
-      annotate: { content: "# Doc\nSome content", filePath: "/tmp/test.md" },
+      annotate: {
+        content: "# Doc\nSome content",
+        filePath: "/tmp/test.md",
+        sourceInfo: "https://example.com/doc.html",
+        sourceConverted: true,
+        renderAs: "html",
+      },
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("Plannotator");
     expect(prompt).toContain("/tmp/test.md");
+    expect(prompt).toContain("https://example.com/doc.html");
+    expect(prompt).toContain("Render mode: html");
+    expect(prompt).toContain("converted before annotation");
   });
 
   test("buildForkPreamble includes context and instructions", () => {
@@ -274,6 +408,43 @@ describe("Context builders", () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain("[truncated for context window]");
     expect(prompt.length).toBeLessThan(longPlan.length);
+  });
+
+  test("every mode instructs the agent to answer directly (no unprompted review)", () => {
+    const modes: AIContext[] = [
+      { mode: "plan-review", plan: { plan: "# Plan" } },
+      { mode: "code-review", review: { patch: "+x" } },
+      { mode: "annotate", annotate: { content: "# Doc", filePath: "/x.md" } },
+    ];
+    for (const ctx of modes) {
+      const prompt = buildSystemPrompt(ctx);
+      expect(prompt).toContain("Respond to the user's message directly");
+      expect(prompt).toContain("do NOT review");
+    }
+  });
+
+  test("code-review system prompt never carries the diff or a git command, for any diffType", () => {
+    // The "changes under review" context moved to the user's messages (built by
+    // the shared agent-review machine), so the system prompt must stay role-only
+    // regardless of diff type — no pasted patch, no git command.
+    const variants: AIContext[] = [
+      { mode: "code-review", review: { patch: "diff --git a/foo.ts\n+marker", diffType: "branch", base: "develop" } },
+      { mode: "code-review", review: { patch: "+marker", diffType: "merge-base", base: "main" } },
+      { mode: "code-review", review: { patch: "diff --git a/foo.ts\n+marker", diffType: "jj-current" } },
+      { mode: "code-review", review: { patch: "diff --git a/foo.ts\n+marker" } },
+    ];
+    for (const ctx of variants) {
+      const prompt = buildSystemPrompt(ctx);
+      expect(prompt).not.toContain("marker");
+      expect(prompt).not.toContain("```diff");
+      expect(prompt).not.toContain("git diff");
+    }
+  });
+
+  test("code-review system prompt tells the agent the changeset arrives in user messages", () => {
+    const prompt = buildSystemPrompt({ mode: "code-review", review: { patch: "+x" } });
+    expect(prompt).toMatch(/messages/i);
+    expect(prompt).toMatch(/inspect/i);
   });
 });
 
@@ -373,6 +544,12 @@ describe("AI endpoints", () => {
     return { reg, sm, endpoints };
   }
 
+  test("canonical path list matches the runtime endpoint map", () => {
+    const { endpoints } = setup();
+
+    expect([...AI_ENDPOINT_PATHS].sort()).toEqual(Object.keys(endpoints).sort());
+  });
+
   test("capabilities returns available: false when no provider", async () => {
     const { endpoints } = setup();
 
@@ -398,6 +575,30 @@ describe("AI endpoints", () => {
     expect(data.providers[0].id).toBe("mock");
     expect(data.providers[0].name).toBe("mock");
     expect(data.providers[0].capabilities.fork).toBe(true);
+  });
+
+  test("capabilities waits for pending provider discovery", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const provider = mockProvider("pi-sdk") as AIProvider & {
+      models?: Array<{ id: string; label: string; default?: boolean }>;
+    };
+    reg.register(provider);
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeCapabilities: async () => {
+        provider.models = [{ id: "pi/model", label: "Pi Model", default: true }];
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities")
+    );
+    const data = await res.json();
+    expect(data.providers[0].models).toEqual([
+      { id: "pi/model", label: "Pi Model", default: true },
+    ]);
   });
 
   test("capabilities lists multiple providers", async () => {
@@ -479,6 +680,34 @@ describe("AI endpoints", () => {
       })
     );
     expect(createRes.status).toBe(200);
+  });
+
+  test("session creation clamps client-supplied cost controls", async () => {
+    const { reg, endpoints } = setup();
+    let seenOptions: { maxTurns?: number; maxBudgetUsd?: number } | null = null;
+    reg.register({
+      ...mockProvider("mock"),
+      async createSession(opts) {
+        seenOptions = opts;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    });
+
+    const createRes = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          maxTurns: 9999,
+          maxBudgetUsd: 9999,
+        }),
+      })
+    );
+
+    expect(createRes.status).toBe(200);
+    expect(seenOptions?.maxTurns).toBe(99);
+    expect(seenOptions?.maxBudgetUsd).toBe(5);
   });
 
   test("session creation fails for unknown provider ID", async () => {
@@ -621,132 +850,157 @@ describe("AI endpoints", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Codex SDK event mapping
+// Claude Agent SDK — Bedrock/Vertex model resolution
 // ---------------------------------------------------------------------------
 
-import { mapCodexEvent, mapCodexItem } from "./providers/codex-sdk.ts";
+import { resolveSDKModel } from "./providers/claude-agent-sdk.ts";
 
-describe("mapCodexEvent", () => {
-  function offsets() {
-    return new Map<string, number>();
-  }
+describe("resolveSDKModel", () => {
+  const SONNET_ARN =
+    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-sonnet-4-6";
+  const OPUS_ARN =
+    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-opus-4-8[1m]";
+  const HAIKU_ARN =
+    "arn:aws:bedrock:us-east-1:123456789012:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0";
 
-  test("thread.started returns empty", () => {
-    const result = mapCodexEvent(
-      { type: "thread.started", thread_id: "t-123" },
-      offsets(),
-    );
-    expect(result).toEqual([]);
+  const bedrockEnv = {
+    CLAUDE_CODE_USE_BEDROCK: "1",
+    ANTHROPIC_MODEL: OPUS_ARN,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: SONNET_ARN,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: OPUS_ARN,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: HAIKU_ARN,
+  };
+
+  test("off Bedrock/Vertex: returns the requested alias unchanged", () => {
+    expect(resolveSDKModel("claude-sonnet-4-6", {})).toBe("claude-sonnet-4-6");
   });
 
-  test("turn.started and turn.completed return empty", () => {
-    expect(mapCodexEvent({ type: "turn.started" }, offsets())).toEqual([]);
-    expect(mapCodexEvent({ type: "turn.completed", usage: {} }, offsets())).toEqual([]);
+  test("maps a bare sonnet alias to the configured Sonnet ARN on Bedrock", () => {
+    expect(resolveSDKModel("claude-sonnet-4-6", bedrockEnv)).toBe(SONNET_ARN);
   });
 
-  test("turn.failed returns error", () => {
-    const result = mapCodexEvent(
-      { type: "turn.failed", error: { message: "Out of tokens" } },
-      offsets(),
-    );
-    expect(result).toEqual([{
-      type: "error",
-      error: "Out of tokens",
-      code: "turn_failed",
-    }]);
+  test("maps bare opus / haiku aliases to their ARNs", () => {
+    expect(resolveSDKModel("claude-opus-4-8", bedrockEnv)).toBe(OPUS_ARN);
+    expect(resolveSDKModel("claude-haiku-4-5", bedrockEnv)).toBe(HAIKU_ARN);
   });
 
-  test("error event returns error", () => {
-    const result = mapCodexEvent(
-      { type: "error", message: "Connection lost" },
-      offsets(),
-    );
-    expect(result).toEqual([{
-      type: "error",
-      error: "Connection lost",
-      code: "codex_error",
-    }]);
+  test("maps the [1m] context variant by family", () => {
+    expect(resolveSDKModel("claude-sonnet-4-6[1m]", bedrockEnv)).toBe(SONNET_ARN);
   });
 
-  test("unknown event type passes through", () => {
-    const result = mapCodexEvent(
-      { type: "some.future.event", data: 42 },
-      offsets(),
-    );
-    expect(result.length).toBe(1);
-    expect(result[0].type).toBe("unknown");
-  });
-});
-
-describe("mapCodexItem — agent_message", () => {
-  function offsets() {
-    return new Map<string, number>();
-  }
-
-  test("item.started initializes offset tracker, returns empty", () => {
-    const o = offsets();
-    const result = mapCodexItem(
-      { type: "item.started", item: { id: "msg-1", type: "agent_message", text: "" } },
-      o,
-    );
-    expect(result).toEqual([]);
-    expect(o.get("msg-1")).toBe(0);
+  test("passes through an identifier that is already an ARN", () => {
+    expect(resolveSDKModel(SONNET_ARN, bedrockEnv)).toBe(SONNET_ARN);
   });
 
-  test("item.updated emits text_delta from cumulative text", () => {
-    const o = offsets();
-    o.set("msg-1", 0);
-
-    const r1 = mapCodexItem(
-      { type: "item.updated", item: { id: "msg-1", type: "agent_message", text: "Hello" } },
-      o,
-    );
-    expect(r1).toEqual([{ type: "text_delta", delta: "Hello" }]);
-    expect(o.get("msg-1")).toBe(5);
-
-    const r2 = mapCodexItem(
-      { type: "item.updated", item: { id: "msg-1", type: "agent_message", text: "Hello world" } },
-      o,
-    );
-    expect(r2).toEqual([{ type: "text_delta", delta: " world" }]);
-    expect(o.get("msg-1")).toBe(11);
+  test("passes through a bare inference-profile id", () => {
+    const profile = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+    expect(resolveSDKModel(profile, bedrockEnv)).toBe(profile);
   });
 
-  test("item.updated with no new text returns empty", () => {
-    const o = offsets();
-    o.set("msg-1", 5);
-
-    const result = mapCodexItem(
-      { type: "item.updated", item: { id: "msg-1", type: "agent_message", text: "Hello" } },
-      o,
-    );
-    expect(result).toEqual([]);
+  test("falls back to ANTHROPIC_MODEL when no family default is set", () => {
+    expect(
+      resolveSDKModel("claude-sonnet-4-6", {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_MODEL: OPUS_ARN,
+      }),
+    ).toBe(OPUS_ARN);
   });
 
-  test("item.completed emits full text and cleans up offset", () => {
-    const o = offsets();
-    o.set("msg-1", 5);
+  test("returns undefined so the SDK inherits env when nothing else resolves", () => {
+    expect(
+      resolveSDKModel("claude-sonnet-4-6", { CLAUDE_CODE_USE_BEDROCK: "1" }),
+    ).toBeUndefined();
+  });
 
-    const result = mapCodexItem(
-      { type: "item.completed", item: { id: "msg-1", type: "agent_message", text: "Hello world" } },
-      o,
-    );
-    expect(result).toEqual([{ type: "text", text: "Hello world" }]);
-    expect(o.has("msg-1")).toBe(false);
+  test("also applies on Vertex", () => {
+    expect(
+      resolveSDKModel("claude-opus-4-8", {
+        CLAUDE_CODE_USE_VERTEX: "true",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: OPUS_ARN,
+      }),
+    ).toBe(OPUS_ARN);
   });
 });
 
-describe("mapCodexItem — command_execution", () => {
-  function offsets() {
-    return new Map<string, number>();
-  }
+// ---------------------------------------------------------------------------
+// Codex app-server provider — JSON-RPC classification + event mapping
+// ---------------------------------------------------------------------------
 
-  test("item.started emits tool_use", () => {
-    const result = mapCodexItem(
-      { type: "item.started", item: { id: "cmd-1", type: "command_execution", command: "ls -la", status: "in_progress" } },
-      offsets(),
-    );
-    expect(result).toEqual([{
+import {
+  classifyRpcMessage,
+  mapApprovalRequest,
+  mapCodexAppServerEvent,
+} from "./providers/codex-app-server.ts";
+
+describe("classifyRpcMessage", () => {
+  test("a message with id + result is a response", () => {
+    expect(classifyRpcMessage({ id: 7, result: { ok: true } })).toEqual({
+      kind: "response",
+      id: 7,
+    });
+  });
+
+  test("a message with id + method is a server request (not a response)", () => {
+    // id-space collision guard: even though id 7 could match a pending client
+    // request, the presence of `method` means this is an inbound request.
+    expect(
+      classifyRpcMessage({
+        id: 7,
+        method: "item/commandExecution/requestApproval",
+        params: { command: "ls" },
+      }),
+    ).toEqual({
+      kind: "request",
+      id: 7,
+      method: "item/commandExecution/requestApproval",
+      params: { command: "ls" },
+    });
+  });
+
+  test("a message with method and no id is a notification", () => {
+    expect(
+      classifyRpcMessage({ method: "item/agentMessage/delta", params: { delta: "hi" } }),
+    ).toEqual({
+      kind: "notification",
+      method: "item/agentMessage/delta",
+      params: { delta: "hi" },
+    });
+  });
+
+  test("a message with neither id nor method is unknown", () => {
+    expect(classifyRpcMessage({ foo: 1 })).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("mapCodexAppServerEvent", () => {
+  test("agentMessage delta maps to text_delta", () => {
+    expect(
+      mapCodexAppServerEvent(
+        { method: "item/agentMessage/delta", params: { delta: "Hello" } },
+        "thr-1",
+      ),
+    ).toEqual([{ type: "text_delta", delta: "Hello" }]);
+  });
+
+  test("empty agentMessage delta is ignored", () => {
+    expect(
+      mapCodexAppServerEvent(
+        { method: "item/agentMessage/delta", params: { delta: "" } },
+        "thr-1",
+      ),
+    ).toEqual([]);
+  });
+
+  test("commandExecution item/started maps to tool_use", () => {
+    expect(
+      mapCodexAppServerEvent(
+        {
+          method: "item/started",
+          params: { item: { id: "cmd-1", type: "commandExecution", command: "ls -la" } },
+        },
+        "thr-1",
+      ),
+    ).toEqual([{
       type: "tool_use",
       toolName: "Bash",
       toolInput: { command: "ls -la" },
@@ -754,10 +1008,15 @@ describe("mapCodexItem — command_execution", () => {
     }]);
   });
 
-  test("item.completed emits tool_result with exit code", () => {
-    const result = mapCodexItem(
-      { type: "item.completed", item: { id: "cmd-1", type: "command_execution", command: "ls", aggregated_output: "file.txt\n", exit_code: 0, status: "completed" } },
-      offsets(),
+  test("commandExecution item/completed maps to tool_result with exit code", () => {
+    const result = mapCodexAppServerEvent(
+      {
+        method: "item/completed",
+        params: {
+          item: { id: "cmd-1", type: "commandExecution", aggregatedOutput: "file.txt\n", exitCode: 0 },
+        },
+      },
+      "thr-1",
     );
     expect(result.length).toBe(1);
     expect(result[0].type).toBe("tool_result");
@@ -766,82 +1025,102 @@ describe("mapCodexItem — command_execution", () => {
       expect(result[0].result).toContain("[exit code: 0]");
     }
   });
-});
 
-describe("mapCodexItem — file_change", () => {
-  function offsets() {
-    return new Map<string, number>();
-  }
+  test("turn/completed (success) maps to result with sessionId", () => {
+    expect(
+      mapCodexAppServerEvent(
+        { method: "turn/completed", params: { turn: { status: "completed" } } },
+        "thr-1",
+      ),
+    ).toEqual([{ type: "result", sessionId: "thr-1", success: true }]);
+  });
 
-  test("emits tool_use with changes", () => {
-    const result = mapCodexItem(
-      { type: "item.completed", item: { id: "fc-1", type: "file_change", changes: [{ path: "src/foo.ts", kind: "update" }], status: "completed" } },
-      offsets(),
-    );
+  test("turn/completed (failed) maps to error", () => {
+    expect(
+      mapCodexAppServerEvent(
+        {
+          method: "turn/completed",
+          params: { turn: { status: "failed", error: { message: "boom" } } },
+        },
+        "thr-1",
+      ),
+    ).toEqual([{ type: "error", error: "boom", code: "turn_failed" }]);
+  });
+
+  test("error notification reads the nested error.message (not generic Unknown error)", () => {
+    // Codex's ErrorNotification carries the text under `error` (a TurnError).
+    expect(
+      mapCodexAppServerEvent(
+        { method: "error", params: { error: { message: "usage limit reached" }, willRetry: false } },
+        "thr-1",
+      ),
+    ).toEqual([{ type: "error", error: "usage limit reached", code: "codex_error" }]);
+  });
+
+  test("error notification falls back to Unknown error when no message present", () => {
+    expect(
+      mapCodexAppServerEvent({ method: "error", params: {} }, "thr-1"),
+    ).toEqual([{ type: "error", error: "Unknown error", code: "codex_error" }]);
+  });
+
+  test("transient error (willRetry) is not surfaced — Codex retries and the turn continues", () => {
+    expect(
+      mapCodexAppServerEvent(
+        { method: "error", params: { error: { message: "blip" }, willRetry: true } },
+        "thr-1",
+      ),
+    ).toEqual([]);
+  });
+
+  test("process_exited maps to a provider error", () => {
+    const result = mapCodexAppServerEvent({ method: "process_exited", params: {} }, "thr-1");
+    expect(result[0].type).toBe("error");
+    if (result[0].type === "error") expect(result[0].code).toBe("provider_error");
+  });
+
+  test("informational notifications are ignored", () => {
+    expect(mapCodexAppServerEvent({ method: "turn/started", params: {} }, "thr-1")).toEqual([]);
+    expect(mapCodexAppServerEvent({ method: "thread/started", params: {} }, "thr-1")).toEqual([]);
+  });
+
+  test("unknown notification passes through", () => {
+    const result = mapCodexAppServerEvent({ method: "some/future/event", params: {} }, "thr-1");
     expect(result.length).toBe(1);
-    expect(result[0].type).toBe("tool_use");
-    if (result[0].type === "tool_use") {
-      expect(result[0].toolName).toBe("FileChange");
-    }
+    expect(result[0].type).toBe("unknown");
   });
 });
 
-describe("mapCodexItem — mcp_tool_call", () => {
-  function offsets() {
-    return new Map<string, number>();
-  }
-
-  test("item.started emits tool_use with server/tool name", () => {
-    const result = mapCodexItem(
-      { type: "item.started", item: { id: "mcp-1", type: "mcp_tool_call", server: "github", tool: "search", arguments: { q: "test" }, status: "in_progress" } },
-      offsets(),
+describe("mapApprovalRequest", () => {
+  test("command execution approval maps to a Bash permission_request", () => {
+    const msg = mapApprovalRequest(
+      "item/commandExecution/requestApproval",
+      { command: "rm -rf build", cwd: "/repo", itemId: "item-1", reason: "needs write" },
+      "42",
     );
-    expect(result).toEqual([{
-      type: "tool_use",
-      toolName: "github/search",
-      toolInput: { q: "test" },
-      toolUseId: "mcp-1",
-    }]);
+    expect(msg.type).toBe("permission_request");
+    expect(msg.requestId).toBe("42");
+    expect(msg.toolName).toBe("Bash");
+    expect(msg.toolInput).toEqual({ command: "rm -rf build", cwd: "/repo" });
+    expect(msg.toolUseId).toBe("item-1");
+    expect(msg.description).toBe("needs write");
   });
 
-  test("item.completed with result emits tool_result", () => {
-    const result = mapCodexItem(
-      { type: "item.completed", item: { id: "mcp-1", type: "mcp_tool_call", server: "github", tool: "search", arguments: {}, result: "found 3 items", status: "completed" } },
-      offsets(),
+  test("file change approval maps to a FileChange permission_request", () => {
+    const msg = mapApprovalRequest(
+      "item/fileChange/requestApproval",
+      { itemId: "item-2", reason: "edit src/foo.ts" },
+      "43",
     );
-    expect(result.some(m => m.type === "tool_result")).toBe(true);
+    expect(msg.toolName).toBe("FileChange");
+    expect(msg.title).toBe("edit src/foo.ts");
+    expect(msg.requestId).toBe("43");
   });
 
-  test("item.completed with error emits error", () => {
-    const result = mapCodexItem(
-      { type: "item.completed", item: { id: "mcp-1", type: "mcp_tool_call", server: "github", tool: "search", arguments: {}, error: { message: "rate limited" }, status: "completed" } },
-      offsets(),
-    );
-    expect(result.some(m => m.type === "error")).toBe(true);
-  });
-});
-
-describe("mapCodexItem — error and passthrough types", () => {
-  function offsets() {
-    return new Map<string, number>();
-  }
-
-  test("error item maps to error message", () => {
-    const result = mapCodexItem(
-      { type: "item.completed", item: { id: "e-1", type: "error", message: "Something broke" } },
-      offsets(),
-    );
-    expect(result).toEqual([{ type: "error", error: "Something broke" }]);
-  });
-
-  test("reasoning, web_search, todo_list pass through as unknown", () => {
-    for (const itemType of ["reasoning", "web_search", "todo_list"]) {
-      const result = mapCodexItem(
-        { type: "item.completed", item: { id: "x-1", type: itemType, text: "thinking..." } },
-        offsets(),
-      );
-      expect(result[0].type).toBe("unknown");
-    }
+  test("unknown approval method falls back to a generic permission_request", () => {
+    const msg = mapApprovalRequest("item/something/requestApproval", { foo: 1 }, "44");
+    expect(msg.type).toBe("permission_request");
+    expect(msg.toolName).toBe("item/something/requestApproval");
+    expect(msg.toolInput).toEqual({ foo: 1 });
   });
 });
 

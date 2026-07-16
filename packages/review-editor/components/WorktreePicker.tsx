@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import type { WorktreeInfo } from '@plannotator/shared/types';
 
 interface WorktreePickerProps {
@@ -59,17 +59,20 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
         if (!v) setQuery('');
       }}
     >
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          title={active ? `Worktree: ${active.path}` : 'Main repository'}
-          className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
-            isCustom
-              ? 'bg-primary/10 border border-primary/30 text-foreground'
-              : 'bg-muted border border-transparent text-foreground'
-          }`}
-        >
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            disabled={disabled}
+            title={active ? `Worktree: ${active.path}` : 'Main repository'}
+            className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
+              isCustom
+                ? 'bg-primary/10 border border-primary/30 text-foreground'
+                : 'bg-muted border border-transparent text-foreground'
+            }`}
+          />
+        }
+      >
           <span className="truncate flex-1 text-left">{activeLabel}</span>
           {isCustom && (
             <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
@@ -85,26 +88,21 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content
-          side="bottom"
-          align="start"
-          sideOffset={4}
-          className="z-50 w-72 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--radix-popover-content-transform-origin)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-          onOpenAutoFocus={(e) => {
-            // Only override Radix's default focus when the search input is
-            // actually rendered — otherwise the preventDefault() would leave
-            // focus on the trigger, and arrow keys would bubble out to the
-            // file-tree nav. For short worktree lists we let Radix focus the
-            // first picker button itself.
-            if (searchRef.current) {
-              e.preventDefault();
-              searchRef.current.focus();
-            }
-          }}
-        >
+        <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
+          <Popover.Popup
+            className="w-72 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
+            initialFocus={() => {
+              // Only override the default focus when the search input is
+              // actually rendered — otherwise arrow keys would bubble out to
+              // the file-tree nav. For short worktree lists, returning null
+              // falls back to Base UI's default focus (the popup's first
+              // tabbable); undefined would mean "do nothing" and leave focus
+              // on the trigger.
+              return searchRef.current;
+            }}
+          >
           {worktrees.length > 3 && (
             <div className="p-2 border-b border-border/50">
               <input
@@ -153,7 +151,8 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
               </div>
             )}
           </div>
-        </Popover.Content>
+          </Popover.Popup>
+        </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
   );

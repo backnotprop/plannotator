@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import * as Checkbox from '@radix-ui/react-checkbox';
+import { Checkbox } from '@base-ui/react/checkbox';
 import type { TourQAItem, TourStop } from '../../hooks/tour/useTourData';
 
 interface QAChecklistProps {
@@ -39,7 +39,7 @@ export const QAChecklist: React.FC<QAChecklistProps> = ({
           <Checkbox.Root
             checked={checked[i] ?? false}
             onCheckedChange={() => onToggle(i)}
-            className="tour-checkbox mt-0.5 w-[18px] h-[18px] rounded-[4px] flex-shrink-0 border border-foreground/25 dark:border-border/50 bg-muted/40 dark:bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)] dark:shadow-none data-[state=checked]:bg-primary data-[state=checked]:border-primary data-[state=checked]:shadow-none flex items-center justify-center"
+            className="tour-checkbox mt-0.5 w-[18px] h-[18px] rounded-[4px] flex-shrink-0 border border-foreground/25 dark:border-border/50 bg-muted/40 dark:bg-background shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)] dark:shadow-none data-checked:bg-primary data-checked:border-primary data-checked:shadow-none flex items-center justify-center"
           >
             <Checkbox.Indicator>
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">

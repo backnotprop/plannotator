@@ -12,6 +12,16 @@ REM Three-layer opt-in for SLSA provenance verification.
 REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
+REM Guided-install answers. Precedence: CLI flags > wizard (interactive, first
+REM run or --reconfigure) > saved prefs from a previous run > defaults.
+set "EXTRAS_FLAG="
+set "MODEL_INVOCABLE_FLAG="
+set "NON_INTERACTIVE=0"
+set "RECONFIGURE=0"
+REM Binary-only mode. Installs just plannotator.exe and no persistent state
+REM elsewhere. Set by --minimal (1) / --no-minimal (0); -1 = neither flag given
+REM (fall through to the PLANNOTATOR_MINIMAL env var, resolved after :args_done).
+set "MINIMAL_FLAG=-1"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -20,7 +30,7 @@ if /i "%~1"=="--version" (
         echo --version requires an argument >&2
         exit /b 1
     )
-    REM Reject dash-prefixed values — prevents `install.cmd --version
+    REM Reject dash-prefixed values - prevents `install.cmd --version
     REM --skip-attestation` from silently setting VERSION=--skip-attestation.
     set "NEXT_ARG=%~2"
     if "!NEXT_ARG:~0,1!"=="-" (
@@ -51,6 +61,68 @@ if /i "%~1"=="--skip-attestation" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--extras" (
+    set "EXTRAS_FLAG=yes"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--no-extras" (
+    set "EXTRAS_FLAG=no"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--model-invocable" (
+    if "%~2"=="" (
+        echo --model-invocable requires a comma-separated skill list or 'none' >&2
+        exit /b 1
+    )
+    set "MODEL_INVOCABLE_FLAG=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--non-interactive" (
+    set "NON_INTERACTIVE=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--yes" (
+    set "NON_INTERACTIVE=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--reconfigure" (
+    set "RECONFIGURE=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--minimal" (
+    if "!MINIMAL_FLAG!"=="0" (
+        echo --minimal and --no-minimal are mutually exclusive >&2
+        exit /b 1
+    )
+    set "MINIMAL_FLAG=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--binary-only" (
+    if "!MINIMAL_FLAG!"=="0" (
+        echo --binary-only and --no-minimal are mutually exclusive >&2
+        exit /b 1
+    )
+    set "MINIMAL_FLAG=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--no-minimal" (
+    if "!MINIMAL_FLAG!"=="1" (
+        echo --no-minimal and --minimal are mutually exclusive >&2
+        exit /b 1
+    )
+    set "MINIMAL_FLAG=0"
+    shift
+    goto parse_args
+)
 REM Reject any other dash-prefixed token as an unknown option, so a typoed
 REM flag like --verify-attesttion fails fast instead of being interpreted as
 REM a version tag (which would 404 on releases/download/v--verify-attesttion/...).
@@ -60,16 +132,16 @@ REM because unquoted %~1 in an echo pipe lets cmd.exe interpret shell
 REM metacharacters (& | > <) in the argument before the pipe runs. Assigning
 REM to a `set "VAR=%~1"` literal-quoted form preserves metacharacters safely,
 REM and delayed-expansion substring (!VAR:~0,1!) avoids the subprocess entirely.
-REM The error-message echo also quotes "%~1" for the same reason — echoing an
+REM The error-message echo also quotes "%~1" for the same reason - echoing an
 REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
-REM Reject if --version was already passed — silent overwrite is worse
+REM Reject if --version was already passed - silent overwrite is worse
 REM than a clean usage error.
 if "!VERSION_EXPLICIT!"=="1" (
     echo Unexpected positional argument: "%~1" ^(version already set^) >&2
@@ -81,17 +153,28 @@ shift
 goto parse_args
 :args_done
 
+REM Resolve binary-only mode. Precedence: --minimal / --no-minimal flag >
+REM PLANNOTATOR_MINIMAL env var > default (off). Mirrors install.sh / install.ps1.
+set "MINIMAL=0"
+if /i "!PLANNOTATOR_MINIMAL!"=="1"    set "MINIMAL=1"
+if /i "!PLANNOTATOR_MINIMAL!"=="true" set "MINIMAL=1"
+if /i "!PLANNOTATOR_MINIMAL!"=="yes"  set "MINIMAL=1"
+if "!MINIMAL_FLAG!"=="1" set "MINIMAL=1"
+if "!MINIMAL_FLAG!"=="0" set "MINIMAL=0"
+
 set "REPO=backnotprop/plannotator"
+set "SEM_REPO=Ataraxy-Labs/sem"
+set "SEM_VERSION=v0.8.0"
 set "INSTALL_DIR=%USERPROFILE%\.local\bin"
 
 REM First plannotator release that carries SLSA build-provenance attestations.
-REM See scripts/install.sh for the full explanation — this constant is
+REM See scripts/install.sh for the full explanation - this constant is
 REM bumped once at the first attested release via the release skill.
 set "MIN_ATTESTED_VERSION=v0.17.2"
 
 REM Detect architecture. Native ARM64 Windows binaries are built from
 REM bun-windows-arm64 (stable since Bun v1.3.10), so ARM64 hosts get a
-REM native binary — no Windows x86-64 emulation tax. PROCESSOR_ARCHITECTURE
+REM native binary - no Windows x86-64 emulation tax. PROCESSOR_ARCHITECTURE
 REM reports the architecture the current cmd.exe process is running under;
 REM PROCESSOR_ARCHITEW6432 is set only in 32-bit processes running via
 REM WoW64 and reflects the host architecture (covers the edge case of a
@@ -146,7 +229,7 @@ if /i "!VERSION!"=="latest" (
 ) else (
     set "TAG=!VERSION!"
     REM Add v prefix if not present. Use a substring test rather than
-    REM piping the expanded variable through findstr — an unquoted echo
+    REM piping the expanded variable through findstr - an unquoted echo
     REM pipe re-exposes cmd metacharacters (& | > <) in the value before
     REM the pipe runs. Matches the safe pattern used in the arg parser.
     if not "!TAG:~0,1!"=="v" set "TAG=v!TAG!"
@@ -160,8 +243,16 @@ REM provenance support. Precedence: CLI flag > env var > config.json > default.
 set "VERIFY_ATTESTATION=0"
 
 REM Layer 3: config file (lowest precedence of the opt-in sources).
-if exist "%USERPROFILE%\.plannotator\config.json" (
-    findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "%USERPROFILE%\.plannotator\config.json" >nul 2>&1
+if defined PLANNOTATOR_DATA_DIR (
+    set "_CONFIG_DIR=!PLANNOTATOR_DATA_DIR!"
+) else (
+    set "_CONFIG_DIR=%USERPROFILE%\.plannotator"
+)
+if /i "!_CONFIG_DIR!"=="~" set "_CONFIG_DIR=%USERPROFILE%"
+if "!_CONFIG_DIR:~0,2!"=="~\" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
+if "!_CONFIG_DIR:~0,2!"=="~/" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
+if exist "!_CONFIG_DIR!\config.json" (
+    findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
     if !ERRORLEVEL! equ 0 set "VERIFY_ATTESTATION=1"
 )
 
@@ -185,10 +276,10 @@ REM would let a crafted --version value break out of the single-quoted literal
 REM and execute arbitrary PowerShell (e.g. --version "0.18.0'; calc; '0.18.0"
 REM would run Calculator). $env: reads the raw string; PowerShell never parses
 REM the value as code. [version] cast throws on invalid input, catch swallows,
-REM VERSION_OK stays empty, and the guard rejects — safe fail.
+REM VERSION_OK stays empty, and the guard rejects - safe fail.
 if "!VERIFY_ATTESTATION!"=="1" (
     REM Strip the leading `v` via substring-from-index-1. cmd's `:str=repl`
-    REM substitution is GLOBAL, not anchored — `!TAG:v=!` would remove every
+    REM substitution is GLOBAL, not anchored - `!TAG:v=!` would remove every
     REM `v` in the string, not just the leading one, so a hypothetical tag
     REM like `v1.0.0-rev2` would become `1.0.0-re2` and break the [version]
     REM cast. TAG is guaranteed to start with `v` by the normalization step
@@ -206,7 +297,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
     REM we reject explicitly with an accurate diagnosis instead of silently
     REM misclassifying the failure.
     REM
-    REM Uses native cmd substitution `!VAR:-=!` to check for `-` presence —
+    REM Uses native cmd substitution `!VAR:-=!` to check for `-` presence -
     REM no subshell, no metacharacter risk. If removing `-` changes the
     REM string, the original contained a `-`.
     if not "!TAG_NUM!"=="!TAG_NUM:-=!" (
@@ -297,7 +388,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         REM between concurrent invocations. Matches install.sh / install.ps1.
         REM
         REM Verification is constrained to the exact tag (--source-ref) AND
-        REM the specific signing workflow file (--signer-workflow) — not
+        REM the specific signing workflow file (--signer-workflow) - not
         REM just "built somewhere in this repo". See install.sh for full
         REM rationale.
         set "GH_OUTPUT=%TEMP%\plannotator-gh-%RANDOM%.txt"
@@ -337,20 +428,22 @@ move /y "!TEMP_FILE!" "!INSTALL_PATH!" >nul
 echo.
 echo plannotator !TAG! installed to !INSTALL_PATH!
 
-REM Check if install directory is in PATH
-echo !PATH! | findstr /i /c:"!INSTALL_DIR!" >nul
-if !ERRORLEVEL! neq 0 (
+REM Binary-only mode stops here (see the MINIMAL resolution after :args_done):
+REM the binary is installed, so print PATH advice and exit before any sidecar
+REM download, agent integration, skill checkout, or config write runs. No
+REM persistent state is written outside !INSTALL_DIR!.
+if "!MINIMAL!"=="1" (
+    call :PrintPathAdvice
     echo.
-    echo !INSTALL_DIR! is not in your PATH.
-    echo.
-    echo Add it permanently with:
-    echo.
-    echo   setx PATH "%%PATH%%;!INSTALL_DIR!"
-    echo.
-    echo Or add it for this session only:
-    echo.
-    echo   set PATH=%%PATH%%;!INSTALL_DIR!
+    echo Minimal install complete - only the plannotator binary was installed.
+    echo No skills, hooks, agent integrations, or config files were written.
+    exit /b 0
 )
+
+call :InstallSemSidecar
+call :InstallAgentTerminalRuntime
+
+call :PrintPathAdvice
 
 REM Validate plugin hooks.json if plugin is already installed
 if defined CLAUDE_CONFIG_DIR (
@@ -370,7 +463,7 @@ echo         "matcher": "EnterPlanMode",
 echo         "hooks": [
 echo           {
 echo             "type": "command",
-echo             "command": "!EXE_PATH! improve-context",
+echo             "command": "\"!EXE_PATH!\" improve-context",
 echo             "timeout": 5
 echo           }
 echo         ]
@@ -382,7 +475,7 @@ echo         "matcher": "ExitPlanMode",
 echo         "hooks": [
 echo           {
 echo             "type": "command",
-echo             "command": "!EXE_PATH!",
+echo             "command": "\"!EXE_PATH!\"",
 echo             "timeout": 345600
 echo           }
 echo         ]
@@ -395,27 +488,36 @@ echo }
 )
 
 REM Codex hooks on Windows are still experimental upstream. Do not mutate
-REM %%USERPROFILE%%\.codex automatically from the cmd installer until that path
+REM the Codex home automatically from the cmd installer until that path
 REM is verified end-to-end.
+REM Codex stores config and state under CODEX_HOME when set, falling back to
+REM %%USERPROFILE%%\.codex (developers.openai.com/codex/config-advanced). (#852)
+set "CODEX_DIR=%USERPROFILE%\.codex"
+if defined CODEX_HOME set "CODEX_DIR=%CODEX_HOME%"
 set "CODEX_AVAILABLE=0"
 where codex >nul 2>&1
 if !ERRORLEVEL! equ 0 set "CODEX_AVAILABLE=1"
-if exist "%USERPROFILE%\.codex" (
-    for /f "delims=" %%C in ('dir /b /a "%USERPROFILE%\.codex" 2^>nul') do (
+if exist "!CODEX_DIR!" (
+    for /f "delims=" %%C in ('dir /b /a "!CODEX_DIR!" 2^>nul') do (
         if /i not "%%C"=="skills" if /i not "%%C"==".DS_Store" set "CODEX_AVAILABLE=1"
     )
 )
+REM Kiro is auto-detected like Codex/Gemini: PATH executable or an existing %USERPROFILE%\.kiro.
+set "KIRO_AVAILABLE=0"
+where kiro-cli >nul 2>&1
+if !ERRORLEVEL! equ 0 set "KIRO_AVAILABLE=1"
+if exist "%USERPROFILE%\.kiro" set "KIRO_AVAILABLE=1"
 if "!CODEX_AVAILABLE!"=="1" (
     echo.
     echo Codex detected.
     echo Codex plan review hooks are experimental on Windows. To try them manually:
     echo.
-    echo   1. Add this to %%USERPROFILE%%\.codex\config.toml:
+    echo   1. Add this to !CODEX_DIR!\config.toml:
     echo.
     echo      [features]
     echo      hooks = true
     echo.
-    echo   2. Add a Stop hook in %%USERPROFILE%%\.codex\hooks.json that runs:
+    echo   2. Add a Stop hook in !CODEX_DIR!\hooks.json that runs:
     echo.
     echo      !INSTALL_PATH!
     echo.
@@ -426,164 +528,350 @@ if exist "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" rmdir /s /q "
 if exist "%USERPROFILE%\.cache\opencode\packages\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\packages\@plannotator" >nul 2>&1
 if exist "%USERPROFILE%\.bun\install\cache\@plannotator" rmdir /s /q "%USERPROFILE%\.bun\install\cache\@plannotator" >nul 2>&1
 
-REM Install /review slash command
+REM ----------------------------------------------------------------------
+REM Skills + command stubs install (requires git)
+REM
+REM Claude Code commands are deprecated in favor of skills. Core skills
+REM installed to %%USERPROFILE%%\.claude\skills are user-invocable by directory
+REM name (/plannotator-review etc.), so no command files are written anymore.
+REM
+REM Install matrix (all copies verbatim, copy-if-present so older-tag pinned
+REM installs never fail when a source dir is absent):
+REM   %%USERPROFILE%%\.claude\skills            <- apps\skills\core\* (all 4)
+REM   %%USERPROFILE%%\.agents\skills            <- apps\skills\core\* (all 4)
+REM   %%USERPROFILE%%\.kiro\skills              <- apps\kiro-cli\skills\* (3) + 2 extras (when kiro detected)
+REM   %%USERPROFILE%%\.config\opencode\commands <- apps\opencode-plugin\commands\*.md (always)
+REM   %%USERPROFILE%%\.gemini\commands          <- apps\gemini\commands\*.toml (when ~/.gemini exists)
+REM Nothing goes to the Codex home (CODEX_DIR\skills) anymore.
+REM ----------------------------------------------------------------------
+
+REM Aggressive cleanup on upgrade - echo each removal, ignore missing.
+REM NOTE: legacy Claude command cleanup happens AFTER the skill install below -
+REM a command file is only removed once its replacement skill is on disk, so a
+REM failed or skipped skill install never leaves users with neither.
 if defined CLAUDE_CONFIG_DIR (
     set "CLAUDE_COMMANDS_DIR=%CLAUDE_CONFIG_DIR%\commands"
 ) else (
     set "CLAUDE_COMMANDS_DIR=%USERPROFILE%\.claude\commands"
 )
-if not exist "!CLAUDE_COMMANDS_DIR!" mkdir "!CLAUDE_COMMANDS_DIR!"
 
-(
-echo ---
-echo description: Open interactive code review for current changes or a PR URL
-echo allowed-tools: Bash^(plannotator:*^)
-echo ---
-echo.
-echo ## Code Review Feedback
-echo.
-echo ^^!`plannotator review $ARGUMENTS`
-echo.
-echo ## Your task
-echo.
-echo If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
-) > "!CLAUDE_COMMANDS_DIR!\plannotator-review.md"
+REM NOTE: Codex stale-skill cleanup happens AFTER the skill install below -
+REM the core skills are only removed from the Codex home once their
+REM replacement exists in %%USERPROFILE%%\.agents\skills.
+set "STALE_CODEX_SKILLS_DIR=!CODEX_DIR!\skills"
 
-echo Installed /plannotator-review command to !CLAUDE_COMMANDS_DIR!\plannotator-review.md
-
-(
-echo ---
-echo description: Open interactive annotation UI for a markdown file
-echo allowed-tools: Bash^(plannotator:*^)
-echo ---
-echo.
-echo ## Markdown Annotations
-echo.
-echo ^^!`plannotator annotate $ARGUMENTS`
-echo.
-echo ## Your task
-echo.
-echo Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
-) > "!CLAUDE_COMMANDS_DIR!\plannotator-annotate.md"
-
-echo Installed /plannotator-annotate command to !CLAUDE_COMMANDS_DIR!\plannotator-annotate.md
-
-(
-echo ---
-echo description: Annotate the last rendered assistant message
-echo allowed-tools: Bash^(plannotator:*^)
-echo ---
-echo.
-echo ## Message Annotations
-echo.
-echo ^^!`plannotator annotate-last`
-echo.
-echo ## Your task
-echo.
-echo Address the annotation feedback above. The user has reviewed your last message and provided specific annotations and comments.
-) > "!CLAUDE_COMMANDS_DIR!\plannotator-last.md"
-
-echo Installed /plannotator-last command to !CLAUDE_COMMANDS_DIR!\plannotator-last.md
-
-REM Install skills (requires git)
-REM Remove legacy Codex-oriented skills from the older shared agent scope.
-set "LEGACY_AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
-set "LEGACY_SKILLS_REMOVED=0"
-for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
-    if exist "!LEGACY_AGENTS_SKILLS_DIR!\%%S" (
-        rmdir /s /q "!LEGACY_AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
-        set "LEGACY_SKILLS_REMOVED=1"
+REM Old installers (pre core/extra split) ran a wholesale skills copy against
+REM a new-layout tag and could leave junk core/extra directory copies in the
+REM Claude skills scope. Never valid skill names - always safe to remove.
+if defined CLAUDE_CONFIG_DIR (
+    set "CLAUDE_SKILLS_SCOPE=%CLAUDE_CONFIG_DIR%\skills"
+) else (
+    set "CLAUDE_SKILLS_SCOPE=%USERPROFILE%\.claude\skills"
+)
+for %%J in (core extra) do (
+    if exist "!CLAUDE_SKILLS_SCOPE!\%%J" (
+        rmdir /s /q "!CLAUDE_SKILLS_SCOPE!\%%J" >nul 2>&1
+        echo Removed stale layout directory !CLAUDE_SKILLS_SCOPE!\%%J ^(left by an older installer^)
     )
 )
-if "!LEGACY_SKILLS_REMOVED!"=="1" echo Removed legacy Plannotator skills from !LEGACY_AGENTS_SKILLS_DIR!
 
-REM Remove Plannotator skills that belong in the shared agent scope from Codex.
-set "STALE_CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
-set "STALE_CODEX_SKILLS_REMOVED=0"
-for %%S in (plannotator-compound plannotator-setup-goal) do (
-    if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
-        rmdir /s /q "!STALE_CODEX_SKILLS_DIR!\%%S" >nul 2>&1
-        set "STALE_CODEX_SKILLS_REMOVED=1"
+REM Extras are no longer managed in the Claude / shared-agent scopes. Remove
+REM previously default-installed copies ONCE per machine - recorded in the
+REM migrations ledger under the Plannotator data dir - because copies the user
+REM reinstalls via `npx skills add` are byte-identical to ours and can only be
+REM told apart by remembering that this cleanup already ran.
+if defined CLAUDE_CONFIG_DIR (
+    set "CLAUDE_SKILLS_DIR=%CLAUDE_CONFIG_DIR%\skills"
+) else (
+    set "CLAUDE_SKILLS_DIR=%USERPROFILE%\.claude\skills"
+)
+set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
+set "MIGRATIONS_DIR=!_CONFIG_DIR!\migrations"
+set "EXTRAS_MIGRATION=!MIGRATIONS_DIR!\2026-06-extras-default-install-removed"
+if not exist "!EXTRAS_MIGRATION!" (
+    for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
+        if exist "!CLAUDE_SKILLS_DIR!\%%S" (
+            rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
+            echo Removed extra Plannotator skill from !CLAUDE_SKILLS_DIR!\%%S ^(reinstall via npx skills add^)
+        )
+        if exist "!AGENTS_SKILLS_DIR!\%%S" (
+            rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
+            echo Removed extra Plannotator skill from !AGENTS_SKILLS_DIR!\%%S ^(reinstall via npx skills add^)
+        )
+    )
+    if not exist "!MIGRATIONS_DIR!" mkdir "!MIGRATIONS_DIR!" >nul 2>&1
+    type nul > "!EXTRAS_MIGRATION!"
+)
+
+REM --- Guided install (interactive consoles only) ---
+REM Mirrors install.sh: two questions (extras? model-invocable skills?),
+REM answers persisted to install-prefs in the Plannotator data dir and reused
+REM silently on re-runs. --reconfigure re-opens the wizard; --non-interactive
+REM forces silence. `set /p` returns empty at EOF, so redirected/CI runs fall
+REM through to the defaults without hanging. Flags win over everything.
+REM No checkbox UI in batch - the skill picker uses numbered toggles instead.
+set "PREFS_FILE=!_CONFIG_DIR!\install-prefs"
+set "SAVED_EXTRAS="
+set "SAVED_INVOCABLE="
+if exist "!PREFS_FILE!" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("!PREFS_FILE!") do (
+        if /i "%%A"=="extras" set "SAVED_EXTRAS=%%B"
+        if /i "%%A"=="model_invocable" set "SAVED_INVOCABLE=%%B"
     )
 )
-if "!STALE_CODEX_SKILLS_REMOVED!"=="1" echo Removed shared-agent Plannotator skills from !STALE_CODEX_SKILLS_DIR!
 
-where git >nul 2>&1
-if !ERRORLEVEL! equ 0 (
-    if defined CLAUDE_CONFIG_DIR (
-        set "CLAUDE_SKILLS_DIR=%CLAUDE_CONFIG_DIR%\skills"
+REM Extras already on disk? Then the extras question is moot - they still
+REM count toward the picker list, and we never launch the npx flow over them.
+set "EXTRAS_PRESENT=0"
+for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
+    if exist "!CLAUDE_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
+    if exist "!AGENTS_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
+)
+
+REM A wizard needs a real console. `timeout` exits non-zero when stdin is
+REM redirected ("Input redirection is not supported"), making it a reliable
+REM console probe - CI and redirected runs never see the wizard and never
+REM trigger the wizard-only installs (npx extras). The set /p
+REM EOF-fallthrough remains as a second line of defense.
+set "CAN_PROMPT=0"
+timeout /t 0 >nul 2>&1
+if !ERRORLEVEL! equ 0 set "CAN_PROMPT=1"
+if "!NON_INTERACTIVE!"=="1" set "CAN_PROMPT=0"
+set "RUN_WIZARD=0"
+if "!CAN_PROMPT!"=="1" (
+    if "!RECONFIGURE!"=="1" set "RUN_WIZARD=1"
+    if not exist "!PREFS_FILE!" set "RUN_WIZARD=1"
+)
+
+set "EXTRAS_CHOICE="
+set "INVOCABLE_CHOICE="
+if "!RUN_WIZARD!"=="1" call :guided_wizard
+
+REM Flags override the wizard and saved answers; otherwise saved, then defaults.
+if defined EXTRAS_FLAG set "EXTRAS_CHOICE=!EXTRAS_FLAG!"
+if defined MODEL_INVOCABLE_FLAG set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
+if not defined EXTRAS_CHOICE (
+    if defined SAVED_EXTRAS (set "EXTRAS_CHOICE=!SAVED_EXTRAS!") else (set "EXTRAS_CHOICE=no")
+)
+if not defined INVOCABLE_CHOICE (
+    if defined SAVED_INVOCABLE (set "INVOCABLE_CHOICE=!SAVED_INVOCABLE!") else (set "INVOCABLE_CHOICE=none")
+)
+
+REM Persist only when the wizard ran or a flag set something - silent re-runs
+REM must not clobber saved answers with defaults.
+set "DO_PERSIST=0"
+if "!RUN_WIZARD!"=="1" set "DO_PERSIST=1"
+if defined EXTRAS_FLAG set "DO_PERSIST=1"
+if defined MODEL_INVOCABLE_FLAG set "DO_PERSIST=1"
+if "!DO_PERSIST!"=="1" (
+    if not exist "!_CONFIG_DIR!" mkdir "!_CONFIG_DIR!" >nul 2>&1
+    > "!PREFS_FILE!" (
+        echo extras=!EXTRAS_CHOICE!
+        echo model_invocable=!INVOCABLE_CHOICE!
+    )
+)
+
+REM Extras install is delegated to the skills CLI (its UI picks the agents).
+REM Interactive wizard runs only - silent runs and CI get the printed command.
+REM Never runs when the extras already exist.
+if "!EXTRAS_CHOICE!"=="yes" if "!EXTRAS_PRESENT!"=="0" (
+    set "NPX_OK=0"
+    where npx >nul 2>&1
+    if !ERRORLEVEL! equ 0 if "!RUN_WIZARD!"=="1" set "NPX_OK=1"
+    if "!NPX_OK!"=="1" (
+        echo Launching the skills CLI for the extras ^(pick your agents in its UI^)...
+        call npx skills add backnotprop/plannotator/apps/skills/extra
+        if not !ERRORLEVEL! equ 0 echo skills CLI did not complete - install later with: npx skills add backnotprop/plannotator/apps/skills/extra
     ) else (
-        set "CLAUDE_SKILLS_DIR=%USERPROFILE%\.claude\skills"
+        echo Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra
     )
-    set "CODEX_SKILLS_DIR=%USERPROFILE%\.codex\skills"
-    set "AGENTS_SKILLS_DIR=%USERPROFILE%\.agents\skills"
-    set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
-    mkdir "!SKILLS_TMP!" >nul 2>&1
+)
 
-    git clone --depth 1 --filter=blob:none --sparse "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        pushd "!SKILLS_TMP!\repo"
-        git sparse-checkout set apps/skills >nul 2>&1
+REM File-copy installs require git (sparse checkout). Hard requirement: without
+REM git we cannot install the /plannotator-* skills, so fail loudly instead of
+REM leaving a partial install. Hook/config writing above has already run; the
+REM Pi update and Gemini config below are skipped on failure and complete when
+REM the user re-runs the installer.
+where git >nul 2>&1
+if not !ERRORLEVEL! equ 0 (
+    echo Error: git is required to install Plannotator's skills and slash commands. 1>&2
+    echo Install git, then run this installer again. 1>&2
+    exit /b 1
+)
+set "CHECKOUT_FAILED=0"
+set "KIRO_SKILLS_DIR=%USERPROFILE%\.kiro\skills"
+set "KIRO_AGENTS_DIR=%USERPROFILE%\.kiro\agents"
+set "OPENCODE_COMMANDS_DIR=%USERPROFILE%\.config\opencode\commands"
+set "GEMINI_COMMANDS_DIR=%USERPROFILE%\.gemini\commands"
+set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
+mkdir "!SKILLS_TMP!" >nul 2>&1
 
-        if exist "apps\skills" (
-            if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
-            if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
-            xcopy /s /y /q "apps\skills\*" "!CLAUDE_SKILLS_DIR!\" >nul 2>&1
-            if exist "apps\skills\plannotator-compound" xcopy /s /i /y /q "apps\skills\plannotator-compound" "!AGENTS_SKILLS_DIR!\plannotator-compound\" >nul 2>&1
-            if exist "apps\skills\plannotator-setup-goal" xcopy /s /i /y /q "apps\skills\plannotator-setup-goal" "!AGENTS_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
-            if exist "apps\skills\plannotator-visual-explainer" xcopy /s /i /y /q "apps\skills\plannotator-visual-explainer" "!AGENTS_SKILLS_DIR!\plannotator-visual-explainer\" >nul 2>&1
-            if "!CODEX_AVAILABLE!"=="1" (
-                if not exist "!CODEX_SKILLS_DIR!" mkdir "!CODEX_SKILLS_DIR!"
-                if exist "apps\skills\plannotator-review" xcopy /s /i /y /q "apps\skills\plannotator-review" "!CODEX_SKILLS_DIR!\plannotator-review\" >nul 2>&1
-                if exist "apps\skills\plannotator-annotate" xcopy /s /i /y /q "apps\skills\plannotator-annotate" "!CODEX_SKILLS_DIR!\plannotator-annotate\" >nul 2>&1
-                if exist "apps\skills\plannotator-last" xcopy /s /i /y /q "apps\skills\plannotator-last" "!CODEX_SKILLS_DIR!\plannotator-last\" >nul 2>&1
-                echo Installed skills to !CLAUDE_SKILLS_DIR!\, Codex command skills to !CODEX_SKILLS_DIR!\, and shared agent skills to !AGENTS_SKILLS_DIR!\
-            ) else (
-                echo Installed skills to !CLAUDE_SKILLS_DIR!\ and shared agent skills to !AGENTS_SKILLS_DIR!\
+git clone --depth 1 --filter=blob:none --sparse "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    pushd "!SKILLS_TMP!\repo"
+    git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
+
+    REM Claude Code reads apps\skills\claude\* (injection `!`plannotator ... $ARGUMENTS``
+    REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
+    REM reads apps\skills\core\* (prose). The `!`...`` injection is Claude-Code-only,
+    REM so the two are sourced separately. Replace rather than merge on each run.
+    if exist "apps\skills\claude" (
+        if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
+            if exist "apps\skills\claude\%%S" (
+                if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\skills\claude\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
             )
         )
-
-        popd
+        echo Installed Claude Code skills to !CLAUDE_SKILLS_DIR!\
+    )
+    if exist "apps\skills\core" (
+        if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
+            if exist "apps\skills\core\%%S" (
+                REM Replace rather than merge so files removed upstream don't linger.
+                if exist "!AGENTS_SKILLS_DIR!\%%S" rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\skills\core\%%S" "!AGENTS_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        echo Installed shared agent skills to !AGENTS_SKILLS_DIR!\
     ) else (
-        echo Skipping skills install ^(git sparse-checkout failed^)
+        echo Tag !TAG! predates the core/extra skill layout - skipping core skill install
     )
 
-    rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
+    REM OpenCode command stubs -> always (plugin intercepts execution).
+    if exist "apps\opencode-plugin\commands" (
+        if not exist "!OPENCODE_COMMANDS_DIR!" mkdir "!OPENCODE_COMMANDS_DIR!"
+        xcopy /y /q "apps\opencode-plugin\commands\*.md" "!OPENCODE_COMMANDS_DIR!\" >nul 2>&1
+        echo Installed OpenCode commands to !OPENCODE_COMMANDS_DIR!\
+    )
+
+    REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native format).
+    if exist "%USERPROFILE%\.gemini" if exist "apps\gemini\commands" (
+        if not exist "!GEMINI_COMMANDS_DIR!" mkdir "!GEMINI_COMMANDS_DIR!"
+        xcopy /y /q "apps\gemini\commands\*.toml" "!GEMINI_COMMANDS_DIR!\" >nul 2>&1
+        echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
+    )
+
+    REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected.
+    if "!KIRO_AVAILABLE!"=="1" if exist "apps\kiro-cli\skills" (
+        if not exist "!KIRO_SKILLS_DIR!" mkdir "!KIRO_SKILLS_DIR!"
+        REM Kiro-specific skills with origin baked in come from apps\kiro-cli\skills.
+        for %%S in (plannotator-review plannotator-annotate) do (
+            if exist "apps\kiro-cli\skills\%%S" (
+                if exist "!KIRO_SKILLS_DIR!\%%S" rmdir /s /q "!KIRO_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\kiro-cli\skills\%%S" "!KIRO_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        REM The two extras Kiro keeps receiving come from apps\skills\extra.
+        if exist "apps\skills\extra\plannotator-setup-goal" (
+            if exist "!KIRO_SKILLS_DIR!\plannotator-setup-goal" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-setup-goal" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\extra\plannotator-setup-goal" "!KIRO_SKILLS_DIR!\plannotator-setup-goal\" >nul 2>&1
+        )
+        if exist "apps\skills\extra\plannotator-visual-explainer" (
+            if exist "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-visual-explainer" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\extra\plannotator-visual-explainer" "!KIRO_SKILLS_DIR!\plannotator-visual-explainer\" >nul 2>&1
+        )
+        REM Plannotator custom agent - don't clobber a user's existing one.
+        if not exist "!KIRO_AGENTS_DIR!\plannotator.json" if exist "apps\kiro-cli\agents\plannotator.json" (
+            if not exist "!KIRO_AGENTS_DIR!" mkdir "!KIRO_AGENTS_DIR!"
+            copy /y "apps\kiro-cli\agents\plannotator.json" "!KIRO_AGENTS_DIR!\plannotator.json" >nul 2>&1
+        )
+        echo Installed Kiro skills to !KIRO_SKILLS_DIR!\ and agent to !KIRO_AGENTS_DIR!\plannotator.json
+    )
+
+    popd
 ) else (
-    echo Skipping skills install ^(git not found^)
+    set "CHECKOUT_FAILED=1"
 )
 
-REM Update Pi extension if pi is installed. When global shared skills are
-REM available, keep the extension commands but disable its bundled skill copy to
-REM avoid duplicate Pi skill warnings.
+rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
+
+if "!CHECKOUT_FAILED!"=="1" (
+    echo Error: unable to fetch !REPO! at !TAG! ^(network or git error^). 1>&2
+    echo Something went wrong - run the installer again. 1>&2
+    exit /b 1
+)
+
+REM Claude Code commands are deprecated in favor of skills. Remove a legacy
+REM command file only once its replacement skill is actually on disk - running
+REM AFTER the install above guarantees a failed or skipped skill install never
+REM leaves users with neither the command nor the skill.
+for %%C in (plannotator-review plannotator-annotate plannotator-last) do (
+    if exist "!CLAUDE_SKILLS_DIR!\%%C" if exist "!CLAUDE_COMMANDS_DIR!\%%C.md" (
+        del /q "!CLAUDE_COMMANDS_DIR!\%%C.md" >nul 2>&1
+        echo Removed deprecated Claude command !CLAUDE_COMMANDS_DIR!\%%C.md ^(replaced by the %%C skill^)
+    )
+)
+
+REM plannotator-archive no longer ships as a skill. Remove any stale installed
+REM copy from every skill scope so upgraders don't keep a dead skill around.
+for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do (
+    if exist "%%~D\plannotator-archive" (
+        rmdir /s /q "%%~D\plannotator-archive" >nul 2>&1
+        echo Removed stale plannotator-archive skill from %%~D\plannotator-archive
+    )
+)
+
+REM The /plannotator-archive OpenCode command was removed too - sweep the stub.
+if exist "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" (
+    del /q "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" >nul 2>&1
+    echo Removed stale plannotator-archive command from !OPENCODE_COMMANDS_DIR!
+)
+
+REM Codex no longer hosts core skills (they live in %%USERPROFILE%%\.agents\skills).
+REM Core skills are removed only once their replacement exists; the stale
+REM shared-agent extras were never Codex's and are removed unconditionally.
+for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do (
+    if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
+        set "OK_REMOVE=1"
+        if "%%S"=="plannotator-review" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
+        if "%%S"=="plannotator-annotate" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
+        if "%%S"=="plannotator-last" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
+        if "!OK_REMOVE!"=="1" (
+            rmdir /s /q "!STALE_CODEX_SKILLS_DIR!\%%S" >nul 2>&1
+            echo Removed Plannotator skill from !STALE_CODEX_SKILLS_DIR!\%%S
+        )
+    )
+)
+
+REM Apply the saved model-invocation choices. Installed skill copies always
+REM arrive locked (disable-model-invocation: true in SKILL.md); for each
+REM chosen skill we unlock the INSTALLED copy by removing that line, and flip
+REM the Codex sidecar's allow_implicit_invocation to match. Re-applied on
+REM every run because installs replace the skill folders wholesale.
+if defined INVOCABLE_CHOICE if not "!INVOCABLE_CHOICE!"=="none" (
+    for %%K in ("!INVOCABLE_CHOICE:,=" "!") do (
+        for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!") do (
+            if exist "%%~D\%%~K\SKILL.md" (
+                findstr /c:"disable-model-invocation: true" "%%~D\%%~K\SKILL.md" >nul 2>&1
+                if !ERRORLEVEL! equ 0 (
+                    findstr /v /c:"disable-model-invocation: true" "%%~D\%%~K\SKILL.md" > "%%~D\%%~K\SKILL.md.tmp"
+                    move /y "%%~D\%%~K\SKILL.md.tmp" "%%~D\%%~K\SKILL.md" >nul 2>&1
+                    echo Enabled model invocation: %%~D\%%~K
+                )
+            )
+            if exist "%%~D\%%~K\agents\openai.yaml" (
+                findstr /c:"allow_implicit_invocation: false" "%%~D\%%~K\agents\openai.yaml" >nul 2>&1
+                if !ERRORLEVEL! equ 0 (
+                    powershell -NoProfile -Command "(Get-Content '%%~D\%%~K\agents\openai.yaml' -Raw) -replace 'allow_implicit_invocation: false','allow_implicit_invocation: true' | Set-Content '%%~D\%%~K\agents\openai.yaml' -NoNewline"
+                )
+            )
+        )
+    )
+)
+
+REM Update Pi extension if pi is installed. Pi keeps its 6 extension commands
+REM and the plannotator_submit_plan tool; it no longer bundles skills, so there
+REM is no settings.json package-skills filter to configure.
 where pi >nul 2>&1
 if !ERRORLEVEL! equ 0 (
     echo Updating Pi extension...
     pi install npm:@plannotator/pi-extension
     if !ERRORLEVEL! equ 0 (
-        set "PI_SHARED_SKILLS_DIR=%USERPROFILE%\.agents\skills"
-        set "PI_SHARED_SKILLS_AVAILABLE=0"
-        if exist "!PI_SHARED_SKILLS_DIR!\plannotator-compound\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\plannotator-setup-goal\SKILL.md" if exist "!PI_SHARED_SKILLS_DIR!\plannotator-visual-explainer\SKILL.md" set "PI_SHARED_SKILLS_AVAILABLE=1"
-        if "!PI_SHARED_SKILLS_AVAILABLE!"=="1" (
-            if defined PI_CODING_AGENT_DIR (
-                set "PI_SETTINGS_PATH=!PI_CODING_AGENT_DIR!\settings.json"
-            ) else (
-                set "PI_SETTINGS_PATH=%USERPROFILE%\.pi\agent\settings.json"
-            )
-            if exist "!PI_SETTINGS_PATH!" (
-                where powershell >nul 2>&1
-                if !ERRORLEVEL! equ 0 (
-                    powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:PI_SETTINGS_PATH; if ((Test-Path $p) -eq $false) { exit 0 }; try { $s=Get-Content -Path $p -Raw -ErrorAction Stop | ConvertFrom-Json } catch { Write-Host 'Skipping Pi settings update (could not parse settings.json)'; exit 0 }; if (($null -eq $s) -or ($null -eq $s.packages)) { exit 0 }; $pattern='^(?:npm:)?@plannotator/pi-extension(?:@.+)?$'; $changed=$false; $packages=@(); foreach ($entry in @($s.packages)) { if (($entry -is [string]) -and ($entry -match $pattern)) { $packages += [pscustomobject]@{ source=$entry; skills=@() }; $changed=$true; continue }; $sourceProperty=$null; if (($null -ne $entry) -and ($null -ne $entry.PSObject)) { $sourceProperty=$entry.PSObject.Properties['source'] }; if (($null -ne $sourceProperty) -and ($sourceProperty.Value -is [string]) -and ($sourceProperty.Value -match $pattern)) { $skillsProperty=$entry.PSObject.Properties['skills']; if (($null -eq $skillsProperty) -or (@($skillsProperty.Value).Count -ne 0)) { if ($null -ne $skillsProperty) { $entry.skills=@() } else { $entry | Add-Member -NotePropertyName 'skills' -NotePropertyValue @() }; $changed=$true } }; $packages += $entry }; if ($changed) { $s.packages=@($packages); $tmp=[System.IO.Path]::GetTempFileName(); try { $json=($s | ConvertTo-Json -Depth 20)+[Environment]::NewLine; $utf8NoBom=New-Object System.Text.UTF8Encoding -ArgumentList $false; [System.IO.File]::WriteAllText($tmp,$json,$utf8NoBom); Move-Item -Force $tmp $p; Write-Host 'Configured Pi to use global Plannotator skills and skip bundled package skills.' } catch { Write-Host 'Skipping Pi settings update (could not rewrite settings.json)'; Remove-Item -Force $tmp -ErrorAction SilentlyContinue } }"
-                ) else (
-                    echo Skipping Pi settings update ^(PowerShell not found^)
-                )
-            )
-        ) else (
-            echo Leaving Pi bundled skills enabled ^(global Plannotator agent skills not found^).
-        )
         echo Pi extension updated.
     ) else (
-        echo Skipping Pi settings update ^(pi install failed^)
+        echo Skipping Pi update ^(pi install failed^)
     )
 )
 
@@ -649,36 +937,21 @@ echo }
         )
     )
 
-    REM Install slash commands
-    if not exist "%USERPROFILE%\.gemini\commands" mkdir "%USERPROFILE%\.gemini\commands"
+    REM Gemini slash commands (plannotator-*.toml) are copied from the sparse
+    REM checkout in the git-gated skills/commands block above, not written here.
+)
 
-    (
-echo description = "Open interactive code review for current changes or a PR URL"
-echo prompt = """
-echo ## Code Review Feedback
 echo.
-echo ^^!{plannotator review {{args}}}
+echo ==========================================
+echo   KIRO CLI USERS
+echo ==========================================
 echo.
-echo ## Your task
-echo.
-echo If the review above contains feedback or annotations, address them. If no changes were requested, acknowledge and continue.
-echo """
-    ) > "%USERPROFILE%\.gemini\commands\plannotator-review.toml"
-
-    (
-echo description = "Open interactive annotation UI for a markdown file or folder"
-echo prompt = """
-echo ## Markdown Annotations
-echo.
-echo ^^!{plannotator annotate {{args}}}
-echo.
-echo ## Your task
-echo.
-echo Address the annotation feedback above. The user has reviewed the markdown file and provided specific annotations and comments.
-echo """
-    ) > "%USERPROFILE%\.gemini\commands\plannotator-annotate.toml"
-
-    echo Installed Gemini slash commands to %USERPROFILE%\.gemini\commands\
+if "!KIRO_AVAILABLE!"=="1" (
+    echo Kiro skills are installed to %USERPROFILE%\.kiro\skills\
+    echo The Plannotator agent is installed to %USERPROFILE%\.kiro\agents\plannotator.json
+    echo Launch it: kiro-cli chat --agent plannotator
+) else (
+    echo Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills.
 )
 
 echo.
@@ -689,10 +962,18 @@ echo Then install the Claude Code plugin:
 echo   /plugin marketplace add backnotprop/plannotator
 echo   /plugin install plannotator@plannotator
 echo.
-echo The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use!
+echo Upgrading from an older version? Also run /plugin marketplace update
+echo so the plugin drops its old plannotator:* command entries.
+echo.
+echo The /plannotator-review, /plannotator-annotate, and /plannotator-last skills are ready to use!
+if not "!EXTRAS_CHOICE!"=="yes" (
+    echo.
+    echo Optional skills ^(compound planning, setup-goal, visual explainer^):
+    echo   npx skills add backnotprop/plannotator/apps/skills/extra
+)
 
 REM Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)
-REM Only warn when the plugin is installed — manual-only users won't have overlap
+REM Only warn when the plugin is installed - manual-only users won't have overlap
 if defined CLAUDE_CONFIG_DIR (
     set "CLAUDE_SETTINGS=%CLAUDE_CONFIG_DIR%\settings.json"
 ) else (
@@ -716,3 +997,242 @@ if exist "!PLUGIN_HOOKS!" if exist "!CLAUDE_SETTINGS!" (
 
 echo.
 exit /b 0
+
+REM ======================================================================
+REM Print the PATH-setup hint if INSTALL_DIR isn't already on PATH. Called by
+REM both the --minimal early exit and the normal flow (mirrors install.sh's
+REM print_path_advice).
+REM ======================================================================
+:PrintPathAdvice
+echo !PATH! | findstr /i /c:"!INSTALL_DIR!" >nul
+if !ERRORLEVEL! neq 0 (
+    echo.
+    echo !INSTALL_DIR! is not in your PATH.
+    echo.
+    echo Add it permanently with:
+    echo.
+    echo   setx PATH "%%PATH%%;!INSTALL_DIR!"
+    echo.
+    echo Or add it for this session only:
+    echo.
+    echo   set PATH=%%PATH%%;!INSTALL_DIR!
+)
+goto :eof
+
+REM ======================================================================
+REM Optional annotate agent terminal runtime install. Non-fatal: Plannotator
+REM remains installed if Node/npm or npm install is unavailable.
+REM ======================================================================
+:InstallAgentTerminalRuntime
+if /i "!PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL!"=="1" (
+    echo Skipping agent terminal runtime install ^(PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL is set^)
+    goto :eof
+)
+if /i "!PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL!"=="true" (
+    echo Skipping agent terminal runtime install ^(PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL is set^)
+    goto :eof
+)
+if /i "!PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL!"=="yes" (
+    echo Skipping agent terminal runtime install ^(PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL is set^)
+    goto :eof
+)
+
+"!INSTALL_PATH!" install-runtime agent-terminal
+if !ERRORLEVEL! neq 0 (
+    echo Skipping agent terminal runtime install ^(plannotator install-runtime failed^)
+)
+goto :eof
+
+REM ======================================================================
+REM Optional semantic diff sidecar install. Non-fatal: Plannotator remains
+REM installed if sem download, checksum, or extraction fails.
+REM ======================================================================
+:InstallSemSidecar
+if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="1" (
+    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
+    goto :eof
+)
+if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="true" (
+    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
+    goto :eof
+)
+if /i "!PLANNOTATOR_SKIP_SEM_INSTALL!"=="yes" (
+    echo Skipping semantic diff sidecar install ^(PLANNOTATOR_SKIP_SEM_INSTALL is set^)
+    goto :eof
+)
+
+set "SEM_ASSET="
+if /i "!PLATFORM!"=="win32-x64" set "SEM_ASSET=sem-windows-x86_64.zip"
+if not defined SEM_ASSET (
+    echo Skipping semantic diff sidecar install ^(sem does not publish !PLATFORM!^)
+    goto :eof
+)
+
+set "SEM_DIR=!_CONFIG_DIR!\vendor\sem\!SEM_VERSION!"
+set "SEM_PATH=!SEM_DIR!\sem.exe"
+if exist "!SEM_PATH!" (
+    "!SEM_PATH!" --version 2>nul | findstr /r /c:"^sem " >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        echo Semantic diff sidecar already installed at !SEM_PATH!
+        goto :eof
+    )
+)
+
+set "SEM_BASE_URL=https://github.com/!SEM_REPO!/releases/download/!SEM_VERSION!"
+set "SEM_ARCHIVE=%TEMP%\plannotator-sem-%RANDOM%.zip"
+set "SEM_CHECKSUMS=%TEMP%\plannotator-sem-checksums-%RANDOM%.txt"
+set "SEM_EXTRACT=%TEMP%\plannotator-sem-%RANDOM%"
+mkdir "!SEM_EXTRACT!" >nul 2>&1
+
+REM Bounded so a slow/hung download of this optional sidecar can't wedge an
+REM install where plannotator already landed. Opt out with PLANNOTATOR_SKIP_SEM_INSTALL=1.
+curl -fsSL --connect-timeout 10 --max-time 120 "!SEM_BASE_URL!/!SEM_ASSET!" -o "!SEM_ARCHIVE!"
+if !ERRORLEVEL! neq 0 (
+    echo Skipping semantic diff sidecar install ^(download failed^)
+    goto :sem_cleanup
+)
+
+curl -fsSL --connect-timeout 10 --max-time 60 "!SEM_BASE_URL!/checksums.txt" -o "!SEM_CHECKSUMS!"
+if !ERRORLEVEL! neq 0 (
+    echo Skipping semantic diff sidecar install ^(checksum download failed^)
+    goto :sem_cleanup
+)
+
+set "EXPECTED_SEM_CHECKSUM="
+for /f "usebackq tokens=1,2" %%i in ("!SEM_CHECKSUMS!") do (
+    if "%%j"=="!SEM_ASSET!" set "EXPECTED_SEM_CHECKSUM=%%i"
+)
+if not defined EXPECTED_SEM_CHECKSUM (
+    echo Skipping semantic diff sidecar install ^(checksum missing for !SEM_ASSET!^)
+    goto :sem_cleanup
+)
+
+set "ACTUAL_SEM_CHECKSUM="
+for /f "skip=1 tokens=*" %%i in ('certutil -hashfile "!SEM_ARCHIVE!" SHA256') do (
+    if not defined ACTUAL_SEM_CHECKSUM (
+        set "ACTUAL_SEM_CHECKSUM=%%i"
+        set "ACTUAL_SEM_CHECKSUM=!ACTUAL_SEM_CHECKSUM: =!"
+    )
+)
+if /i "!ACTUAL_SEM_CHECKSUM!" neq "!EXPECTED_SEM_CHECKSUM!" (
+    echo Skipping semantic diff sidecar install ^(checksum mismatch^)
+    goto :sem_cleanup
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force -Path $env:SEM_ARCHIVE -DestinationPath $env:SEM_EXTRACT"
+if !ERRORLEVEL! neq 0 (
+    echo Skipping semantic diff sidecar install ^(extract failed^)
+    goto :sem_cleanup
+)
+set "EXTRACTED_SEM="
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path $env:SEM_EXTRACT -Filter sem.exe -Recurse -File | Select-Object -First 1 -ExpandProperty FullName"`) do (
+    set "EXTRACTED_SEM=%%i"
+)
+if not defined EXTRACTED_SEM (
+    echo Skipping semantic diff sidecar install ^(binary missing from archive^)
+    goto :sem_cleanup
+)
+
+if not exist "!SEM_DIR!" mkdir "!SEM_DIR!"
+copy /y "!EXTRACTED_SEM!" "!SEM_PATH!" >nul
+if !ERRORLEVEL! equ 0 (
+    echo Semantic diff sidecar installed to !SEM_PATH!
+) else (
+    echo Skipping semantic diff sidecar install ^(copy failed^)
+)
+
+:sem_cleanup
+if exist "!SEM_ARCHIVE!" del "!SEM_ARCHIVE!"
+if exist "!SEM_CHECKSUMS!" del "!SEM_CHECKSUMS!"
+if exist "!SEM_EXTRACT!" rmdir /s /q "!SEM_EXTRACT!"
+goto :eof
+
+REM ======================================================================
+REM Guided-install wizard (called only on interactive first runs or with
+REM --reconfigure). Sets EXTRAS_CHOICE and INVOCABLE_CHOICE.
+REM ======================================================================
+:guided_wizard
+echo.
+echo ==========================================
+echo   PLANNOTATOR GUIDED INSTALL
+echo ==========================================
+echo.
+if "!EXTRAS_PRESENT!"=="1" (
+    echo Extra skills already installed - keeping them.
+    set "EXTRAS_CHOICE=yes"
+) else if defined EXTRAS_FLAG (
+    REM Flag already answered this question - don't ask and then ignore.
+    set "EXTRAS_CHOICE=!EXTRAS_FLAG!"
+) else (
+    set "DEF_EXTRAS=no"
+    if defined SAVED_EXTRAS set "DEF_EXTRAS=!SAVED_EXTRAS!"
+    set "ANSWER="
+    set /p "ANSWER=Install the extra skills (compound planning, setup-goal, visual explainer)? [y/N] "
+    set "EXTRAS_CHOICE=no"
+    if /i "!ANSWER!"=="y" set "EXTRAS_CHOICE=yes"
+    if /i "!ANSWER!"=="yes" set "EXTRAS_CHOICE=yes"
+    if "!ANSWER!"=="" set "EXTRAS_CHOICE=!DEF_EXTRAS!"
+)
+if defined MODEL_INVOCABLE_FLAG (
+    REM Flag already answered this question - don't ask and then ignore.
+    set "INVOCABLE_CHOICE=!MODEL_INVOCABLE_FLAG!"
+    goto :eof
+)
+set "ANSWER="
+set /p "ANSWER=Make any skills callable by the model (instead of user-invoked only)? [y/N] "
+set "WANT_INVOCABLE=no"
+if /i "!ANSWER!"=="y" set "WANT_INVOCABLE=yes"
+if /i "!ANSWER!"=="yes" set "WANT_INVOCABLE=yes"
+if "!WANT_INVOCABLE!"=="no" (
+    set "INVOCABLE_CHOICE=none"
+    goto :eof
+)
+set "SKILL_COUNT=3"
+set "SKILL_1=plannotator-review"
+set "SKILL_2=plannotator-annotate"
+set "SKILL_3=plannotator-last"
+if "!EXTRAS_CHOICE!"=="yes" (
+    set "SKILL_COUNT=6"
+    set "SKILL_4=plannotator-compound"
+    set "SKILL_5=plannotator-setup-goal"
+    set "SKILL_6=plannotator-visual-explainer"
+)
+REM Preselect previously chosen skills. NOTE: no pipes here - each side of a
+REM cmd pipe runs in a child without delayed expansion, so !vars! would pass
+REM through literally. A substring-replace containment test avoids that trap.
+set "PRESEL=,!SAVED_INVOCABLE!,"
+for /l %%I in (1,1,!SKILL_COUNT!) do (
+    set "SEL_%%I=0"
+    if defined SAVED_INVOCABLE (
+        for %%K in ("!SKILL_%%I!") do if not "!PRESEL:,%%~K,=!"=="!PRESEL!" set "SEL_%%I=1"
+    )
+)
+:toggle_loop
+echo.
+for /l %%I in (1,1,!SKILL_COUNT!) do (
+    set "MARK= "
+    if "!SEL_%%I!"=="1" set "MARK=x"
+    echo   %%I^) [!MARK!] !SKILL_%%I!
+)
+set "PICK="
+set /p "PICK=Toggle a number (press enter on empty input to confirm): "
+if "!PICK!"=="" goto :collect_invocable
+set "VALID=0"
+for /l %%I in (1,1,!SKILL_COUNT!) do if "!PICK!"=="%%I" set "VALID=1"
+if "!VALID!"=="0" (
+    echo Invalid choice: !PICK!
+    goto :toggle_loop
+)
+for %%I in (!PICK!) do (
+    if "!SEL_%%I!"=="1" (set "SEL_%%I=0") else (set "SEL_%%I=1")
+)
+goto :toggle_loop
+:collect_invocable
+set "INVOCABLE_CHOICE="
+for /l %%I in (1,1,!SKILL_COUNT!) do (
+    if "!SEL_%%I!"=="1" (
+        if defined INVOCABLE_CHOICE (set "INVOCABLE_CHOICE=!INVOCABLE_CHOICE!,!SKILL_%%I!") else (set "INVOCABLE_CHOICE=!SKILL_%%I!")
+    )
+)
+if not defined INVOCABLE_CHOICE set "INVOCABLE_CHOICE=none"
+goto :eof

@@ -17,15 +17,17 @@
  * - Same trust model as ~/.plannotator/config.json
  */
 
-import { homedir } from "os";
 import { join } from "path";
 import { readFileSync, statSync } from "fs";
+import { getPlannotatorDataDir } from "./data-dir";
 
-/** Base directory for hook-injectable files (new path) */
-const HOOKS_BASE_DIR = join(homedir(), ".plannotator", "hooks");
+const DATA_DIR = getPlannotatorDataDir();
 
-/** Legacy base directory (pre-migration path) */
-const LEGACY_BASE_DIR = join(homedir(), ".plannotator");
+/** Hooks subdirectory (preferred location) */
+const HOOKS_BASE_DIR = join(DATA_DIR, "hooks");
+
+/** Fallback: hooks placed directly in the data dir (pre-hooks-subdir layout) */
+const LEGACY_BASE_DIR = DATA_DIR;
 
 /** Maximum file size to read (50 KB) */
 const MAX_FILE_SIZE = 50 * 1024;

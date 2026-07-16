@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.19.18",
+  "version": "0.23.1",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -17,20 +17,29 @@
     "./p4": "./p4.ts",
     "./vcs": "./vcs.ts",
     "./repo": "./repo.ts",
+    "./review-workspace": "./review-workspace.ts",
+    "./agent-terminal-runtime": "./agent-terminal-runtime.ts",
     "./share-url": "./share-url.ts",
     "./sessions": "./sessions.ts",
     "./project": "./project.ts",
-    "./pr": "./pr.ts"
+    "./pr": "./pr.ts",
+    "./html-assets": "./html-assets.ts"
   },
   "files": [
-    "*.ts"
+    "*.ts",
+    "*.mjs"
   ],
   "dependencies": {
-    "@pierre/diffs": "^1.1.12",
+    "chokidar": "^5.0.0",
+    "@pierre/diffs": "1.2.8",
+    "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
-    "@plannotator/ai": "workspace:*"
+    "@plannotator/webtui": "0.1.0"
   },
   "peerDependencies": {
     "bun": ">=1.0.0"
+  },
+  "devDependencies": {
+    "glimpseui": "^0.8.0"
   }
 }

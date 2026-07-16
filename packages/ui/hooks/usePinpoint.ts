@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback, type RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import type Highlighter from '@plannotator/web-highlighter';
 import type { InputMethod } from '../types';
-import { resolvePinpointTarget, type PinpointTarget } from '../utils/blockTargeting';
+import { resolvePinpointTarget } from '../utils/blockTargeting';
 
 export interface UsePinpointOptions {
   containerRef: RefObject<HTMLElement | null>;

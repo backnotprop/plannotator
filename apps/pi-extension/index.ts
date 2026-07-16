@@ -57,7 +57,6 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
 	startCodeReviewBrowserSession,
 	startLastMessageAnnotationSession,
 	startMarkdownAnnotationSession,
@@ -65,8 +64,10 @@ import {
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.js";
 import {
+	findAssistantMessageByEntryId,
 	getAssistantMessageText,
 	getLastAssistantMessageSnapshot,
+	getRecentAssistantMessages,
 	hasSessionMovedPastEntry,
 } from "./assistant-message.js";
 import {
@@ -85,6 +86,7 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
+import { isRemoteSession } from "./server/network.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -125,6 +127,17 @@ function safeNotify(
 		if (notifyCurrentPiSession(message, type, origin)) return;
 		console.error(`Plannotator notification failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
+}
+
+/**
+ * Foreground "session opened" notice. For a remote session the auto-opened
+ * browser is unreachable, so the URL must ride in THIS in-turn message — the
+ * after-turn notify inside openBrowserForServer fires too late to render.
+ */
+function sessionOpenedMessage(label: string, url: string): string {
+	return isRemoteSession()
+		? `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`
+		: `${label}. You can keep chatting while it runs.`;
 }
 
 function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown, origin?: PiSessionIdentity): void {
@@ -210,7 +223,21 @@ function sendUserMessageWithCurrentSessionFallback(
 export default function plannotator(pi: ExtensionAPI): void {
 	const currentPiSession = registerCurrentPiSession(pi);
 	let phase: Phase = "idle";
-	void registerPlannotatorEventListeners(pi);
+	void registerPlannotatorEventListeners(pi, {
+		handlePlanMode: async (mode, ctx) => {
+			if (mode === "status") return { phase };
+			if (mode === "enter") {
+				if (phase === "idle") await enterPlanning(ctx);
+				return { phase };
+			}
+			if (mode === "exit") {
+				if (phase !== "idle") await exitToIdle(ctx);
+				return { phase };
+			}
+			await togglePlanMode(ctx);
+			return { phase };
+		},
+	});
 	let lastSubmittedPath: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
@@ -391,21 +418,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerCommand("plannotator-status", {
-		description: "Show plannotator status",
-		handler: async (_args, ctx) => {
-			const parts = [`Phase: ${phase}`];
-			if (lastSubmittedPath) {
-				parts.push(`Plan file: ${lastSubmittedPath}`);
-			}
-			if (checklistItems.length > 0) {
-				const done = checklistItems.filter((t) => t.completed).length;
-				parts.push(`Progress: ${done}/${checklistItems.length}`);
-			}
-			ctx.ui.notify(parts.join("\n"), "info");
-		},
-	});
-
 	pi.registerCommand("plannotator-review", {
 		description: "Open interactive code review for current changes or a PR URL; pass --git to force Git in JJ workspaces",
 		handler: async (args, ctx) => {
@@ -422,13 +434,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			try {
 				const reviewArgs = parseReviewArgs(args ?? "");
-				const isPRReview = reviewArgs.prUrl !== undefined;
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType,
 					useLocal: reviewArgs.useLocal,
 				});
-				ctx.ui.notify("Code review opened. You can keep chatting while it runs.", "info");
+				ctx.ui.notify(sessionOpenedMessage("Code review opened", session.url), "info");
 				void session
 					.waitForDecision()
 					.then((result) => {
@@ -451,21 +462,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Code review closed (no feedback).", "info", origin);
 								return;
 							}
-							if (isPRReview) {
-								// Platform PR actions (approve/comment) return approved:false with a
-								// status message — don't tell the agent to "address" a platform action.
-								sendUserMessageWithCurrentSessionFallback(
-									pi,
-									result.feedback,
-									{ deliverAs: "followUp" },
-									"Plannotator code review feedback could not be sent",
-									origin,
-								);
-								return;
-							}
+							// Append the triage-first suffix when the reviewer sent
+							// annotations to act on (PR mode included). Platform PR actions
+							// (approve/comment posted to the host) come back with an empty
+							// annotation set and a status message — don't tell the agent to
+							// "address" a platform action.
+							const reviewFeedback = (result.annotations?.length ?? 0) > 0
+								? `${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`
+								: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								`${result.feedback}${getReviewDeniedSuffix("pi", loadConfig())}`,
+								reviewFeedback,
 								{ deliverAs: "followUp" },
 								"Plannotator code review feedback could not be sent",
 								origin,
@@ -489,13 +496,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-annotate", {
 		description: "Open markdown file or folder in annotation UI",
 		handler: async (args, ctx) => {
-			// #570: split --gate / --json from the path. --json is silently
+			// Split known annotate flags from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
 			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag } = parseAnnotateArgs(args ?? "");
+			const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.html | https://... | folder/> [--gate] [--json]", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
 				return;
 			}
 			if (!hasPlanBrowserHtml()) {
@@ -519,7 +526,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const isUrl = /^https?:\/\//i.test(filePath);
 
 			if (isUrl) {
-				const useJina = resolveUseJina(false, loadConfig());
+				const useJina = resolveUseJina(noJina, loadConfig());
 				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
 				try {
 					const result = await urlToMarkdown(filePath, { useJina });
@@ -555,8 +562,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 
 				if (isFolder) {
-					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, /\.(mdx?|html?)$/i)) {
-						ctx.ui.notify(`No markdown or HTML files found in ${absolutePath}`, "error");
+					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
+						ctx.ui.notify(`No markdown, text, or HTML files found in ${absolutePath}`, "error");
 						return;
 					}
 					markdown = "";
@@ -564,14 +571,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 					mode = "annotate-folder";
 					ctx.ui.notify(`Opening annotation UI for folder ${filePath}...`, "info");
 				} else if (/\.html?$/i.test(absolutePath)) {
-					// HTML file annotation — convert to markdown via Turndown
-					const fileSize = statSync(absolutePath).size;
-					if (fileSize > 10 * 1024 * 1024) {
-						ctx.ui.notify(`File too large (${Math.round(fileSize / 1024 / 1024)}MB, max 10MB)`, "error");
-						return;
-					}
 					const html = readFileSync(absolutePath, "utf-8");
-					if (renderHtmlFlag) {
+					const renderHtmlForFile = !renderMarkdownFlag;
+					if (renderHtmlForFile) {
 						rawHtml = html;
 						markdown = "";
 					} else {
@@ -581,6 +583,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 					sourceInfo = basename(absolutePath);
 					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
 				} else {
+					if (!/\.(mdx?|txt)$/i.test(absolutePath)) {
+						ctx.ui.notify("Only .md, .mdx, .txt, .html, .htm files are supported.", "error");
+						return;
+					}
 					markdown = readFileSync(absolutePath, "utf-8");
 					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
 				}
@@ -600,9 +606,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 					sourceConverted,
 					gate,
 					rawHtml,
-					renderHtmlFlag,
+					!!rawHtml,
+					renderMarkdownFlag,
 				);
-				ctx.ui.notify("Annotation opened. You can keep chatting while it runs.", "info");
+				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session
 					.waitForDecision()
 					.then((result) => {
@@ -649,7 +656,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerCommand("plannotator-last", {
 		description: "Annotate the last assistant message",
 		handler: async (args, ctx) => {
-			// #570: support --gate on /plannotator-last for Stop-hook review gate.
+			// Support --gate on /plannotator-last for the Stop-hook review gate.
 			const { gate } = parseAnnotateArgs(args ?? "");
 
 			if (!hasPlanBrowserHtml()) {
@@ -669,11 +676,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 				return;
 			}
 
+			const recent = getRecentAssistantMessages(ctx, 25);
+			const pickerMessages = recent.length > 1 ? recent : undefined;
+
 			ctx.ui.notify("Opening annotation UI for last message...", "info");
 
 			try {
-				const session = await startLastMessageAnnotationSession(ctx, snapshot.text, gate);
-				ctx.ui.notify("Last-message annotation opened. You can keep chatting while it runs.", "info");
+				const session = await startLastMessageAnnotationSession(ctx, snapshot.text, gate, pickerMessages);
+				ctx.ui.notify(sessionOpenedMessage("Last-message annotation opened", session.url), "info");
 				void session
 					.waitForDecision()
 					.then((result) => {
@@ -690,9 +700,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
-							const feedback = shouldAnchorLastMessageFeedback(ctx, snapshot.entryId, origin)
-								? anchorMessageFeedback(result.feedback, snapshot.text)
-								: result.feedback;
+							// Picker may have changed which message the feedback targets; if so,
+							// look that one up in the current branch so the anchor quote matches.
+							const target = result.selectedMessageId && result.selectedMessageId !== snapshot.entryId
+								? findAssistantMessageByEntryId(ctx, result.selectedMessageId) ?? snapshot
+								: snapshot;
+								const feedback = result.feedbackScope !== "messages" && shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
+									? anchorMessageFeedback(result.feedback, target.text)
+									: result.feedback;
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
 								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
@@ -712,31 +727,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 			} catch (err) {
 				ctx.ui.notify(
 					`Failed to start annotation UI: ${getStartupErrorMessage(err)}`,
-					"error",
-				);
-			}
-		},
-	});
-
-	pi.registerCommand("plannotator-archive", {
-		description: "Browse saved plan decisions",
-		handler: async (_args, ctx) => {
-			if (!hasPlanBrowserHtml()) {
-				ctx.ui.notify(
-					"Archive UI not available. Run 'bun run build' in the pi-extension directory.",
-					"error",
-				);
-				return;
-			}
-
-			ctx.ui.notify("Opening plan archive...", "info");
-
-			try {
-				await openArchiveBrowserAction(ctx);
-				ctx.ui.notify("Archive browser closed.", "info");
-			} catch (err) {
-				ctx.ui.notify(
-					`Failed to start archive: ${getStartupErrorMessage(err)}`,
 					"error",
 				);
 			}
@@ -1165,9 +1155,16 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 	pi.on("agent_end", async (_event, ctx) => {
 		if (phase === "executing" && justApprovedPlan) {
 			justApprovedPlan = false;
-			setTimeout(() => {
+			let attempts = 0;
+			const continueWhenIdle = (): void => {
+				if (!ctx.isIdle()) {
+					attempts += 1;
+					if (attempts <= 200) setTimeout(continueWhenIdle, 50);
+					return;
+				}
 				pi.sendUserMessage("Continue with the approved plan.");
-			}, 0);
+			};
+			setTimeout(continueWhenIdle, 0);
 			return;
 		}
 

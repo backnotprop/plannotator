@@ -96,7 +96,7 @@ Pastes stored to `~/.plannotator/pastes/` by default.
 | `PASTE_PORT` | `19433` | Server port |
 | `PASTE_DATA_DIR` | `~/.plannotator/pastes` | Storage directory |
 | `PASTE_TTL_DAYS` | `7` | Auto-delete after N days |
-| `PASTE_MAX_SIZE` | `524288` | Max payload size (512KB) |
+| `PASTE_MAX_SIZE` | `5242880` | Max encrypted payload size (5 MB) |
 | `PASTE_ALLOWED_ORIGINS` | (see defaults) | CORS allowed origins |
 
 ## 4. Connect the Components

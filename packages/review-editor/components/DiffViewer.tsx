@@ -4,6 +4,7 @@ import { getSingularPatch, processFile } from '@pierre/diffs';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { usePierreTheme } from '../hooks/usePierreTheme';
+import { useWorkerPoolThemeSync } from '../workerPool';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
 import { detectLanguage } from '../utils/detectLanguage';
@@ -12,7 +13,12 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
+import { FileCommentBanner } from './FileCommentBanner';
+import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
+import { lineAnnotationMetadata } from '../utils/annotationDisplay';
+import type { AnnotationScrollTarget } from '../types';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
+import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -35,6 +41,7 @@ interface PierreDiffContentProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   mergedAnnotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   pendingSelection: SelectedLineRange | null;
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
@@ -55,6 +62,7 @@ const PierreDiffContent = React.memo(({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  expandUnchanged,
   mergedAnnotations,
   pendingSelection,
   onLineSelectionEnd,
@@ -72,17 +80,26 @@ const PierreDiffContent = React.memo(({
         themeType: pierreTheme.type,
         unsafeCSS: pierreTheme.css,
         ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
+        // We render our own FileHeader above this view; suppress Pierre's
+        // built-in header (and its file-status symbol) so it doesn't double up.
+        disableFileHeader: true,
         diffStyle,
         overflow: diffOverflow,
         diffIndicators,
         lineDiffType,
         disableLineNumbers,
         disableBackground,
+        expandUnchanged,
         hunkSeparators: 'line-info',
         enableLineSelection: true,
         enableGutterUtility: true,
         onGutterUtilityClick,
         onLineSelectionEnd,
+        // Pierre's renderer-options builder drops onToken* before it evaluates
+        // shouldUseTokenTransformer, so passing the handlers alone never wraps
+        // tokens (no data-char) and code-nav/token events never fire. Enable
+        // the token transformer explicitly.
+        useTokenTransformer: true,
         onTokenClick,
         onTokenEnter,
         onTokenLeave,
@@ -105,6 +122,7 @@ const PierreDiffContent = React.memo(({
   prev.lineDiffType === next.lineDiffType &&
   prev.disableLineNumbers === next.disableLineNumbers &&
   prev.disableBackground === next.disableBackground &&
+  prev.expandUnchanged === next.expandUnchanged &&
   prev.mergedAnnotations === next.mergedAnnotations &&
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
@@ -119,6 +137,8 @@ interface DiffViewerProps {
   patch: string;
   filePath: string;
   oldPath?: string;
+  /** Change type for the header icon + rename display. */
+  status?: import('../types').DiffFileStatus;
   /** Base branch override used for file-content lookups (branch / merge-base modes only). */
   reviewBase?: string;
   /** Current PR url + diff scope — used to namespace file-comment drafts so they don't leak across in-place PR switches. */
@@ -131,10 +151,12 @@ interface DiffViewerProps {
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
+  expandUnchanged?: boolean;
   fontFamily?: string;
   fontSize?: string;
   annotations: CodeAnnotation[];
   selectedAnnotationId: string | null;
+  scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
@@ -170,6 +192,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   patch,
   filePath,
   oldPath,
+  status,
   reviewBase,
   prUrl,
   prDiffScope,
@@ -180,10 +203,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   lineDiffType,
   disableLineNumbers,
   disableBackground,
+  expandUnchanged,
   fontFamily,
   fontSize,
   annotations,
   selectedAnnotationId,
+  scrollTargetAnnotation,
   pendingSelection,
   onLineSelection,
   onAddAnnotation,
@@ -212,6 +237,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onCodeNavRequest,
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize });
+  // Worker-pool highlighting: keep the pool's theme pair in step with the UI
+  // theme. (No mount gating here — the single-file panel renders one diff;
+  // a main-thread fallback frame at startup is invisible.)
+  useWorkerPoolThemeSync(pierreTheme.syntaxTheme);
   // containerRef must point at the actual scrolling element (the
   // OverlayScrollbars viewport), not the OverlayScrollArea host. `viewport`
   // is state so effects re-run once the library has mounted the viewport.
@@ -301,6 +330,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // against the complete file (isPartial: false), enabling expansion.
   const augmentedDiff = useMemo(() => {
     if (!fileContents || fileContents.forPath !== filePath || (fileContents.old == null && fileContents.new == null)) return fileDiff;
+    // Stale-content guard (same as AllFilesCodeView): the file may have
+    // changed on disk since the diff was captured — augmenting with contents
+    // that don't reconcile with the patch breaks Pierre's line math. Fall back
+    // to the raw patch for this file.
+    if (!isContentConsistentWithPatch(patch, fileContents.old, fileContents.new)) {
+      console.warn(
+        `DiffViewer: skipping full-content expansion for ${filePath} — file changed since the diff was captured`,
+      );
+      return fileDiff;
+    }
     try {
       const result = processFile(patch, {
         oldFile: fileContents.old != null ? { name: oldPath || filePath, contents: fileContents.old } : undefined,
@@ -373,13 +412,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return () => viewport.removeEventListener('scroll', onScroll);
   }, [viewport, filePath]);
 
-  // Scroll to selected annotation when it changes
+  // Scroll to a comment ONLY on sidebar navigation (scrollTargetAnnotation),
+  // never on a bare in-diff selection — clicking a comment must not move the
+  // viewport. Keyed on the token so re-clicking the same sidebar row re-centers.
   useEffect(() => {
-    if (!selectedAnnotationId || !containerRef.current) return;
+    if (!scrollTargetAnnotation || !containerRef.current) return;
+    const targetId = scrollTargetAnnotation.id;
 
     const timeoutId = setTimeout(() => {
       const annotationEl = containerRef.current?.querySelector(
-        `[data-annotation-id="${selectedAnnotationId}"]`
+        `[data-annotation-id="${targetId}"]`
       );
       if (annotationEl) {
         annotationEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -387,7 +429,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     }, 100);
 
     return () => clearTimeout(timeoutId);
-  }, [selectedAnnotationId, viewport]);
+  }, [scrollTargetAnnotation, viewport]);
 
   // Apply search highlights to diff lines (including inside shadow DOM).
   // The query is already debounced upstream (useReviewSearch), so this runs synchronously.
@@ -408,7 +450,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     roots.forEach(root =>
       applySearchHighlights(root, query, matches, activeSearchMatchId)
     );
-  }, [searchQuery, searchMatches, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, augmentedDiff, viewport]);
+  }, [searchQuery, searchMatches, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, expandUnchanged, augmentedDiff, viewport]);
 
   // Swap active search highlight instantly when stepping between matches.
   // This avoids a full rebuild just to change two elements' background color.
@@ -421,7 +463,48 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   useEffect(() => {
     if (!activeSearchMatch || !containerRef.current) return;
     return retryScrollToSearchMatch(containerRef.current, activeSearchMatch);
-  }, [activeSearchMatch, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, viewport]);
+  }, [activeSearchMatch, filePath, diffStyle, diffOverflow, diffIndicators, lineDiffType, disableLineNumbers, disableBackground, expandUnchanged, viewport]);
+
+  // Scroll to the selected line range — drives "jump to entity" from semantic-diff
+  // clicks and AI "scroll to lines". Mirrors the scroll-to-annotation behavior used
+  // by sidebar comments (center the target, smooth). pierre tags the selected rows
+  // with `[data-selected-line]` inside the diff shadow DOM once it applies
+  // `selectedLines`, so we retry across frames until it appears.
+  //
+  // Only scroll when the target is off-screen: a manual drag-select also sets
+  // pendingSelection, but its lines are by definition already visible, so we leave
+  // the view untouched and avoid yanking it on every selection.
+  useEffect(() => {
+    if (!pendingSelection || !containerRef.current) return;
+    const container = containerRef.current;
+    let cancelled = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 30;
+
+    const tryScroll = () => {
+      if (cancelled) return;
+      const target = getSearchRoots(container)
+        .map((root) => (root as ParentNode).querySelector?.('[data-selected-line]') ?? null)
+        .find((el): el is Element => el != null);
+      if (target) {
+        const targetRect = target.getBoundingClientRect();
+        const viewRect = container.getBoundingClientRect();
+        const fullyVisible = targetRect.top >= viewRect.top && targetRect.bottom <= viewRect.bottom;
+        if (!fullyVisible) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        return;
+      }
+      attempts += 1;
+      if (attempts < MAX_ATTEMPTS) requestAnimationFrame(tryScroll);
+    };
+
+    const raf = requestAnimationFrame(tryScroll);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [pendingSelection, filePath, augmentedDiff, viewport]);
 
   // Map annotations to @pierre/diffs format
   const lineAnnotations = useMemo(() => {
@@ -430,18 +513,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       .map(ann => ({
         side: ann.side === 'new' ? 'additions' as const : 'deletions' as const,
         lineNumber: ann.lineEnd,
-        metadata: {
-          annotationId: ann.id,
-          type: ann.type,
-          text: ann.text,
-          suggestedCode: ann.suggestedCode,
-          originalCode: ann.originalCode,
-          author: ann.author,
-          severity: ann.severity,
-          reasoning: ann.reasoning,
-          conventionalLabel: ann.conventionalLabel,
-          decorations: ann.decorations,
-        } as DiffAnnotationMetadata,
+        metadata: lineAnnotationMetadata(ann),
       }));
   }, [annotations]);
 
@@ -496,12 +568,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       <InlineAnnotation
         metadata={annotation.metadata}
         language={detectLanguage(filePath)}
+        isSelected={annotation.metadata.annotationId === selectedAnnotationId}
         onSelect={onSelectAnnotation}
         onEdit={handleEdit}
         onDelete={onDeleteAnnotation}
       />
     );
-  }, [filePath, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
+  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
 
   const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
     toolbarHostRef.current?.handleLineSelectionEnd(range);
@@ -564,11 +637,31 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     } as React.CSSProperties;
   }, [diffOverflow, isSplitLayout, splitRatio]);
 
+  // File-scoped comments render below the path, above the hunks (full text, no
+  // truncation) — line-scoped annotations stay inline in the gutter.
+  const fileComments = useMemo(
+    () => annotations.filter(isFileScopedAnnotation),
+    [annotations],
+  );
+
+  // Replay a selected line/range comment's anchor as the controlled highlight so
+  // clicking it (inline card or sidebar) lights up its lines. A live compose
+  // selection (pendingSelection) wins while the toolbar is open; file-scoped
+  // comments have no meaningful line so they don't paint a highlight.
+  const selectedAnnotationRange = useMemo<SelectedLineRange | null>(() => {
+    if (!selectedAnnotationId) return null;
+    const ann = annotations.find((a) => a.id === selectedAnnotationId);
+    if (!ann || isFileScopedAnnotation(ann)) return null;
+    return lineRangeForAnnotation(ann);
+  }, [selectedAnnotationId, annotations]);
+
   return (
     <div className="h-full flex flex-col">
       <FileHeader
         filePath={filePath}
         patch={patch}
+        status={status}
+        oldPath={oldPath}
         isViewed={isViewed}
         onToggleViewed={onToggleViewed}
         isStaged={isStaged}
@@ -584,6 +677,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         overflowX="scroll"
         onViewportReady={onViewportReady}
       >
+        <FileCommentBanner
+          comments={fileComments}
+          selectedAnnotationId={selectedAnnotationId}
+          onSelect={onSelectAnnotation}
+          onEdit={onEditAnnotation}
+          onDelete={onDeleteAnnotation}
+        />
         <div className="p-4" ref={diffContentRef}>
           <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
             {isSplitLayout && diffOverflow !== 'wrap' && (
@@ -606,8 +706,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               lineDiffType={lineDiffType}
               disableLineNumbers={disableLineNumbers}
               disableBackground={disableBackground}
+              expandUnchanged={expandUnchanged}
               mergedAnnotations={mergedAnnotations}
-              pendingSelection={pendingSelection}
+              pendingSelection={pendingSelection ?? selectedAnnotationRange}
               onLineSelectionEnd={handlePierreLineSelectionEnd}
               onGutterUtilityClick={handleGutterUtilityClick}
               renderAnnotation={renderAnnotation}

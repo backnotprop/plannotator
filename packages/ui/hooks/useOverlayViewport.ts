@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 
 /**
- * Bridges the OverlayScrollbars viewport element into React state and a ref
- * at the same time, for components that need to both:
+ * Bridges a scroll element (delivered by `OverlayScrollArea`'s `onViewportReady`,
+ * now a native scroll node) into React state and a ref at the same time, for
+ * components that need to both:
  *
  *   1. Re-run effects when the viewport becomes available (state), and
  *   2. Access the viewport imperatively without re-rendering (ref).

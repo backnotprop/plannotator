@@ -110,6 +110,8 @@ export async function startGoalSetupServer(
       server = Bun.serve({
         hostname: getServerHostname(),
         port: configuredPort,
+        // Bun's default 10s idleTimeout kills long-running requests.
+        idleTimeout: 0,
 
         async fetch(req) {
           const url = new URL(req.url);

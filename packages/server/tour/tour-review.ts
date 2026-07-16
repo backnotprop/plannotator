@@ -1,9 +1,10 @@
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
-import { getLocalDiffInstruction } from "../agent-review-message";
+import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
 import type {
   CodeTourOutput,
   TourDiffAnchor,
@@ -242,13 +243,23 @@ is a person; what would THEY do to gain confidence?
 Reference which stops each question relates to via stop_indices. Every question
 should reference at least one stop.
 
+## Speed
+You are handed the changeset directly — reading it once, carefully, is most
+of the job. The diff (inlined, or one diff command away) is your primary
+and usually only source. A few TARGETED lookups are fine when a stop's
+story needs one; do NOT explore the repository, read unchanged files "for
+context", or run broad searches. The reviewer is waiting for the tour:
+fast and well-told beats exhaustive and late.
+
 ## Pipeline
 
-1. Read the full diff (git diff, jj diff, or inlined patch).
-2. Read CLAUDE.md and README.md for project context.
-3. Read commit messages (git log --oneline) and PR title/body if available.
+1. Read the full diff (inlined, or ONE diff command: git diff / jj diff).
+2. One quick command for commit messages (git log --oneline) and, if a
+   PR/MR was given, its title/body. Skip whatever isn't there.
+3. OPTIONAL, not a required step: skim CLAUDE.md or README.md only if the
+   project is unfamiliar AND a stop's story genuinely depends on it.
 4. Identify logical groupings of change (cross-file when appropriate). These
-   become stops.
+   become stops. This is thinking, not tool calls.
 5. Determine reading flow order: entry point first, then outward. Definitions
    before consumers, cause before effect.
 6. Write the greeting, intent, before/after, takeaways, stops, and checklist
@@ -288,9 +299,13 @@ callouts. The primary question is "what does this change do and why?" not
 export function buildTourUserMessage(
   patch: string,
   diffType: DiffType,
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string },
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string; workspace?: WorkspaceReviewPromptContext },
   prMetadata?: PRMetadata,
 ): string {
+  if (options?.workspace) {
+    return buildWorkspaceTourUserMessage(patch, options.workspace);
+  }
+
   if (prMetadata) {
     if (options?.prDiffScope === "full-stack") {
       return [
@@ -332,6 +347,21 @@ export function buildTourUserMessage(
   ].join("\n");
 }
 
+function buildWorkspaceTourUserMessage(
+  patch: string,
+  workspace: WorkspaceReviewPromptContext,
+): string {
+  return [
+    "Walk the reviewer through the local workspace changes across multiple nested VCS repositories.",
+    "",
+    ...buildWorkspacePromptContextLines(workspace),
+    "",
+    "```diff",
+    patch,
+    "```",
+  ].join("\n");
+}
+
 export interface TourClaudeCommandResult {
   command: string[];
   stdinPrompt: string;
@@ -344,7 +374,7 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
     "Bash(git show:*)", "Bash(git blame:*)", "Bash(git branch:*)",
     "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
     "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
-    "Bash(git show-ref:*)",
+    "Bash(git show-ref:*)", "Bash(git -C:*)",
     "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
     "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
     "Bash(jj bookmark list:*)",
@@ -383,7 +413,7 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
   };
 }
 
-const TOUR_SCHEMA_DIR = join(homedir(), ".plannotator");
+const TOUR_SCHEMA_DIR = getPlannotatorDataDir();
 const TOUR_SCHEMA_FILE = join(TOUR_SCHEMA_DIR, "tour-schema.json");
 let tourSchemaMaterialized = false;
 
@@ -474,7 +504,7 @@ export interface TourSessionBuildCommandOptions {
   cwd: string;
   patch: string;
   diffType: DiffType;
-  options?: { defaultBranch?: string; hasLocalAccess?: boolean };
+  options?: { defaultBranch?: string; hasLocalAccess?: boolean; prDiffScope?: string; workspace?: WorkspaceReviewPromptContext };
   prMetadata?: PRMetadata;
   config?: Record<string, unknown>;
 }

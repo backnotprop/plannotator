@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { homedir } from "os";
+import path from "path";
 import {
   applyEdits,
   formatWithLineNumbers,
   getPlanBackingPath,
   validateEdits,
-} from "./index";
+} from "./plan-edits";
 
 // ── applyEdits ─────────────────────────────────────────────────────────────
 
@@ -51,6 +53,11 @@ describe("applyEdits", () => {
   test("edit on empty file (start=1, no end)", () => {
     const result = applyEdits([], [{ start: 1, content: "hello" }]);
     expect(result).toEqual(["hello"]);
+  });
+
+  test("edit on empty file (start=1, end=1) — splice clamps gracefully (#742)", () => {
+    const result = applyEdits([], [{ start: 1, end: 1, content: "# Plan\nGoals" }]);
+    expect(result).toEqual(["# Plan", "Goals"]);
   });
 
   test("content with trailing newline produces trailing empty string", () => {
@@ -126,6 +133,12 @@ describe("validateEdits", () => {
   test("passes for empty file with start=1", () => {
     expect(validateEdits([], [{ start: 1, content: "hello" }])).toBeNull();
   });
+
+  test("passes for empty file with start=1 and end=1 (#742)", () => {
+    // Agent or framework may include end on first call; validation should
+    // not reject it since applyEdits handles this via splice clamping.
+    expect(validateEdits([], [{ start: 1, end: 1, content: "# Plan\nGoals" }])).toBeNull();
+  });
 });
 
 // ── formatWithLineNumbers ──────────────────────────────────────────────────
@@ -162,14 +175,15 @@ describe("formatWithLineNumbers", () => {
 // ── getPlanBackingPath ─────────────────────────────────────────────────────
 
 describe("getPlanBackingPath", () => {
-  test("returns path inside .opencode/plans within the given directory", () => {
-    const result = getPlanBackingPath("/some/project");
-    expect(result).toBe("/some/project/.opencode/plans/_active-plan.md");
+  test("returns path inside data dir active/{project}/_active-plan.md", () => {
+    const result = getPlanBackingPath("myproject");
+    const dataDir = process.env.PLANNOTATOR_DATA_DIR || path.join(homedir(), ".plannotator");
+    expect(result).toBe(path.join(dataDir, "active", "myproject", "_active-plan.md"));
   });
 
-  test("uses the provided directory as the root", () => {
-    const result = getPlanBackingPath("/home/user/myproject");
-    expect(result).toContain("/home/user/myproject");
+  test("uses the provided project name as the directory segment", () => {
+    const result = getPlanBackingPath("some-project");
+    expect(result).toContain(path.join("active", "some-project"));
     expect(result).toContain("_active-plan.md");
   });
 });

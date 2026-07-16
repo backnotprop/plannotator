@@ -23,7 +23,33 @@ interface UseAutoCloseReturn {
   enableAndStart: () => void;
 }
 
+type GlimpseWindow = Window & {
+  glimpse?: {
+    close?: () => void;
+  };
+};
+
+function requestGlimpseClose(): boolean {
+  const glimpseClose = (window as GlimpseWindow).glimpse?.close;
+  if (typeof glimpseClose === 'function') {
+    glimpseClose();
+    return true;
+  }
+
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({ __plannotator_glimpse_close: true }, '*');
+    return true;
+  }
+
+  return false;
+}
+
 function tryClose(onFail: () => void): void {
+  const requestedNativeClose = requestGlimpseClose();
+  if (requestedNativeClose) {
+    return;
+  }
+
   window.close();
   // window.close() is silently ignored when the tab wasn't opened by script.
   // Check after a short delay whether we're still alive.

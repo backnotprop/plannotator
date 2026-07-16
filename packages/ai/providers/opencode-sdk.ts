@@ -228,7 +228,11 @@ export class OpenCodeProvider implements AIProvider {
 				for (const model of Object.values(provider.models)) {
 					models.push({
 						id: `${provider.id}/${model.id}`,
-						label: model.name ?? model.id,
+						// include the provider name: different providers can expose
+						// models with the same name (e.g. deepseek-v4-pro via
+						// DeepSeek and via OpenRouter), which would otherwise be
+						// indistinguishable in the dropdown
+						label: `${model.name ?? model.id} (${provider.name})`,
 					});
 				}
 			}

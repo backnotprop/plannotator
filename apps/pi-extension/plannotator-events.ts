@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DiffType, VcsSelection } from "./server.js";
+import { getRecentAssistantMessages } from "./assistant-message.js";
 import {
 	getLastAssistantMessageText,
 	getStartupErrorMessage,
@@ -21,6 +22,7 @@ export const PLANNOTATOR_REVIEW_RESULT_CHANNEL = "plannotator:review-result" as 
 export const PLANNOTATOR_TIMEOUT_MS = 5_000;
 
 export type PlannotatorAction =
+	| "plan-mode"
 	| "plan-review"
 	| "review-status"
 	| "code-review"
@@ -53,6 +55,14 @@ export interface PlannotatorRequestBase<A extends PlannotatorAction, P, R> {
 	action: A;
 	payload: P;
 	respond: (response: PlannotatorResponse<R>) => void;
+}
+
+export interface PlannotatorPlanModePayload {
+	mode?: "enter" | "exit" | "toggle" | "status";
+}
+
+export interface PlannotatorPlanModeResult {
+	phase: "idle" | "planning" | "executing";
 }
 
 export interface PlannotatorPlanReviewPayload {
@@ -105,7 +115,7 @@ export interface PlannotatorAnnotatePayload {
 	markdown?: string;
 	mode?: "annotate" | "annotate-folder" | "annotate-last";
 	folderPath?: string;
-	/** Enable review-gate UX (Approve / Annotate / Close), #570 */
+	/** Enable review-gate UX (Approve / Annotate / Close). */
 	gate?: boolean;
 }
 
@@ -113,7 +123,7 @@ export interface PlannotatorAnnotationResult {
 	feedback: string;
 	/** True when the reviewer closed the session without providing feedback. */
 	exit?: boolean;
-	/** True when the reviewer clicked Approve in review-gate mode, #570 */
+	/** True when the reviewer clicked Approve in review-gate mode. */
 	approved?: boolean;
 }
 
@@ -126,6 +136,7 @@ export interface PlannotatorArchiveResult {
 }
 
 export type PlannotatorRequestMap = {
+	"plan-mode": PlannotatorRequestBase<"plan-mode", PlannotatorPlanModePayload, PlannotatorPlanModeResult>;
 	"plan-review": PlannotatorRequestBase<"plan-review", PlannotatorPlanReviewPayload, PlannotatorPlanReviewStartResult>;
 	"review-status": PlannotatorRequestBase<"review-status", PlannotatorReviewStatusPayload, PlannotatorReviewStatusResult>;
 	"code-review": PlannotatorRequestBase<"code-review", PlannotatorCodeReviewPayload, PlannotatorCodeReviewResult>;
@@ -135,6 +146,7 @@ export type PlannotatorRequestMap = {
 };
 export type PlannotatorRequest = PlannotatorRequestMap[PlannotatorAction];
 export type PlannotatorResponseMap = {
+	"plan-mode": PlannotatorResponse<PlannotatorPlanModeResult>;
 	"plan-review": PlannotatorResponse<PlannotatorPlanReviewStartResult>;
 	"review-status": PlannotatorResponse<PlannotatorReviewStatusResult>;
 	"code-review": PlannotatorResponse<PlannotatorCodeReviewResult>;
@@ -144,6 +156,7 @@ export type PlannotatorResponseMap = {
 };
 function isPlannotatorAction(value: unknown): value is PlannotatorAction {
 	return (
+		value === "plan-mode" ||
 		value === "plan-review" ||
 		value === "review-status" ||
 		value === "code-review" ||
@@ -199,7 +212,17 @@ function createActiveSessionContext() {
 	};
 }
 
-export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
+export interface PlannotatorEventListenerOptions {
+	handlePlanMode?: (
+		mode: NonNullable<PlannotatorPlanModePayload["mode"]>,
+		ctx: ExtensionContext,
+	) => Promise<PlannotatorPlanModeResult> | PlannotatorPlanModeResult;
+}
+
+export function registerPlannotatorEventListeners(
+	pi: ExtensionAPI,
+	options: PlannotatorEventListenerOptions = {},
+): void {
 	const activeSessionContext = createActiveSessionContext();
 
 	// Plannotator event requests are handled against the latest active session.
@@ -232,6 +255,20 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 			}
 
 			switch (request.action) {
+				case "plan-mode": {
+					if (!options.handlePlanMode) {
+						request.respond({ status: "unavailable", error: "Plan mode control is not available in this session." });
+						return;
+					}
+					const mode = request.payload?.mode ?? "toggle";
+					if (mode !== "enter" && mode !== "exit" && mode !== "toggle" && mode !== "status") {
+						request.respond({ status: "error", error: "Invalid plan-mode payload.mode." });
+						return;
+					}
+					const result = await options.handlePlanMode(mode, ctx);
+					request.respond({ status: "handled", result });
+					return;
+				}
 				case "plan-review": {
 					const planContent = request.payload?.planContent;
 					if (typeof planContent !== "string" || !planContent.trim()) {
@@ -295,12 +332,15 @@ export function registerPlannotatorEventListeners(pi: ExtensionAPI): void {
 				}
 				case "annotate-last": {
 					const payload = request.payload;
-					const lastText = payload?.markdown?.trim() ? payload.markdown : getLastAssistantMessageText(ctx);
+					const usePayloadText = !!payload?.markdown?.trim();
+					const lastText = usePayloadText ? payload!.markdown! : getLastAssistantMessageText(ctx);
 					if (!lastText) {
 						request.respond({ status: "unavailable", error: "No assistant message found in session." });
 						return;
 					}
-					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate);
+					const recent = usePayloadText ? [] : getRecentAssistantMessages(ctx, 25);
+					const pickerMessages = recent.length > 1 ? recent : undefined;
+					const result = await openLastMessageAnnotation(ctx, lastText, payload?.gate, pickerMessages);
 					request.respond({ status: "handled", result });
 					return;
 				}

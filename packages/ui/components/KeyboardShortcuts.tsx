@@ -56,6 +56,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 /* ─── Platform-aware key names ─── */
 
 const enter = isMac ? '⏎' : '↵';
+const shiftKey = isMac ? '⇧' : 'Shift';
 
 /* ─── Shortcut data ─── */
 
@@ -70,44 +71,80 @@ interface ShortcutSection {
   shortcuts: Shortcut[];
 }
 
+const inputMethodShortcuts: ShortcutSection = {
+  title: 'Input Method',
+  shortcuts: [
+    { keys: [altKey, 'hold'], desc: 'Temporarily switch mode', hint: 'Hold to switch between Select and Pinpoint, release to revert' },
+    { keys: [altKey, altKey], desc: 'Toggle mode', hint: 'Double-tap to permanently switch between Select and Pinpoint' },
+  ],
+};
+
+const annotationShortcuts: ShortcutSection = {
+  title: 'Annotations',
+  shortcuts: [
+    { keys: ['a-z'], desc: 'Start typing comment', hint: 'When the annotation toolbar is open, any letter key opens the comment editor with that character' },
+    { keys: [altKey, '1-0'], desc: 'Apply quick label', hint: 'Instantly applies the Nth preset label (0 = 10th). When the label picker is open, bare digits also work.' },
+    { keys: [modKey, enter], desc: 'Submit comment' },
+    { keys: [modKey, 'C'], desc: 'Copy selected text' },
+    { keys: ['Esc'], desc: 'Close toolbar / Cancel' },
+  ],
+};
+
+const imageAnnotatorShortcuts: ShortcutSection = {
+  title: 'Image Annotator',
+  shortcuts: [
+    { keys: ['1'], desc: 'Pen tool' },
+    { keys: ['2'], desc: 'Arrow tool' },
+    { keys: ['3'], desc: 'Circle tool' },
+    { keys: [modKey, 'Z'], desc: 'Undo' },
+    { keys: [enter], desc: 'Finish' },
+    { keys: ['Esc'], desc: 'Cancel' },
+  ],
+};
+
+const sharedPlanEditorShortcuts: ShortcutSection[] = [
+  inputMethodShortcuts,
+  annotationShortcuts,
+  imageAnnotatorShortcuts,
+];
+
+const planActionShortcuts: ShortcutSection = {
+  title: 'Actions',
+  shortcuts: [
+    { keys: [modKey, enter], desc: 'Submit / Approve' },
+    { keys: [modKey, 'S'], desc: 'Save to notes app' },
+    { keys: [modKey, 'P'], desc: 'Print plan' },
+    { keys: ['Esc'], desc: 'Close dialog' },
+  ],
+};
+
+const annotateActionShortcuts: ShortcutSection = {
+  title: 'Actions',
+  shortcuts: [
+    { keys: [modKey, enter], desc: 'Send annotations' },
+    { keys: [modKey, 'S'], desc: 'Save to notes app' },
+    { keys: [modKey, 'P'], desc: 'Print document' },
+  ],
+};
+
+const annotateSidebarShortcuts: ShortcutSection = {
+  title: 'Sidebar',
+  shortcuts: [
+    { keys: [modKey, 'B'], desc: 'Toggle Contents sidebar' },
+    { keys: [modKey, shiftKey, 'B'], desc: 'Toggle Files sidebar', hint: 'Available when the Files tab is shown.' },
+    { keys: [shiftKey, shiftKey], desc: 'Toggle Agent TUI sidebar', hint: 'Available when the Agent control is shown.' },
+  ],
+};
+
 const planShortcuts: ShortcutSection[] = [
-  {
-    title: 'Actions',
-    shortcuts: [
-      { keys: [modKey, enter], desc: 'Submit / Approve' },
-      { keys: [modKey, 'S'], desc: 'Save to notes app' },
-      { keys: [modKey, 'P'], desc: 'Print plan' },
-      { keys: ['Esc'], desc: 'Close dialog' },
-    ],
-  },
-  {
-    title: 'Input Method',
-    shortcuts: [
-      { keys: [altKey, 'hold'], desc: 'Temporarily switch mode', hint: 'Hold to switch between Select and Pinpoint, release to revert' },
-      { keys: [altKey, altKey], desc: 'Toggle mode', hint: 'Double-tap to permanently switch between Select and Pinpoint' },
-    ],
-  },
-  {
-    title: 'Annotations',
-    shortcuts: [
-      { keys: ['a-z'], desc: 'Start typing comment', hint: 'When the annotation toolbar is open, any letter key opens the comment editor with that character' },
-      { keys: [altKey, '1-0'], desc: 'Apply quick label', hint: 'Instantly applies the Nth preset label (0 = 10th). When the label picker is open, bare digits also work.' },
-      { keys: [modKey, enter], desc: 'Submit comment' },
-      { keys: [modKey, 'C'], desc: 'Copy selected text' },
-      { keys: ['Esc'], desc: 'Close toolbar / Cancel' },
-    ],
-  },
-  {
-    title: 'Image Annotator',
-    shortcuts: [
-      { keys: ['1'], desc: 'Pen tool' },
-      { keys: ['2'], desc: 'Arrow tool' },
-      { keys: ['3'], desc: 'Circle tool' },
-      { keys: [modKey, 'Z'], desc: 'Undo' },
-      { keys: [enter], desc: 'Finish' },
-      { keys: ['Esc'], desc: 'Cancel' },
-    ],
-  },
+  planActionShortcuts,
+  ...sharedPlanEditorShortcuts,
+];
+
+const annotateShortcuts: ShortcutSection[] = [
+  annotateActionShortcuts,
+  annotateSidebarShortcuts,
+  ...sharedPlanEditorShortcuts,
 ];
 
 const reviewShortcuts: ShortcutSection[] = [
@@ -154,8 +191,8 @@ const reviewShortcuts: ShortcutSection[] = [
 
 /* ─── Exported panel ─── */
 
-export const KeyboardShortcuts: React.FC<{ mode: 'plan' | 'review' }> = ({ mode }) => {
-  const sections = mode === 'review' ? reviewShortcuts : planShortcuts;
+export const KeyboardShortcuts: React.FC<{ mode: 'plan' | 'annotate' | 'review' }> = ({ mode }) => {
+  const sections = mode === 'review' ? reviewShortcuts : mode === 'annotate' ? annotateShortcuts : planShortcuts;
 
   return (
     <div className="space-y-4">

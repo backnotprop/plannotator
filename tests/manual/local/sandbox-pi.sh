@@ -82,7 +82,7 @@ if [ "$NO_GIT" = false ]; then
   git config user.name "Test User"
 fi
 
-# Create sample project
+# Create sample project (base files — committed history lives on `main`)
 cat > README.md << 'EOF'
 # Sample Project
 
@@ -95,27 +95,100 @@ This is a sandbox for testing the Plannotator Pi extension.
 - Last message annotation
 EOF
 
+cat > package.json << 'EOF'
+{
+  "name": "sandbox",
+  "version": "1.0.0",
+  "type": "module"
+}
+EOF
+
 mkdir -p src
 cat > src/index.ts << 'EOF'
 export function greet(name: string): string {
   return `Hello, ${name}!`;
 }
 
-// TODO: Add more features
 console.log(greet("World"));
 EOF
 
-# Commit initial files
+cat > src/utils.ts << 'EOF'
+export function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(Math.max(n, lo), hi);
+}
+EOF
+
+cat > src/legacy.ts << 'EOF'
+// Deprecated helper kept only for backwards compatibility.
+export function oldGreet(name: string): string {
+  return "Hi " + name;
+}
+EOF
+
+# Build rich git state so /plannotator-review can exercise every diff mode:
+# uncommitted, staged, unstaged, last-commit, branch, and merge-base.
 if [ "$NO_GIT" = false ]; then
+  # ── main: two commits of history ──
   git add -A
   git commit -q -m "Initial commit"
+  git branch -M main
 
-  # Add uncommitted changes (for /plannotator-review)
-  cat >> src/index.ts << 'EOF'
-
-export function farewell(name: string): string {
-  return `Goodbye, ${name}!`;
+  cat > src/math.ts << 'EOF'
+export function add(a: number, b: number): number {
+  return a + b;
 }
+EOF
+  printf '\n## Status\nActive.\n' >> README.md
+  git add -A
+  git commit -q -m "Add math utilities"
+
+  # ── feature branch: diverges from main (powers branch / merge-base diff) ──
+  git checkout -q -b feature/widgets
+
+  cat > src/widget.ts << 'EOF'
+export interface Widget {
+  id: string;
+  label: string;
+}
+
+export function renderWidget(w: Widget): string {
+  return `[${w.id}] ${w.label}`;
+}
+EOF
+  printf '\nexport const VERSION = "1.0";\n' >> src/index.ts
+  git add -A
+  git commit -q -m "Add widget module"
+
+  # last commit: a rename + a delete + a modify (rich single-commit diff)
+  git mv src/utils.ts src/helpers.ts
+  git rm -q src/legacy.ts
+  printf '\nexport const PI = 3.14159;\n' >> src/math.ts
+  git add -A
+  git commit -q -m "Refactor: rename utils -> helpers, drop legacy, extend math"
+
+  # ── working tree: staged + unstaged + untracked, all at once ──
+  # staged (modify + brand-new file, both git-added)
+  printf '\nexport const WIDGET_LIMIT = 100;\n' >> src/widget.ts
+  cat > src/staged-feature.ts << 'EOF'
+export function staged(): string {
+  return "this change is staged";
+}
+EOF
+  git add src/widget.ts src/staged-feature.ts
+
+  # unstaged (modify tracked files, NOT added)
+  printf '\n// FIXME: handle empty input\n' >> src/index.ts
+  printf '\n## Notes\nWork in progress.\n' >> README.md
+
+  # untracked (new files, never added)
+  cat > src/scratch.ts << 'EOF'
+// Scratch experiment, not yet tracked.
+export const scratch = true;
+EOF
+  cat > notes.md << 'EOF'
+# Scratch notes
+
+Untracked working-tree file.
 EOF
 fi
 
@@ -126,13 +199,20 @@ echo "Directory: $SANDBOX_DIR"
 if [ "$NO_GIT" = true ]; then
   echo "Git: DISABLED"
 else
-  echo "Git: enabled (with uncommitted changes)"
+  echo "Git: branch 'feature/widgets' off 'main' (2 commits each)"
+  echo "     staged:    src/widget.ts (mod), src/staged-feature.ts (new)"
+  echo "     unstaged:  src/index.ts, README.md"
+  echo "     untracked: src/scratch.ts, notes.md"
+  echo "     last commit: rename utils->helpers, delete legacy, modify math"
+  echo "     vs main: widget add + index/math changes (branch / merge-base)"
 fi
 echo ""
 echo "To test:"
 echo "  1. Plan mode: Ask the agent to plan something"
 if [ "$NO_GIT" = false ]; then
   echo "  2. Code review: Run /plannotator-review"
+  echo "     Switch diff mode in the UI to exercise uncommitted / staged /"
+  echo "     unstaged / last-commit / branch / merge-base."
 fi
 echo "  3. Annotate file: Run /plannotator-annotate README.md"
 echo "  4. Annotate last: Run /plannotator-last"

@@ -8,11 +8,18 @@
     "./shortcuts": "./shortcuts.ts"
   },
   "dependencies": {
+    "@fontsource-variable/geist-mono": "5.2.7",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
+    "@plannotator/webtui": "0.1.0",
+    "diff": "^8.0.3",
+    "lucide-react": "^1.14.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "sonner": "^2.0.7",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "tailwindcss-animate": "^1.0.7"
   }
 }

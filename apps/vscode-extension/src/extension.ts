@@ -7,7 +7,9 @@ import { createCookieProxy } from "./cookie-proxy";
 import { PanelManager } from "./panel-manager";
 import { setActiveProxyPort, registerEditorAnnotationCommand } from "./editor-annotations";
 
-const IPC_REGISTRY = path.join(os.homedir(), ".plannotator", "vscode-ipc.json");
+import { getPlannotatorDataDir } from "../../../packages/shared/data-dir";
+
+const IPC_REGISTRY = path.join(getPlannotatorDataDir(), "vscode-ipc.json");
 
 function readIpcRegistry(): Record<string, number> {
   try {

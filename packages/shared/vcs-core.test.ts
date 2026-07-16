@@ -108,6 +108,35 @@ describe("createVcsApi", () => {
     await expect(api.getVcsContext("/repo")).resolves.toMatchObject({ vcsType: "p4" });
   });
 
+  test("detectManagedVcs returns null instead of falling back when no provider detects a workspace", async () => {
+    const git = provider("git", false, ["uncommitted"]);
+    const api = createVcsApi([git]);
+
+    await expect(api.detectManagedVcs("/not-a-repo")).resolves.toBeNull();
+    await expect(api.detectVcs("/not-a-repo")).resolves.toBe(git);
+  });
+
+  test("detectManagedVcs respects forced VCS selection without throwing", async () => {
+    const jj = provider("jj", true, ["jj-current"], {}, "/repo");
+    const git = provider("git", false, ["uncommitted"]);
+    const api = createVcsApi([jj, git]);
+
+    await expect(api.detectManagedVcs("/repo", "git")).resolves.toBeNull();
+    await expect(api.detectManagedVcs("/repo", "jj")).resolves.toBe(jj);
+  });
+
+  test("detectManagedVcs returns null when forced provider detection throws", async () => {
+    const git = {
+      ...provider("git", true, ["uncommitted"]),
+      async detect() {
+        throw new Error("git failed");
+      },
+    };
+    const api = createVcsApi([git]);
+
+    await expect(api.detectManagedVcs("/repo", "git")).resolves.toBeNull();
+  });
+
   test("routes operations by diff type before falling back to detection", async () => {
     const jj = provider("jj", false, ["jj-current"]);
     const git = provider("git", true, ["uncommitted"]);
@@ -130,6 +159,15 @@ describe("createVcsApi", () => {
     await expect(git.canStageFiles("staged", "/repo")).resolves.toBe(false);
     await expect(git.canStageFiles("branch", "/repo")).resolves.toBe(false);
     await expect(git.canStageFiles("merge-base", "/repo")).resolves.toBe(false);
+    // Historical commit diffs have nothing stageable — plain and worktree forms.
+    await expect(git.canStageFiles("commit:abc1234", "/repo")).resolves.toBe(false);
+    await expect(git.canStageFiles("worktree:/repo:commit:abc1234", "/repo")).resolves.toBe(false);
+  });
+
+  test("the git provider owns commit:<sha> diff types", () => {
+    const git = createGitProvider(gitRuntime);
+    expect(git.ownsDiffType("commit:abc1234")).toBe(true);
+    expect(git.ownsDiffType("worktree:/repo:commit:abc1234")).toBe(true);
   });
 
   test("requires providers to explicitly opt into staging", async () => {

@@ -42,19 +42,38 @@ function renderInline(text: string, startKey: number): React.ReactNode[] {
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
-    // Text before match
+    // A `[text](url)` match preceded by `!` is a markdown image `![alt](url)`.
+    const isImage = !!(match[1] && match[2] && match[3]) && text[match.index - 1] === '!';
+
+    // Text before match (drop the trailing '!' that marks an image).
     if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
+      let before = text.slice(lastIndex, match.index);
+      if (isImage && before.endsWith('!')) before = before.slice(0, -1);
+      if (before) nodes.push(before);
     }
 
     const token = match[0];
     if (match[1] && match[2] && match[3]) {
-      // Markdown link: [text](url)
-      nodes.push(
-        <a key={key++} href={match[3]} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-          {match[2]}
-        </a>
-      );
+      if (isImage) {
+        // Markdown image: ![alt](url). Broken sources hide themselves.
+        nodes.push(
+          <img
+            key={key++}
+            src={match[3]}
+            alt={match[2]}
+            loading="lazy"
+            className="max-w-full h-auto rounded my-1"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        );
+      } else {
+        // Markdown link: [text](url)
+        nodes.push(
+          <a key={key++} href={match[3]} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+            {match[2]}
+          </a>
+        );
+      }
     } else if (token.startsWith('`')) {
       nodes.push(<code key={key++} className="inline-code">{token.slice(1, -1)}</code>);
     } else if (token.startsWith('**')) {

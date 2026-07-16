@@ -80,6 +80,7 @@ describe('shortcuts', () => {
 
     expect(annotateSections.map(section => section.title)).toEqual([
       'Actions',
+      'Sidebar',
       'Input Method',
       'Annotations',
       'Image Annotator',
@@ -89,6 +90,7 @@ describe('shortcuts', () => {
     expect(getShortcut(planReviewSettingsShortcutRegistry, 'plan-review-editor-settings', 'submitAnnotations')).toBeUndefined();
     expect(getShortcut(annotateSettingsShortcutRegistry, 'annotate-editor-settings', 'submitAnnotations')?.description).toBe('Send annotations');
     expect(getShortcut(annotateSettingsShortcutRegistry, 'annotate-editor-settings', 'submitPlan')).toBeUndefined();
+    expect(getShortcut(annotateSettingsShortcutRegistry, 'annotate-sidebar', 'toggleContents')?.description).toBe('Toggle Contents sidebar');
 
     expect(reviewSections.map(section => section.title)).toEqual([
       'Actions',

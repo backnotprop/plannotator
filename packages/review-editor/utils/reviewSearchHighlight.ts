@@ -19,7 +19,9 @@ export function getSearchRoots(root: ParentNode): ParentNode[] {
 
   while (current) {
     if (current instanceof HTMLElement && current.shadowRoot) {
-      roots.push(current.shadowRoot);
+      // The recursive call already includes the shadow root itself as its
+      // first entry — pushing it here too would double every root (and
+      // double all clear/apply work over its subtree).
       roots.push(...getSearchRoots(current.shadowRoot));
     }
     current = walker.nextNode() as Element | null;
@@ -27,6 +29,12 @@ export function getSearchRoots(root: ParentNode): ParentNode[] {
 
   return roots;
 }
+
+// Item nodes that currently contain search marks. Lets the idle path (empty
+// query / no matches for the item — i.e. every scroll frame while search is
+// not in use) skip the full shadow-root TreeWalker without risking stale
+// marks: only nodes this module marked can need clearing.
+const markedItemNodes = new WeakSet<HTMLElement>();
 
 export function clearSearchHighlights(root: ParentNode) {
   const marks = root.querySelectorAll('mark[data-review-search-match]');
@@ -155,6 +163,61 @@ export function applySearchHighlights(
   });
 }
 
+/**
+ * CodeView variant of {@link applySearchHighlights}.
+ *
+ * CodeView renders every file's diff into a single light-DOM scroll container,
+ * but each visible item is its own `<diffs-container>` with its own shadow root,
+ * and CodeView recycles those item elements as you scroll (element pool). A
+ * one-shot `<mark>` mutation would therefore disappear when an element is reused,
+ * or stick to a reused row that now shows a different file/line.
+ *
+ * The fix is to (re)apply marks per ITEM, hooked into CodeView's per-item render
+ * cycle (`onPostRender`). `itemNode` is the item's container element handed to
+ * `onPostRender`; `matchesForItem` are the search matches that belong to the
+ * file this item renders (already filtered by the caller via the
+ * filePath -> itemId map). We first clear any stale marks inside this item's
+ * shadow root(s) (defends against recycling: the element may previously have
+ * shown a different file), then apply fresh marks for this item's matches.
+ *
+ * Marks are inline `<mark>` wrappers with zero height delta, so they never alter
+ * the measured row height (which would desync CodeView's itemMetrics).
+ */
+export function applyItemSearchHighlights(
+  itemNode: HTMLElement,
+  query: string,
+  matchesForItem: ReviewSearchMatch[],
+  activeSearchMatchId: string | null,
+): void {
+  const trimmed = query.trim();
+  const idle = !trimmed || matchesForItem.length === 0;
+  // Idle fast path: this runs on EVERY item render (every scroll frame) — when
+  // search is not in use and this node was never marked, there is nothing to
+  // clear, so skip the shadow-root walk entirely.
+  if (idle && !markedItemNodes.has(itemNode)) return;
+
+  const roots = getSearchRoots(itemNode);
+  // Clear first so a node with stale marks (recycled element, query changed)
+  // is reset even when this item now has no matches.
+  for (const root of roots) clearSearchHighlights(root);
+  markedItemNodes.delete(itemNode);
+  if (idle) return;
+
+  for (const root of roots) {
+    applySearchHighlights(root, query, matchesForItem, activeSearchMatchId);
+  }
+  markedItemNodes.add(itemNode);
+}
+
+/** Clear all search marks inside a single CodeView item's element (used when an
+ * item leaves the rendered window so a future reuse starts clean). */
+export function clearItemSearchHighlights(itemNode: HTMLElement): void {
+  if (!markedItemNodes.has(itemNode)) return;
+  const roots = getSearchRoots(itemNode);
+  for (const root of roots) clearSearchHighlights(root);
+  markedItemNodes.delete(itemNode);
+}
+
 export function swapActiveSearchHighlight(
   container: HTMLElement,
   newActiveId: string | null,
@@ -166,7 +229,10 @@ export function swapActiveSearchHighlight(
       decorateSearchMatch(prev, false);
     }
     if (newActiveId) {
-      const next = root.querySelector(`mark[data-review-search-match="${newActiveId}"]`) as HTMLElement | null;
+      // Match ids embed file paths — CSS.escape so a path character that is
+      // special inside an attribute selector can't throw from querySelector
+      // and silently abort the active-match swap.
+      const next = root.querySelector(`mark[data-review-search-match="${CSS.escape(newActiveId)}"]`) as HTMLElement | null;
       if (next) {
         decorateSearchMatch(next, true);
       }
@@ -211,7 +277,7 @@ export function scrollToSearchMatch(
   const lineEl = root.querySelector(getLineSelector(match)) as HTMLElement | null;
   if (!lineEl) return false;
 
-  const mark = root.querySelector(`mark[data-review-search-match="${match.id}"]`) as HTMLElement | null;
+  const mark = root.querySelector(`mark[data-review-search-match="${CSS.escape(match.id)}"]`) as HTMLElement | null;
   scrollSearchTargetIntoContainer(scrollContainer, mark ?? lineEl);
   mark?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   return true;

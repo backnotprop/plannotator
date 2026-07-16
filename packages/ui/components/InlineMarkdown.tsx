@@ -1,12 +1,44 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import hljs from "highlight.js";
-import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/shared/code-file";
+import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { getImageSrc } from "./ImageThumbnail";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
+import { normalizeMathTex, renderMathToHtml } from "./blocks/MathBlock";
+
+export interface DocPreviewResult {
+  contents?: string;
+  filepath?: string;
+}
+export type DocPreviewFetcher = (path: string, base?: string) => Promise<DocPreviewResult | null>;
+
+/**
+ * Default code-file hover-preview fetcher — Plannotator's `/api/doc` behavior, verbatim.
+ */
+const defaultDocPreviewFetcher: DocPreviewFetcher = async (path, base) => {
+  const params = new URLSearchParams({ path });
+  if (base) params.set('base', base);
+  const res = await fetch(`/api/doc?${params}`);
+  return await res.json();
+};
+
+// Module-level fetcher, stable identity. Defaults to Plannotator's `/api/doc`.
+// A host (e.g. Workspaces) calls setDocPreviewFetcher once at startup to load
+// hover previews from its own backend.
+let docPreviewFetcher: DocPreviewFetcher = defaultDocPreviewFetcher;
+
+/** Override how code-file hover previews are fetched. Call once at app startup. */
+export const setDocPreviewFetcher = (fetcher: DocPreviewFetcher): void => {
+  docPreviewFetcher = fetcher;
+};
+
+/** Reset to the default (Plannotator `/api/doc`) fetcher. Mainly for tests. */
+export const resetDocPreviewFetcher = (): void => {
+  docPreviewFetcher = defaultDocPreviewFetcher;
+};
 
 /**
  * Decide how a candidate code-file path should render based on validation state:
@@ -94,7 +126,7 @@ const CodeSnippetPreview: React.FC<{
         <span>{filepath.split('/').pop()}</span>
         <span className="opacity-60">{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>
       </div>
-      <div className="hljs overflow-auto text-[12px] leading-5 min-h-0" style={{ padding: 0, background: 'var(--color-muted, #1e293b)' }}>
+      <div className="hljs code-snippet-preview overflow-auto text-[12px] leading-5 min-h-0" style={{ padding: 0, background: 'var(--code-bg, #1e293b)' }}>
         <table className="border-collapse w-full">
           <tbody>
             {snippet.split('\n').map((_, i) => (
@@ -149,11 +181,8 @@ const CodeFileLink: React.FC<{
     if (hoverPreviewRef.current) return;
     showTimerRef.current = setTimeout(async () => {
       try {
-        const params = new URLSearchParams({ path: candidate });
-        if (baseDir) params.set('base', baseDir);
-        const res = await fetch(`/api/doc?${params}`);
-        const data = await res.json();
-        if (data.contents) setHoverPreview({ contents: data.contents, filepath: data.filepath ?? candidate });
+        const data = await docPreviewFetcher(candidate, baseDir);
+        if (data?.contents) setHoverPreview({ contents: data.contents, filepath: data.filepath ?? candidate });
       } catch {}
     }, 150);
   }, [candidate, hasLineRef, gate.render, cancelHide, baseDir]);
@@ -259,6 +288,32 @@ const CodeFileIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
   </svg>
 );
+
+const InlineMath: React.FC<{ tex: string }> = ({ tex }) => {
+  const normalizedTex = normalizeMathTex(tex);
+  const html = useMemo(() => renderMathToHtml(normalizedTex, false), [normalizedTex]);
+
+  return (
+    <span
+      className="math-inline math-annotatable text-foreground"
+      data-math-tex={normalizedTex}
+      data-math-display="false"
+      aria-label={normalizedTex}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+};
+
+function canRenderSpacedDollarMath(tex: string): boolean {
+  const trimmed = normalizeMathTex(tex);
+  if (!trimmed) return false;
+  if (!/^\s|\s$/.test(tex)) return true;
+  return (
+    /\\[a-zA-Z]+/.test(trimmed) ||
+    /[=^_{}+\-*/<>|]/.test(trimmed) ||
+    /^[a-zA-Z]$/.test(trimmed)
+  );
+}
 
 // Trim trailing sentence punctuation from a bare URL, but keep closing
 // brackets when they balance an opener inside the URL (Wikipedia-style
@@ -381,19 +436,35 @@ function emitPlainTextWithBareUrls(
  * Scanner that walks a text string and emits React nodes for inline markdown:
  * emphasis (**bold**, *italic*, _italic_, ***both***), `code`, ~~strikethrough~~,
  * [label](url) / ![alt](src) / <autolink>, bare https:// URLs, [[wiki-links]],
- * hex color swatches (#fff / #123abc), @mentions, #issue-refs, and backslash
+ * inline math ($...$), hex color swatches (#fff / #123abc), @mentions, #issue-refs, and backslash
  * escapes. Plain-text chunks outside these patterns pass through
  * `transformPlainText` for emoji shortcodes + smart punctuation.
  */
 export const InlineMarkdown: React.FC<{
   text: string;
   onOpenLinkedDoc?: (path: string) => void;
+  /**
+   * SYNCHRONOUS wiki-link resolution (host-backed, e.g. an in-memory cache).
+   * Called with the RAW stored target of a `[[target]]` / `[[target|label]]`
+   * wiki-link — before any path normalization (no `.md` appended), so opaque
+   * ids like `doc_01XYZ` arrive verbatim.
+   *
+   * Absent, or returning null/undefined → exactly today's rendering (stored
+   * label, live link). `label` → displayed instead of the stored label (the
+   * stored label is the fallback, the target the last resort). `status:
+   * 'deleted'` → a muted, non-interactive span (no anchor, no link icon,
+   * `onOpenLinkedDoc` is NOT wired) titled "Document deleted".
+   *
+   * Deliberately sync-only: no async variant, no loading states. Back it
+   * with a cache you keep hydrated.
+   */
+  resolveLinkedDoc?: (target: string) => { label?: string; status?: 'active' | 'deleted' } | null;
   onOpenCodeFile?: (path: string) => void;
   onNavigateAnchor?: (hash: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
-}> = ({ text, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
+}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
   const validation = useCodePathValidation();
   const parts: React.ReactNode[] = [];
   let remaining = text;
@@ -412,13 +483,65 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
-    // Backslash escaping: \. \* \_ \` \[ \~ etc. — emit literal char, hide backslash
-    match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&])/);
+    // Inline math: \( ... \) or $...$ — require non-space content and avoid
+    // display fences.
+    if (remaining.startsWith('\\(')) {
+      let end = -1;
+      for (let i = 2; i < remaining.length - 1; i++) {
+        if (remaining[i] === '\\' && remaining[i + 1] === ')') {
+          if (i > 0 && remaining[i - 1] === '\\') continue;
+          end = i;
+          break;
+        }
+      }
+      if (end > 1) {
+        const tex = remaining.slice(2, end);
+        if (tex.trim()) {
+          parts.push(<InlineMath key={key++} tex={tex} />);
+          remaining = remaining.slice(end + 2);
+          previousChar = ')';
+          continue;
+        }
+      }
+    }
+
+    // Backslash escaping: \. \* \_ \` \[ \~ \$ etc. — emit literal char, hide backslash
+    match = remaining.match(/^\\([\\*_`\[\]~!.()\-#>+|{}&$])/);
     if (match) {
       parts.push(match[1]);
       remaining = remaining.slice(2);
       previousChar = match[1];
       continue;
+    }
+
+    // Inline math: $...$ — require non-space content and avoid $$ display fences.
+    if (remaining.startsWith('$') && previousChar !== '$' && !remaining.startsWith('$$')) {
+      let end = -1;
+      for (let i = 1; i < remaining.length; i++) {
+        if (remaining[i] === '\\') {
+          i++;
+          continue;
+        }
+        if (remaining[i] === '$') {
+          end = i;
+          break;
+        }
+      }
+      if (end > 1) {
+        const tex = remaining.slice(1, end);
+        // Money guard: `$A$B` where a digit immediately follows the closing `$`
+        // is almost always two currency amounts ("$5-$10", "$50,000-$100,000",
+        // "$5/mo and tier B is $10/mo"), not inline math — real inline math never
+        // abuts a digit across the closing delimiter. Leave such text literal.
+        const afterClose = remaining[end + 1];
+        const looksLikeMoney = /^\s*\d/.test(tex) && afterClose !== undefined && /\d/.test(afterClose);
+        if (!looksLikeMoney && canRenderSpacedDollarMath(tex)) {
+          parts.push(<InlineMath key={key++} tex={tex} />);
+          remaining = remaining.slice(end + 1);
+          previousChar = '$';
+          continue;
+        }
+      }
     }
 
     // Bare URL autolink: https://… preceded by word boundary.
@@ -486,6 +609,17 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
+    // Keep custom autolinks literal; their contents should not
+    // recurse into markdown parsing.
+    match = remaining.match(/^<([A-Za-z][A-Za-z0-9.+-]{0,31}:[^\s<>]*)>/);
+    if (match) {
+      const content = match[1];
+      parts.push(<span key={key++}>{`<${content}>`}</span>);
+      remaining = remaining.slice(match[0].length);
+      previousChar = ">";
+      continue;
+    }
+
     // Strikethrough: ~~text~~
     match = remaining.match(/^~~([\s\S]+?)~~/);
     if (match) {
@@ -496,6 +630,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
@@ -518,6 +653,7 @@ export const InlineMarkdown: React.FC<{
               onImageClick={onImageClick}
               text={match[1]}
               onOpenLinkedDoc={onOpenLinkedDoc}
+              resolveLinkedDoc={resolveLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               onNavigateAnchor={onNavigateAnchor}
               githubRepo={githubRepo}
@@ -540,6 +676,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
@@ -561,6 +698,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
@@ -583,6 +721,7 @@ export const InlineMarkdown: React.FC<{
             onImageClick={onImageClick}
             text={match[1]}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
@@ -716,12 +855,28 @@ export const InlineMarkdown: React.FC<{
     match = remaining.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
     if (match) {
       const target = match[1].trim();
-      const display = match[2]?.trim() || target;
-      const targetPath = /\.(mdx?|html?)$/i.test(target)
+      const storedLabel = match[2]?.trim();
+      // Host resolution gets the RAW target (pre-`.md` normalization): host
+      // targets are opaque doc ids, not paths. null → today's rendering.
+      const resolution = resolveLinkedDoc?.(target) ?? null;
+      const display = resolution?.label || storedLabel || target;
+      const targetPath = /\.(mdx?|txt|html?)$/i.test(target)
         ? target
         : `${target}.md`;
 
-      if (onOpenLinkedDoc) {
+      if (resolution?.status === 'deleted') {
+        // Deleted doc: muted NON-link — no anchor, no pointer, no link icon —
+        // even when onOpenLinkedDoc is present.
+        parts.push(
+          <span
+            key={key++}
+            className="text-muted-foreground line-through decoration-muted-foreground/60"
+            title="Document deleted"
+          >
+            {display}
+          </span>,
+        );
+      } else if (onOpenLinkedDoc) {
         parts.push(
           <a
             key={key++}
@@ -833,11 +988,11 @@ export const InlineMarkdown: React.FC<{
         continue;
       }
 
-      // Local doc: .md / .mdx / .html / .htm, optionally with #fragment.
+      // Local doc: .md / .mdx / .txt / .html / .htm, optionally with #fragment.
       // Fragment is stripped before handing to onOpenLinkedDoc (overlay has
       // no anchor-scroll support today).
       const isLocalDoc =
-        /\.(mdx?|html?)(#.*)?$/i.test(linkUrl) &&
+        /\.(mdx?|txt|html?)(#.*)?$/i.test(linkUrl) &&
         !linkUrl.startsWith("http://") &&
         !linkUrl.startsWith("https://");
       const isCodeFile = !isLocalDoc && isCodeFilePath(linkUrl);
@@ -943,6 +1098,7 @@ export const InlineMarkdown: React.FC<{
             key={key++}
             text={before}
             onOpenLinkedDoc={onOpenLinkedDoc}
+            resolveLinkedDoc={resolveLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
@@ -962,7 +1118,7 @@ export const InlineMarkdown: React.FC<{
     // `h` mid-word (e.g. ":heart:", "hello"), and splitting on it breaks
     // multi-char patterns like emoji shortcodes. Bare URLs are instead
     // detected inline via emitPlainTextWithBareUrls() below.
-    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@]/);
+    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@$]/);
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
     emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
     previousChar = plainText[plainText.length - 1] || previousChar;

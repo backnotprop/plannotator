@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import type { ArchivedPlan } from "@plannotator/shared/storage";
+import type { ArchivedPlan } from "@plannotator/core/storage-types";
 
 export type { ArchivedPlan };
 

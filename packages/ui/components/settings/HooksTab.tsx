@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FAVICON_SVG } from '@plannotator/shared/favicon';
+import { FAVICON_SVG } from '@plannotator/core/favicon';
 
 interface HooksStatus {
   pfmReminder: { enabled: boolean };

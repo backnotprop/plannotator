@@ -3,6 +3,8 @@ import type { PRContext, PRCheck } from '@plannotator/shared/pr-types';
 
 interface PRChecksTabProps {
   context: PRContext;
+  /** Drop the standalone outer padding/max-width when embedded inside another padded container. */
+  bare?: boolean;
 }
 
 const DECISION_STYLES: Record<string, { bg: string; text: string; label: string }> = {
@@ -61,7 +63,7 @@ function CheckIcon({ check }: { check: PRCheck }) {
   );
 }
 
-export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context }) => {
+export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false }) => {
   // Group checks by workflow
   const groupedChecks = useMemo(() => {
     const groups = new Map<string, PRCheck[]>();
@@ -94,7 +96,7 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context }) => {
   const mergeableConflict = !isMerged && !isClosed && context.mergeable === 'CONFLICTING';
 
   return (
-    <div className="px-8 py-4 space-y-4 max-w-2xl">
+    <div className={bare ? 'space-y-4' : 'px-8 py-4 space-y-4 max-w-2xl'}>
       {/* Merge readiness */}
       <div className="space-y-2">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

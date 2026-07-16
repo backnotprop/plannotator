@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="44" role="img" aria-label="Beta is ending. Sign up for Workspaces.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#191a33"/>
+      <stop offset="100%" stop-color="#2b2452"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c8c5ea" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#c8c5ea" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="44" rx="22" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="399" height="43" rx="21.5" fill="none" stroke="#6f66b8" stroke-opacity="0.55"/>
+  <rect x="1" y="1" width="398" height="21" rx="21" fill="url(#shine)"/>
+  <text x="20" y="30" font-size="19">&#127880;</text>
+  <text x="218" y="28" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6e4f7">Beta is ending &#183; <tspan fill="#f0a64f">Sign up for Workspaces</tspan> &#8594;</text>
+</svg>

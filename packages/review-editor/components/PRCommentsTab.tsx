@@ -1,9 +1,45 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import type { PRContext, PRComment, PRReview, PRReviewThread } from '@plannotator/shared/pr-types';
-import { MarkdownBody } from './PRSummaryTab';
+import { MarkdownBody } from './MarkdownBody';
 import { CopyButton } from './CopyButton';
 import { DiffHunkPreview } from './DiffHunkPreview';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
+import { getItem, setItem } from '@plannotator/ui/utils/storage';
+import { Popover } from '@base-ui/react/popover';
+import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
+import { useReviewState } from '../dock/ReviewStateContext';
+import { Avatar } from './Avatar';
+
+type AnnotateFn = (commentId: string, author: string, body: string, anchorEl: HTMLElement) => void;
+
+const HIDE_BOTS_KEY = 'plannotator-pr-hide-bots';
+
+/** Small muted "bot" tag shown next to automation-account authors. */
+function BotTag() {
+  return (
+    <span className="shrink-0 text-[9px] uppercase tracking-wide font-semibold px-1 py-px rounded bg-muted text-muted-foreground/70">
+      bot
+    </span>
+  );
+}
+
+/** Labeled on/off switch row for the Filters popover (checked = shown). */
+function FilterSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      className="w-full flex items-center justify-between gap-2 px-1 py-1 group"
+    >
+      <span className="min-w-0 truncate text-xs text-foreground/90 group-hover:text-foreground transition-colors">{label}</span>
+      <span className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-muted-foreground/25'}`}>
+        <span className={`inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+      </span>
+    </button>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,6 +97,18 @@ function getEntryBody(entry: TimelineEntry): string {
   return entry.data.body;
 }
 
+/** True when the entry's author is a bot (threads key off the first comment). */
+function entryIsBot(entry: TimelineEntry): boolean {
+  if (entry.kind === 'thread') return entry.data.comments[0]?.isBot === true;
+  return entry.data.isBot === true;
+}
+
+/** Author avatar URL for the entry (threads key off the first comment). */
+function getEntryAvatar(entry: TimelineEntry): string | undefined {
+  if (entry.kind === 'thread') return entry.data.comments[0]?.avatarUrl;
+  return entry.data.avatarUrl;
+}
+
 function matchesSearch(entry: TimelineEntry, query: string): boolean {
   const q = query.toLowerCase();
   const author = getEntryAuthor(entry).toLowerCase();
@@ -87,9 +135,17 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
   const [sortNewestFirst, setSortNewestFirst] = useState(false);
   const [hideResolved, setHideResolved] = useState(false);
   const [hideOutdated, setHideOutdated] = useState(false);
+  const [hideBots, setHideBots] = useState(() => getItem(HIDE_BOTS_KEY) !== 'false'); // default on
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [excludedAuthors, setExcludedAuthors] = useState<Set<string>>(new Set());
+
+  // Comment annotation: the "Annotate" button on a card opens one comment box.
+  const { onAddCommentAnnotation, onAskAIForComment, commentScrollTarget } = useReviewState();
+  const [annotating, setAnnotating] = useState<{ commentId: string; author: string; body: string; anchorEl: HTMLElement } | null>(null);
+  const handleAnnotate = useCallback<AnnotateFn>((commentId, author, body, anchorEl) => {
+    setAnnotating({ commentId, author, body, anchorEl });
+  }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -109,13 +165,25 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
     return entries;
   }, [context.comments, context.reviews, context.reviewThreads]);
 
-  const uniqueAuthors = useMemo(
-    () => [...new Set(baseTimeline.map((e) => getEntryAuthor(e)).filter(Boolean))].sort(),
+  const hasBots = useMemo(() => baseTimeline.some(entryIsBot), [baseTimeline]);
+
+  // Per-author filtering covers humans only; bots are toggled wholesale via the
+  // "Bot comments" switch, so they don't clutter the author list.
+  const humanAuthors = useMemo(
+    () => [...new Set(
+      baseTimeline
+        .filter((e) => !entryIsBot(e))
+        .map((e) => getEntryAuthor(e))
+        .filter(Boolean),
+    )].sort(),
     [baseTimeline],
   );
 
   const filteredTimeline = useMemo(() => {
     let result = baseTimeline;
+    if (hideBots) {
+      result = result.filter((e) => !entryIsBot(e));
+    }
     if (hideResolved) {
       result = result.filter((e) => e.kind !== 'thread' || !e.data.isResolved);
     }
@@ -129,7 +197,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
       result = result.filter((e) => matchesSearch(e, searchQuery.trim()));
     }
     return result;
-  }, [baseTimeline, searchQuery, excludedAuthors, hideResolved, hideOutdated]);
+  }, [baseTimeline, searchQuery, excludedAuthors, hideResolved, hideOutdated, hideBots]);
 
   const displayTimeline = useMemo(
     () => sortNewestFirst ? [...filteredTimeline].reverse() : filteredTimeline,
@@ -142,6 +210,25 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
     const el = containerRef.current.querySelector(`[data-comment-id="${CSS.escape(selectedId)}"]`);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [selectedId]);
+
+  // --- Reveal a comment from the sidebar (clicking a "PR comment" annotation) ---
+  // Select + un-collapse + scroll. The token bumps per click, so re-selecting the
+  // same comment re-scrolls even though selectedId doesn't change.
+  useEffect(() => {
+    if (!commentScrollTarget) return;
+    const { commentId } = commentScrollTarget;
+    setSelectedId(commentId);
+    setCollapsedIds(prev => {
+      if (!prev.has(commentId)) return prev;
+      const next = new Set(prev);
+      next.delete(commentId);
+      return next;
+    });
+    requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(`[data-comment-id="${CSS.escape(commentId)}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, [commentScrollTarget]);
 
   // --- Keyboard ---
   useEffect(() => {
@@ -184,12 +271,24 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
     }
   }, [searchQuery]);
 
+  const toggleHideBots = useCallback(() => {
+    setHideBots((v) => {
+      const next = !v;
+      setItem(HIDE_BOTS_KEY, String(next));
+      return next;
+    });
+  }, []);
+
   // --- Clear all filters ---
+  // Resets the view transiently; does NOT persist hideBots (only the explicit
+  // toggle changes the saved default), so a one-off "clear" can't permanently
+  // disable bot-hiding for future PRs.
   const clearFilters = useCallback(() => {
     setSearchQuery('');
     setExcludedAuthors(new Set());
     setHideResolved(false);
     setHideOutdated(false);
+    setHideBots(false);
   }, []);
 
   // --- Empty state (no comments at all) ---
@@ -206,14 +305,21 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
     );
   }
 
-  const hasFilters = !!searchQuery.trim() || excludedAuthors.size > 0 || hideResolved || hideOutdated;
+  // hideBots only counts as an active filter when the PR actually has bots —
+  // otherwise the (default-on) bot filter is invisible (its toggle is hidden)
+  // and effect-less, so it shouldn't show in the badge/count.
+  const hasFilters = !!searchQuery.trim() || excludedAuthors.size > 0 || hideResolved || hideOutdated || (hasBots && hideBots);
+  const activeFilterCount =
+    excludedAuthors.size + (hasBots && hideBots ? 1 : 0) + (hideResolved ? 1 : 0) + (hideOutdated ? 1 : 0);
+  const allCollapsed = displayTimeline.length > 0 && displayTimeline.every((e) => collapsedIds.has(e.data.id));
 
   return (
     <div ref={containerRef} className="h-full flex flex-col">
-      {/* ── Toolbar ── */}
-      <div className="flex-shrink-0 bg-background border-b border-border/30 px-8 py-2 space-y-2">
+      {/* ── Toolbar ── search | filters | toggles on one row ── */}
+      <div className="flex-shrink-0 bg-background border-b border-border/30 px-8 py-2">
+        <div className="flex items-center gap-2">
         {/* Search */}
-        <div className="relative">
+        <div className="relative flex-1 min-w-0">
           <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -223,7 +329,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleSearchKeyDown}
             placeholder="Search comments..."
-            className="w-full pl-8 py-1.5 pr-20 bg-muted rounded text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/50"
+            className="w-full h-7 pl-8 pr-20 bg-muted rounded-md text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/50"
           />
           <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
             {searchQuery.trim() && (
@@ -244,65 +350,101 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
           </div>
         </div>
 
-        {/* Controls row */}
-        <div className="flex items-center justify-between gap-2">
-          {/* Author pills — click to exclude, click again to re-include */}
-          <div className="flex items-center gap-1 overflow-x-auto min-w-0">
-            {excludedAuthors.size > 0 && (
-              <button
-                onClick={() => setExcludedAuthors(new Set())}
-                className="text-[10px] px-1.5 py-0.5 rounded text-primary hover:underline whitespace-nowrap"
-              >
-                Show all
-              </button>
-            )}
-            {uniqueAuthors.map((author) => (
-              <AuthorPill
-                key={author}
-                label={author === platformUser ? `${author} (you)` : author}
-                excluded={excludedAuthors.has(author)}
-                onClick={() => {
-                  setExcludedAuthors((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(author)) next.delete(author); else next.add(author);
-                    return next;
-                  });
-                }}
-              />
-            ))}
-          </div>
+          {/* Filters popover — show/hide categories + per-author toggles */}
+          <Popover.Root>
+            <Popover.Trigger
+              render={
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md bg-muted text-muted-foreground hover:text-foreground transition-colors data-popup-open:bg-background data-popup-open:text-foreground data-popup-open:shadow-sm"
+                  title="Filter comments"
+                />
+              }
+            >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h18M6 12h12M10 19h4" />
+                </svg>
+                Filters
+                {activeFilterCount > 0 && (
+                  <span className="ml-0.5 inline-flex items-center justify-center min-w-3.5 h-3.5 px-1 rounded-full bg-primary/20 text-primary text-[9px] font-semibold tabular-nums">
+                    {activeFilterCount}
+                  </span>
+                )}
+                <svg className="w-2.5 h-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Positioner align="start" sideOffset={6} className="z-50">
+                <Popover.Popup className="w-56 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
+                <div className="p-2 space-y-1">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 px-1">Show</div>
+                  {hasBots && (
+                    <FilterSwitch label="Bot comments" checked={!hideBots} onChange={toggleHideBots} />
+                  )}
+                  <FilterSwitch label="Resolved threads" checked={!hideResolved} onChange={() => setHideResolved((v) => !v)} />
+                  <FilterSwitch label="Outdated threads" checked={!hideOutdated} onChange={() => setHideOutdated((v) => !v)} />
 
-          {/* Filter + sort + collapse controls */}
+                  {humanAuthors.length > 0 && (
+                    <>
+                      <div className="border-t border-border/50 my-1" />
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Authors</span>
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setExcludedAuthors(new Set())}
+                            className="text-primary hover:underline"
+                          >
+                            All
+                          </button>
+                          <span className="text-muted-foreground/30">·</span>
+                          <button
+                            type="button"
+                            onClick={() => setExcludedAuthors(new Set(humanAuthors))}
+                            className="text-primary hover:underline"
+                          >
+                            None
+                          </button>
+                        </div>
+                      </div>
+                      <div className="max-h-44 overflow-y-auto pr-0.5">
+                        {humanAuthors.map((author) => (
+                          <FilterSwitch
+                            key={author}
+                            label={author === platformUser ? `${author} (you)` : author}
+                            checked={!excludedAuthors.has(author)}
+                            onChange={() => setExcludedAuthors((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(author)) next.delete(author); else next.add(author);
+                              return next;
+                            })}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+                </Popover.Popup>
+              </Popover.Positioner>
+            </Popover.Portal>
+          </Popover.Root>
+
+          {/* Sort + collapse */}
           <div className="flex items-center gap-1 flex-shrink-0">
             <button
-              onClick={() => setHideResolved((v) => !v)}
-              className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${hideResolved ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
-              title={hideResolved ? 'Show resolved threads' : 'Hide resolved threads'}
-            >
-              Resolved
-            </button>
-            <button
-              onClick={() => setHideOutdated((v) => !v)}
-              className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${hideOutdated ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
-              title={hideOutdated ? 'Show outdated threads' : 'Hide outdated threads'}
-            >
-              Outdated
-            </button>
-            <div className="w-px h-3 bg-border/30 mx-0.5" />
-            <button
               onClick={() => setSortNewestFirst((v) => !v)}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              className="h-7 px-2 inline-flex items-center text-xs rounded-md bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
               {sortNewestFirst ? 'Newest' : 'Oldest'}
             </button>
-            <button onClick={collapseAll} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors" title="Collapse all">
+            <button
+              onClick={() => allCollapsed ? expandAll() : collapseAll()}
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title={allCollapsed ? 'Expand all' : 'Collapse all'}
+            >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 14h16M4 10h16" />
-              </svg>
-            </button>
-            <button onClick={expandAll} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors" title="Expand all">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                <path strokeLinecap="round" strokeLinejoin="round" d={allCollapsed ? 'M4 6h16M4 12h16M4 18h16' : 'M4 14h16M4 10h16'} />
               </svg>
             </button>
           </div>
@@ -310,7 +452,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
       </div>
 
       {/* ── Timeline ── */}
-      <OverlayScrollArea className="flex-1 min-h-0">
+      <OverlayScrollArea className="flex-1 min-h-0 scroll-fade">
       <div className="px-8 py-4">
         <div className="space-y-3 max-w-2xl">
         {displayTimeline.length === 0 ? (
@@ -335,6 +477,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                   isCollapsed={isCollapsed}
                   onSelect={() => setSelectedId(isSelected ? null : id)}
                   onToggleCollapse={() => toggleCollapsed(id)}
+                  onAnnotate={handleAnnotate}
                 />
               );
             }
@@ -350,20 +493,24 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                 key={id}
                 data-comment-id={id}
                 onClick={() => setSelectedId(isSelected ? null : id)}
-                className={`group/card rounded bg-card border p-3 cursor-pointer transition-all duration-150 shadow-[0_1px_3px_rgba(0,0,0,0.06)] ${
+                className={`group/card rounded-lg border bg-card px-3 py-2.5 cursor-pointer transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${
                   isSelected
-                    ? 'border-primary/20 bg-primary/5 ring-1 ring-primary/10'
-                    : 'border-border/40 hover:shadow-[0_2px_6px_rgba(0,0,0,0.08)]'
+                    ? 'border-primary/30 bg-primary/5 ring-1 ring-primary/10'
+                    : 'border-border/40 hover:border-border/70'
                 }`}
               >
                 <div
-                  className="flex items-center justify-between"
+                  className="flex items-center gap-2.5"
                   onClick={(e) => { e.stopPropagation(); toggleCollapsed(id); }}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-xs font-semibold text-foreground truncate">
+                  <Avatar src={getEntryAvatar(entry)} name={entry.data.author} />
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span className="text-[13px] font-semibold text-foreground truncate">
                       {entry.data.author || 'unknown'}
                     </span>
+                    {entry.data.isBot && (
+                      <BotTag />
+                    )}
                     {style && (
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded flex-shrink-0 ${style.bg} ${style.text}`}>
                         {style.label}
@@ -371,7 +518,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
                       {formatRelativeTime(getEntryTime(entry))}
                     </span>
                     <svg className={`w-3 h-3 text-muted-foreground/40 transition-transform duration-150 ${isCollapsed ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -381,15 +528,18 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                 </div>
 
                 {!isCollapsed && entry.data.body && (
-                  <div className="mt-2 text-xs text-foreground/80 leading-relaxed review-comment-markdown">
-                    <MarkdownBody markdown={entry.data.body} />
+                  <div className="mt-2 review-comment-markdown">
+                    <MarkdownBody markdown={entry.data.body} textClassName="text-[13px]" />
                   </div>
                 )}
 
                 {!isCollapsed && (
-                  <CommentActions
+                  <PRCommentLinkActions
                     url={entry.kind === 'comment' ? (entry.data as PRComment).url : (entry.data as PRReview).url}
                     body={entry.data.body}
+                    commentId={id}
+                    author={entry.data.author || 'unknown'}
+                    onAnnotate={handleAnnotate}
                   />
                 )}
               </div>
@@ -399,6 +549,22 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
         </div>
       </div>
       </OverlayScrollArea>
+
+      {annotating && (
+        <CommentPopover
+          anchorEl={annotating.anchorEl}
+          contextText={annotating.body ? annotating.body.slice(0, 80) : `comment by ${annotating.author}`}
+          isGlobal={false}
+          allowImages={false}
+          onSubmit={(text) => {
+            onAddCommentAnnotation(annotating.commentId, annotating.author, annotating.body, text);
+            setAnnotating(null);
+          }}
+          onClose={() => setAnnotating(null)}
+          onAskAI={onAskAIForComment}
+          askAIContext={{ kind: 'selection', label: 'PR comment', text: annotating.body }}
+        />
+      )}
     </div>
   );
 });
@@ -407,12 +573,13 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 // Subcomponents
 // ---------------------------------------------------------------------------
 
-function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse }: {
+function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse, onAnnotate }: {
   thread: PRReviewThread;
   isSelected: boolean;
   isCollapsed: boolean;
   onSelect: () => void;
   onToggleCollapse: () => void;
+  onAnnotate: AnnotateFn;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const first = thread.comments[0];
@@ -427,23 +594,27 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
     <div
       data-comment-id={thread.id}
       onClick={onSelect}
-      className={`group/card rounded border p-3 cursor-pointer transition-all duration-150 ${
-        isDimmed ? 'bg-card/50 shadow-[0_1px_2px_rgba(0,0,0,0.03)]' : 'bg-card shadow-[0_1px_3px_rgba(0,0,0,0.06)]'
+      className={`group/card rounded-lg border px-3 py-2.5 cursor-pointer transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${
+        isDimmed ? 'bg-card/50' : 'bg-card'
       } ${
         isSelected
-          ? 'border-primary/20 bg-primary/5 ring-1 ring-primary/10'
-          : 'border-border/40 hover:shadow-[0_2px_6px_rgba(0,0,0,0.08)]'
+          ? 'border-primary/30 bg-primary/5 ring-1 ring-primary/10'
+          : 'border-border/40 hover:border-border/70'
       }`}
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between"
+        className="flex items-center gap-2.5"
         onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className={`text-xs font-semibold truncate ${thread.isResolved ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+        <Avatar src={first.avatarUrl} name={first.author} />
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <span className={`text-[13px] font-semibold truncate ${thread.isResolved ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
             {first.author || 'unknown'}
           </span>
+          {first.isBot && (
+            <BotTag />
+          )}
           {thread.isOutdated && (
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-warning/15 text-warning flex-shrink-0">
               Outdated
@@ -488,8 +659,8 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           {/* First comment body — truncated with fade for resolved/outdated */}
           {first.body && (
             <div className={`relative mt-2 ${isDimmed && !isExpanded ? 'max-h-16 overflow-hidden' : ''}`}>
-              <div className={`text-xs leading-relaxed review-comment-markdown ${isDimmed && !isExpanded ? 'text-muted-foreground' : 'text-foreground/80'}`}>
-                <MarkdownBody markdown={first.body} />
+              <div className={`leading-relaxed review-comment-markdown ${isDimmed && !isExpanded ? 'text-muted-foreground' : 'text-foreground/85'}`}>
+                <MarkdownBody markdown={first.body} textClassName="text-[13px]" />
               </div>
               {isDimmed && !isExpanded && (
                 <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
@@ -509,15 +680,19 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
 
           {/* Replies — only shown when expanded or not dimmed */}
           {(!isDimmed || isExpanded) && replies.length > 0 && (
-            <div className="mt-2 ml-4 space-y-2 border-l border-border/30 pl-3">
+            <div className="mt-2.5 ml-3 space-y-2.5 border-l border-border/30 pl-3">
               {replies.map((reply) => (
                 <div key={reply.id}>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-semibold text-foreground">{reply.author}</span>
+                    <Avatar src={reply.avatarUrl} name={reply.author} size={16} />
+                    <span className="text-[11px] font-semibold text-foreground">{reply.author}</span>
+                    {reply.isBot && (
+                      <BotTag />
+                    )}
                     <span className="text-[10px] text-muted-foreground">{formatRelativeTime(reply.createdAt)}</span>
                   </div>
-                  <div className="text-xs text-foreground/80 leading-relaxed review-comment-markdown">
-                    <MarkdownBody markdown={reply.body} />
+                  <div className="pl-6 leading-relaxed review-comment-markdown text-foreground/85">
+                    <MarkdownBody markdown={reply.body} textClassName="text-[13px]" />
                   </div>
                 </div>
               ))}
@@ -525,18 +700,42 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           )}
 
           {/* Actions */}
-          <CommentActions url={first.url} body={first.body} />
+          <PRCommentLinkActions
+            url={first.url}
+            body={first.body}
+            commentId={thread.id}
+            author={first.author || 'unknown'}
+            onAnnotate={onAnnotate}
+          />
         </>
       )}
     </div>
   );
 }
 
-function CommentActions({ url, body }: { url?: string; body: string }) {
-  if (!url && !body) return null;
+function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
+  url?: string;
+  body: string;
+  commentId?: string;
+  author?: string;
+  onAnnotate?: AnnotateFn;
+}) {
+  if (!url && !body && !onAnnotate) return null;
 
   return (
     <div className="mt-2 pt-2 border-t border-border/20 flex items-center justify-end gap-1 opacity-0 group-hover/card:opacity-100 transition-opacity duration-100">
+      {onAnnotate && commentId && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onAnnotate(commentId, author || 'unknown', body, e.currentTarget); }}
+          className="mr-auto flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/30 transition-colors"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4v-4z" />
+          </svg>
+          Annotate
+        </button>
+      )}
       {url && (
         <a
           href={url}
@@ -553,21 +752,5 @@ function CommentActions({ url, body }: { url?: string; body: string }) {
       )}
       <CopyButton text={body} variant="inline" label="Copy" />
     </div>
-  );
-}
-
-function AuthorPill({ label, excluded, onClick }: { label: string; excluded: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap transition-colors ${
-        excluded
-          ? 'bg-muted/50 text-muted-foreground/40 line-through'
-          : 'bg-muted text-muted-foreground hover:text-foreground'
-      }`}
-      title={excluded ? `Show ${label}` : `Hide ${label}`}
-    >
-      {label}
-    </button>
   );
 }

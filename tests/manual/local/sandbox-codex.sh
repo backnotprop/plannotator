@@ -50,7 +50,7 @@ echo "Compiling plannotator binary..."
 cd "$PROJECT_ROOT"
 bun run build:hook > /dev/null 2>&1
 bun run build:review > /dev/null 2>&1
-bun build apps/hook/server/index.ts --compile --outfile ~/.local/bin/plannotator 2>&1
+bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --outfile ~/.local/bin/plannotator 2>&1
 echo "Binary compiled to ~/.local/bin/plannotator"
 echo ""
 

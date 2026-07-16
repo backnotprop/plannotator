@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from "react";
-import { isCodeFilePath } from "@plannotator/shared/code-file";
-import { Block } from "../../types";
+import { isCodeFilePath } from "@plannotator/core/code-file";
+import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
 import { getImageSrc } from "../ImageThumbnail";
 
@@ -16,7 +16,7 @@ interface HtmlBlockProps {
 // behave the same as their markdown counterparts:
 // - Relative image paths route through /api/image?path=... so they load from
 //   the plan's directory, not the plannotator server root.
-// - Relative .md / .mdx / .html links open in the linked-doc overlay when
+// - Relative .md / .mdx / .txt / .html links open in the linked-doc overlay when
 //   onOpenLinkedDoc is provided (same as [[wiki-links]] and [label](./x.md)).
 // Absolute http(s) URLs and mailto: are left untouched.
 function rewriteRelativeRefs(
@@ -68,7 +68,7 @@ function rewriteRelativeRefs(
       cleanups.push(() => a.removeEventListener('click', handler));
       return;
     }
-    if (onOpenLinkedDoc && /\.(mdx?|html?)(#.*)?$/i.test(href)) {
+    if (onOpenLinkedDoc && /\.(mdx?|txt|html?)(#.*)?$/i.test(href)) {
       const handler = (e: Event) => {
         e.preventDefault();
         onOpenLinkedDoc(href.replace(/#.*$/, ''));

@@ -1,4 +1,13 @@
-import { toRelativePath } from "./path-utils";
+import {
+  composeReviewPrompt,
+  type ResolvedReviewProfile,
+} from "@plannotator/shared/review-profiles";
+import {
+  transformSeverityFindings,
+  type ReviewSeverity,
+  type ReviewFinding,
+  type ReviewAnnotationInput,
+} from "./review-findings";
 
 /**
  * Claude Code Review Agent — prompt, command builder, and JSONL output parser.
@@ -16,16 +25,10 @@ import { toRelativePath } from "./path-utils";
 // Types
 // ---------------------------------------------------------------------------
 
-export type ClaudeSeverity = "important" | "nit" | "pre_existing";
-
-export interface ClaudeFinding {
-  severity: ClaudeSeverity;
-  file: string;
-  line: number;
-  end_line: number;
-  description: string;
-  reasoning: string;
-}
+// Claude findings ARE review findings — reuse the one shared shape from
+// review-findings.ts rather than keeping a byte-identical copy that can drift.
+export type ClaudeSeverity = ReviewSeverity;
+export type ClaudeFinding = ReviewFinding;
 
 export interface ClaudeReviewOutput {
   findings: ClaudeFinding[];
@@ -49,9 +52,13 @@ export const CLAUDE_REVIEW_SCHEMA_JSON = JSON.stringify({
         type: "object",
         properties: {
           severity: { type: "string", enum: ["important", "nit", "pre_existing"] },
-          file: { type: "string" },
-          line: { type: "integer" },
-          end_line: { type: "integer" },
+          // Nullable, not omitted: keep every property in `required` so the
+          // schema is valid under strict structured-output validators too. A
+          // whole-file finding sets line/end_line null; a general finding also
+          // sets file null.
+          file: { type: ["string", "null"] },
+          line: { type: ["integer", "null"] },
+          end_line: { type: ["integer", "null"] },
           description: { type: "string" },
           reasoning: { type: "string" },
         },
@@ -161,6 +168,10 @@ Step 5: Deduplicate and rank
   - Within each severity, sort by file path and line number
 
 Step 6: Return structured JSON output matching the schema.
+  Place each finding by how specific it is: give file and line for a line-level
+  issue; give file and set line null for a whole-file issue; set file and line
+  null for a general, review-level note. Never invent a line you are unsure of —
+  drop to a file or general placement instead of guessing.
   If no issues are found, return an empty findings array with zeroed summary.
 
 ## Hard constraints
@@ -174,6 +185,23 @@ Step 6: Return structured JSON output matching the schema.
 - Do NOT post any comments to GitHub or GitLab
 - Do NOT use gh pr comment or any commenting tool
 - Your only output is the structured JSON findings`;
+
+// ---------------------------------------------------------------------------
+// Prompt composition
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose Claude's review prompt: the immutable system prompt, the resolved
+ * profile's Custom Review Profile section (omitted for builtin:default), then
+ * the user review message. For builtin:default / no profile the output is
+ * byte-identical to today's `CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage`.
+ */
+export function composeClaudeReviewPrompt(
+  userMessage: string,
+  reviewProfile?: ResolvedReviewProfile,
+): string {
+  return composeReviewPrompt(CLAUDE_REVIEW_PROMPT, reviewProfile, userMessage);
+}
 
 // ---------------------------------------------------------------------------
 // Command builder
@@ -205,7 +233,7 @@ export function buildClaudeCommand(prompt: string, model: string = "claude-opus-
     "Bash(git show:*)", "Bash(git blame:*)", "Bash(git branch:*)",
     "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
     "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
-    "Bash(git show-ref:*)",
+    "Bash(git show-ref:*)", "Bash(git -C:*)",
     // JJ (read-only)
     "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
     "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
@@ -282,34 +310,11 @@ export function transformClaudeFindings(
   findings: ClaudeFinding[],
   source: string,
   cwd?: string,
-): Array<{
-  source: string;
-  filePath: string;
-  lineStart: number;
-  lineEnd: number;
-  type: string;
-  side: string;
-  scope: string;
-  text: string;
-  severity: ClaudeSeverity;
-  reasoning: string;
-  author: string;
-}> {
-  return findings
-    .filter(f => f.file && typeof f.line === "number")
-    .map(f => ({
-      source,
-      filePath: toRelativePath(f.file, cwd),
-      lineStart: f.line,
-      lineEnd: f.end_line ?? f.line,
-      type: "comment",
-      side: "new",
-      scope: "line",
-      text: `[${f.severity}] ${f.description}`,
-      severity: f.severity,
-      reasoning: f.reasoning,
-      author: "Claude Code",
-    }));
+  pathTransform?: (path: string) => string,
+): ReviewAnnotationInput[] {
+  // Routing (line / whole-file / general) is shared with the marker engines in
+  // review-findings.ts — nothing is dropped; only the author differs.
+  return transformSeverityFindings(findings, source, "Claude Code", cwd, pathTransform);
 }
 
 // ---------------------------------------------------------------------------

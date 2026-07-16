@@ -1,5 +1,9 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
 @import "tailwindcss";
 @import "dockview-react/dist/styles/dockview.css";
+
+@plugin "tailwindcss-animate";
 
 /* Tell Tailwind where to scan for classes */
 @source "../ui/components/**/*.tsx";
@@ -7,6 +11,7 @@
 @source "./*.tsx";
 @source "./components/**/*.tsx";
 @source "./dock/**/*.tsx";
+@source "./utils/**/*.tsx";
 
 @import "../ui/theme.css";
 
@@ -18,6 +23,16 @@
    search bar vertically aligned across all three columns. */
 :root {
   --panel-header-h: 33px;
+
+  /* Code-review-only readable-text bump. `text-xs` is the app's small/body
+     tier; Tailwind's default leaves it at 12px, which reads cramped here.
+     This stylesheet ships only in the review bundle, so overriding the token
+     is scoped to code review — the plan/annotate apps are untouched. Only the
+     `text-xs` tier moves; the 10/11px micro-labels (counts, letters, badges,
+     eyebrows) are arbitrary escapes and stay as-is. Rollback = delete these
+     two lines. */
+  --text-xs: 0.8125rem; /* 13px */
+  --text-xs--line-height: calc(1 / 0.75); /* reference xs ratio (≈1.33), unitless — holds at 13px */
 }
 
 /* =====================================================
@@ -32,9 +47,9 @@
   --dv-group-view-background-color: var(--background);
   --dv-tabs-and-actions-container-background-color: var(--muted);
   --dv-activegroup-visiblepanel-tab-background-color: var(--background);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--muted);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-background-color: var(--background);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--muted);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-tab-divider-color: var(--border);
   --dv-activegroup-visiblepanel-tab-color: var(--foreground);
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
@@ -104,6 +119,34 @@
   color: var(--foreground);
 }
 
+/* Chrome-style dock tabs — rounded top corners with the tabs inset slightly
+   into the muted strip. Inactive tabs are transparent (blend into the strip,
+   via the --dv-* vars above); the active tab takes the panel background so it
+   reads as connected to the content below. This rule handles shape + spacing +
+   hover only; the per-state background colors come from the bridge vars. */
+.dv-dockview .dv-tabs-and-actions-container {
+  padding: 5px 6px 0;
+}
+
+.dv-dockview .dv-tab {
+  border-radius: 8px 8px 0 0;
+  margin-right: 2px;
+}
+
+/* The tab strip's `padding: 5px 6px 0` insets the TABS from the top (so their
+   rounded corners connect to the content below). The right-side actions
+   (Split/Unified, options, collapse-all) inherit that asymmetric top padding
+   and end up ~2.5px below the strip's true vertical center. Lift them by half
+   the asymmetry so they center in the full strip. */
+.dv-dockview .dv-right-actions-container {
+  align-items: center;
+  margin-top: -2.5px;
+}
+
+.dv-dockview .dv-tab.dv-inactive-tab:hover {
+  background-color: color-mix(in oklch, var(--foreground) 6%, transparent) !important;
+}
+
 /* @pierre/diffs theme integration — pass plannotator theme colors into shadow DOM */
 diffs-container {
   --diffs-dark-bg: var(--background);
@@ -116,23 +159,41 @@ diffs-container {
 .review-comment {
   position: relative;
   box-sizing: border-box;
-  width: 100%;
-  max-width: 100%;
+  /* Subtract the horizontal margins: box-sizing can't account for margin, so a
+     plain width:100% + side margins would overflow the slot (right edge touches
+     the container). Keep this in sync with the horizontal margin below. */
+  width: calc(100% - 0.5rem);
+  max-width: calc(100% - 0.5rem);
   min-width: 0;
   background: var(--popover);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 0.625rem 0.75rem;
   font-size: 0.8125rem;
-  margin: 0.5rem 0;
+  /* Force the app's sans font — without this the card inherits its surroundings,
+     which inside the diff is MONOSPACE, making inline comment prose hard to read
+     and inconsistent with the sidebar. Code spans opt back into mono explicitly. */
+  font-family: var(--font-sans);
+  margin: 0.5rem 0.25rem;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  /* Soft two-layer shadow (close contact + ambient lift) for a card that reads
+     as elevated above the diff without a heavy border. */
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 10px rgb(0 0 0 / 0.04);
   transition: border-color 150ms, box-shadow 150ms, background 150ms;
 }
 
 .review-comment:hover {
   border-color: var(--muted-foreground);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 6px 16px rgb(0 0 0 / 0.07);
+}
+
+/* Selected state — shared by inline annotations and file-comment cards. A
+   primary-colored border + 1px ring mirrors the sidebar's selected row so the
+   clicked card and its highlighted diff lines read as one selection. */
+.review-comment.is-selected,
+.review-comment.is-selected:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), 0 4px 12px rgb(0 0 0 / 0.06);
 }
 
 .review-comment-header {
@@ -145,42 +206,25 @@ diffs-container {
   color: var(--muted-foreground);
 }
 
-.review-comment-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 0.125rem;
-  opacity: 0;
-  transform: scale(0.95);
-  transition: opacity 100ms, transform 100ms;
-}
-
-.review-comment:hover .review-comment-actions {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.review-comment-action {
-  padding: 0.25rem;
-  border-radius: 4px;
-  color: var(--muted-foreground);
-  transition: color 100ms, background 100ms;
-}
-
-.review-comment-action:hover {
-  color: var(--foreground);
-  background: var(--muted);
-}
-
-.review-comment-action.destructive:hover {
-  color: var(--destructive);
-  background: oklch(from var(--destructive) l c h / 0.1);
-}
-
 .review-comment > .review-comment-body {
   min-width: 0;
   color: var(--foreground);
   line-height: 1.5;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Block markdown in the file-comment banner: cancel the pre-wrap used for the
+   inline-markdown body so rendered paragraphs/lists don't gain blank lines. */
+.review-comment > .review-comment-body.ai-markdown {
+  white-space: normal;
+}
+
+/* Finding reasoning — wrap long unbroken tokens (file:line refs, identifiers) so
+   they don't bleed past the card's right edge, same as the comment body. */
+.review-comment-reasoning {
+  min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -224,58 +268,9 @@ diffs-container {
   background: oklch(from var(--primary) l c h / 0.3) !important;
 }
 
-/* File tree styling */
-.file-tree-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  cursor: pointer;
-  color: var(--muted-foreground);
-}
-
-.file-tree-item:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-
-.file-tree-item.active {
-  background: oklch(from var(--primary) l c h / 0.3);
-  color: var(--primary);
-}
-
+/* Review-specific file tree states; shared base styles live in theme.css. */
 .file-tree-item.scroll-active {
   background: oklch(from var(--foreground) l c h / 0.06);
-}
-
-.file-tree-item.has-annotations {
-  background: oklch(from var(--primary) l c h / 0.08);
-}
-
-.file-tree-item.has-annotations:hover {
-  background: var(--muted);
-}
-
-.file-tree-item.active.has-annotations {
-  background: oklch(from var(--primary) l c h / 0.3);
-}
-
-.file-tree-item .additions {
-  color: var(--success);
-}
-
-.file-tree-item .deletions {
-  color: var(--destructive);
-}
-
-.file-tree-item.active .additions {
-  color: var(--success);
-}
-
-.file-tree-item.active .deletions {
-  color: var(--destructive);
 }
 
 .file-tree-item.staged {
@@ -288,6 +283,258 @@ diffs-container {
 
 .file-tree-item.staged.active {
   background: oklch(from var(--primary) l c h / 0.3);
+}
+
+/* Semantic diff terminal view */
+.semantic-diff-panel {
+  height: 100%;
+  min-width: 0;
+  overflow: auto;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Centered terminal column — capped width, auto margins */
+.semantic-diff-terminal {
+  width: 100%;
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  font-family: var(--diff-font-override, var(--font-mono));
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+}
+
+/* File section — flat, no box; grouping comes from a quiet underlined header */
+.semantic-diff-file {
+  margin: 0 0 1.5rem;
+}
+
+.semantic-diff-file-header {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0 0.5rem 0.375rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 0.7);
+}
+
+.semantic-diff-path {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.semantic-diff-path-dir {
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-path-name {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.semantic-diff-rows {
+  padding: 0;
+}
+
+.semantic-diff-loading,
+.semantic-diff-empty,
+.semantic-diff-error,
+.semantic-diff-summary {
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-error {
+  color: var(--destructive);
+}
+
+/* Entity row — grid-aligned, full-width, rounded hover target */
+.semantic-diff-row {
+  display: grid;
+  grid-template-columns: 2ch 9ch minmax(0, 1fr) max-content;
+  column-gap: 1ch;
+  align-items: baseline;
+  width: 100%;
+  min-height: 1.75rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0.1875rem 0.5rem;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+
+.semantic-diff-retry {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  margin-top: 0.5rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.semantic-diff-row:focus-visible,
+.semantic-diff-retry:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .semantic-diff-row:hover,
+  .semantic-diff-retry:hover {
+    background: oklch(from var(--foreground) l c h / 0.045);
+  }
+}
+
+/* Nudge the add/remove glyphs up slightly so they read at the weight of the
+   modified triangle; line-height pinned so the larger size doesn't grow rows. */
+.semantic-diff-symbol-added,
+.semantic-diff-symbol-deleted {
+  font-size: 1.15em;
+  line-height: 1;
+}
+
+.semantic-diff-symbol-added {
+  color: var(--success);
+}
+
+.semantic-diff-symbol-deleted {
+  color: var(--destructive);
+}
+
+.semantic-diff-symbol-modified,
+.semantic-diff-symbol-renamed,
+.semantic-diff-symbol-moved,
+.semantic-diff-symbol-reordered {
+  color: var(--primary);
+}
+
+.semantic-diff-kind,
+.semantic-diff-status {
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-diff-status {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.semantic-diff-summary {
+  margin-top: 0.5rem;
+  padding: 0 0.5rem;
+}
+
+/* "sem · N" pill in a diff file header. Fixed min-width (and a fixed-width
+   count, below) so 1- vs 2-digit counts — and files with no badge at all,
+   via the ghost — never skew the header button column across files. */
+.semantic-file-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3125rem;
+  height: 1.5rem;
+  min-width: 4.125rem;
+  padding: 0 0.4375rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+/* Disabled "sem 0" badge for files with no semantic changes — same footprint
+   and structure as the live badge so every header looks consistent, but
+   grayed out and inert (no popover, no hover affordance). */
+.semantic-file-badge-disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.semantic-file-badge-disabled .semantic-file-badge-count {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.semantic-file-badge:hover,
+.semantic-file-badge[data-popup-open] {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.semantic-file-badge:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.semantic-file-badge-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.semantic-file-badge-count {
+  min-width: 1.5em;
+  padding: 0.0625rem 0.3125rem;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: oklch(from var(--primary) l c h / 0.14);
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* Hover popover — same terminal rows as the panel, shadcn surface */
+.semantic-diff-popover {
+  width: min(30rem, 90vw);
+  max-height: min(24rem, 70vh);
+  overflow: auto;
+  padding: 0.375rem;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  font-family: var(--diff-font-override, var(--font-mono));
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.semantic-diff-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem 0.375rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.semantic-diff-popover-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
 }
 
 /* =====================================================
@@ -1288,4 +1535,104 @@ diffs-container {
 .code-nav-peek code,
 .code-nav-peek .hljs {
   background: transparent !important;
+}
+
+/* =====================================================
+   Scroll-fade
+   Soft mask fade on the top/bottom edges of a scroll container so
+   content dissolves into the surface instead of hard-cutting at the
+   edge. Applied directly to the scrolling element (OverlayScrollArea
+   renders the scroll node), e.g. the PR Overview panel regions.
+
+   Scroll-aware where supported (top crisp at the start, bottom crisp
+   at the end, both faded mid-scroll); falls back to a static both-edge
+   fade otherwise. The mask is painted on the viewport box, so it stays
+   pinned to the edges while content scrolls underneath.
+   ===================================================== */
+@property --sf-top {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --sf-bottom {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.scroll-fade {
+  --sf-size: min(2.5rem, 12%);
+  /* Fallback (no scroll-driven animations): static fade on both edges. */
+  --sf-top: var(--sf-size);
+  --sf-bottom: var(--sf-size);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--sf-top), #000 calc(100% - var(--sf-bottom)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--sf-top), #000 calc(100% - var(--sf-bottom)), transparent 100%);
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-fade {
+    --sf-top: 0px;
+    --sf-bottom: var(--sf-size);
+    animation: sf-fade-top linear both, sf-fade-bottom linear both;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range: 0 var(--sf-reveal, 96px), calc(100% - var(--sf-reveal, 96px)) 100%;
+  }
+  @keyframes sf-fade-top { to { --sf-top: var(--sf-size); } }
+  @keyframes sf-fade-bottom { to { --sf-bottom: 0px; } }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-fade {
+    animation: none;
+    --sf-top: var(--sf-size);
+    --sf-bottom: var(--sf-size);
+  }
+}
+
+/* =====================================================
+   Compact markdown (PR Overview)
+   The shared BlockRenderer (RenderedMarkdown) is sized for full-page plans —
+   24px headings, 15px body, wide margins. `.md-compact` shrinks it to fit the
+   dense PR panel by overriding those inline utilities via specificity, so no
+   changes to the shared renderer components are needed.
+   ===================================================== */
+.md-compact {
+  font-size: 0.8125rem; /* 13px base */
+  line-height: 1.55;
+}
+.md-compact > :first-child { margin-top: 0; }
+.md-compact h1 { font-size: 0.9375rem; line-height: 1.35; margin: 0.75rem 0 0.375rem; letter-spacing: normal; } /* 15px */
+.md-compact h2 { font-size: 0.875rem;  line-height: 1.35; margin: 0.75rem 0 0.25rem; }  /* 14px */
+.md-compact h3 { font-size: 0.8125rem; line-height: 1.4;  margin: 0.625rem 0 0.25rem; } /* 13px */
+.md-compact h4,
+.md-compact h5,
+.md-compact h6 { font-size: 0.8125rem; line-height: 1.4; margin: 0.5rem 0 0.25rem; }
+.md-compact p  { font-size: 0.8125rem; line-height: 1.6; margin-bottom: 0.5rem; } /* 13px */
+/* list items (and other text-sm prose) render at the plan's 14px — bring them
+   down to the 13px body and give a matching line-height. */
+.md-compact .text-sm { font-size: 0.8125rem; line-height: 1.55; }
+.md-compact hr { margin: 0.875rem 0; }
+.md-compact blockquote { margin: 0.5rem 0; }
+/* Code blocks: the plan-sized CodeBlock keeps text-[13px] + a 20px my-5 margin,
+   so it reads bulky next to the 13px body. Shrink the font below the body and
+   tighten the box. `.my-5` is unique to the code-block wrapper in this renderer. */
+.md-compact .my-5 { margin-top: 0.625rem; margin-bottom: 0.625rem; } /* was 20px */
+.md-compact pre { font-size: 0.75rem; }                              /* 12px, under the body */
+.md-compact pre code.hljs { padding: 0.5rem 0.625rem; }              /* tighter than hljs default */
+
+/* PR description + comment media: cap wide screenshots/videos to the card width
+   (GitHub embeds them at their natural size, e.g. width="1440"), and wrap long
+   unbroken tokens (Vercel bot hashes, long URLs) so content never bleeds past
+   the card edge. */
+.md-compact img,
+.md-compact video,
+.review-comment-markdown img,
+.review-comment-markdown video {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.md-compact,
+.review-comment-markdown {
+  overflow-wrap: anywhere;
 }

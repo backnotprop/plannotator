@@ -6,7 +6,7 @@ export function useDismissOnOutsideAndEscape({
   onDismiss,
 }: {
   enabled: boolean;
-  ref: React.RefObject<HTMLElement>;
+  ref: React.RefObject<HTMLElement | null>;
   onDismiss: () => void;
 }) {
   useEffect(() => {

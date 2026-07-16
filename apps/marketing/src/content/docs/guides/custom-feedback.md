@@ -107,7 +107,7 @@ The resolution order is:
 
 Blank or whitespace-only values are treated as "not set" and fall through to the next level. This means you can clear a runtime override by setting it to `""` without affecting others.
 
-Valid runtime keys: `claude-code`, `opencode`, `copilot-cli`, `pi`, `codex`, `gemini-cli`.
+Valid runtime keys: `claude-code`, `amp`, `droid`, `opencode`, `copilot-cli`, `pi`, `codex`, `gemini-cli`.
 
 ## Full config example
 

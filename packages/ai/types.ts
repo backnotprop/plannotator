@@ -10,72 +10,8 @@
 // Context — what the AI session knows about
 // ---------------------------------------------------------------------------
 
-/** The surface the user is interacting with when they invoke AI. */
-export type AIContextMode = "plan-review" | "code-review" | "annotate";
-
-/**
- * Describes the parent agent session that originally produced the plan or diff.
- * Used to fork conversations with full history.
- */
-export interface ParentSession {
-  /** Session ID from the host agent (e.g. Claude Code session UUID). */
-  sessionId: string;
-  /** Working directory the parent session was running in. */
-  cwd: string;
-}
-
-/**
- * Snapshot of plan-review-specific context.
- * Passed when AIContextMode is "plan-review".
- */
-export interface PlanContext {
-  /** The full plan markdown as submitted by the agent. */
-  plan: string;
-  /** Previous plan version (if this is a resubmission). */
-  previousPlan?: string;
-  /** The version number in the plan's history. */
-  version?: number;
-  /** Annotations the user has made so far (serialised for the prompt). */
-  annotations?: string;
-}
-
-/**
- * Snapshot of code-review-specific context.
- * Passed when AIContextMode is "code-review".
- */
-export interface CodeReviewContext {
-  /** The unified diff patch. */
-  patch: string;
-  /** The specific file being discussed (if scoped). */
-  filePath?: string;
-  /** The line range being discussed (if scoped). */
-  lineRange?: { start: number; end: number; side: "old" | "new" };
-  /** The code snippet being discussed (if scoped). */
-  selectedCode?: string;
-  /** Summary of annotations the user has made. */
-  annotations?: string;
-}
-
-/**
- * Snapshot of annotate-mode context.
- * Passed when AIContextMode is "annotate".
- */
-export interface AnnotateContext {
-  /** The markdown file content being annotated. */
-  content: string;
-  /** Path to the file on disk. */
-  filePath: string;
-  /** Summary of annotations the user has made. */
-  annotations?: string;
-}
-
-/**
- * Union of mode-specific contexts, discriminated by `mode`.
- */
-export type AIContext =
-  | { mode: "plan-review"; plan: PlanContext; parent?: ParentSession }
-  | { mode: "code-review"; review: CodeReviewContext; parent?: ParentSession }
-  | { mode: "annotate"; annotate: AnnotateContext; parent?: ParentSession };
+import type { AIContext, AIContextMode, PlanContext, CodeReviewContext, AnnotateContext, ParentSession } from '@plannotator/core/ai-context';
+export type { AIContext, AIContextMode, PlanContext, CodeReviewContext, AnnotateContext, ParentSession };
 
 // ---------------------------------------------------------------------------
 // Messages — what streams back from the AI
@@ -185,6 +121,13 @@ export interface AISession {
   respondToPermission?(requestId: string, allow: boolean, message?: string): void;
 
   /**
+   * Release any long-lived resources held by this session (e.g. a spawned
+   * subprocess). Called by the SessionManager when a session is evicted or
+   * removed. Optional — providers without persistent resources omit it.
+   */
+  dispose?(): void;
+
+  /**
    * Callback invoked when the real session ID is resolved from the provider.
    * Set by the SessionManager to remap its internal tracking key.
    */
@@ -254,7 +197,15 @@ export interface AIProvider {
   readonly capabilities: AIProviderCapabilities;
 
   /** Available models for this provider. */
-  readonly models?: ReadonlyArray<{ id: string; label: string; default?: boolean }>;
+  readonly models?: ReadonlyArray<{
+    id: string;
+    label: string;
+    default?: boolean;
+    /** Reasoning-effort options this model supports (provider-reported). */
+    reasoningEfforts?: ReadonlyArray<{ id: string; label: string }>;
+    /** The model's default reasoning effort. */
+    defaultReasoningEffort?: string;
+  }>;
 
   /**
    * Create a fresh session (no parent history).

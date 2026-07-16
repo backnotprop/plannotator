@@ -6,7 +6,7 @@
  */
 
 import { useState, useRef, useMemo, useCallback } from "react";
-import type { ArchivedPlan } from "@plannotator/shared/storage";
+import type { ArchivedPlan } from "@plannotator/core/storage-types";
 import type { UseLinkedDocReturn } from "./useLinkedDoc";
 import type { ViewerHandle } from "../components/Viewer";
 import type { Annotation } from "../types";

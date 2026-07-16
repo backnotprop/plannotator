@@ -9,39 +9,77 @@
 
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 
+export interface StorageBackend {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
 /**
- * Get a value from cookie storage
+ * Default backend: cookies.
+ * Used instead of localStorage so settings persist across the random ports each
+ * hook invocation uses (cookies are scoped by domain, not port).
+ */
+const cookieBackend: StorageBackend = {
+  getItem(key) {
+    try {
+      const match = document.cookie.match(new RegExp(`(?:^|; )${escapeRegex(key)}=([^;]*)`));
+      return match ? decodeURIComponent(match[1]) : null;
+    } catch (e) {
+      return null;
+    }
+  },
+  setItem(key, value) {
+    try {
+      const encoded = encodeURIComponent(value);
+      document.cookie = `${key}=${encoded}; path=/; max-age=${ONE_YEAR_SECONDS}; SameSite=Lax`;
+    } catch (e) {
+      // Cookie not available
+    }
+  },
+  removeItem(key) {
+    try {
+      document.cookie = `${key}=; path=/; max-age=0`;
+    } catch (e) {
+      // Cookie not available
+    }
+  },
+};
+
+// Active backend. Defaults to cookies so Plannotator is unchanged. A host
+// (e.g. Workspaces) calls setStorageBackend once at startup to persist settings
+// through its own storage instead.
+let backend: StorageBackend = cookieBackend;
+
+/** Override the storage backend. Call once at app startup. */
+export function setStorageBackend(b: StorageBackend): void {
+  backend = b;
+}
+
+/** Reset to the default (cookie) backend. Mainly for tests. */
+export function resetStorageBackend(): void {
+  backend = cookieBackend;
+}
+
+/**
+ * Get a value from storage (default = cookies)
  */
 export function getItem(key: string): string | null {
-  try {
-    const match = document.cookie.match(new RegExp(`(?:^|; )${escapeRegex(key)}=([^;]*)`));
-    return match ? decodeURIComponent(match[1]) : null;
-  } catch (e) {
-    return null;
-  }
+  return backend.getItem(key);
 }
 
 /**
- * Set a value in cookie storage
+ * Set a value in storage (default = cookies)
  */
 export function setItem(key: string, value: string): void {
-  try {
-    const encoded = encodeURIComponent(value);
-    document.cookie = `${key}=${encoded}; path=/; max-age=${ONE_YEAR_SECONDS}; SameSite=Lax`;
-  } catch (e) {
-    // Cookie not available
-  }
+  backend.setItem(key, value);
 }
 
 /**
- * Remove a value from cookie storage
+ * Remove a value from storage (default = cookies)
  */
 export function removeItem(key: string): void {
-  try {
-    document.cookie = `${key}=; path=/; max-age=0`;
-  } catch (e) {
-    // Cookie not available
-  }
+  backend.removeItem(key);
 }
 
 /**
@@ -76,6 +114,21 @@ export function getAutoCloseDelay(): AutoCloseDelay {
 
 export function setAutoCloseDelay(delay: AutoCloseDelay): void {
   setItem(AUTO_CLOSE_KEY, delay);
+}
+
+/**
+ * Last-used "Open in app" target.
+ * Stores the app id from the OPEN_IN_APPS catalog (packages/shared/open-in-apps.ts).
+ * Defaults to 'reveal' (the file manager) when unset.
+ */
+const OPEN_IN_APP_KEY = 'plannotator-open-in-app';
+
+export function getLastOpenInApp(): string {
+  return getItem(OPEN_IN_APP_KEY) ?? 'reveal';
+}
+
+export function setLastOpenInApp(id: string): void {
+  setItem(OPEN_IN_APP_KEY, id);
 }
 
 /**

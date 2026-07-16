@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from '@plannotator/review-editor';
+import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
 import '@plannotator/review-editor/styles';
 
 const rootElement = document.getElementById('root');
@@ -11,6 +12,11 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    {/* Worker-pool syntax highlighting — tokenization off the main thread
+        (diffshub parity). Pierre's CodeView/FileDiff pick the pool up from
+        context automatically. */}
+    <ReviewWorkerPoolProvider>
+      <App />
+    </ReviewWorkerPoolProvider>
   </React.StrictMode>
 );

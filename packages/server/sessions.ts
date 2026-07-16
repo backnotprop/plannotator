@@ -5,7 +5,6 @@
  * so users can discover and reopen closed browser tabs.
  */
 
-import { homedir } from "os";
 import { join } from "path";
 import {
   mkdirSync,
@@ -15,6 +14,7 @@ import {
   unlinkSync,
   existsSync,
 } from "fs";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 export interface SessionInfo {
   pid: number;
@@ -27,7 +27,7 @@ export interface SessionInfo {
 }
 
 function getSessionsDir(): string {
-  const dir = join(homedir(), ".plannotator", "sessions");
+  const dir = join(getPlannotatorDataDir(), "sessions");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -49,21 +49,27 @@ function isAlive(pid: number): boolean {
 }
 
 /**
- * Register the current server session.
+ * Register the current server session. Best-effort: the registry only powers
+ * `plannotator sessions` discovery, so an unwritable data dir (read-only
+ * mount, disk full) must never take the server down with it.
  */
 export function registerSession(info: SessionInfo): void {
-  writeFileSync(sessionPath(info.pid), JSON.stringify(info, null, 2), "utf-8");
+  try {
+    writeFileSync(sessionPath(info.pid), JSON.stringify(info, null, 2), "utf-8");
+  } catch {
+    // Session discovery is unavailable; the session itself is unaffected.
+  }
 }
 
 /**
  * Unregister the current process's session. No-op if not found.
  */
 export function unregisterSession(pid: number = process.pid): void {
-  const filePath = sessionPath(pid);
   try {
+    const filePath = sessionPath(pid);
     if (existsSync(filePath)) unlinkSync(filePath);
   } catch {
-    // Ignore delete failures
+    // Ignore delete failures (including an unwritable sessions dir).
   }
 }
 
@@ -71,11 +77,12 @@ export function unregisterSession(pid: number = process.pid): void {
  * List all active sessions. Automatically removes stale entries.
  */
 export function listSessions(): SessionInfo[] {
-  const dir = getSessionsDir();
   const active: SessionInfo[] = [];
 
   let entries: string[];
+  let dir: string;
   try {
+    dir = getSessionsDir();
     entries = readdirSync(dir);
   } catch {
     return [];

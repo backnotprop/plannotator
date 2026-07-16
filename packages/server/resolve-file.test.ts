@@ -283,6 +283,15 @@ describe("resolveMarkdownFile", () => {
     });
   });
 
+  test("accepts .txt files as plain-text annotate documents", async () => {
+    const root = createTempProject({ "notes.txt": "plain text\n" });
+    const result = resolveMarkdownFile("notes.txt", root);
+    expect(result).toEqual({
+      kind: "found",
+      path: resolve(root, "notes.txt"),
+    });
+  });
+
   // Edge cases
 
   test("returns not_found for nonexistent file", async () => {

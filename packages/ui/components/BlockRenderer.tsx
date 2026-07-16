@@ -1,12 +1,13 @@
 import React from "react";
-import { Block } from "../types";
+import type { Block } from "../types";
 import { InlineMarkdown } from "./InlineMarkdown";
-import { ListMarker } from "./ListMarker";
+import { ListItemBody } from "./ListItemBody";
 import { CodeBlock } from "./blocks/CodeBlock";
 import { HtmlBlock } from "./blocks/HtmlBlock";
 import { Callout } from "./blocks/Callout";
 import { AlertBlock } from "./blocks/AlertBlock";
 import { TableBlock } from "./blocks/TableBlock";
+import { MathBlock } from "./blocks/MathBlock";
 
 export const BlockRenderer: React.FC<{
   block: Block;
@@ -82,7 +83,6 @@ export const BlockRenderer: React.FC<{
         : block.checked;
       const isInteractive = isCheckbox && !!onToggleCheckbox;
       const textClass = `text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`;
-      const paragraphs = block.content.split(/\n\n+/);
       const inlineProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, onNavigateAnchor };
       return (
         <div
@@ -90,27 +90,17 @@ export const BlockRenderer: React.FC<{
           data-block-id={block.id}
           style={{ marginLeft: `${indent}rem` }}
         >
-          <ListMarker
+          <ListItemBody
             level={block.level || 0}
             ordered={block.ordered}
             orderedIndex={orderedIndex}
             checked={isChecked}
             interactive={isInteractive}
             onToggle={isInteractive ? () => onToggleCheckbox!(block.id, !isChecked) : undefined}
+            textClassName={textClass}
+            content={block.content}
+            renderInline={(text) => <InlineMarkdown {...inlineProps} text={text} />}
           />
-          {paragraphs.length === 1 ? (
-            <span className={textClass}>
-              <InlineMarkdown {...inlineProps} text={block.content} />
-            </span>
-          ) : (
-            <div className={textClass}>
-              {paragraphs.map((para, i) => (
-                <p key={i} className={i > 0 ? 'mt-3' : ''}>
-                  <InlineMarkdown {...inlineProps} text={para} />
-                </p>
-              ))}
-            </div>
-          )}
         </div>
       );
     }
@@ -130,6 +120,9 @@ export const BlockRenderer: React.FC<{
           onNavigateAnchor={onNavigateAnchor}
         />
       );
+
+    case 'math':
+      return <MathBlock block={block} />;
 
     case 'hr':
       return <hr className="border-border/30 my-8" data-block-id={block.id} />;

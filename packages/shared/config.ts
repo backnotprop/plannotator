@@ -5,28 +5,13 @@
  * Runtime-agnostic: uses only node:fs, node:os, node:child_process.
  */
 
-import { homedir } from "os";
 import { join } from "path";
+import { getPlannotatorDataDir } from "./data-dir";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
-export type DefaultDiffType = 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
-export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
-
-export interface DiffOptions {
-  diffStyle?: 'split' | 'unified';
-  overflow?: 'scroll' | 'wrap';
-  diffIndicators?: 'bars' | 'classic' | 'none';
-  lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
-  showLineNumbers?: boolean;
-  showDiffBackground?: boolean;
-  fontFamily?: string;
-  fontSize?: string;
-  tabSize?: number;
-  hideWhitespace?: boolean;
-  defaultDiffType?: DefaultDiffType;
-  lineBgIntensity?: DiffLineBgIntensity;
-}
+import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions } from '@plannotator/core/config-types';
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -39,6 +24,9 @@ export type PromptSectionOverrides = Record<string, string | undefined>;
 
 export type PromptRuntime =
   | "claude-code"
+  | "amp"
+  | "droid"
+  | "kiro-cli"
   | "opencode"
   | "copilot-cli"
   | "pi"
@@ -118,15 +106,37 @@ export interface PlannotatorConfig {
    */
   jina?: boolean;
   /**
+   * Save per-file version history when annotating local files. Powers the
+   * annotate version diff ("what changed since I last looked"). NOTE: this
+   * writes a copy of each annotated file's content under
+   * ~/.plannotator/history/ (or PLANNOTATOR_DATA_DIR). Set to false to keep
+   * annotate sessions fully stateless. Default: true.
+   */
+  annotateHistory?: boolean;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
    * Read by the `improve-context` PreToolUse handler. Default: false.
    */
   pfmReminder?: boolean;
+  /**
+   * Open Plannotator in a Glimpse native window when available.
+   * When true (default), the server spawns `glimpseui` if it is on PATH,
+   * no explicit browser is configured, and the session is local.
+   * Set to false to always use the system browser even when Glimpse is installed.
+   */
+  glimpse?: boolean;
+  /**
+   * Control URL sharing (Share tab, copy link, short URLs, import review).
+   * Defaults to enabled. Set to "disabled" to hide all sharing UI — useful
+   * for teams working with sensitive plans. Mirrors the PLANNOTATOR_SHARE
+   * env var value, which takes precedence over this setting.
+   */
+  share?: "enabled" | "disabled";
 }
 
-const CONFIG_DIR = join(homedir(), ".plannotator");
+const CONFIG_DIR = getPlannotatorDataDir();
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 /**
@@ -204,12 +214,29 @@ export function getServerConfig(gitUser: string | null): {
 }
 
 /**
- * Read the user's preferred default diff type from config, falling back to 'unstaged'.
+ * Read the user's preferred default diff type from config, falling back to
+ * 'since-base' (the composite "what would GitHub show" view). Users with an
+ * explicit defaultDiffType keep their choice.
  */
 export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType {
   const v = cfg?.diffOptions?.defaultDiffType as string | undefined;
   if (v === 'branch') return 'merge-base';
-  return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'unstaged';
+  return v === 'since-base' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'since-base';
+}
+
+/**
+ * Resolve whether to use Glimpse native window.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_GLIMPSE env var  →  config.glimpse  →  default true
+ */
+export function resolveUseGlimpse(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_GLIMPSE;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  if (config.glimpse !== undefined) return config.glimpse;
+  return true;
 }
 
 /**
@@ -218,6 +245,21 @@ export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType
  * Priority (highest wins):
  *   --no-jina CLI flag  →  PLANNOTATOR_JINA env var  →  config.jina  →  default true
  */
+/**
+ * Resolve whether annotate mode saves per-file version history.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_ANNOTATE_HISTORY env var  →  config.annotateHistory  →  default true
+ */
+export function resolveAnnotateHistory(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  if (config.annotateHistory !== undefined) return config.annotateHistory;
+  return true;
+}
+
 export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {
   // CLI flag has highest priority
   if (cliNoJina) return false;
@@ -232,5 +274,18 @@ export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): b
   if (config.jina !== undefined) return config.jina;
 
   // Default: enabled
+  return true;
+}
+
+/**
+ * Resolve whether URL sharing is enabled.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_SHARE env var  →  config.share  →  default true
+ */
+export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_SHARE;
+  if (envVal !== undefined) return envVal !== "disabled";
+  if (config.share !== undefined) return config.share !== "disabled";
   return true;
 }

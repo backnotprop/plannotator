@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { extractCandidateCodePaths } from "@plannotator/shared/extract-code-paths";
+import { extractCandidateCodePaths } from "@plannotator/core/extract-code-paths";
 
 export type ValidationEntry =
 	| { status: "found"; resolved: string }
@@ -29,6 +29,7 @@ export type ValidatedMap = Map<string, ValidationEntry>;
 export function useValidatedCodePaths(
 	markdown: string,
 	baseDir?: string,
+	disabled?: boolean,
 ): { validated: ValidatedMap; ready: boolean } {
 	const [validated, setValidated] = useState<ValidatedMap>(new Map());
 	const [ready, setReady] = useState<boolean>(false);
@@ -36,6 +37,14 @@ export function useValidatedCodePaths(
 	useEffect(() => {
 		setValidated(new Map());
 		setReady(false);
+
+		// Host opt-out (e.g. a backend with no /api/doc/exists). Default undefined
+		// for Plannotator => unchanged. When disabled we never probe and leave
+		// ready=false, so gateCodePath's no-validation fallback renders code links
+		// optimistically (clickable) instead of demoting them to plain text.
+		if (disabled) {
+			return;
+		}
 
 		const candidates = extractCandidateCodePaths(markdown);
 		if (candidates.length === 0) {
@@ -76,7 +85,7 @@ export function useValidatedCodePaths(
 		return () => {
 			cancelled = true;
 		};
-	}, [markdown, baseDir]);
+	}, [markdown, baseDir, disabled]);
 
 	// Stable reference: only changes when validated/ready actually change.
 	// Without memoization, the parent provider's value is a fresh object every

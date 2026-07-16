@@ -7,10 +7,10 @@
  */
 
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
+import { findCodexRolloutByThreadId, getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
 
 // --- Fixture Helpers ---
 
@@ -160,6 +160,28 @@ afterEach(() => {
 });
 
 // --- Tests ---
+
+describe("findCodexRolloutByThreadId", () => {
+  test("respects CODEX_HOME for session discovery (#852)", () => {
+    const home = mkdtempSync(join(tmpdir(), "plannotator-codex-home-"));
+    tempFiles.push(home);
+    const threadId = "0196f8a2-aaaa-bbbb-cccc-1234567890ab";
+    const dayDir = join(home, "sessions", "2026", "06", "04");
+    mkdirSync(dayDir, { recursive: true });
+    const rollout = join(dayDir, `rollout-2026-06-04T10-00-00-${threadId}.jsonl`);
+    writeFileSync(rollout, buildRollout(sessionMeta(), assistantMessage("hi")));
+
+    const prev = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    try {
+      expect(findCodexRolloutByThreadId(threadId)).toBe(rollout);
+      expect(findCodexRolloutByThreadId("no-such-thread")).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = prev;
+    }
+  });
+});
 
 describe("getLastCodexMessage", () => {
   test("finds last assistant message", () => {

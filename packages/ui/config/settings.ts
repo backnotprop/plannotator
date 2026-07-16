@@ -9,7 +9,7 @@
  * Add new settings here. Cookie-only settings omit serverKey.
  */
 
-import type { DiffLineBgIntensity } from '@plannotator/shared/config';
+import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 
@@ -39,21 +39,52 @@ export const SETTINGS = {
     toServer: (v: string) => ({ displayName: v }),
   },
 
+  gridEnabled: {
+    // Default ON: plans open in the classic grid / floating-card look. The UI 2.0
+    // flat look is offered as an opt-in via the look-and-feel chooser dialog.
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-grid-enabled');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-grid-enabled', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   // --- Diff display options (namespaced under diffOptions in config.json) ---
 
+  // Which left-panel view a code review OPENS in. 'sections' = the git-status
+  // view (Committed/Changes/Untracked); 'tree' = the classic file tree.
+  // Cookie-only. Written ONLY by Settings and the first-run setup dialog —
+  // the in-review header toggle is session-scoped and never writes this
+  // (looking at another view mid-review must not silently change the default).
+  //
+  // Deliberately NOT a value here: 'commits'. The Commits view is session-only
+  // and never the opening view — a review always opens on files. A
+  // previously-persisted 'commits' cookie is treated as unset.
+  reviewPanelView: {
+    defaultValue: 'sections' as 'sections' | 'tree',
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-review-panel-view');
+      return v === 'tree' || v === 'sections' ? v : undefined;
+    },
+    toCookie: (v: string) => storage.setItem('plannotator-review-panel-view', v),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   defaultDiffType: {
-    defaultValue: 'unstaged' as 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all',
+    defaultValue: 'since-base' as 'since-base' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all',
     fromCookie: () => {
       const v = storage.getItem('plannotator-default-diff-type');
       if (v === 'branch') return 'merge-base' as const;
-      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
+      return v === 'since-base' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toCookie: (v: string) => storage.setItem('plannotator-default-diff-type', v),
     serverKey: 'diffOptions',
     fromServer: (sc: Record<string, unknown>) => {
       const v = (sc.diffOptions as Record<string, unknown> | undefined)?.defaultDiffType;
       if (v === 'branch') return 'merge-base' as const;
-      return v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
+      return v === 'since-base' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toServer: (v: string) => ({ diffOptions: { defaultDiffType: v } }),
   },
@@ -175,6 +206,21 @@ export const SETTINGS = {
     toServer: (v: boolean) => ({ diffOptions: { hideWhitespace: v } }),
   },
 
+  diffExpandUnchanged: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-expand-unchanged');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-expand-unchanged', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.expandUnchanged;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { expandUnchanged: v } }),
+  },
+
   diffFontSize: {
     defaultValue: '' as string, // empty = theme default
     fromCookie: () => storage.getItem('plannotator-diff-font-size') || undefined,
@@ -255,7 +301,10 @@ export const SETTINGS = {
       }
     },
   },
-} satisfies Record<string, SettingDef<unknown>>;
+  /* SettingDef<any>, not <unknown>: consumers compile this shipped source under
+     their own strictFunctionTypes, where a narrow `toCookie: (v: string) => void`
+     is contravariantly incompatible with `(value: unknown) => void`. */
+} satisfies Record<string, SettingDef<any>>;
 
 export type SettingsMap = typeof SETTINGS;
 export type SettingName = keyof SettingsMap;

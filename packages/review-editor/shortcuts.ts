@@ -74,6 +74,13 @@ export const reviewEditorShortcuts = defineShortcutScope({
       hint: 'Available in dev builds only.',
       displayOrder: 30,
     },
+    toggleGuide: {
+      description: 'Toggle guided review',
+      bindings: ['Mod+Shift+G'],
+      section: 'Layout',
+      hint: 'Opens or closes the guided review screen takeover.',
+      displayOrder: 40,
+    },
     toggleViewed: {
       description: 'Toggle file viewed',
       bindings: ['V'],

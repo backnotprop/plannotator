@@ -2,105 +2,7 @@ import React, { useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { TourStop, TourDiffAnchor } from '../../hooks/tour/useTourData';
 import { DiffHunkPreview } from '../DiffHunkPreview';
-import { renderInlineMarkdown } from '../../utils/renderInlineMarkdown';
-
-function renderDetail(text: string): React.ReactNode[] {
-  if (!text) return [];
-  const nodes: React.ReactNode[] = [];
-  const lines = text.split('\n');
-  let i = 0;
-  let key = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (!line.trim()) {
-      i++;
-      continue;
-    }
-
-    // Callout block: > [!IMPORTANT] / > [!NOTE] / > [!WARNING]
-    if (line.match(/^>\s*\[!(IMPORTANT|NOTE|WARNING)\]/i)) {
-      const type = line.match(/WARNING/i) ? 'warning' : line.match(/IMPORTANT/i) ? 'important' : 'note';
-      const calloutLines: string[] = [];
-      let j = i + 1;
-      while (j < lines.length && lines[j].startsWith('>')) {
-        calloutLines.push(lines[j].replace(/^>\s?/, ''));
-        j++;
-      }
-      const calloutStyles = {
-        important: 'bg-primary/[0.05] dark:bg-primary/[0.12] text-foreground',
-        warning: 'bg-warning/[0.05] dark:bg-warning/[0.12] text-foreground',
-        note: 'bg-muted/20 dark:bg-muted/40 text-foreground',
-      };
-      const calloutLabel = { important: 'Important', warning: 'Warning', note: 'Note' };
-      nodes.push(
-        <div key={key++} className={`my-2 px-3 py-2 rounded text-[12px] ${calloutStyles[type]}`}>
-          <span className="font-semibold text-[10px] uppercase tracking-wider block mb-0.5 opacity-70">
-            {calloutLabel[type]}
-          </span>
-          <span className="leading-relaxed">{renderInlineMarkdown(calloutLines.join(' '))}</span>
-        </div>
-      );
-      i = j;
-      continue;
-    }
-
-    // Heading h3
-    if (line.startsWith('### ')) {
-      nodes.push(
-        <h3 key={key++} className="text-[12px] font-semibold text-foreground mt-3 mb-1">
-          {line.slice(4)}
-        </h3>
-      );
-      i++;
-      continue;
-    }
-
-    // Bullet list
-    if (line.match(/^[-*] /)) {
-      const bullets: string[] = [line.slice(2)];
-      let j = i + 1;
-      while (j < lines.length && lines[j].match(/^[-*] /)) {
-        bullets.push(lines[j].slice(2));
-        j++;
-      }
-      nodes.push(
-        <ul key={key++} className="my-1.5 space-y-0.5 pl-4">
-          {bullets.map((b, bi) => (
-            <li key={bi} className="text-[13px] text-foreground list-disc leading-relaxed">
-              {renderInlineMarkdown(b)}
-            </li>
-          ))}
-        </ul>
-      );
-      i = j;
-      continue;
-    }
-
-    // Paragraph — collect until blank line or block element
-    const paraLines: string[] = [line];
-    let j = i + 1;
-    while (
-      j < lines.length &&
-      lines[j].trim() &&
-      !lines[j].startsWith('### ') &&
-      !lines[j].match(/^[-*] /) &&
-      !lines[j].match(/^>\s*\[!/)
-    ) {
-      paraLines.push(lines[j]);
-      j++;
-    }
-    nodes.push(
-      <p key={key++} className="text-[13px] text-foreground leading-relaxed">
-        {renderInlineMarkdown(paraLines.join(' '))}
-      </p>
-    );
-    i = j;
-  }
-
-  return nodes;
-}
+import { renderMarkdownProse } from '../../utils/renderMarkdownProse';
 
 // ---------------------------------------------------------------------------
 // Inline anchor block
@@ -253,7 +155,7 @@ export const TourStopCard: React.FC<TourStopCardProps> = ({
                   visible: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 200, damping: 22 } },
                 }}
               >
-                {renderDetail(stop.detail)}
+                {renderMarkdownProse(stop.detail)}
               </motion.div>
 
               {stop.anchors.length > 0 && (

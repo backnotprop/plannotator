@@ -3,11 +3,6 @@
  * Codex, custom scripts, etc.) how to post annotations into a live Plannotator
  * **plan-review** session via the /api/external-annotations HTTP API.
  *
- * Plan mode and code-review mode have different annotation shapes (plan uses
- * `originalText` for inline highlighting; review uses `filePath` + line ranges
- * + severity), so each mode owns its own instructions module. The
- * code-review counterpart will live alongside this file when it's added.
- *
  * The body is intentionally short (~110 lines of markdown) so an agent can read
  * it top-to-bottom and start posting in 30 seconds. Edit freely — this file is
  * the single source of truth for the agent-facing contract surface.

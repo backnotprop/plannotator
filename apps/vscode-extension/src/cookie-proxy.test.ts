@@ -105,6 +105,9 @@ describe("createCookieProxy", () => {
       // Should contain the virtual cookie store with saved cookies
       expect(html).toContain('"plannotator-identity":"tater-42"');
       expect(html).toContain('"other-cookie":"ignore"');
+      // Should forward keystrokes to the parent for VS Code keybindings
+      expect(html).toContain('type:"plannotator-keydown"');
+      expect(html).toContain('window.addEventListener("keydown"');
       // Should still contain original content
       expect(html).toContain("<title>Test</title>");
       expect(html).toContain("Hello");

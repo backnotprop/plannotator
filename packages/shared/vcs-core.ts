@@ -7,6 +7,7 @@ import {
   detectRemoteDefaultBranch,
   getFileContentsForDiff as getGitFileContentsForDiff,
   getGitContext,
+  getGitDiffFingerprint,
   gitAddFile,
   gitResetFile,
   parseWorktreeDiffType,
@@ -17,6 +18,7 @@ import {
   type ReviewJjRuntime,
   detectJjWorkspace,
   getJjContext,
+  getJjDiffFingerprint,
   getJjFileContentsForDiff,
   runJjDiff,
 } from "./jj-core";
@@ -34,6 +36,7 @@ export {
   JJ_TRUNK_REVSET,
   jjCompareTargetRevset,
   jjLineBaseRevset,
+  parseCommitDiffType,
   parseRemoteBookmark,
   parseWorktreeDiffType,
   validateFilePath,
@@ -54,6 +57,14 @@ export interface VcsProvider {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
+  /** Cheap staleness fingerprint for a diff (see review-core/jj-core). Providers
+   * without an implementation (e.g. p4) are treated as always-fresh. */
+  getDiffFingerprint?(
+    diffType: DiffType,
+    defaultBranch: string,
+    cwd?: string,
+    options?: GitDiffOptions,
+  ): Promise<string | null>;
   stageFile?(filePath: string, cwd?: string): Promise<void>;
   unstageFile?(filePath: string, cwd?: string): Promise<void>;
   resolveCwd?(diffType: string, fallbackCwd?: string): string | undefined;
@@ -64,6 +75,7 @@ export type VcsSelection = "auto" | "git" | "jj" | "p4";
 
 export interface VcsApi {
   detectVcs(cwd?: string): Promise<VcsProvider>;
+  detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null>;
   getVcsContext(cwd?: string, vcsType?: VcsSelection): Promise<GitContext>;
   detectRemoteDefaultCompareTarget(cwd?: string, vcsType?: VcsSelection): Promise<string | null>;
   prepareLocalReviewDiff(options: PrepareLocalReviewDiffOptions): Promise<PreparedLocalReviewDiff>;
@@ -80,6 +92,14 @@ export interface VcsApi {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
+  /** Best-effort staleness fingerprint for the given diff parameters. `null`
+   * means "cannot fingerprint" and must be treated as always-fresh. */
+  getVcsDiffFingerprint(
+    diffType: DiffType,
+    defaultBranch?: string,
+    cwd?: string,
+    options?: GitDiffOptions,
+  ): Promise<string | null>;
   canStageFiles(diffType: string, cwd?: string): Promise<boolean>;
   stageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
@@ -104,7 +124,7 @@ export interface PreparedLocalReviewDiff {
   error?: string;
 }
 
-const GIT_DIFF_TYPES = new Set(["uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
+const GIT_DIFF_TYPES = new Set(["since-base", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
 const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
 
 function selectNearestProvider(
@@ -157,12 +177,20 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
     },
 
     ownsDiffType(diffType: string): boolean {
-      return GIT_DIFF_TYPES.has(diffType) || diffType.startsWith("worktree:");
+      return (
+        GIT_DIFF_TYPES.has(diffType) ||
+        diffType.startsWith("worktree:") ||
+        diffType.startsWith("commit:")
+      );
     },
 
     canStageFiles(diffType: string): boolean {
       const effectiveDiffType = parseWorktreeDiffType(diffType)?.subType ?? diffType;
-      return effectiveDiffType === "uncommitted" || effectiveDiffType === "unstaged";
+      return (
+        effectiveDiffType === "since-base" ||
+        effectiveDiffType === "uncommitted" ||
+        effectiveDiffType === "unstaged"
+      );
     },
 
     getContext(cwd?: string): Promise<GitContext> {
@@ -175,6 +203,10 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
 
     getFileContents(diffType, defaultBranch, filePath, oldPath?, cwd?) {
       return getGitFileContentsForDiff(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
+    },
+
+    getDiffFingerprint(diffType, defaultBranch, cwd?, options?) {
+      return getGitDiffFingerprint(runtime, diffType, defaultBranch, cwd, options);
     },
 
     stageFile(filePath: string, cwd?: string): Promise<void> {
@@ -223,6 +255,10 @@ export function createJjProvider(runtime: ReviewJjRuntime): VcsProvider {
     getFileContents(diffType, defaultBranch, filePath, oldPath?, cwd?) {
       return getJjFileContentsForDiff(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
     },
+
+    getDiffFingerprint(diffType, defaultBranch, cwd?) {
+      return getJjDiffFingerprint(runtime, diffType, defaultBranch, cwd);
+    },
   };
 }
 
@@ -230,18 +266,16 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
   const providerList = [...providers];
   const defaultProvider = providerList.find((provider) => provider.id === "git") ?? providerList[0];
   const vcsCache = new Map<string, VcsProvider>();
+  const managedVcsCache = new Map<string, VcsProvider>();
 
   if (!defaultProvider) {
     throw new Error("createVcsApi requires at least one provider");
   }
 
-  async function detectVcs(cwd?: string): Promise<VcsProvider> {
-    const key = cwd ?? process.cwd();
-    const cached = vcsCache.get(key);
-    if (cached) return cached;
-
+  async function collectDetectedProviders(cwd?: string): Promise<Array<{ provider: VcsProvider; root: string | null; order: number }>> {
     const candidates: Array<{ provider: VcsProvider; root: string | null; order: number }> = [];
-    for (const provider of providerList) {
+    for (let index = 0; index < providerList.length; index++) {
+      const provider = providerList[index];
       let root: string | null = null;
       let detected = false;
       try {
@@ -255,11 +289,42 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
         continue;
       }
       if (detected) {
-        candidates.push({ provider, root, order: candidates.length });
+        candidates.push({ provider, root, order: index });
       }
     }
+    return candidates;
+  }
 
-    const detected = selectNearestProvider(candidates, cwd) ?? defaultProvider;
+  async function detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null> {
+    const key = `${vcsType ?? "auto"}:${cwd ?? process.cwd()}`;
+    const cached = managedVcsCache.get(key);
+    if (cached) return cached;
+
+    if (vcsType && vcsType !== "auto") {
+      const provider = getProviderById(vcsType);
+      let detected = false;
+      try {
+        detected = provider ? await provider.detect(cwd) : false;
+      } catch {
+        detected = false;
+      }
+      const result = detected ? provider : null;
+      if (result) managedVcsCache.set(key, result);
+      return result;
+    }
+
+    const candidates = await collectDetectedProviders(cwd);
+    const detected = selectNearestProvider(candidates, cwd);
+    if (detected) managedVcsCache.set(key, detected);
+    return detected;
+  }
+
+  async function detectVcs(cwd?: string): Promise<VcsProvider> {
+    const key = cwd ?? process.cwd();
+    const cached = vcsCache.get(key);
+    if (cached) return cached;
+
+    const detected = (await detectManagedVcs(cwd)) ?? defaultProvider;
     vcsCache.set(key, detected);
     return detected;
   }
@@ -348,6 +413,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
 
   return {
     detectVcs,
+    detectManagedVcs,
 
     async getVcsContext(cwd?: string, vcsType?: VcsSelection): Promise<GitContext> {
       return (await getContextWithProvider(cwd, vcsType)).gitContext;
@@ -402,6 +468,23 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     ): Promise<{ oldContent: string | null; newContent: string | null }> {
       const provider = await getProviderForOperation(diffType, cwd);
       return provider.getFileContents(diffType, defaultBranch, filePath, oldPath, cwd);
+    },
+
+    async getVcsDiffFingerprint(
+      diffType: DiffType,
+      defaultBranch: string = "main",
+      cwd?: string,
+      options?: GitDiffOptions,
+    ): Promise<string | null> {
+      try {
+        const provider = await getProviderForOperation(diffType, cwd);
+        if (!provider.getDiffFingerprint) return null;
+        return await provider.getDiffFingerprint(diffType, defaultBranch, cwd, options);
+      } catch {
+        // Fingerprinting is best-effort: failure means "always fresh", never
+        // a user-facing error.
+        return null;
+      }
     },
 
     async canStageFiles(diffType: string, cwd?: string): Promise<boolean> {

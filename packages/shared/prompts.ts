@@ -16,6 +16,9 @@ export function resolveTemplate(
 
 export const PLAN_TOOL_NAMES: Record<PromptRuntime, string> = {
   "claude-code": "ExitPlanMode",
+  amp: "ExitPlanMode",
+  droid: "ExitPlanMode",
+  "kiro-cli": "ExitPlanMode",
   opencode: "submit_plan",
   "copilot-cli": "exit_plan_mode",
   pi: "plannotator_submit_plan",
@@ -36,7 +39,7 @@ export function buildPlanFileRule(toolName: string, planFilePath?: string): stri
 
 export const DEFAULT_REVIEW_APPROVED_PROMPT = "# Code Review\n\nCode review completed — no changes requested.";
 
-export const DEFAULT_REVIEW_DENIED_SUFFIX = "\nThe reviewer has identified issues above. You must address all of them.";
+export const DEFAULT_REVIEW_DENIED_SUFFIX = "\n\nThe findings above came from an automated review of the current changes. Do two things, kept in separate sections:\n\n1. Triage each incoming finding — open the code it points at and give a verdict (Confirmed / Partly / Not a bug / Intended) with evidence (file:line + what the code actually does). Say whether it's introduced by these changes, pre-existing, or a deliberate scope decision. Rank by real user impact.\n\n2. Independently review the current diff yourself — don't just grade the list, surface what it missed, at the same bar (file:line, concrete failure scenario, severity). Actively look for: parallel code paths that should have changed together but didn't; state that outlives its context (cleared on one transition but not another); new-feature vs sibling-feature consistency (drafts, counts, persistence, exports); edge cases where the new thing is the only thing present; seams where new code meets existing code.\n\nFor each real issue, describe it concretely in plain language: the exact place it lives and the real-world trigger that hits it — the specific call, endpoint, command, input, or user action — plus the state or conditions under which it goes wrong. Not an abstract description.\n\nDo not change any code until we've discussed the findings.";
 
 export const DEFAULT_PLAN_DENIED_PROMPT =
   "YOUR PLAN WAS NOT APPROVED.\n\nYou MUST revise the plan to address ALL of the feedback below before calling {{toolName}} again.\n\nRules:\n{{planFileRule}}- Do not resubmit the same plan unchanged.\n- Do NOT change the plan title (first # heading) unless the user explicitly asks you to.\n\n{{feedback}}";
@@ -109,22 +112,20 @@ export function getReviewApprovedPrompt(
   });
 }
 
-const REVIEW_DENIED_RUNTIME_DEFAULTS: Partial<Record<PromptRuntime, string>> = {
-  opencode: "\n\nPlease address this feedback.",
-  pi: "\n\nPlease address this feedback.",
-};
-
 export function getReviewDeniedSuffix(
   runtime?: PromptRuntime | null,
   config?: PlannotatorConfig,
 ): string {
+  // Intentionally no per-runtime defaults: every agent gets the same
+  // triage-first instruction so none of them start coding off raw review
+  // feedback. Per-runtime customization stays available via config
+  // (prompts.review.runtimes.<runtime>.denied).
   return getConfiguredPrompt({
     section: "review",
     key: "denied",
     runtime,
     config,
     fallback: DEFAULT_REVIEW_DENIED_SUFFIX,
-    runtimeFallbacks: REVIEW_DENIED_RUNTIME_DEFAULTS,
   });
 }
 

@@ -2,18 +2,20 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
+import { handleAnnotateCommand, handleAnnotateLastCommand } from "./commands";
 
+// Inject the annotate-server stub through CommandDeps rather than
+// `mock.module`. Bun's module mocks are process-global and cannot be unset,
+// so a `mock.module("@plannotator/server/annotate", ...)` here would leak the
+// stub into every other suite (it previously broke packages/server tests that
+// boot the real annotate server). Dependency injection keeps it local.
 const startAnnotateServerMock = mock(async (_options: any) => ({
+  port: 0,
+  url: "http://localhost",
+  isRemote: false,
   waitForDecision: async () => ({ feedback: "", annotations: [] }),
   stop: () => {},
 }));
-
-mock.module("@plannotator/server/annotate", () => ({
-  startAnnotateServer: startAnnotateServerMock,
-  handleAnnotateServerReady: () => {},
-}));
-
-const { handleAnnotateCommand, handleAnnotateLastCommand } = await import("./commands");
 
 const tempDirs: string[] = [];
 
@@ -40,6 +42,7 @@ function makeDeps() {
     getShareBaseUrl: () => "https://share.example.test",
     getPasteApiUrl: () => "https://paste.example.test",
     directory: undefined as string | undefined,
+    startAnnotateServer: startAnnotateServerMock,
   };
 }
 
@@ -72,7 +75,36 @@ describe("handleAnnotateCommand", () => {
     expect(options.mode).toBe("annotate");
     expect(options.pasteApiUrl).toBe("https://paste.example.test");
     expect(options.shareBaseUrl).toBe("https://share.example.test");
-    expect(options.markdown).toContain("Design Spec");
+    expect(options.markdown).toBe("");
+    expect(options.rawHtml).toContain("<h1>Design Spec</h1>");
+    expect(options.renderHtml).toBe(true);
+    expect(options.convertHtml).toBe(false);
+    expect(options.sourceConverted).toBe(false);
+  });
+
+  test("--markdown converts HTML paths via Turndown", async () => {
+    const projectRoot = makeTempDir();
+    const docsDir = path.join(projectRoot, "docs");
+    mkdirSync(docsDir, { recursive: true });
+    const htmlPath = path.join(docsDir, "Design Spec.html");
+    writeFileSync(htmlPath, "<h1>Design Spec</h1><p>Body</p>");
+
+    const deps = makeDeps();
+    deps.directory = projectRoot;
+
+    await handleAnnotateCommand(
+      { properties: { arguments: "\"docs/Design Spec.html\" --markdown" } },
+      deps,
+    );
+
+    expect(startAnnotateServerMock).toHaveBeenCalledTimes(1);
+    const options = startAnnotateServerMock.mock.calls[0]?.[0];
+    expect(options.filePath).toBe(htmlPath);
+    expect(options.markdown).toContain("# Design Spec");
+    expect(options.rawHtml).toBeUndefined();
+    expect(options.renderHtml).toBe(false);
+    expect(options.convertHtml).toBe(true);
+    expect(options.sourceConverted).toBe(true);
   });
 
   test("supports quoted folder paths and opens annotate-folder mode", async () => {

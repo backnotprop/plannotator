@@ -108,6 +108,62 @@ export async function runJjDiff(
   return { patch, label: args.label };
 }
 
+// --- Diff staleness fingerprint ---------------------------------------------
+// jj snapshots the working copy on every command invocation, so `@`'s commit
+// id reflects the CURRENT file state — a working-copy edit changes it. That
+// makes commit ids a complete content fingerprint for every jj mode. `null`
+// means "cannot fingerprint" (callers treat as always-fresh).
+export async function getJjDiffFingerprint(
+  runtime: ReviewJjRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  cwd?: string,
+): Promise<string | null> {
+  const idOf = async (rev: string): Promise<string | null> => {
+    const result = await runtime.runJj(
+      ["log", "-r", rev, "--no-graph", "-T", "commit_id"],
+      { cwd },
+    );
+    return result.exitCode === 0 ? result.stdout.trim() || null : null;
+  };
+
+  try {
+    switch (diffType) {
+      case "jj-current":
+      case "jj-all": {
+        const id = await idOf("@");
+        return id ? `jj:${diffType}:${id}` : null;
+      }
+      case "jj-last": {
+        const id = await idOf("@-");
+        return id ? `jj:${diffType}:${id}` : null;
+      }
+      case "jj-line": {
+        const compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
+        const current = await idOf("@");
+        const base = await idOf(jjLineBaseRevset(compareTarget));
+        return current && base ? `jj:${diffType}:${base}:${current}` : null;
+      }
+      case "jj-evolog": {
+        // Evolog diffs render `--from <historical entry> --to @`: the
+        // historical end is immutable, but @ is the LIVE working copy — every
+        // edit moves it and changes the patch. Fingerprint BOTH ends.
+        const current = await idOf("@");
+        if (!current) return null;
+        if (defaultBranch.length > 0) return `jj:${diffType}:${defaultBranch}:${current}`;
+        const evologs = await getJjEvoLogEntries(runtime, cwd);
+        return evologs.length >= 2
+          ? `jj:${diffType}:auto:${evologs[1].commitId}:${current}`
+          : null;
+      }
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 function dropHunklessGitDiffChunks(patch: string): string {
   if (!patch.includes("diff --git ")) return patch;
 

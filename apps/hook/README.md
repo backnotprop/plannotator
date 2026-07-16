@@ -21,7 +21,7 @@ irm https://plannotator.ai/install.ps1 | iex
 curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
-Released binaries ship with SHA256 sidecars and [SLSA build provenance](https://slsa.dev/) attestations from v0.17.2 onwards. See the [installation docs](https://plannotator.ai/docs/getting-started/installation/#verifying-your-install) for version pinning and verification commands.
+Released binaries ship with SHA256 sidecars and [SLSA build provenance](https://slsa.dev/) attestations from v0.17.2 onwards. See the [installation docs](https://plannotator.ai/docs/getting-started/installation/) for version pinning and the [verification docs](https://plannotator.ai/docs/reference/verifying-your-install/) for verification commands.
 
 ---
 
@@ -106,12 +106,12 @@ Host your-server
 
 ## Slash Commands
 
-The plugin registers three slash commands:
+Plannotator's slash commands are installed as Claude Code skills in `~/.claude/skills` by the install script (the canonical source is `apps/skills/core/`). Claude Code skills are user-invocable by directory name, so these three work like slash commands inside your session:
 
 | Command | Description |
 |---------|-------------|
 | `/plannotator-review [--git]` | Open code review UI for current changes or a GitHub PR; `--git` forces Git in JJ workspaces |
-| `/plannotator-annotate <file.md>` | Annotate any markdown file |
+| `/plannotator-annotate <file.md \| file.html \| https://... \| folder/>` | Annotate a file, URL, or folder |
 | `/plannotator-last` | Annotate the agent's last message |
 
 ## Obsidian Integration

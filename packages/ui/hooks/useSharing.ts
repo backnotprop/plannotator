@@ -64,7 +64,7 @@ interface UseSharingResult {
   refreshShareUrl: () => Promise<void>;
 
   /** Generate a short URL via the paste service (user must explicitly trigger this) */
-  generateShortUrl: () => Promise<void>;
+  generateShortUrl: () => Promise<string | null>;
 
   /** Import annotations from a teammate's share URL */
   importFromShareUrl: (url: string) => Promise<ImportResult>;
@@ -100,7 +100,9 @@ export function useSharing(
   shareBaseUrl?: string,
   pasteApiUrl?: string,
   rawHtml?: string,
+  resolveRawHtmlForShare?: () => Promise<string | null>,
   setRawHtml?: (h: string) => void,
+  setShareHtml?: (h: string) => void,
   setRenderAs?: (m: 'markdown' | 'html') => void,
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
@@ -141,22 +143,22 @@ export function useSharing(
         if (payload) {
           if (payload.h && payload.r === 'html') {
             setRawHtml?.(payload.h);
+            setShareHtml?.(payload.h);
             setRenderAs?.('html');
             setMarkdown('');
           } else {
             setMarkdown(payload.p);
             setRenderAs?.('markdown');
             setRawHtml?.('');
+            setShareHtml?.('');
           }
 
           const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
           setAnnotations(restoredAnnotations);
 
-          if (payload.g?.length) {
-            const parsed = parseShareableImages(payload.g) ?? [];
-            setGlobalAttachments(parsed);
-            setSharedGlobalAttachments(parsed);
-          }
+          const parsedGlobalAttachments = parseShareableImages(payload.g) ?? [];
+          setGlobalAttachments(parsedGlobalAttachments);
+          setSharedGlobalAttachments(parsedGlobalAttachments.length ? parsedGlobalAttachments : null);
 
           setPendingSharedAnnotations(restoredAnnotations);
           setIsSharedSession(true);
@@ -188,24 +190,23 @@ export function useSharing(
       if (payload) {
         if (payload.h && payload.r === 'html') {
           setRawHtml?.(payload.h);
+          setShareHtml?.(payload.h);
           setRenderAs?.('html');
           setMarkdown('');
         } else {
           setMarkdown(payload.p);
           setRenderAs?.('markdown');
           setRawHtml?.('');
+          setShareHtml?.('');
         }
 
         // Convert shareable annotations to full annotations
         const restoredAnnotations = fromShareable(payload.a, payload.d, payload.s);
         setAnnotations(restoredAnnotations);
 
-        // Restore global attachments if present
-        if (payload.g?.length) {
-          const parsed = parseShareableImages(payload.g) ?? [];
-          setGlobalAttachments(parsed);
-          setSharedGlobalAttachments(parsed);
-        }
+        const parsedGlobalAttachments = parseShareableImages(payload.g) ?? [];
+        setGlobalAttachments(parsedGlobalAttachments);
+        setSharedGlobalAttachments(parsedGlobalAttachments.length ? parsedGlobalAttachments : null);
 
         // Store for later application to DOM
         setPendingSharedAnnotations(restoredAnnotations);
@@ -236,7 +237,7 @@ export function useSharing(
       setShareLoadError('Failed to load shared plan — an unexpected error occurred.');
       return false;
     }
-  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl, setRawHtml, setRenderAs]);
+  }, [setMarkdown, setAnnotations, setGlobalAttachments, onSharedLoad, pasteApiUrl, setRawHtml, setShareHtml, setRenderAs]);
 
   // Load from hash on mount
   useEffect(() => {
@@ -281,7 +282,7 @@ export function useSharing(
     if (isSharedRef.current) { isSharedRef.current = false; return; }
     setShortShareUrl('');
     setShortUrlError('');
-  }, [markdown, annotations, rawHtml, isSharedSession]);
+  }, [markdown, annotations, globalAttachments, rawHtml, isSharedSession]);
 
   /**
    * Generate a short URL via the paste service.
@@ -289,34 +290,40 @@ export function useSharing(
    * Clears the short URL if the service is unavailable — the full
    * hash-based URL remains usable as a fallback.
    */
-  const generateShortUrl = useCallback(async () => {
-    if (!markdown && !rawHtml) return;
+  const generateShortUrl = useCallback(async (): Promise<string | null> => {
+    if (!markdown && !rawHtml) return null;
 
     setIsGeneratingShortUrl(true);
     setShortUrlError('');
 
     try {
+      const htmlForShare = rawHtml
+        ? (await resolveRawHtmlForShare?.()) ?? rawHtml
+        : undefined;
       const result = await createShortShareUrl(
         markdown,
         annotations,
         globalAttachments,
         { pasteApiUrl, shareBaseUrl },
-        rawHtml,
+        htmlForShare,
       );
 
       if (result) {
         setShortShareUrl(result.shortUrl);
+        return result.shortUrl;
       } else {
         setShortShareUrl('');
         setShortUrlError('Short URL service unavailable');
+        return null;
       }
-    } catch {
+    } catch (e) {
       setShortShareUrl('');
-      setShortUrlError('Failed to generate short URL');
+      setShortUrlError(e instanceof Error ? e.message : 'Failed to generate short URL');
+      return null;
     } finally {
       setIsGeneratingShortUrl(false);
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare]);
 
   // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {

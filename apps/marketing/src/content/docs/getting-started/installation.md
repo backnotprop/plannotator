@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "How to install Plannotator for Claude Code, Codex, OpenCode, Pi, and other agent hosts."
+description: "How to install Plannotator for Claude Code, Codex, OpenCode, Kiro CLI, Pi, Amp, Droid, and other agent hosts."
 sidebar:
   order: 1
 section: "Getting Started"
@@ -10,7 +10,9 @@ Plannotator runs as a plugin for your coding agent. Install the CLI first, then 
 
 ## Prerequisites
 
-Install the `plannotator` command so your agent can use it.
+Install the `plannotator` command so your agent can use it. The installer
+requires `git` (it fetches the skills and command files from a sparse checkout
+of the release tag) and fails with a clear message if git is missing.
 
 **macOS / Linux / WSL:**
 
@@ -23,6 +25,15 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 ```powershell
 irm https://plannotator.ai/install.ps1 | iex
 ```
+
+### Guided install
+
+When run in a terminal for the first time, the installer asks two questions:
+
+1. **Install the extra skills?** (compound planning, setup-goal, visual explainer) — answering yes launches `npx skills add` so you pick which agents get them in its UI. Skipped automatically if the extras are already installed.
+2. **Make any skills callable by the model?** — answering yes opens a picker (space toggles on macOS/Linux/PowerShell; numbered toggles in the cmd installer). Chosen skills have `disable-model-invocation` removed from their *installed* copies (and the Codex sidecar flipped to match); everything else stays user-invoked only.
+
+Answers are saved to `<data dir>/install-prefs` and reused silently on re-runs — pass `--reconfigure` to change them. **Automated installs are unaffected**: runs without a terminal (CI, scripts) never prompt and keep the defaults (no extras, nothing model-invocable). Automation can opt in explicitly with `--extras` / `--no-extras` / `--model-invocable <list>` / `--non-interactive`.
 
 **Windows CMD:**
 
@@ -51,6 +62,27 @@ Version pinning is fully supported from **v0.17.2 onwards**. v0.17.2 is the firs
 
 </details>
 
+<details>
+<summary><strong>Binary-only install (nothing but the CLI)</strong></summary>
+
+Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, Gemini, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --minimal
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Minimal
+```
+
+```cmd
+curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --minimal && del install.cmd
+```
+
+For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the environment instead of passing the flag; pass `--no-minimal` to force a full install even when that variable is set.
+
+</details>
+
 Every release includes SHA256 checksums (verified automatically) and optional [SLSA build provenance](/docs/reference/verifying-your-install/) attestations.
 
 ## Claude Code
@@ -63,6 +95,8 @@ Every release includes SHA256 checksums (verified automatically) and optional [S
 ```
 
 Restart Claude Code after installing for hooks to take effect.
+
+The plugin provides the plan-review hook only. To also get the `/plannotator-*` slash commands you must run the [install script](#prerequisites) — it installs them as Claude Code skills in `~/.claude/skills` (see [Slash commands](#slash-commands) below).
 
 ### Manual installation
 
@@ -95,6 +129,18 @@ To test a local checkout of Plannotator:
 claude --plugin-dir ./apps/hook
 ```
 
+### Slash commands
+
+Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
+
+Upgrading from an older version? The installer removes the legacy `~/.claude/commands/plannotator-*.md` files automatically, but the marketplace plugin's old namespaced `plannotator:*` command entries are managed by Claude Code — run `/plugin marketplace update` once so they disappear from the `/` menu.
+
+Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
+
+```bash
+npx skills add backnotprop/plannotator/apps/skills/extra
+```
+
 ## OpenCode
 
 Add the plugin to your `opencode.json`:
@@ -115,6 +161,32 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 ```
 
 This also clears any cached plugin versions.
+
+## Kiro CLI
+
+Kiro is auto-detected — no extra flag or step. If `~/.kiro` exists (or `kiro-cli` is on your PATH) when you run the installer, Plannotator's Kiro skills install automatically, the same way Codex and Gemini are handled. This works on every platform; use the installer for your OS:
+
+**macOS / Linux / WSL:**
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+**Windows PowerShell:**
+
+```powershell
+irm https://plannotator.ai/install.ps1 | iex
+```
+
+**Windows CMD:**
+
+```cmd
+curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
+```
+
+On Windows the installer checks for `%USERPROFILE%\.kiro` (or `kiro-cli` on your PATH). This installs the Kiro skills to `~/.kiro/skills` and the Plannotator agent to `~/.kiro/agents/plannotator.json` (an existing agent file is never overwritten). If you install Kiro *after* Plannotator, just re-run the installer.
+
+See the [Kiro guide](/docs/guides/kiro-cli/) for the skill list and the Plannotator agent.
 
 ## Kilo Code
 
@@ -168,6 +240,12 @@ Notes:
 - Codex hooks are currently experimental.
 - The current official Codex hooks docs say hooks are disabled on Windows, so this flow is currently macOS/Linux/WSL only.
 
+The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
+
+```bash
+npx skills add backnotprop/plannotator/apps/skills/extra
+```
+
 You can still use the direct commands at any time:
 
 ```bash
@@ -193,3 +271,65 @@ pi -e npm:@plannotator/pi-extension
 Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator` or `Ctrl+Alt+P`. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
 
 See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
+
+## Amp
+
+Plannotator's Amp integration is currently commands-only. It adds command-palette actions for code review, file annotation, and annotating Amp's latest assistant message.
+
+Install the CLI first:
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Then install the Amp plugin:
+
+```bash
+mkdir -p ~/.config/amp/plugins
+curl -fsSL https://raw.githubusercontent.com/backnotprop/plannotator/main/apps/amp-plugin/plannotator.ts \
+  -o ~/.config/amp/plugins/plannotator.ts
+```
+
+Restart Amp or run `plugins: reload` from the command palette.
+
+This adds:
+
+```text
+Plannotator: Review changes
+Plannotator: Review changes or PR
+Plannotator: Annotate file
+Plannotator: Annotate last answer
+```
+
+For `Plannotator: Review changes or PR`, leave the input blank to review local changes, or enter a PR/MR URL.
+
+The plugin uses Amp's thread API for `Annotate last answer`, so it does not read transcript logs.
+
+## Droid
+
+Plannotator's Droid integration is currently commands-only. It does not intercept Droid's planning flow yet.
+
+Install the CLI first:
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Then install the Droid plugin:
+
+```bash
+droid plugin marketplace add https://github.com/backnotprop/plannotator
+droid plugin install plannotator@plannotator
+```
+
+Open a fresh Droid session after installing.
+
+This adds the following slash commands:
+
+```text
+/plannotator-review
+/plannotator-annotate <file|folder|url>
+/plannotator-last
+```
+
+Those commands open the browser-based Plannotator review UI and send the result back into the Droid session.

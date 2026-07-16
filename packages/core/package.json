@@ -1,0 +1,33 @@
+{
+  "name": "@plannotator/core",
+  "version": "0.22.0",
+  "type": "module",
+  "exports": {
+    "./agents": "./agents.ts",
+    "./agent-jobs": "./agent-jobs.ts",
+    "./agent-terminal": "./agent-terminal.ts",
+    "./browser-paths": "./browser-paths.ts",
+    "./code-file": "./code-file.ts",
+    "./compress": "./compress.ts",
+    "./crypto": "./crypto.ts",
+    "./external-annotation": "./external-annotation.ts",
+    "./extract-code-paths": "./extract-code-paths.ts",
+    "./favicon": "./favicon.ts",
+    "./feedback-templates": "./feedback-templates.ts",
+    "./goal-setup": "./goal-setup.ts",
+    "./open-in-apps": "./open-in-apps.ts",
+    "./project": "./project.ts",
+    "./source-save": "./source-save.ts",
+    "./config-types": "./config-types.ts",
+    "./storage-types": "./storage-types.ts",
+    "./workspace-status-types": "./workspace-status-types.ts",
+    "./ai-context": "./ai-context.ts",
+    "./types": "./types.ts",
+    ".": "./index.ts"
+  },
+  "files": ["**/*.ts", "!**/*.test.ts"],
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  }
+}

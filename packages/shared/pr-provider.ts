@@ -35,7 +35,7 @@ export async function getUser(runtime: PRRuntime, ref: PRRef): Promise<string | 
 export async function fetchPR(
   runtime: PRRuntime,
   ref: PRRef,
-): Promise<{ metadata: PRMetadata; rawPatch: string }> {
+): Promise<{ metadata: PRMetadata; rawPatch: string; patchIncomplete?: boolean }> {
   if (ref.platform === "github") return fetchGhPR(runtime, ref);
   return fetchGlMR(runtime, ref);
 }

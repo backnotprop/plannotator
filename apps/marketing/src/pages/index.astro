@@ -8,7 +8,7 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
 ---
 <Base
   title="Plannotator - Plan & Code Review for AI Coding Agents"
-  description="Free, open-source plugin for Claude Code, OpenCode, Codex, and Pi. Review agent plans before they execute, annotate agent-written code, send structured feedback back — all locally."
+  description="Free, open-source review tooling for Claude Code, OpenCode, Codex, Pi, and Droid. Review agent plans before they execute, annotate agent-written code, and send structured feedback back locally."
 >
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
@@ -21,6 +21,72 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
 
       <!-- Social Proof -->
       <SocialProofBar />
+
+      <!-- Capabilities -->
+      <section class="py-16 px-8 border-t border-border/30 landing-reveal">
+        <h2 class="font-display text-xl font-semibold tracking-tight mb-8 text-center">
+          Everything the plugin does
+        </h2>
+        <div class="capabilities-grid">
+          <div class="cap-group">
+            <h3 class="cap-group-label">Commands</h3>
+            <div class="cap-item">
+              <code class="cap-cmd">/plannotator-annotate &lt;file|dir|url&gt;</code>
+              <span class="cap-desc">Annotate any markdown, spec/plan, folder, or URL and send feedback</span>
+            </div>
+            <div class="cap-item">
+              <code class="cap-cmd">/plannotator-review [PR_URL]</code>
+              <span class="cap-desc">Code review for local diffs or GitHub/GitLab PRs</span>
+            </div>
+            <div class="cap-item">
+              <code class="cap-cmd">/plannotator-last</code>
+              <span class="cap-desc">Annotate the agent's last message</span>
+            </div>
+            <div class="cap-item">
+              <code class="cap-cmd">Plan review</code>
+              <span class="cap-desc">Automatic: hooks into your agent's plan step</span>
+            </div>
+          </div>
+          <div class="cap-group">
+            <h3 class="cap-group-label">Features</h3>
+            <div class="cap-item">
+              <span class="cap-name">Runs locally</span>
+              <span class="cap-desc">Plans never leave your machine</span>
+            </div>
+            <div class="cap-item">
+              <span class="cap-name">Encrypted sharing</span>
+              <span class="cap-desc">Share plans via URL — data lives in the link itself</span>
+            </div>
+            <div class="cap-item">
+              <span class="cap-name">Version history</span>
+              <span class="cap-desc">Every plan revision saved, with diffs between versions</span>
+            </div>
+            <div class="cap-item">
+              <span class="cap-name">Draft auto-save</span>
+              <span class="cap-desc">Annotations survive server crashes and restarts</span>
+            </div>
+          </div>
+          <div class="cap-group">
+            <h3 class="cap-group-label">Integrations</h3>
+            <div class="cap-item">
+              <span class="cap-name">VS Code</span>
+              <span class="cap-desc">Open plans in editor tabs, diff view, editor annotations</span>
+            </div>
+            <div class="cap-item">
+              <span class="cap-name">Obsidian</span>
+              <span class="cap-desc">Auto-save plans to your vault with frontmatter and tags</span>
+            </div>
+            <div class="cap-item">
+              <span class="cap-name">Bear</span>
+              <span class="cap-desc">Save plans with nested tags and project metadata</span>
+            </div>
+            <div class="cap-item">
+              <span class="cap-name">GitHub PRs</span>
+              <span class="cap-desc">Review pull requests by URL with full diff annotations</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- Plan Review -->
       <section class="py-16 px-8 border-t border-border/30 landing-reveal">
@@ -302,72 +368,6 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
         </div>
       </section>
 
-      <!-- Capabilities -->
-      <section class="py-16 px-8 border-t border-border/30 landing-reveal">
-        <h2 class="font-display text-xl font-semibold tracking-tight mb-8 text-center">
-          Everything the plugin does
-        </h2>
-        <div class="capabilities-grid">
-          <div class="cap-group">
-            <h3 class="cap-group-label">Commands</h3>
-            <div class="cap-item">
-              <code class="cap-cmd">Plan review</code>
-              <span class="cap-desc">Automatic: hooks into your agent's plan step</span>
-            </div>
-            <div class="cap-item">
-              <code class="cap-cmd">/plannotator-annotate &lt;file|dir|url&gt;</code>
-              <span class="cap-desc">Annotate any markdown, spec/plan, folder, or URL and send feedback</span>
-            </div>
-            <div class="cap-item">
-              <code class="cap-cmd">/plannotator-last</code>
-              <span class="cap-desc">Annotate the agent's last message</span>
-            </div>
-            <div class="cap-item">
-              <code class="cap-cmd">/plannotator-review &lt;null|pr-url&gt;</code>
-              <span class="cap-desc">Code review for local changes or GitHub and GitLab PRs</span>
-            </div>
-          </div>
-          <div class="cap-group">
-            <h3 class="cap-group-label">Features</h3>
-            <div class="cap-item">
-              <span class="cap-name">Runs locally</span>
-              <span class="cap-desc">Plans never leave your machine</span>
-            </div>
-            <div class="cap-item">
-              <span class="cap-name">Encrypted sharing</span>
-              <span class="cap-desc">Share plans via URL — data lives in the link itself</span>
-            </div>
-            <div class="cap-item">
-              <span class="cap-name">Version history</span>
-              <span class="cap-desc">Every plan revision saved, with diffs between versions</span>
-            </div>
-            <div class="cap-item">
-              <span class="cap-name">Draft auto-save</span>
-              <span class="cap-desc">Annotations survive server crashes and restarts</span>
-            </div>
-          </div>
-          <div class="cap-group">
-            <h3 class="cap-group-label">Integrations</h3>
-            <div class="cap-item">
-              <span class="cap-name">VS Code</span>
-              <span class="cap-desc">Open plans in editor tabs, diff view, editor annotations</span>
-            </div>
-            <div class="cap-item">
-              <span class="cap-name">Obsidian</span>
-              <span class="cap-desc">Auto-save plans to your vault with frontmatter and tags</span>
-            </div>
-            <div class="cap-item">
-              <span class="cap-name">Bear</span>
-              <span class="cap-desc">Save plans with nested tags and project metadata</span>
-            </div>
-            <div class="cap-item">
-              <span class="cap-name">GitHub PRs</span>
-              <span class="cap-desc">Review pull requests by URL with full diff annotations</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- Compatibility & social proof -->
       <section class="py-12 px-8 border-t border-border/30 text-center">
         <p class="text-sm text-muted-foreground mb-4">
@@ -400,6 +400,33 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
             class="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             Read the docs &rarr;
+          </a>
+        </div>
+      </section>
+
+      <!-- Workspaces teaser -->
+      <section class="workspaces-cta-band py-14 px-8 border-t border-border/30 landing-reveal">
+        <div class="relative z-10 max-w-2xl mx-auto text-center">
+          <span class="workspaces-cta-pill mb-4">
+            <span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+            Plannotator Workspaces · waitlist
+          </span>
+          <h2 class="font-display text-xl sm:text-2xl font-semibold tracking-tight mb-3">
+            Turn agent plans and code reviews into <span class="text-primary">shared team knowledge</span>.
+          </h2>
+          <p class="text-sm text-muted-foreground leading-relaxed mb-5 max-w-[52ch] mx-auto">
+            Workspaces is the hosted layer for teams &mdash; shared plans,
+            review history, integrations, and verification standards. The
+            local plugin stays free &amp; open source.
+          </p>
+          <a
+            href="/workspaces/"
+            class="hero-cta-btn inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm text-foreground font-medium hover:bg-muted/50 transition-colors"
+          >
+            Join the waitlist
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
           </a>
         </div>
       </section>

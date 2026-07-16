@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -57,7 +57,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -76,50 +76,50 @@ jobs:
           VERSION=$(jq -r .version package.json)
 
           # macOS ARM64
-          bun build apps/hook/server/index.ts --compile --target=bun-darwin-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-arm64
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-arm64
           sha256sum plannotator-darwin-arm64 > plannotator-darwin-arm64.sha256
 
           # macOS x64
-          bun build apps/hook/server/index.ts --compile --target=bun-darwin-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-x64
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-x64
           sha256sum plannotator-darwin-x64 > plannotator-darwin-x64.sha256
 
           # Linux x64
-          bun build apps/hook/server/index.ts --compile --target=bun-linux-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
           sha256sum plannotator-linux-x64 > plannotator-linux-x64.sha256
 
           # Linux ARM64
-          bun build apps/hook/server/index.ts --compile --target=bun-linux-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-arm64
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-arm64
           sha256sum plannotator-linux-arm64 > plannotator-linux-arm64.sha256
 
           # Windows x64
-          bun build apps/hook/server/index.ts --compile --target=bun-windows-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-x64.exe
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-x64.exe
           sha256sum plannotator-win32-x64.exe > plannotator-win32-x64.exe.sha256
 
           # Windows ARM64 (native, via bun-windows-arm64 — stable since Bun v1.3.10)
-          bun build apps/hook/server/index.ts --compile --target=bun-windows-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-arm64.exe
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-windows-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-arm64.exe
           sha256sum plannotator-win32-arm64.exe > plannotator-win32-arm64.exe.sha256
 
           # Paste service binaries
-          bun build apps/paste-service/targets/bun.ts --compile --target=bun-darwin-arm64 --outfile plannotator-paste-darwin-arm64
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-arm64 --outfile plannotator-paste-darwin-arm64
           sha256sum plannotator-paste-darwin-arm64 > plannotator-paste-darwin-arm64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --target=bun-darwin-x64 --outfile plannotator-paste-darwin-x64
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-x64 --outfile plannotator-paste-darwin-x64
           sha256sum plannotator-paste-darwin-x64 > plannotator-paste-darwin-x64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --target=bun-linux-x64 --outfile plannotator-paste-linux-x64
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --outfile plannotator-paste-linux-x64
           sha256sum plannotator-paste-linux-x64 > plannotator-paste-linux-x64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --target=bun-linux-arm64 --outfile plannotator-paste-linux-arm64
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-arm64 --outfile plannotator-paste-linux-arm64
           sha256sum plannotator-paste-linux-arm64 > plannotator-paste-linux-arm64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-x64 --outfile plannotator-paste-win32-x64.exe
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64 --outfile plannotator-paste-win32-x64.exe
           sha256sum plannotator-paste-win32-x64.exe > plannotator-paste-win32-x64.exe.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
           sha256sum plannotator-paste-win32-arm64.exe > plannotator-paste-win32-arm64.exe.sha256
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: binaries
           path: |
@@ -141,13 +141,17 @@ jobs:
             binary: plannotator-win32-x64.exe
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Download binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binaries
           path: artifacts
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
 
       - name: Smoke-test binary
         if: runner.os != 'Windows'
@@ -158,8 +162,14 @@ jobs:
           set -euo pipefail
           chmod +x "$BINARY"
 
-          # 1. --help: proves binary loads and arg parsing works.
-          "$BINARY" --help
+          # 1. --help from a hostile caller cwd proves the binary loads,
+          # arg parsing works, and Bun did not autoload caller bunfig.toml.
+          hostile_cwd="$(mktemp -d)"
+          printf 'preload = ["./does-not-exist.ts"]\n' > "$hostile_cwd/bunfig.toml"
+          (
+            cd "$hostile_cwd"
+            "$GITHUB_WORKSPACE/$BINARY" --help
+          )
 
           smoke_test_server() {
             local label="$1" port="$2" endpoint="$3"
@@ -188,6 +198,85 @@ jobs:
             echo "OK: ${label} responded on :${port}${endpoint}"
           }
 
+          smoke_test_agent_terminal() {
+            local port="19502"
+            local data_dir
+            data_dir="$(mktemp -d)"
+
+            PLANNOTATOR_DATA_DIR="$data_dir" "$BINARY" install-runtime agent-terminal
+
+            PLANNOTATOR_DATA_DIR="$data_dir" PLANNOTATOR_PORT="$port" "$BINARY" annotate README.md &
+            local pid=$!
+            local ok=0
+
+            for _ in $(seq 1 60); do
+              if curl -sf "http://127.0.0.1:${port}/api/plan" -o /dev/null 2>/dev/null; then
+                ok=1
+                break
+              fi
+              sleep 0.5
+            done
+
+            if [ "$ok" = "0" ]; then
+              kill "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+              echo "FAIL: plannotator annotate terminal did not respond on :${port}/api/plan"
+              exit 1
+            fi
+
+            local runtime_dir="${data_dir}/vendor/agent-terminal/webtui-0.1.0"
+            local smoke_script="${runtime_dir}/terminal-smoke.mjs"
+            cat > "$smoke_script" <<'NODE'
+          import WebSocket from "ws";
+
+          const base = process.env.PLANNOTATOR_SMOKE_URL;
+          const plan = await fetch(`${base}/api/plan`).then((res) => res.json());
+          const terminal = plan.agentTerminal;
+          if (!terminal?.enabled) {
+            throw new Error(`agent terminal disabled: ${JSON.stringify(terminal)}`);
+          }
+          if (!terminal.wsPath?.startsWith("/api/agent-terminal/pty/")) {
+            throw new Error(`agent terminal returned non-tokenized path: ${terminal.wsPath}`);
+          }
+
+          await new Promise((resolve, reject) => {
+            let ws;
+            const timer = setTimeout(() => {
+              ws?.close();
+              reject(new Error("timed out waiting for terminal response"));
+            }, 5000);
+            ws = new WebSocket(`${base.replace(/^http/, "ws")}${terminal.wsPath}`);
+            ws.on("open", () => {
+              ws.send(JSON.stringify({ type: "spawn", requestId: "missing-agent", options: {} }));
+            });
+            ws.on("message", (raw) => {
+              clearTimeout(timer);
+              ws.close();
+              const message = JSON.parse(String(raw));
+              if (message.type !== "error" || message.message !== "Agent terminal requires a built-in WebTUI agent.") {
+                reject(new Error(`unexpected terminal response: ${JSON.stringify(message)}`));
+                return;
+              }
+              resolve();
+            });
+            ws.on("error", (err) => {
+              clearTimeout(timer);
+              reject(err);
+            });
+          });
+          NODE
+
+            local result=0
+            (cd "$runtime_dir" && PLANNOTATOR_SMOKE_URL="http://127.0.0.1:${port}" node "$smoke_script") || result=$?
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            if [ "$result" != "0" ]; then
+              exit "$result"
+            fi
+
+            echo "OK: plannotator annotate terminal WebSocket reached sidecar"
+          }
+
           # 2. review: exercises server startup, bundled HTML, git diff, and HTTP.
           smoke_test_server "plannotator review" 19500 "/api/diff" \
             "$BINARY" review
@@ -195,6 +284,9 @@ jobs:
           # 3. annotate: exercises annotate server startup with a real file.
           smoke_test_server "plannotator annotate" 19501 "/api/plan" \
             "$BINARY" annotate README.md
+
+          # 4. terminal: exercises managed WebTUI runtime + compiled sidecar import.
+          smoke_test_agent_terminal
 
       - name: Smoke-test binary
         if: runner.os == 'Windows'
@@ -206,8 +298,16 @@ jobs:
           $ErrorActionPreference = "Stop"
           $binary = (Resolve-Path $env:BINARY).Path
 
-          # 1. --help: proves binary loads and arg parsing works.
-          & $binary --help
+          # 1. --help from a hostile caller cwd proves the binary loads,
+          # arg parsing works, and Bun did not autoload caller bunfig.toml.
+          $hostileCwd = New-Item -ItemType Directory -Path (Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString()))
+          Set-Content -Path (Join-Path $hostileCwd.FullName "bunfig.toml") -Value 'preload = ["./does-not-exist.ts"]'
+          Push-Location $hostileCwd.FullName
+          try {
+            & $binary --help
+          } finally {
+            Pop-Location
+          }
 
           function Test-PlannotatorServer {
             param(
@@ -261,11 +361,146 @@ jobs:
             Write-Host "OK: $Label responded on :$Port$Endpoint"
           }
 
+          function Test-AgentTerminal {
+            $port = "19502"
+            $dataDir = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-terminal-$([System.Guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+
+            $env:PLANNOTATOR_DATA_DIR = $dataDir
+            & $binary install-runtime agent-terminal
+            if ($LASTEXITCODE -ne 0) {
+              throw "FAIL: install-runtime agent-terminal failed"
+            }
+
+            $env:PLANNOTATOR_PORT = $port
+            $stdout = New-TemporaryFile
+            $stderr = New-TemporaryFile
+            $process = Start-Process `
+              -FilePath $binary `
+              -ArgumentList @("annotate", "README.md") `
+              -PassThru `
+              -NoNewWindow `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr
+
+            try {
+              $ok = $false
+              for ($i = 0; $i -lt 60; $i++) {
+                try {
+                  Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/plan" -UseBasicParsing -TimeoutSec 1 | Out-Null
+                  $ok = $true
+                  break
+                } catch {
+                  if ($process.HasExited) {
+                    break
+                  }
+                  Start-Sleep -Milliseconds 500
+                }
+              }
+
+              if (-not $ok) {
+                throw "FAIL: plannotator annotate terminal did not respond on :$Port/api/plan"
+              }
+
+              $runtimeDir = Join-Path $dataDir "vendor\agent-terminal\webtui-0.1.0"
+              $smokeScript = Join-Path $runtimeDir "terminal-smoke.mjs"
+              Set-Content -Path $smokeScript -Encoding UTF8 -Value @'
+          import WebSocket from "ws";
+
+          const base = process.env.PLANNOTATOR_SMOKE_URL;
+          const plan = await fetch(`${base}/api/plan`).then((res) => res.json());
+          const terminal = plan.agentTerminal;
+          if (!terminal?.enabled) {
+            throw new Error(`agent terminal disabled: ${JSON.stringify(terminal)}`);
+          }
+          if (!terminal.wsPath?.startsWith("/api/agent-terminal/pty/")) {
+            throw new Error(`agent terminal returned non-tokenized path: ${terminal.wsPath}`);
+          }
+
+          await new Promise((resolve, reject) => {
+            let ws;
+            const timer = setTimeout(() => {
+              ws?.close();
+              reject(new Error("timed out waiting for terminal response"));
+            }, 5000);
+            ws = new WebSocket(`${base.replace(/^http/, "ws")}${terminal.wsPath}`);
+            ws.on("open", () => {
+              ws.send(JSON.stringify({ type: "spawn", requestId: "missing-agent", options: {} }));
+            });
+            ws.on("message", (raw) => {
+              clearTimeout(timer);
+              ws.close();
+              const message = JSON.parse(String(raw));
+              if (message.type !== "error" || message.message !== "Agent terminal requires a built-in WebTUI agent.") {
+                reject(new Error(`unexpected terminal response: ${JSON.stringify(message)}`));
+                return;
+              }
+              resolve();
+            });
+            ws.on("error", (err) => {
+              clearTimeout(timer);
+              reject(err);
+            });
+          });
+          '@
+              Push-Location $runtimeDir
+              try {
+                $env:PLANNOTATOR_SMOKE_URL = "http://127.0.0.1:$Port"
+                node $smokeScript
+              } finally {
+                Pop-Location
+                Remove-Item Env:\PLANNOTATOR_SMOKE_URL -ErrorAction SilentlyContinue
+              }
+              Write-Host "OK: plannotator annotate terminal WebSocket reached sidecar"
+            } finally {
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
+              }
+              Remove-Item Env:\PLANNOTATOR_PORT -ErrorAction SilentlyContinue
+              Remove-Item Env:\PLANNOTATOR_DATA_DIR -ErrorAction SilentlyContinue
+            }
+          }
+
           # 2. review: exercises server startup, bundled HTML, git diff, and HTTP.
           Test-PlannotatorServer "plannotator review" "19500" "/api/diff" @("review")
 
           # 3. annotate: exercises annotate server startup with a real file.
           Test-PlannotatorServer "plannotator annotate" "19501" "/api/plan" @("annotate", "README.md")
+
+          # 4. terminal: exercises managed WebTUI runtime + compiled sidecar import.
+          Test-AgentTerminal
+
+  pi-extension-ai-runtime-windows:
+    needs: test
+    # Exercises the Pi extension's Node/jiti server mirror on Windows with an
+    # npm-style `pi` shim pair. The binary smoke above covers the compiled Bun
+    # CLI, but the published Pi extension uses this separate Node path.
+    name: Pi extension AI runtime (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.11
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate Pi extension shared copies
+        shell: bash
+        run: bash apps/pi-extension/vendor.sh
+
+      - name: Build Pi AI runtime smoke
+        run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
+
+      - name: Run Pi AI runtime smoke
+        run: node "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
 
   install-script-smoke:
     needs: build
@@ -280,7 +515,7 @@ jobs:
             artifact: plannotator-linux-x64
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Download binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -423,6 +658,7 @@ jobs:
     needs:
       - build
       - smoke-binaries
+      - pi-extension-ai-runtime-windows
       - install-script-smoke
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
@@ -438,7 +674,7 @@ jobs:
           name: binaries
 
       - name: Generate SLSA build provenance attestation
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: |
             plannotator-darwin-arm64
@@ -466,7 +702,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -478,7 +714,7 @@ jobs:
         run: ls -la artifacts/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: artifacts/*
           generate_release_notes: true
@@ -489,19 +725,20 @@ jobs:
     needs:
       - build
       - smoke-binaries
+      - pi-extension-ai-runtime-windows
       - install-script-smoke
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.11
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org

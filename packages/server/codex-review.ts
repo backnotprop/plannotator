@@ -6,22 +6,29 @@
  */
 
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { appendFile, mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { toRelativePath } from "./path-utils";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import {
+  composeReviewPrompt,
+  type ResolvedReviewProfile,
+} from "@plannotator/shared/review-profiles";
+import { classifyFindingPlacement } from "@plannotator/shared/external-annotation";
 
 // ---------------------------------------------------------------------------
 // Debug log — only active when PLANNOTATOR_DEBUG is set
 // ---------------------------------------------------------------------------
 
+const DATA_DIR = getPlannotatorDataDir();
 const DEBUG_ENABLED = !!process.env.PLANNOTATOR_DEBUG;
-const DEBUG_LOG_PATH = join(homedir(), ".plannotator", "codex-review-debug.log");
+const DEBUG_LOG_PATH = join(DATA_DIR, "codex-review-debug.log");
 
 async function debugLog(label: string, data?: unknown): Promise<void> {
   if (!DEBUG_ENABLED) return;
   try {
-    await mkdir(join(homedir(), ".plannotator"), { recursive: true });
+    await mkdir(DATA_DIR, { recursive: true });
     const timestamp = new Date().toISOString();
     const line = data !== undefined
       ? `[${timestamp}] ${label}: ${typeof data === "string" ? data : JSON.stringify(data, null, 2)}\n`
@@ -36,7 +43,7 @@ async function debugLog(label: string, data?: unknown): Promise<void> {
 // can't read, so we materialize the schema to a real file.
 // ---------------------------------------------------------------------------
 
-const CODEX_REVIEW_SCHEMA = JSON.stringify({
+export const CODEX_REVIEW_SCHEMA = JSON.stringify({
   type: "object",
   properties: {
     findings: {
@@ -48,12 +55,15 @@ const CODEX_REVIEW_SCHEMA = JSON.stringify({
           body: { type: "string" },
           confidence_score: { type: "number" },
           priority: { type: ["integer", "null"] },
+          // Nullable, not omittable: OpenAI strict structured output requires
+          // every property to appear in `required`. A whole-file finding sets
+          // line_range to null; a general finding sets code_location to null.
           code_location: {
-            type: "object",
+            type: ["object", "null"],
             properties: {
               absolute_file_path: { type: "string" },
               line_range: {
-                type: "object",
+                type: ["object", "null"],
                 properties: {
                   start: { type: "integer" },
                   end: { type: "integer" },
@@ -78,7 +88,7 @@ const CODEX_REVIEW_SCHEMA = JSON.stringify({
   additionalProperties: false,
 });
 
-const SCHEMA_DIR = join(homedir(), ".plannotator");
+const SCHEMA_DIR = DATA_DIR;
 const SCHEMA_FILE = join(SCHEMA_DIR, "codex-review-schema.json");
 let schemaMaterialized = false;
 
@@ -149,12 +159,32 @@ At the beginning of the finding title, tag the bug with priority level. For exam
 
 Additionally, include a numeric priority field in the JSON output for each finding: set "priority" to 0 for P0, 1 for P1, 2 for P2, or 3 for P3. If a priority cannot be determined, omit the field or use null.
 
+Place each finding by how specific it is. For a line-level issue, set code_location with the file and a line_range. For a whole-file issue, set code_location with the file path and line_range null. For a general, review-wide point, set code_location null. Do not invent a line range you are unsure of — drop to a whole-file or general placement instead.
+
 At the end of your findings, output an "overall correctness" verdict of whether or not the patch should be considered "correct".
 Correct implies that existing code and tests will not break, and the patch is free of bugs and other blocking issues.
 Ignore non-blocking issues such as style, formatting, typos, documentation, and other nits.
 
 FORMATTING GUIDELINES:
 The finding description should be one paragraph.`;
+
+// ---------------------------------------------------------------------------
+// Prompt composition
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose Codex's review prompt: the immutable system prompt, the resolved
+ * profile's Custom Review Profile section (omitted for builtin:default), then
+ * the user review message. For builtin:default / no profile the output is
+ * byte-identical to today's
+ * `CODEX_REVIEW_SYSTEM_PROMPT + "\n\n---\n\n" + userMessage`.
+ */
+export function composeCodexReviewPrompt(
+  userMessage: string,
+  reviewProfile?: ResolvedReviewProfile,
+): string {
+  return composeReviewPrompt(CODEX_REVIEW_SYSTEM_PROMPT, reviewProfile, userMessage);
+}
 
 // ---------------------------------------------------------------------------
 // Command builder
@@ -210,7 +240,7 @@ export function generateOutputPath(): string {
 
 export interface CodexCodeLocation {
   absolute_file_path: string;
-  line_range: { start: number; end: number };
+  line_range?: { start: number; end: number } | null; // null for a whole-file comment
 }
 
 export interface CodexFinding {
@@ -218,7 +248,7 @@ export interface CodexFinding {
   body: string;
   confidence_score: number;
   priority: number | null;
-  code_location: CodexCodeLocation;
+  code_location?: CodexCodeLocation | null; // null for a general (review-level) comment
 }
 
 export interface CodexReviewOutput {
@@ -291,24 +321,29 @@ export function transformReviewFindings(
   source: string,
   cwd?: string,
   author?: string,
+  pathTransform?: (path: string) => string,
 ): ReviewAnnotationInput[] {
-  const annotations = findings
-    .filter((f) =>
-      f.code_location?.absolute_file_path &&
-      typeof f.code_location?.line_range?.start === "number" &&
-      typeof f.code_location?.line_range?.end === "number"
-    )
-    .map((f) => ({
+  // Route every finding by what it carries — nothing is dropped. No usable file
+  // becomes a general comment; a file without a line range, a whole-file comment.
+  const annotations = findings.map((f) => {
+    const loc = f.code_location;
+    const rawFile = loc && typeof loc.absolute_file_path === "string" ? loc.absolute_file_path : "";
+    const filePath = rawFile
+      ? (pathTransform ? pathTransform(toRelativePath(rawFile, cwd)) : toRelativePath(rawFile, cwd))
+      : "";
+    const placement = classifyFindingPlacement(filePath, loc?.line_range?.start, loc?.line_range?.end);
+    return {
       source,
-      filePath: toRelativePath(f.code_location.absolute_file_path, cwd),
-      lineStart: f.code_location.line_range.start,
-      lineEnd: f.code_location.line_range.end,
+      filePath: placement.filePath,
+      lineStart: placement.lineStart,
+      lineEnd: placement.lineEnd,
       type: "comment",
       side: "new",
-      scope: "line",
+      scope: placement.scope,
       text: `${f.title}\n\n${f.body}`.trim(),
       author: author ?? "Review Agent",
-    }));
+    };
+  });
 
   debugLog("TRANSFORM_FINDINGS", {
     inputCount: findings.length,

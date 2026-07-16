@@ -18,8 +18,8 @@
     "esModuleInterop": true,
     "types": ["bun"],
     "paths": {
-      "@plannotator/shared": ["../shared/index.ts"],
-      "@plannotator/shared/*": ["../shared/*"]
+      "@plannotator/core": ["../core/index.ts"],
+      "@plannotator/core/*": ["../core/*"]
     }
   },
   "include": [
