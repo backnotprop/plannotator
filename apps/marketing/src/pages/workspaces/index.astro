@@ -23,7 +23,7 @@ const teamSizes = [
 ---
 <Base
   title="Plannotator Workspaces · Get notified"
-  description="Plannotator Workspaces is the hosted team layer for collaborating on agent plans, specs, code reviews, and verification standards. Plannotator core stays free and open source."
+  description="Plannotator Workspaces is the private team layer for keeping human review, agent work, and durable context together. Join the design partner waitlist."
 >
   <Fragment slot="head">
     <!-- Page-scoped theme tokens. The page is now system-responsive: it
@@ -110,59 +110,91 @@ const teamSizes = [
       <div class="ws-col-left">
         <header class="ws-hero">
           <p class="ws-eyebrow">Plannotator Workspaces · Waitlist</p>
-          <h1 class="ws-page-title">From review surfaces to standards your agents learn from.</h1>
+          <h1 class="ws-page-title">A private workspace for teams working with coding agents.</h1>
+          <p class="ws-hero-copy">
+            Plannotator already gives individuals a better way to review agent
+            plans and code. Workspaces brings that review loop into a shared
+            team setting, so useful context does not disappear after one run.
+          </p>
+          <div class="ws-link-row" aria-label="Related Plannotator surfaces">
+            <a href="/" class="ws-text-link">Plan review</a>
+            <a href="/code-review/" class="ws-text-link">Code review</a>
+          </div>
         </header>
 
         <section class="ws-info">
           <div class="ws-phases">
           <div class="ws-phase">
             <span class="ws-when">Today</span>
-            <span class="ws-what">You review agent artifacts (docs/specs) and code.</span>
+            <span class="ws-what">Plannotator helps you review agent plans, docs, and code before sending feedback back to the agent.</span>
           </div>
           <div class="ws-phase">
-            <span class="ws-when">Next</span>
-            <span class="ws-what">Artifacts and reviews become facts, requirements, and testable standards. Versioned and accessible to your agents and teammates.</span>
+            <span class="ws-when">Teams</span>
+            <span class="ws-what">Workspaces keeps those reviews and decisions in one shared place for the people and agents that need them later.</span>
           </div>
           <div class="ws-phase">
-            <span class="ws-when">Compound</span>
-            <span class="ws-what">Those standards get checked before and after code lands. Additionally, Workspaces will offer enhanced gating for PRs and releases; achieving higher quality and faster verification.</span>
+            <span class="ws-when">Private beta</span>
+            <span class="ws-what">We are opening this carefully with design partners who already feel the pain of multi-agent planning and review.</span>
           </div>
         </div>
 
-        <p class="ws-intro">Plannotator Workspaces will offer:</p>
+        <div class="ws-preview-panel" aria-label="Workspaces preview">
+          <div class="ws-preview-top">
+            <span>Private beta</span>
+            <span>human review loop</span>
+          </div>
+          <div class="ws-preview-flow">
+            <div class="ws-preview-node">
+              <span class="ws-node-k">01</span>
+              <strong>Review</strong>
+              <span>Plans and code</span>
+            </div>
+            <div class="ws-preview-rail" aria-hidden="true"></div>
+            <div class="ws-preview-node">
+              <span class="ws-node-k">02</span>
+              <strong>Context</strong>
+              <span>Shared by the team</span>
+            </div>
+            <div class="ws-preview-rail" aria-hidden="true"></div>
+            <div class="ws-preview-node">
+              <span class="ws-node-k">03</span>
+              <strong>Handoff</strong>
+              <span>Back to agents</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="ws-intro">What we are sharing publicly:</p>
 
         <ul class="ws-points">
           <li>
-            <strong>Collaborative knowledge base for agent artifacts.</strong>
-            Share plans, specs, explainers, and reviews with your team
-            (and agents) in markdown or HTML, before and after agents
-            code.
+            <strong>Shared context for agent work.</strong>
+            Plans, review notes, decisions, and team knowledge belong in a
+            durable workspace, not scattered across chats, terminals, and PRs.
           </li>
           <li>
-            <strong>Artifacts and annotations become standards.</strong>
-            Capture team artifacts and review comments as reusable
-            expectations for future agent work.
-          </li>
-          <li class="ws-points-feat">
-            <strong>
-              Manage golden standards.<span class="ws-star">✱</span>
-            </strong>
-            Workspaces extracts verification facts (simple, sourced claims
-            about your system) from specs and reviews, and accumulates
-            them into a golden set of rules your agents can rely on.
+            <strong>Human review stays central.</strong>
+            Teams should be able to discuss, revise, and approve the important
+            parts of agent work before that work becomes more code.
           </li>
           <li>
-            <strong>Feed standards back into agents.</strong>
-            Send accumulated team knowledge into planning and review
-            agents. Access rules from your own agents, or run them as
-            CI/CD-gated agents inside Workspaces.
+            <strong>Standards can compound.</strong>
+            Useful review feedback should become reusable team context, with
+            enough structure to apply across projects without locking you in.
           </li>
           <li>
-            <strong>Connect to CI/CD.</strong>
-            PR explainers with attached plans and review context, plus
-            verification against your team's standards.
-            </li>
+            <strong>Portable by default.</strong>
+            Your plans, notes, and standards should remain readable, movable,
+            and useful outside any single product surface.
+          </li>
           </ul>
+
+          <div class="ws-private-note">
+            <span class="ws-private-label">Design partner detail</span>
+            We are intentionally keeping the public page high-level. In design
+            partner conversations, we will go deeper on review workflows,
+            standards, repo scope, and agent handoff.
+          </div>
         </section>
       </div>
 
@@ -211,7 +243,7 @@ const teamSizes = [
               </label>
               <textarea
                 name="note"
-                placeholder="Wishes, blockers, or how you'd like to use Workspaces."
+                placeholder="What breaks today when your team reviews plans, code, or agent work?"
                 maxlength="1000"
               ></textarea>
             </div>
@@ -291,7 +323,7 @@ const teamSizes = [
             <span class="ws-commit-tag">[ open source ]</span>
             <p class="ws-commit-msg">
               Plannotator core stays <em>free and open source</em>, always.
-              Workspaces is the hosted layer for teams and power users.
+              Workspaces is the private team layer built around it.
             </p>
           </div>
 
@@ -680,15 +712,52 @@ const teamSizes = [
     }
     .ws-page-title {
       font-family: 'Instrument Sans', system-ui, sans-serif;
-      font-size: clamp(20px, 2.4vw, 26px);
+      font-size: 3.5rem;
       font-weight: 600;
-      line-height: 1.18;
-      letter-spacing: -0.012em;
+      line-height: 1.02;
+      letter-spacing: 0;
       color: var(--foreground);
       margin: 0;
     }
+    .ws-hero-copy {
+      max-width: 660px;
+      margin: 22px 0 0;
+      color: oklch(from var(--foreground) l c h / 0.78);
+      font-size: 1.0625rem;
+      line-height: 1.65;
+    }
+    .ws-link-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .ws-text-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 0 14px;
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      color: var(--foreground);
+      font-size: 0.875rem;
+      text-decoration: none;
+      transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+    }
+    .ws-text-link:hover {
+      border-color: oklch(from var(--primary) l c h / 0.6);
+      color: var(--primary);
+      background: oklch(from var(--primary) l c h / 0.08);
+    }
+    @media (max-width: 980px) {
+      .ws-page-title { font-size: 2.875rem; }
+    }
+    @media (max-width: 600px) {
+      .ws-page-title { font-size: 2.35rem; }
+      .ws-hero-copy { font-size: 1rem; }
+    }
 
-    /* ── Phases (Today / Next / Compound) ── */
+    /* ── Phases ── */
     .ws-phases {
       display: grid;
       grid-template-columns: 110px 1fr;
@@ -708,7 +777,7 @@ const teamSizes = [
       font-size: 0.9375rem;
       font-weight: 600;
       color: var(--secondary);
-      letter-spacing: -0.005em;
+      letter-spacing: 0;
       padding-left: 14px;
     }
     .ws-what {
@@ -721,6 +790,96 @@ const teamSizes = [
       .ws-when { padding-left: 8px; }
     }
 
+    /* ── High-level preview, intentionally non-specific ── */
+    .ws-preview-panel {
+      max-width: 620px;
+      margin: 26px 0 0;
+      padding: 18px;
+      background:
+        linear-gradient(135deg, oklch(from var(--card) l c h / 0.96), oklch(from var(--muted) l c h / 0.72));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 0 oklch(from var(--border) l c h / 0.4);
+    }
+    .ws-preview-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted-foreground);
+    }
+    .ws-preview-flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+    }
+    .ws-preview-node {
+      min-height: 116px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 14px;
+      background: var(--background);
+      border: 1px solid oklch(from var(--border) l c h / 0.8);
+      border-radius: 6px;
+    }
+    .ws-node-k {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--primary);
+    }
+    .ws-preview-node strong {
+      font-family: 'Instrument Sans', system-ui, sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0;
+      color: var(--foreground);
+    }
+    .ws-preview-node span:last-child {
+      color: var(--muted-foreground);
+      font-size: 0.8125rem;
+      line-height: 1.35;
+    }
+    .ws-preview-rail {
+      height: 1px;
+      background: linear-gradient(90deg, var(--border), var(--primary), var(--border));
+      position: relative;
+    }
+    .ws-preview-rail::after {
+      content: "";
+      position: absolute;
+      right: -1px;
+      top: 50%;
+      width: 7px;
+      height: 7px;
+      border-top: 1px solid var(--primary);
+      border-right: 1px solid var(--primary);
+      transform: translateY(-50%) rotate(45deg);
+    }
+    @media (max-width: 700px) {
+      .ws-preview-flow {
+        grid-template-columns: 1fr;
+      }
+      .ws-preview-rail {
+        width: 1px;
+        height: 20px;
+        margin: 0 auto;
+        background: linear-gradient(180deg, var(--border), var(--primary), var(--border));
+      }
+      .ws-preview-rail::after {
+        right: 50%;
+        top: auto;
+        bottom: -1px;
+        transform: translateX(50%) rotate(135deg);
+      }
+      .ws-preview-node { min-height: 96px; }
+    }
+
     /* ── Intro lead ── */
     .ws-intro {
       font-family: 'Instrument Sans', system-ui, sans-serif;
@@ -728,7 +887,7 @@ const teamSizes = [
       color: var(--foreground);
       font-weight: 600;
       font-size: 1.0625rem;
-      letter-spacing: -0.008em;
+      letter-spacing: 0;
       max-width: 540px;
     }
 
@@ -764,31 +923,28 @@ const teamSizes = [
       color: var(--foreground);
       font-weight: 600;
       font-size: 0.9375rem;
-      letter-spacing: -0.005em;
+      letter-spacing: 0;
       margin-bottom: 2px;
     }
-    .ws-points-feat {
+    .ws-private-note {
+      max-width: 560px;
+      margin-top: 18px;
+      padding: 16px 18px;
+      border: 1px solid oklch(from var(--primary) l c h / 0.28);
+      border-radius: var(--radius);
       background: oklch(from var(--primary) l c h / 0.08);
-      margin-left: -14px;
-      padding-left: 28px !important;
-      padding-right: 14px;
-      border-bottom: none !important;
+      color: oklch(from var(--foreground) l c h / 0.82);
+      font-size: 0.875rem;
+      line-height: 1.6;
     }
-    /* Restore the next sibling's top edge so dropping the feat's bottom
-       border doesn't leave it visually merged with the following item. */
-    .ws-points-feat + li {
-      border-top: 1px solid oklch(from var(--border) l c h / 0.3);
-    }
-    /* No bullet/bar on the highlighted item — the tinted background is
-       enough on its own. */
-    .ws-points-feat::before { display: none !important; }
-    .ws-star {
-      color: var(--primary);
+    .ws-private-label {
+      display: block;
+      margin-bottom: 6px;
       font-family: var(--font-mono);
       font-size: 0.6875rem;
-      font-weight: 500;
-      margin-left: 6px;
-      vertical-align: 1px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--primary);
     }
 
     /* ── OSS contributors card ──
