@@ -14,7 +14,7 @@
 
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
-import { isAddressInUseError, isRemoteSession, getServerHostname, getServerPorts } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -113,9 +113,6 @@ export interface ServerResult {
 
 // --- Server Implementation ---
 
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 500;
-
 /**
  * Start the Plannotator server
  *
@@ -131,10 +128,6 @@ export async function startPlannotatorServer(
   const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
 
   const isRemote = isRemoteSession();
-  const configuredPorts = getServerPorts();
-  const portsToTry = configuredPorts.length > 1
-    ? configuredPorts
-    : Array(MAX_RETRIES).fill(configuredPorts[0]);
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
@@ -207,13 +200,8 @@ export async function startPlannotatorServer(
     decisionPromise = new Promise(() => {});
   }
 
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= portsToTry.length; attempt++) {
-    const port = portsToTry[attempt - 1];
-    try {
-      server = Bun.serve({
+  const server = await startBunServerOnAvailablePort((port) =>
+    Bun.serve({
         hostname: getServerHostname(),
         port,
         // Bun's default 10s idleTimeout kills AI SSE streams that stall
@@ -586,32 +574,8 @@ export async function startPlannotatorServer(
             { status: 500, headers: { "Content-Type": "text/plain" } },
           );
         },
-      });
-
-      break; // Success, exit retry loop
-    } catch (err: unknown) {
-      const isAddressInUse = isAddressInUseError(err);
-
-      if (isAddressInUse && attempt < portsToTry.length) {
-        if (configuredPorts.length === 1) await Bun.sleep(RETRY_DELAY_MS);
-        continue;
-      }
-
-      if (isAddressInUse) {
-        const configured = configuredPorts.length > 1
-          ? `${configuredPorts[0]}-${configuredPorts.at(-1)}`
-          : String(port);
-        const hint = isRemote ? " (set PLANNOTATOR_PORT to use a different port or range)" : "";
-        throw new Error(`Port selection ${configured} exhausted${hint}`);
-      }
-
-      throw err;
-    }
-  }
-
-  if (!server) {
-    throw new Error("Failed to start server");
-  }
+    }),
+  );
 
   const port = server.port!;
   const serverUrl = `http://localhost:${port}`;

@@ -29,7 +29,7 @@ for f in config-types storage-types workspace-status-types; do
 done
 
 # Everything else in the original flat list stays sourced from packages/shared.
-for f in prompts review-core diff-paths cli-pagination jj-core vcs-core review-args draft pr-types pr-context-live pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common resolve-file annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node url-to-markdown tour annotate-args at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff source-save-node review-profiles guide commit-avatars commit-history; do
+for f in prompts review-core diff-paths cli-pagination jj-core vcs-core review-args draft pr-types pr-context-live pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common resolve-file annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node url-to-markdown tour annotate-args at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff source-save-node review-profiles guide commit-avatars commit-history port-range; do
   src="../../packages/shared/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done

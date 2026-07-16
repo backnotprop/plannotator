@@ -5,7 +5,15 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { isAddressInUseError, isRemoteSession, getServerHostname, getServerPort, getServerPorts } from "./remote";
+import { closeServer, occupyConsecutivePorts } from "../../tests/helpers/ports";
+import {
+  isAddressInUseError,
+  isRemoteSession,
+  getServerHostname,
+  getServerPort,
+  getServerPorts,
+  startBunServerOnAvailablePort,
+} from "./remote";
 
 // Save and restore env between tests
 const savedEnv: Record<string, string | undefined> = {};
@@ -148,6 +156,19 @@ describe("getServerPort", () => {
     expect(getServerPort()).toBe(0);
   });
 
+  test("rejects malformed fixed ports and ranges without accepting numeric prefixes", () => {
+    clearEnv();
+    for (const value of [
+      "19432garbage",
+      "19432.5",
+      "19432-19435garbage",
+      "19432-19435-19436",
+    ]) {
+      process.env.PLANNOTATOR_PORT = value;
+      expect(getServerPorts()).toEqual([0]);
+    }
+  });
+
   test("ignores out-of-range port", () => {
     clearEnv();
     process.env.PLANNOTATOR_PORT = "99999";
@@ -158,6 +179,44 @@ describe("getServerPort", () => {
     clearEnv();
     process.env.PLANNOTATOR_PORT = "0";
     expect(getServerPort()).toBe(0);
+  });
+});
+
+describe("Bun port range binding", () => {
+  test("binds the next port when the range start is occupied", async () => {
+    clearEnv();
+    const { start, servers } = await occupyConsecutivePorts(2);
+    await closeServer(servers[1]);
+    process.env.PLANNOTATOR_PORT = `${start}-${start + 1}`;
+
+    let server: ReturnType<typeof Bun.serve> | undefined;
+    try {
+      server = await startBunServerOnAvailablePort((port) => Bun.serve({
+        hostname: "127.0.0.1",
+        port,
+        fetch: () => new Response("ok"),
+      }));
+      expect(server.port).toBe(start + 1);
+    } finally {
+      server?.stop(true);
+      await closeServer(servers[0]);
+    }
+  });
+
+  test("reports an exhausted occupied range", async () => {
+    clearEnv();
+    const { start, servers } = await occupyConsecutivePorts(2);
+    process.env.PLANNOTATOR_PORT = `${start}-${start + 1}`;
+
+    try {
+      await expect(startBunServerOnAvailablePort((port) => Bun.serve({
+        hostname: "127.0.0.1",
+        port,
+        fetch: () => new Response("ok"),
+      }))).rejects.toThrow(`Port selection ${start}-${start + 1} exhausted`);
+    } finally {
+      await Promise.all(servers.map(closeServer));
+    }
   });
 });
 

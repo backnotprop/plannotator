@@ -9,7 +9,7 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
-import { isAddressInUseError, isRemoteSession, getServerHostname, getServerPorts } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, gitRuntime } from "./vcs";
 import { basename } from "node:path";
@@ -187,9 +187,6 @@ export interface ReviewServerResult {
 }
 
 // --- Server Implementation ---
-
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 500;
 
 /**
  * Start the Code Review server
@@ -1202,10 +1199,6 @@ export async function startReviewServer(
   const aiRuntime = await createAIRuntime({ getCwd: resolveAgentCwd });
 
   const isRemote = isRemoteSession();
-  const configuredPorts = getServerPorts();
-  const portsToTry = configuredPorts.length > 1
-    ? configuredPorts
-    : Array(MAX_RETRIES).fill(configuredPorts[0]);
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
@@ -1282,13 +1275,8 @@ export async function startReviewServer(
     resolveDecision = resolve;
   });
 
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= portsToTry.length; attempt++) {
-    const port = portsToTry[attempt - 1];
-    try {
-      server = Bun.serve({
+  const server = await startBunServerOnAvailablePort((port) =>
+    Bun.serve({
         hostname: getServerHostname(),
         port,
         // Bun's default 10s idleTimeout kills requests that legitimately park:
@@ -2533,32 +2521,8 @@ export async function startReviewServer(
             { status: 500, headers: { "Content-Type": "text/plain" } },
           );
         },
-      });
-
-      break; // Success, exit retry loop
-    } catch (err: unknown) {
-      const isAddressInUse = isAddressInUseError(err);
-
-      if (isAddressInUse && attempt < portsToTry.length) {
-        if (configuredPorts.length === 1) await Bun.sleep(RETRY_DELAY_MS);
-        continue;
-      }
-
-      if (isAddressInUse) {
-        const configured = configuredPorts.length > 1
-          ? `${configuredPorts[0]}-${configuredPorts.at(-1)}`
-          : String(port);
-        const hint = isRemote ? " (set PLANNOTATOR_PORT to use a different port or range)" : "";
-        throw new Error(`Port selection ${configured} exhausted${hint}`);
-      }
-
-      throw err;
-    }
-  }
-
-  if (!server) {
-    throw new Error("Failed to start server");
-  }
+    }),
+  );
 
   const port = server.port!;
   serverUrl = `http://localhost:${port}`;

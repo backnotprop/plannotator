@@ -8,9 +8,14 @@
  * Legacy (still supported): SSH_TTY, SSH_CONNECTION
  */
 
+import { parsePortSelection } from "@plannotator/shared/port-range";
+
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
+const MAX_FIXED_PORT_RETRIES = 5;
+const PORT_RETRY_DELAY_MS = 500;
 
+/** Return whether a runtime listen failure represents an occupied address. */
 export function isAddressInUseError(err: unknown): boolean {
   return err instanceof Error && (
     (err as NodeJS.ErrnoException).code === "EADDRINUSE" ||
@@ -58,19 +63,9 @@ export function isRemoteSession(): boolean {
 export function getServerPorts(): number[] {
   const envPort = process.env.PLANNOTATOR_PORT;
   if (envPort) {
-    const value = envPort.trim();
-    const range = /^(\d+)-(\d+)$/.exec(value);
-    if (range) {
-      const start = Number(range[1]);
-      const end = Number(range[2]);
-      if (start >= 1 && end < 65536 && start <= end) {
-        return Array.from({ length: end - start + 1 }, (_, index) => start + index);
-      }
-    } else {
-      const parsed = parseInt(value, 10);
-      if (!Number.isNaN(parsed) && parsed >= 0 && parsed < 65536) {
-        return [parsed];
-      }
+    const parsed = parsePortSelection(envPort);
+    if (parsed) {
+      return parsed;
     }
     console.error(
       `[Plannotator] Warning: Invalid PLANNOTATOR_PORT "${envPort}", using default`
@@ -86,6 +81,48 @@ export function getServerPorts(): number[] {
  */
 export function getServerPort(): number {
   return getServerPorts()[0];
+}
+
+/**
+ * Start a Bun server on the first available configured port.
+ *
+ * Bounded ranges advance immediately after EADDRINUSE. A fixed port retains
+ * the existing five-attempt retry behavior for transient conflicts.
+ */
+export async function startBunServerOnAvailablePort<TServer>(
+  startServer: (port: number) => TServer,
+): Promise<TServer> {
+  const configuredPorts = getServerPorts();
+  const portsToTry = configuredPorts.length > 1
+    ? configuredPorts
+    : Array(MAX_FIXED_PORT_RETRIES).fill(configuredPorts[0]);
+
+  for (const [index, port] of portsToTry.entries()) {
+    try {
+      return startServer(port);
+    } catch (error: unknown) {
+      if (!isAddressInUseError(error)) {
+        throw error;
+      }
+
+      if (index < portsToTry.length - 1) {
+        if (configuredPorts.length === 1) {
+          await Bun.sleep(PORT_RETRY_DELAY_MS);
+        }
+        continue;
+      }
+
+      const configured = configuredPorts.length > 1
+        ? `${configuredPorts[0]}-${configuredPorts.at(-1)}`
+        : String(port);
+      const hint = isRemoteSession()
+        ? " (set PLANNOTATOR_PORT to use a different port or range)"
+        : "";
+      throw new Error(`Port selection ${configured} exhausted${hint}`);
+    }
+  }
+
+  throw new Error("Failed to start server");
 }
 
 /**

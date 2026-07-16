@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
+import { closeServer, occupyConsecutivePorts } from "../../../tests/helpers/ports";
 import {
 	getServerHostname,
 	getServerPort,
@@ -126,23 +127,65 @@ describe("pi port selection", () => {
 		expect(getServerPorts()).toEqual({ ports: [0], portSource: "random" });
 	});
 
+	test("rejects malformed fixed ports and ranges without accepting numeric prefixes", () => {
+		clearEnv();
+		for (const value of [
+			"19432garbage",
+			"19432.5",
+			"19432-19435garbage",
+			"19432-19435-19436",
+		]) {
+			process.env.PLANNOTATOR_PORT = value;
+			expect(getServerPorts()).toEqual({ ports: [0], portSource: "random" });
+		}
+	});
+
 	test("binds the next port when the range start is occupied", async () => {
 		clearEnv();
-		const blocker = createServer();
-		await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
-		const blockedPort = (blocker.address() as { port: number }).port;
-		expect(blockedPort).toBeLessThan(65535);
-
-		process.env.PLANNOTATOR_PORT = `${blockedPort}-${blockedPort + 1}`;
+		const { start, servers } = await occupyConsecutivePorts(2);
+		await closeServer(servers[1]);
+		process.env.PLANNOTATOR_PORT = `${start}-${start + 1}`;
 		const server = createServer();
 		try {
 			expect(await listenOnPort(server)).toEqual({
-				port: blockedPort + 1,
+				port: start + 1,
 				portSource: "env",
 			});
+			expect(server.listenerCount("error")).toBe(0);
+			expect(server.listenerCount("listening")).toBe(0);
 		} finally {
-			server.close();
-			blocker.close();
+			await closeServer(server);
+			await closeServer(servers[0]);
+		}
+	});
+
+	test("reports an exhausted occupied range", async () => {
+		clearEnv();
+		const { start, servers } = await occupyConsecutivePorts(2);
+		process.env.PLANNOTATOR_PORT = `${start}-${start + 1}`;
+		const server = createServer();
+
+		try {
+			await expect(listenOnPort(server)).rejects.toThrow(
+				`Port selection ${start}-${start + 1} exhausted`,
+			);
+		} finally {
+			await Promise.all(servers.map(closeServer));
+		}
+	});
+
+	test("removes failed-attempt listeners across a long occupied range", async () => {
+		clearEnv();
+		const { start, servers } = await occupyConsecutivePorts(12);
+		process.env.PLANNOTATOR_PORT = `${start}-${start + servers.length - 1}`;
+		const server = createServer();
+
+		try {
+			await expect(listenOnPort(server)).rejects.toThrow("exhausted");
+			expect(server.listenerCount("error")).toBe(0);
+			expect(server.listenerCount("listening")).toBe(0);
+		} finally {
+			await Promise.all(servers.map(closeServer));
 		}
 	});
 });

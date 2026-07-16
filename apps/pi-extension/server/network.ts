@@ -9,6 +9,7 @@ import type { Server } from "node:http";
 import { release } from "node:os";
 import { delimiter, join } from "node:path";
 import { loadConfig, resolveUseGlimpse } from "../generated/config.js";
+import { parsePortSelection } from "../generated/port-range.js";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -71,22 +72,9 @@ export function getServerPorts(): {
 } {
 	const envPort = process.env.PLANNOTATOR_PORT;
 	if (envPort) {
-		const value = envPort.trim();
-		const range = /^(\d+)-(\d+)$/.exec(value);
-		if (range) {
-			const start = Number(range[1]);
-			const end = Number(range[2]);
-			if (start >= 1 && end < 65536 && start <= end) {
-				return {
-					ports: Array.from({ length: end - start + 1 }, (_, index) => start + index),
-					portSource: "env",
-				};
-			}
-		} else {
-			const parsed = parseInt(value, 10);
-			if (!Number.isNaN(parsed) && parsed >= 0 && parsed < 65536) {
-				return { ports: [parsed], portSource: "env" };
-			}
+		const parsed = parsePortSelection(envPort);
+		if (parsed) {
+			return { ports: parsed, portSource: "env" };
 		}
 		// Invalid port - fall back silently, caller can check env var themselves
 	}
@@ -120,15 +108,27 @@ export async function listenOnPort(
 	for (const [index, port] of portsToTry.entries()) {
 		try {
 			await new Promise<void>((resolve, reject) => {
-				server.once("error", reject);
-				server.listen(
-					port,
-					getServerHostname(),
-					() => {
-						server.removeListener("error", reject);
-						resolve();
-					},
-				);
+				const onError = (error: Error) => {
+					cleanup();
+					reject(error);
+				};
+				const onListening = () => {
+					cleanup();
+					resolve();
+				};
+				const cleanup = () => {
+					server.removeListener("error", onError);
+					server.removeListener("listening", onListening);
+				};
+
+				server.once("error", onError);
+				server.once("listening", onListening);
+				try {
+					server.listen(port, getServerHostname());
+				} catch (error: unknown) {
+					cleanup();
+					reject(error);
+				}
 			});
 			const addr = server.address() as { port: number };
 			return { port: addr.port, portSource };
