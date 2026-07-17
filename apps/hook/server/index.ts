@@ -100,6 +100,7 @@ import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannot
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { statSync, rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
+import { checkoutPRHead } from "@plannotator/shared/pr-stack";
 import {
   getReviewApprovedPrompt,
   getReviewDeniedSuffix,
@@ -538,6 +539,7 @@ if (args[0] === "sessions") {
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
+  const inPlace = useLocal && reviewArgs.noWorktree === true;
 
   let rawPatch: string;
   let gitRef: string;
@@ -590,13 +592,90 @@ if (args[0] === "sessions") {
       process.exit(1);
     }
 
+    // --no-worktree: reuse the CURRENT repo for the PR checkout instead of
+    // adding a git worktree. `git worktree add` materializes a second full
+    // working tree, which is slow and disk-heavy on large repos; checking the
+    // PR head out in place avoids that. Same-repo only, requires a clean working
+    // tree, and the original branch/HEAD is restored when the session exits.
+    // With agentCwd set and no pool, the review server's resolvePRLocalCwd /
+    // ensurePRLocalCwd fallbacks use this repo, so full-stack diff, file
+    // expansion, and code-nav all keep working.
+    if (inPlace && prMetadata) {
+      try {
+        const repoDir = process.cwd();
+        if (prMetadata.baseBranch.includes('..') || prMetadata.baseBranch.startsWith('-')) throw new Error(`Invalid base branch: ${prMetadata.baseBranch}`);
+        if (!/^[0-9a-f]{40,64}$/i.test(prMetadata.baseSha)) throw new Error(`Invalid base SHA: ${prMetadata.baseSha}`);
+
+        let isSameRepo = false;
+        try {
+          const remoteResult = await gitRuntime.runGit(["remote", "get-url", "origin"], { cwd: repoDir });
+          if (remoteResult.exitCode === 0) {
+            const remoteUrl = remoteResult.stdout.trim();
+            const currentRepo = parseRemoteUrl(remoteUrl);
+            const prRepo = prMetadata.platform === "github"
+              ? `${prMetadata.owner}/${prMetadata.repo}`
+              : prMetadata.projectPath;
+            const repoMatches = !!currentRepo && currentRepo.toLowerCase() === prRepo.toLowerCase();
+            const sshHost = remoteUrl.match(/^[^@]+@([^:]+):/)?.[1];
+            const httpsHost = (() => { try { return new URL(remoteUrl).hostname; } catch { return null; } })();
+            const remoteHost = (sshHost || httpsHost || "").toLowerCase();
+            const prHost = prMetadata.host.toLowerCase();
+            isSameRepo = repoMatches && remoteHost === prHost;
+          }
+        } catch { /* not in a git repo */ }
+
+        if (!isSameRepo) {
+          console.error("Warning: --no-worktree only applies to a PR from the current repository; reviewing from the platform diff only.");
+        } else {
+          // Guard: never clobber uncommitted work.
+          const statusRes = await gitRuntime.runGit(["status", "--porcelain"], { cwd: repoDir });
+          if (statusRes.exitCode !== 0) throw new Error(`git status failed: ${statusRes.stderr.trim()}`);
+          if (statusRes.stdout.trim() !== "") {
+            throw new Error("working tree has uncommitted changes — commit or stash them, or drop --no-worktree");
+          }
+
+          const branchRes = await gitRuntime.runGit(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: repoDir });
+          const origRef = branchRes.exitCode === 0
+            ? branchRes.stdout.trim()
+            : (await gitRuntime.runGit(["rev-parse", "HEAD"], { cwd: repoDir })).stdout.trim();
+          if (!origRef) throw new Error("could not determine the current git ref to restore later");
+
+          const baseFetchRes = await gitRuntime.runGit(["fetch", "origin", "--", prMetadata.baseBranch], { cwd: repoDir });
+          if (baseFetchRes.exitCode !== 0) throw new Error(`git fetch origin ${prMetadata.baseBranch} failed: ${baseFetchRes.stderr.trim()}`);
+          const catRes = await gitRuntime.runGit(["cat-file", "-t", prMetadata.baseSha], { cwd: repoDir });
+          if (catRes.exitCode !== 0) await gitRuntime.runGit(["fetch", "origin", "--", prMetadata.baseSha], { cwd: repoDir });
+
+          const checkedOut = await checkoutPRHead(gitRuntime, prMetadata, repoDir);
+          if (!checkedOut) throw new Error("failed to fetch/checkout the PR head into the current repository");
+
+          agentCwd = repoDir;
+
+          let restored = false;
+          const restore = () => {
+            if (restored) return;
+            restored = true;
+            try { Bun.spawnSync(["git", "checkout", origRef], { cwd: repoDir }); } catch {}
+          };
+          worktreeCleanup = restore;
+          process.once("exit", restore);
+
+          console.error(`Checked out PR head in ${repoDir} (no worktree); '${origRef}' will be restored on exit.`);
+        }
+      } catch (err) {
+        console.error("Warning: --no-worktree failed, falling back to remote diff");
+        console.error(err instanceof Error ? err.message : String(err));
+        agentCwd = undefined;
+        worktreePool = undefined;
+        worktreeCleanup = undefined;
+      }
+    }
     // --local: create a local checkout with the PR head for full file access.
     // The checkout is built in the BACKGROUND — the platform diff is already
     // in hand, so the review server starts immediately. The pool entry starts
     // ready:false and flips to ready when the warmup completes; consumers that
     // need real files (agent jobs, full-stack diff, code-nav) await it via
     // pool.ensure().
-    if (useLocal && prMetadata) {
+    else if (useLocal && prMetadata) {
       // Hoisted so catch block can clean up partially-created directories
       let localPath: string | undefined;
       let sessionDir: string | undefined;

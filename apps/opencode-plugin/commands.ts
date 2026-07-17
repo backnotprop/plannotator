@@ -60,6 +60,12 @@ export async function handleReviewCommand(
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
 
+  // --no-worktree (in-place PR checkout) is implemented only in the Claude Code runtime.
+  if (reviewArgs.noWorktree) {
+    client.app.log({ level: "error", message: "--no-worktree is only supported in the Claude Code runtime, not OpenCode." });
+    return;
+  }
+
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
