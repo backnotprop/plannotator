@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://plannotator.ai/docs/getting-started/installation/">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a>
+  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a>
 </p>
 
 # Plannotator
@@ -100,6 +100,8 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
 /plannotator-last                                # Annotate the agent's last message
 ```
 
+Need a realistic document to try? Copy the [product requirements document template and filled example](https://docs.plannotator.ai/templates/product-requirements-document) as Markdown.
+
 ### Code review
 
 ```
@@ -146,7 +148,7 @@ Share a plan with a teammate and they can annotate it themselves. Import their f
 
 **Large plans** go through a short-link service, encrypted in your browser with AES-256-GCM. The server stores only ciphertext, and the key never leaves the URL fragment. Pastes auto-delete after 7 days.
 
-Same model as [PrivateBin](https://privatebin.info/). The paste service is [self-hostable](https://plannotator.ai/docs/guides/sharing-and-collaboration/).
+Same model as [PrivateBin](https://privatebin.info/). The paste service is [self-hostable](https://docs.plannotator.ai/open-source/workflows/sharing).
 
 Sharing can be disabled entirely with `PLANNOTATOR_SHARE=disabled`.
 
@@ -189,7 +191,7 @@ Then finish the step for your agent:
 | **OpenCode** | Add `"plugin": ["@plannotator/opencode@latest"]` to `opencode.json`. Restart OpenCode. | [README](apps/opencode-plugin/README.md) |
 | **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator`. | [README](apps/pi-extension/README.md) |
 
-Full walkthroughs live in the [installation docs](https://plannotator.ai/docs/getting-started/installation/).
+Full walkthroughs live in the [installation docs](https://docs.plannotator.ai/open-source/start/installation).
 
 <details>
 <summary>Claude Code: manual hook setup (without the plugin system)</summary>
@@ -320,7 +322,7 @@ Requires `gh` installed and authenticated. Can also be set persistently in `~/.p
 { "verifyAttestation": true }
 ```
 
-See the [verification docs](https://plannotator.ai/docs/reference/verifying-your-install/) for details.
+See the [verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
 
 ---
 
