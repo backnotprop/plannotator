@@ -121,7 +121,10 @@ describe("favicon surfaces", () => {
     expect(portalConfig).toContain("source: FAVICON_PNG_BYTES");
   });
 
-  test("the shared application favicon is the transparent tight-fit 64px asset", () => {
+  test("the shared application favicon is the selected production 64px asset", () => {
+    expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
+      "8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073",
+    );
     const stats = inspectRgbaPng(FAVICON_PNG_BYTES);
     expect(stats).toMatchObject({ width: 64, height: 64 });
     expect(stats.transparentPixels).toBeGreaterThan(0);
@@ -129,10 +132,10 @@ describe("favicon surfaces", () => {
     expect(stats.opaquePixels).toBeGreaterThan(0);
   });
 
-  test("the marketing site ships the transparent tight-fit 256px asset", async () => {
+  test("the marketing site ships the selected production 256px asset", async () => {
     const favicon = await readRepoFile("apps/marketing/public/favicon.png");
     expect(createHash("sha256").update(favicon).digest("hex")).toBe(
-      "0b76aedf7eee2944e134ee0cc369e57e3bc125e490b6ca5b4c02ba1395d0ea73",
+      "4e99a26b076e421f654df83472c6186b62830d5db8fcd8e97d01947dffac28fd",
     );
     const stats = inspectRgbaPng(favicon);
     expect(stats).toMatchObject({ width: 256, height: 256 });

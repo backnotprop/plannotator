@@ -9,7 +9,7 @@ import {
 describe("production favicon", () => {
   test("embeds the canonical 64px PNG exactly", () => {
     expect(createHash("sha256").update(FAVICON_PNG_BYTES).digest("hex")).toBe(
-      "a424302151106140b40f1aa891d07cd5081213db0ac9ace618a18ca2be7f3188",
+      "8467d50dba314f3b72ab73ba37d406baabd8d74ed72529e853613442a8c65073",
     );
     expect(Array.from(FAVICON_PNG_BYTES.subarray(0, 8))).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
