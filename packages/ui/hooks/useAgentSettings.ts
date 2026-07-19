@@ -193,12 +193,27 @@ export function sanitizeCodexPerModel(
   return out;
 }
 
-// One-shot migration: gpt-5.3-codex is deprecated (ChatGPT-account Codex
-// rejects it with a 400), so a saved pick of it silently becomes the current
-// default rather than shipping a launch that can never succeed.
-function migrateCodexModel(value: unknown, fallback: string): string {
-  if (typeof value !== 'string' || value === 'gpt-5.3-codex') return fallback;
-  return value;
+// One-shot model migrations for a saved Codex section. Keep its per-model
+// preferences aligned with the canonical model ID while sanitizing them.
+export function migrateCodexSection(
+  section: { model?: unknown; perModel?: Record<string, { reasoning: string; fast: boolean }> } | undefined,
+  fallback: string,
+): CodexSection {
+  const perModel = sanitizeCodexPerModel(section?.perModel);
+  const legacyPreference = perModel['gpt-5.6'];
+  if (legacyPreference) {
+    perModel['gpt-5.6-sol'] ??= legacyPreference;
+    delete perModel['gpt-5.6'];
+  }
+
+  const savedModel = section?.model;
+  const model =
+    savedModel === 'gpt-5.6'
+      ? 'gpt-5.6-sol'
+      : typeof savedModel !== 'string' || savedModel === 'gpt-5.3-codex'
+        ? fallback
+        : savedModel;
+  return { model, perModel };
 }
 
 function parseEngine(value: unknown): AgentEngine {
@@ -248,10 +263,7 @@ function readCookie(): AgentSettingsState {
         model: typeof parsed.claude?.model === 'string' ? parsed.claude.model : DEFAULT_CLAUDE_MODEL,
         perModel: parsed.claude?.perModel ?? {},
       },
-      codex: {
-        model: migrateCodexModel(parsed.codex?.model, DEFAULT_CODEX_MODEL),
-        perModel: sanitizeCodexPerModel(parsed.codex?.perModel),
-      },
+      codex: migrateCodexSection(parsed.codex, DEFAULT_CODEX_MODEL),
       cursor: {
         model: typeof parsed.cursor?.model === 'string' ? parsed.cursor.model : DEFAULT_CURSOR_MODEL,
       },
@@ -269,18 +281,12 @@ function readCookie(): AgentSettingsState {
         model: typeof parsed.tourClaude?.model === 'string' ? parsed.tourClaude.model : DEFAULT_TOUR_CLAUDE_MODEL,
         perModel: parsed.tourClaude?.perModel ?? {},
       },
-      tourCodex: {
-        model: migrateCodexModel(parsed.tourCodex?.model, DEFAULT_TOUR_CODEX_MODEL),
-        perModel: sanitizeCodexPerModel(parsed.tourCodex?.perModel),
-      },
+      tourCodex: migrateCodexSection(parsed.tourCodex, DEFAULT_TOUR_CODEX_MODEL),
       guideClaude: {
         model: typeof parsed.guideClaude?.model === 'string' ? parsed.guideClaude.model : DEFAULT_GUIDE_CLAUDE_MODEL,
         perModel: parsed.guideClaude?.perModel ?? {},
       },
-      guideCodex: {
-        model: migrateCodexModel(parsed.guideCodex?.model, DEFAULT_GUIDE_CODEX_MODEL),
-        perModel: sanitizeCodexPerModel(parsed.guideCodex?.perModel),
-      },
+      guideCodex: migrateCodexSection(parsed.guideCodex, DEFAULT_GUIDE_CODEX_MODEL),
       guideCursor: {
         model: typeof parsed.guideCursor?.model === 'string' ? parsed.guideCursor.model : DEFAULT_GUIDE_CURSOR_MODEL,
       },

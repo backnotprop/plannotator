@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { sanitizeCodexPerModel, parseReviewProfileByEngine, DEFAULT_CODEX_REASONING } from "./useAgentSettings";
+import {
+  DEFAULT_CODEX_REASONING,
+  migrateCodexSection,
+  parseReviewProfileByEngine,
+  sanitizeCodexPerModel,
+} from "./useAgentSettings";
 
 describe("sanitizeCodexPerModel", () => {
   test("returns empty object for undefined/empty input", () => {
@@ -40,6 +45,61 @@ describe("sanitizeCodexPerModel", () => {
     expect(sanitizeCodexPerModel(input)).toEqual({
       valid: { reasoning: "high", fast: false },
     });
+  });
+});
+
+describe("migrateCodexSection", () => {
+  test("moves a stale GPT-5.6 selection and preference while preserving unrelated preferences", () => {
+    expect(
+      migrateCodexSection(
+        {
+          model: "gpt-5.6",
+          perModel: {
+            "gpt-5.6": { reasoning: "xhigh", fast: true },
+            "gpt-5.5": { reasoning: "medium", fast: false },
+          },
+        },
+        "gpt-5.5",
+      ),
+    ).toEqual({
+      model: "gpt-5.6-sol",
+      perModel: {
+        "gpt-5.6-sol": { reasoning: "xhigh", fast: true },
+        "gpt-5.5": { reasoning: "medium", fast: false },
+      },
+    });
+  });
+
+  test("keeps the canonical preference when stale and canonical keys both exist", () => {
+    expect(
+      migrateCodexSection(
+        {
+          model: "gpt-5.6",
+          perModel: {
+            "gpt-5.6": { reasoning: "low", fast: false },
+            "gpt-5.6-sol": { reasoning: "high", fast: true },
+          },
+        },
+        "gpt-5.5",
+      ),
+    ).toEqual({
+      model: "gpt-5.6-sol",
+      perModel: {
+        "gpt-5.6-sol": { reasoning: "high", fast: true },
+      },
+    });
+  });
+
+  test("passes valid and unknown model IDs through unchanged", () => {
+    for (const model of ["gpt-5.5", "future-codex-model"]) {
+      const section = {
+        model,
+        perModel: {
+          [model]: { reasoning: "medium", fast: false },
+        },
+      };
+      expect(migrateCodexSection(section, "gpt-5.5")).toEqual(section);
+    }
   });
 });
 
