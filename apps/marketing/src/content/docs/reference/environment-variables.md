@@ -38,8 +38,11 @@ All Plannotator environment variables and their defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_JINA` | enabled | Set to `0` or `false` to disable Jina Reader for URL annotation. Set to `1` or `true` to enable (this is the default). Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
+| `PLANNOTATOR_ANNOTATE_HISTORY` | enabled | Set to `0` or `false` to disable per-file version history for non-empty local file annotation. Set to `1` or `true` to enable (this is the default). Can also be set in the active config file (`{ "annotateHistory": false }`); the environment variable takes precedence. Does not apply to URL, folder, or last-message annotation. |
+| `PLANNOTATOR_JINA` | enabled | Set to `0` or `false` to disable Jina Reader for URL annotation. Set to `1` or `true` to enable (this is the default). Can also be set in the active config file (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | (none) | Optional Jina Reader API key for higher rate limits. Without it: 20 req/min. With it: 500 req/min. Free keys available from [Jina](https://jina.ai/reader/) and include 10M tokens. |
+
+The active config file is `~/.plannotator/config.json` by default, or `$PLANNOTATOR_DATA_DIR/config.json` when the data directory is overridden.
 
 ## Paste service variables
 

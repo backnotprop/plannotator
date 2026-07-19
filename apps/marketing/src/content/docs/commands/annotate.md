@@ -76,7 +76,7 @@ Three ways to disable Jina Reader, in priority order:
 
 1. **CLI flag:** `--no-jina`
 2. **Environment variable:** `PLANNOTATOR_JINA=0` or `PLANNOTATOR_JINA=false`
-3. **Config file:** `~/.plannotator/config.json` with `{ "jina": false }`
+3. **Config file:** `config.json` in the Plannotator data directory with `{ "jina": false }` (`~/.plannotator/config.json` by default, or `$PLANNOTATOR_DATA_DIR/config.json` when overridden)
 
 If none of these are set, Jina is enabled by default.
 
@@ -99,6 +99,18 @@ For local HTML files, `--markdown` switches from raw HTML rendering to markdown 
 ## Source badge
 
 When annotating an HTML file or URL (not plain markdown), a small badge appears under the document title showing where the content came from. For URLs it shows the hostname (e.g. "stripe.com"). For HTML files it shows the filename (e.g. "guide.html").
+
+## Per-file version history
+
+Opening a non-empty local `.md`, `.mdx`, `.txt`, `.html`, or `.htm` file saves a copy for version history. Empty files do not create history. History is keyed by the file's resolved path, so reopening the same path after editing it exposes the previous/current diff and its earlier versions in the sidebar's Version Browser. Consecutive opens with identical content are deduplicated and do not create another version.
+
+### Privacy and retention
+
+History stores complete copies of eligible local files. For HTML files rendered directly (the default), it stores the raw HTML source; with `--markdown`, it stores the converted markdown. Versions are not automatically pruned or expired and remain until you manually remove them.
+
+These copies are stored under `~/.plannotator/history/` by default, or under `$PLANNOTATOR_DATA_DIR/history/` when the data directory is overridden. To keep local file annotation stateless, set `PLANNOTATOR_ANNOTATE_HISTORY=0` or add `"annotateHistory": false` to the active config file: `~/.plannotator/config.json` by default, or `$PLANNOTATOR_DATA_DIR/config.json` when overridden. The environment variable takes precedence over the config setting.
+
+URL annotation, folder browsing, and last-message annotation do not use per-file version history.
 
 ## Annotate mode differences
 
@@ -192,10 +204,11 @@ The agent receives this and can act on each annotation.
 
 ## Environment variables
 
-The annotate server respects the same environment variables as plan review, plus two specific to URL annotation:
+The annotate server respects the same environment variables as plan review. `PLANNOTATOR_ANNOTATE_HISTORY` controls eligible local-file history; `PLANNOTATOR_JINA` and `JINA_API_KEY` apply to URL annotation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PLANNOTATOR_ANNOTATE_HISTORY` | enabled | Set to `0` or `false` to disable per-file version history for local file annotation. |
 | `PLANNOTATOR_JINA` | enabled | Set to `0` or `false` to disable Jina Reader for URL annotation. |
 | `JINA_API_KEY` | (none) | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM). |
 
