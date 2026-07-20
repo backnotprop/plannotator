@@ -9,14 +9,16 @@ test("uses the canonical GPT-5.6 Sol model ID", () => {
 });
 
 describe("CODEX_MODELS catalog", () => {
-  test("omits gpt-5.3-codex (saved picks of it are force-migrated away)", () => {
-    expect(CODEX_MODELS.some(({ value }) => value === "gpt-5.3-codex")).toBe(false);
+  test("omits models rejected or API-shut-down for every auth mode", () => {
+    // gpt-5.3-codex: ChatGPT-account Codex rejects it outright. The other
+    // three: API-level shutdown 2026-07-23 per OpenAI's deprecations page.
+    for (const value of ["gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"]) {
+      expect(CODEX_MODELS.some((m) => m.value === value)).toBe(false);
+    }
   });
 
-  test("keeps the 5.2/5.1 family for API-key Codex users", () => {
-    for (const value of ["gpt-5.2-codex", "gpt-5.2", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"]) {
-      expect(catalogEntry(value)?.efforts).toEqual(["low", "medium", "high", "xhigh"]);
-    }
+  test("keeps gpt-5.2 (still API-valid) with the historical effort set", () => {
+    expect(catalogEntry("gpt-5.2")?.efforts).toEqual(["low", "medium", "high", "xhigh"]);
   });
 
   test("GPT-5.6 family carries the CLI catalog's efforts and defaults", () => {

@@ -35,15 +35,14 @@ export const CODEX_MODELS: CodexModelOption[] = [
   { value: 'gpt-5.5', label: 'GPT-5.5', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'medium' },
   { value: 'gpt-5.4', label: 'GPT-5.4', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'medium' },
   { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'high' },
-  // The 5.2/5.1 family is absent from the CLI catalog and rejected for
-  // ChatGPT-account Codex, but still available to API-key users — keep them.
-  // (gpt-5.3-codex is NOT kept: saved picks of it are already force-migrated
-  // away in useAgentSettings, so offering it would be incoherent.) They
-  // predate max/ultra, so they get the safe historical effort set.
-  { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'medium' },
+  // gpt-5.2 is retained: it was retired from the ChatGPT product (steered to
+  // 5.5) but the API still serves it, so API-key Codex users keep it. The
+  // rest of the 5.2/5.1 family (gpt-5.2-codex, gpt-5.1-codex-max,
+  // gpt-5.1-codex-mini — and gpt-5.3-codex before them) is API-shut-down per
+  // OpenAI's deprecations page (2026-07-23), dead for ALL auth modes; saved
+  // picks migrate in useAgentSettings. gpt-5.2 predates max/ultra, so it
+  // gets the safe historical effort set.
   { value: 'gpt-5.2', label: 'GPT-5.2', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'medium' },
-  { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'medium' },
-  { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'medium' },
   { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', efforts: EFFORTS_THROUGH_XHIGH, defaultEffort: 'medium' },
 ];
 

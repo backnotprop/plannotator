@@ -200,6 +200,20 @@ export function sanitizeCodexPerModel(
   return out;
 }
 
+// Saved model IDs that migrate to a direct replacement: the stale gpt-5.6
+// slug (renamed to -sol when the tiered family shipped) and gpt-5.1-codex-mini
+// (API shutdown 2026-07-23; gpt-5.4-mini is OpenAI's recommended replacement).
+const RENAMED_CODEX_MODELS: Record<string, string> = {
+  'gpt-5.6': 'gpt-5.6-sol',
+  'gpt-5.1-codex-mini': 'gpt-5.4-mini',
+};
+
+// Saved model IDs with no direct replacement — migrate to the surface's
+// fallback. gpt-5.3-codex is rejected outright by ChatGPT-account Codex;
+// gpt-5.2-codex and gpt-5.1-codex-max hit the API-level shutdown on
+// 2026-07-23 (OpenAI recommends gpt-5.5, which every fallback already is).
+const RETIRED_CODEX_MODELS = new Set(['gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.1-codex-max']);
+
 // One-shot model migrations for a saved Codex section. Keep its per-model
 // preferences aligned with the canonical model ID while sanitizing them.
 export function migrateCodexSection(
@@ -207,19 +221,19 @@ export function migrateCodexSection(
   fallback: string,
 ): CodexSection {
   const perModel = sanitizeCodexPerModel(section?.perModel);
-  const legacyPreference = perModel['gpt-5.6'];
-  if (legacyPreference) {
-    perModel['gpt-5.6-sol'] ??= legacyPreference;
-    delete perModel['gpt-5.6'];
+  for (const [legacy, replacement] of Object.entries(RENAMED_CODEX_MODELS)) {
+    const legacyPreference = perModel[legacy];
+    if (legacyPreference) {
+      perModel[replacement] ??= legacyPreference;
+      delete perModel[legacy];
+    }
   }
 
   const savedModel = section?.model;
   const model =
-    savedModel === 'gpt-5.6'
-      ? 'gpt-5.6-sol'
-      : typeof savedModel !== 'string' || savedModel === 'gpt-5.3-codex'
-        ? fallback
-        : savedModel;
+    typeof savedModel !== 'string' || RETIRED_CODEX_MODELS.has(savedModel)
+      ? fallback
+      : (RENAMED_CODEX_MODELS[savedModel] ?? savedModel);
   return { model, perModel };
 }
 

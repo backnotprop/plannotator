@@ -115,10 +115,55 @@ describe("migrateCodexSection", () => {
     }
   });
 
-  test("keeps the 5.2/5.1 family (still valid for API-key Codex)", () => {
-    for (const model of ["gpt-5.2-codex", "gpt-5.2", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"]) {
-      expect(migrateCodexSection({ model, perModel: {} }, "gpt-5.5").model).toBe(model);
+  test("keeps gpt-5.2 (still API-valid — only the ChatGPT product retired it)", () => {
+    expect(migrateCodexSection({ model: "gpt-5.2", perModel: {} }, "gpt-5.5").model).toBe("gpt-5.2");
+  });
+
+  test("moves API-shut-down picks with no direct replacement to the fallback", () => {
+    for (const model of ["gpt-5.2-codex", "gpt-5.1-codex-max"]) {
+      expect(migrateCodexSection({ model, perModel: {} }, "gpt-5.5").model).toBe("gpt-5.5");
     }
+  });
+
+  test("moves a gpt-5.1-codex-mini pick and preference to gpt-5.4-mini", () => {
+    expect(
+      migrateCodexSection(
+        {
+          model: "gpt-5.1-codex-mini",
+          perModel: {
+            "gpt-5.1-codex-mini": { reasoning: "xhigh", fast: true },
+            "gpt-5.5": { reasoning: "medium", fast: false },
+          },
+        },
+        "gpt-5.5",
+      ),
+    ).toEqual({
+      model: "gpt-5.4-mini",
+      perModel: {
+        "gpt-5.4-mini": { reasoning: "xhigh", fast: true },
+        "gpt-5.5": { reasoning: "medium", fast: false },
+      },
+    });
+  });
+
+  test("keeps the canonical gpt-5.4-mini preference when both keys exist", () => {
+    expect(
+      migrateCodexSection(
+        {
+          model: "gpt-5.1-codex-mini",
+          perModel: {
+            "gpt-5.1-codex-mini": { reasoning: "low", fast: false },
+            "gpt-5.4-mini": { reasoning: "high", fast: true },
+          },
+        },
+        "gpt-5.5",
+      ),
+    ).toEqual({
+      model: "gpt-5.4-mini",
+      perModel: {
+        "gpt-5.4-mini": { reasoning: "high", fast: true },
+      },
+    });
   });
 
   test("moves a saved gpt-5.3-codex pick to the fallback and minimal reasoning to low", () => {
