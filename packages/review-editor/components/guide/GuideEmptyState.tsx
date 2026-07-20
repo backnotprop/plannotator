@@ -10,7 +10,7 @@ import {
   TOUR_CLAUDE_MODELS,
   CLAUDE_EFFORT,
   CODEX_MODELS,
-  CODEX_REASONING,
+  codexReasoningOptions,
   PI_THINKING,
   REVIEW_ENGINE_LABEL,
 } from '@plannotator/ui/components/AgentsTab';
@@ -468,7 +468,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 <InlinePicker label="Effort" value={guideClaudeEffort} options={CLAUDE_EFFORT} onChange={setGuideClaudeEffort} />
               )}
               {engine === 'codex' && (
-                <InlinePicker label="Reasoning" value={guideCodexReasoning} options={CODEX_REASONING} onChange={setGuideCodexReasoning} />
+                <InlinePicker label="Reasoning" value={guideCodexReasoning} options={codexReasoningOptions(guideCodexModel)} onChange={setGuideCodexReasoning} />
               )}
               {engine === 'pi' && (
                 <InlinePicker label="Thinking" value={guidePiThinking} options={PI_THINKING} onChange={setGuidePiThinking} />

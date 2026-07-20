@@ -22,6 +22,7 @@ import { useAgentSettings } from '../hooks/useAgentSettings';
 import type { AgentEngine, AgentMode, ReviewEngine } from '../hooks/useAgentSettings';
 import type { AgentLaunchParams } from '../hooks/useAgentJobs';
 import { ConfigRow, SegmentedPicker, Toggle, SelectMenu } from './AgentControls';
+import { CODEX_MODELS, CODEX_EFFORT_LABELS, codexReasoningOptions } from '../utils/codexModels';
 
 export type { AgentLaunchParams } from '../hooks/useAgentJobs';
 
@@ -49,30 +50,10 @@ export const CLAUDE_EFFORT: Array<{ value: string; label: string }> = [
   { value: 'max', label: 'Max' },
 ];
 
-export const CODEX_MODELS: Array<{ value: string; label: string }> = [
-  // GPT-5.6 naming scheme: `-sol` is the flagship, `-terra` is the mid
-  // price/performance tier, and `-luna` is the efficient high-volume tier.
-  { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-  { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-  { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-  { value: 'gpt-5.5', label: 'GPT-5.5' },
-  { value: 'gpt-5.4', label: 'GPT-5.4' },
-  { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-  { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-  { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-  { value: 'gpt-5.2', label: 'GPT-5.2' },
-  { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
-  { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini' },
-  { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-];
-
-export const CODEX_REASONING: Array<{ value: string; label: string }> = [
-  { value: 'minimal', label: 'Minimal' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'XHigh' },
-];
+// Codex model catalog + per-model reasoning efforts live in
+// utils/codexModels (useAgentSettings needs them too, for effort clamping);
+// re-exported here so both launch surfaces keep one import site.
+export { CODEX_MODELS, codexReasoningOptions } from '../utils/codexModels';
 
 // Tour/guide Claude catalog: the CLI's latest-resolving aliases on top
 // (verified against `claude --help`: "Provide an alias for the latest model
@@ -275,7 +256,7 @@ function formatEffort(value: string): string {
 }
 
 function formatReasoning(value: string): string {
-  return catalogLabel(CODEX_REASONING, value);
+  return CODEX_EFFORT_LABELS[value] ?? value;
 }
 
 // --- Add-a-review dialog: a type-ahead picker over every discovered skill ---
@@ -1117,7 +1098,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                       <SelectMenu value={codexModel} options={CODEX_MODELS} onChange={setCodexModel} />
                     </ConfigRow>
                     <ConfigRow label="Reasoning" stacked>
-                      <SegmentedPicker options={CODEX_REASONING} value={codexReasoning} onChange={setCodexReasoning} />
+                      <SegmentedPicker options={codexReasoningOptions(codexModel)} value={codexReasoning} onChange={setCodexReasoning} />
                     </ConfigRow>
                     <ConfigRow label="Fast mode">
                       <Toggle checked={codexFast} onChange={setCodexFast} />
@@ -1160,7 +1141,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                 {tourEngine === 'codex' && (
                   <>
                     <ConfigRow label="Reasoning" stacked>
-                      <SegmentedPicker options={CODEX_REASONING} value={tourCodexReasoning} onChange={setTourCodexReasoning} />
+                      <SegmentedPicker options={codexReasoningOptions(tourCodexModel)} value={tourCodexReasoning} onChange={setTourCodexReasoning} />
                     </ConfigRow>
                     <ConfigRow label="Fast mode">
                       <Toggle checked={tourCodexFast} onChange={setTourCodexFast} />
@@ -1195,7 +1176,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                     deliberately not offered for guide. */}
                 {guideEngine === 'codex' && (
                   <ConfigRow label="Reasoning" stacked>
-                    <SegmentedPicker options={CODEX_REASONING} value={guideCodexReasoning} onChange={setGuideCodexReasoning} />
+                    <SegmentedPicker options={codexReasoningOptions(guideCodexModel)} value={guideCodexReasoning} onChange={setGuideCodexReasoning} />
                   </ConfigRow>
                 )}
 

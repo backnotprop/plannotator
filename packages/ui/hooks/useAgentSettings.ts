@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getItem, setItem } from '../utils/storage';
+import { clampCodexReasoning } from '../utils/codexModels';
 
 const COOKIE_KEY = 'plannotator.agents';
 
@@ -176,7 +177,9 @@ const initialState: AgentSettingsState = {
 
 // One-shot migration: drop any cached "none" codex reasoning entries. The
 // dropdown no longer offers "None" (codex-rs rejects it as a config value);
-// fall back to the default instead of shipping an invalid flag.
+// fall back to the default instead of shipping an invalid flag. Saved
+// "minimal" entries migrate to "low": no current Codex model supports
+// minimal, and low is the nearest effort that every model does.
 export function sanitizeCodexPerModel(
   perModel: Record<string, { reasoning: string; fast: boolean }> | undefined,
 ): Record<string, { reasoning: string; fast: boolean }> {
@@ -186,6 +189,10 @@ export function sanitizeCodexPerModel(
     if (!entry || typeof entry !== 'object') continue;
     if (entry.reasoning === 'none') {
       if (entry.fast) out[model] = { reasoning: DEFAULT_CODEX_REASONING, fast: true };
+      continue;
+    }
+    if (entry.reasoning === 'minimal') {
+      out[model] = { ...entry, reasoning: 'low' };
       continue;
     }
     out[model] = entry;
@@ -514,13 +521,27 @@ export function useAgentSettings() {
   }, []);
 
   const claudeEffort = state.claude.perModel[state.claude.model]?.effort ?? DEFAULT_CLAUDE_EFFORT;
-  const codexReasoning = state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING;
+  // Codex reasoning is clamped through the model's supported-effort set: a
+  // saved (or surface-default) effort the selected model doesn't support
+  // snaps to that model's catalog default. Every consumer — the pickers AND
+  // the launch payloads — reads these derived values, so an unsupported
+  // effort can never reach `-c model_reasoning_effort=`.
+  const codexReasoning = clampCodexReasoning(
+    state.codex.model,
+    state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING,
+  );
   const codexFast = state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST;
   const tourClaudeEffort = state.tourClaude.perModel[state.tourClaude.model]?.effort ?? DEFAULT_TOUR_CLAUDE_EFFORT;
-  const tourCodexReasoning = state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING;
+  const tourCodexReasoning = clampCodexReasoning(
+    state.tourCodex.model,
+    state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING,
+  );
   const tourCodexFast = state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST;
   const guideClaudeEffort = state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT;
-  const guideCodexReasoning = state.guideCodex.perModel[state.guideCodex.model]?.reasoning ?? DEFAULT_GUIDE_CODEX_REASONING;
+  const guideCodexReasoning = clampCodexReasoning(
+    state.guideCodex.model,
+    state.guideCodex.perModel[state.guideCodex.model]?.reasoning ?? DEFAULT_GUIDE_CODEX_REASONING,
+  );
 
   return {
     selectedMode: state.selectedMode,

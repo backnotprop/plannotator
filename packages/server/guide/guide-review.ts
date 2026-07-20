@@ -1139,8 +1139,9 @@ export function createGuideSession(): GuideSession {
 
         if (engine === "codex") {
           const outputPath = generateGuideOutputPath();
-          const command = await buildGuideCodexCommand({ cwd, outputPath, prompt: repairPrompt, model: model || undefined, reasoningEffort: "minimal", fastMode: false });
-          return { command, outputPath, prompt: repairPrompt, label: "Guide Repair", engine: "codex", model, reasoningEffort: "minimal" };
+          // "low" not "minimal": no current Codex model supports minimal.
+          const command = await buildGuideCodexCommand({ cwd, outputPath, prompt: repairPrompt, model: model || undefined, reasoningEffort: "low", fastMode: false });
+          return { command, outputPath, prompt: repairPrompt, label: "Guide Repair", engine: "codex", model, reasoningEffort: "low" };
         }
 
         const { command, stdinPrompt } = buildGuideClaudeCommand(repairPrompt, model, "low");
