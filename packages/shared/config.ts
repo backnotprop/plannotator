@@ -134,6 +134,16 @@ export interface PlannotatorConfig {
    * env var value, which takes precedence over this setting.
    */
   share?: "enabled" | "disabled";
+  /**
+   * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
+   * jobs. When true (default), review jobs run with Cursor's sandbox forced
+   * on as part of their read-only posture. Set to false on systems where
+   * Cursor's sandbox cannot start (e.g. NixOS / AppArmor-restricted Linux):
+   * the flag pair is then OMITTED entirely, deferring to the user's own
+   * Cursor Agent sandbox configuration. Mirrors the
+   * PLANNOTATOR_CURSOR_SANDBOX env var, which takes precedence.
+   */
+  cursorSandbox?: boolean;
 }
 
 const CONFIG_DIR = getPlannotatorDataDir();
@@ -287,5 +297,25 @@ export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
   const envVal = process.env.PLANNOTATOR_SHARE;
   if (envVal !== undefined) return envVal !== "disabled";
   if (config.share !== undefined) return config.share !== "disabled";
+  return true;
+}
+
+/**
+ * Resolve whether Cursor review jobs pass `--sandbox enabled` to the `agent` CLI.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_CURSOR_SANDBOX env var  →  config.cursorSandbox  →  default true
+ *
+ * Env values `0` / `false` / `disabled` turn the flag off (the pair is omitted
+ * from the argv, deferring to the user's own Cursor Agent configuration);
+ * anything else — including `1` / `true` / `enabled` — keeps the default.
+ */
+export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_CURSOR_SANDBOX;
+  if (envVal !== undefined) {
+    const v = envVal.toLowerCase();
+    return v !== "0" && v !== "false" && v !== "disabled";
+  }
+  if (config.cursorSandbox !== undefined) return config.cursorSandbox;
   return true;
 }

@@ -73,6 +73,7 @@ for f in guide-review; do
     | sed 's|from "\.\./pr"|from "./pr-provider.js"|' \
     | sed 's|from "\.\./agent-review-message"|from "./agent-review-message.js"|' \
     | sed 's|from "\.\./marker-review"|from "./marker-review.js"|' \
+    | sed 's|from "\.\./config"|from "./config.js"|' \
     | sed 's|from "@plannotator/shared/guide"|from "./guide.js"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir"|' \
     > "generated/$f.ts"

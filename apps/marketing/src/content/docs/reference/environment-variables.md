@@ -41,6 +41,12 @@ All Plannotator environment variables and their defaults.
 | `PLANNOTATOR_JINA` | enabled | Set to `0` or `false` to disable Jina Reader for URL annotation. Set to `1` or `true` to enable (this is the default). Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | (none) | Optional Jina Reader API key for higher rate limits. Without it: 20 req/min. With it: 500 req/min. Free keys available from [Jina](https://jina.ai/reader/) and include 10M tokens. |
 
+## Code review variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLANNOTATOR_CURSOR_SANDBOX` | enabled | Set to `0`, `false`, or `disabled` to stop passing `--sandbox enabled` when launching Cursor's `agent` CLI for review jobs. The flag pair is omitted entirely (never `--sandbox disabled`), so your own Cursor Agent sandbox configuration governs — for systems where Cursor's sandbox cannot start (e.g. NixOS or AppArmor-restricted Linux). Set to `1` or `true` to keep it enabled (this is the default). Can also be set via `~/.plannotator/config.json` (`{ "cursorSandbox": false }`); the env var takes precedence. Note: opting out means the review job's write protection relies on `--mode ask` plus your own Cursor configuration. |
+
 ## Paste service variables
 
 | Variable | Default | Description |
