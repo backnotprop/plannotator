@@ -41,14 +41,13 @@ export const ANNOTATION_HIGHLIGHT_CSS = `
   filter: brightness(1.2);
 }
 .plannotator-pinpoint-hover {
-  outline: 2px solid var(--pn-focus-highlight, #4493f8) !important;
-  outline-offset: 1px;
-  cursor: crosshair !important;
+  background-color: oklch(from var(--pn-focus-highlight, #4493f8) l c h / 0.12) !important;
+  border-radius: 3px;
+  cursor: pointer !important;
 }
-/* SVG nodes can't take a CSS outline — stroke their shapes instead. */
-.plannotator-pinpoint-hover rect, .plannotator-pinpoint-hover path,
-.plannotator-pinpoint-hover circle, .plannotator-pinpoint-hover ellipse, .plannotator-pinpoint-hover polygon {
-  stroke: var(--pn-focus-highlight, #4493f8) !important; stroke-width: 2.5px !important;
+/* SVG groups can't render a CSS background, so use a soft glow instead. */
+.plannotator-pinpoint-hover:is(g, svg) {
+  filter: drop-shadow(0 0 4px oklch(from var(--pn-focus-highlight, #4493f8) l c h / 0.55));
 }
 `;
 

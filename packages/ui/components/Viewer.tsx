@@ -574,7 +574,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       <article
         ref={containerRef}
         data-print-region="article"
-        className={`w-full bg-card rounded-xl py-5 md:py-8 lg:py-10 xl:py-12 relative ${gridEnabled ? 'px-5 md:px-8 lg:px-10 xl:px-12 shadow-xl border border-border/50' : ''} ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
+        className={`w-full bg-card rounded-xl py-5 md:py-8 lg:py-10 xl:py-12 relative ${gridEnabled ? 'px-5 md:px-8 lg:px-10 xl:px-12 shadow-xl border border-border/50' : ''} ${inputMethod === 'pinpoint' ? 'cursor-pointer' : ''}`}
         style={{ WebkitTouchCallout: 'none' } as React.CSSProperties}
       >
         {/* Repo info + plan diff badge + demo badge + linked doc badge + archive badge - top left */}
@@ -984,7 +984,6 @@ const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }>
     </div>
   );
 };
-
 
 
 
