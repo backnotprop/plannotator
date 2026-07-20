@@ -67,6 +67,32 @@ export interface BrowserDecisionSession<T> {
 	stop: () => void;
 }
 
+type CodeReviewOptions = {
+	cwd?: string;
+	defaultBranch?: string;
+	diffType?: DiffType;
+	prUrl?: string;
+	vcsType?: VcsSelection;
+	useLocal?: boolean;
+};
+
+type CodeReviewDecision = {
+	approved: boolean;
+	feedback?: string;
+	annotations?: unknown[];
+	agentSwitch?: string;
+	exit?: boolean;
+};
+
+const CODE_REVIEW_PROGRESS_STATUS = "plannotator-review";
+
+function setCodeReviewProgress(ctx: ExtensionContext, message?: string): void {
+	ctx.ui.setStatus(
+		CODE_REVIEW_PROGRESS_STATUS,
+		message ? ctx.ui.theme.fg("accent", message) : undefined,
+	);
+}
+
 export interface PlanReviewBrowserSession extends BrowserDecisionSession<PlanReviewDecision> {
 	reviewId: string;
 	onDecision: (listener: (result: PlanReviewDecision) => void | Promise<void>) => () => void;
@@ -214,24 +240,27 @@ export function shouldUseLocalPrCheckout(options: { useLocal?: boolean }): boole
 
 export async function openCodeReview(
 	ctx: ExtensionContext,
-	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string; vcsType?: VcsSelection; useLocal?: boolean } = {},
-): Promise<{ approved: boolean; feedback?: string; annotations?: unknown[]; agentSwitch?: string; exit?: boolean }> {
+	options: CodeReviewOptions = {},
+): Promise<CodeReviewDecision> {
 	const session = await startCodeReviewBrowserSession(ctx, options);
 	return session.waitForDecision();
 }
 
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
-	options: { cwd?: string; defaultBranch?: string; diffType?: DiffType; prUrl?: string; vcsType?: VcsSelection; useLocal?: boolean } = {},
-): Promise<
-	BrowserDecisionSession<{
-		approved: boolean;
-		feedback?: string;
-		annotations?: unknown[];
-		agentSwitch?: string;
-		exit?: boolean;
-	}>
-> {
+	options: CodeReviewOptions = {},
+): Promise<BrowserDecisionSession<CodeReviewDecision>> {
+	try {
+		return await createCodeReviewBrowserSession(ctx, options);
+	} finally {
+		setCodeReviewProgress(ctx);
+	}
+}
+
+async function createCodeReviewBrowserSession(
+	ctx: ExtensionContext,
+	options: CodeReviewOptions,
+): Promise<BrowserDecisionSession<CodeReviewDecision>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator code review browser is unavailable in this session.");
 	}
@@ -283,7 +312,10 @@ export async function startCodeReviewBrowserSession(
 			throw err;
 		}
 
-		console.error(`Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`);
+		setCodeReviewProgress(
+			ctx,
+			`Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...`,
+		);
 		const pr = await fetchPR(prRef);
 		rawPatch = pr.rawPatch;
 		gitRef = `${getMRLabel(prRef)} ${getMRNumberLabel(prRef)}`;
@@ -332,7 +364,7 @@ export async function startCodeReviewBrowserSession(
 
 				if (isSameRepo) {
 					// ── Same-repo: fast worktree path ──
-					console.error("Fetching PR branch and creating local worktree...");
+					setCodeReviewProgress(ctx, `Preparing local ${getMRLabel(prRef)} checkout...`);
 					await fetchRef(reviewRuntime, prMetadata.baseBranch, { cwd: repoDir });
 					await ensureObjectAvailable(reviewRuntime, prMetadata.baseSha, { cwd: repoDir });
 					await fetchRef(reviewRuntime, fetchRefStr, { cwd: repoDir });
@@ -374,13 +406,13 @@ export async function startCodeReviewBrowserSession(
 						...(prMetadata.platform === "github" ? { GH_HOST: host } : { GITLAB_HOST: host }),
 					};
 
-					console.error(`Cloning ${prRepo} (shallow)...`);
+					setCodeReviewProgress(ctx, `Cloning ${prRepo}...`);
 					const cloneResult = spawnSync(cli, ["repo", "clone", prRepo, localPath, "--", "--depth=1", "--no-checkout"], { encoding: "utf-8", env: cloneEnv });
 					if ((cloneResult.status ?? 1) !== 0) {
 						throw new Error(`${cli} repo clone failed: ${(cloneResult.stderr ?? "").trim()}`);
 					}
 
-					console.error("Fetching PR branch...");
+					setCodeReviewProgress(ctx, `Fetching ${getMRLabel(prRef)} branch...`);
 					const fetchResult = await reviewRuntime.runGit(["fetch", "--depth=200", "origin", fetchRefStr], { cwd: localPath });
 					if (fetchResult.exitCode !== 0) throw new Error(`Failed to fetch PR head ref: ${fetchResult.stderr.trim()}`);
 
@@ -391,7 +423,9 @@ export async function startCodeReviewBrowserSession(
 
 					// Best-effort: create base refs so agent diffs work
 					const baseFetch = await reviewRuntime.runGit(["fetch", "--depth=200", "origin", prMetadata.baseSha], { cwd: localPath });
-					if (baseFetch.exitCode !== 0) console.error("Warning: failed to fetch baseSha, agent diffs may be inaccurate");
+					if (baseFetch.exitCode !== 0) {
+						ctx.ui.notify("Failed to fetch the PR base commit; agent diffs may be inaccurate.", "warning");
+					}
 					await reviewRuntime.runGit(["branch", "--", prMetadata.baseBranch, prMetadata.baseSha], { cwd: localPath });
 					await reviewRuntime.runGit(["update-ref", `refs/remotes/origin/${prMetadata.baseBranch}`, prMetadata.baseSha], { cwd: localPath });
 
@@ -410,10 +444,11 @@ export async function startCodeReviewBrowserSession(
 					{ sessionDir: sessionDir!, repoDir, isSameRepo },
 					{ path: localPath, prUrl: prMetadata.url, number: prNumber, ready: true },
 				);
-				console.error(`Local checkout ready at ${localPath}`);
+				setCodeReviewProgress(ctx, "Starting code review...");
 			} catch (err) {
-				console.error("Warning: local worktree creation failed, falling back to remote diff");
-				console.error(err instanceof Error ? err.message : String(err));
+				const detail = err instanceof Error ? err.message : String(err);
+				ctx.ui.notify(`Local checkout failed; using the remote diff instead: ${detail}`, "warning");
+				setCodeReviewProgress(ctx, "Starting code review from remote diff...");
 				if (exitHandler) { process.removeListener("exit", exitHandler); exitHandler = undefined; }
 				if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
 				agentCwd = undefined;
