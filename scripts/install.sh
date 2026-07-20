@@ -315,9 +315,19 @@ verify_attestation=0
 # Crude grep against a flat boolean — PlannotatorConfig has no nested
 # verifyAttestation, so false positives are not a concern.
 # Resolve the data directory, expanding ~ the same way the runtime does.
+# Unset: an existing ~/.plannotator (legacy default) always wins; otherwise
+# an explicitly-set absolute XDG_DATA_HOME places it at
+# $XDG_DATA_HOME/plannotator; otherwise ~/.plannotator.
 _raw_dir="${PLANNOTATOR_DATA_DIR:-}"
 case "$_raw_dir" in
-    "")      _config_dir="$HOME/.plannotator" ;;
+    "")
+        _config_dir="$HOME/.plannotator"
+        if [ ! -d "$_config_dir" ]; then
+            case "${XDG_DATA_HOME:-}" in
+                /*) _config_dir="$XDG_DATA_HOME/plannotator" ;;
+            esac
+        fi
+        ;;
     "~")     _config_dir="$HOME" ;;
     "~/"*)   _config_dir="$HOME/${_raw_dir#\~/}" ;;
     *)       _config_dir="$_raw_dir" ;;

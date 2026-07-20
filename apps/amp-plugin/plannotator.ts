@@ -1,7 +1,7 @@
 import type { PluginAPI, PluginCommandContext, ThreadMessage } from "@ampcode/plugin";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, posix, resolve, win32 } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath as nodeFileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
@@ -911,16 +911,29 @@ function loadPlannotatorConfig(): PromptConfig {
 }
 
 export function getPlannotatorDataDir(): string {
-  const value = process.env.PLANNOTATOR_DATA_DIR?.trim();
-  if (!value) return join(homedir(), ".plannotator");
-
   const home = homedir();
-  if (value === "~") return home;
-  if (value.startsWith("~/") || value.startsWith("~\\")) {
-    return join(home, value.slice(2));
+
+  const value = process.env.PLANNOTATOR_DATA_DIR?.trim();
+  if (value) {
+    if (value === "~") return home;
+    if (value.startsWith("~/") || value.startsWith("~\\")) {
+      return join(home, value.slice(2));
+    }
+    return resolve(value);
   }
 
-  return resolve(value);
+  // Legacy-first: an existing ~/.plannotator always wins so current
+  // installs never move. Only when it is absent AND XDG_DATA_HOME is
+  // explicitly set to an absolute path does the XDG location apply.
+  const legacyDir = join(home, ".plannotator");
+  if (existsSync(legacyDir)) return legacyDir;
+
+  const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
+  if (xdgDataHome && isAbsolute(xdgDataHome)) {
+    return join(xdgDataHome, "plannotator");
+  }
+
+  return legacyDir;
 }
 
 function getConfiguredPrompt(
