@@ -12,4 +12,4 @@ Run:
 PLANNOTATOR_ORIGIN=kiro-cli plannotator annotate $ARGUMENTS
 ```
 
-`$ARGUMENTS` should be a markdown file path, folder path, html file path, or URL.
+`$ARGUMENTS` should be a markdown or plain-text config file path (.md, .txt, .yaml, .json, .toml, .ini, .csv, .log, …), folder path, html file path, or URL.

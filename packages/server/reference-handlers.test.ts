@@ -316,3 +316,39 @@ describe("annotatable plain-text files (#1029)", () => {
 		expect(data.markdown).toBe("a,b\n1,2\n");
 	});
 });
+
+describe("annotatable document size cap", () => {
+	test("doc=1 rejects an oversized file with 413", async () => {
+		const root = makeTempDir("plannotator-doc-cap-");
+		const big = join(root, "huge.yaml");
+		writeFileSync(big, `key: ${"x".repeat(2 * 1024 * 1024 + 1)}\n`);
+
+		const res = await getDoc(big, { rootPaths: [root], doc: true });
+		const data = await res.json() as { error?: string };
+
+		expect(res.status).toBe(413);
+		expect(data.error).toBe("File too large (max 2MB)");
+	});
+
+	test("markdown fallback rejects an oversized .md with 413", async () => {
+		const root = makeTempDir("plannotator-md-cap-");
+		writeFileSync(join(root, "huge.md"), `# big\n${"x".repeat(2 * 1024 * 1024 + 1)}\n`);
+
+		const res = await getDoc("huge.md", { rootPaths: [root] });
+		const data = await res.json() as { error?: string };
+
+		expect(res.status).toBe(413);
+		expect(data.error).toBe("File too large (max 2MB)");
+	});
+
+	test("base-relative branch rejects an oversized relative doc with 413", async () => {
+		const root = makeTempDir("plannotator-base-cap-");
+		writeFileSync(join(root, "big.txt"), "x".repeat(2 * 1024 * 1024 + 1));
+
+		const res = await getDoc("big.txt", { rootPaths: [root], base: root });
+		const data = await res.json() as { error?: string };
+
+		expect(res.status).toBe(413);
+		expect(data.error).toBe("File too large (max 2MB)");
+	});
+});

@@ -100,6 +100,7 @@ async function loadAnnotateCommandModules() {
 		isAnnotatableTextPath: resolveFile.isAnnotatableTextPath,
 		ANNOTATABLE_DOC_REGEX: resolveFile.ANNOTATABLE_DOC_REGEX,
 		ANNOTATABLE_EXTENSIONS_HINT: resolveFile.ANNOTATABLE_EXTENSIONS_HINT,
+		MAX_ANNOTATABLE_FILE_BYTES: resolveFile.MAX_ANNOTATABLE_FILE_BYTES,
 		FILE_BROWSER_EXCLUDED: referenceCommon.FILE_BROWSER_EXCLUDED,
 	};
 }
@@ -523,6 +524,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				isAnnotatableTextPath,
 				ANNOTATABLE_DOC_REGEX,
 				ANNOTATABLE_EXTENSIONS_HINT,
+				MAX_ANNOTATABLE_FILE_BYTES,
 			} = await loadAnnotateCommandModules();
 			// Split known annotate flags from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
@@ -615,6 +617,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 				} else {
 					if (!isAnnotatableTextPath(absolutePath)) {
 						ctx.ui.notify(`File type not supported. Supported types: ${ANNOTATABLE_EXTENSIONS_HINT}`, "error");
+						return;
+					}
+					if (statSync(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
+						ctx.ui.notify(`File too large to annotate (max 2MB): ${absolutePath}`, "error");
 						return;
 					}
 					markdown = readFileSync(absolutePath, "utf-8");

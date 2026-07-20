@@ -96,7 +96,7 @@ import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-mar
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX, ANNOTATABLE_EXTENSIONS_HINT } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX, ANNOTATABLE_EXTENSIONS_HINT, MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { statSync, rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
@@ -1020,6 +1020,10 @@ if (args[0] === "sessions") {
         }
 
         absolutePath = resolved.path;
+        if (Bun.file(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
+          console.error(`File too large to annotate (max 2MB): ${absolutePath}`);
+          process.exit(1);
+        }
         markdown = await Bun.file(absolutePath).text();
         console.error(`Resolved: ${absolutePath}`);
       }

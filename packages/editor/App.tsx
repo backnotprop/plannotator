@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
-import { ANNOTATABLE_TEXT_REGEX } from '@plannotator/shared/annotatable';
+import { shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 import { annotateFileFeedback, annotateMessageFeedback } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -92,6 +92,7 @@ import type { AIContext } from '@plannotator/ai';
 import type { CommentAskAIContext } from '@plannotator/ui/components/CommentPopover';
 import {
   hasSourceSaveConflictSnapshot,
+  isSourceSaveFilePath,
   type SourceSaveCapability,
   type SourceSaveResponse,
 } from '@plannotator/shared/source-save';
@@ -267,8 +268,28 @@ const App: React.FC = () => {
   const editableDocuments = useEditableDocuments();
   const activeEditableDocument = editableDocuments.activeDocument;
   const displayedMarkdown = activeEditableDocument?.currentText ?? markdown;
-  const frontmatter = useMemo(() => extractFrontmatter(displayedMarkdown).frontmatter, [displayedMarkdown]);
-  const blocks = useMemo(() => parseMarkdownToBlocks(displayedMarkdown), [displayedMarkdown]);
+  const [sourceFilePath, setSourceFilePath] = useState<string | undefined>();
+  // Mirrors linkedDocHook.filepath (declared later) so the parse memos below
+  // can key frontmatter behavior off the ACTIVE document's path. Kept in sync
+  // by an effect after the hook is created.
+  const [linkedDocParsePath, setLinkedDocParsePath] = useState<string | null>(null);
+  const activeParseDocPath = linkedDocParsePath ?? sourceFilePath;
+  // Frontmatter stripping is a markdown convention — for non-markdown
+  // annotatable sources (.yaml/.txt/…) a leading `--- … ---` pair is real
+  // content (multi-document YAML), so it must survive parsing.
+  const parseFrontmatter = shouldStripFrontmatter(activeParseDocPath);
+  const parseFrontmatterRef = useRef(parseFrontmatter);
+  useEffect(() => {
+    parseFrontmatterRef.current = parseFrontmatter;
+  }, [parseFrontmatter]);
+  const frontmatter = useMemo(
+    () => (parseFrontmatter ? extractFrontmatter(displayedMarkdown).frontmatter : null),
+    [displayedMarkdown, parseFrontmatter],
+  );
+  const blocks = useMemo(
+    () => parseMarkdownToBlocks(displayedMarkdown, { frontmatter: parseFrontmatter }),
+    [displayedMarkdown, parseFrontmatter],
+  );
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
@@ -384,7 +405,6 @@ const App: React.FC = () => {
   // Hide the floating HTML annotation controls (toolstrip + action cluster) so the
   // user can read the rendered page unobstructed. Selections/annotations are unaffected.
   const [htmlToolsHidden, setHtmlToolsHidden] = useState(false);
-  const [sourceFilePath, setSourceFilePath] = useState<string | undefined>();
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -769,6 +789,13 @@ const App: React.FC = () => {
     onAfterBack: restoreLinkedDocumentEditableKey,
   });
 
+  // Keep the early parse-path mirror in sync with the active linked doc so
+  // the blocks/frontmatter memos (declared before this hook) parse with the
+  // right frontmatter rule for the file on screen.
+  useEffect(() => {
+    setLinkedDocParsePath(linkedDocHook.filepath ?? null);
+  }, [linkedDocHook.filepath]);
+
   // Active document's directory — feeds both click-time popout fetches and
   // the validator hook so they resolve against the same base. Drifting
   // these would silently re-introduce the demote-correct-link bug.
@@ -983,7 +1010,9 @@ const App: React.FC = () => {
       for (const [filepath, doc] of state.linkedDocSession.docs) {
         linkedDocs.set(filepath, {
           ...doc,
-          blocks: doc.markdown ? parseMarkdownToBlocks(doc.markdown) : undefined,
+          blocks: doc.markdown
+            ? parseMarkdownToBlocks(doc.markdown, { frontmatter: shouldStripFrontmatter(filepath) })
+            : undefined,
         });
       }
       return {
@@ -1321,7 +1350,10 @@ const App: React.FC = () => {
       const enriched: Map<string, LinkedDocAnnotationEntry> = new Map(docAnnotations);
       for (const [filepath, entry] of enriched) {
         if (entry.markdown) {
-          enriched.set(filepath, { ...entry, blocks: parseMarkdownToBlocks(entry.markdown) });
+          enriched.set(filepath, {
+            ...entry,
+            blocks: parseMarkdownToBlocks(entry.markdown, { frontmatter: shouldStripFrontmatter(filepath) }),
+          });
         }
       }
       output += exportLinkedDocAnnotations(enriched);
@@ -1537,7 +1569,9 @@ const App: React.FC = () => {
   // which isn't in state yet when the remap runs.
   const applyEditedDocument = useCallback((next: string, list?: Annotation[]): Annotation[] => {
     const sourceAnnotations = list ?? annotationsRef.current;
-    const newBlocks = parseMarkdownToBlocks(next);
+    // Match the display parse (blocks memo) — the active document's
+    // frontmatter rule must apply here too or the remapped blockIds drift.
+    const newBlocks = parseMarkdownToBlocks(next, { frontmatter: parseFrontmatterRef.current });
     const remapped = sourceAnnotations.map((a) => {
       if (a.diffContext || a.type === AnnotationType.GLOBAL_COMMENT || a.id.startsWith('ann-checkbox-')) return a;
       const blk = newBlocks.find((b) => b.content.includes(a.originalText));
@@ -4035,7 +4069,11 @@ const App: React.FC = () => {
                     toast('Finish editing first', { description: 'Use "Done editing" before opening files.' });
                     return;
                   }
-                  if (isEditingMarkdown && !ANNOTATABLE_TEXT_REGEX.test(args[0])) {
+                  // Mid-edit, only files that can themselves be edited (source-save
+                  // capable: .md/.mdx/.txt) may be opened. Wider annotatable types
+                  // (.yaml/.json/…) are view-only — switching to one mid-edit would
+                  // silently downgrade "Done editing" to feedback-only edits.
+                  if (isEditingMarkdown && !isSourceSaveFilePath(args[0])) {
                     toast('Finish editing first', { description: 'Use "Done editing" before opening non-editable files.' });
                     return;
                   }

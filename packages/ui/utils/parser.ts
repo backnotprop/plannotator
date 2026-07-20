@@ -101,13 +101,26 @@ const VOID_HTML_TAGS: ReadonlySet<string> = new Set([
 
 const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
 
+export interface ParseMarkdownOptions {
+  /**
+   * Strip a leading `--- ... ---` pair as frontmatter (default true).
+   * Pass false for non-markdown plain-text sources (.yaml/.json/.txt/…)
+   * where the delimiters are real content — a multi-document YAML starts
+   * with them (see shouldStripFrontmatter in @plannotator/core/annotatable).
+   */
+  frontmatter?: boolean;
+}
+
 /**
  * A simplified markdown parser that splits content into linear blocks.
  * For a production app, we would use a robust AST walker (remark),
  * but for this demo, we want predictable text-anchoring.
  */
-export const parseMarkdownToBlocks = (markdown: string): Block[] => {
-  const { content: cleanMarkdown, contentStartLine } = extractFrontmatter(markdown);
+export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownOptions): Block[] => {
+  const { content: cleanMarkdown, contentStartLine } =
+    options?.frontmatter === false
+      ? { content: markdown, contentStartLine: 1 }
+      : extractFrontmatter(markdown);
   const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;

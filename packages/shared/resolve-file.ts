@@ -21,6 +21,7 @@ export {
 	ANNOTATABLE_TEXT_REGEX,
 	ANNOTATABLE_DOC_REGEX,
 	ANNOTATABLE_EXTENSIONS_HINT,
+	MAX_ANNOTATABLE_FILE_BYTES,
 	isAnnotatableTextPath,
 	isAnnotatableDocPath,
 } from "./annotatable";

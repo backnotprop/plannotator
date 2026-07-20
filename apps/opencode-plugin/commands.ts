@@ -22,7 +22,7 @@ import {
   getReviewDeniedSuffix,
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX, MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
@@ -306,6 +306,10 @@ export async function handleAnnotateCommand(
       }
 
       absolutePath = resolved.path;
+      if (Bun.file(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
+        client.app.log({ level: "error", message: `File too large to annotate (max 2MB): ${absolutePath}` });
+        return;
+      }
       client.app.log({ level: "info", message: `Resolved: ${absolutePath}` });
       markdown = await Bun.file(absolutePath).text();
     }

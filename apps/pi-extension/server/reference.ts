@@ -38,6 +38,7 @@ import {
 	isWithinProjectRoot,
 	warmFileListCache,
 	ANNOTATABLE_DOC_REGEX,
+	MAX_ANNOTATABLE_FILE_BYTES,
 	isAnnotatableTextPath,
 } from "../generated/resolve-file.js";
 import { parseCodePath } from "../generated/code-file.js";
@@ -279,6 +280,10 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 		}
 		try {
 			if (existsSync(fromBase)) {
+				if (statSync(fromBase).size > MAX_ANNOTATABLE_FILE_BYTES) {
+					json(res, { error: "File too large (max 2MB)" }, 413);
+					return;
+				}
 				const snapshot = readSourceFileSnapshot(fromBase);
 				const raw = snapshot.text;
 				const isHtml = /\.html?$/i.test(requestedPath);
@@ -366,7 +371,7 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 
 		try {
 			const stat = statSync(resolvedCode);
-			if (stat.size > 2 * 1024 * 1024) {
+			if (stat.size > MAX_ANNOTATABLE_FILE_BYTES) {
 				json(res, { error: "File too large (max 2MB)" }, 413);
 				return;
 			}
@@ -419,6 +424,10 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	}
 
 	try {
+		if (statSync(result.path).size > MAX_ANNOTATABLE_FILE_BYTES) {
+			json(res, { error: "File too large (max 2MB)" }, 413);
+			return;
+		}
 		const snapshot = readSourceFileSnapshot(result.path);
 		jsonDoc(res, { markdown: snapshot.text, filepath: result.path, renderAs: "markdown" }, options, undefined, snapshot);
 	} catch {

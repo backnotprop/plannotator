@@ -27,6 +27,7 @@ import {
 	getFileBrowserMaxFiles,
 	warmFileListCache,
 	ANNOTATABLE_DOC_REGEX,
+	MAX_ANNOTATABLE_FILE_BYTES,
 	isAnnotatableTextPath,
 } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
@@ -237,6 +238,9 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 		try {
 			const file = Bun.file(fromBase);
 			if (await file.exists()) {
+				if (file.size > MAX_ANNOTATABLE_FILE_BYTES) {
+					return Response.json({ error: "File too large (max 2MB)" }, { status: 413 });
+				}
 				const snapshot = readSourceFileSnapshot(fromBase);
 				const raw = snapshot.text;
 				const isHtml = /\.html?$/i.test(requestedPath);
@@ -320,7 +324,7 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 
 		try {
 			const file = Bun.file(resolvedCode);
-			if (file.size > 2 * 1024 * 1024) {
+			if (file.size > MAX_ANNOTATABLE_FILE_BYTES) {
 				return Response.json({ error: "File too large (max 2MB)" }, { status: 413 });
 			}
 			const contents = await file.text();
@@ -371,6 +375,9 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	}
 
 	try {
+		if (Bun.file(result.path).size > MAX_ANNOTATABLE_FILE_BYTES) {
+			return Response.json({ error: "File too large (max 2MB)" }, { status: 413 });
+		}
 		const snapshot = readSourceFileSnapshot(result.path);
 		return docJson({ markdown: snapshot.text, filepath: result.path, renderAs: "markdown" }, options, snapshot);
 	} catch {
