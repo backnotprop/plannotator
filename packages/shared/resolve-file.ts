@@ -14,10 +14,16 @@ import { isAbsolute, join, resolve, win32 } from "path";
 import { existsSync, readdirSync, type Dirent } from "fs";
 import { readdir } from "node:fs/promises";
 
-const MARKDOWN_PATH_REGEX = /\.(mdx?|txt)$/i;
-
+import { ANNOTATABLE_TEXT_REGEX } from "./annotatable";
 import { CODE_FILE_REGEX as CODE_FILE_BASENAME_REGEX } from "./code-file";
 export { CODE_FILE_REGEX, isCodeFilePath } from "./code-file";
+export {
+	ANNOTATABLE_TEXT_REGEX,
+	ANNOTATABLE_DOC_REGEX,
+	ANNOTATABLE_EXTENSIONS_HINT,
+	isAnnotatableTextPath,
+	isAnnotatableDocPath,
+} from "./annotatable";
 
 const WINDOWS_DRIVE_PATH_PATTERNS = [
 	/^\/cygdrive\/([a-zA-Z])\/(.+)$/,
@@ -194,8 +200,14 @@ function resolveAbsolutePath(
 		: resolve(input);
 }
 
+/**
+ * The set of files single-file annotate resolution accepts. Wider than
+ * markdown proper (#1029): any unambiguously plain-text format renders the
+ * way .txt does. HTML is excluded — it has its own resolution branch at the
+ * call sites.
+ */
 function isSearchableMarkdownPath(input: string): boolean {
-	return MARKDOWN_PATH_REGEX.test(input.trim());
+	return ANNOTATABLE_TEXT_REGEX.test(input.trim());
 }
 
 /** Check if a path looks like a Windows absolute path (e.g. C:\ or C:/) */
@@ -263,7 +275,7 @@ function walkMarkdownFiles(dir: string, root: string, results: string[], ignored
 			root,
 			results,
 			ignoredDirs,
-			(name) => /\.(mdx?|txt)$/i.test(name),
+			(name) => ANNOTATABLE_TEXT_REGEX.test(name),
 			{ visitedFiles: 0, limit: getFileBrowserMaxFiles() },
 		);
 	} catch {
@@ -453,7 +465,7 @@ function resolveMarkdownFileCore(
 	const isBareFilename = !searchInput.includes("/");
 	const targetLookupKey = getLookupKey(searchInput, isBareFilename);
 
-	// Restrict to markdown files
+	// Restrict to annotatable plain-text files (markdown + config formats)
 	if (!isSearchableMarkdownPath(normalizedInput)) {
 		return { kind: "not_found", input };
 	}

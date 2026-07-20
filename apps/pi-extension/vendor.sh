@@ -8,7 +8,7 @@ rm -rf generated
 mkdir -p generated generated/ai/providers
 
 # Modules that MOVED to @plannotator/core — vendor the real impl from core.
-for f in feedback-templates project favicon code-file external-annotation agent-jobs agent-terminal source-save open-in-apps; do
+for f in feedback-templates project favicon code-file annotatable external-annotation agent-jobs agent-terminal source-save open-in-apps; do
   src="../../packages/core/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done

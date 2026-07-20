@@ -5,6 +5,8 @@ import { join } from "path";
 import {
 	getFileBrowserMaxFiles,
 	hasMarkdownFiles,
+	isAnnotatableDocPath,
+	isAnnotatableTextPath,
 	resolveCodeFile,
 	resolveMarkdownFile,
 	warmFileListCache,
@@ -304,5 +306,99 @@ describe("explicit parent-relative markdown paths (#1085)", () => {
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("annotatable plain-text files (#1029)", () => {
+	test("resolves an exact relative .yaml path", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "plannotator-annotatable-yaml-"));
+		try {
+			mkdirSync(join(cwd, "config"));
+			writeFileSync(join(cwd, "config", "app.yaml"), "key: value\n");
+			expect(resolveMarkdownFile("config/app.yaml", cwd)).toEqual({
+				kind: "found",
+				path: join(cwd, "config", "app.yaml"),
+			});
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("resolves a bare filename in-root for a config format", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "plannotator-annotatable-bare-"));
+		try {
+			mkdirSync(join(cwd, "nested"));
+			writeFileSync(join(cwd, "nested", "Cargo.toml"), "[package]\n");
+			expect(resolveMarkdownFile("cargo.toml", cwd)).toEqual({
+				kind: "found",
+				path: join(cwd, "nested", "Cargo.toml"),
+			});
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("accepts each newly supported extension", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "plannotator-annotatable-all-"));
+		try {
+			const names = [
+				"a.yaml", "b.yml", "c.json", "d.jsonc", "e.json5", "f.toml",
+				"g.ini", "h.cfg", "i.conf", "j.properties", "k.csv", "l.tsv",
+				"m.log", "n.xml", "sample.env.example",
+			];
+			for (const name of names) {
+				writeFileSync(join(cwd, name), "content\n");
+			}
+			for (const name of names) {
+				expect(resolveMarkdownFile(name, cwd)).toEqual({
+					kind: "found",
+					path: join(cwd, name),
+				});
+			}
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("still rejects source-code extensions", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "plannotator-annotatable-code-"));
+		try {
+			writeFileSync(join(cwd, "script.py"), "print('hi')\n");
+			expect(resolveMarkdownFile("script.py", cwd)).toEqual({
+				kind: "not_found",
+				input: "script.py",
+			});
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects .env but accepts .env.example", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "plannotator-annotatable-env-"));
+		try {
+			writeFileSync(join(cwd, ".env"), "SECRET=1\n");
+			writeFileSync(join(cwd, ".env.example"), "SECRET=\n");
+			expect(resolveMarkdownFile(".env", cwd)).toEqual({
+				kind: "not_found",
+				input: ".env",
+			});
+			expect(resolveMarkdownFile(".env.example", cwd)).toEqual({
+				kind: "found",
+				path: join(cwd, ".env.example"),
+			});
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("predicates classify text vs doc vs unsupported paths", () => {
+		expect(isAnnotatableTextPath("notes.yaml")).toBe(true);
+		expect(isAnnotatableTextPath("notes.txt")).toBe(true);
+		expect(isAnnotatableTextPath("page.html")).toBe(false);
+		expect(isAnnotatableTextPath("app.ts")).toBe(false);
+		expect(isAnnotatableTextPath(".env")).toBe(false);
+		expect(isAnnotatableDocPath("page.html")).toBe(true);
+		expect(isAnnotatableDocPath("config.json5")).toBe(true);
+		expect(isAnnotatableDocPath("binary.png")).toBe(false);
 	});
 });

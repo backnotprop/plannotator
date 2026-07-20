@@ -13,9 +13,16 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 | Input | Command | What happens |
 |-------|---------|--------------|
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
+| Plain-text file | `plannotator annotate config.yaml` | Opens the file directly, rendered as plain text |
 | HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
 | URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
-| Folder | `plannotator annotate ./docs/` | Opens a file browser showing all `.md`, `.mdx`, `.html`, and `.htm` files |
+| Folder | `plannotator annotate ./docs/` | Opens a file browser showing all supported files |
+
+### Supported file types
+
+Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These render exactly like `.txt` — as plain text you can select and annotate.
+
+`.env` is deliberately not supported: it commonly holds secrets, and annotate's version history copies file contents into the data dir (`~/.plannotator/history/`). Use `.env.example` for the secret-free template. Source-code files (`.ts`, `.py`, …) are also excluded — use `plannotator review` for code.
 
 ### Slash command (inside an agent session)
 

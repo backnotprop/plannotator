@@ -37,6 +37,8 @@ import {
 	resolveUserPath,
 	isWithinProjectRoot,
 	warmFileListCache,
+	ANNOTATABLE_DOC_REGEX,
+	isAnnotatableTextPath,
 } from "../generated/resolve-file.js";
 import { parseCodePath } from "../generated/code-file.js";
 import { htmlToMarkdown } from "../generated/html-to-markdown.js";
@@ -213,7 +215,7 @@ function jsonDoc(
 }
 
 /** Recursively walk a directory collecting files by extension, skipping ignored dirs. */
-const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
+const FILE_BROWSER_EXTENSIONS = ANNOTATABLE_DOC_REGEX;
 
 function walkMarkdownFiles(dir: string, root: string, results: string[], extensions: RegExp = FILE_BROWSER_EXTENSIONS): void {
 	let entries: Dirent[];
@@ -258,10 +260,17 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	const base = url.searchParams.get("base");
 	const resolvedBase = getTrustedBaseDir(base, allowedRoots);
 	const convert = url.searchParams.get("convert") === "1";
+	// `?doc=1` (set by the file browser) forces annotatable plain-text rendering
+	// for extensions that overlap CODE_FILE_REGEX (.yaml, .json, .toml, .ini,
+	// .xml). Without it, those paths keep the syntax-highlighted code-file
+	// popout response, so code-file links inside documents are unaffected.
+	const forceDoc = url.searchParams.get("doc") === "1";
+	const wantsDocRender = (path: string) =>
+		ANNOTATABLE_DOC_REGEX.test(path) && (forceDoc || !isCodeFilePath(path));
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
-		/\.(mdx?|txt|html?)$/i.test(requestedPath)
+		wantsDocRender(requestedPath)
 	) {
 		const fromBase = resolveUserPath(requestedPath, resolvedBase);
 		if (!isWithinAllowedRoots(fromBase, allowedRoots)) {
@@ -316,7 +325,10 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	}
 
 	// Code files: try literal resolve first; on miss, fall back to smart resolver.
-	if (isCodeFilePath(requestedPath)) {
+	// Skipped when the client asked for doc rendering (`?doc=1`) on an
+	// annotatable plain-text path — those fall through to the markdown
+	// resolution below and render like .txt.
+	if (isCodeFilePath(requestedPath) && !(forceDoc && isAnnotatableTextPath(requestedPath))) {
 		const parsed = parseCodePath(requestedPath);
 		const cleanPath = parsed.filePath;
 		const literalPath = resolveUserPath(cleanPath, resolvedBase || projectRoot);

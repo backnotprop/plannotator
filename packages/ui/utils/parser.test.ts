@@ -1110,3 +1110,44 @@ describe("exportAnnotations — line labels", () => {
     expect(output).toContain("(lines 3–5)");
   });
 });
+
+describe("parseMarkdownToBlocks — non-markdown plain text (#1029)", () => {
+  /**
+   * Annotate now accepts YAML/JSON/TOML-style config files and renders them
+   * through the same pipeline as .txt. The parser must treat structured
+   * config content as ordinary text without crashing or dropping lines.
+   */
+  test("YAML content parses into blocks without crashing", () => {
+    const yaml = [
+      "name: plannotator",
+      "on:",
+      "  push:",
+      "    branches: [main]",
+      "jobs:",
+      "  build:",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      "      - run: bun test",
+    ].join("\n");
+    const blocks = parseMarkdownToBlocks(yaml);
+    expect(blocks.length).toBeGreaterThan(0);
+    const joined = blocks.map((b) => b.content).join("\n");
+    expect(joined).toContain("name: plannotator");
+    expect(joined).toContain("uses: actions/checkout@v4");
+  });
+
+  test("JSON content parses into blocks without crashing", () => {
+    const json = '{\n  "name": "plannotator",\n  "private": true\n}';
+    const blocks = parseMarkdownToBlocks(json);
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.map((b) => b.content).join("\n")).toContain('"name": "plannotator"');
+  });
+
+  test("YAML document-start marker is not swallowed as frontmatter content loss", () => {
+    // A YAML file often starts with `---`; the parser treats a leading
+    // `---` pair as frontmatter, but the remaining document must survive.
+    const yaml = "---\nkey: value\nother: thing\n---\nrest: here\n";
+    const blocks = parseMarkdownToBlocks(yaml);
+    expect(blocks.map((b) => b.content).join("\n")).toContain("rest: here");
+  });
+});

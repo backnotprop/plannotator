@@ -51,10 +51,11 @@ async function postDocExists(body: unknown, options: { rootPath?: string; rootPa
 	}>;
 }
 
-async function getDoc(path: string, options: { base?: string; rootPaths?: string[]; sourceSaveFilePath?: string }) {
+async function getDoc(path: string, options: { base?: string; rootPaths?: string[]; sourceSaveFilePath?: string; doc?: boolean }) {
 	const url = new URL("http://localhost/api/doc");
 	url.searchParams.set("path", path);
 	if (options.base) url.searchParams.set("base", options.base);
+	if (options.doc) url.searchParams.set("doc", "1");
 	return handleDoc(new Request(url.toString()), {
 		rootPaths: options.rootPaths,
 		sourceSaveFilePath: options.sourceSaveFilePath,
@@ -249,5 +250,69 @@ describe("handleFileBrowserFiles", () => {
 				process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = previousLimit;
 			}
 		}
+	});
+});
+
+describe("annotatable plain-text files (#1029)", () => {
+	test("file browser lists config formats but not source code or .env", async () => {
+		const root = makeTempDir("plannotator-files-annotatable-");
+		writeTempFile(root, "docs/plan.md", "# plan\n");
+		writeTempFile(root, "config.yaml", "key: value\n");
+		writeTempFile(root, "settings.toml", "[table]\n");
+		writeTempFile(root, "data.csv", "a,b\n1,2\n");
+		writeTempFile(root, ".env.example", "API_KEY=\n");
+		writeTempFile(root, ".env", "API_KEY=secret\n");
+		writeTempFile(root, "app.ts", "export {};\n");
+
+		const url = new URL("http://localhost/api/reference/files");
+		url.searchParams.set("dirPath", root);
+		const res = await handleFileBrowserFiles(new Request(url.toString()));
+		const data = await res.json() as { tree: VaultNode[] };
+
+		expect(res.status).toBe(200);
+		expect(flattenTree(data.tree).sort()).toEqual([
+			".env.example",
+			"config.yaml",
+			"data.csv",
+			"docs/plan.md",
+			"settings.toml",
+		]);
+	});
+
+	test("doc=1 serves a .yaml file as an annotatable markdown document", async () => {
+		const root = makeTempDir("plannotator-doc-yaml-");
+		const file = writeTempFile(root, "config.yaml", "key: value\n");
+
+		const res = await getDoc(file, { rootPaths: [root], doc: true });
+		const data = await res.json() as { markdown?: string; codeFile?: boolean; renderAs?: string };
+
+		expect(res.status).toBe(200);
+		expect(data.codeFile).toBeUndefined();
+		expect(data.markdown).toBe("key: value\n");
+		expect(data.renderAs).toBe("markdown");
+	});
+
+	test("without doc=1, a .yaml path keeps the code-file popout response", async () => {
+		const root = makeTempDir("plannotator-doc-yaml-code-");
+		writeTempFile(root, "config.yaml", "key: value\n");
+
+		const res = await getDoc("config.yaml", { rootPaths: [root] });
+		const data = await res.json() as { codeFile?: boolean; contents?: string };
+
+		expect(res.status).toBe(200);
+		expect(data.codeFile).toBe(true);
+		expect(data.contents).toBe("key: value\n");
+	});
+
+	test("non-code annotatable extensions serve as markdown without doc=1", async () => {
+		const root = makeTempDir("plannotator-doc-csv-");
+		writeTempFile(root, "data.csv", "a,b\n1,2\n");
+
+		const res = await getDoc("data.csv", { rootPaths: [root] });
+		const data = await res.json() as { markdown?: string; codeFile?: boolean };
+
+		expect(res.status).toBe(200);
+		expect(data.codeFile).toBeUndefined();
+		expect(data.markdown).toBe("a,b\n1,2\n");
 	});
 });

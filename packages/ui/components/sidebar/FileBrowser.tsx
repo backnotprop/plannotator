@@ -43,6 +43,9 @@ interface AggregateWorkspaceChange {
   files: number;
 }
 
+// Display-name stripping only — deliberately narrower than the annotatable
+// set. Config files (config.yaml vs config.json) keep their extensions so
+// same-named siblings stay distinguishable in the tree.
 const FILE_EXTENSION_RE = /\.(mdx?|txt|html?)$/i;
 
 function normalizeFilterText(value: string): string {
@@ -418,7 +421,7 @@ const DirSection: React.FC<{
   if (dir.tree.length === 0) {
     return (
       <div className="px-3 py-2 text-[11px] text-muted-foreground">
-        No markdown or text files found
+        No annotatable files found
       </div>
     );
   }

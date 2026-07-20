@@ -96,7 +96,7 @@ import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-mar
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX, ANNOTATABLE_EXTENSIONS_HINT } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { statSync, rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
@@ -954,9 +954,9 @@ if (args[0] === "sessions") {
 
     if (folderCandidate !== null) {
       const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
-      // Folder annotation mode (markdown/plain text + HTML files)
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
-        console.error(`No markdown, text, or HTML files found in ${resolvedArg}`);
+      // Folder annotation mode (markdown/plain text/config + HTML files)
+      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
+        console.error(`No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}`);
         process.exit(1);
       }
       folderPath = resolvedArg;
@@ -1010,7 +1010,7 @@ if (args[0] === "sessions") {
             const ext = path.extname(resolvedPath).toLowerCase();
             console.error(
               `File type not supported: ${ext}\n` +
-              `Only .md, .mdx, .txt, .html, .htm files are supported.\n` +
+              `Supported types: ${ANNOTATABLE_EXTENSIONS_HINT}\n` +
               `For code review, use: plannotator review [file]`
             );
           } else {

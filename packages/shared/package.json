@@ -4,6 +4,7 @@
   "private": true,
   "exports": {
     "./agents": "./agents.ts",
+    "./annotatable": "./annotatable.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
     "./diff-paths": "./diff-paths.ts",

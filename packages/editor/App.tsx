@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
+import { ANNOTATABLE_TEXT_REGEX } from '@plannotator/shared/annotatable';
 import { annotateFileFeedback, annotateMessageFeedback } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -1086,7 +1087,10 @@ const App: React.FC = () => {
 
     const buildUrl = dirState?.isVault
       ? (path: string) => `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(dirPath)}&path=${encodeURIComponent(path)}`
-      : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}${convertHtml ? '&convert=1' : ''}`;
+      // `doc=1`: file-browser selections always want annotatable document
+      // rendering — without it, extensions that overlap the code-file set
+      // (.yaml, .json, .toml, …) would come back as code-file popout payloads.
+      : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}&doc=1${convertHtml ? '&convert=1' : ''}`;
     linkedDocHook.open(absolutePath, buildUrl, 'files');
     fileBrowser.setActiveFile(absolutePath);
   }, [editableDocuments, linkedDocHook, fileBrowser, convertHtml, isEditingMarkdown]);
@@ -4031,7 +4035,7 @@ const App: React.FC = () => {
                     toast('Finish editing first', { description: 'Use "Done editing" before opening files.' });
                     return;
                   }
-                  if (isEditingMarkdown && !/\.(mdx?|txt)$/i.test(args[0])) {
+                  if (isEditingMarkdown && !ANNOTATABLE_TEXT_REGEX.test(args[0])) {
                     toast('Finish editing first', { description: 'Use "Done editing" before opening non-editable files.' });
                     return;
                   }

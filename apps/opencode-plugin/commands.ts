@@ -22,7 +22,7 @@ import {
   getReviewDeniedSuffix,
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
@@ -256,8 +256,8 @@ export async function handleAnnotateCommand(
     }
 
     if (isFolder) {
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
-        client.app.log({ level: "error", message: `No markdown, text, or HTML files found in ${resolvedArg}` });
+      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
+        client.app.log({ level: "error", message: `No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}` });
         return;
       }
       folderPath = resolvedArg;
