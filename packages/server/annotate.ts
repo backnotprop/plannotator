@@ -15,12 +15,12 @@ import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } fro
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
-import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
+import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
-import { getPlanVersion, listVersions } from "@plannotator/shared/storage";
-import { computeAnnotateHistory, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
+import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
+import { computeAnnotateHistory, deriveAnnotateHistorySlug, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { htmlDiff } from "@plannotator/shared/html-diff";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
@@ -165,6 +165,7 @@ export async function startAnnotateServer(
   // when headings change. Diff content is the markdown, or the raw HTML source
   // when rendering HTML. Only single local files (not URLs/folders/messages).
   const annotateProjectName = project ?? "_unknown";
+  const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
   let annotateHistory: AnnotateHistoryResult | null = null;
   {
     const historyContent = renderHtml && rawHtml ? rawHtml : markdown;
@@ -172,7 +173,7 @@ export async function startAnnotateServer(
       mode === "annotate" &&
       !/^https?:\/\//i.test(filePath) &&
       historyContent.length > 0 &&
-      resolveAnnotateHistory(loadConfig());
+      annotateHistoryEnabled;
     // History is an enhancement, never a gate: a read-only/full data dir
     // must degrade to v0.22.0's stateless annotate (no version diff), not
     // fail the whole session before the UI ever opens. (computeAnnotateHistory
@@ -180,6 +181,19 @@ export async function startAnnotateServer(
     if (eligible) {
       annotateHistory = computeAnnotateHistory(annotateProjectName, resolvePath(filePath), historyContent);
     }
+  }
+
+  // Folder annotate: the same per-file version history, but run lazily the
+  // first time a folder file is opened via /api/doc (not eagerly for every
+  // file in the folder) and memoized per resolved absolute path for the life
+  // of this server — reopening the same file in this session never re-snapshots.
+  const folderAnnotateHistoryCache = new Map<string, AnnotateHistoryResult | null>();
+  function computeFolderAnnotateHistory(resolvedFilePath: string, content: string): AnnotateHistoryResult | null {
+    const cached = folderAnnotateHistoryCache.get(resolvedFilePath);
+    if (cached !== undefined) return cached;
+    const result = computeAnnotateHistory(annotateProjectName, resolvedFilePath, content);
+    folderAnnotateHistoryCache.set(resolvedFilePath, result);
+    return result;
   }
   const draftSource =
     mode === "annotate-folder" && folderPath
@@ -379,16 +393,39 @@ export async function startAnnotateServer(
           }
 
           // API: fetch a specific version of the annotated file (version diff base picker)
+          //
+          // Folder sessions pass `?path=` (optionally `&base=`) to identify which
+          // file's history to read, resolved and containment-checked exactly like
+          // /api/doc; the slug is always derived server-side from that resolved
+          // path — a client-supplied slug is never accepted, since getHistoryDir
+          // joins it into a filesystem path unsanitized. Without `path`, behavior
+          // is unchanged: the single session's own history is used.
           if (url.pathname === "/api/plan/version" && req.method === "GET") {
-            if (!annotateHistory) {
-              return Response.json({ error: "No version history" }, { status: 404 });
+            const pathParam = url.searchParams.get("path");
+            let slug: string;
+            if (pathParam !== null) {
+              const resolved = resolveAllowedDocPath(pathParam, url.searchParams.get("base"), {
+                rootPaths: getReferenceRootPaths(),
+              });
+              if (resolved.kind === "denied") {
+                return Response.json({ error: "Access denied: path is outside project root" }, { status: 403 });
+              }
+              slug = deriveAnnotateHistorySlug(resolved.path);
+              if (getVersionCount(annotateProjectName, slug) === 0) {
+                return Response.json({ error: "No version history" }, { status: 404 });
+              }
+            } else {
+              if (!annotateHistory) {
+                return Response.json({ error: "No version history" }, { status: 404 });
+              }
+              slug = annotateHistory.slug;
             }
             const vParam = url.searchParams.get("v");
             const v = vParam ? parseInt(vParam, 10) : NaN;
             if (isNaN(v) || v < 1) {
               return new Response("Invalid version number", { status: 400 });
             }
-            const content = getPlanVersion(annotateProjectName, annotateHistory.slug, v);
+            const content = getPlanVersion(annotateProjectName, slug, v);
             if (content === null) {
               return Response.json({ error: "Version not found" }, { status: 404 });
             }
@@ -396,7 +433,24 @@ export async function startAnnotateServer(
           }
 
           // API: list all stored versions of the annotated file (Version Browser)
+          // Same `?path=`/`&base=` parameterization as /api/plan/version above.
           if (url.pathname === "/api/plan/versions" && req.method === "GET") {
+            const pathParam = url.searchParams.get("path");
+            if (pathParam !== null) {
+              const resolved = resolveAllowedDocPath(pathParam, url.searchParams.get("base"), {
+                rootPaths: getReferenceRootPaths(),
+              });
+              if (resolved.kind === "denied") {
+                return Response.json({ error: "Access denied: path is outside project root" }, { status: 403 });
+              }
+              const slug = deriveAnnotateHistorySlug(resolved.path);
+              const versions = listVersions(annotateProjectName, slug);
+              return Response.json({
+                project: annotateProjectName,
+                slug: versions.length > 0 ? slug : null,
+                versions,
+              });
+            }
             if (!annotateHistory) {
               return Response.json({ project: annotateProjectName, slug: null, versions: [] });
             }
@@ -483,6 +537,10 @@ export async function startAnnotateServer(
               sourceSaveFolderPath: mode === "annotate-folder" ? folderPath : undefined,
               onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
               rootPaths: getReferenceRootPaths(),
+              annotateHistory:
+                mode === "annotate-folder" && annotateHistoryEnabled
+                  ? { compute: computeFolderAnnotateHistory }
+                  : undefined,
             });
           }
 
