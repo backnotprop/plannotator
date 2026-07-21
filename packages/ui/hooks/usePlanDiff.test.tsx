@@ -150,6 +150,118 @@ describe('usePlanDiff — per-document docKey reset', () => {
   });
 });
 
+describe('usePlanDiff — per-docKey base-selection memory', () => {
+  test.skipIf(!hasDom)('a manually-selected base version survives a detour to another document and back', async () => {
+    const rootVersionInfo: VersionInfo = { version: 3, totalVersions: 3, project: 'demo' };
+    const docAVersionInfo: VersionInfo = { version: 5, totalVersions: 5, project: 'demo' };
+    const fetchers: PlanDiffFetchers = {
+      fetchVersion: async (version) => ({ plan: `fetched plan v${version}`, version }),
+    };
+
+    const session = await mountHolder({
+      currentPlan: 'root current text',
+      initialPreviousPlan: 'root v2 text',
+      versionInfo: rootVersionInfo,
+      docKey: null,
+      fetchers,
+    });
+
+    // Sanity: the auto-selected default base is version - 1 (v2), not v1.
+    expect(session.current().diffBaseVersion).toBe(2);
+    expect(session.current().diffBasePlan).toBe('root v2 text');
+
+    // User manually picks an earlier, non-default version via the injected fetcher.
+    await act(async () => {
+      await session.current().selectBaseVersion(1);
+    });
+    expect(session.current().diffBaseVersion).toBe(1);
+    expect(session.current().diffBasePlan).toBe('fetched plan v1');
+
+    // Detour: navigate to a different document (e.g. a linked doc opened
+    // from root). Its own default base applies — nothing carries over.
+    await session.update({
+      currentPlan: 'docA current text',
+      initialPreviousPlan: 'docA previous text',
+      versionInfo: docAVersionInfo,
+      docKey: 'docA',
+      fetchers,
+    });
+    expect(session.current().diffBaseVersion).toBe(4);
+    expect(session.current().diffBasePlan).toBe('docA previous text');
+
+    // Navigate back to root (docKey null) with the same original props.
+    await session.update({
+      currentPlan: 'root current text',
+      initialPreviousPlan: 'root v2 text',
+      versionInfo: rootVersionInfo,
+      docKey: null,
+      fetchers,
+    });
+
+    // The manual selection from before the detour is restored — NOT the
+    // auto-computed default (v2) that a plain reset would re-seed.
+    expect(session.current().diffBaseVersion).toBe(1);
+    expect(session.current().diffBasePlan).toBe('fetched plan v1');
+  });
+
+  test.skipIf(!hasDom)('distinct docKeys keep independent base selections — no leakage between them', async () => {
+    const versionInfoA: VersionInfo = { version: 3, totalVersions: 3, project: 'demo' };
+    const versionInfoB: VersionInfo = { version: 4, totalVersions: 4, project: 'demo' };
+    const fetchers: PlanDiffFetchers = {
+      fetchVersion: async (version) => ({ plan: `fetched plan v${version}`, version }),
+    };
+
+    const session = await mountHolder({
+      currentPlan: 'docA current',
+      initialPreviousPlan: 'docA previous',
+      versionInfo: versionInfoA,
+      docKey: 'docA',
+      fetchers,
+    });
+    await act(async () => {
+      await session.current().selectBaseVersion(1);
+    });
+    expect(session.current().diffBaseVersion).toBe(1);
+    expect(session.current().diffBasePlan).toBe('fetched plan v1');
+
+    await session.update({
+      currentPlan: 'docB current',
+      initialPreviousPlan: 'docB previous',
+      versionInfo: versionInfoB,
+      docKey: 'docB',
+      fetchers,
+    });
+    await act(async () => {
+      await session.current().selectBaseVersion(2);
+    });
+    expect(session.current().diffBaseVersion).toBe(2);
+    expect(session.current().diffBasePlan).toBe('fetched plan v2');
+
+    // Back to docA: its own selection (v1) — not docB's (v2).
+    await session.update({
+      currentPlan: 'docA current',
+      initialPreviousPlan: 'docA previous',
+      versionInfo: versionInfoA,
+      docKey: 'docA',
+      fetchers,
+    });
+    expect(session.current().diffBaseVersion).toBe(1);
+    expect(session.current().diffBasePlan).toBe('fetched plan v1');
+
+    // Back to docB: its own selection (v2) — confirms docA's visit above
+    // didn't clobber it either.
+    await session.update({
+      currentPlan: 'docB current',
+      initialPreviousPlan: 'docB previous',
+      versionInfo: versionInfoB,
+      docKey: 'docB',
+      fetchers,
+    });
+    expect(session.current().diffBaseVersion).toBe(2);
+    expect(session.current().diffBasePlan).toBe('fetched plan v2');
+  });
+});
+
 describe('usePlanDiff — baseline survives a live-reload-style text update', () => {
   test.skipIf(!hasDom)('a currentPlan change with a stable docKey recomputes the diff without losing diffBasePlan', async () => {
     const versionInfoA: VersionInfo = { version: 2, totalVersions: 2, project: 'demo' };
