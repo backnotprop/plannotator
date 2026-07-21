@@ -31,9 +31,6 @@ export interface LinkedDocLoadData {
    */
   previousPlan?: string | null;
   versionInfo?: VersionInfo | null;
-  /** Present alongside previousPlan/versionInfo; not currently consumed by
-   *  the client (mirrors the unused /api/plan field for shape parity). */
-  diffCurrent?: string;
 }
 
 /**

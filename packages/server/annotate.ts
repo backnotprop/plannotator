@@ -15,7 +15,7 @@ import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } fro
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
-import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath } from "./reference-handlers";
+import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
@@ -187,11 +187,17 @@ export async function startAnnotateServer(
   // first time a folder file is opened via /api/doc (not eagerly for every
   // file in the folder) and memoized per resolved absolute path for the life
   // of this server — reopening the same file in this session never re-snapshots.
-  const folderAnnotateHistoryCache = new Map<string, AnnotateHistoryResult | null>();
-  function computeFolderAnnotateHistory(resolvedFilePath: string, content: string): AnnotateHistoryResult | null {
+  // The memo drops `diffCurrent` (it always equals the request's own content
+  // and the client never reads it off /api/doc) — only slug/previousPlan/
+  // versionInfo are retained.
+  const folderAnnotateHistoryCache = new Map<string, FolderAnnotateHistory | null>();
+  function computeFolderAnnotateHistory(resolvedFilePath: string, content: string): FolderAnnotateHistory | null {
     const cached = folderAnnotateHistoryCache.get(resolvedFilePath);
     if (cached !== undefined) return cached;
-    const result = computeAnnotateHistory(annotateProjectName, resolvedFilePath, content);
+    const full = computeAnnotateHistory(annotateProjectName, resolvedFilePath, content);
+    const result: FolderAnnotateHistory | null = full
+      ? { slug: full.slug, previousPlan: full.previousPlan, versionInfo: full.versionInfo }
+      : null;
     folderAnnotateHistoryCache.set(resolvedFilePath, result);
     return result;
   }

@@ -41,6 +41,15 @@ import {
 import type { AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { preloadFile } from "@pierre/diffs/ssr";
 
+/**
+ * Subset of AnnotateHistoryResult the folder /api/doc path actually needs.
+ * `diffCurrent` is omitted: it always equals the request's own `content` and
+ * the client never reads it off this response (the single-file /api/plan
+ * payload still returns the full AnnotateHistoryResult, `diffCurrent`
+ * included, for legacy shape parity — see annotate.ts).
+ */
+export type FolderAnnotateHistory = Omit<AnnotateHistoryResult, "diffCurrent">;
+
 // --- Route handlers ---
 
 /**
@@ -61,14 +70,16 @@ export interface HandleDocOptions {
 	 * When set, /api/doc runs annotate's per-file version-history pipeline for
 	 * eligible markdown-branch documents (local file under an allowed root,
 	 * .md/.txt, not HTML, not a converted doc, under the annotatable size cap
-	 * already enforced above) and merges `previousPlan`/`versionInfo`/
-	 * `diffCurrent` into the response — the same field names the single-file
-	 * /api/plan payload uses. `compute` is expected to memoize per resolved
-	 * path itself (the annotate server keys its cache by path in its own
-	 * closure); this module only decides *whether* to call it.
+	 * already enforced above) and merges `previousPlan`/`versionInfo` into the
+	 * response — the same field names the single-file /api/plan payload uses
+	 * (which additionally returns `diffCurrent`; the folder path omits it
+	 * since it always equals the document's own content and the client never
+	 * reads it). `compute` is expected to memoize per resolved path itself
+	 * (the annotate server keys its cache by path in its own closure); this
+	 * module only decides *whether* to call it.
 	 */
 	annotateHistory?: {
-		compute: (resolvedFilePath: string, content: string) => AnnotateHistoryResult | null;
+		compute: (resolvedFilePath: string, content: string) => FolderAnnotateHistory | null;
 	};
 }
 
@@ -200,7 +211,6 @@ type DocOptionsResult<T> = T & {
 	sourceSave?: SourceSaveCapability;
 	previousPlan?: string | null;
 	versionInfo?: AnnotateHistoryResult["versionInfo"];
-	diffCurrent?: string;
 };
 
 function applyDocOptions<T extends Record<string, unknown>>(
@@ -234,7 +244,6 @@ function applyDocOptions<T extends Record<string, unknown>>(
 		if (history) {
 			next.previousPlan = history.previousPlan;
 			next.versionInfo = history.versionInfo;
-			next.diffCurrent = history.diffCurrent;
 		}
 	}
 	if (typeof data.filepath !== "string") {
