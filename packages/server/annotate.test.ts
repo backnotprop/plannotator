@@ -14,8 +14,8 @@
  * process-global and cannot be unset).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startAnnotateServer } from "./annotate";
@@ -534,9 +534,24 @@ describe("annotate server: folder annotate history", () => {
 
   // Every test uses its own project namespace (history lives in the real
   // ~/.plannotator data dir, same as storage.test.ts) so runs never collide.
+  // Every minted name is tracked and its history directory removed in
+  // afterAll below — this suite must never leave residue in the real data
+  // dir (including the stray non-directory file the "unwritable data dir"
+  // test deliberately plants inside its own project's history dir; removing
+  // the project dir recursively takes that with it).
+  const mintedProjects: string[] = [];
   function uniqueProject(label: string): string {
-    return `_annotate_history_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const project = `_annotate_history_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    mintedProjects.push(project);
+    return project;
   }
+
+  afterAll(() => {
+    const historyDir = join(getPlannotatorDataDir(), "history");
+    for (const project of mintedProjects) {
+      rmSync(join(historyDir, project), { recursive: true, force: true });
+    }
+  });
 
   test("first open mints one version; reopening in the same session is memoized (no re-snapshot even if the file changes on disk)", async () => {
     const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-first-open-"));
@@ -559,12 +574,14 @@ describe("annotate server: folder annotate history", () => {
         markdown?: string;
         previousPlan?: string | null;
         versionInfo?: { version: number; totalVersions: number; project: string };
-        diffCurrent?: string;
       };
       expect(firstJson.markdown).toBe("V1\n");
       expect(firstJson.previousPlan).toBeNull();
       expect(firstJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
-      expect(firstJson.diffCurrent).toBe("V1\n");
+      // diffCurrent is intentionally not propagated on the folder /api/doc
+      // path — it always equals the doc's own markdown and the client never
+      // reads it (unlike single-file /api/plan, which keeps it for shape parity).
+      expect("diffCurrent" in firstJson).toBe(false);
 
       // Change the file on disk between opens — a re-run of the pipeline
       // would mint version 2. Memoization must prevent that.
@@ -698,11 +715,11 @@ describe("annotate server: folder annotate history", () => {
       const json = await response.json() as {
         previousPlan?: string | null;
         versionInfo?: { version: number; totalVersions: number; project: string };
-        diffCurrent?: string;
       };
       expect(json.previousPlan).toBeNull();
       expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
-      expect(json.diffCurrent).toBe("Fresh\n");
+      // diffCurrent is intentionally not propagated on the folder /api/doc path.
+      expect("diffCurrent" in json).toBe(false);
     } finally {
       server.stop();
     }

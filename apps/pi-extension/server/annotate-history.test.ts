@@ -15,8 +15,8 @@
  * approach as the Bun-side suite) so runs never collide.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startAnnotateServer } from "./serverAnnotate";
@@ -49,9 +49,24 @@ describe("pi annotate server: folder annotate history", () => {
 		else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistoryFlag;
 	});
 
+	// Every minted name is tracked and its history directory removed in
+	// afterAll below — this suite must never leave residue in the real data
+	// dir (including the stray non-directory file the "unwritable data dir"
+	// test deliberately plants inside its own project's history dir; removing
+	// the project dir recursively takes that with it).
+	const mintedProjects: string[] = [];
 	function uniqueProject(label: string): string {
-		return `_pi_annotate_history_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+		const project = `_pi_annotate_history_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+		mintedProjects.push(project);
+		return project;
 	}
+
+	afterAll(() => {
+		const historyDir = join(getPlannotatorDataDir(), "history");
+		for (const project of mintedProjects) {
+			rmSync(join(historyDir, project), { recursive: true, force: true });
+		}
+	});
 
 	test("first open mints one version; reopening in the same session is memoized (no re-snapshot even if the file changes on disk)", async () => {
 		const folderPath = mkdtempSync(join(tmpdir(), "plannotator-pi-folder-history-first-open-"));
@@ -74,12 +89,14 @@ describe("pi annotate server: folder annotate history", () => {
 				markdown?: string;
 				previousPlan?: string | null;
 				versionInfo?: { version: number; totalVersions: number; project: string };
-				diffCurrent?: string;
 			};
 			expect(firstJson.markdown).toBe("V1\n");
 			expect(firstJson.previousPlan).toBeNull();
 			expect(firstJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
-			expect(firstJson.diffCurrent).toBe("V1\n");
+			// diffCurrent is intentionally not propagated on the folder /api/doc
+			// path — it always equals the doc's own markdown and the client never
+			// reads it (unlike single-file /api/plan, which keeps it for shape parity).
+			expect("diffCurrent" in firstJson).toBe(false);
 
 			// Change the file on disk between opens — a re-run of the pipeline
 			// would mint version 2. Memoization must prevent that.
