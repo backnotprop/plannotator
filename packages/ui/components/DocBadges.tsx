@@ -5,9 +5,13 @@
  *   - layout="column": original location at the top-left of the plan card (absolute)
  *   - layout="row":   inside the sticky header lane when the user scrolls
  *
- * In row layout, the demo badge and linked-doc breadcrumb are dropped — the
- * sticky lane hides entirely in linked-doc mode, and the demo badge is purely
- * decorative top-of-doc context.
+ * In row layout, the demo badge and linked-doc breadcrumb are dropped —
+ * everything else is decorative top-of-doc context except the plan-diff
+ * badge, which is NOT suppressed by linkedDocInfo: `planDiffStats`/
+ * `hasPreviousVersion` already arrive pre-scoped to whichever document is
+ * currently active (root, or a folder/linked doc with its own diff
+ * baseline), so it renders in linked-doc mode exactly when that document
+ * actually has a previous version to diff against.
  */
 
 import React from 'react';
@@ -64,10 +68,12 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   ) : null;
 
   // In row layout, only PlanDiffBadge (when it has stats to show) and
-  // archiveInfo actually render — everything else is hidden. Check what
-  // will truly produce visible output to avoid an empty wrapper div.
+  // archiveInfo (outside linked-doc mode) actually render — everything else
+  // is hidden. Check what will truly produce visible output to avoid an
+  // empty wrapper div. PlanDiffBadge is not linkedDocInfo-gated — see the
+  // header comment.
   const anything = isRow
-    ? (!linkedDocInfo && ((hasPreviousVersion && planDiffStats) || archiveInfo))
+    ? (hasPreviousVersion && planDiffStats) || (archiveInfo && !linkedDocInfo)
     : repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || canOpenInApp;
   if (!anything) return null;
 
@@ -124,7 +130,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
         </div>
       )}
 
-      {onPlanDiffToggle && !linkedDocInfo && (
+      {onPlanDiffToggle && (
         <PlanDiffBadge
           stats={planDiffStats ?? null}
           isActive={isPlanDiffActive ?? false}

@@ -61,7 +61,7 @@ import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSe
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar, type SidebarTab } from '@plannotator/ui/hooks/useSidebar';
-import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
+import { usePlanDiff, type VersionInfo, type VersionEntry, type PlanDiffFetchers } from '@plannotator/ui/hooks/usePlanDiff';
 import { useLinkedDoc, type LinkedDocSessionState } from '@plannotator/ui/hooks/useLinkedDoc';
 import { useCodeFilePopout } from '@plannotator/ui/hooks/useCodeFilePopout';
 import { useAnnotationDraft, type DraftEditedDocument, type DraftSavedFileChange } from '@plannotator/ui/hooks/useAnnotationDraft';
@@ -686,36 +686,6 @@ const App: React.FC = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isPlanDiffActive]);
 
-  // Plan diff computation. On the HTML surface the diff is rendered as the real
-  // page with inline highlights (htmlDiffHtml) instead of the markdown block diff,
-  // so suppress the markdown diff path there (markdown is empty for HTML).
-  const planDiff = usePlanDiff(
-    markdown,
-    isHtmlSurface ? null : previousPlan,
-    isHtmlSurface ? null : versionInfo,
-  );
-  const warnFinishEditingFirst = useCallback((target: 'versions' | 'diff') => {
-    toast('Finish editing first', {
-      description: target === 'versions'
-        ? 'Use "Done editing" before changing the comparison version.'
-        : 'Use "Done editing" before opening the version diff.',
-    });
-  }, []);
-  const handleSelectBaseVersion = useCallback((version: number) => {
-    if (isEditingMarkdown) {
-      warnFinishEditingFirst('versions');
-      return Promise.resolve();
-    }
-    return planDiff.selectBaseVersion(version);
-  }, [isEditingMarkdown, planDiff.selectBaseVersion, warnFinishEditingFirst]);
-  const handleActivatePlanDiff = useCallback(() => {
-    if (isEditingMarkdown) {
-      warnFinishEditingFirst('diff');
-      return;
-    }
-    setIsPlanDiffActive(true);
-  }, [isEditingMarkdown, warnFinishEditingFirst]);
-
   const linkedDocSidebar = useMemo(() => ({
     ...sidebar,
     open: openSidebarTab,
@@ -788,6 +758,73 @@ const App: React.FC = () => {
     getDocumentMarkdown: getLinkedDocumentMarkdown,
     onAfterBack: restoreLinkedDocumentEditableKey,
   });
+
+  // Active document's version-diff baseline: the root document's own
+  // previousPlan/versionInfo (set once from /api/plan) when no linked/folder
+  // doc is open, or the active document's own baseline when one is —
+  // captured from its /api/doc response and cached across navigation by
+  // useLinkedDoc. /api/doc only ever populates these for eligible folder
+  // files, so any other linked doc naturally resolves to null/null here,
+  // same as the (now-removed) blanket "linkedDocHook.isActive ? null : ..."
+  // suppression used to force.
+  const activeDiffPreviousPlan = linkedDocHook.isActive ? linkedDocHook.diffPreviousPlan : previousPlan;
+  const activeDiffVersionInfo = linkedDocHook.isActive ? linkedDocHook.diffVersionInfo : versionInfo;
+  const activeDocFilepath = linkedDocHook.isActive ? linkedDocHook.filepath : null;
+
+  // Per-document version fetchers: only needed while a document with its own
+  // diff baseline is active (folder annotate) — usePlanDiff's bare-endpoint
+  // defaults already cover the root document.
+  const activeDocDiffFetchers = useMemo<PlanDiffFetchers | undefined>(() => {
+    if (!activeDocFilepath) return undefined;
+    const filepath = activeDocFilepath;
+    return {
+      fetchVersion: async (version: number) => {
+        const res = await fetch(`/api/plan/version?v=${version}&path=${encodeURIComponent(filepath)}`);
+        if (!res.ok) throw new Error(`Failed to load version ${version}.`);
+        return (await res.json()) as { plan: string; version: number };
+      },
+      fetchVersions: async () => {
+        const res = await fetch(`/api/plan/versions?path=${encodeURIComponent(filepath)}`);
+        if (!res.ok) throw new Error('Failed to load versions.');
+        return (await res.json()) as { project: string; slug: string; versions: VersionEntry[] };
+      },
+    };
+  }, [activeDocFilepath]);
+
+  // Plan diff computation. On the HTML surface the diff is rendered as the real
+  // page with inline highlights (htmlDiffHtml) instead of the markdown block diff,
+  // so suppress the markdown diff path there (markdown is empty for HTML).
+  // `activeDocFilepath` as the docKey resets the diff-base state whenever the
+  // active document changes, so a newly opened document starts from ITS OWN
+  // baseline instead of inheriting whatever the previous document had.
+  const planDiff = usePlanDiff(
+    markdown,
+    isHtmlSurface ? null : activeDiffPreviousPlan,
+    isHtmlSurface ? null : activeDiffVersionInfo,
+    activeDocDiffFetchers,
+    activeDocFilepath,
+  );
+  const warnFinishEditingFirst = useCallback((target: 'versions' | 'diff') => {
+    toast('Finish editing first', {
+      description: target === 'versions'
+        ? 'Use "Done editing" before changing the comparison version.'
+        : 'Use "Done editing" before opening the version diff.',
+    });
+  }, []);
+  const handleSelectBaseVersion = useCallback((version: number) => {
+    if (isEditingMarkdown) {
+      warnFinishEditingFirst('versions');
+      return Promise.resolve();
+    }
+    return planDiff.selectBaseVersion(version);
+  }, [isEditingMarkdown, planDiff.selectBaseVersion, warnFinishEditingFirst]);
+  const handleActivatePlanDiff = useCallback(() => {
+    if (isEditingMarkdown) {
+      warnFinishEditingFirst('diff');
+      return;
+    }
+    setIsPlanDiffActive(true);
+  }, [isEditingMarkdown, warnFinishEditingFirst]);
 
   // Keep the early parse-path mirror in sync with the active linked doc so
   // the blocks/frontmatter memos (declared before this hook) parse with the
@@ -4022,7 +4059,7 @@ const App: React.FC = () => {
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
               hasDiff={planDiff.hasPreviousVersion}
-              showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
+              showVersionsTab={!isHtmlSurface && activeDiffVersionInfo !== null && activeDiffVersionInfo.totalVersions > 1}
               showFilesTab={showFilesTab && !archive.archiveMode}
               showMessagesTab={annotateSource === 'message' && recentMessages.length > 1}
               showAgentTerminalTab={showAgentTerminalControls}
@@ -4082,8 +4119,8 @@ const App: React.FC = () => {
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
                 onFilesRetryVaultDir={(vaultPath) => fileBrowser.addVaultDir(vaultPath)}
                 hasFileAnnotations={hasFileAnnotations}
-                showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
-                versionInfo={versionInfo}
+                showVersionsTab={!isHtmlSurface && activeDiffVersionInfo !== null && activeDiffVersionInfo.totalVersions > 1}
+                versionInfo={activeDiffVersionInfo}
                 versions={planDiff.versions}
                 selectedBaseVersion={planDiff.diffBaseVersion}
                 onSelectBaseVersion={handleSelectBaseVersion}
@@ -4392,10 +4429,10 @@ const App: React.FC = () => {
                     onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                     repoInfo={repoInfo}
                     stickyActions={uiPrefs.stickyActionsEnabled}
-                    planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
+                    planDiffStats={planDiff.diffStats}
                     isPlanDiffActive={isPlanDiffActive}
                     onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
-                    hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
+                    hasPreviousVersion={planDiff.hasPreviousVersion}
                     showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}
