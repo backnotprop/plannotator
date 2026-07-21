@@ -19,7 +19,8 @@ import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVault
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
-import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
+import { getPlanVersion, listVersions } from "@plannotator/shared/storage";
+import { computeAnnotateHistory, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { htmlDiff } from "@plannotator/shared/html-diff";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
@@ -164,14 +165,7 @@ export async function startAnnotateServer(
   // when headings change. Diff content is the markdown, or the raw HTML source
   // when rendering HTML. Only single local files (not URLs/folders/messages).
   const annotateProjectName = project ?? "_unknown";
-  let annotateHistory:
-    | {
-        slug: string;
-        diffCurrent: string;
-        previousPlan: string | null;
-        versionInfo: { version: number; totalVersions: number; project: string };
-      }
-    | null = null;
+  let annotateHistory: AnnotateHistoryResult | null = null;
   {
     const historyContent = renderHtml && rawHtml ? rawHtml : markdown;
     const eligible =
@@ -179,38 +173,12 @@ export async function startAnnotateServer(
       !/^https?:\/\//i.test(filePath) &&
       historyContent.length > 0 &&
       resolveAnnotateHistory(loadConfig());
+    // History is an enhancement, never a gate: a read-only/full data dir
+    // must degrade to v0.22.0's stateless annotate (no version diff), not
+    // fail the whole session before the UI ever opens. (computeAnnotateHistory
+    // never throws — it logs and returns null on any storage error.)
     if (eligible) {
-      const base =
-        (filePath.split(/[\\/]/).pop() || "document")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-          .slice(0, 60) || "document";
-      const slug = `annotate-${base}-${contentHash(resolvePath(filePath)).slice(0, 8)}`;
-      // History is an enhancement, never a gate: a read-only/full data dir
-      // must degrade to v0.22.0's stateless annotate (no version diff), not
-      // fail the whole session before the UI ever opens.
-      try {
-        const saved = saveToHistory(annotateProjectName, slug, historyContent);
-        const previousPlan =
-          saved.version > 1
-            ? getPlanVersion(annotateProjectName, slug, saved.version - 1)
-            : null;
-        annotateHistory = {
-          slug,
-          diffCurrent: historyContent,
-          previousPlan,
-          versionInfo: {
-            version: saved.version,
-            totalVersions: getVersionCount(annotateProjectName, slug),
-            project: annotateProjectName,
-          },
-        };
-      } catch (error) {
-        console.error(
-          `[plannotator] warning: annotate history unavailable (${error instanceof Error ? error.message : String(error)}); continuing without version diff`,
-        );
-      }
+      annotateHistory = computeAnnotateHistory(annotateProjectName, resolvePath(filePath), historyContent);
     }
   }
   const draftSource =
