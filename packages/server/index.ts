@@ -20,9 +20,11 @@ import {
   saveToObsidian,
   saveToBear,
   saveToOctarine,
+  saveToNotion,
   type ObsidianConfig,
   type BearConfig,
   type OctarineConfig,
+  type NotionConfig,
   type IntegrationResult,
 } from "./integrations";
 import {
@@ -453,6 +455,7 @@ export async function startPlannotatorServer(
                 obsidian?: ObsidianConfig;
                 bear?: BearConfig;
                 octarine?: OctarineConfig;
+                notion?: NotionConfig;
                 feedback?: string;
                 agentSwitch?: string;
                 planSave?: { enabled: boolean; customPath?: string };
@@ -493,6 +496,9 @@ export async function startPlannotatorServer(
               }
               if (body.octarine?.plan && body.octarine?.workspace) {
                 integrationPromises.push(saveToOctarine(body.octarine).then(r => { integrationResults.octarine = r; }));
+              }
+              if (body.notion?.plan && body.notion?.parentPageId) {
+                integrationPromises.push(saveToNotion(body.notion).then(r => { integrationResults.notion = r; }));
               }
               await Promise.allSettled(integrationPromises);
 

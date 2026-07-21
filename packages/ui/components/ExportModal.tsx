@@ -10,6 +10,7 @@ import React, { useState, useEffect } from 'react';
 import { getObsidianSettings, getEffectiveVaultPath } from '../utils/obsidian';
 import { getBearSettings } from '../utils/bear';
 import { getOctarineSettings } from '../utils/octarine';
+import { getNotionSettings, normalizeNotionPageId } from '../utils/notion';
 import { wrapFeedbackForAgent } from '../utils/parser';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
@@ -18,11 +19,12 @@ interface SaveToNotesPayload {
   obsidian?: object;
   bear?: object;
   octarine?: object;
+  notion?: object;
 }
 
 /** Parsed response from the notes endpoint. */
 interface SaveToNotesResult {
-  results?: Record<string, { success?: boolean; error?: string }>;
+  results?: Record<string, { success?: boolean; error?: string; url?: string }>;
 }
 
 /** Default save-to-notes wire: today's literal POST to /api/save-notes. */
@@ -61,7 +63,7 @@ interface ExportModalProps {
 
 type Tab = 'share' | 'annotations' | 'notes';
 
-type SaveTarget = 'obsidian' | 'bear' | 'octarine';
+type SaveTarget = 'obsidian' | 'bear' | 'octarine' | 'notion';
 type SaveStatus = 'idle' | 'saving' | 'success' | 'error';
 
 export const ExportModal: React.FC<ExportModalProps> = ({
@@ -85,8 +87,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [copied, setCopied] = useState<'short' | 'full' | 'annotations' | false>(false);
-  const [saveStatus, setSaveStatus] = useState<Record<SaveTarget, SaveStatus>>({ obsidian: 'idle', bear: 'idle', octarine: 'idle' });
+  const [saveStatus, setSaveStatus] = useState<Record<SaveTarget, SaveStatus>>({ obsidian: 'idle', bear: 'idle', octarine: 'idle', notion: 'idle' });
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const [savedUrls, setSavedUrls] = useState<Partial<Record<SaveTarget, string>>>({});
 
   // Reset tab when modal opens
   useEffect(() => {
@@ -98,8 +101,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   // Reset save status when modal opens
   useEffect(() => {
     if (isOpen) {
-      setSaveStatus({ obsidian: 'idle', bear: 'idle', octarine: 'idle' });
+      setSaveStatus({ obsidian: 'idle', bear: 'idle', octarine: 'idle', notion: 'idle' });
       setSaveErrors({});
+      setSavedUrls({});
     }
   }, [isOpen]);
 
@@ -109,10 +113,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const obsidianSettings = getObsidianSettings();
   const bearSettings = getBearSettings();
   const octarineSettings = getOctarineSettings();
+  const notionSettings = getNotionSettings();
   const effectiveVaultPath = getEffectiveVaultPath(obsidianSettings);
   const isObsidianReady = obsidianSettings.enabled && effectiveVaultPath.trim().length > 0;
   const isBearReady = bearSettings.enabled;
   const isOctarineReady = octarineSettings.enabled && octarineSettings.workspace.trim().length > 0;
+  const notionParentPageId = normalizeNotionPageId(notionSettings.parentPageId);
+  const isNotionReady = notionSettings.enabled && notionParentPageId !== null;
 
   const handleCopy = async (text: string, which: 'short' | 'full' | 'annotations') => {
     try {
@@ -149,7 +156,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setSaveStatus(prev => ({ ...prev, [target]: 'saving' }));
     setSaveErrors(prev => { const next = { ...prev }; delete next[target]; return next; });
 
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
+    const body: { obsidian?: object; bear?: object; octarine?: object; notion?: object } = {};
 
     if (target === 'obsidian') {
       body.obsidian = {
@@ -170,6 +177,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         folder: octarineSettings.folder || 'plannotator',
       };
     }
+    if (target === 'notion' && notionParentPageId) {
+      body.notion = { plan: markdown, parentPageId: notionParentPageId };
+    }
 
     try {
       const data = await onSaveToNotes(body);
@@ -177,6 +187,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
       if (result?.success) {
         setSaveStatus(prev => ({ ...prev, [target]: 'success' }));
+        if (result.url) setSavedUrls(prev => ({ ...prev, [target]: result.url! }));
       } else {
         setSaveStatus(prev => ({ ...prev, [target]: 'error' }));
         setSaveErrors(prev => ({ ...prev, [target]: result?.error || 'Save failed' }));
@@ -192,10 +203,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     if (isObsidianReady) targets.push('obsidian');
     if (isBearReady) targets.push('bear');
     if (isOctarineReady) targets.push('octarine');
+    if (isNotionReady) targets.push('notion');
     await Promise.all(targets.map(t => handleSaveToNotes(t)));
   };
 
-  const readyCount = [isObsidianReady, isBearReady, isOctarineReady].filter(Boolean).length;
+  const readyCount = [isObsidianReady, isBearReady, isOctarineReady, isNotionReady].filter(Boolean).length;
 
   // Determine which tabs to show
   const showTabs = sharingEnabled || showNotesTab;
@@ -521,12 +533,67 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 )}
               </div>
 
+              {/* Notion */}
+              <div className="border border-border rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${isNotionReady ? 'bg-success' : 'bg-muted-foreground/30'}`} />
+                    <span className="text-sm font-medium">Notion</span>
+                  </div>
+                  {isNotionReady ? (
+                    <button
+                      onClick={() => handleSaveToNotes('notion')}
+                      disabled={saveStatus.notion === 'saving'}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                        saveStatus.notion === 'success'
+                          ? 'bg-success/15 text-success'
+                          : saveStatus.notion === 'error'
+                            ? 'bg-destructive/15 text-destructive'
+                            : saveStatus.notion === 'saving'
+                              ? 'bg-muted text-muted-foreground opacity-50'
+                              : 'bg-primary text-primary-foreground hover:opacity-90'
+                      }`}
+                    >
+                      {saveStatus.notion === 'saving' ? 'Saving...'
+                        : saveStatus.notion === 'success' ? 'Saved'
+                        : saveStatus.notion === 'error' ? 'Failed'
+                        : 'Save'}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Not configured</span>
+                  )}
+                </div>
+                {isNotionReady && (
+                  <div className="text-[10px] text-muted-foreground/70">
+                    Parent page: {notionParentPageId}
+                  </div>
+                )}
+                {savedUrls.notion && (
+                  <a
+                    href={savedUrls.notion}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block text-[10px] text-primary hover:underline truncate"
+                  >
+                    Open saved page
+                  </a>
+                )}
+                {!isNotionReady && (
+                  <div className="text-[10px] text-muted-foreground/70">
+                    Enable in Settings &gt; Saving &gt; Notion
+                  </div>
+                )}
+                {saveErrors.notion && (
+                  <div className="text-[10px] text-destructive">{saveErrors.notion}</div>
+                )}
+              </div>
+
               {/* Save All button */}
               {readyCount >= 2 && (
                 <div className="flex justify-end">
                   <button
                     onClick={handleSaveAll}
-                    disabled={saveStatus.obsidian === 'saving' || saveStatus.bear === 'saving' || saveStatus.octarine === 'saving'}
+                    disabled={saveStatus.obsidian === 'saving' || saveStatus.bear === 'saving' || saveStatus.octarine === 'saving' || saveStatus.notion === 'saving'}
                     className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
                     Save All

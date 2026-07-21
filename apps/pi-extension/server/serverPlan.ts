@@ -33,9 +33,11 @@ import {
 	type IntegrationResult,
 	type ObsidianConfig,
 	type OctarineConfig,
+	type NotionConfig,
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
+	saveToNotion,
 } from "./integrations.js";
 import { listenOnPort } from "./network.js";
 
@@ -357,6 +359,7 @@ export async function startPlanReviewServer(options: {
 				const obsConfig = body.obsidian as ObsidianConfig | undefined;
 				const bearConfig = body.bear as BearConfig | undefined;
 				const octConfig = body.octarine as OctarineConfig | undefined;
+				const notionConfig = body.notion as NotionConfig | undefined;
 				if (obsConfig?.vaultPath && obsConfig?.plan) {
 					integrationPromises.push(
 						saveToObsidian(obsConfig).then((r) => {
@@ -375,6 +378,13 @@ export async function startPlanReviewServer(options: {
 					integrationPromises.push(
 						saveToOctarine(octConfig).then((r) => {
 							integrationResults.octarine = r;
+						}),
+					);
+				}
+				if (notionConfig?.plan && notionConfig?.parentPageId) {
+					integrationPromises.push(
+						saveToNotion(notionConfig).then((r) => {
+							integrationResults.notion = r;
 						}),
 					);
 				}

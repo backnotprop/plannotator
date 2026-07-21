@@ -69,6 +69,30 @@ describe("handleSaveNotes", () => {
     expect(json.results.obsidian).toHaveProperty("error");
   });
 
+  test("dispatches a Notion export without exposing its token", async () => {
+    const originalToken = process.env.NOTION_TOKEN;
+    const originalFetch = globalThis.fetch;
+    process.env.NOTION_TOKEN = "secret-token";
+    globalThis.fetch = async () => Response.json({ url: "https://www.notion.so/saved-plan" });
+
+    try {
+      const response = await handleSaveNotes(
+        saveNotesRequest({
+          notion: { plan: "# Test Plan", parentPageId: "parent-page-id" },
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.results.notion).toEqual({ success: true, url: "https://www.notion.so/saved-plan" });
+      expect(JSON.stringify(json)).not.toContain("secret-token");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.NOTION_TOKEN;
+      else process.env.NOTION_TOKEN = originalToken;
+    }
+  });
+
   test("an unparseable body returns a 500 JSON error (not SPA HTML)", async () => {
     const badRequest = new Request("http://localhost/api/save-notes", {
       method: "POST",

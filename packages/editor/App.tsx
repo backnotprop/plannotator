@@ -33,6 +33,7 @@ import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAn
 import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTOM_PATH_SENTINEL } from '@plannotator/ui/utils/obsidian';
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils/octarine';
+import { getNotionSettings, isNotionConfigured, normalizeNotionPageId } from '@plannotator/ui/utils/notion';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
@@ -156,6 +157,7 @@ type NoteAutoSaveResults = {
   obsidian?: boolean;
   bear?: boolean;
   octarine?: boolean;
+  notion?: boolean;
 };
 
 type MessageAnnotationState = {
@@ -2420,7 +2422,7 @@ const App: React.FC = () => {
     if (!isApiMode || !markdown || isSharedSession || annotateMode || archive.archiveMode) return;
     if (autoSaveAttempted.current) return;
 
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
+    const body: { obsidian?: object; bear?: object; octarine?: object; notion?: object } = {};
     const targets: string[] = [];
 
     const obsSettings = getObsidianSettings();
@@ -2458,6 +2460,13 @@ const App: React.FC = () => {
       targets.push('Octarine');
     }
 
+    const notionSettings = getNotionSettings();
+    const parentPageId = normalizeNotionPageId(notionSettings.parentPageId);
+    if (notionSettings.autoSave && notionSettings.enabled && parentPageId) {
+      body.notion = { plan: markdown, parentPageId };
+      targets.push('Notion');
+    }
+
     if (targets.length === 0) return;
     autoSaveAttempted.current = true;
 
@@ -2472,6 +2481,7 @@ const App: React.FC = () => {
           ...(body.obsidian ? { obsidian: Boolean(data.results?.obsidian?.success) } : {}),
           ...(body.bear ? { bear: Boolean(data.results?.bear?.success) } : {}),
           ...(body.octarine ? { octarine: Boolean(data.results?.octarine?.success) } : {}),
+          ...(body.notion ? { notion: Boolean(data.results?.notion?.success) } : {}),
         };
         autoSaveResultsRef.current = results;
 
@@ -2635,13 +2645,14 @@ const App: React.FC = () => {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
       const octarineSettings = getOctarineSettings();
+      const notionSettings = getNotionSettings();
       const planSaveSettings = getPlanSaveSettings();
-      const autoSaveResults = bearSettings.autoSave && autoSavePromiseRef.current
+      const autoSaveResults = (bearSettings.autoSave || notionSettings.autoSave) && autoSavePromiseRef.current
         ? await autoSavePromiseRef.current
         : autoSaveResultsRef.current;
 
       // Build request body - include integrations if enabled
-      const body: { draftGeneration: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
+      const body: { draftGeneration: number; obsidian?: object; bear?: object; octarine?: object; notion?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
         draftGeneration: getDraftGeneration(),
       };
 
@@ -2688,6 +2699,11 @@ const App: React.FC = () => {
           workspace: octarineSettings.workspace,
           folder: octarineSettings.folder || 'plannotator',
         };
+      }
+
+      const parentPageId = normalizeNotionPageId(notionSettings.parentPageId);
+      if (notionSettings.enabled && parentPageId && !(notionSettings.autoSave && autoSaveResults.notion)) {
+        body.notion = { plan: currentMarkdown, parentPageId };
       }
 
       // Include annotations as feedback if any exist (for OpenCode "approve with notes").
@@ -3353,8 +3369,8 @@ const App: React.FC = () => {
     toast.success('Downloaded annotations');
   };
 
-  const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine') => {
-    const body: { obsidian?: object; bear?: object; octarine?: object } = {};
+  const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine' | 'notion') => {
+    const body: { obsidian?: object; bear?: object; octarine?: object; notion?: object } = {};
     // Mid-edit saves describe the live buffer, matching handleApprove.
     const quickSaveMarkdown = isEditingMarkdown
       ? markdownEditorHandleRef.current?.getMarkdown() ?? displayedMarkdown
@@ -3390,7 +3406,13 @@ const App: React.FC = () => {
       };
     }
 
-    const targetName = target === 'obsidian' ? 'Obsidian' : target === 'bear' ? 'Bear' : 'Octarine';
+    if (target === 'notion') {
+      const ns = getNotionSettings();
+      const parentPageId = normalizeNotionPageId(ns.parentPageId);
+      if (parentPageId) body.notion = { plan: quickSaveMarkdown, parentPageId };
+    }
+
+    const targetName = target === 'obsidian' ? 'Obsidian' : target === 'bear' ? 'Bear' : target === 'octarine' ? 'Octarine' : 'Notion';
     try {
       const res = await fetch('/api/save-notes', {
         method: 'POST',
@@ -3644,6 +3666,7 @@ const App: React.FC = () => {
       const obsOk = isObsidianConfigured();
       const bearOk = getBearSettings().enabled;
       const octOk = isOctarineConfigured();
+      const notionOk = isNotionConfigured();
 
       if (defaultApp === 'download') {
         handleDownloadAnnotations();
@@ -3653,6 +3676,8 @@ const App: React.FC = () => {
         handleQuickSaveToNotes('bear');
       } else if (defaultApp === 'octarine' && octOk) {
         handleQuickSaveToNotes('octarine');
+      } else if (defaultApp === 'notion' && notionOk) {
+        handleQuickSaveToNotes('notion');
       } else {
         setInitialExportTab('notes');
         setShowExport(true);
@@ -3803,6 +3828,7 @@ const App: React.FC = () => {
   const handleOpenImport = useCallback(() => setShowImport(true), []);
   const handleSaveToObsidian = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('obsidian'), []);
   const handleSaveToOctarine = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('octarine'), []);
+  const handleSaveToNotion = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('notion'), []);
   const handleSaveToBear = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('bear'), []);
 
   const planMaxWidth = useMemo(() => {
@@ -3913,6 +3939,7 @@ const App: React.FC = () => {
           onSaveToObsidian={handleSaveToObsidian}
           onSaveToBear={handleSaveToBear}
           onSaveToOctarine={handleSaveToOctarine}
+          onSaveToNotion={handleSaveToNotion}
           appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
           updateInfo={updateInfo}
           isWSL={isWSL}
@@ -3920,6 +3947,7 @@ const App: React.FC = () => {
           obsidianConfigured={isObsidianConfigured()}
           bearConfigured={getBearSettings().enabled}
           octarineConfigured={isOctarineConfigured()}
+          notionConfigured={isNotionConfigured()}
         />
 
         {/* Linked document error banner */}

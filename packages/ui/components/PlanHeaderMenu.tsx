@@ -29,12 +29,14 @@ interface PlanHeaderMenuProps {
   onSaveToObsidian: () => void;
   onSaveToBear: () => void;
   onSaveToOctarine: () => void;
+  onSaveToNotion: () => void;
   sharingEnabled: boolean;
   isApiMode: boolean;
   agentInstructionsEnabled: boolean;
   obsidianConfigured: boolean;
   bearConfigured: boolean;
   octarineConfigured: boolean;
+  notionConfigured: boolean;
 }
 
 export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
@@ -52,19 +54,21 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   onSaveToObsidian,
   onSaveToBear,
   onSaveToOctarine,
+  onSaveToNotion,
   sharingEnabled,
   isApiMode,
   agentInstructionsEnabled,
   obsidianConfigured,
   bearConfigured,
   octarineConfigured,
+  notionConfigured,
 }) => {
   const { theme, setTheme, colorTheme } = useTheme();
 
   const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
 
   const anyNotesAppConfigured =
-    isApiMode && (obsidianConfigured || bearConfigured || octarineConfigured);
+    isApiMode && (obsidianConfigured || bearConfigured || octarineConfigured || notionConfigured);
 
   return (
     <ActionMenu
@@ -231,6 +235,16 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
                   }}
                   icon={<NoteIcon />}
                   label="Save to Octarine"
+                />
+              )}
+              {notionConfigured && (
+                <ActionMenuItem
+                  onClick={() => {
+                    closeMenu();
+                    onSaveToNotion();
+                  }}
+                  icon={<NoteIcon />}
+                  label="Save to Notion"
                 />
               )}
             </>

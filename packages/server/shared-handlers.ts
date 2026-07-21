@@ -12,8 +12,8 @@ import { openBrowser as openBrowserImpl } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
 import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
-import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
-import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
+import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
+import type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult } from "./integrations";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -228,15 +228,16 @@ export async function handleServerReady(
   }
 }
 
-/** Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers. */
+/** Save to external note apps. Used by plan + annotate servers. */
 export async function handleSaveNotes(req: Request): Promise<Response> {
-  const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult } = {};
+  const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult; notion?: IntegrationResult } = {};
 
   try {
     const body = (await req.json()) as {
       obsidian?: ObsidianConfig;
       bear?: BearConfig;
       octarine?: OctarineConfig;
+      notion?: NotionConfig;
     };
 
     const promises: Promise<void>[] = [];
@@ -248,6 +249,9 @@ export async function handleSaveNotes(req: Request): Promise<Response> {
     }
     if (body.octarine?.plan && body.octarine?.workspace) {
       promises.push(saveToOctarine(body.octarine).then(r => { results.octarine = r; }));
+    }
+    if (body.notion?.plan && body.notion?.parentPageId) {
+      promises.push(saveToNotion(body.notion).then(r => { results.notion = r; }));
     }
     await Promise.allSettled(promises);
 

@@ -27,6 +27,12 @@ import {
   type OctarineSettings,
 } from '../utils/octarine';
 import {
+  getNotionSettings,
+  saveNotionSettings,
+  normalizeNotionPageId,
+  type NotionSettings,
+} from '../utils/notion';
+import {
   getAgentSwitchSettings,
   saveAgentSwitchSettings,
   AGENT_OPTIONS,
@@ -71,7 +77,7 @@ import {
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
 
-type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'notion' | 'comments' | 'hooks';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -678,6 +684,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [vaultsLoading, setVaultsLoading] = useState(false);
   const [bear, setBear] = useState<BearSettings>({ enabled: false, customTags: '', tagPosition: 'append', autoSave: false });
   const [octarine, setOctarine] = useState<OctarineSettings>({ enabled: false, workspace: '', folder: 'plannotator', autoSave: false });
+  const [notion, setNotion] = useState<NotionSettings>({ enabled: false, parentPageId: '', autoSave: false });
   const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true, planWidth: 'compact' });
@@ -721,12 +728,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const integrationTabs: { id: SettingsTab; label: string }[] = [
     { id: 'files', label: 'Files' },
     ...(mode === 'plan'
-      ? [{ id: 'obsidian' as SettingsTab, label: 'Obsidian' }, { id: 'bear' as SettingsTab, label: 'Bear' }, { id: 'octarine' as SettingsTab, label: 'Octarine' }]
+      ? [{ id: 'obsidian' as SettingsTab, label: 'Obsidian' }, { id: 'bear' as SettingsTab, label: 'Bear' }, { id: 'octarine' as SettingsTab, label: 'Octarine' }, { id: 'notion' as SettingsTab, label: 'Notion' }]
       : []),
   ];
   const obsidianDefaultSaveAvailable = obsidian.enabled && getEffectiveVaultPath(obsidian).trim().length > 0;
   const bearDefaultSaveAvailable = bear.enabled;
   const octarineDefaultSaveAvailable = octarine.enabled && octarine.workspace.trim().length > 0;
+  const notionDefaultSaveAvailable = notion.enabled && normalizeNotionPageId(notion.parentPageId) !== null;
 
   // Sync external open state
   useEffect(() => {
@@ -742,6 +750,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
       setOctarine(getOctarineSettings());
+      setNotion(getNotionSettings());
       setAgent(getAgentSwitchSettings());
       setPlanSave(getPlanSaveSettings());
       setUiPrefs(getUIPreferences());
@@ -768,7 +777,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       defaultNotesApp === 'download' ||
       (defaultNotesApp === 'obsidian' && obsidianDefaultSaveAvailable) ||
       (defaultNotesApp === 'bear' && bearDefaultSaveAvailable) ||
-      (defaultNotesApp === 'octarine' && octarineDefaultSaveAvailable);
+      (defaultNotesApp === 'octarine' && octarineDefaultSaveAvailable) ||
+      (defaultNotesApp === 'notion' && notionDefaultSaveAvailable);
 
     if (!defaultSaveAvailable) {
       setDefaultNotesApp('ask');
@@ -780,6 +790,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     obsidianDefaultSaveAvailable,
     bearDefaultSaveAvailable,
     octarineDefaultSaveAvailable,
+    notionDefaultSaveAvailable,
   ]);
 
   // Fetch detected vaults when Obsidian is enabled
@@ -834,6 +845,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     const newSettings = { ...octarine, ...updates };
     setOctarine(newSettings);
     saveOctarineSettings(newSettings);
+  };
+
+  const handleNotionChange = (updates: Partial<NotionSettings>) => {
+    const newSettings = { ...notion, ...updates };
+    setNotion(newSettings);
+    saveNotionSettings(newSettings);
   };
 
   const handleAgentChange = (switchTo: AgentSwitchSettings['switchTo'], customName?: string) => {
@@ -1463,13 +1480,14 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         {obsidianDefaultSaveAvailable && <option value="obsidian">Obsidian</option>}
                         {bearDefaultSaveAvailable && <option value="bear">Bear</option>}
                         {octarineDefaultSaveAvailable && <option value="octarine">Octarine</option>}
+                        {notionDefaultSaveAvailable && <option value="notion">Notion</option>}
                       </select>
                       <div className="text-[10px] text-muted-foreground/70">
                         {defaultNotesApp === 'ask'
                           ? 'Opens Export dialog with Notes tab'
                           : defaultNotesApp === 'download'
                             ? `${modKey}+S downloads the annotations file`
-                            : `${modKey}+S saves directly to ${{ obsidian: 'Obsidian', bear: 'Bear', octarine: 'Octarine' }[defaultNotesApp] ?? defaultNotesApp}`}
+                            : `${modKey}+S saves directly to ${{ obsidian: 'Obsidian', bear: 'Bear', octarine: 'Octarine', notion: 'Notion' }[defaultNotesApp] ?? defaultNotesApp}`}
                       </div>
                     </div>
 
@@ -2177,6 +2195,66 @@ tags: [plan, ...]
                             <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
                               octarine.autoSave ? 'translate-x-6' : 'translate-x-1'
                             }`} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* === NOTION TAB === */}
+                {activeTab === 'notion' && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">Notion</div>
+                        <div className="text-xs text-muted-foreground">Save plans as child pages in Notion</div>
+                      </div>
+                      <button
+                        role="switch"
+                        aria-checked={notion.enabled}
+                        onClick={() => handleNotionChange({ enabled: !notion.enabled })}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${notion.enabled ? 'bg-primary' : 'bg-muted'}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${notion.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
+                    {notion.enabled && (
+                      <div className="mt-3 space-y-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs text-muted-foreground">Parent Page URL or ID</label>
+                          <input
+                            type="text"
+                            value={notion.parentPageId}
+                            onChange={(e) => handleNotionChange({ parentPageId: e.target.value })}
+                            onBlur={(e) => {
+                              const parentPageId = normalizeNotionPageId(e.target.value);
+                              if (parentPageId) handleNotionChange({ parentPageId });
+                            }}
+                            placeholder="https://www.notion.so/..."
+                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                          />
+                          <div className="text-[10px] text-muted-foreground">
+                            Share this parent page with your Notion integration before exporting.
+                          </div>
+                        </div>
+                        <div className="rounded-lg bg-muted/50 p-3 text-[10px] text-muted-foreground space-y-1">
+                          <div>Set <code>NOTION_TOKEN</code> in the environment that starts Plannotator.</div>
+                          <div>The token is never stored in Plannotator settings or sent by your browser.</div>
+                        </div>
+                        <div className="border-t border-border/30" />
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-medium">Auto-save on Plan Arrival</div>
+                            <div className="text-[10px] text-muted-foreground">Automatically create a Notion page when a plan loads, before you approve or deny.</div>
+                          </div>
+                          <button
+                            role="switch"
+                            aria-checked={notion.autoSave}
+                            onClick={() => handleNotionChange({ autoSave: !notion.autoSave })}
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${notion.autoSave ? 'bg-primary' : 'bg-muted'}`}
+                          >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${notion.autoSave ? 'translate-x-6' : 'translate-x-1'}`} />
                           </button>
                         </div>
                       </div>

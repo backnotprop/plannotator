@@ -17,9 +17,11 @@ import {
 	type IntegrationResult,
 	type ObsidianConfig,
 	type OctarineConfig,
+	type NotionConfig,
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
+	saveToNotion,
 } from "./integrations.js";
 
 type Res = import("node:http").ServerResponse;
@@ -244,6 +246,7 @@ export async function handleSaveNotesRequest(
 		obsidian?: IntegrationResult;
 		bear?: IntegrationResult;
 		octarine?: IntegrationResult;
+		notion?: IntegrationResult;
 	} = {};
 	try {
 		const body = await parseBody(req);
@@ -251,6 +254,7 @@ export async function handleSaveNotesRequest(
 		const obsConfig = body.obsidian as ObsidianConfig | undefined;
 		const bearConfig = body.bear as BearConfig | undefined;
 		const octConfig = body.octarine as OctarineConfig | undefined;
+		const notionConfig = body.notion as NotionConfig | undefined;
 		if (obsConfig?.vaultPath && obsConfig?.plan) {
 			promises.push(
 				saveToObsidian(obsConfig).then((r) => {
@@ -269,6 +273,13 @@ export async function handleSaveNotesRequest(
 			promises.push(
 				saveToOctarine(octConfig).then((r) => {
 					results.octarine = r;
+				}),
+			);
+		}
+		if (notionConfig?.plan && notionConfig?.parentPageId) {
+			promises.push(
+				saveToNotion(notionConfig).then((r) => {
+					results.notion = r;
 				}),
 			);
 		}

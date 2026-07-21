@@ -284,6 +284,8 @@ You run /plannotator-review
 
 **Bear**: Save plans as Bear notes with nested tags and project metadata.
 
+**Notion**: Save plans as Markdown child pages under a shared Notion page. Set `NOTION_TOKEN` in the environment that starts Plannotator, then configure the parent page in Settings.
+
 **GitHub / GitLab**: Pass any PR or MR URL to `/plannotator-review` and review it with the full diff viewer, annotations, and file tree.
 
 ---

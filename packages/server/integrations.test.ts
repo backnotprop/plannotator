@@ -13,6 +13,8 @@ import {
   buildHashtags,
   buildBearContent,
   saveToObsidian,
+  saveToNotion,
+  NOTION_API_VERSION,
 } from "./integrations";
 
 describe("extractTitle", () => {
@@ -207,5 +209,71 @@ describe("saveToObsidian", () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toBeString();
+  });
+});
+
+describe("saveToNotion", () => {
+  const originalToken = process.env.NOTION_TOKEN;
+  const originalFetch = globalThis.fetch;
+
+  function restore(): void {
+    if (originalToken === undefined) delete process.env.NOTION_TOKEN;
+    else process.env.NOTION_TOKEN = originalToken;
+    globalThis.fetch = originalFetch;
+  }
+
+  test("requires a token without making a request", async () => {
+    delete process.env.NOTION_TOKEN;
+    try {
+      const result = await saveToNotion({ plan: "# Test Plan", parentPageId: "page-id" });
+      expect(result).toEqual({ success: false, error: "Notion is not configured. Set NOTION_TOKEN." });
+    } finally {
+      restore();
+    }
+  });
+
+  test("creates a markdown child page without exposing the token", async () => {
+    process.env.NOTION_TOKEN = "secret-token";
+    let request: Request | undefined;
+    globalThis.fetch = async (input, init) => {
+      request = new Request(input, init);
+      return Response.json({ url: "https://www.notion.so/test-page" });
+    };
+
+    try {
+      const result = await saveToNotion({
+        plan: "# Implementation Plan: Test Export\n\nContent",
+        parentPageId: "parent-page-id",
+      });
+
+      expect(result).toEqual({ success: true, url: "https://www.notion.so/test-page" });
+      expect(request?.url).toBe("https://api.notion.com/v1/pages");
+      expect(request?.headers.get("Authorization")).toBe("Bearer secret-token");
+      expect(request?.headers.get("Notion-Version")).toBe(NOTION_API_VERSION);
+      expect(await request?.json()).toEqual({
+        parent: { page_id: "parent-page-id" },
+        properties: { title: { title: [{ text: { content: "Test Export" } }] } },
+        markdown: "# Implementation Plan: Test Export\n\nContent",
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  test("explains a page access failure without leaking the token", async () => {
+    process.env.NOTION_TOKEN = "secret-token";
+    globalThis.fetch = async () => Response.json(
+      { message: "Could not find page" },
+      { status: 403 },
+    );
+
+    try {
+      const result = await saveToNotion({ plan: "# Test Plan", parentPageId: "page-id" });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Share the parent page");
+      expect(result.error).not.toContain("secret-token");
+    } finally {
+      restore();
+    }
   });
 });

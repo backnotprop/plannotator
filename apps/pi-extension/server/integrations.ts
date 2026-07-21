@@ -1,5 +1,5 @@
 /**
- * Note-taking app integrations (Obsidian, Bear, Octarine).
+ * Note-taking app integrations (Obsidian, Bear, Octarine, Notion).
  * Node.js equivalents of packages/server/integrations.ts.
  * Config types, save functions, tag extraction, filename generation
  */
@@ -12,6 +12,7 @@ import {
 	type ObsidianConfig,
 	type BearConfig,
 	type OctarineConfig,
+	type NotionConfig,
 	type IntegrationResult,
 	extractTitle,
 	generateFrontmatter,
@@ -25,7 +26,7 @@ import {
 import { sanitizeTag } from "../generated/project.js";
 import { resolveUserPath } from "../generated/resolve-file.js";
 
-export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
+export type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult };
 export {
 	extractTitle,
 	generateFrontmatter,
@@ -191,5 +192,47 @@ export async function saveToOctarine(
 			success: false,
 			error: err instanceof Error ? err.message : "Unknown error",
 		};
+	}
+}
+
+const NOTION_API_VERSION = "2026-03-11";
+
+export async function saveToNotion(
+	config: NotionConfig,
+): Promise<IntegrationResult> {
+	const token = process.env.NOTION_TOKEN?.trim();
+	if (!token) {
+		return { success: false, error: "Notion is not configured. Set NOTION_TOKEN." };
+	}
+	const parentPageId = config.parentPageId.trim();
+	if (!parentPageId) {
+		return { success: false, error: "Notion parent page is required." };
+	}
+
+	try {
+		const response = await fetch("https://api.notion.com/v1/pages", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				"Notion-Version": NOTION_API_VERSION,
+			},
+			body: JSON.stringify({
+				parent: { page_id: parentPageId },
+				properties: { title: { title: [{ text: { content: extractTitle(config.plan) } }] } },
+				markdown: config.plan,
+			}),
+		});
+		const data = await response.json().catch(() => null) as { message?: unknown; url?: unknown } | null;
+		if (!response.ok) {
+			const detail = typeof data?.message === "string" ? ` ${data.message}` : "";
+			if (response.status === 401) return { success: false, error: `Notion token is invalid or revoked.${detail}` };
+			if (response.status === 403) return { success: false, error: `Notion cannot access this page. Share the parent page with your Notion integration.${detail}` };
+			if (response.status === 429) return { success: false, error: `Notion rate limit exceeded.${detail}` };
+			return { success: false, error: `Notion export failed (${response.status}).${detail}` };
+		}
+		return { success: true, ...(typeof data?.url === "string" ? { url: data.url } : {}) };
+	} catch (err) {
+		return { success: false, error: err instanceof Error ? `Notion export failed: ${err.message}` : "Notion export failed." };
 	}
 }
