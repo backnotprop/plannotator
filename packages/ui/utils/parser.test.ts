@@ -1078,6 +1078,12 @@ name: bar
     expect(frontmatter?.name).toBe("bar");
   });
 
+  test("CRLF line endings do not leak \\r into the value", () => {
+    const md = "---\r\ndescription: >-\r\n  one two\r\n  three\r\n---\r\n# Hi";
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three");
+  });
+
   test("plain single-line values and arrays still parse", () => {
     const md = `---
 name: foo

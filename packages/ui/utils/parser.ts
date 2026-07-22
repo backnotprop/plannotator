@@ -62,7 +62,9 @@ function parseBlockScalar(
   const body: string[] = [];
   let j = bodyStart;
   for (; j < lines.length; j++) {
-    const bodyLine = lines[j];
+    // CRLF sources split on '\n' leave a trailing '\r' that would otherwise
+    // survive into the folded value (every other parser path trims lines).
+    const bodyLine = lines[j].replace(/\r$/, '');
     if (bodyLine.trim() === '') {
       body.push('');
       continue;
