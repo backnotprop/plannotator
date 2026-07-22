@@ -82,6 +82,10 @@ interface ViewerProps {
   isPlanDiffActive?: boolean;
   onPlanDiffToggle?: () => void;
   hasPreviousVersion?: boolean;
+  /** Baseline suffix + tooltip for the plan-diff badge (see DocBadges) —
+   *  annotate/folder sessions pass "since last review"; plan review omits. */
+  planDiffBaselineLabel?: string;
+  planDiffBaselineTooltip?: string;
   /** Show amber "Demo" badge (portal mode, no shared content loaded) */
   showDemoBadge?: boolean;
   /** Max width in px for the plan card; null removes the cap entirely. */
@@ -181,6 +185,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   isPlanDiffActive,
   onPlanDiffToggle,
   hasPreviousVersion,
+  planDiffBaselineLabel,
+  planDiffBaselineTooltip,
   showDemoBadge,
   maxWidth,
   onOpenLinkedDoc,
@@ -587,6 +593,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isPlanDiffActive={isPlanDiffActive}
               hasPreviousVersion={hasPreviousVersion}
               onPlanDiffToggle={onPlanDiffToggle}
+              planDiffBaselineLabel={planDiffBaselineLabel}
+              planDiffBaselineTooltip={planDiffBaselineTooltip}
               showDemoBadge={showDemoBadge}
               archiveInfo={archiveInfo}
               linkedDocInfo={linkedDocInfo}

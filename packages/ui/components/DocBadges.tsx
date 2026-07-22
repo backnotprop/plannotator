@@ -35,6 +35,11 @@ export interface DocBadgesProps {
   isPlanDiffActive?: boolean;
   hasPreviousVersion?: boolean;
   onPlanDiffToggle?: () => void;
+  /** Baseline suffix + tooltip for the plan-diff badge — annotate/folder
+   *  sessions pass "since last review" so the badge's numbers read against
+   *  the right baseline. See PlanDiffBadge. Plan review passes nothing. */
+  planDiffBaselineLabel?: string;
+  planDiffBaselineTooltip?: string;
   showDemoBadge?: boolean;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
   linkedDocInfo?: LinkedDocBadgeInfo | null;
@@ -54,6 +59,8 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   isPlanDiffActive,
   hasPreviousVersion,
   onPlanDiffToggle,
+  planDiffBaselineLabel,
+  planDiffBaselineTooltip,
   showDemoBadge,
   archiveInfo,
   linkedDocInfo,
@@ -136,6 +143,8 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
           isActive={isPlanDiffActive ?? false}
           onToggle={onPlanDiffToggle}
           hasPreviousVersion={hasPreviousVersion ?? false}
+          baselineLabel={planDiffBaselineLabel}
+          baselineTooltip={planDiffBaselineTooltip}
         />
       )}
 

@@ -4191,6 +4191,8 @@ const App: React.FC = () => {
                   isPlanDiffActive={isPlanDiffActive}
                   hasPreviousVersion={planDiff.hasPreviousVersion}
                   onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                  planDiffBaselineLabel={annotateMode ? 'since last review' : undefined}
+                  planDiffBaselineTooltip={annotateMode ? 'Changes since you last reviewed this file' : undefined}
                   archiveInfo={archive.currentInfo}
                   maxWidth={annotateReaderMaxWidth}
                   remountToken={viewerContentKey}
@@ -4433,6 +4435,8 @@ const App: React.FC = () => {
                     isPlanDiffActive={isPlanDiffActive}
                     onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
                     hasPreviousVersion={planDiff.hasPreviousVersion}
+                    planDiffBaselineLabel={annotateMode ? 'since last review' : undefined}
+                    planDiffBaselineTooltip={annotateMode ? 'Changes since you last reviewed this file' : undefined}
                     showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}

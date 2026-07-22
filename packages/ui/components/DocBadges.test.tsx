@@ -130,6 +130,36 @@ describe('DocBadges open-in placement', () => {
     expect(host?.querySelector('button[aria-label="Open in Finder"]')).toBeNull();
   });
 
+  test.skipIf(!hasDom)('labels the diff badge with its baseline in annotate/folder sessions', async () => {
+    await renderBadges({
+      planDiffStats: { additions: 3, deletions: 1, modifications: 0 },
+      hasPreviousVersion: true,
+      onPlanDiffToggle: () => {},
+      planDiffBaselineLabel: 'since last review',
+      planDiffBaselineTooltip: 'Changes since you last reviewed this file',
+    });
+
+    const badge = Array.from(host?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find((button) => button.textContent?.includes('+3'));
+    if (!badge) throw new Error('Expected the diff badge to render');
+    expect(badge.textContent).toContain('since last review');
+    expect(badge.title).toBe('Changes since you last reviewed this file');
+  });
+
+  test.skipIf(!hasDom)('plan review diff badge renders exactly as before when no baseline label is passed', async () => {
+    await renderBadges({
+      planDiffStats: { additions: 3, deletions: 1, modifications: 0 },
+      hasPreviousVersion: true,
+      onPlanDiffToggle: () => {},
+    });
+
+    const badge = Array.from(host?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find((button) => button.textContent?.includes('+3'));
+    if (!badge) throw new Error('Expected the diff badge to render');
+    expect(badge.textContent).toBe('+3/-1');
+    expect(badge.title).toBe('Show what changed from previous version');
+  });
+
   test.skipIf(!hasDom)('keeps folder-file selectors after the active filename', async () => {
     await renderBadges({
       linkedDocInfo: {
