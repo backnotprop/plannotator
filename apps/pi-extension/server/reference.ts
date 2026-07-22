@@ -65,13 +65,12 @@ export type FolderAnnotateHistory = Omit<AnnotateHistoryResult, "diffCurrent">;
 
 type Res = ServerResponse;
 
-/**
- * Extensions eligible for annotate's per-file version history when served
- * through /api/doc (folder annotate mode). Deliberately narrower than the
- * full annotatable-text set: markdown-branch documents only, matching the
- * gate the folder annotate design settled on. Mirrors packages/server/reference-handlers.ts.
- */
-const ANNOTATE_HISTORY_ELIGIBLE_REGEX = /\.(md|txt)$/i;
+// History eligibility for folder /api/doc documents is `isAnnotatableTextPath`
+// (ANNOTATABLE_TEXT_REGEX in @plannotator/core/annotatable) — the exact set the
+// single-file pipeline snapshots (.md/.mdx/.txt plus the plain-text config
+// formats; no HTML, no .env). Reusing the canonical predicate keeps cross-mode
+// slug continuity: a .yaml with single-file history must diff when opened via
+// its folder too. Mirrors packages/server/reference-handlers.ts.
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
@@ -82,8 +81,9 @@ export interface HandleDocOptions {
 	/**
 	 * When set, /api/doc runs annotate's per-file version-history pipeline for
 	 * eligible markdown-branch documents (local file under an allowed root,
-	 * .md/.txt, not HTML, not a converted doc, under the annotatable size cap
-	 * already enforced above) and merges `previousPlan`/`versionInfo` into the
+	 * any annotatable plain-text extension per `isAnnotatableTextPath`, not
+	 * HTML, not a converted doc, under the annotatable size cap already
+	 * enforced above) and merges `previousPlan`/`versionInfo` into the
 	 * response — the same field names the single-file /api/plan payload uses
 	 * (which additionally returns `diffCurrent`; the folder path omits it
 	 * since it always equals the document's own content and the client never
@@ -242,8 +242,9 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	}
 	// Annotate version history (folder mode only — see HandleDocOptions.annotateHistory).
 	// Independent of the sourceSave branching below: only markdown-branch
-	// documents (not HTML, not converted) with a .md/.txt extension are
-	// eligible. The 2MB annotatable-file size cap is already enforced by the
+	// documents (not HTML, not converted) with an annotatable plain-text
+	// extension are eligible — the same set the single-file pipeline
+	// snapshots. The 2MB annotatable-file size cap is already enforced by the
 	// caller before any of these responses are built, so no separate check is
 	// needed here. Mirrors packages/server/reference-handlers.ts.
 	if (
@@ -252,7 +253,7 @@ function applyDocOptions<T extends Record<string, unknown>>(
 		data.renderAs === "markdown" &&
 		data.isConverted !== true &&
 		typeof data.markdown === "string" &&
-		ANNOTATE_HISTORY_ELIGIBLE_REGEX.test(data.filepath)
+		isAnnotatableTextPath(data.filepath)
 	) {
 		const history = options.annotateHistory.compute(data.filepath, data.markdown);
 		if (history) {

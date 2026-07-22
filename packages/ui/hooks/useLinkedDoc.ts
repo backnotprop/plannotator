@@ -24,8 +24,10 @@ export interface LinkedDocLoadData {
   /**
    * Per-file version-diff baseline (annotate folder sessions only) — the same
    * field names/shapes /api/plan already returns for single-file sessions.
-   * /api/doc only populates these for eligible folder files (local .md/.txt,
-   * markdown-branch, not converted/HTML); every other document — including
+   * /api/doc only populates these for eligible folder files (local annotatable
+   * plain-text files — .md/.mdx/.txt plus the config set, per
+   * `isAnnotatableTextPath` — markdown-branch, not converted/HTML); every other
+   * document — including
    * plain linked docs outside folder mode — omits them, which is what keeps
    * the diff badge/version browser from appearing for those.
    */

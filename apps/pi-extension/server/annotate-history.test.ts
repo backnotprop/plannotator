@@ -231,6 +231,108 @@ describe("pi annotate server: folder annotate history", () => {
 		}
 	});
 
+	test("eligibility matches the single-file plain-text set: .mdx mints a snapshot on first open", async () => {
+		const folderPath = mkdtempSync(join(tmpdir(), "plannotator-pi-folder-history-mdx-"));
+		const docPath = join(folderPath, "note.mdx");
+		writeFileSync(docPath, "MDX content\n", "utf-8");
+		const project = uniqueProject("mdx");
+
+		const server = await startAnnotateServer({
+			markdown: "",
+			filePath: folderPath,
+			folderPath,
+			mode: "annotate-folder",
+			htmlContent: "<html></html>",
+			project,
+		});
+
+		try {
+			const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+			const json = (await response.json()) as {
+				previousPlan?: string | null;
+				versionInfo?: { version: number; totalVersions: number; project: string };
+			};
+			expect(json.previousPlan).toBeNull();
+			expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+		} finally {
+			server.stop();
+		}
+	});
+
+	test("cross-mode continuity for config formats: a .yaml with single-file history diffs when opened via its folder", async () => {
+		const folderPath = mkdtempSync(join(tmpdir(), "plannotator-pi-folder-history-yaml-"));
+		const docPath = join(folderPath, "config.yaml");
+		const project = uniqueProject("yaml");
+
+		// Single-file session saves "a: 1" as version 1 for this exact path.
+		const seedServer = await startAnnotateServer({
+			markdown: "a: 1\n",
+			filePath: docPath,
+			htmlContent: "<html></html>",
+			mode: "annotate",
+			project,
+		});
+		seedServer.stop();
+
+		// The folder session reads different content off disk, so it mints version 2.
+		writeFileSync(docPath, "a: 2\n", "utf-8");
+
+		const server = await startAnnotateServer({
+			markdown: "",
+			filePath: folderPath,
+			folderPath,
+			mode: "annotate-folder",
+			htmlContent: "<html></html>",
+			project,
+		});
+
+		try {
+			// `doc=1` mirrors the file browser: it forces annotatable plain-text
+			// rendering for extensions that overlap CODE_FILE_REGEX (.yaml, .json…).
+			const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
+			const json = (await response.json()) as {
+				previousPlan?: string | null;
+				versionInfo?: { version: number; totalVersions: number; project: string };
+			};
+			expect(json.previousPlan).toBe("a: 1\n");
+			expect(json.versionInfo).toEqual({ version: 2, totalVersions: 2, project });
+		} finally {
+			server.stop();
+		}
+	});
+
+	test(".env stays ineligible: no snapshot is minted even though .env.example would be", async () => {
+		const folderPath = mkdtempSync(join(tmpdir(), "plannotator-pi-folder-history-env-"));
+		const docPath = join(folderPath, ".env");
+		writeFileSync(docPath, "SECRET=1\n", "utf-8");
+		const project = uniqueProject("env");
+
+		const server = await startAnnotateServer({
+			markdown: "",
+			filePath: folderPath,
+			folderPath,
+			mode: "annotate-folder",
+			htmlContent: "<html></html>",
+			project,
+		});
+
+		try {
+			const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
+			const json = (await response.json()) as Record<string, unknown>;
+			// Whatever shape /api/doc answers with (.env is not annotatable, so it
+			// is never served as a document), no history fields may appear and no
+			// snapshot may be written.
+			expect("previousPlan" in json).toBe(false);
+			expect("versionInfo" in json).toBe(false);
+
+			const versions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+			const versionsJson = (await versions.json()) as { slug: string | null; versions: unknown[] };
+			expect(versionsJson).toEqual({ project, slug: null, versions: [] });
+		} finally {
+			server.stop();
+		}
+	});
+
 	test("an unwritable history directory degrades to a plain render, no error propagates", async () => {
 		const folderPath = mkdtempSync(join(tmpdir(), "plannotator-pi-folder-history-unwritable-"));
 		const docPath = join(folderPath, "note.md");
