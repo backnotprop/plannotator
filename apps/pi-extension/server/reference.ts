@@ -14,21 +14,21 @@ import {
 import type { ServerResponse } from "node:http";
 import { join, resolve as resolvePath } from "node:path";
 
-import { json, parseBody } from "./helpers";
+import { json, parseBody } from "./helpers.ts";
 import type { IncomingMessage } from "node:http";
 
 import {
 	type VaultNode,
 	buildFileTree,
 	isFileBrowserExcludedPath,
-} from "../generated/reference-common.js";
+} from "../generated/reference-common.ts";
 import {
 	filterWorkspaceStatusForDirectory,
 	getWorkspaceStatusForDirectory,
 	getWorkspaceStatusRelativePaths,
 	type WorkspaceFileChange,
-} from "../generated/workspace-status.js";
-import { detectObsidianVaults } from "../generated/integrations-common.js";
+} from "../generated/workspace-status.ts";
+import { detectObsidianVaults } from "../generated/integrations-common.ts";
 import {
 	isAbsoluteUserPath,
 	isCodeFilePath,
@@ -40,16 +40,16 @@ import {
 	ANNOTATABLE_DOC_REGEX,
 	MAX_ANNOTATABLE_FILE_BYTES,
 	isAnnotatableTextPath,
-} from "../generated/resolve-file.js";
-import { parseCodePath } from "../generated/code-file.js";
-import { htmlToMarkdown } from "../generated/html-to-markdown.js";
-import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.js";
+} from "../generated/resolve-file.ts";
+import { parseCodePath } from "../generated/code-file.ts";
+import { htmlToMarkdown } from "../generated/html-to-markdown.ts";
+import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.ts";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromSnapshot,
 	readSourceFileSnapshot,
 	resolveExistingSourceSaveFile,
-} from "../generated/source-save-node.js";
+} from "../generated/source-save-node.ts";
 import { preloadFile } from "@pierre/diffs/ssr";
 
 type Res = ServerResponse;

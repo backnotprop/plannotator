@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadPlannotatorBrowser } from "./plannotator-browser-runtime";
+import { loadPlannotatorBrowser } from "./plannotator-browser-runtime.ts";
 
 const extensionDirectory = dirname(fileURLToPath(import.meta.url));
 
@@ -19,14 +19,14 @@ describe("Pi extension startup boundary", () => {
 	test("keeps invocation-only modules out of the eager index graph", () => {
 		const imports = scanImports("index.ts");
 		const invocationOnlyModules = [
-			"./generated/annotate-args.js",
-			"./generated/at-reference.js",
-			"./generated/html-to-markdown.js",
-			"./generated/prompts.js",
-			"./generated/reference-common.js",
-			"./generated/resolve-file.js",
-			"./generated/review-args.js",
-			"./generated/url-to-markdown.js",
+			"./generated/annotate-args.ts",
+			"./generated/at-reference.ts",
+			"./generated/html-to-markdown.ts",
+			"./generated/prompts.ts",
+			"./generated/reference-common.ts",
+			"./generated/resolve-file.ts",
+			"./generated/review-args.ts",
+			"./generated/url-to-markdown.ts",
 		];
 
 		for (const modulePath of invocationOnlyModules) {
@@ -39,10 +39,10 @@ describe("Pi extension startup boundary", () => {
 		const eventImports = scanImports("plannotator-events.ts");
 		const runtimeImports = scanImports("plannotator-browser-runtime.ts");
 
-		expect(eventImports.eager).not.toContain("./plannotator-browser.js");
-		expect(eventImports.eager).toContain("./plannotator-browser-runtime.js");
-		expect(runtimeImports.eager).not.toContain("./plannotator-browser.js");
-		expect(runtimeImports.dynamic).toContain("./plannotator-browser.js");
+		expect(eventImports.eager).not.toContain("./plannotator-browser.ts");
+		expect(eventImports.eager).toContain("./plannotator-browser-runtime.ts");
+		expect(runtimeImports.eager).not.toContain("./plannotator-browser.ts");
+		expect(runtimeImports.dynamic).toContain("./plannotator-browser.ts");
 	});
 
 	test("coalesces concurrent first-use browser imports", async () => {

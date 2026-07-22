@@ -8,10 +8,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
-import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.js";
-import { FAVICON_PNG_BYTES } from "../generated/favicon.js";
+import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.ts";
+import { FAVICON_PNG_BYTES } from "../generated/favicon.ts";
 
-import { json, parseBody, send, toWebRequest } from "./helpers";
+import { json, parseBody, send, toWebRequest } from "./helpers.ts";
 import {
 	type BearConfig,
 	type IntegrationResult,
@@ -20,7 +20,7 @@ import {
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
-} from "./integrations.js";
+} from "./integrations.ts";
 
 type Res = import("node:http").ServerResponse;
 

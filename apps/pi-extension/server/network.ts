@@ -8,8 +8,8 @@ import { existsSync } from "node:fs";
 import type { Server } from "node:http";
 import { release } from "node:os";
 import { delimiter, join } from "node:path";
-import { loadConfig, resolveUseGlimpse } from "../generated/config.js";
-import { parsePortSelection } from "../generated/port-range.js";
+import { loadConfig, resolveUseGlimpse } from "../generated/config.ts";
+import { parsePortSelection } from "../generated/port-range.ts";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";

@@ -21,7 +21,7 @@ import {
 	type OpenInApp,
 	type OpenInKind,
 	type OpenInPlatform,
-} from "../generated/open-in-apps.js";
+} from "../generated/open-in-apps.ts";
 
 function currentPlatform(): OpenInPlatform {
 	switch (process.platform) {

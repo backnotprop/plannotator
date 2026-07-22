@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadPlannotatorConfig, formatTodoList, renderTemplate, resolvePhaseProfile } from "./config";
+import { loadPlannotatorConfig, formatTodoList, renderTemplate, resolvePhaseProfile } from "./config.ts";
 
 const tempDirs: string[] = [];
 const originalHome = process.env.HOME;

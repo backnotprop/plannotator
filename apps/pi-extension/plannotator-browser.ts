@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:f
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool.js";
+import { createWorktreePool, type WorktreePool } from "./generated/worktree-pool.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	prepareLocalReviewDiff,
@@ -20,37 +20,37 @@ import {
 	type DiffType,
 	type VcsSelection,
 	unstageFile,
-} from "./server.js";
-import { openBrowser, isRemoteSession } from "./server/network.js";
-import { detectProjectName } from "./server/project.js";
-import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.js";
+} from "./server.ts";
+import { openBrowser, isRemoteSession } from "./server/network.ts";
+import { detectProjectName } from "./server/project.ts";
+import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.ts";
 import {
 	getMRLabel,
 	getMRNumberLabel,
 	getDisplayRepo,
 	getCliName,
 	getCliInstallUrl,
-} from "./generated/pr-provider.js";
-import { parseRemoteUrl } from "./generated/repo.js";
-import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.js";
-import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "./generated/config.js";
+} from "./generated/pr-provider.ts";
+import { parseRemoteUrl } from "./generated/repo.ts";
+import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.ts";
+import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "./generated/config.ts";
 import {
 	WorkspaceReviewSession,
 	type WorkspaceDiffType,
-} from "./generated/review-workspace.js";
+} from "./generated/review-workspace.ts";
 import {
 	getPlanBrowserHtml,
 	getReviewBrowserHtml,
 	getStartupErrorMessage,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
-} from "./plannotator-browser-runtime.js";
-export { getLastAssistantMessageText } from "./assistant-message.js";
+} from "./plannotator-browser-runtime.ts";
+export { getLastAssistantMessageText } from "./assistant-message.ts";
 export {
 	getStartupErrorMessage,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
-} from "./plannotator-browser-runtime.js";
+} from "./plannotator-browser-runtime.ts";
 
 export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
 export interface PlanReviewDecision {

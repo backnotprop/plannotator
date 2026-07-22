@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 
-import { contentHash, deleteDraft } from "../generated/draft.js";
+import { contentHash, deleteDraft } from "../generated/draft.ts";
 import {
 	type ArchivedPlan,
 	generateSlug,
@@ -14,9 +14,9 @@ import {
 	saveAnnotations,
 	saveFinalSnapshot,
 	saveToHistory,
-} from "../generated/storage.js";
-import { createEditorAnnotationHandler } from "./annotations.js";
-import { createExternalAnnotationHandler } from "./external-annotations.js";
+} from "../generated/storage.ts";
+import { createEditorAnnotationHandler } from "./annotations.ts";
+import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleDraftRequest,
 	handleFavicon,
@@ -24,10 +24,10 @@ import {
 	readDraftGenerationFromBody,
 	handleSaveNotesRequest,
 	handleUploadRequest,
-} from "./handlers.js";
-import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.js";
-import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
-import { openEditorDiff } from "./ide.js";
+} from "./handlers.ts";
+import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.ts";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
+import { openEditorDiff } from "./ide.ts";
 import {
 	type BearConfig,
 	type IntegrationResult,
@@ -36,13 +36,13 @@ import {
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
-} from "./integrations.js";
-import { listenOnPort } from "./network.js";
+} from "./integrations.ts";
+import { listenOnPort } from "./network.ts";
 
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled } from "../generated/config.js";
-import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.js";
-import { composeImproveContext } from "../generated/pfm-reminder.js";
-import { detectProjectName, getRepoInfo } from "./project.js";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled } from "../generated/config.ts";
+import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
+import { composeImproveContext } from "../generated/pfm-reminder.ts";
+import { detectProjectName, getRepoInfo } from "./project.ts";
 import {
 	handleDocRequest,
 	handleDocExistsRequest,
@@ -50,9 +50,9 @@ import {
 	handleObsidianDocRequest,
 	handleObsidianFilesRequest,
 	handleObsidianVaultsRequest,
-} from "./reference.js";
-import { handleFileBrowserStreamRequest } from "./file-browser-watch.js";
-import { warmFileListCache } from "../generated/resolve-file.js";
+} from "./reference.ts";
+import { handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
+import { warmFileListCache } from "../generated/resolve-file.ts";
 
 export interface PlanReviewDecision {
 	approved: boolean;

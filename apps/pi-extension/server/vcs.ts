@@ -12,13 +12,13 @@ import {
 	getGitContext as getGitContextCore,
 	prepareGitCommand,
 	runGitDiff as runGitDiffCore,
-} from "../generated/review-core.js";
+} from "../generated/review-core.ts";
 import {
 	type ReviewJjRuntime,
-} from "../generated/jj-core.js";
+} from "../generated/jj-core.ts";
 import {
 	type ReviewGitButlerRuntime,
-} from "../generated/gitbutler-core.js";
+} from "../generated/gitbutler-core.ts";
 import {
 	type VcsSelection,
 	createGitButlerProvider,
@@ -26,7 +26,7 @@ import {
 	createJjProvider,
 	createVcsApi,
 	resolveInitialDiffType,
-} from "../generated/vcs-core.js";
+} from "../generated/vcs-core.ts";
 
 function runCommand(
 	command: string,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { isFileBrowserWatchIgnoredPath } from "./file-browser-watch";
+import { isFileBrowserWatchIgnoredPath } from "./file-browser-watch.ts";
 
 describe("Pi file browser watcher", () => {
 	test("ignores nested excluded folders for watcher paths", () => {

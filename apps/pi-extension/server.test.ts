@@ -28,10 +28,10 @@ import {
   startPlanReviewServer,
   startReviewServer,
   unstageFile,
-} from "./server";
-import { WorkspaceReviewSession } from "./generated/review-workspace.js";
-import { parseReviewArgs } from "./generated/review-args.js";
-import { warmFileListCache } from "./generated/resolve-file.js";
+} from "./server.ts";
+import { WorkspaceReviewSession } from "./generated/review-workspace.ts";
+import { parseReviewArgs } from "./generated/review-args.ts";
+import { warmFileListCache } from "./generated/resolve-file.ts";
 
 const tempDirs: string[] = [];
 const originalCwd = process.cwd();

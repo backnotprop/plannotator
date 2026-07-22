@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createTestEnvironment } from "../../../tests/helpers/environment";
-import { closeServer, occupyConsecutivePorts } from "../../../tests/helpers/ports";
-import { openBrowser } from "./network";
-import { startPlanReviewServer } from "./serverPlan";
+import { createTestEnvironment } from "../../../tests/helpers/environment.ts";
+import { closeServer, occupyConsecutivePorts } from "../../../tests/helpers/ports.ts";
+import { openBrowser } from "./network.ts";
+import { startPlanReviewServer } from "./serverPlan.ts";
 
 const envKeys = [
 	"PLANNOTATOR_PORT",

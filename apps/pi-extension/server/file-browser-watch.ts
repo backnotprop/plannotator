@@ -3,10 +3,10 @@ import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAbsolute, relative } from "node:path";
 
-import { isFileBrowserExcludedPath } from "../generated/reference-common.js";
-import { resolveUserPath } from "../generated/resolve-file.js";
-import { getGitMetadataWatchPaths } from "../generated/workspace-status.js";
-import { json } from "./helpers.js";
+import { isFileBrowserExcludedPath } from "../generated/reference-common.ts";
+import { resolveUserPath } from "../generated/resolve-file.ts";
+import { getGitMetadataWatchPaths } from "../generated/workspace-status.ts";
+import { json } from "./helpers.ts";
 
 interface FileBrowserChangeEvent {
 	type: "ready" | "changed";

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
-import { closeServer, occupyConsecutivePorts } from "../../../tests/helpers/ports";
+import { closeServer, occupyConsecutivePorts } from "../../../tests/helpers/ports.ts";
 import {
 	getServerHostname,
 	getServerPort,
@@ -9,7 +9,7 @@ import {
 	isRemoteSession,
 	listenOnPort,
 	openBrowser,
-} from "./network";
+} from "./network.ts";
 
 const savedEnv: Record<string, string | undefined> = {};
 const envKeys = [
