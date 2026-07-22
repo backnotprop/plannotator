@@ -116,6 +116,7 @@ const DEMO_PLAN_CONTENT = USE_DIFF_DEMO
   ? DIFF_DEMO_PLAN_CONTENT
   : DEFAULT_DEMO_PLAN_CONTENT;
 import { useCheckboxOverrides } from './hooks/useCheckboxOverrides';
+import { usePlanDiffViewAutoExit } from './hooks/usePlanDiffViewAutoExit';
 import { AppHeader } from './components/AppHeader';
 import {
   AnnotateAgentTerminalPanel,
@@ -803,6 +804,17 @@ const App: React.FC = () => {
     isHtmlSurface ? null : activeDiffVersionInfo,
     activeDocDiffFetchers,
     activeDocFilepath,
+  );
+  // Exit diff view when the active document switches to one with no diff
+  // baseline (e.g. a history-less folder file) — otherwise the stale active
+  // flag hides the annotation toolstrip until Escape. Gated off HTML surfaces,
+  // whose diff view is driven by htmlDiffHtml (usePlanDiff is fed nulls there,
+  // so hasPreviousVersion is always false). See usePlanDiffViewAutoExit.
+  const exitPlanDiffView = useCallback(() => setIsPlanDiffActive(false), []);
+  usePlanDiffViewAutoExit(
+    isPlanDiffActive && !isHtmlSurface,
+    planDiff.hasPreviousVersion,
+    exitPlanDiffView,
   );
   const warnFinishEditingFirst = useCallback((target: 'versions' | 'diff') => {
     toast('Finish editing first', {
