@@ -55,6 +55,12 @@ interface ExportModalProps {
   markdown?: string;
   isApiMode?: boolean;
   initialTab?: Tab;
+  /**
+   * Wrap annotation output for agent clipboard paste.
+   * Defaults to plan-deny framing; annotate sessions should pass a mode-aware
+   * wrapper so Copy matches Send Feedback / agent-terminal delivery (#1107).
+   */
+  formatAnnotationsForAgent?: (feedback: string) => string;
   /** Override the save-to-notes wire. Default: POST /api/save-notes (today's behavior). */
   onSaveToNotes?: (payload: SaveToNotesPayload) => Promise<SaveToNotesResult>;
 }
@@ -80,6 +86,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   markdown,
   isApiMode = false,
   initialTab,
+  formatAnnotationsForAgent = wrapFeedbackForAgent,
   onSaveToNotes = defaultSaveToNotes,
 }) => {
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
@@ -125,7 +132,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   const handleCopyAnnotations = async () => {
-    await handleCopy(wrapFeedbackForAgent(annotationsOutput), 'annotations');
+    await handleCopy(formatAnnotationsForAgent(annotationsOutput), 'annotations');
   };
 
   // Whether the hash URL is large enough to warrant a short URL option

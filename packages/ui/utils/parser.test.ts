@@ -1,5 +1,11 @@
 import { describe, test, expect } from "bun:test";
-import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations } from "./parser";
+import {
+  parseMarkdownToBlocks,
+  computeListIndices,
+  extractFrontmatter,
+  exportAnnotations,
+  wrapFeedbackForAgent,
+} from "./parser";
 import { shouldStripFrontmatter } from "@plannotator/core/annotatable";
 import type { Block } from "../types";
 
@@ -1109,6 +1115,60 @@ describe("exportAnnotations — line labels", () => {
     const anns = [{ blockId: math.id, type: "COMMENT", text: "clarify", originalText: "x + y", startOffset: 0 }];
     const output = exportAnnotations(mathBlocks, anns);
     expect(output).toContain("(lines 3–5)");
+  });
+});
+
+describe("wrapFeedbackForAgent — mode-aware clipboard framing (#1107)", () => {
+  const feedback = "## 1. Fix intro\n> Too vague.";
+
+  test("defaults to plan-deny framing for plan review", () => {
+    const result = wrapFeedbackForAgent(feedback);
+    expect(result).toContain("YOUR PLAN WAS NOT APPROVED.");
+    expect(result).toContain(feedback);
+  });
+
+  test("explicit plan mode still uses plan-deny framing", () => {
+    const result = wrapFeedbackForAgent(feedback, { mode: "plan" });
+    expect(result).toContain("YOUR PLAN WAS NOT APPROVED.");
+  });
+
+  test("annotate file mode uses markdown annotation framing", () => {
+    const result = wrapFeedbackForAgent(feedback, {
+      mode: "annotate",
+      annotateSource: "file",
+      filePath: "docs/guide.md",
+      fileHeader: "File",
+    });
+    expect(result).not.toContain("YOUR PLAN WAS NOT APPROVED.");
+    expect(result).toContain("# Markdown Annotations");
+    expect(result).toContain("File: docs/guide.md");
+    expect(result).toContain(feedback);
+  });
+
+  test("annotate folder mode labels the path as Folder", () => {
+    const result = wrapFeedbackForAgent(feedback, {
+      mode: "annotate-folder",
+      annotateSource: "folder",
+      filePath: "/repo/docs",
+    });
+    expect(result).not.toContain("YOUR PLAN WAS NOT APPROVED.");
+    expect(result).toContain("Folder: /repo/docs");
+  });
+
+  test("annotate message mode uses message framing", () => {
+    const result = wrapFeedbackForAgent(feedback, {
+      mode: "annotate",
+      annotateSource: "message",
+    });
+    expect(result).not.toContain("YOUR PLAN WAS NOT APPROVED.");
+    expect(result).toContain("# Message Annotations");
+    expect(result).toContain(feedback);
+  });
+
+  test("annotate-last mode maps to message framing", () => {
+    const result = wrapFeedbackForAgent(feedback, { mode: "annotate-last" });
+    expect(result).toContain("# Message Annotations");
+    expect(result).not.toContain("YOUR PLAN WAS NOT APPROVED.");
   });
 });
 

@@ -1,5 +1,9 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
-import { planDenyFeedback } from '@plannotator/core/feedback-templates';
+import {
+  annotateFileFeedback,
+  annotateMessageFeedback,
+  planDenyFeedback,
+} from '@plannotator/core/feedback-templates';
 
 /**
  * Parsed YAML frontmatter as key-value pairs.
@@ -646,9 +650,62 @@ export function groupBlocks(blocks: Block[]): RenderGroup[] {
   return groups;
 }
 
-/** Wrap feedback output with the deny preamble for pasting into agent sessions */
-export const wrapFeedbackForAgent = (feedback: string): string =>
-  planDenyFeedback(feedback);
+/**
+ * Options for wrapping annotation output before clipboard paste into an agent.
+ *
+ * Plan review keeps the plan-deny preamble. Annotate sessions must use the
+ * annotate wrappers — otherwise file/message feedback is mislabeled as a plan
+ * rejection (see #1107).
+ */
+export interface WrapFeedbackForAgentOptions {
+  /** Session kind. Defaults to plan-deny wrapping for backward compatibility. */
+  mode?: 'plan' | 'annotate' | 'annotate-last' | 'annotate-folder';
+  /** Annotate source subtype when mode is annotate*. */
+  annotateSource?: 'file' | 'folder' | 'message' | null;
+  filePath?: string;
+  fileHeader?: string;
+  /** Plan-deny tool name (ExitPlanMode, submit_plan, …). */
+  toolName?: string;
+  planFilePath?: string;
+}
+
+/**
+ * Wrap feedback for pasting into agent sessions.
+ *
+ * - Plan review → plan-deny preamble ("YOUR PLAN WAS NOT APPROVED.")
+ * - Annotate file/folder → markdown annotation preamble
+ * - Annotate message → message annotation preamble
+ */
+export const wrapFeedbackForAgent = (
+  feedback: string,
+  options: WrapFeedbackForAgentOptions = {},
+): string => {
+  const mode = options.mode;
+  const isAnnotate =
+    mode === 'annotate' ||
+    mode === 'annotate-last' ||
+    mode === 'annotate-folder' ||
+    options.annotateSource != null;
+
+  if (isAnnotate) {
+    if (options.annotateSource === 'message' || mode === 'annotate-last') {
+      return annotateMessageFeedback(feedback);
+    }
+    const fileHeader =
+      options.fileHeader ??
+      (options.annotateSource === 'folder' || mode === 'annotate-folder' ? 'Folder' : 'File');
+    return annotateFileFeedback(feedback, {
+      filePath: options.filePath ?? 'current file',
+      fileHeader,
+    });
+  }
+
+  return planDenyFeedback(
+    feedback,
+    options.toolName,
+    options.planFilePath ? { planFilePath: options.planFilePath } : undefined,
+  );
+};
 
 export interface ExportAnnotationsOptions {
   sourceConverted?: boolean;

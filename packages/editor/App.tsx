@@ -2,7 +2,6 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallba
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { shouldStripFrontmatter } from '@plannotator/shared/annotatable';
-import { annotateFileFeedback, annotateMessageFeedback } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
@@ -2579,13 +2578,21 @@ const App: React.FC = () => {
     sourceFilePath,
   ]);
 
+  /** Mode-aware agent framing for Send (agent terminal) and Copy clipboard. */
   const buildAnnotateAgentFeedback = useCallback((feedback: string) => {
-    if (annotateSource === 'message') {
-      return annotateMessageFeedback(feedback);
-    }
-
-    return annotateFileFeedback(feedback, getAnnotateFeedbackTarget());
+    const target = getAnnotateFeedbackTarget();
+    return wrapFeedbackForAgent(feedback, {
+      mode: 'annotate',
+      annotateSource,
+      filePath: target.filePath,
+      fileHeader: target.fileHeader,
+    });
   }, [annotateSource, getAnnotateFeedbackTarget]);
+
+  const formatAnnotationsForAgent = useCallback((feedback: string) => {
+    if (annotateMode) return buildAnnotateAgentFeedback(feedback);
+    return wrapFeedbackForAgent(feedback);
+  }, [annotateMode, buildAnnotateAgentFeedback]);
 
   const currentFeedbackPayload = useMemo(() => getCurrentFeedbackPayload(), [
     agentFeedbackRevision,
@@ -4470,7 +4477,7 @@ const App: React.FC = () => {
             onClose={() => setIsPanelOpen(false)}
             onQuickCopy={async () => {
               const output = getCurrentFeedbackPayload();
-              await navigator.clipboard.writeText(wrapFeedbackForAgent(output));
+              await navigator.clipboard.writeText(formatAnnotationsForAgent(output));
             }}
             onShare={canShareCurrentSession ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}
@@ -4572,6 +4579,7 @@ const App: React.FC = () => {
           markdown={markdown}
           isApiMode={isApiMode}
           initialTab={initialExportTab}
+          formatAnnotationsForAgent={formatAnnotationsForAgent}
         />
 
         {/* Import Modal */}

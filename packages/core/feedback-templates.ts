@@ -8,8 +8,9 @@
  * bundled into the browser SPA. It must NOT import from ./prompts or ./config
  * (which depend on node:fs, node:os, node:child_process). Keep it self-contained.
  *
- * Server-side call sites use getPlanDeniedPrompt() from ./prompts directly.
- * This module is only kept for the browser's wrapFeedbackForAgent clipboard feature.
+ * Server-side call sites use getPlanDeniedPrompt() / getAnnotate*Prompt() from
+ * ./prompts directly. This module is kept for the browser's wrapFeedbackForAgent
+ * clipboard feature (plan deny + annotate file/message defaults).
  */
 
 export interface PlanDenyFeedbackOptions {
