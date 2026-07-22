@@ -8,6 +8,76 @@ export interface Frontmatter {
   [key: string]: string | string[];
 }
 
+/** Number of leading whitespace characters on a line. */
+function indentWidth(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
+/** Strip the common leading indentation shared by all non-empty lines. */
+function dedentLines(lines: string[]): string[] {
+  const indents = lines.filter((l) => l !== '').map(indentWidth);
+  const minIndent = indents.length ? Math.min(...indents) : 0;
+  return lines.map((l) => (l === '' ? '' : l.slice(minIndent)));
+}
+
+/**
+ * Fold YAML `>`-style scalar lines: adjacent non-empty lines join with a
+ * single space, and a run of N blank lines between paragraphs folds to N
+ * newlines.
+ */
+function foldScalarLines(lines: string[]): string {
+  let text = '';
+  let started = false;
+  let blanks = 0;
+  for (const l of lines) {
+    if (l === '') {
+      blanks++;
+      continue;
+    }
+    if (!started) {
+      text = l;
+      started = true;
+    } else {
+      text += blanks > 0 ? '\n'.repeat(blanks) : ' ';
+      text += l;
+    }
+    blanks = 0;
+  }
+  return text;
+}
+
+/**
+ * Parse a YAML block scalar (`|` literal keeps newlines / `>` folded joins
+ * with spaces) whose body is the run of lines below `bodyStart` indented
+ * deeper than `keyIndent`. Trailing blank lines are dropped and chomping
+ * indicators are treated as strip. Returns the value and the index of the
+ * last line the scalar consumed.
+ */
+function parseBlockScalar(
+  lines: string[],
+  bodyStart: number,
+  keyIndent: number,
+  folded: boolean,
+): { value: string; endIndex: number } {
+  const body: string[] = [];
+  let j = bodyStart;
+  for (; j < lines.length; j++) {
+    // CRLF sources split on '\n' leave a trailing '\r' that would otherwise
+    // survive into the folded value (every other parser path trims lines).
+    const bodyLine = lines[j].replace(/\r$/, '');
+    if (bodyLine.trim() === '') {
+      body.push('');
+      continue;
+    }
+    if (indentWidth(bodyLine) <= keyIndent) break; // dedent ends the block
+    body.push(bodyLine);
+  }
+  const dedented = dedentLines(body);
+  while (dedented.length && dedented[dedented.length - 1] === '') dedented.pop();
+  const value = (folded ? foldScalarLines(dedented) : dedented.join('\n')).trim();
+  return { value, endIndex: j - 1 };
+}
+
 /**
  * Extract YAML frontmatter from markdown if present.
  * Returns the parsed frontmatter, the remaining markdown, and the 1-based
@@ -44,8 +114,10 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
   let currentKey: string | null = null;
   let currentArray: string[] | null = null;
 
-  for (const line of frontmatterRaw.split('\n')) {
-    const trimmedLine = line.trim();
+  const lines = frontmatterRaw.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmedLine = rawLine.trim();
 
     // Array item (- value)
     if (trimmedLine.startsWith('- ') && currentKey) {
@@ -64,6 +136,27 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
       currentKey = trimmedLine.slice(0, colonIndex).trim();
       const value = trimmedLine.slice(colonIndex + 1).trim();
       currentArray = null;
+
+      // Block scalar: `|` (literal, keep newlines) or `>` (folded, join with
+      // spaces), each with optional chomping indicator (`-`/`+`). The value
+      // spans the following lines indented deeper than the key, e.g.
+      //   description: >-
+      //     line one
+      //     line two
+      // Without this, the indicator (">-") was stored verbatim and the body
+      // silently dropped.
+      const blockScalar = value.match(/^([|>])[+-]?$/);
+      if (blockScalar) {
+        const { value: scalarValue, endIndex } = parseBlockScalar(
+          lines,
+          i + 1,
+          indentWidth(rawLine),
+          blockScalar[1] === '>',
+        );
+        frontmatter[currentKey] = scalarValue;
+        i = endIndex;
+        continue;
+      }
 
       if (value) {
         frontmatter[currentKey] = value;

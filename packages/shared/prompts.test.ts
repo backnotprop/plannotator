@@ -17,7 +17,9 @@ import {
   getPlanApprovedWithNotesPrompt,
   getPlanAutoApprovedPrompt,
   getAnnotateFileFeedbackPrompt,
+  getAnnotateFileFeedbackTemplate,
   getAnnotateMessageFeedbackPrompt,
+  getAnnotateMessageFeedbackTemplate,
   getAnnotateApprovedPrompt,
   getReviewDeniedSuffix,
   resolveTemplate,
@@ -289,6 +291,50 @@ describe("getAnnotateMessageFeedbackPrompt", () => {
       prompts: { annotate: { messageFeedback: "Notes: {{feedback}}" } },
     }, { feedback: "fix" });
     expect(result).toBe("Notes: fix");
+  });
+});
+
+// Unsubstituted template getters — shipped to the browser via the annotate
+// /api/plan payload so clipboard Copy can reproduce the Send Feedback wrap
+// (including config overrides) client-side (#1107).
+describe("getAnnotateFileFeedbackTemplate / getAnnotateMessageFeedbackTemplate", () => {
+  test("returns the default templates with placeholders intact", () => {
+    expect(getAnnotateFileFeedbackTemplate("claude-code", {})).toBe(
+      DEFAULT_ANNOTATE_FILE_FEEDBACK_PROMPT,
+    );
+    expect(getAnnotateMessageFeedbackTemplate("claude-code", {})).toBe(
+      DEFAULT_ANNOTATE_MESSAGE_FEEDBACK_PROMPT,
+    );
+    expect(getAnnotateFileFeedbackTemplate("claude-code", {})).toContain("{{feedback}}");
+  });
+
+  test("returns configured overrides without variable substitution", () => {
+    const config = {
+      prompts: {
+        annotate: {
+          fileFeedback: "Review {{filePath}}: {{feedback}}",
+          messageFeedback: "Notes: {{feedback}}",
+        },
+      },
+    };
+    expect(getAnnotateFileFeedbackTemplate("opencode", config)).toBe(
+      "Review {{filePath}}: {{feedback}}",
+    );
+    expect(getAnnotateMessageFeedbackTemplate("opencode", config)).toBe(
+      "Notes: {{feedback}}",
+    );
+  });
+
+  test("runtime-specific override wins over generic", () => {
+    const result = getAnnotateFileFeedbackTemplate("pi", {
+      prompts: {
+        annotate: {
+          fileFeedback: "Generic: {{feedback}}",
+          runtimes: { pi: { fileFeedback: "Pi: {{feedback}}" } },
+        },
+      },
+    });
+    expect(result).toBe("Pi: {{feedback}}");
   });
 });
 

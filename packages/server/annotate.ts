@@ -23,6 +23,7 @@ import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "@p
 import { htmlDiff } from "@plannotator/shared/html-diff";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
+import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "@plannotator/shared/prompts";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromText,
@@ -407,6 +408,15 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser),
               agentTerminal: agentTerminal.capability,
               ...(recentMessages ? { recentMessages } : {}),
+              // Resolved copy-wrapper templates (config-aware, placeholders
+              // intact) so clipboard Copy matches what Send Feedback produces
+              // instead of the plan-deny wrap (#1107). Resolved per request so
+              // config edits mid-session behave like Send Feedback (which
+              // resolves at submit time).
+              feedbackTemplates: {
+                fileFeedback: getAnnotateFileFeedbackTemplate(origin),
+                messageFeedback: getAnnotateMessageFeedbackTemplate(origin),
+              },
             });
           }
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallba
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { shouldStripFrontmatter } from '@plannotator/shared/annotatable';
-import { annotateFileFeedback, annotateMessageFeedback } from '@plannotator/shared/feedback-templates';
+import { annotateFileFeedback, annotateMessageFeedback, wrapFeedbackForClipboard, type AnnotateFeedbackTemplates } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
@@ -391,6 +391,9 @@ const App: React.FC = () => {
     submitLabel: 'Submit',
   });
   const [sourceInfo, setSourceInfo] = useState<string | undefined>();
+  // Server-resolved annotate copy-wrapper templates (config-aware) so
+  // clipboard Copy matches Send Feedback instead of the plan-deny wrap (#1107).
+  const [feedbackTemplates, setFeedbackTemplates] = useState<AnnotateFeedbackTemplates | null>(null);
   const [sourceConverted, setSourceConverted] = useState(false);
   const [renderAs, setRenderAs] = useState<'markdown' | 'html'>('markdown');
   // HTML plans render edge-to-edge (full-viewport) instead of in the centered,
@@ -2251,7 +2254,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Session-level force-markdown preference (--markdown); threaded into folder/linked
@@ -2314,6 +2317,7 @@ const App: React.FC = () => {
           setSelectedMessageId(null);
         }
         setSourceInfo(data.sourceInfo ?? undefined);
+        setFeedbackTemplates(data.feedbackTemplates ?? null);
         setSourceConverted(!!data.sourceConverted);
         if (data.filePath) {
           setImageBaseDir(data.mode === 'annotate-folder' ? data.filePath : data.filePath.replace(/\/[^/]+$/, ''));
@@ -2586,6 +2590,31 @@ const App: React.FC = () => {
 
     return annotateFileFeedback(feedback, getAnnotateFeedbackTarget());
   }, [annotateSource, getAnnotateFeedbackTarget]);
+
+  // Clipboard copy wrapper (#1107): plan review keeps the deliberately forceful
+  // plan-deny framing; annotate sessions wrap with the server-resolved template
+  // (the same one Send Feedback gets, including custom prompts.annotate.*
+  // config), falling back to the built-in annotate defaults when the server
+  // didn't ship one. Shared/static and archive sessions never set annotateMode
+  // and keep today's behavior.
+  const wrapCopiedFeedback = useCallback((feedback: string) => {
+    if (annotateMode) {
+      if (annotateSource === 'message') {
+        return wrapFeedbackForClipboard(feedback, {
+          mode: 'annotate-message',
+          template: feedbackTemplates?.messageFeedback,
+        });
+      }
+      const target = getAnnotateFeedbackTarget();
+      return wrapFeedbackForClipboard(feedback, {
+        mode: 'annotate-file',
+        template: feedbackTemplates?.fileFeedback,
+        filePath: target.filePath,
+        fileHeader: target.fileHeader,
+      });
+    }
+    return wrapFeedbackForAgent(feedback);
+  }, [annotateMode, annotateSource, feedbackTemplates, getAnnotateFeedbackTarget]);
 
   const currentFeedbackPayload = useMemo(() => getCurrentFeedbackPayload(), [
     agentFeedbackRevision,
@@ -4470,7 +4499,7 @@ const App: React.FC = () => {
             onClose={() => setIsPanelOpen(false)}
             onQuickCopy={async () => {
               const output = getCurrentFeedbackPayload();
-              await navigator.clipboard.writeText(wrapFeedbackForAgent(output));
+              await navigator.clipboard.writeText(wrapCopiedFeedback(output));
             }}
             onShare={canShareCurrentSession ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}
@@ -4572,6 +4601,7 @@ const App: React.FC = () => {
           markdown={markdown}
           isApiMode={isApiMode}
           initialTab={initialExportTab}
+          wrapCopiedAnnotations={wrapCopiedFeedback}
         />
 
         {/* Import Modal */}

@@ -1029,6 +1029,75 @@ describe("extractFrontmatter — contentStartLine", () => {
   });
 });
 
+describe("extractFrontmatter — block scalars", () => {
+  test("folded (>-) joins wrapped lines with spaces", () => {
+    const md = `---
+description: >-
+  one two
+  three four
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three four");
+  });
+
+  test("folded (>) treats a blank line as a paragraph break", () => {
+    const md = `---
+description: >
+  one two
+  three four
+
+  five six
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three four\nfive six");
+  });
+
+  test("literal (|) preserves newlines", () => {
+    const md = `---
+note: |
+  line one
+  line two
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.note).toBe("line one\nline two");
+  });
+
+  test("block scalar does not swallow the next key", () => {
+    const md = `---
+description: >-
+  one two
+  three
+name: bar
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three");
+    expect(frontmatter?.name).toBe("bar");
+  });
+
+  test("CRLF line endings do not leak \\r into the value", () => {
+    const md = "---\r\ndescription: >-\r\n  one two\r\n  three\r\n---\r\n# Hi";
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three");
+  });
+
+  test("plain single-line values and arrays still parse", () => {
+    const md = `---
+name: foo
+tags:
+  - a
+  - b
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.name).toBe("foo");
+    expect(frontmatter?.tags).toEqual(["a", "b"]);
+  });
+});
+
 describe("parseMarkdownToBlocks — startLine accuracy", () => {
   test("basic blocks get correct startLine", () => {
     const md = "# Heading\n\nParagraph\n\n- Item";

@@ -57,6 +57,13 @@ interface ExportModalProps {
   initialTab?: Tab;
   /** Override the save-to-notes wire. Default: POST /api/save-notes (today's behavior). */
   onSaveToNotes?: (payload: SaveToNotesPayload) => Promise<SaveToNotesResult>;
+  /**
+   * Wrap the annotations output for the clipboard Copy button. Annotate
+   * sessions pass a mode-aware wrapper so Copy matches Send Feedback instead
+   * of the plan-deny framing (#1107). Default: plan-deny wrap (today's
+   * plan-review behavior).
+   */
+  wrapCopiedAnnotations?: (feedback: string) => string;
 }
 
 type Tab = 'share' | 'annotations' | 'notes';
@@ -81,6 +88,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   isApiMode = false,
   initialTab,
   onSaveToNotes = defaultSaveToNotes,
+  wrapCopiedAnnotations = wrapFeedbackForAgent,
 }) => {
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
@@ -125,7 +133,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   const handleCopyAnnotations = async () => {
-    await handleCopy(wrapFeedbackForAgent(annotationsOutput), 'annotations');
+    await handleCopy(wrapCopiedAnnotations(annotationsOutput), 'annotations');
   };
 
   // Whether the hash URL is large enough to warrant a short URL option
