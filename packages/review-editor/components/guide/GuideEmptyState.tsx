@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { AgentCapabilities } from '@plannotator/ui/types';
+import type { SavedGuideListEntry } from '@plannotator/shared/guide';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
-import { useAgentSettings } from '@plannotator/ui/hooks/useAgentSettings';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 // Same catalogs AgentsTab's launch panel uses — one source of truth for both
 // guide launch surfaces (this page and the sidebar's Guided Review mode).
@@ -15,17 +15,24 @@ import {
   REVIEW_ENGINE_LABEL,
 } from '@plannotator/ui/components/AgentsTab';
 import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from '@plannotator/ui/components/AgentControls';
-
-const GUIDE_ENGINES = Object.keys(REVIEW_ENGINE_LABEL) as ReviewEngine[];
-
-// Marker-engine fallbacks until the server delivers the live catalogs on the
-// capability entries (mirrors AgentsTab's fallbacks).
-const CURSOR_FALLBACK = [{ value: 'auto', label: 'Auto' }];
-const OPENCODE_FALLBACK = [{ value: '', label: 'Default' }];
-const PI_FALLBACK = [{ value: '', label: 'Default' }];
-const COPILOT_FALLBACK = [{ value: '', label: 'Default' }];
+import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
 
 type Option = { value: string; label: string };
+
+/** "2d ago" style age for the previous-guides rows (local convention — same
+ *  shape as PRCommentsTab's formatRelativeTime, taking epoch ms instead). */
+function formatSavedAge(savedAt: number): string {
+  if (!savedAt) return '';
+  const diff = Date.now() - savedAt;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 30) return `${days}d ago`;
+  return new Date(savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 /** Inline "Label: Value ▾" picker — the wireframe's compact select pill.
  *  Long catalogs (marker-engine model lists can run to hundreds) automatically
@@ -150,6 +157,9 @@ interface GuideEmptyStateProps {
   /** Navigate to a guide by job id once a manually-fixed output is accepted by
    *  the server (POST /api/guide/:jobId/submit → 200). */
   onOpenFixedGuide?: (jobId: string) => void;
+  /** Open a persisted guide from the previous-guides list — receives the
+   *  `saved:{id}` pseudo job id understood by the guide endpoints (#1112). */
+  onOpenSavedGuide?: (jobId: string) => void;
 }
 
 /**
@@ -159,18 +169,17 @@ interface GuideEmptyStateProps {
  * (the same persisted guide settings AgentsTab's launch panel edits), and a
  * primary Generate button.
  */
-export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, launchJob, onBack, failure, onOpenFixedGuide }) => {
+export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, launchJob, onBack, failure, onOpenFixedGuide, onOpenSavedGuide }) => {
+  // Engine/model resolution + launch-param shapes are shared with GuideView's
+  // "Regenerate" hint via useGuideLaunch — this component keeps only the
+  // picker UI on top of it.
+  const launch = useGuideLaunch(capabilities);
   const {
-    guideEngine,
     guideClaudeModel,
     guideClaudeEffort,
     guideCodexModel,
     guideCodexReasoning,
-    guideCursorModel,
-    guideOpencodeModel,
-    guidePiModel,
     guidePiThinking,
-    guideCopilotModel,
     setGuideEngine,
     setGuideClaudeModel,
     setGuideClaudeEffort,
@@ -181,10 +190,37 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
     setGuidePiModel,
     setGuidePiThinking,
     setGuideCopilotModel,
-  } = useAgentSettings();
+  } = launch.settings;
 
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+
+  // Previous guides persisted for this repo (#1112). Null until the list
+  // resolves; an empty list hides the section entirely. Standalone/demo mode
+  // has no backend — the fetch failure leaves the section hidden.
+  const [savedGuides, setSavedGuides] = useState<SavedGuideListEntry[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/guides')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: SavedGuideListEntry[] | null) => {
+        if (alive && Array.isArray(data)) setSavedGuides(data);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const handleDeleteSaved = async (id: string) => {
+    // Optimistic removal — a failed delete just resurfaces on the next open.
+    setSavedGuides((prev) => (prev ? prev.filter((g) => g.id !== id) : prev));
+    try {
+      await fetch(`/api/guides/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch {
+      // Best-effort.
+    }
+  };
 
   // Failure-recovery panel state (only relevant when `failure` is set — see
   // GuideScreen, which remounts this component fresh, keyed on jobId, for
@@ -264,54 +300,19 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
     }
   };
 
-  const providerAvailable = (id: string) =>
-    capabilities?.providers.some((p) => p.id === id && p.available) ?? false;
-  const guideAvailable = providerAvailable('guide');
-  const availableEngines = GUIDE_ENGINES.filter(providerAvailable);
-  // A persisted engine can be unavailable on this machine — fall back to the
-  // first available one rather than a dead selection.
-  const engine: ReviewEngine = providerAvailable(guideEngine) ? guideEngine : (availableEngines[0] ?? guideEngine);
-
-  // Marker model catalogs are discovered server-side and delivered on the
-  // capability entry; fall back to the engine-default option until then.
-  // Mirrors AgentsTab's per-engine catalog semantics exactly: opencode/pi
-  // PREPEND their engine-managed "Default" ('' value) to the discovered list —
-  // the discovered catalogs are real models only, and dropping Default left a
-  // saved-default user with a blank pill and no way back after picking a
-  // concrete model. Cursor REPLACES: its discovered list natively includes
-  // 'auto', so prepending would duplicate it.
-  const markerModels = (id: 'cursor' | 'opencode' | 'pi' | 'copilot', fallback: Option[]): Option[] => {
-    const models = capabilities?.providers.find((p) => p.id === id)?.models;
-    if (!models || models.length === 0) return fallback;
-    const discovered = models.map((m) => ({ value: m.id, label: m.label }));
-    return id === 'cursor' ? discovered : [...fallback, ...discovered];
-  };
-
-  // Compute each marker engine's catalog once so the picker and the launch
-  // params below read the exact same lists.
-  const cursorOptions = markerModels('cursor', CURSOR_FALLBACK);
-  const opencodeOptions = markerModels('opencode', OPENCODE_FALLBACK);
-  const piOptions = markerModels('pi', PI_FALLBACK);
-  const copilotOptions = markerModels('copilot', COPILOT_FALLBACK);
-
-  // AgentsTab reconciles the saved guide Cursor/OpenCode/Pi model back to the
-  // catalog head via effects when the live catalog no longer contains it (see
-  // AgentsTab.tsx's reconcile effects ~712-745, which snap both the review
-  // AND guide fields against the same catalog). This launcher reads the same
-  // persisted cookie values but is deliberately stateless — no effects, no
-  // cookie writes — so instead of reconciling in the background, a stale
-  // saved id is reconciled right here at read time: if it's not in the
-  // current catalog, fall back to the catalog's first entry rather than
-  // POSTing a dead model id to the server. ('' / Default is present in the
-  // opencode/pi catalogs after the round-5 prepend fix, so a saved '' stays
-  // valid and is never treated as stale.)
-  const effectiveModel = (saved: string, options: Option[]): string =>
-    options.some((o) => o.value === saved) ? saved : (options[0]?.value ?? saved);
-
-  const effectiveCursorModel = effectiveModel(guideCursorModel, cursorOptions);
-  const effectiveOpencodeModel = effectiveModel(guideOpencodeModel, opencodeOptions);
-  const effectivePiModel = effectiveModel(guidePiModel, piOptions);
-  const effectiveCopilotModel = effectiveModel(guideCopilotModel, copilotOptions);
+  const {
+    guideAvailable,
+    availableEngines,
+    engine,
+    cursorOptions,
+    opencodeOptions,
+    piOptions,
+    copilotOptions,
+    effectiveCursorModel,
+    effectiveOpencodeModel,
+    effectivePiModel,
+    effectiveCopilotModel,
+  } = launch;
 
   const modelPicker: { value: string; options: Option[]; onChange: (v: string) => void } =
     engine === 'claude'
@@ -326,53 +327,15 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
               ? { value: effectiveCopilotModel, options: copilotOptions, onChange: setGuideCopilotModel }
               : { value: effectivePiModel, options: piOptions, onChange: setGuidePiModel };
 
-  const canLaunch = guideAvailable && availableEngines.length > 0 && !launching;
+  const canLaunch = launch.canLaunch && !launching;
 
   const handleGenerate = async () => {
     if (!canLaunch) return;
     setLaunching(true);
     setLaunchError(null);
-    // Config shapes mirror AgentsTab's buildGuideLaunch exactly — one shape
-    // per engine, so the server sees identical launches from both surfaces.
-    const params: AgentLaunchParams =
-      engine === 'cursor'
-        ? {
-            provider: 'guide',
-            label: 'Guided Review',
-            engine: 'cursor',
-            ...(effectiveCursorModel && effectiveCursorModel.toLowerCase() !== 'auto' ? { model: effectiveCursorModel } : {}),
-          }
-        : engine === 'opencode'
-          ? {
-              provider: 'guide',
-              label: 'Guided Review',
-              engine: 'opencode',
-              ...(effectiveOpencodeModel ? { model: effectiveOpencodeModel } : {}),
-            }
-          : engine === 'pi'
-            ? {
-                provider: 'guide',
-                label: 'Guided Review',
-                engine: 'pi',
-                ...(effectivePiModel ? { model: effectivePiModel } : {}),
-                thinking: guidePiThinking,
-              }
-            : engine === 'copilot'
-              ? {
-                  provider: 'guide',
-                  label: 'Guided Review',
-                  engine: 'copilot',
-                  ...(effectiveCopilotModel ? { model: effectiveCopilotModel } : {}),
-                }
-              : {
-                provider: 'guide',
-                label: 'Guided Review',
-                engine,
-                model: engine === 'claude' ? guideClaudeModel : guideCodexModel,
-                ...(engine === 'claude'
-                  ? { effort: guideClaudeEffort }
-                  : { reasoningEffort: guideCodexReasoning }),
-              };
+    // Launch-param shapes live in useGuideLaunch (shared with GuideView's
+    // Regenerate hint) and mirror AgentsTab's buildGuideLaunch exactly.
+    const params: AgentLaunchParams = launch.buildParams();
     try {
       await launchJob(params);
     } catch (err) {
@@ -498,6 +461,51 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
           </div>
           {launchError && <p className="mt-2 text-xs leading-snug text-destructive/80">{launchError}</p>}
         </>
+      )}
+
+      {savedGuides && savedGuides.length > 0 && (
+        <div className="mt-10 max-w-[820px]">
+          <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+            Previous guides
+          </div>
+          <div className="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/50">
+            {savedGuides.map((entry) => (
+              <div key={entry.id} className="group flex items-center gap-3 px-3.5 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => onOpenSavedGuide?.(`saved:${entry.id}`)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                >
+                  <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                    {entry.label}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground transition-colors group-hover:text-primary">
+                    {entry.title}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+                    {formatSavedAge(entry.savedAt)}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+                    {entry.progress.reviewed}/{entry.progress.total}
+                  </span>
+                  {entry.moved && (
+                    <span className="shrink-0 font-mono text-[10px] text-amber-600/80 dark:text-amber-500/70" title="The diff has changed since this guide was generated">
+                      diff changed
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteSaved(entry.id)}
+                  aria-label={`Delete saved guide "${entry.title}"`}
+                  className="shrink-0 rounded px-1 text-sm leading-none text-muted-foreground/40 transition-colors hover:text-destructive"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

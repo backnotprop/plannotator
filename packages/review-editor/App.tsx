@@ -3365,6 +3365,7 @@ const ReviewApp: React.FC = () => {
                 killJob={agentJobs.killJob}
                 onClose={() => setGuideOpen(false)}
                 onOpenFixedGuide={handleOpenGuide}
+                onOpenSavedGuide={handleOpenGuide}
               />
             </div>
           )}
