@@ -3,6 +3,7 @@ import {
   resolveCursorSandbox,
   resolveUseGlimpse,
   resolveAnnotateHistory,
+  resolveGuideHistory,
   resolveUseJina,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
@@ -73,6 +74,12 @@ describe("config.json boolean coercion", () => {
       envVar: "PLANNOTATOR_ANNOTATE_HISTORY",
       key: "annotateHistory",
       resolve: resolveAnnotateHistory,
+    },
+    {
+      name: "resolveGuideHistory",
+      envVar: "PLANNOTATOR_GUIDE_HISTORY",
+      key: "guideHistory",
+      resolve: resolveGuideHistory,
     },
     {
       name: "resolveUseJina",

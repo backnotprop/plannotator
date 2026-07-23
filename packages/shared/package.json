@@ -52,6 +52,7 @@
     "./html-assets-node": "./html-assets-node.ts",
     "./tour": "./tour.ts",
     "./guide": "./guide.ts",
+    "./guide-store": "./guide-store.ts",
     "./annotate-args": "./annotate-args.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
