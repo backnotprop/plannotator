@@ -1,8 +1,41 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DEMO_GUIDE, DEMO_GUIDE_ID } from '../../demoGuide';
-import type { CodeGuideData } from '@plannotator/shared/guide';
+import type { CodeGuideData, CurrentGuideInfo } from '@plannotator/shared/guide';
 
 export type { GuideDiffRef, GuideSection, CodeGuideOutput, CodeGuideData } from '@plannotator/shared/guide';
+
+export function useCurrentGuide(refreshKey: string): { guide: CurrentGuideInfo | null; loading: boolean } {
+  const [guide, setGuide] = useState<CurrentGuideInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setGuide(null);
+    setLoading(true);
+    fetch('/api/guide/current')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: { guide?: CurrentGuideInfo | null }) => {
+        if (cancelled) return;
+        setGuide(data.guide?.id ? data.guide : null);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Persistence is additive. A missing endpoint/artifact must leave the
+        // existing in-session and demo guide paths working unchanged.
+        setGuide(null);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  return { guide, loading };
+}
 
 export interface UseGuideDataReturn {
   guide: CodeGuideData | null;

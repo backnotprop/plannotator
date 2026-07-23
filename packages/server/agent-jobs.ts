@@ -92,7 +92,7 @@ export interface AgentJobHandlerOptions {
    * Return an object with the command to spawn (and optional output path for result ingestion).
    * Return null to reject or fall through to frontend-supplied command.
    */
-  buildCommand?: (provider: string, config?: Record<string, unknown>) => Promise<{
+  buildCommand?: (provider: string, config: Record<string, unknown> | undefined, jobId: string) => Promise<{
     command: string[];
     outputPath?: string;
     captureStdout?: boolean;
@@ -676,7 +676,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             if (body.fastMode === true) config.fastMode = true;
             if (typeof body.reviewProfileId === "string") config.reviewProfileId = body.reviewProfileId;
             if (typeof body.repairOf === "string") config.repairOf = body.repairOf;
-            const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined);
+            const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined, jobId);
             if (built) {
               command = built.command;
               outputPath = built.outputPath;

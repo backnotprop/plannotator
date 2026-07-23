@@ -200,7 +200,8 @@ export async function fetchGlMR(
     author: { username: string };
     source_branch: string;
     target_branch: string;
-    target_project_id?: number;
+    source_project_id?: number | null;
+    target_project_id?: number | null;
     diff_refs: { base_sha: string; head_sha: string; start_sha: string } | null;
     web_url: string;
   };
@@ -221,6 +222,22 @@ export async function fetchGlMR(
     }
   } catch { /* default branch is best-effort metadata */ }
 
+  let headProjectPath: string | undefined;
+  if (typeof raw.source_project_id === "number" && raw.source_project_id === raw.target_project_id) {
+    headProjectPath = ref.projectPath;
+  } else if (typeof raw.source_project_id === "number") {
+    try {
+      const sourceProjectResult = await runtime.runCommand(
+        "glab",
+        apiArgs(ref.host, `projects/${raw.source_project_id}`),
+      );
+      if (sourceProjectResult.exitCode === 0 && sourceProjectResult.stdout.trim()) {
+        const sourceProject = JSON.parse(sourceProjectResult.stdout) as { path_with_namespace?: string };
+        headProjectPath = sourceProject.path_with_namespace;
+      }
+    } catch { /* source project is best-effort metadata */ }
+  }
+
   const metadata: PRMetadata = {
     platform: "gitlab",
     host: ref.host,
@@ -230,6 +247,7 @@ export async function fetchGlMR(
     author: raw.author.username,
     baseBranch: raw.target_branch,
     headBranch: raw.source_branch,
+    headProjectPath,
     defaultBranch,
     baseSha: raw.diff_refs.base_sha,
     headSha: raw.diff_refs.head_sha,

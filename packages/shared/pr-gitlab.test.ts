@@ -46,6 +46,8 @@ describe("fetchGlMR", () => {
               author: { username: "reviewer" },
               source_branch: "feature/app",
               target_branch: "main",
+              source_project_id: 20,
+              target_project_id: 10,
               diff_refs: {
                 base_sha: "a".repeat(40),
                 head_sha: "b".repeat(40),
@@ -57,9 +59,16 @@ describe("fetchGlMR", () => {
             exitCode: 0,
           };
         }
-        if (endpoint === "projects/group%2Fproject") {
+        if (endpoint === "projects/10") {
           return {
             stdout: JSON.stringify({ default_branch: "main" }),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (endpoint === "projects/20") {
+          return {
+            stdout: JSON.stringify({ path_with_namespace: "contributor/project" }),
             stderr: "",
             exitCode: 0,
           };
@@ -81,6 +90,7 @@ describe("fetchGlMR", () => {
       iid: 42,
       baseBranch: "main",
       headBranch: "feature/app",
+      headProjectPath: "contributor/project",
     });
     expect(result.rawPatch).toBe(rawPatch);
     expect(result.rawPatch).toContain("diff --git a/package-lock.json b/package-lock.json");
@@ -115,6 +125,7 @@ function gitlabRuntime(opts: {
     author: { username: "u" },
     source_branch: "feature",
     target_branch: "main",
+    source_project_id: null,
     diff_refs: { base_sha: "a".repeat(40), head_sha: "b".repeat(40), start_sha: "a".repeat(40) },
     web_url: "https://gitlab.com/g/p/-/merge_requests/1",
   });
@@ -149,6 +160,7 @@ describe("fetchGlMR raw_diffs fallback", () => {
     const result = await fetchGlMR(runtime, REF);
     expect(result.rawPatch).toContain("diff --git a/src/a.ts b/src/a.ts");
     expect(result.rawPatch).toContain("+new");
+    expect(result.metadata.platform === "gitlab" && result.metadata.headProjectPath).toBeUndefined();
     expect(calls.some((c) => c.includes("/diffs?per_page=100"))).toBe(true);
   });
 

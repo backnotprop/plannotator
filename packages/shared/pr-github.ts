@@ -166,7 +166,7 @@ export async function fetchGhPR(
     runtime.runCommand("gh", [
       "pr", "view", String(ref.number),
       "--repo", repo,
-      "--json", "id,title,author,baseRefName,headRefName,baseRefOid,headRefOid,url,changedFiles",
+      "--json", "id,title,author,baseRefName,headRefName,headRepository,baseRefOid,headRefOid,url,changedFiles",
     ]),
     runtime.runCommand("gh", [
       "repo", "view", repo,
@@ -231,6 +231,7 @@ export async function fetchGhPR(
     author: { login: string };
     baseRefName: string;
     headRefName: string;
+    headRepository?: { nameWithOwner?: string } | null;
     baseRefOid: string;
     headRefOid: string;
     url: string;
@@ -262,6 +263,7 @@ export async function fetchGhPR(
     author: raw.author.login,
     baseBranch: raw.baseRefName,
     headBranch: raw.headRefName,
+    headRepository: raw.headRepository?.nameWithOwner,
     defaultBranch: repoResult.exitCode === 0 && repoResult.stdout.trim() && repoResult.stdout.trim() !== "null"
       ? repoResult.stdout.trim()
       : undefined,

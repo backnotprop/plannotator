@@ -78,7 +78,7 @@ export interface AgentJobHandlerOptions {
 	getServerUrl: () => string;
 	getCwd: () => string;
 	/** Build the command server-side for a given provider. */
-	buildCommand?: (provider: string, config?: Record<string, unknown>) => Promise<{
+	buildCommand?: (provider: string, config: Record<string, unknown> | undefined, jobId: string) => Promise<{
 		command: string[];
 		outputPath?: string;
 		captureStdout?: boolean;
@@ -633,7 +633,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						if (body.fastMode === true) config.fastMode = true;
 						if (typeof body.reviewProfileId === "string") config.reviewProfileId = body.reviewProfileId;
 						if (typeof body.repairOf === "string") config.repairOf = body.repairOf;
-						const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined);
+						const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined, jobId);
 						if (built) {
 							command = built.command;
 							outputPath = built.outputPath;

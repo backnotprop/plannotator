@@ -163,6 +163,8 @@ A Guided Review turns the changeset into an ordered, chaptered walkthrough: an a
 
 Open it with the **Guide** button in the review header (or `Mod+Shift+G`), pick an agent and model, and generate. Sections track a per-section "reviewed" state so you can work through a large change in order. Guides run on Claude or Codex natively, and on Cursor, OpenCode, Pi, or GitHub Copilot CLI when those binaries are installed.
 
+Successful guides and their reviewed state are saved under `PLANNOTATOR_DATA_DIR` and return when you reopen the same PR or local branch. A PR and its matching local head branch share the guide when Plannotator can identify the head repository and branch reliably. If the PR head or branch diff has changed, the previous guide remains available with an **Outdated guide** notice; choose **Regenerate guide** explicitly to replace it. A failed regeneration leaves the previous successful guide intact.
+
 ## How review agents prompt the CLI
 
 The review agents (Claude, Codex, Code Tour, Guided Review) shell out to external CLIs — Claude and Codex natively, plus Cursor, OpenCode, Pi, and GitHub Copilot CLI as additional engines for review and guide jobs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
@@ -224,6 +226,7 @@ Runtime keys use Plannotator's runtime identifiers. For code review, the current
 | `/api/ai/permission` | POST | Respond to tool approval request |
 | `/api/agents/capabilities` | GET | Check available agent providers |
 | `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (review, Code Tour, Guided Review) |
+| `/api/guide/current` | GET | Find the durable Guided Review for the currently open PR or branch and report whether it is outdated |
 | `/api/guide/:jobId` | GET | Fetch a completed Guided Review (sections, summaries, file refs) |
 | `/api/guide/:jobId/reviewed` | PUT | Persist per-section reviewed state |
 | `/api/code-nav/resolve` | POST | Find symbol definitions/references for code navigation |

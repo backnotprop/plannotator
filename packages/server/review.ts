@@ -82,6 +82,10 @@ import {
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "./tour/tour-review";
 import { createGuideSession, GUIDE_EMPTY_OUTPUT_ERROR } from "./guide/guide-review";
 import {
+  createPRGuidePersistenceContext,
+  resolveLocalGuidePersistenceContext,
+} from "./guide/guide-storage";
+import {
   MARKER_ENGINES,
   composeMarkerReviewPrompt,
   buildMarkerCommand,
@@ -660,6 +664,13 @@ export async function startReviewServer(
     if (!workspace) return undefined;
     return workspace.getPromptContext();
   };
+  const getCurrentGuidePersistenceContext = async () => {
+    const metadata = prMetadata;
+    const patch = currentPatch;
+    if (metadata) return createPRGuidePersistenceContext(metadata, patch);
+    if (workspace || (sessionVcsType && sessionVcsType !== "git")) return null;
+    return resolveLocalGuidePersistenceContext(gitRuntime, resolveAgentCwd(), patch);
+  };
 
   // GitButler's picker topology is live session state: stacks and branches can
   // change without changing the currently-rendered patch. Carry a compact
@@ -796,7 +807,7 @@ export async function startReviewServer(
     getServerUrl: () => serverUrl,
     getCwd: resolveAgentCwd,
 
-    async buildCommand(provider, config) {
+    async buildCommand(provider, config, jobId) {
       // Snapshot ALL launch-relevant state before any await: waiting out the
       // checkout warmup below yields to other requests (e.g. pr-switch), and
       // the job's cwd, prompt, and PR attribution must describe the same PR.
@@ -997,6 +1008,14 @@ export async function startReviewServer(
           config: guideConfig,
           ...(repair && { repair }),
         });
+        const persistenceContext = repairOf
+          ? guide.getLaunchPersistence(repairOf)
+          : launchMetadata
+            ? createPRGuidePersistenceContext(launchMetadata, launchPatch)
+            : workspacePrompt || (sessionVcsType && sessionVcsType !== "git")
+              ? null
+              : await resolveLocalGuidePersistenceContext(gitRuntime, cwd, launchPatch);
+        if (persistenceContext) guide.registerPersistence(jobId, persistenceContext);
         // A repair job's payload is the FAILED job's previously-captured
         // output, not this launch's diff — its file refs were validated
         // (and, for onJobComplete, must be re-validated) against the failed
@@ -1384,6 +1403,12 @@ export async function startReviewServer(
             } catch {
               return Response.json({ error: "Invalid JSON" }, { status: 400 });
             }
+          }
+
+          // API: Find the durable guide associated with the review target currently open.
+          if (url.pathname === "/api/guide/current" && req.method === "GET") {
+            const context = await getCurrentGuidePersistenceContext();
+            return Response.json({ guide: context ? guide.getCurrentGuide(context) : null });
           }
 
           // API: Get guide result

@@ -364,6 +364,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`). Response includes `semanticDiff?`. |
 | `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
 | `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
+| `/api/guide/current` | GET | Find the durable Guided Review for the current PR/branch and report staleness |
 | `/api/guide/:jobId` | GET | Fetch Guided Review result (ordered sections with overviews + file refs) for a completed guide job |
 | `/api/guide/:jobId/reviewed` | PUT | Persist per-section reviewed state for a guide |
 | `/api/guide/:jobId/output` | GET | Fetch a failed guide job's captured raw output for manual repair (404 if none captured) |

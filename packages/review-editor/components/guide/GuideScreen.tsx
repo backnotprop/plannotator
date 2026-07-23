@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { CurrentGuideInfo, GuideLaunchSettings } from '@plannotator/shared/guide';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import { jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 import { REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
 import { isTerminalStatus } from '@plannotator/shared/agent-jobs';
-import { useGuideData } from '../../hooks/guide/useGuideData';
+import { useCurrentGuide, useGuideData } from '../../hooks/guide/useGuideData';
 import { useReviewState } from '../../dock/ReviewStateContext';
 import { GuideEmptyState } from './GuideEmptyState';
 import { GuideGenerating } from './GuideGenerating';
@@ -73,8 +74,17 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   // Cancel below targets whichever job this resolves to. Filtered to the
   // current context first — a running guide job for a different PR/context
   // must not steal the takeover.
+  const guideJobs = jobs.filter((j) => j.provider === 'guide' && matchesContext(j));
+  const guideRefreshKey = [
+    state.prMetadata?.url ?? '',
+    state.prMetadata?.headSha ?? '',
+    state.currentWorktreePath ?? '',
+    state.rawPatch,
+    guideJobs.map((job) => `${job.id}:${job.status}`).join(','),
+  ].join('\0');
+  const { guide: currentGuide, loading: currentGuideLoading } = useCurrentGuide(guideRefreshKey);
   const runningJob =
-    [...jobs].reverse().find((j) => j.provider === 'guide' && matchesContext(j) && !isTerminalStatus(j.status)) ?? null;
+    [...guideJobs].reverse().find((j) => !isTerminalStatus(j.status)) ?? null;
 
   if (runningJob) {
     return (
@@ -99,7 +109,6 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   // above an already-successful guide. Scoped to the current context — a
   // guide (or failure) from a different PR/local-diff context is irrelevant
   // to what's on screen right now.
-  const guideJobs = jobs.filter((j) => j.provider === 'guide' && matchesContext(j));
   const latestGuideJob = guideJobs.length > 0 ? guideJobs[guideJobs.length - 1] : null;
 
   // The job behind activeGuideJobId may belong to a DIFFERENT context (e.g.
@@ -120,8 +129,8 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   // (which has its own finished guide) landed on the empty state — B's guide
   // existed but nothing selected it, since activeGuideJobId still pointed at A.
   const newestDoneGuideJob = [...guideJobs].reverse().find((j) => j.status === 'done') ?? null;
-  const displayGuideJobId =
-    activeGuideJobId && activeGuideMatchesContext ? activeGuideJobId : newestDoneGuideJob?.id ?? null;
+  const displayGuideJobId = currentGuide?.id
+    ?? (activeGuideJobId && activeGuideMatchesContext ? activeGuideJobId : newestDoneGuideJob?.id ?? null);
 
   if (displayGuideJobId) {
     // A guide can already be showing (activeGuideJobId) while a LATER launch
@@ -152,8 +161,19 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
         failedJob={newerFailedJob}
         capabilities={capabilities}
         launchJob={launchJob}
+        currentGuide={currentGuide?.id === displayGuideJobId ? currentGuide : null}
         onOpenFixedGuide={onOpenFixedGuide}
       />
+    );
+  }
+
+  if (currentGuideLoading) {
+    return (
+      <div className="w-full px-10 py-8">
+        <div className="h-7 w-80 animate-pulse rounded bg-muted/30" />
+        <div className="mt-3 h-4 w-full max-w-md animate-pulse rounded bg-muted/20" />
+        <GuideSectionSkeleton />
+      </div>
     );
   }
 
@@ -195,6 +215,7 @@ function ActiveGuide({
   failedJob,
   capabilities,
   launchJob,
+  currentGuide,
   onOpenFixedGuide,
 }: {
   jobId: string;
@@ -205,10 +226,13 @@ function ActiveGuide({
   failedJob: AgentJobInfo | null;
   capabilities: AgentCapabilities | null;
   launchJob: (params: AgentLaunchParams) => Promise<AgentJobInfo | null>;
+  currentGuide: CurrentGuideInfo | null;
   onOpenFixedGuide?: (jobId: string) => void;
 }) {
   const { guide, loading, error, reviewed, toggleReviewed, retry } = useGuideData(jobId);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerationError, setRegenerationError] = useState<string | null>(null);
   const state = useReviewState();
 
   // "Details" switches this screen over to the full failure-recovery panel
@@ -246,6 +270,28 @@ function ActiveGuide({
     const firstResolvable = allRefs.find((ref) => filePathsInDiff.has(ref.file));
     if (firstResolvable) setFocusedFile(firstResolvable.file);
   }, [guide, focusedFile, state.files]);
+
+  const handleRegenerate = async () => {
+    if (regenerating) return;
+    setRegenerating(true);
+    setRegenerationError(null);
+    const sourceJob = jobs.find((job) => job.id === jobId);
+    const launch: GuideLaunchSettings = currentGuide?.launch ?? {
+      ...(sourceJob?.engine && { engine: sourceJob.engine }),
+      ...(sourceJob?.model && { model: sourceJob.model }),
+      ...(sourceJob?.effort && { effort: sourceJob.effort }),
+      ...(sourceJob?.reasoningEffort && { reasoningEffort: sourceJob.reasoningEffort }),
+      ...(sourceJob?.fastMode && { fastMode: true }),
+      ...(sourceJob?.thinking && { thinking: sourceJob.thinking }),
+    };
+    try {
+      await launchJob({ provider: 'guide', label: 'Guided Review', ...launch });
+    } catch (err) {
+      setRegenerationError(err instanceof Error ? err.message : 'Could not regenerate the guide.');
+    } finally {
+      setRegenerating(false);
+    }
+  };
 
   const handleFixOutput = async () => {
     if (!failedJob || repairing) return;
@@ -343,11 +389,29 @@ function ActiveGuide({
     );
   }
 
-  const engine = jobs.find((j) => j.id === jobId)?.engine;
+  const engine = jobs.find((j) => j.id === jobId)?.engine ?? currentGuide?.engine;
+  const outdatedBanner = currentGuide?.outdated ? (
+    <div className="flex items-center gap-3 border-b border-warning/30 bg-warning/10 px-4 py-2 text-xs text-foreground">
+      <div className="min-w-0 flex-1">
+        <span className="font-semibold">Outdated guide</span>
+        <span className="ml-1.5 text-muted-foreground">The reviewed changeset has moved since this guide was generated.</span>
+        {regenerationError && <span className="ml-1.5 text-destructive">{regenerationError}</span>}
+      </div>
+      <button
+        type="button"
+        onClick={handleRegenerate}
+        disabled={regenerating}
+        className="shrink-0 rounded-md border border-warning/30 bg-background/70 px-2.5 py-1.5 font-medium text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {regenerating ? 'Starting…' : 'Regenerate guide'}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <div className="w-full">
       {failureStrip}
+      {outdatedBanner}
       <GuideView
         guide={guide}
         reviewed={reviewed}

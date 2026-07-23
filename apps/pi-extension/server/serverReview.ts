@@ -123,6 +123,10 @@ import {
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.ts";
 import { createGuideSession, GUIDE_EMPTY_OUTPUT_ERROR } from "../generated/guide-review.ts";
 import {
+	createPRGuidePersistenceContext,
+	resolveLocalGuidePersistenceContext,
+} from "../generated/guide-storage.ts";
+import {
 	MARKER_ENGINES,
 	composeMarkerReviewPrompt,
 	buildMarkerCommand,
@@ -715,6 +719,13 @@ export async function startReviewServer(options: {
 		if (!workspace) return undefined;
 		return workspace.getPromptContext();
 	}
+	async function getCurrentGuidePersistenceContext() {
+		const metadata = prMeta;
+		const patch = currentPatch;
+		if (metadata) return createPRGuidePersistenceContext(metadata, patch);
+		if (workspace || (sessionVcsType && sessionVcsType !== "git")) return null;
+		return resolveLocalGuidePersistenceContext(reviewRuntime, resolveAgentCwd(), patch);
+	}
 
 	// GitButler's picker topology can change while the visible patch stays
 	// byte-identical. Include its compact context revision in the snapshot id so
@@ -848,7 +859,7 @@ export async function startReviewServer(options: {
 		getServerUrl: () => serverUrl,
 		getCwd: resolveAgentCwd,
 
-		async buildCommand(provider, config) {
+		async buildCommand(provider, config, jobId) {
 			// Snapshot every mutable review selector before any await. A concurrent
 			// switch must not retarget the prompt, attribution, or line anchors.
 			const launchPrMeta = prMeta;
@@ -1035,6 +1046,14 @@ export async function startReviewServer(options: {
 					config: guideConfig,
 					...(repair && { repair }),
 				});
+				const persistenceContext = repairOf
+					? guide.getLaunchPersistence(repairOf)
+					: launchPrMeta
+						? createPRGuidePersistenceContext(launchPrMeta, launchPatch)
+						: workspacePrompt || (sessionVcsType && sessionVcsType !== "git")
+							? null
+							: await resolveLocalGuidePersistenceContext(reviewRuntime, cwd, launchPatch);
+				if (persistenceContext) guide.registerPersistence(jobId, persistenceContext);
 				// A repair job's payload is the FAILED job's previously-captured
 				// output, not this launch's diff — its file refs were validated
 				// (and, for onJobComplete, must be re-validated) against the failed
@@ -1354,6 +1373,13 @@ export async function startReviewServer(options: {
 			} catch {
 				json(res, { error: "Invalid JSON" }, 400);
 			}
+			return;
+		}
+
+		// API: Find the durable guide associated with the review target currently open.
+		if (url.pathname === "/api/guide/current" && req.method === "GET") {
+			const context = await getCurrentGuidePersistenceContext();
+			json(res, { guide: context ? guide.getCurrentGuide(context) : null });
 			return;
 		}
 

@@ -1,5 +1,7 @@
-import { describe, it, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterEach, describe, it, expect } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   composeGuideMarkerPrompt,
   createGuideSession,
@@ -8,6 +10,7 @@ import {
   parseGuideStreamOutput,
 } from "./guide-review";
 import { markerClose, markerOpen } from "../marker-review";
+import { createGuideStore, type GuidePersistenceContext } from "./guide-storage";
 
 // Pins the behaviors the PR-993 review rounds fixed. This module previously
 // had NO direct coverage — the repair ladder and validation are pure logic
@@ -16,6 +19,17 @@ import { markerClose, markerOpen } from "../marker-review";
 
 const FILES = ["src/a.ts", "src/b.ts", "src/c.ts"];
 const PI_FIXTURE_NONCE = "pn0123456789ab";
+const tempDirs: string[] = [];
+
+function tempGuideDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-guide-session-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 const piInsufficientCreditsStdout = readFileSync(
   new URL("../fixtures/pi-insufficient-credits.ndjson", import.meta.url),
   "utf8",
@@ -161,6 +175,61 @@ describe("parseGuideStreamOutput", () => {
 
   it("returns null on empty stdout", () => {
     expect(parseGuideStreamOutput("")).toBeNull();
+  });
+});
+
+describe("createGuideSession persistence", () => {
+  const context: GuidePersistenceContext = {
+    targets: [{ kind: "branch", repository: "github.com/acme/widgets", branch: "feature/persist" }],
+    revision: "abc123",
+    fingerprint: "patch-one",
+  };
+
+  it("restores successful guide output, launch settings, and Reviewed state in a new session", async () => {
+    const dir = tempGuideDir();
+    const first = createGuideSession(createGuideStore(dir));
+    first.registerPersistence("job-1", context);
+    const output = JSON.parse(guideJson([
+      { title: "Persisted", overview: "Stored", diffs: [{ file: "src/a.ts" }] },
+    ]));
+    await first.onJobComplete({
+      job: { id: "job-1", engine: "claude", model: "sonnet", effort: "low" },
+      meta: { stdout: JSON.stringify({ type: "result", structured_output: output }) },
+      changedFiles: FILES,
+    });
+    first.saveReviewed("job-1", [true]);
+
+    const restarted = createGuideSession(createGuideStore(dir));
+    expect(restarted.getCurrentGuide(context)).toMatchObject({
+      id: "job-1",
+      outdated: false,
+      engine: "claude",
+      launch: { engine: "claude", model: "sonnet", effort: "low" },
+    });
+    expect(restarted.getGuide("job-1")?.reviewed).toEqual([true]);
+    expect(restarted.getGuide("job-1")?.sections[0].title).toBe("Persisted");
+  });
+
+  it("keeps the previous persisted guide when regeneration fails", async () => {
+    const dir = tempGuideDir();
+    const store = createGuideStore(dir);
+    const first = createGuideSession(store);
+    first.registerPersistence("old-job", context);
+    first.submitManualOutput("old-job", guideJson([
+      { title: "Still available", overview: "Stored", diffs: [{ file: "src/a.ts" }] },
+    ]), FILES);
+
+    first.registerPersistence("failed-job", { ...context, revision: "def456", fingerprint: "patch-two" });
+    await first.onJobComplete({
+      job: { id: "failed-job", engine: "pi", prompt: composeGuideMarkerPrompt("Review", PI_FIXTURE_NONCE) },
+      meta: { stdout: "not valid guide output" },
+      changedFiles: FILES,
+    });
+
+    const restarted = createGuideSession(createGuideStore(dir));
+    expect(restarted.getCurrentGuide({ ...context, revision: "def456", fingerprint: "patch-two" }))
+      .toMatchObject({ id: "old-job", outdated: true });
+    expect(restarted.getGuide("old-job")?.sections[0].title).toBe("Still available");
   });
 });
 

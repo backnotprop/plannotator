@@ -20,9 +20,17 @@ import {
 } from "../marker-review";
 import type {
   CodeGuideOutput,
+  CurrentGuideInfo,
   GuideDiffRef,
+  GuideLaunchSettings,
   GuideSection,
 } from "@plannotator/shared/guide";
+import {
+  createGuideStore,
+  type GuidePersistenceContext,
+  type GuideStore,
+  type PersistedGuide,
+} from "./guide-storage";
 
 export type { CodeGuideOutput, GuideDiffRef, GuideSection };
 
@@ -890,9 +898,8 @@ export interface GuideSessionJobSummary {
   confidence: number;
 }
 
-export interface GuideSessionJobRef {
+export interface GuideSessionJobRef extends GuideLaunchSettings {
   id: string;
-  engine?: string;
   /** Full prompt text stored on the job at launch. Only read for Cursor/OpenCode/
    *  Pi jobs, to recover the per-job marker nonce (extractMarkerNonce) — the
    *  claude/codex paths never touch it. */
@@ -932,6 +939,11 @@ export interface GuideSession {
     error?: string;
   }>;
   getGuide(jobId: string): (CodeGuideOutput & { reviewed: boolean[] }) | null;
+  /** Associate a job with the stable review target and launch-time changeset it represents. */
+  registerPersistence(jobId: string, context: GuidePersistenceContext): void;
+  getLaunchPersistence(jobId: string): GuidePersistenceContext | null;
+  /** Load the newest durable guide matching the review target and hydrate it into this session. */
+  getCurrentGuide(context: GuidePersistenceContext): CurrentGuideInfo | null;
   saveReviewed(jobId: string, reviewed: boolean[]): void;
   getFailedPayload(jobId: string): string | null;
   /** The changed-file set (as of LAUNCH time) recorded for a given job id, or
@@ -1097,11 +1109,39 @@ function extractClaudeFailedPayload(stdout: string): string {
   return stdout;
 }
 
-export function createGuideSession(): GuideSession {
+export function createGuideSession(store: GuideStore = createGuideStore()): GuideSession {
   const guideResults = new Map<string, CodeGuideOutput>();
   const guideReviewed = new Map<string, boolean[]>();
   const failedPayloads = new Map<string, string>();
   const launchChangedFiles = new Map<string, string[]>();
+  const launchPersistence = new Map<string, GuidePersistenceContext>();
+  const launchSettings = new Map<string, GuideLaunchSettings>();
+  const persistedRecords = new Map<string, PersistedGuide>();
+
+  const writePersisted = (record: PersistedGuide): void => {
+    persistedRecords.set(record.id, record);
+    try {
+      store.write(record);
+    } catch (error) {
+      console.error(`[guide] Failed to persist guide ${record.id}:`, error);
+    }
+  };
+
+  const persistGuide = (jobId: string, guide: CodeGuideOutput): void => {
+    const context = launchPersistence.get(jobId);
+    if (!context) return;
+    const launch = launchSettings.get(jobId);
+    writePersisted({
+      version: 1,
+      id: jobId,
+      context,
+      generatedAt: Date.now(),
+      ...(launch?.engine ? { engine: launch.engine } : {}),
+      ...(launch && { launch }),
+      guide,
+      reviewed: guideReviewed.get(jobId) ?? [],
+    });
+  };
 
   return {
     guideResults,
@@ -1178,6 +1218,15 @@ export function createGuideSession(): GuideSession {
     },
 
     async onJobComplete({ job, meta, changedFiles }) {
+      const settings: GuideLaunchSettings = {
+        ...(job.engine && { engine: job.engine }),
+        ...(job.model && { model: job.model }),
+        ...(job.effort && { effort: job.effort }),
+        ...(job.reasoningEffort && { reasoningEffort: job.reasoningEffort }),
+        ...(job.fastMode && { fastMode: true }),
+        ...(job.thinking && { thinking: job.thinking }),
+      };
+      launchSettings.set(job.id, settings);
       // Record the changed-file set this attempt validated against — BEFORE
       // parsing, so both the success and failure paths capture it. A later
       // manual repair (submitManualOutput) reuses this exact set instead of
@@ -1235,6 +1284,7 @@ export function createGuideSession(): GuideSession {
       }
 
       guideResults.set(job.id, result.guide);
+      persistGuide(job.id, result.guide);
       failedPayloads.delete(job.id);
 
       const totalFiles = result.guide.sections.reduce((n, s) => n + s.diffs.length, 0);
@@ -1252,8 +1302,37 @@ export function createGuideSession(): GuideSession {
       return { ...guide, reviewed: guideReviewed.get(jobId) ?? [] };
     },
 
+    registerPersistence(jobId, context) {
+      launchPersistence.set(jobId, context);
+    },
+
+    getLaunchPersistence(jobId) {
+      return launchPersistence.get(jobId) ?? null;
+    },
+
+    getCurrentGuide(context) {
+      const current = store.readCurrent(context);
+      if (!current) return null;
+      const { record } = current;
+      guideResults.set(record.id, record.guide);
+      guideReviewed.set(record.id, record.reviewed);
+      launchPersistence.set(record.id, record.context);
+      persistedRecords.set(record.id, record);
+      if (record.launch) launchSettings.set(record.id, record.launch);
+      return {
+        id: record.id,
+        outdated: current.outdated,
+        generatedAt: record.generatedAt,
+        engine: record.engine,
+        launch: record.launch,
+      };
+    },
+
     saveReviewed(jobId, reviewed) {
-      guideReviewed.set(jobId, reviewed);
+      const normalized = reviewed.map((item) => item === true);
+      guideReviewed.set(jobId, normalized);
+      const record = persistedRecords.get(jobId);
+      if (record) writePersisted({ ...record, reviewed: normalized });
     },
 
     getFailedPayload(jobId) {
@@ -1296,6 +1375,7 @@ export function createGuideSession(): GuideSession {
       if ("error" in result) return { error: result.error };
 
       guideResults.set(jobId, result.guide);
+      persistGuide(jobId, result.guide);
       failedPayloads.delete(jobId);
       const files = result.guide.sections.reduce((n, s) => n + s.diffs.length, 0);
       return { ok: true, sections: result.guide.sections.length, files };

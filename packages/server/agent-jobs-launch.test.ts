@@ -41,14 +41,16 @@ function post(body: unknown): Request {
 const JOBS_URL = new URL("http://localhost/api/agents/jobs");
 
 describe("POST /api/agents/jobs — reviewProfileId launch plumbing", () => {
-  test("forwards reviewProfileId into buildCommand config", async () => {
+  test("forwards reviewProfileId and the allocated job ID into buildCommand", async () => {
     let seenConfig: Record<string, unknown> | undefined;
+    let seenJobId: string | undefined;
     const handler = createAgentJobHandler({
       mode: "review",
       getServerUrl: () => "http://localhost:1234",
       getCwd: () => "/tmp",
-      async buildCommand(_provider, config) {
+      async buildCommand(_provider, config, jobId) {
         seenConfig = config;
+        seenJobId = jobId;
         // Return a no-op command that won't actually spawn anything useful.
         return { command: ["true"], reviewProfileId: "user:security", reviewProfileLabel: "Security" };
       },
@@ -57,7 +59,9 @@ describe("POST /api/agents/jobs — reviewProfileId launch plumbing", () => {
     const res = await handler.handle(post({ provider: "codex", reviewProfileId: "user:security" }), JOBS_URL);
 
     expect(res?.status).toBe(201);
+    const { job } = await res!.json();
     expect(seenConfig?.reviewProfileId).toBe("user:security");
+    expect(seenJobId).toBe(job.id);
     handler.killAll();
   });
 

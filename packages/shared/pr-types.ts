@@ -65,6 +65,8 @@ export interface GithubPRMetadata {
   author: string;
   baseBranch: string;
   headBranch: string;
+  /** `owner/repo` for the PR head, including fork ownership when cross-repository. */
+  headRepository?: string;
   /** Repository default branch, used to infer whether this PR targets another PR branch. */
   defaultBranch?: string;
   baseSha: string;
@@ -84,6 +86,8 @@ export interface GitlabMRMetadata {
   author: string;
   baseBranch: string;
   headBranch: string;
+  /** Namespace/project path for the MR source, including fork namespace when cross-project. */
+  headProjectPath?: string;
   /** Project default branch, used to infer whether this MR targets another MR branch. */
   defaultBranch?: string;
   baseSha: string;

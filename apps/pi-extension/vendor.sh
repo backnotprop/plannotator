@@ -62,11 +62,9 @@ for f in tour-review; do
     > "generated/$f.ts"
 done
 
-# guide-review lives in packages/server/guide/ — same parent-relative and
-# shared-package import rewrites as tour-review above, plus its own
-# marker-review import (guide's marker-engine support reuses marker-review.ts's
-# nonce/extraction primitives, same as review.ts does).
-for f in guide-review; do
+# Guided Review server modules live in packages/server/guide/ — same
+# parent-relative and shared-package import rewrites as tour-review above.
+for f in guide-review guide-storage; do
   src="../../packages/server/guide/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/server/guide/%s.ts\n' "$f" | cat - "$src" \
     | sed 's|from "\.\./vcs"|from "./review-core.ts"|' \
@@ -75,6 +73,9 @@ for f in guide-review; do
     | sed 's|from "\.\./marker-review"|from "./marker-review.ts"|' \
     | sed 's|from "\.\./config"|from "./config.ts"|' \
     | sed 's|from "@plannotator/shared/guide"|from "./guide.ts"|' \
+    | sed 's|from "@plannotator/shared/repo"|from "./repo.ts"|' \
+    | sed 's|from "@plannotator/shared/pr-types"|from "./pr-types.ts"|' \
+    | sed 's|from "@plannotator/shared/review-core"|from "./review-core.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
     > "generated/$f.ts"
 done

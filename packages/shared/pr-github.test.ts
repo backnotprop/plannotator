@@ -11,6 +11,7 @@ const VIEW_JSON = JSON.stringify({
   author: { login: "dev" },
   baseRefName: "main",
   headRefName: "feature",
+  headRepository: { nameWithOwner: "fork-owner/r" },
   baseRefOid: "a".repeat(40),
   headRefOid: "b".repeat(40),
   url: "https://github.com/o/r/pull/123",
@@ -63,8 +64,10 @@ describe("fetchGhPR", () => {
       number: 123,
       baseBranch: "main",
       headBranch: "feature",
+      headRepository: "fork-owner/r",
       mergeBaseSha: "c".repeat(40),
     });
+    expect(calls.find((c) => c.startsWith("gh pr view"))).toContain("headRepository");
     expect(calls.some((c) => c.includes("/pulls/123/files"))).toBe(false);
   });
 

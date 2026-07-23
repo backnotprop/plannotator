@@ -34,3 +34,21 @@ export interface CodeGuideOutput {
 
 /** UI-side guide shape: server output extended with persisted per-section reviewed state. */
 export type CodeGuideData = CodeGuideOutput & { reviewed: boolean[] };
+
+export interface GuideLaunchSettings {
+  engine?: string;
+  model?: string;
+  effort?: string;
+  reasoningEffort?: string;
+  fastMode?: boolean;
+  thinking?: string;
+}
+
+/** The durable guide, if any, associated with the review target currently open on the server. */
+export interface CurrentGuideInfo {
+  id: string;
+  outdated: boolean;
+  generatedAt: number;
+  engine?: string;
+  launch?: GuideLaunchSettings;
+}
