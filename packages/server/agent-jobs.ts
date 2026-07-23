@@ -128,6 +128,10 @@ export interface AgentJobHandlerOptions {
      *  model planned section placement against, not whatever patch is on
      *  screen when the job happens to finish. */
     changedFilesSnapshot?: string[];
+    /** Launch-time review-target snapshot (guide provider only) — stored on
+     *  AgentJobInfo so guide persistence labels the envelope with the context
+     *  the guide was generated against (see AgentJobInfo.guideContext). */
+    guideContext?: AgentJobInfo["guideContext"];
   } | null>;
   /**
    * Called after a job process exits with exit code 0.
@@ -238,7 +242,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
     command: string[],
     label: string,
     outputPath?: string,
-    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; changedFilesSnapshot?: string[] },
+    spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"] },
   ): AgentJobInfo {
     const source = jobSource(id);
 
@@ -260,6 +264,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       ...(spawnOptions?.prUrl && { prUrl: spawnOptions.prUrl }),
       ...(spawnOptions?.diffScope && { diffScope: spawnOptions.diffScope }),
       ...(spawnOptions?.diffContext && { diffContext: spawnOptions.diffContext }),
+      ...(spawnOptions?.guideContext && { guideContext: spawnOptions.guideContext }),
       ...(spawnOptions?.reviewProfileId && { reviewProfileId: spawnOptions.reviewProfileId }),
       ...(spawnOptions?.reviewProfileLabel && { reviewProfileLabel: spawnOptions.reviewProfileLabel }),
     };
@@ -664,6 +669,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
           let jobReviewProfileId: string | undefined;
           let jobReviewProfileLabel: string | undefined;
           let jobChangedFilesSnapshot: string[] | undefined;
+          let jobGuideContext: AgentJobInfo["guideContext"] | undefined;
           const jobId = crypto.randomUUID();
           if (options.buildCommand) {
             // Thread config from POST body to buildCommand
@@ -697,6 +703,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
               jobReviewProfileId = built.reviewProfileId;
               jobReviewProfileLabel = built.reviewProfileLabel;
               jobChangedFilesSnapshot = built.changedFilesSnapshot;
+              jobGuideContext = built.guideContext;
             }
           }
 
@@ -724,6 +731,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             reviewProfileId: jobReviewProfileId,
             reviewProfileLabel: jobReviewProfileLabel,
             changedFilesSnapshot: jobChangedFilesSnapshot,
+            guideContext: jobGuideContext,
           });
           return Response.json({ job }, { status: 201 });
         } catch (err) {

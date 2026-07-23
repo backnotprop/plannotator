@@ -273,11 +273,33 @@ export interface GuideStoreSessionOptions {
   writesEnabled: () => boolean;
 }
 
+/**
+ * Review-target snapshot taken when a guide job LAUNCHES. Guide jobs run for
+ * minutes while the session supports mid-generation PR switching
+ * (/api/pr-switch) and diff switches — reading the live getters at completion
+ * would permanently label the envelope with the WRONG context (launched on PR
+ * A, switched to B, completed: A's content stamped with B's label/url/head).
+ * Captured via captureLaunchContext() at build time and carried on the job
+ * itself (AgentJobInfo.guideContext), same discipline as changedFilesSnapshot.
+ */
+export interface GuideLaunchContext {
+  pr?: { url: string; headSha: string; label: string } | null;
+  branchLabel?: string;
+  headSha?: string;
+}
+
 export interface GuideStoreSession {
-  /** Persist a successfully validated guide for a completed job. Never throws. */
+  /** Snapshot the CURRENT review-target context for a job being launched now.
+   *  The caller stamps the result onto the job; saveForJob prefers it over
+   *  the live getters at completion time. */
+  captureLaunchContext(): Promise<GuideLaunchContext>;
+  /** Persist a successfully validated guide for a completed job. Prefers the
+   *  job's launch-time context snapshot; falls back to the live getters only
+   *  when no snapshot exists (defensive). Never throws. */
   saveForJob(
     job: { id: string; engine?: string; model?: string },
     data: CodeGuideOutput & { reviewed?: boolean[] },
+    launchContext?: GuideLaunchContext,
   ): Promise<void>;
   /** True when this live job id has already been autosaved this session. */
   isJobSaved(jobId: string): boolean;
@@ -298,8 +320,10 @@ export interface GuideStoreSession {
 export function createGuideStoreSession(options: GuideStoreSessionOptions): GuideStoreSession {
   const { runGit, getGitCwd, getPRInfo, getBranchLabel, getFallbackDir, writesEnabled } = options;
 
-  /** jobId → saved id, for reviewed write-through and the `saved` flag. */
-  const savedIdByJob = new Map<string, string>();
+  /** jobId → saved location, for reviewed write-through and the `saved` flag.
+   *  Carries the repo key the save actually landed under (launch-time PR key
+   *  when one was captured), so write-through never chases the session key. */
+  const savedIdByJob = new Map<string, { repoKey: string; id: string }>();
 
   let repoKeyPromise: Promise<string> | null = null;
   const resolveRepoKey = (): Promise<string> => {
@@ -344,27 +368,46 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
     !!(stored && current && stored !== current);
 
   return {
-    async saveForJob(job, data) {
+    async captureLaunchContext() {
+      const pr = getPRInfo();
+      return {
+        ...(pr ? { pr } : {}),
+        ...(getBranchLabel() ? { branchLabel: getBranchLabel() } : {}),
+        ...(await currentHeadSha().then((sha) => (sha ? { headSha: sha } : {}))),
+      };
+    },
+
+    async saveForJob(job, data, launchContext) {
       try {
         if (!writesEnabled()) return;
         const { reviewed, ...guide } = data;
         const existingId = savedIdByJob.get(job.id);
-        const repoKey = await resolveRepoKey();
-        const pr = getPRInfo();
-        const id = existingId ?? makeGuideId(guide.title);
+        // Launch-time snapshot wins over the live getters: the envelope must
+        // describe the changeset the guide was GENERATED against, not the
+        // PR/diff the reviewer switched to while the job ran. Live getters are
+        // the defensive fallback for jobs launched without a snapshot.
+        const pr = launchContext ? launchContext.pr ?? null : getPRInfo();
+        const headSha = launchContext ? launchContext.headSha : await currentHeadSha();
+        const branchLabel = launchContext ? launchContext.branchLabel : getBranchLabel();
+        // Anchor the shelf to the launch-time PR too — a cross-project
+        // pr-switch must not file PR A's guide under B's repository.
+        const repoKey = existingId?.repoKey
+          ?? (pr?.url ? deriveGuideRepoKeyFromPRUrl(pr.url) : null)
+          ?? (await resolveRepoKey());
+        const id = existingId?.id ?? makeGuideId(guide.title);
         const envelope: SavedGuideEnvelope = {
           version: 1,
           savedAt: Date.now(),
-          label: pr?.label ?? getBranchLabel() ?? "local",
+          label: pr?.label ?? branchLabel ?? "local",
           title: guide.title,
           ...(job.engine ? { engine: job.engine } : {}),
           ...(job.model ? { model: job.model } : {}),
-          ...(await currentHeadSha().then((sha) => (sha ? { headSha: sha } : {}))),
+          ...(pr?.headSha ? { headSha: pr.headSha } : headSha ? { headSha } : {}),
           ...(pr?.url ? { prUrl: pr.url } : {}),
           guide: guide as CodeGuideOutput,
           reviewed: coerceReviewed(reviewed, guide.sections.length),
         };
-        if (saveGuide(repoKey, id, envelope)) savedIdByJob.set(job.id, id);
+        if (saveGuide(repoKey, id, envelope)) savedIdByJob.set(job.id, { repoKey, id });
       } catch (e) {
         // Persistence must never break job completion.
         console.error(`[guide-store] Autosave failed for job ${job.id}: ${e}`);
@@ -376,10 +419,10 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
     },
 
     async writeThroughReviewed(jobId, reviewed) {
-      const id = savedIdByJob.get(jobId);
-      if (!id) return;
+      const saved = savedIdByJob.get(jobId);
+      if (!saved) return;
       try {
-        updateGuideReviewed(await resolveRepoKey(), id, reviewed);
+        updateGuideReviewed(saved.repoKey, saved.id, reviewed);
       } catch {
         // Best-effort — the in-memory state is still authoritative this session.
       }

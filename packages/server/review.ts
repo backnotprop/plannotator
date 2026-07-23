@@ -1038,6 +1038,15 @@ export async function startReviewServer(
         const changedFilesSnapshot = repairOf
           ? guide.getLaunchChangedFiles(repairOf) ?? changedFiles.map((f) => f.path)
           : changedFiles.map((f) => f.path);
+        // Snapshot the launch-time review-target context (#1112): guide jobs
+        // run for minutes while the session supports mid-generation PR/diff
+        // switching, so the persisted envelope must be labeled with the
+        // context this guide is GENERATED against — captured now, carried on
+        // the job (guideContext), and read back at completion instead of the
+        // live session state. Repairs reuse the FAILED job's own snapshot,
+        // same as changedFilesSnapshot above.
+        const guideContext = (repairOf ? agentJobs.getJob(repairOf)?.guideContext : undefined)
+          ?? await guideStore.captureLaunchContext();
         return {
           ...built,
           prUrl: launchPrUrl,
@@ -1046,6 +1055,7 @@ export async function startReviewServer(
           reviewProfileId: reviewProfile.id,
           reviewProfileLabel: reviewProfile.label,
           changedFilesSnapshot,
+          guideContext,
         };
       }
 
@@ -1291,9 +1301,11 @@ export async function startReviewServer(
           job.summary = summary;
           // Autosave (#1112): only guides that passed validateGuideOutput ever
           // reach guideResults, so a getGuide hit here IS the validation gate.
-          // Failed/invalid guides never write.
+          // Failed/invalid guides never write. The job's launch-time context
+          // snapshot labels the envelope — never the live session state, which
+          // may have PR/diff-switched while the job ran.
           const validated = guide.getGuide(job.id);
-          if (validated) await guideStore.saveForJob(job, validated);
+          if (validated) await guideStore.saveForJob(job, validated, job.guideContext);
         } else {
           // Same fail-closed precedent as Tour: an exit-0 job with empty,
           // malformed, or fully-invalidated output must not look like a
@@ -1502,9 +1514,10 @@ export async function startReviewServer(
                 confidence: 1,
               });
               // A manually repaired guide passed the same validateGuideOutput
-              // gate as an automatic one — persist it too (#1112).
+              // gate as an automatic one — persist it too (#1112), labeled
+              // with the job's own launch-time context snapshot.
               const repaired = guide.getGuide(jobId);
-              if (repaired) await guideStore.saveForJob(existingJob, repaired);
+              if (repaired) await guideStore.saveForJob(existingJob, repaired, existingJob.guideContext);
               return Response.json({ ok: true, sections, files });
             } catch {
               return Response.json({ error: "Invalid JSON" }, { status: 400 });

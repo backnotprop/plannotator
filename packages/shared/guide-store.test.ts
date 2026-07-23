@@ -320,6 +320,81 @@ describe("createGuideStoreSession", () => {
     expect(listGuides(key)[0].envelope.label).toBe("local");
   });
 
+  test("a job launched under PR A completing after a switch to PR B keeps A's label, url, headSha, and shelf", async () => {
+    // Mutable live state: what the session getters return at any moment —
+    // exactly what the servers wire in. The launch snapshot is captured while
+    // PR A is active; the "user" then switches to PR B before the multi-minute
+    // job completes and saveForJob runs against the live-getters-say-B state.
+    let livePR: { url: string; headSha: string; label: string } | null = {
+      url: "https://github.com/acme/widgets/pull/1",
+      headSha: "aaaaaaa1",
+      label: "PR #1",
+    };
+    const session = createGuideStoreSession({
+      getGitCwd: () => undefined,
+      getPRInfo: () => livePR,
+      getBranchLabel: () => undefined,
+      getFallbackDir: () => "/unused",
+      writesEnabled: () => true,
+    });
+
+    const launchContext = await session.captureLaunchContext();
+    expect(launchContext.pr?.url).toBe("https://github.com/acme/widgets/pull/1");
+
+    // Simulate /api/pr-switch to a DIFFERENT PR (different repo, even) while
+    // the job runs.
+    livePR = { url: "https://github.com/other/gadgets/pull/9", headSha: "bbbbbbb2", label: "PR #9" };
+
+    await session.saveForJob({ id: "job-1", engine: "claude" }, { ...GUIDE }, launchContext);
+
+    // The envelope is labeled with PR A — the context the guide was GENERATED
+    // against — and filed under A's repository shelf, not B's.
+    const entries = listGuides(REPO_KEY);
+    expect(entries.length).toBe(1);
+    expect(entries[0].envelope.label).toBe("PR #1");
+    expect(entries[0].envelope.prUrl).toBe("https://github.com/acme/widgets/pull/1");
+    expect(entries[0].envelope.headSha).toBe("aaaaaaa1");
+    expect(listGuides("github.com__other__gadgets")).toEqual([]);
+
+    // Reviewed write-through follows the launch-time shelf too, even though
+    // the live session is still pointed at PR B.
+    await session.writeThroughReviewed("job-1", [true, false]);
+    expect(listGuides(REPO_KEY)[0].envelope.reviewed).toEqual([true, false]);
+  });
+
+  test("branch-mode launch context survives a mid-run branch/head change", async () => {
+    let head = "abc1234";
+    let branch = "feature/locales";
+    const session = branchSession({
+      runGit: async (args) => {
+        if (args[0] === "remote") return "git@github.com:acme/widgets.git\n";
+        if (args[0] === "rev-parse" && args[1] === "HEAD") return `${head}\n`;
+        return null;
+      },
+      getBranchLabel: () => branch,
+    });
+
+    const launchContext = await session.captureLaunchContext();
+    head = "def4567";
+    branch = "hotfix/other";
+
+    await session.saveForJob({ id: "job-1" }, { ...GUIDE }, launchContext);
+    const [entry] = listGuides(REPO_KEY);
+    expect(entry.envelope.label).toBe("feature/locales");
+    expect(entry.envelope.headSha).toBe("abc1234");
+    // The moved flag now reflects that the branch has advanced past the
+    // launch-time head the guide was generated on.
+    expect((await session.listSaved())[0].moved).toBe(true);
+  });
+
+  test("saveForJob without a launch snapshot falls back to the live getters", async () => {
+    const session = branchSession();
+    await session.saveForJob({ id: "job-1" }, { ...GUIDE });
+    const [entry] = listGuides(REPO_KEY);
+    expect(entry.envelope.label).toBe("feature/locales");
+    expect(entry.envelope.headSha).toBe("abc1234");
+  });
+
   test("saving twice for the same job overwrites the same file", async () => {
     const session = branchSession();
     await session.saveForJob({ id: "job-1" }, { ...GUIDE });
