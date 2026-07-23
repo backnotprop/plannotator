@@ -408,7 +408,7 @@ tools (except writing markdown files), or otherwise make changes to the system.
         const stripped = stripConflictingPlanModeRules(output.system);
         output.system.length = 0;
         output.system.push(...stripped);
-        output.system.push(getPlanningPrompt());
+        output.system[0] += "\n\n" + getPlanningPrompt();
 
         const hook = readImprovementHook("enterplanmode-improve");
         const pfmEnabled = loadConfig().pfmReminder === true;
@@ -417,7 +417,7 @@ tools (except writing markdown files), or otherwise make changes to the system.
           improvementHookContent: hook?.content ?? null,
         });
         if (improveContext) {
-          output.system.push(improveContext);
+          output.system[0] += "\n\n" + improveContext;
         }
 
         return;
@@ -425,13 +425,13 @@ tools (except writing markdown files), or otherwise make changes to the system.
 
       if (!shouldInjectGenericPlanReminder(lastUserAgent, isSubagent, workflowOptions)) return;
 
-      output.system.push(`## Plan Submission
+      output.system[0] += `\n\n## Plan Submission
 
 When you have completed your plan, call the \`submit_plan\` tool to submit it for user review. Pass your full plan as a single edit: \`{ "edits": [{ "start": 1, "content": "..." }] }\`.
 
 The user will review your plan in a visual UI where they can annotate, approve, or request changes. If rejected, the response includes your plan with line numbers; use targeted edits to revise specific sections.
 
-Do NOT proceed with implementation until your plan is approved.`);
+Do NOT proceed with implementation until your plan is approved.`;
     },
 
     // Intercept plannotator commands before the agent sees them.
