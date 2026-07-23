@@ -9,7 +9,8 @@
  * (which depend on node:fs, node:os, node:child_process). Keep it self-contained.
  *
  * Server-side call sites use getPlanDeniedPrompt() from ./prompts directly.
- * This module is only kept for the browser's wrapFeedbackForAgent clipboard feature.
+ * This module is only kept for the browser's clipboard copy features
+ * (wrapFeedbackForAgent / wrapFeedbackForClipboard).
  */
 
 export interface PlanDenyFeedbackOptions {
@@ -43,3 +44,70 @@ export const annotateFileFeedback = (
 
 export const annotateMessageFeedback = (feedback: string): string =>
   `# Message Annotations\n\n${feedback}\n\nPlease address the annotation feedback above.`;
+
+/**
+ * Browser-safe `{{placeholder}}` substitution with the same semantics as
+ * resolveTemplate() in @plannotator/shared/prompts: unknown placeholders are
+ * left untouched. Used by the clipboard copy paths to apply a server-resolved
+ * feedback template without any node: imports.
+ */
+export const applyFeedbackTemplate = (
+  template: string,
+  vars: Record<string, string | undefined>,
+): string =>
+  template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    const val = vars[key];
+    return val !== undefined ? val : match;
+  });
+
+/**
+ * Resolved (config-aware, unsubstituted) feedback templates shipped by the
+ * annotate server in the /api/plan payload. Absent outside annotate mode.
+ */
+export interface AnnotateFeedbackTemplates {
+  /** File/folder annotate wrap — placeholders: {{feedback}}, {{filePath}}, {{fileHeader}}. */
+  fileFeedback?: string;
+  /** Message annotate wrap (annotate-last) — placeholder: {{feedback}}. */
+  messageFeedback?: string;
+}
+
+export type ClipboardFeedbackContext =
+  | { mode: "plan-review" }
+  | { mode: "annotate-file"; template?: string; filePath: string; fileHeader?: string }
+  | { mode: "annotate-message"; template?: string };
+
+/**
+ * Mode-aware wrapper for the clipboard Copy paths (#1107).
+ *
+ * Plan review keeps the deliberately forceful plan-deny framing. Annotate
+ * sessions use the server-resolved template when the server shipped one
+ * (matching what Send Feedback produces, including user-customized
+ * prompts.annotate.* templates in ~/.plannotator/config.json), and fall back
+ * to the built-in annotate defaults when it did not (e.g. shared/static
+ * sessions never enter annotate mode and keep plan-deny behavior).
+ */
+export const wrapFeedbackForClipboard = (
+  feedback: string,
+  context: ClipboardFeedbackContext,
+): string => {
+  if (context.mode === "annotate-file") {
+    if (context.template) {
+      return applyFeedbackTemplate(context.template, {
+        feedback,
+        filePath: context.filePath,
+        fileHeader: context.fileHeader ?? "File",
+      });
+    }
+    return annotateFileFeedback(feedback, {
+      filePath: context.filePath,
+      fileHeader: context.fileHeader,
+    });
+  }
+  if (context.mode === "annotate-message") {
+    if (context.template) {
+      return applyFeedbackTemplate(context.template, { feedback });
+    }
+    return annotateMessageFeedback(feedback);
+  }
+  return planDenyFeedback(feedback);
+};

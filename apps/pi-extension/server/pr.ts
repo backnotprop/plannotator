@@ -13,7 +13,7 @@ import {
 	type PRStackTree,
 	type PRListItem,
 	parsePRUrl as parsePRUrlCore,
-} from "../generated/pr-types.js";
+} from "../generated/pr-types.ts";
 import {
 	checkAuth as checkAuthCore,
 	fetchPRContext as fetchPRContextCore,
@@ -25,7 +25,7 @@ import {
 	getUser as getUserCore,
 	markPRFilesViewed as markPRFilesViewedCore,
 	submitPRReview as submitPRReviewCore,
-} from "../generated/pr-provider.js";
+} from "../generated/pr-provider.ts";
 
 const prRuntime: PRRuntime = {
 	async runCommand(cmd, args) {

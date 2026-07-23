@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
-import { AGENT_TERMINAL_WS_BASE_PATH } from "../generated/agent-terminal.js";
-import { createNodeAgentTerminalBridge, normalizeSpawnOptions } from "./agent-terminal";
-import { startAnnotateServer } from "./serverAnnotate";
+import { AGENT_TERMINAL_WS_BASE_PATH } from "../generated/agent-terminal.ts";
+import { createNodeAgentTerminalBridge, normalizeSpawnOptions } from "./agent-terminal.ts";
+import { startAnnotateServer } from "./serverAnnotate.ts";
 
 describe("pi annotate agent terminal capability", () => {
 	test("normalizes spawn options from the server-owned agent launch plan", () => {

@@ -5,7 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import { json, parseBody } from "./helpers";
+import { json, parseBody } from "./helpers.ts";
 
 interface EditorAnnotation {
 	id: string;

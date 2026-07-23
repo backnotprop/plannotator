@@ -4,7 +4,7 @@ import {
 	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
 	stripPlanningOnlyTools,
-} from "./tool-scope";
+} from "./tool-scope.ts";
 
 describe("pi plan tool scoping", () => {
 	test("planning phase adds the submit tool and discovery helpers", () => {

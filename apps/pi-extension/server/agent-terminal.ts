@@ -7,8 +7,8 @@ import {
 	buildAgentTerminalWsPath,
 	type AgentTerminalAgent,
 	type AgentTerminalCapability,
-} from "../generated/agent-terminal.js";
-import { isRemoteSession } from "./network.js";
+} from "../generated/agent-terminal.ts";
+import { isRemoteSession } from "./network.ts";
 import type { PtyBackend, PtyExit, PtySession, PtySpawnOptions, Unsubscribe } from "@plannotator/webtui/core";
 
 type WebTuiCore = typeof import("@plannotator/webtui/core");

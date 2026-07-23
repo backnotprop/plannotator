@@ -2,7 +2,9 @@ import { describe, test, expect } from "bun:test";
 import {
   annotateFileFeedback,
   annotateMessageFeedback,
+  applyFeedbackTemplate,
   planDenyFeedback,
+  wrapFeedbackForClipboard,
 } from "./feedback-templates";
 
 describe("feedback-templates", () => {
@@ -86,4 +88,81 @@ describe("feedback-templates", () => {
     expect(result).toContain("Please address the annotation feedback above.");
   });
 
+});
+
+describe("applyFeedbackTemplate", () => {
+  test("substitutes known placeholders", () => {
+    const result = applyFeedbackTemplate("Review {{filePath}}: {{feedback}}", {
+      filePath: "/repo/README.md",
+      feedback: "Fix the intro",
+    });
+    expect(result).toBe("Review /repo/README.md: Fix the intro");
+  });
+
+  test("leaves unknown placeholders untouched (resolveTemplate parity)", () => {
+    const result = applyFeedbackTemplate("{{feedback}} {{mystery}}", {
+      feedback: "hi",
+    });
+    expect(result).toBe("hi {{mystery}}");
+  });
+});
+
+/**
+ * Clipboard copy wrapping (#1107): the Copy buttons must never wrap annotate
+ * feedback with the plan-deny framing — that template falsely tells the agent
+ * its plan was rejected. Copy must match what Send Feedback produces.
+ */
+describe("wrapFeedbackForClipboard", () => {
+  test("plan-review mode keeps the plan-deny wrap (unchanged behavior)", () => {
+    const result = wrapFeedbackForClipboard("Fix auth", { mode: "plan-review" });
+    expect(result).toBe(planDenyFeedback("Fix auth"));
+    expect(result).toContain("YOUR PLAN WAS NOT APPROVED.");
+  });
+
+  test("annotate-file without a server template uses the default annotate wrap", () => {
+    const result = wrapFeedbackForClipboard("Fix the intro", {
+      mode: "annotate-file",
+      filePath: "/repo/README.md",
+      fileHeader: "File",
+    });
+    expect(result).toBe(
+      annotateFileFeedback("Fix the intro", { filePath: "/repo/README.md", fileHeader: "File" }),
+    );
+    expect(result).not.toContain("YOUR PLAN WAS NOT APPROVED.");
+  });
+
+  test("annotate-file applies the server-resolved template with substitution", () => {
+    const result = wrapFeedbackForClipboard("Fix the intro", {
+      mode: "annotate-file",
+      template: "{{fileHeader}} {{filePath}} notes:\n\n{{feedback}}\n\nAnswer questions directly.",
+      filePath: "/repo/README.md",
+      fileHeader: "File",
+    });
+    expect(result).toBe(
+      "File /repo/README.md notes:\n\nFix the intro\n\nAnswer questions directly.",
+    );
+  });
+
+  test("annotate-file defaults fileHeader to File when the template needs it", () => {
+    const result = wrapFeedbackForClipboard("Fix it", {
+      mode: "annotate-file",
+      template: "{{fileHeader}}: {{filePath}} — {{feedback}}",
+      filePath: "/repo/doc.md",
+    });
+    expect(result).toBe("File: /repo/doc.md — Fix it");
+  });
+
+  test("annotate-message without a server template uses the default message wrap", () => {
+    const result = wrapFeedbackForClipboard("Wrong conclusion", { mode: "annotate-message" });
+    expect(result).toBe(annotateMessageFeedback("Wrong conclusion"));
+    expect(result).not.toContain("YOUR PLAN WAS NOT APPROVED.");
+  });
+
+  test("annotate-message applies the server-resolved template with substitution", () => {
+    const result = wrapFeedbackForClipboard("Wrong conclusion", {
+      mode: "annotate-message",
+      template: "Message review:\n\n{{feedback}}",
+    });
+    expect(result).toBe("Message review:\n\nWrong conclusion");
+  });
 });

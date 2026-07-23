@@ -22,16 +22,16 @@ import {
 	serializeAgentSSEEvent,
 	AGENT_HEARTBEAT_COMMENT,
 	AGENT_HEARTBEAT_INTERVAL_MS,
-} from "../generated/agent-jobs.js";
-import { formatClaudeLogEvent } from "../generated/claude-review.js";
+} from "../generated/agent-jobs.ts";
+import { formatClaudeLogEvent } from "../generated/claude-review.ts";
 import {
 	MARKER_ENGINES,
 	formatMarkerLogEvent,
 	type MarkerEngine,
 	type MarkerEngineId,
 	type MarkerModel,
-} from "../generated/marker-review.js";
-import { json, parseBody } from "./helpers.js";
+} from "../generated/marker-review.ts";
+import { json, parseBody } from "./helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Route prefixes

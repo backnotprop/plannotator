@@ -25,15 +25,15 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolvePhaseProfile } from "./config.js";
+import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolvePhaseProfile } from "./config.ts";
 import {
 	type ChecklistItem,
 	markCompletedSteps,
 	parseChecklist,
-} from "./generated/checklist.js";
-import { loadConfig, resolveUseJina } from "./generated/config.js";
-import { readImprovementHook } from "./generated/improvement-hooks.js";
-import { composeImproveContext } from "./generated/pfm-reminder.js";
+} from "./generated/checklist.ts";
+import { loadConfig, resolveUseJina } from "./generated/config.ts";
+import { readImprovementHook } from "./generated/improvement-hooks.ts";
+import { composeImproveContext } from "./generated/pfm-reminder.ts";
 import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
@@ -43,14 +43,14 @@ import {
 	startMarkdownAnnotationSession,
 	openPlanReviewBrowser,
 	registerPlannotatorEventListeners,
-} from "./plannotator-events.js";
+} from "./plannotator-events.ts";
 import {
 	findAssistantMessageByEntryId,
 	getAssistantMessageText,
 	getLastAssistantMessageSnapshot,
 	getRecentAssistantMessages,
 	hasSessionMovedPastEntry,
-} from "./assistant-message.js";
+} from "./assistant-message.ts";
 import {
 	getPiSessionIdentity,
 	isCurrentPiSessionDifferentFrom,
@@ -59,7 +59,7 @@ import {
 	registerCurrentPiSession,
 	sendUserMessageToCurrentPiSession,
 	withCurrentPiSessionFallbackHeader,
-} from "./current-pi-session.js";
+} from "./current-pi-session.ts";
 import {
 	getToolsForPhase,
 	isPlanWritePathAllowed,
@@ -67,17 +67,17 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
-import { isRemoteSession } from "./server/network.js";
+import { isRemoteSession } from "./server/network.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-type PlannotatorPromptsModule = typeof import("./generated/prompts.js");
+type PlannotatorPromptsModule = typeof import("./generated/prompts.ts");
 
 let promptsModulePromise: Promise<PlannotatorPromptsModule> | undefined;
 
 function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
 	if (!promptsModulePromise) {
-		promptsModulePromise = import("./generated/prompts.js").catch((error: unknown) => {
+		promptsModulePromise = import("./generated/prompts.ts").catch((error: unknown) => {
 			promptsModulePromise = undefined;
 			throw error;
 		});
@@ -87,10 +87,10 @@ function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
 
 async function loadAnnotateCommandModules() {
 	const [annotateArgs, atReference, resolveFile, referenceCommon] = await Promise.all([
-		import("./generated/annotate-args.js"),
-		import("./generated/at-reference.js"),
-		import("./generated/resolve-file.js"),
-		import("./generated/reference-common.js"),
+		import("./generated/annotate-args.ts"),
+		import("./generated/at-reference.ts"),
+		import("./generated/resolve-file.ts"),
+		import("./generated/reference-common.ts"),
 	]);
 	return {
 		parseAnnotateArgs: annotateArgs.parseAnnotateArgs,
@@ -448,7 +448,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const origin = getPiSessionIdentity(ctx);
 
 			try {
-				const { parseReviewArgs } = await import("./generated/review-args.js");
+				const { parseReviewArgs } = await import("./generated/review-args.ts");
 				const reviewArgs = parseReviewArgs(args ?? "");
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
@@ -559,7 +559,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				const useJina = resolveUseJina(noJina, loadConfig());
 				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
 				try {
-					const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.js");
+					const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.ts");
 					const result = await urlToMarkdown(filePath, { useJina });
 					markdown = result.markdown;
 					sourceConverted = isConvertedSource(result.source);
@@ -608,7 +608,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 						rawHtml = html;
 						markdown = "";
 					} else {
-						const { htmlToMarkdown } = await import("./generated/html-to-markdown.js");
+						const { htmlToMarkdown } = await import("./generated/html-to-markdown.ts");
 						markdown = htmlToMarkdown(html);
 						sourceConverted = true;
 					}
@@ -694,7 +694,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		description: "Annotate the last assistant message",
 		handler: async (args, ctx) => {
 			// Support --gate on /plannotator-last for the Stop-hook review gate.
-			const { parseAnnotateArgs } = await import("./generated/annotate-args.js");
+			const { parseAnnotateArgs } = await import("./generated/annotate-args.ts");
 			const { gate } = parseAnnotateArgs(args ?? "");
 
 			if (!hasPlanBrowserHtml()) {

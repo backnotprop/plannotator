@@ -19,9 +19,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startAnnotateServer } from "./serverAnnotate";
-import { deriveAnnotateHistorySlug } from "../generated/annotate-history.js";
-import { getPlannotatorDataDir } from "../generated/data-dir.js";
+import { startAnnotateServer } from "./serverAnnotate.ts";
+import { deriveAnnotateHistorySlug } from "../generated/annotate-history.ts";
+import { getPlannotatorDataDir } from "../generated/data-dir.ts";
 
 describe("pi annotate server: folder annotate history", () => {
 	let savedPort: string | undefined;

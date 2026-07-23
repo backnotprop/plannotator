@@ -63,7 +63,7 @@ Annotate plans, specs, messages, html, then send the feedback to your agent.
 
 ### Code Review
 
-Review local changes or remote PRs. Comment on diffs, suggest code. Your comments go back to the agent. Works with git, jj, p4, GitHub, and GitLab.
+Review local changes or remote PRs. Comment on diffs, suggest code. Your comments go back to the agent. Works with Git, GitButler, Jujutsu (`jj`), Perforce (`p4`), GitHub, and GitLab.
 
 </td>
 <td width="60%">
@@ -108,7 +108,10 @@ Need a realistic document to try? Copy the [product requirements document templa
 /plannotator-review                    # Review uncommitted changes
 /plannotator-review <github-pr-url>    # Review a GitHub pull request
 /plannotator-review <gitlab-mr-url>    # Review a GitLab merge request
+plannotator review --gitbutler         # Review an active GitButler workspace
 ```
+
+GitButler users can review the whole workspace, one stack, or one branch layer. See the [GitButler workflow guide](https://docs.plannotator.ai/open-source/workflows/gitbutler).
 
 ### Plan mode
 

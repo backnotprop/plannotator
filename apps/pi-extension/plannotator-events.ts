@@ -2,19 +2,19 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { DiffType, VcsSelection } from "./server.js";
+import type { DiffType, VcsSelection } from "./server.ts";
 import {
 	getLastAssistantMessageText,
 	getRecentAssistantMessages,
-} from "./assistant-message.js";
+} from "./assistant-message.ts";
 import {
 	getStartupErrorMessage,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	loadPlannotatorBrowser,
-} from "./plannotator-browser-runtime.js";
+} from "./plannotator-browser-runtime.ts";
 
-type PlannotatorBrowserModule = typeof import("./plannotator-browser.js");
+type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
 
 /** Start a plan-review browser session after loading the browser/server graph on demand. */
 export function startPlanReviewBrowserSession(

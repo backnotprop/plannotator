@@ -3,13 +3,14 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
-import { contentHash, deleteDraft } from "../generated/draft.js";
-import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.js";
-import { computeAnnotateHistory, deriveAnnotateHistorySlug, type AnnotateHistoryResult } from "../generated/annotate-history.js";
-import { htmlDiff } from "../generated/html-diff.js";
-import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled, resolveAnnotateHistory } from "../generated/config.js";
-import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.js";
-import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.js";
+import { contentHash, deleteDraft } from "../generated/draft.ts";
+import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
+import { computeAnnotateHistory, deriveAnnotateHistorySlug, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
+import { htmlDiff } from "../generated/html-diff.ts";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled, resolveAnnotateHistory, type PromptRuntime } from "../generated/config.ts";
+import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
+import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.ts";
+import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.ts";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromText,
@@ -17,7 +18,7 @@ import {
 	resolveFolderSourceFile,
 	resolveFolderSourceFileForSave,
 	saveSourceFileAtomic,
-} from "../generated/source-save-node.js";
+} from "../generated/source-save-node.ts";
 
 import {
 	handleDraftRequest,
@@ -27,14 +28,14 @@ import {
 	readDraftGenerationFromUrl,
 	handleSaveNotesRequest,
 	handleUploadRequest,
-} from "./handlers.js";
-import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.js";
-import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
+} from "./handlers.ts";
+import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.ts";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
-import { isRemoteSession, listenOnPort } from "./network.js";
-import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.js";
+import { isRemoteSession, listenOnPort } from "./network.ts";
+import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
 
-import { getRepoInfo } from "./project.js";
+import { getRepoInfo } from "./project.ts";
 import {
 	handleDocRequest,
 	handleDocExistsRequest,
@@ -44,23 +45,23 @@ import {
 	handleObsidianDocRequest,
 	resolveAllowedDocPath,
 	type FolderAnnotateHistory,
-} from "./reference.js";
-import { handleFileBrowserStreamRequest } from "./file-browser-watch.js";
-import { resolveUserPath, warmFileListCache } from "../generated/resolve-file.js";
-import { createExternalAnnotationHandler } from "./external-annotations.js";
-import { createNodeAgentTerminalBridge } from "./agent-terminal.js";
+} from "./reference.ts";
+import { handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
+import { resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
+import { createExternalAnnotationHandler } from "./external-annotations.ts";
+import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
 	HTML_ASSET_ROUTE_PREFIX,
 	encodeHtmlAssetPath,
 	htmlAssetContentType,
 	normalizeHtmlAssetRoutePath,
 	rewriteHtmlAssetReferences,
-} from "../generated/html-assets.js";
-import { inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.js";
+} from "../generated/html-assets.ts";
+import { inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
-} from "../generated/agent-terminal.js";
+} from "../generated/agent-terminal.ts";
 
 export interface AnnotateServerResult {
 	port: number;
@@ -425,6 +426,19 @@ export async function startAnnotateServer(options: {
 				serverConfig: getServerConfig(gitUser),
 				agentTerminal: agentTerminalCapability,
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
+				// Resolved copy-wrapper templates (config-aware, placeholders
+				// intact) so clipboard Copy matches what Send Feedback produces
+				// instead of the plan-deny wrap (#1107). Resolved per request so
+				// config edits mid-session behave like Send Feedback (which
+				// resolves at submit time).
+				feedbackTemplates: {
+					fileFeedback: getAnnotateFileFeedbackTemplate(
+						(options.origin ?? "pi") as PromptRuntime,
+					),
+					messageFeedback: getAnnotateMessageFeedbackTemplate(
+						(options.origin ?? "pi") as PromptRuntime,
+					),
+				},
 			});
 		} else if (url.pathname === "/api/plan/version" && req.method === "GET") {
 			// fetch a specific version of the annotated file (version diff base picker)
