@@ -24,6 +24,7 @@ import { spawnSync } from "node:child_process";
 import {
   aggregateWorkspacePatch,
   buildLocalWorkspaceReview,
+  isRepoRelative,
   prefixPatchPaths,
   resolveWorkspaceFilePath,
   discoverWorkspaceRepoPaths,
@@ -1125,6 +1126,16 @@ describe("review-workspace", () => {
       expect(workspace.normalizeAnnotationPath("api/src/file.ts")).toBe("api/src/file.ts");
       expect(workspace.normalizeAnnotationPath("src/file.ts")).toBe("api/src/file.ts");
       expect(workspace.normalizeAnnotationPath(join(api, "src/file.ts"))).toBe("api/src/file.ts");
+    });
+
+    it("treats cross-drive relative() results as escaping the repo", () => {
+      expect(isRepoRelative("src/file.ts")).toBe(true);
+      expect(isRepoRelative("nested/deep/file.ts")).toBe(true);
+      expect(isRepoRelative("../outside.ts")).toBe(false);
+      expect(isRepoRelative("")).toBe(false);
+      // On Windows, path.relative returns the target's absolute path when the
+      // base is on a different drive; after normalization that is "L:/...".
+      expect(isRepoRelative("L:/repos/project/src/file.ts")).toBe(false);
     });
 
     it("keeps requested Git-only workspace modes available when another child repo fails detection", async () => {
