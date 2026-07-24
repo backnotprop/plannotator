@@ -115,7 +115,6 @@ interface DiffData {
   gitRef: string;
   origin?: Origin;
   diffType?: string;
-  aiEnabled?: boolean;
   /** Server-built "changes under review" description for Ask AI (current view). */
   aiReviewContext?: string;
   gitContext?: GitContext;
@@ -272,7 +271,11 @@ const ReviewApp: React.FC = () => {
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [hideViewedFiles, setHideViewedFiles] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
-  const [aiEnabled, setAiEnabled] = useState(true);
+  // Unknown until /api/diff responds. Keeping this tri-state prevents provider
+  // discovery from starting before the server reports that AI is enabled.
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
+  const aiUIEnabled = aiEnabled === true;
+  const guideVisible = aiUIEnabled && guideOpen;
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [reviewMode, setReviewMode] = useState<string | null>(null);
@@ -429,7 +432,7 @@ const ReviewApp: React.FC = () => {
   // The same !!origin proxy is used elsewhere in this file (draft hook, feedback guard, conditional UI)
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
-  const agentJobs = useAgentJobs({ enabled: !!origin && aiEnabled });
+  const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
 
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
@@ -635,7 +638,7 @@ const ReviewApp: React.FC = () => {
   if (!isLoading && guideIntroEligibleRef.current === null) {
     guideIntroEligibleRef.current = hasSearchableFiles;
   }
-  const guideIntroVisible = aiEnabled && showGuideIntro && guideIntroEligibleRef.current === true;
+  const guideIntroVisible = aiUIEnabled && showGuideIntro && guideIntroEligibleRef.current === true;
   // Ack the hint on ANY path that opens the guide — keyboard shortcut,
   // job-completion auto-open, job cards — not just the header button's own
   // onClick; otherwise the shimmer resumes after the user closes a guide
@@ -702,9 +705,9 @@ const ReviewApp: React.FC = () => {
     }
   }, [codeNav.resolve, dockApi, isAllFilesActive, isSemanticDiffActive, gitContext, agentCwd]);
 
-  // Check AI capabilities on mount
+  // Check AI capabilities only after /api/diff confirms AI is enabled.
   useEffect(() => {
-    if (!aiEnabled) {
+    if (!aiUIEnabled) {
       setAiAvailable(false);
       setAiProviders([]);
       setAiDefaultProvider(null);
@@ -721,7 +724,7 @@ const ReviewApp: React.FC = () => {
         }
       })
       .catch(() => {});
-  }, [aiEnabled]);
+  }, [aiUIEnabled]);
 
   // Provider/model/effort selection logic lives in the shared hook above; the
   // app only composes the session reset (the hook can't own it — see the cycle
@@ -1232,7 +1235,7 @@ const ReviewApp: React.FC = () => {
       // same hasSearchableFiles condition as the header badge so the shortcut
       // and badge agree on availability.
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'g' && !isTypingTarget(e.target)) {
-        if (aiEnabled && hasSearchableFiles) {
+        if (aiUIEnabled && hasSearchableFiles) {
           e.preventDefault();
           setGuideOpen(prev => !prev);
         }
@@ -1248,7 +1251,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen]);
+  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen]);
 
 
   // Load diff content - try API first, fall back to demo
@@ -1303,7 +1306,6 @@ const ReviewApp: React.FC = () => {
           gitRef: data.gitRef,
           origin: data.origin,
           diffType: data.diffType,
-          aiEnabled: data.aiEnabled,
           aiReviewContext: data.aiReviewContext,
           gitContext: data.gitContext,
           diffOptions: data.diffOptions,
@@ -1374,6 +1376,7 @@ const ReviewApp: React.FC = () => {
       })
       .catch(() => {
         // Not in API mode - use demo content
+        setAiEnabled(true);
         const demoFiles = parseDiffToFiles(DEMO_DIFF);
         setDiffData({
           files: demoFiles,
@@ -2795,7 +2798,7 @@ const ReviewApp: React.FC = () => {
                 <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
               </>
             )}
-            {aiEnabled && hasSearchableFiles && (
+            {aiUIEnabled && hasSearchableFiles && (
               <>
                 <button
                   onClick={() => {
@@ -3377,7 +3380,7 @@ const ReviewApp: React.FC = () => {
               replacement for either in the tree: the dock below stays
               mounted (just CSS-hidden) so its layout/scroll state survives
               toggling the guide open and closed. */}
-          {aiEnabled && guideOpen && (
+          {guideVisible && (
             <div className="flex-1 min-w-0 overflow-y-auto">
               <GuideScreen
                 activeGuideJobId={activeGuideJobId}
@@ -3393,7 +3396,7 @@ const ReviewApp: React.FC = () => {
           )}
 
           {/* Center dock area */}
-          <div className={`flex-1 min-w-0 overflow-hidden relative ${guideOpen ? 'hidden' : ''}`}>
+          <div className={`flex-1 min-w-0 overflow-hidden relative ${guideVisible ? 'hidden' : ''}`}>
             {/* Commit navigation veil: while a commit switch is in flight (or
                 the view was just entered and HEAD auto-select hasn't landed),
                 cover the stale previous diff instead of letting it sit there
@@ -3544,7 +3547,7 @@ const ReviewApp: React.FC = () => {
                 externalAnnotations={externalAnnotations}
                 onOpenJobDetail={handleOpenJobDetail}
                 onOpenGuide={handleOpenGuide}
-                guideLaunchable={aiEnabled && hasSearchableFiles}
+                guideLaunchable={aiUIEnabled && hasSearchableFiles}
                 canOpenGuideJob={jobMatchesCurrentContext}
               />
             </div>

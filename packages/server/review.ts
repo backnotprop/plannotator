@@ -2563,6 +2563,18 @@ export async function startReviewServer(
             return handleAgents(options.opencodeClient);
           }
 
+          // AI-disabled review sessions expose no agent discovery or launch
+          // surface. The exact endpoint above is feedback routing, not a job.
+          if (!aiEnabled && url.pathname.startsWith("/api/agents/")) {
+            if (
+              url.pathname.slice("/api/agents/".length) === "capabilities" &&
+              req.method === "GET"
+            ) {
+              return Response.json({ mode: "review", providers: [], available: false });
+            }
+            return Response.json({ error: "AI features disabled" }, { status: 503 });
+          }
+
           // API: Review profiles (custom reviews discovery). Reloaded per
           // request, no file watching. Profiles come from the user dir plus
           // builtins.

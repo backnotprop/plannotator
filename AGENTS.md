@@ -133,7 +133,7 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_AGENT_TERMINAL_REMOTE` | Set to `1` / `true` to enable the annotate-mode agent terminal while `PLANNOTATOR_REMOTE` is active. Off by default because remote mode binds beyond localhost. |
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
-| `PLANNOTATOR_AI` | Set to `disabled` to skip AI provider initialization and hide Plannotator-managed AI controls, including Ask AI, Review Agents, and Guided Review. External agents can still open reviews and submit annotations. Default: enabled. |
+| `PLANNOTATOR_AI` | Set to `disabled` to disable the Ask AI, Review Agents, and Guided Review controls and endpoints. External agents can still open reviews and submit annotations. The explicit annotate-mode agent terminal is separate and remains controlled by its own settings. Default: enabled. |
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |

@@ -2483,6 +2483,16 @@ export async function startReviewServer(options: {
 			await handleUploadRequest(req, res);
 		} else if (url.pathname === "/api/agents" && req.method === "GET") {
 			json(res, { agents: [] });
+		} else if (!aiEnabled && url.pathname.startsWith("/api/agents/")) {
+			// The exact endpoint above is feedback routing, not a review job.
+			if (
+				url.pathname.slice("/api/agents/".length) === "capabilities" &&
+				req.method === "GET"
+			) {
+				json(res, { mode: "review", providers: [], available: false });
+			} else {
+				json(res, { error: "AI features disabled" }, 503);
+			}
 		} else if (
 			url.pathname === "/api/agents/review-profiles" &&
 			req.method === "GET"
