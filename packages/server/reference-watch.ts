@@ -25,6 +25,7 @@ interface WatchTarget {
 	watchPath: string;
 	clientDirPath: string;
 	watchGit: boolean;
+	atomic?: boolean;
 	depth?: number;
 	matchesContentEvent?: (path: string) => boolean;
 	ignored?: (path: string) => boolean;
@@ -106,6 +107,7 @@ function ensureWatcher(target: WatchTarget): WatchEntry {
 	entry.contentWatcher = chokidar.watch(target.watchPath, {
 		ignoreInitial: true,
 		persistent: true,
+		atomic: target.atomic,
 		depth: target.depth,
 		ignored: target.ignored,
 		awaitWriteFinish: {
@@ -193,6 +195,7 @@ export function handleFileBrowserFilesStream(
 					watchPath: parentPath,
 					clientDirPath: dirname(rawFilePath),
 					watchGit: false,
+					atomic: false,
 					depth: 0,
 					matchesContentEvent: (path) => resolve(path) === filePath,
 					ignored: (path) => {
