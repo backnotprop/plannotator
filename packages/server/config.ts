@@ -3,6 +3,7 @@ export {
   saveConfig,
   detectGitUser,
   getServerConfig,
+  resolveAIEnabled,
   resolveAnnotateHistory,
   resolveCursorSandbox,
   resolveGuideHistory,

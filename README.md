@@ -338,6 +338,7 @@ Settings are saved in cookies (not localStorage) because each hook invocation ru
 | `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local, unset for SSH auto-detection |
 | `PLANNOTATOR_PORT` | Fixed port (default: random locally, `19432` remote) |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in |
+| `PLANNOTATOR_AI` | `disabled` to skip AI providers and hide Ask AI, Review Agents, and Guided Review |
 | `PLANNOTATOR_SHARE` | `disabled` to turn off URL sharing |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal) |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API |

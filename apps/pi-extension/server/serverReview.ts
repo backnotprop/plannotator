@@ -6,7 +6,7 @@ import { basename, resolve as resolvePath } from "node:path";
 
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash, deleteDraft } from "../generated/draft.ts";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled, resolveCursorSandbox, resolveGuideHistory } from "../generated/config.ts";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveGuideHistory } from "../generated/config.ts";
 
 export type {
 	DiffOption,
@@ -282,6 +282,7 @@ export async function startReviewServer(options: {
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
 }): Promise<ReviewServerResult> {
 	const gitUser = detectGitUser();
+	const aiEnabled = resolveAIEnabled();
 	let draftKey = contentHash(options.rawPatch);
 	let prMeta = options.prMetadata;
 	const isPRMode = !!prMeta;
@@ -746,7 +747,8 @@ export async function startReviewServer(options: {
 		patch: string = currentPatch,
 		base: string = currentBase,
 		diffType: DiffType = currentDiffType as DiffType,
-	): string {
+	): string | undefined {
+		if (!aiEnabled) return undefined;
 		const workspacePrompt = getWorkspacePromptContext();
 		if (workspacePrompt) {
 			return buildAgentReviewUserMessageForTarget(
@@ -1372,7 +1374,7 @@ export async function startReviewServer(options: {
 		resolveDecision = r;
 	});
 
-	const aiRuntime = await createPiAIRuntime({ getCwd: resolveAgentCwd });
+	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd }) : null;
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
@@ -1548,6 +1550,7 @@ export async function startReviewServer(options: {
 			json(res, {
 				rawPatch: servedPatch,
 				aiReviewContext: buildCurrentAiReviewContext(servedPatch, servedBase, servedDiffType as DiffType),
+				aiEnabled,
 				gitRef: servedGitRef,
 				snapshotId: servedSnapshotId,
 				origin: options.origin ?? "pi",

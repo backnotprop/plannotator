@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { contentHash, deleteDraft } from "../generated/draft.ts";
 import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
-import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled, resolveAnnotateHistory, type PromptRuntime } from "../generated/config.ts";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, type PromptRuntime } from "../generated/config.ts";
 import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.ts";
 import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.ts";
@@ -275,7 +275,7 @@ export async function startAnnotateServer(options: {
 	const repoInfo = getRepoInfo();
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
-	const aiRuntime = await createPiAIRuntime();
+	const aiRuntime = resolveAIEnabled() ? await createPiAIRuntime() : null;
 	const htmlAssets = createHtmlAssetRegistry();
 	let agentTerminalCapability: AgentTerminalCapability = {
 		enabled: false,

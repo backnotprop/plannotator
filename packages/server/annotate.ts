@@ -33,14 +33,14 @@ import {
 	saveSourceFileAtomic,
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
-import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAnnotateHistory } from "./config";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveAnnotateHistory } from "./config";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
 import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
-import type { AIEndpoints } from "@plannotator/ai";
+import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
@@ -220,7 +220,7 @@ export async function startAnnotateServer(
       : renderHtml && rawHtml ? rawHtml : markdown;
   const draftKey = contentHash(draftSource);
   const externalAnnotations = createExternalAnnotationHandler("plan");
-  const aiRuntime = await createAIRuntime();
+  const aiRuntime = resolveAIEnabled() ? await createAIRuntime() : null;
   const htmlAssets = createHtmlAssetRegistry();
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),
@@ -639,6 +639,15 @@ export async function startAnnotateServer(
           if (externalResponse) return externalResponse;
 
           if (url.pathname.startsWith("/api/ai/")) {
+            if (!aiRuntime) {
+              if (!isAIEndpointPath(url.pathname)) {
+                return handleApiNotFound(url.pathname);
+              }
+              if (url.pathname.slice("/api/ai/".length) === "capabilities" && req.method === "GET") {
+                return Response.json({ available: false, providers: [] });
+              }
+              return Response.json({ error: "AI backend not available" }, { status: 503 });
+            }
             const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
             if (handler) {
               if (url.pathname === AI_QUERY_ENDPOINT) {
@@ -740,7 +749,7 @@ export async function startAnnotateServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     stop: () => {
-      aiRuntime.dispose();
+      aiRuntime?.dispose();
       agentTerminal.dispose();
       server.stop();
     },
