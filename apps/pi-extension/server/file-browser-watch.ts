@@ -1,7 +1,7 @@
 import chokidar, { type FSWatcher } from "chokidar";
 import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dirname, isAbsolute, relative } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import { isFileBrowserExcludedPath } from "../generated/reference-common.ts";
 import { resolveUserPath } from "../generated/resolve-file.ts";
@@ -28,6 +28,8 @@ interface WatchTarget {
 	watchPath: string;
 	clientDirPath: string;
 	watchGit: boolean;
+	depth?: number;
+	matchesContentEvent?: (path: string) => boolean;
 	ignored?: (path: string) => boolean;
 }
 
@@ -106,13 +108,18 @@ function ensureWatcher(target: WatchTarget): WatchEntry {
 	entry.contentWatcher = chokidar.watch(target.watchPath, {
 		ignoreInitial: true,
 		persistent: true,
+		depth: target.depth,
 		ignored: target.ignored,
 		awaitWriteFinish: {
 			stabilityThreshold: 120,
 			pollInterval: 30,
 		},
 	});
-	entry.contentWatcher.on("all", () => scheduleBroadcast(entry, "files"));
+	entry.contentWatcher.on("all", (_event, path) => {
+		if (!target.matchesContentEvent || target.matchesContentEvent(path)) {
+			scheduleBroadcast(entry, "files");
+		}
+	});
 	entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
 
 	const gitWatchPaths = target.watchGit
@@ -183,11 +190,18 @@ export function handleFileBrowserStreamRequest(req: IncomingMessage, res: Server
 			}
 			const key = `file:${filePath}`;
 			if (!targets.has(key)) {
+				const parentPath = dirname(filePath);
 				targets.set(key, {
 					key,
-					watchPath: filePath,
+					watchPath: parentPath,
 					clientDirPath: dirname(rawFilePath),
 					watchGit: false,
+					depth: 0,
+					matchesContentEvent: (path) => resolve(path) === filePath,
+					ignored: (path) => {
+						const resolvedPath = resolve(path);
+						return resolvedPath !== parentPath && resolvedPath !== filePath;
+					},
 				});
 			}
 		}
