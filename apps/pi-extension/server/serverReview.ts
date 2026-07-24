@@ -6,7 +6,7 @@ import { basename, resolve as resolvePath } from "node:path";
 
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash, deleteDraft } from "../generated/draft.ts";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled, resolveCursorSandbox } from "../generated/config.ts";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled, resolveCursorSandbox, resolveGuideHistory } from "../generated/config.ts";
 
 export type {
 	DiffOption,
@@ -122,6 +122,7 @@ import {
 } from "../generated/claude-review.ts";
 import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.ts";
 import { createGuideSession, GUIDE_EMPTY_OUTPUT_ERROR } from "../generated/guide-review.ts";
+import { createGuideStoreSession, SAVED_GUIDE_ID_PREFIX } from "../generated/guide-store.ts";
 import {
 	MARKER_ENGINES,
 	composeMarkerReviewPrompt,
@@ -767,6 +768,34 @@ export async function startReviewServer(options: {
 	}
 	const tour = createTourSession();
 	const guide = createGuideSession();
+	// Durable guide persistence (#1112): autosaves validated guides to
+	// ${PLANNOTATOR_DATA_DIR}/guides/{repo-key}/ and serves them back through
+	// the existing guide endpoints as `saved:{id}` pseudo job ids. All getters
+	// are late-bound — prMeta/currentDiffType can change mid-session.
+	// Mirrors packages/server/review.ts's guideStore wiring.
+	const guideStore = createGuideStoreSession({
+		runGit: async (args, cwd) => {
+			const result = await reviewRuntime.runGit(args, { cwd });
+			return result.exitCode === 0 ? result.stdout : null;
+		},
+		getGitCwd: () =>
+			isPRMode || isWorkspaceMode
+				? undefined
+				: options.gitContext
+					? resolveVcsCwd(currentDiffType as DiffType, options.gitContext.cwd) ?? options.gitContext.cwd ?? process.cwd()
+					: undefined,
+		getPRInfo: () =>
+			prMeta
+				? {
+						url: prMeta.url,
+						headSha: prMeta.headSha,
+						label: `${getMRLabel(prMeta)} ${getMRNumberLabel(prMeta)}`,
+					}
+				: null,
+		getBranchLabel: () => clientGitContext?.currentBranch || options.gitContext?.currentBranch,
+		getFallbackDir: () => workspace?.root ?? options.agentCwd ?? process.cwd(),
+		writesEnabled: () => resolveGuideHistory(loadConfig()),
+	});
 	const semanticDiffScratchCwd = getSemanticDiffScratchCwd();
 	function resolveSemanticDiffCwd(diffType: DiffType = currentDiffType as DiffType): string {
 		if (workspace) return workspace.root;
@@ -1048,6 +1077,15 @@ export async function startReviewServer(options: {
 				const changedFilesSnapshot = repairOf
 					? guide.getLaunchChangedFiles(repairOf) ?? changedFiles.map((f) => f.path)
 					: changedFiles.map((f) => f.path);
+				// Snapshot the launch-time review-target context (#1112): guide jobs
+				// run for minutes while the session supports mid-generation PR/diff
+				// switching, so the persisted envelope must be labeled with the
+				// context this guide is GENERATED against — captured now, carried on
+				// the job (guideContext), and read back at completion instead of the
+				// live session state. Repairs reuse the FAILED job's own snapshot,
+				// same as changedFilesSnapshot above. Mirrors packages/server/review.ts.
+				const guideContext = (repairOf ? agentJobs.getJob(repairOf)?.guideContext : undefined)
+					?? await guideStore.captureLaunchContext();
 				return {
 					...built,
 					prUrl: launchPrUrl,
@@ -1056,6 +1094,7 @@ export async function startReviewServer(options: {
 					reviewProfileId: reviewProfile.id,
 					reviewProfileLabel: reviewProfile.label,
 					changedFilesSnapshot,
+					guideContext,
 				};
 			}
 
@@ -1292,6 +1331,13 @@ export async function startReviewServer(options: {
 				const { summary, error } = await guide.onJobComplete({ job, meta, changedFiles });
 				if (summary) {
 					job.summary = summary;
+					// Autosave (#1112): only guides that passed validateGuideOutput
+					// ever reach guideResults, so a getGuide hit here IS the
+					// validation gate. Failed/invalid guides never write. The job's
+					// launch-time context snapshot labels the envelope — never the
+					// live session state, which may have PR/diff-switched mid-run.
+					const validated = guide.getGuide(job.id);
+					if (validated) await guideStore.saveForJob(job, validated, job.guideContext);
 				} else {
 					// Same fail-closed precedent as Tour: an exit-0 job with empty,
 					// malformed, or fully-invalidated output must not look like a
@@ -1357,29 +1403,69 @@ export async function startReviewServer(options: {
 			return;
 		}
 
-		// API: Get guide result
+		// API: Get guide result — live job ids, or `saved:{id}` for a
+		// persisted guide loaded from the on-disk store (#1112).
 		if (url.pathname.match(/^\/api\/guide\/[^/]+$/) && req.method === "GET") {
-			const jobId = url.pathname.slice("/api/guide/".length);
+			const jobId = decodeURIComponent(url.pathname.slice("/api/guide/".length));
+			if (jobId.startsWith(SAVED_GUIDE_ID_PREFIX)) {
+				const saved = await guideStore.getSavedGuideData(jobId.slice(SAVED_GUIDE_ID_PREFIX.length));
+				if (!saved) {
+					json(res, { error: "Guide not found" }, 404);
+					return;
+				}
+				json(res, saved);
+				return;
+			}
 			const result = guide.getGuide(jobId);
 			if (!result) {
 				json(res, { error: "Guide not found" }, 404);
 				return;
 			}
-			json(res, result);
+			json(res, { ...result, ...(guideStore.isJobSaved(jobId) ? { saved: true } : {}) });
 			return;
 		}
 
-		// API: Save guide reviewed state
+		// API: Save guide reviewed state. Live job ids also write through to
+		// the job's autosaved file; `saved:{id}` ids persist directly.
 		const reviewedMatch = url.pathname.match(/^\/api\/guide\/([^/]+)\/reviewed$/);
 		if (reviewedMatch && req.method === "PUT") {
-			const jobId = reviewedMatch[1];
+			const jobId = decodeURIComponent(reviewedMatch[1]);
 			try {
 				const body = await parseBody(req) as { reviewed: boolean[] };
-				if (Array.isArray(body.reviewed)) guide.saveReviewed(jobId, body.reviewed);
+				if (Array.isArray(body.reviewed)) {
+					if (jobId.startsWith(SAVED_GUIDE_ID_PREFIX)) {
+						const ok = await guideStore.updateSavedReviewed(jobId.slice(SAVED_GUIDE_ID_PREFIX.length), body.reviewed);
+						if (!ok) {
+							json(res, { error: "Guide not found" }, 404);
+							return;
+						}
+					} else {
+						guide.saveReviewed(jobId, body.reviewed);
+						await guideStore.writeThroughReviewed(jobId, body.reviewed);
+					}
+				}
 				json(res, { ok: true });
 			} catch {
 				json(res, { error: "Invalid JSON" }, 400);
 			}
+			return;
+		}
+
+		// API: List saved guides for the current repo (#1112)
+		if (url.pathname === "/api/guides" && req.method === "GET") {
+			json(res, await guideStore.listSaved());
+			return;
+		}
+
+		// API: Delete a saved guide (#1112)
+		const savedGuideDeleteMatch = url.pathname.match(/^\/api\/guides\/([^/]+)$/);
+		if (savedGuideDeleteMatch && req.method === "DELETE") {
+			const ok = await guideStore.deleteSaved(decodeURIComponent(savedGuideDeleteMatch[1]));
+			if (!ok) {
+				json(res, { error: "Guide not found" }, 404);
+				return;
+			}
+			json(res, { ok: true });
 			return;
 		}
 
@@ -1427,6 +1513,11 @@ export async function startReviewServer(options: {
 					explanation: `${sections} section${sections !== 1 ? "s" : ""}, ${files} file${files !== 1 ? "s" : ""} placed (manually repaired)`,
 					confidence: 1,
 				});
+				// A manually repaired guide passed the same validateGuideOutput
+				// gate as an automatic one — persist it too (#1112), labeled
+				// with the job's own launch-time context snapshot.
+				const repaired = guide.getGuide(jobId);
+				if (repaired) await guideStore.saveForJob(existingJob, repaired, existingJob.guideContext);
 				json(res, { ok: true, sections, files });
 			} catch {
 				json(res, { error: "Invalid JSON" }, 400);

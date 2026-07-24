@@ -114,6 +114,13 @@ export interface PlannotatorConfig {
    */
   annotateHistory?: boolean;
   /**
+   * Persist successful Guided Reviews (guide content + per-section reviewed
+   * state) under ~/.plannotator/guides/ (or PLANNOTATOR_DATA_DIR) so they
+   * survive closing Plannotator. Set to false to disable writes; already-saved
+   * guides remain readable and listed. Default: true.
+   */
+  guideHistory?: boolean;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -282,6 +289,20 @@ export function resolveAnnotateHistory(config: PlannotatorConfig): boolean {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
   return coerceConfigBoolean(config.annotateHistory, true);
+}
+
+/**
+ * Resolve whether successful Guided Reviews are persisted to disk.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_GUIDE_HISTORY env var  →  config.guideHistory  →  default true
+ */
+export function resolveGuideHistory(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_GUIDE_HISTORY;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  return coerceConfigBoolean(config.guideHistory, true);
 }
 
 export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {

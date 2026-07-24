@@ -997,6 +997,17 @@ const ReviewApp: React.FC = () => {
     [prMetadata, activeWorktreePath],
   );
 
+  // A `saved:{id}` guide has no AgentJobInfo, so GuideScreen's context match
+  // passes trivially (unknown ids are tolerated by design, for the demo path).
+  // Without this, switching PR or worktree while a saved guide is open would
+  // leave it mounted over the NEW context's diff with a stale `moved` flag.
+  // Clear it on any review-context switch — simplest and predictable; the
+  // user can reopen it from the Previous guides list. Live job ids are left
+  // alone: GuideScreen's own matchesContext already handles them.
+  useEffect(() => {
+    setActiveGuideJobId(prev => (prev?.startsWith('saved:') ? null : prev));
+  }, [prMetadata?.url, activeWorktreePath]);
+
   // Auto-open tour dialog when a tour job completes — scoped to the current
   // review context, same rule and same deferred-open semantics as the guide
   // effect below (an away-context tour stays unmarked so it opens when the
@@ -3365,6 +3376,7 @@ const ReviewApp: React.FC = () => {
                 killJob={agentJobs.killJob}
                 onClose={() => setGuideOpen(false)}
                 onOpenFixedGuide={handleOpenGuide}
+                onOpenSavedGuide={handleOpenGuide}
               />
             </div>
           )}
