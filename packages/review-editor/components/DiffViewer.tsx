@@ -353,7 +353,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         oldFile: fileContents.old != null ? { name: oldPath || filePath, contents: fileContents.old } : undefined,
         newFile: fileContents.new != null ? { name: filePath, contents: fileContents.new } : undefined,
       });
-      return result || fileDiff;
+      return result && !result.isPartial ? result : fileDiff;
     } catch {
       return fileDiff;
     }

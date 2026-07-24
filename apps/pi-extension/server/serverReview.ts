@@ -43,6 +43,7 @@ import {
 	detectRemoteDefaultInfo,
 	getFileContentsForDiff as getFileContentsForDiffCore,
 	getSinceBaseSections,
+	isBinaryPatchFile,
 	isSameCwdCommitSwitch,
 	listPatchFiles,
 	parseCommitDiffType,
@@ -2326,6 +2327,11 @@ export async function startReviewServer(options: {
 						return;
 					}
 				}
+			}
+
+			if (isBinaryPatchFile(currentPatch, filePath)) {
+				json(res, { oldContent: null, newContent: null });
+				return;
 			}
 
 			if (workspace) {

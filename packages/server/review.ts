@@ -22,6 +22,7 @@ import {
   resolveBaseBranch,
   getSinceBaseSections,
   detectRemoteDefaultInfo,
+  isBinaryPatchFile,
   listPatchFiles,
   type RemoteDefaultInfo,
   type SinceBaseSections,
@@ -2348,6 +2349,10 @@ export async function startReviewServer(
                   return Response.json({ error: "Diff snapshot is stale; refresh before expanding context" }, { status: 409 });
                 }
               }
+            }
+
+            if (isBinaryPatchFile(currentPatch, filePath)) {
+              return Response.json({ oldContent: null, newContent: null });
             }
 
             if (workspace) {
