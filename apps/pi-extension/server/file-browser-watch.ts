@@ -1,5 +1,5 @@
-import chokidar, { type FSWatcher } from "chokidar";
-import { existsSync, statSync } from "node:fs";
+import chokidar, { type FSWatcher as ChokidarWatcher } from "chokidar";
+import { existsSync, statSync, watch, type FSWatcher as NodeWatcher } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
@@ -18,8 +18,8 @@ interface FileBrowserChangeEvent {
 interface WatchEntry {
 	key: string;
 	subscribers: Map<ServerResponse, string>;
-	contentWatcher: FSWatcher | null;
-	gitWatcher: FSWatcher | null;
+	contentWatcher: ChokidarWatcher | NodeWatcher | null;
+	gitWatcher: ChokidarWatcher | null;
 	debounceTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -28,9 +28,7 @@ interface WatchTarget {
 	watchPath: string;
 	clientDirPath: string;
 	watchGit: boolean;
-	atomic?: boolean;
-	depth?: number;
-	matchesContentEvent?: (path: string) => boolean;
+	exactFilePath?: string;
 	ignored?: (path: string) => boolean;
 }
 
@@ -53,6 +51,17 @@ function isValidDirectory(dirPath: string): boolean {
 		return existsSync(dirPath) && statSync(dirPath).isDirectory();
 	} catch {
 		return false;
+	}
+}
+
+function getFileSignature(filePath: string): string {
+	try {
+		const stats = statSync(filePath, { bigint: true });
+		return stats.isDirectory()
+			? "directory"
+			: `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+	} catch {
+		return "missing";
 	}
 }
 
@@ -106,23 +115,34 @@ function ensureWatcher(target: WatchTarget): WatchEntry {
 		debounceTimer: null,
 	};
 
-	entry.contentWatcher = chokidar.watch(target.watchPath, {
-		ignoreInitial: true,
-		persistent: true,
-		atomic: target.atomic,
-		depth: target.depth,
-		ignored: target.ignored,
-		awaitWriteFinish: {
-			stabilityThreshold: 120,
-			pollInterval: 30,
-		},
-	});
-	entry.contentWatcher.on("all", (_event, path) => {
-		if (!target.matchesContentEvent || target.matchesContentEvent(path)) {
+	if (target.exactFilePath) {
+		const exactFilePath = target.exactFilePath;
+		let signature = getFileSignature(exactFilePath);
+		entry.contentWatcher = watch(target.watchPath, { persistent: true }, (_event, filename) => {
+			const nextSignature = getFileSignature(exactFilePath);
+			const eventMatches = filename === null
+				|| resolve(target.watchPath, filename.toString()) === exactFilePath;
+			if (eventMatches || nextSignature !== signature) {
+				signature = nextSignature;
+				scheduleBroadcast(entry, "files");
+			}
+		});
+		entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
+	} else {
+		entry.contentWatcher = chokidar.watch(target.watchPath, {
+			ignoreInitial: true,
+			persistent: true,
+			ignored: target.ignored,
+			awaitWriteFinish: {
+				stabilityThreshold: 120,
+				pollInterval: 30,
+			},
+		});
+		entry.contentWatcher.on("all", () => {
 			scheduleBroadcast(entry, "files");
-		}
-	});
-	entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
+		});
+		entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
+	}
 
 	const gitWatchPaths = target.watchGit
 		? getGitMetadataWatchPaths(target.watchPath)
@@ -198,13 +218,7 @@ export function handleFileBrowserStreamRequest(req: IncomingMessage, res: Server
 					watchPath: parentPath,
 					clientDirPath: dirname(rawFilePath),
 					watchGit: false,
-					atomic: false,
-					depth: 0,
-					matchesContentEvent: (path) => resolve(path) === filePath,
-					ignored: (path) => {
-						const resolvedPath = resolve(path);
-						return resolvedPath !== parentPath && resolvedPath !== filePath;
-					},
+					exactFilePath: filePath,
 				});
 			}
 		}
