@@ -34,6 +34,15 @@ import {
 	saveSourceFileAtomic,
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
+import {
+  ANNOTATE_CLIENT_LEASE_GRACE_MS,
+  ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS,
+  ANNOTATE_CLIENT_LEASE_STREAM_PATH,
+  createAnnotateClientLeaseStreamSession,
+  createAnnotateClientLeaseTracker,
+  type AnnotateClientLeaseStreamSession,
+} from "@plannotator/shared/annotate-client-lease";
+import { createAnnotateDecisionSettler } from "@plannotator/shared/annotate-decision";
 import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveAnnotateHistory } from "./config";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
@@ -88,6 +97,19 @@ export interface AnnotateServerOptions {
   gate?: boolean;
   /** Whether this transport can deliver feedback attached to an approval. */
   approvalNotesSupported?: boolean;
+  /**
+   * Whether this transport can safely resolve an abandoned gate automatically.
+   * Only local direct structured annotate gates (`--gate --json`, not `--hook`,
+   * not remote/shared) qualify — see supportsAnnotateClientLease in
+   * apps/hook/server/annotate-output.ts.
+   */
+  clientLeaseSupported?: boolean;
+  /**
+   * @internal Test-only timing overrides for the client-lease grace/heartbeat
+   * period. Production always uses the real 30s/5s defaults; tests inject
+   * short values so they don't have to sleep for the real grace period.
+   */
+  clientLeaseTestOverrides?: { graceMs?: number; heartbeatMs?: number };
   /** Raw HTML content for direct iframe rendering. */
   rawHtml?: string;
   /** Render HTML as-is in an iframe. */
@@ -151,6 +173,8 @@ export async function startAnnotateServer(
     pasteApiUrl,
     gate = false,
     approvalNotesSupported = false,
+    clientLeaseSupported = false,
+    clientLeaseTestOverrides,
     rawHtml,
     renderHtml = false,
     convertHtml = false,
@@ -338,6 +362,29 @@ export async function startAnnotateServer(
     resolveDecision = resolve;
   });
 
+  // Every decision producer goes through this: connected tabs and the client
+  // lease below race, and a producer that loses must not delete the reviewer's
+  // draft or report success for an outcome the caller never received.
+  const decision = createAnnotateDecisionSettler(resolveDecision!);
+  const alreadyDecided = () =>
+    Response.json({ error: "This review session has already been decided." }, { status: 409 });
+
+  // Last-client abandonment lease: once the tab's client-lease stream
+  // disconnects (as reported by the transport) and stays disconnected for the
+  // grace period with no reconnect, the decision resolves as dismissed
+  // instead of hanging the CLI/hook caller forever. Only meaningful once at
+  // least one client connects. Grace timing is bounded only for clean
+  // disconnects; abrupt/half-open connection loss is detected on a
+  // best-effort basis by the transport (e.g. a failing heartbeat write) and
+  // can take longer than graceMs to be noticed at all — see
+  // packages/shared/annotate-client-lease.ts.
+  const clientLeaseGraceMs = clientLeaseTestOverrides?.graceMs ?? ANNOTATE_CLIENT_LEASE_GRACE_MS;
+  const clientLeaseHeartbeatMs = clientLeaseTestOverrides?.heartbeatMs ?? ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS;
+  const clientLease = createAnnotateClientLeaseTracker(
+    () => decision.settle({ feedback: "", annotations: [], exit: true }),
+    { graceMs: clientLeaseGraceMs },
+  );
+
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -380,6 +427,9 @@ export async function startAnnotateServer(
               sourceSave: primarySource.sourceSave,
               gate,
               approvalNotesSupported,
+              clientLease: clientLeaseSupported
+                ? { enabled: true as const, reconnectGraceMs: clientLeaseGraceMs }
+                : { enabled: false as const },
               renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
               ...(diffHtml ? { diffHtml } : {}),
@@ -668,6 +718,41 @@ export async function startAnnotateServer(
             return handleDraftLoad(draftKey);
           }
 
+          // API: Client-lease SSE — see packages/shared/annotate-client-lease.ts.
+          // Only local direct structured annotate gates (--gate --json) advertise
+          // and serve this; other transports get a 404 (idleTimeout is already 0
+          // for the whole server above, so no per-connection opt-out is needed).
+          if (url.pathname === ANNOTATE_CLIENT_LEASE_STREAM_PATH && req.method === "GET") {
+            if (!clientLeaseSupported) {
+              return new Response("Client lease unavailable", { status: 404 });
+            }
+
+            const encoder = new TextEncoder();
+            let session: AnnotateClientLeaseStreamSession | null = null;
+
+            const stream = new ReadableStream({
+              start(controller) {
+                session = createAnnotateClientLeaseStreamSession({
+                  tracker: clientLease,
+                  heartbeatMs: clientLeaseHeartbeatMs,
+                  write: (chunk) => controller.enqueue(encoder.encode(chunk)),
+                  endStream: () => controller.close(),
+                });
+              },
+              cancel() {
+                session?.close();
+              },
+            });
+
+            return new Response(stream, {
+              headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive",
+              },
+            });
+          }
+
           // API: External annotations (SSE-based, for any external tool)
           const externalResponse = await externalAnnotations.handle(req, url, {
             disableIdleTimeout: () => server.timeout(req, 0),
@@ -696,8 +781,11 @@ export async function startAnnotateServer(
 
           // API: Exit annotation session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
+            if (!decision.settle({ feedback: "", annotations: [], exit: true })) {
+              return alreadyDecided();
+            }
             deleteDraft(draftKey, readDraftGenerationFromUrl(req));
-            resolveDecision({ feedback: "", annotations: [], exit: true });
+            clientLease.cancel();
             return Response.json({ ok: true });
           }
 
@@ -728,8 +816,7 @@ export async function startAnnotateServer(
               return Response.json({ error: "Invalid approval body." }, { status: 400 });
             }
 
-            deleteDraft(draftKey, readDraftGenerationFromBody(body));
-            resolveDecision({
+            const approvalWon = decision.settle({
               feedback: (body.feedback as string | undefined) || "",
               annotations: (body.annotations as unknown[] | undefined) || [],
               approved: true,
@@ -746,6 +833,9 @@ export async function startAnnotateServer(
                     ? "message"
                     : undefined,
             });
+            if (!approvalWon) return alreadyDecided();
+            deleteDraft(draftKey, readDraftGenerationFromBody(body));
+            clientLease.cancel();
             return Response.json({ ok: true });
           }
 
@@ -760,13 +850,15 @@ export async function startAnnotateServer(
                 draftGeneration?: number;
               };
 
-              deleteDraft(draftKey, readDraftGenerationFromBody(body));
-              resolveDecision({
+              const feedbackWon = decision.settle({
                 feedback: body.feedback || "",
                 annotations: body.annotations || [],
                 selectedMessageId: body.selectedMessageId,
                 feedbackScope: body.feedbackScope,
               });
+              if (!feedbackWon) return alreadyDecided();
+              deleteDraft(draftKey, readDraftGenerationFromBody(body));
+              clientLease.cancel();
 
               return Response.json({ ok: true });
             } catch (err) {
@@ -826,6 +918,8 @@ export async function startAnnotateServer(
     isRemote,
     waitForDecision: () => decisionPromise,
     stop: () => {
+      clientLease.cancel();
+      clientLease.closeSessions();
       aiRuntime?.dispose();
       agentTerminal.dispose();
       server.stop();

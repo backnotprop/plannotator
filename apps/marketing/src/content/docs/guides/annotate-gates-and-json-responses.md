@@ -133,7 +133,13 @@ Two caveats on the publication guarantees:
 
 Keep the reviewed source at a stable project path so revisions and version history continue to refer to the same artifact. Result and diagnostic log files can instead live in a narrowly scoped temporary directory.
 
-Clicking Close publishes `{"decision":"dismissed"}`. Closing or crashing the browser outside that explicit action is not guaranteed to produce a decision; callers should treat a missing result or failed process as a recovery case, never as approval.
+Clicking Close publishes `{"decision":"dismissed"}`.
+
+Abandoning the review publishes the same `dismissed` decision. A local direct structured gate tracks its connected review surfaces: once at least one has connected, losing the last one starts a 30-second reconnect grace period, and expiry resolves the gate as `dismissed`. Reloading the page, navigating away and back, or closing one of several tabs all reconnect or leave another surface connected, so none of them dismiss the review. Approve, Send Annotations, and Close still win over a pending expiry.
+
+An abandoned review keeps its saved annotation draft, so nothing you wrote is lost. If a stale tab comes back after the gate already resolved, its Approve, Send Annotations, or Close reports an error instead of pretending to apply: the decision the caller received is the one that counts.
+
+Two cases remain caller-side recovery, never approval: a session where no review client ever connected (a browser that failed to launch keeps waiting, so pass your own startup timeout), and a half-open transport loss, where the connection is only proven dead by a failing heartbeat write and can take longer than the grace period to notice. Remote and shared sessions keep the behavior off entirely, because a tunnel or proxy disconnect is not abandonment.
 
 ## Primary use cases
 

@@ -147,6 +147,11 @@ import {
   getAnnotateApprovalPolicy,
 } from './annotateSubmission';
 import {
+  openAnnotateClientLeaseStream,
+  shouldConnectAnnotateClientLease,
+  type AnnotateClientLeaseConfig,
+} from './annotateClientLease';
+import {
   editableDocumentKey,
   useEditableDocuments,
   type EnabledSourceSaveCapability,
@@ -398,6 +403,7 @@ const App: React.FC = () => {
   const [annotateMode, setAnnotateMode] = useState(false);
   const [gate, setGate] = useState(false);
   const [approvalNotesSupported, setApprovalNotesSupported] = useState(false);
+  const [clientLease, setClientLease] = useState<AnnotateClientLeaseConfig | null>(null);
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
   const [recentMessages, setRecentMessages] = useState<PickerMessage[]>([]);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
@@ -2346,7 +2352,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Session-level force-markdown preference (--markdown); threaded into folder/linked
@@ -2391,6 +2397,7 @@ const App: React.FC = () => {
           setAnnotateMode(true);
           setGate(data.gate ?? false);
           setApprovalNotesSupported(data.approvalNotesSupported ?? false);
+          setClientLease(data.clientLease ?? null);
         }
         if (data.mode === 'annotate-folder') {
           sidebar.open('files');
@@ -2464,6 +2471,21 @@ const App: React.FC = () => {
       })
       .finally(() => setIsLoading(false));
   }, [isLoadingShared, isSharedSession]);
+
+  // Client-lease: while a local direct structured annotate gate is open, keep
+  // exactly one EventSource open so the server can detect this tab going away
+  // and auto-dismiss the gate after its grace period instead of hanging the
+  // CLI/hook caller forever. Grace only starts once the transport reports a
+  // disconnect; abrupt/half-open connection loss is best-effort and not
+  // bounded by the grace period. Only ever a presence signal — no message
+  // payload is read from the stream.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    if (!shouldConnectAnnotateClientLease({ annotateMode, isSharedSession, submitted, clientLease })) return;
+
+    const stream = openAnnotateClientLeaseStream(EventSource);
+    return () => stream.close();
+  }, [annotateMode, isSharedSession, submitted, clientLease]);
 
   useEffect(() => {
     if (!aiSessionEnabled || !isApiMode || isSharedSession) {

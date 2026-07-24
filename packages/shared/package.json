@@ -69,7 +69,9 @@
     "./port-range": "./port-range.ts",
     "./plan-review-lifecycle": "./plan-review-lifecycle.ts",
     "./review-profiles": "./review-profiles.ts",
-    "./commit-avatars": "./commit-avatars.ts"
+    "./commit-avatars": "./commit-avatars.ts",
+    "./annotate-client-lease": "./annotate-client-lease.ts",
+    "./annotate-decision": "./annotate-decision.ts"
   },
   "dependencies": {
     "@plannotator/core": "workspace:*",

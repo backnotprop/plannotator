@@ -1138,3 +1138,284 @@ describe("annotate server: approval notes", () => {
     }
   });
 });
+
+describe("annotate server: client lease", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  /**
+   * Connect to the client-lease stream and wait for its first byte (the
+   * ready comment). Returns a `disconnect()` that aborts the underlying
+   * fetch — plain `reader.cancel()` only stops local reads and does not
+   * propagate a close to the server's `ReadableStream.cancel()`, whereas
+   * aborting the request closes the connection the way an abandoned browser
+   * tab actually would.
+   */
+  async function connectClientLease(url: string): Promise<{ disconnect: () => Promise<void> }> {
+    const controller = new AbortController();
+    const response = await fetch(`${url}/api/annotate/client-lease`, { signal: controller.signal });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Timed out waiting for ready comment")), 1000);
+      }),
+    ]);
+    expect(first.done).toBe(false);
+    return {
+      disconnect: async () => {
+        controller.abort();
+        await reader.cancel().catch(() => {});
+      },
+    };
+  }
+
+  /**
+   * Track whether a promise has settled without racing it against a timer —
+   * a `Promise.race` between an already-resolved sentinel and a promise that
+   * may or may not have settled is nondeterministic. Attaching `.then` up
+   * front and reading a flag afterward is reliable regardless of timing.
+   */
+  function trackSettled<T>(promise: Promise<T>): () => boolean {
+    let settled = false;
+    promise.then(() => {
+      settled = true;
+    });
+    return () => settled;
+  }
+
+  test("advertises the effective client-lease capability in /api/plan", async () => {
+    for (const clientLeaseSupported of [true, false]) {
+      const server = await startAnnotateServer({
+        markdown: "# Test",
+        filePath: join(tmpdir(), "client-lease-capability.md"),
+        htmlContent: MINIMAL_HTML,
+        gate: true,
+        approvalNotesSupported: true,
+        clientLeaseSupported,
+      });
+
+      try {
+        const response = await fetch(`${server.url}/api/plan`);
+        const plan = await response.json() as { clientLease?: { enabled: boolean; reconnectGraceMs?: number } };
+        if (clientLeaseSupported) {
+          expect(plan.clientLease).toEqual({ enabled: true, reconnectGraceMs: 30_000 });
+        } else {
+          expect(plan.clientLease).toEqual({ enabled: false });
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  });
+
+  test("returns 404 for the client-lease stream when the capability is disabled", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-disabled.md"),
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/annotate/client-lease`);
+      expect(response.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("resolves the decision as dismissed after the last client disconnects and the grace period elapses", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-expiry.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 50 },
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const isSettled = trackSettled(decision);
+      const client = await connectClientLease(server.url);
+
+      // Still connected — no expiry.
+      await Bun.sleep(20);
+      expect(isSettled()).toBe(false);
+
+      await client.disconnect();
+
+      expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a reconnect before the grace deadline cancels the pending expiry", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-reconnect.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 80 },
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const isSettled = trackSettled(decision);
+
+      const firstClient = await connectClientLease(server.url);
+      await firstClient.disconnect();
+
+      // Reconnect well before the 80ms grace deadline.
+      await Bun.sleep(20);
+      const secondClient = await connectClientLease(server.url);
+
+      // Even past the original deadline, the reconnect cancelled the pending expiry.
+      await Bun.sleep(100);
+      expect(isSettled()).toBe(false);
+
+      // A fresh disconnect starts its own full grace window.
+      await secondClient.disconnect();
+      expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("an explicit approval wins over a later client-lease expiry", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-explicit-decision.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 60 },
+    });
+
+    try {
+      const client = await connectClientLease(server.url);
+
+      const approve = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "Looks good.", annotations: [] }),
+      });
+      expect(approve.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Looks good.",
+        annotations: [],
+      });
+
+      // Disconnecting after the explicit decision must not overwrite it once
+      // the grace period elapses — the approval already cancelled tracking.
+      await client.disconnect();
+      await Bun.sleep(120);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Looks good.",
+        annotations: [],
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a decision arriving after the lease expired is rejected instead of reported as applied", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-late-decision.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 30 },
+    });
+
+    try {
+      const client = await connectClientLease(server.url);
+      await client.disconnect();
+      expect(await server.waitForDecision()).toEqual({
+        feedback: "",
+        annotations: [],
+        exit: true,
+      });
+
+      // A tab that never saw the dismissal must not be told its decision was
+      // applied: the caller already received `dismissed`.
+      for (const [path, init] of [
+        [
+          "/api/approve",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: "Looks good.", annotations: [] }),
+          },
+        ],
+        [
+          "/api/feedback",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: "Please change this.", annotations: [] }),
+          },
+        ],
+        ["/api/exit", { method: "POST" }],
+      ] as const) {
+        const response = await fetch(`${server.url}${path}`, init);
+        expect(response.status).toBe(409);
+      }
+
+      expect(await server.waitForDecision()).toEqual({
+        feedback: "",
+        annotations: [],
+        exit: true,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("stopping the server ends live lease streams", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-stop.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+    });
+
+    const response = await fetch(`${server.url}/api/annotate/client-lease`);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toBe(": ready\n\n");
+
+    server.stop();
+
+    // The stream must complete rather than stay open on a server that is gone.
+    const next = await reader.read();
+    expect(next.done).toBe(true);
+  });
+});

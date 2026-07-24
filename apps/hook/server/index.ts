@@ -78,6 +78,7 @@ import {
 import {
   startAnnotateServer,
   handleAnnotateServerReady,
+  isRemoteSession,
 } from "@plannotator/server/annotate";
 import {
   startGoalSetupServer,
@@ -157,6 +158,7 @@ import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/
 import {
   createAnnotateOutcomeEmitter,
   supportsAnnotateApprovalNotes,
+  supportsAnnotateClientLease,
 } from "./annotate-output";
 
 // Embed the built HTML at compile time
@@ -1067,6 +1069,12 @@ if (args[0] === "sessions") {
       json: jsonFlag,
       hook: hookFlag,
     }),
+    clientLeaseSupported: supportsAnnotateClientLease({
+      gate: gateFlag,
+      json: jsonFlag,
+      hook: hookFlag,
+      isRemote: isRemoteSession(),
+    }),
     rawHtml,
     renderHtml: !!rawHtml,
     convertHtml: renderMarkdownFlag,
@@ -1270,6 +1278,12 @@ if (args[0] === "sessions") {
       gate: gateFlag,
       json: jsonFlag,
       hook: hookFlag,
+    }),
+    clientLeaseSupported: supportsAnnotateClientLease({
+      gate: gateFlag,
+      json: jsonFlag,
+      hook: hookFlag,
+      isRemote: isRemoteSession(),
     }),
     htmlContent: planHtmlContent,
     recentMessages: pickerMessages,
@@ -1771,6 +1785,12 @@ if (args[0] === "sessions") {
       gate: gateFlag,
       json: jsonFlag,
       hook: hookFlag,
+    }),
+    clientLeaseSupported: supportsAnnotateClientLease({
+      gate: gateFlag,
+      json: jsonFlag,
+      hook: hookFlag,
+      isRemote: isRemoteSession(),
     }),
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {

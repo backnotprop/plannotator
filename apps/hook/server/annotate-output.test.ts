@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   formatAnnotateOutcome,
   supportsAnnotateApprovalNotes,
+  supportsAnnotateClientLease,
 } from "./annotate-output";
 
 describe("annotate stdout", () => {
@@ -47,5 +48,13 @@ describe("annotate stdout", () => {
     expect(supportsAnnotateApprovalNotes({ gate: false, json: true, hook: false })).toBe(false);
     expect(supportsAnnotateApprovalNotes({ gate: true, json: false, hook: false })).toBe(false);
     expect(supportsAnnotateApprovalNotes({ gate: true, json: true, hook: true })).toBe(false);
+  });
+
+  test("advertises client-lease only for gated direct JSON, local sessions", () => {
+    expect(supportsAnnotateClientLease({ gate: true, json: true, hook: false, isRemote: false })).toBe(true);
+    expect(supportsAnnotateClientLease({ gate: false, json: true, hook: false, isRemote: false })).toBe(false);
+    expect(supportsAnnotateClientLease({ gate: true, json: false, hook: false, isRemote: false })).toBe(false);
+    expect(supportsAnnotateClientLease({ gate: true, json: true, hook: true, isRemote: false })).toBe(false);
+    expect(supportsAnnotateClientLease({ gate: true, json: true, hook: false, isRemote: true })).toBe(false);
   });
 });

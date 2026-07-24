@@ -590,6 +590,7 @@ export async function startMarkdownAnnotationSession(
 		sourceConverted,
 		gate,
 		approvalNotesSupported: true,
+		clientLeaseSupported: gate === true && !isRemoteSession(),
 		rawHtml,
 		renderHtml,
 		convertHtml,

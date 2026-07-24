@@ -63,6 +63,14 @@ import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
 } from "../generated/agent-terminal.ts";
+import {
+	ANNOTATE_CLIENT_LEASE_GRACE_MS,
+	ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS,
+	ANNOTATE_CLIENT_LEASE_STREAM_PATH,
+	createAnnotateClientLeaseStreamSession,
+	createAnnotateClientLeaseTracker,
+} from "../generated/annotate-client-lease.ts";
+import { createAnnotateDecisionSettler } from "../generated/annotate-decision.ts";
 
 export interface AnnotateServerResult {
 	port: number;
@@ -204,6 +212,9 @@ export async function startAnnotateServer(options: {
 	sourceConverted?: boolean;
 	gate?: boolean;
 	approvalNotesSupported?: boolean;
+	clientLeaseSupported?: boolean;
+	/** @internal Test-only timing overrides for the client-lease grace/heartbeat intervals — never sleeps real 30s in tests. */
+	clientLeaseTestOverrides?: { graceMs?: number; heartbeatMs?: number };
 	rawHtml?: string;
 	renderHtml?: boolean;
 	convertHtml?: boolean;
@@ -237,6 +248,29 @@ export async function startAnnotateServer(options: {
 	}>((r) => {
 		resolveDecision = r;
 	});
+
+	// Every decision producer goes through this: connected tabs and the client
+	// lease below race, and a producer that loses must not delete the reviewer's
+	// draft or report success for an outcome the caller never received.
+	const decision = createAnnotateDecisionSettler(resolveDecision);
+	const sendAlreadyDecided = (res: import("node:http").ServerResponse): void => {
+		json(res, { error: "This review session has already been decided." }, 409);
+	};
+
+	// Last-client abandonment lease: once the tab's client-lease stream
+	// disconnects (as reported by the transport) and stays disconnected for the
+	// grace period with no reconnect, the decision resolves as dismissed
+	// instead of hanging the Pi orchestration forever. Grace timing is bounded
+	// only for clean disconnects; abrupt/half-open connection loss is detected
+	// on a best-effort basis by the transport and can take longer than
+	// graceMs to be noticed at all. See packages/shared/annotate-client-lease.ts
+	// (vendored to generated/annotate-client-lease.ts by vendor.sh).
+	const clientLeaseGraceMs = options.clientLeaseTestOverrides?.graceMs ?? ANNOTATE_CLIENT_LEASE_GRACE_MS;
+	const clientLeaseHeartbeatMs = options.clientLeaseTestOverrides?.heartbeatMs ?? ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS;
+	const clientLease = createAnnotateClientLeaseTracker(
+		() => decision.settle({ feedback: "", annotations: [], exit: true }),
+		{ graceMs: clientLeaseGraceMs },
+	);
 
 	// Folder annotation has no stable markdown body, so key drafts by folder path instead.
 	const draftSource =
@@ -413,6 +447,42 @@ export async function startAnnotateServer(options: {
 		if (await externalAnnotations.handle(req, res, url)) return;
 		if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) return;
 
+		// API: Client-lease SSE — see generated/annotate-client-lease.ts.
+		// Only local direct structured annotate gates advertise and serve
+		// this; other sessions get a 404.
+		if (url.pathname === ANNOTATE_CLIENT_LEASE_STREAM_PATH && req.method === "GET") {
+			if (!options.clientLeaseSupported) {
+				res.writeHead(404);
+				res.end("Client lease unavailable");
+				return;
+			}
+
+			res.writeHead(200, {
+				"Content-Type": "text/event-stream",
+				"Cache-Control": "no-cache",
+				Connection: "keep-alive",
+			});
+			res.setTimeout(0);
+
+			const session = createAnnotateClientLeaseStreamSession({
+				tracker: clientLease,
+				heartbeatMs: clientLeaseHeartbeatMs,
+				write: (chunk) => {
+					res.write(chunk);
+				},
+				endStream: () => res.end(),
+			});
+
+			// `req.on("close")` reliably fires on client disconnect; `res.on("close")`
+			// is registered too as defense-in-depth for Node runtimes/versions where
+			// only the response object emits it. `session.close()` is idempotent so a
+			// double-fire is harmless.
+			req.on("close", () => session.close());
+			res.on("close", () => session.close());
+
+			return;
+		}
+
 		if (url.pathname === "/api/plan" && req.method === "GET") {
 			const displayRawHtml = options.renderHtml && options.rawHtml
 				? htmlAssets.rewriteHtml(options.rawHtml, options.filePath)
@@ -435,6 +505,9 @@ export async function startAnnotateServer(options: {
 				sourceSave: primarySource.sourceSave,
 				gate: options.gate ?? false,
 				approvalNotesSupported: options.approvalNotesSupported ?? false,
+				clientLease: options.clientLeaseSupported
+					? { enabled: true as const, reconnectGraceMs: clientLeaseGraceMs }
+					: { enabled: false as const },
 				renderAs: displayRawHtml ? 'html' : 'markdown',
 				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
 				...(diffHtml ? { diffHtml } : {}),
@@ -692,8 +765,12 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/favicon.png") {
 			handleFavicon(res);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
+			if (!decision.settle({ feedback: "", annotations: [], exit: true })) {
+				sendAlreadyDecided(res);
+				return;
+			}
 			deleteDraft(draftKey, readDraftGenerationFromUrl(req));
-			resolveDecision({ feedback: "", annotations: [], exit: true });
+			clientLease.cancel();
 			json(res, { ok: true });
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {
 			try {
@@ -708,8 +785,7 @@ export async function startAnnotateServer(options: {
 					return;
 				}
 
-				deleteDraft(draftKey, readDraftGenerationFromBody(body));
-				resolveDecision({
+				const approvalWon = decision.settle({
 					feedback: (body.feedback as string | undefined) || "",
 					annotations: (body.annotations as unknown[] | undefined) || [],
 					approved: true,
@@ -720,6 +796,12 @@ export async function startAnnotateServer(options: {
 					selectedMessageId: typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
 					feedbackScope: body.feedbackScope === "messages" ? "messages" : body.feedbackScope === "message" ? "message" : undefined,
 				});
+				if (!approvalWon) {
+					sendAlreadyDecided(res);
+					return;
+				}
+				deleteDraft(draftKey, readDraftGenerationFromBody(body));
+				clientLease.cancel();
 				json(res, { ok: true });
 			} catch (err) {
 				json(res, { error: err instanceof Error ? err.message : "Invalid JSON body." }, 400);
@@ -727,13 +809,18 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
 			try {
 				const body = await parseBody(req);
-				deleteDraft(draftKey, readDraftGenerationFromBody(body));
-				resolveDecision({
+				const feedbackWon = decision.settle({
 					feedback: (body.feedback as string) || "",
 					annotations: (body.annotations as unknown[]) || [],
 					selectedMessageId: typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
 					feedbackScope: body.feedbackScope === "messages" ? "messages" : body.feedbackScope === "message" ? "message" : undefined,
 				});
+				if (!feedbackWon) {
+					sendAlreadyDecided(res);
+					return;
+				}
+				deleteDraft(draftKey, readDraftGenerationFromBody(body));
+				clientLease.cancel();
 				json(res, { ok: true });
 			} catch (err) {
 				const message = err instanceof Error ? err.message : "Failed to process feedback";
@@ -765,6 +852,11 @@ export async function startAnnotateServer(options: {
 		url: `http://localhost:${port}`,
 		waitForDecision: () => decisionPromise,
 		stop: () => {
+			clientLease.cancel();
+			// Long-lived host process: an unclosed lease stream would keep its
+			// heartbeat timer and socket alive past the session, and would keep
+			// server.close() from ever completing.
+			clientLease.closeSessions();
 			aiRuntime?.dispose();
 			agentTerminal.dispose();
 			server.close();
