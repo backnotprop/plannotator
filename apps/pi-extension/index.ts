@@ -61,9 +61,10 @@ import {
 	withCurrentPiSessionFallbackHeader,
 } from "./current-pi-session.ts";
 import {
-	getToolsForPhase,
+	applyPhaseTools,
 	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
+	releasePhaseTools,
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
@@ -107,7 +108,6 @@ async function loadAnnotateCommandModules() {
 
 
 type SavedPhaseState = {
-	activeTools: string[];
 	model?: { provider: string; id: string };
 	thinkingLevel: ThinkingLevel;
 };
@@ -116,6 +116,7 @@ type PersistedPlannotatorState = {
 	phase: Phase;
 	lastSubmittedPath?: string;
 	savedState?: SavedPhaseState;
+	phaseAddedTools?: string[];
 };
 
 function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml: boolean }): string | null {
@@ -256,6 +257,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	let lastSubmittedPath: string | null = null;
 	let checklistItems: ChecklistItem[] = [];
 	let savedState: SavedPhaseState | null = null;
+	let phaseAddedTools: string[] = [];
 	let plannotatorConfig = {};
 	let justApprovedPlan = false;
 
@@ -320,16 +322,18 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 	function captureSavedState(ctx: ExtensionContext): void {
 		savedState = {
-			activeTools: pi.getActiveTools(),
 			model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
 			thinkingLevel: pi.getThinkingLevel(),
 		};
 	}
 
 	function persistState(): void {
-
-
-		pi.appendEntry("plannotator", { phase, lastSubmittedPath, savedState });
+		pi.appendEntry("plannotator", {
+			phase,
+			lastSubmittedPath,
+			savedState,
+			phaseAddedTools,
+		});
 	}
 
 	async function applyModelRef(
@@ -352,11 +356,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 	async function restoreSavedState(ctx: ExtensionContext): Promise<void> {
 		if (!savedState) return;
 
-		pi.setActiveTools(savedState.activeTools);
 		if (savedState.model) {
 			await applyModelRef(savedState.model, ctx, "restore");
 		}
 		pi.setThinkingLevel(savedState.thinkingLevel);
+	}
+
+	function releaseAddedPhaseTools(): void {
+		const activeTools = pi.getActiveTools();
+		const nextTools = releasePhaseTools(activeTools, phaseAddedTools);
+		phaseAddedTools = [];
+		if (nextTools.length !== activeTools.length) pi.setActiveTools(nextTools);
 	}
 
 	async function applyPhaseConfig(ctx: ExtensionContext, opts: { restoreSavedState?: boolean } = {}): Promise<void> {
@@ -366,13 +376,18 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		if (phase === "planning" || phase === "executing") {
-			const baseTools = stripPlanningOnlyTools(savedState?.activeTools ?? pi.getActiveTools());
-			const toolSet = new Set(baseTools);
-			for (const tool of profile?.activeTools ?? []) toolSet.add(tool);
-			if (phase === "planning") {
-				pi.setActiveTools(getToolsForPhase([...toolSet], phase));
-			} else {
-				pi.setActiveTools([...toolSet]);
+			const activeTools = pi.getActiveTools();
+			const selection = applyPhaseTools(
+				activeTools,
+				phaseAddedTools,
+				profile?.activeTools ?? [],
+			);
+			phaseAddedTools = selection.addedTools;
+			if (
+				selection.activeTools.length !== activeTools.length ||
+				selection.activeTools.some((tool, index) => tool !== activeTools[index])
+			) {
+				pi.setActiveTools(selection.activeTools);
 			}
 		}
 
@@ -408,6 +423,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		checklistItems = [];
 		lastSubmittedPath = null;
 
+		releaseAddedPhaseTools();
 		await restoreSavedState(ctx);
 		savedState = null;
 		updateStatus(ctx);
@@ -1064,9 +1080,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: `[PLANNOTATOR - PLANNING PHASE]
 You are in plan mode. You MUST NOT make any changes to the codebase — no edits, no commits, no installs, no destructive commands. During planning you may only write or edit markdown files (.md, .mdx) inside the working directory.
 
-Available tools: read, bash, grep, find, ls, write (markdown only), edit (markdown only), ${PLAN_SUBMIT_TOOL}
+Use the available reading, searching, and command tools to explore the codebase. Use the available file tools only for markdown plan files.
 
-Do not run destructive bash commands (rm, git push, npm install, etc.) — focus on reading and exploring the codebase. Web fetching (curl, wget) is fine.
+Do not run destructive commands (rm, git push, npm install, etc.) — focus on reading and exploring the codebase. Web fetching is fine.
 
 ## Iterative Planning Workflow
 
@@ -1080,8 +1096,8 @@ Choose a descriptive filename for your plan. Convention: \`PLAN.md\` at the repo
 
 Repeat this cycle until the plan is complete:
 
-1. **Explore** — Use read, grep, find, ls, and bash to understand the codebase. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.
-2. **Update the plan file** — After each discovery, immediately capture what you learned in the plan. Don't wait until the end. Use write for the initial draft, then edit for all subsequent updates.
+1. **Explore** — Use the available reading, searching, and command tools to understand the codebase. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.
+2. **Update the plan file** — After each discovery, immediately capture what you learned in the plan. Don't wait until the end. Use the available file tools to create the initial draft and make targeted updates.
 3. **Ask the user** — When you hit an ambiguity or decision you can't resolve from code alone, ask. Then go back to step 1.
 
 ### First Turn
@@ -1117,7 +1133,7 @@ Your plan is ready when you've addressed all ambiguities and it covers: what to 
 
 When the user denies a plan with feedback:
 1. Read the plan file to see the current plan.
-2. Use the edit tool to make targeted changes addressing the feedback — do NOT rewrite the entire file.
+2. Make targeted changes addressing the feedback — do NOT rewrite the entire file.
 3. Call ${PLAN_SUBMIT_TOOL} again with the same filePath to resubmit.
 
 ### Ending Your Turn
@@ -1263,6 +1279,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			phase = stateEntry.data.phase ?? phase;
 			lastSubmittedPath = stateEntry.data.lastSubmittedPath ?? lastSubmittedPath;
 			savedState = stateEntry.data.savedState ?? savedState;
+			phaseAddedTools = stateEntry.data.phaseAddedTools ?? phaseAddedTools;
 		}
 
 		// Rebuild execution state from disk + session messages
@@ -1312,15 +1329,14 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 		}
 
 		if (phase === "idle") {
+			releaseAddedPhaseTools();
 			if (savedState) {
 				await restoreSavedState(ctx);
 				savedState = null;
-			} else {
-				// Strip planning-only tools on fresh sessions where savedState is null.
-				// Without this, plannotator_submit_plan stays in the active tool set
-				// even though plan mode hasn't been activated. See #387.
-				pi.setActiveTools(stripPlanningOnlyTools(pi.getActiveTools()));
 			}
+			const activeTools = pi.getActiveTools();
+			const idleTools = stripPlanningOnlyTools(activeTools);
+			if (idleTools.length !== activeTools.length) pi.setActiveTools(idleTools);
 		} else if (phase === "planning" || phase === "executing") {
 			await applyPhaseConfig(ctx, { restoreSavedState: true });
 		}
