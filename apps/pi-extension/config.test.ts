@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadPlannotatorConfig, formatTodoList, renderTemplate, resolvePhaseProfile } from "./config.ts";
+import { loadPlannotatorConfig, formatTodoList, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
 
 const tempDirs: string[] = [];
 const originalHome = process.env.HOME;
@@ -34,8 +34,49 @@ describe("plannotator config", () => {
     const planning = resolvePhaseProfile(loaded.config, "planning");
 
     expect(loaded.warnings).toEqual([]);
+    expect(resolveExecutionMode(loaded.config)).toBe("automatic");
     expect(planning.statusLabel).toBe("⏸ plan");
     expect(planning.activeTools).toEqual(["grep", "find", "ls", "plannotator_submit_plan"]);
+  });
+
+  test("defaults to automatic execution", () => {
+    expect(resolveExecutionMode({})).toBe("automatic");
+  });
+
+  test("loads external execution mode with project precedence", () => {
+    const homeDir = makeTempDir("plannotator-config-home-execution-");
+    const cwdDir = makeTempDir("plannotator-config-cwd-execution-");
+    process.env.HOME = homeDir;
+
+    const globalConfigDir = join(homeDir, ".pi", "agent");
+    const projectConfigDir = join(cwdDir, ".pi");
+    mkdirSync(globalConfigDir, { recursive: true });
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, "plannotator.json"), JSON.stringify({ executionMode: "external" }), "utf-8");
+    writeFileSync(join(projectConfigDir, "plannotator.json"), JSON.stringify({ executionMode: "automatic" }), "utf-8");
+
+    const loaded = loadPlannotatorConfig(cwdDir);
+
+    expect(loaded.warnings).toEqual([]);
+    expect(resolveExecutionMode(loaded.config)).toBe("automatic");
+  });
+
+  test("allows a project config to clear inherited external execution with null", () => {
+    const homeDir = makeTempDir("plannotator-config-home-execution-null-");
+    const cwdDir = makeTempDir("plannotator-config-cwd-execution-null-");
+    process.env.HOME = homeDir;
+
+    const globalConfigDir = join(homeDir, ".pi", "agent");
+    const projectConfigDir = join(cwdDir, ".pi");
+    mkdirSync(globalConfigDir, { recursive: true });
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, "plannotator.json"), JSON.stringify({ executionMode: "external" }), "utf-8");
+    writeFileSync(join(projectConfigDir, "plannotator.json"), JSON.stringify({ executionMode: null }), "utf-8");
+
+    const loaded = loadPlannotatorConfig(cwdDir);
+
+    expect(loaded.warnings).toEqual([]);
+    expect(resolveExecutionMode(loaded.config)).toBe("automatic");
   });
 
   test("allows a project config to clear an inherited phase with null", () => {

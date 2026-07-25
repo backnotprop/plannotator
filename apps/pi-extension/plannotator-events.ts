@@ -81,6 +81,7 @@ export function openArchiveBrowserAction(
 
 export const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request" as const;
 export const PLANNOTATOR_REVIEW_RESULT_CHANNEL = "plannotator:review-result" as const;
+export const PLANNOTATOR_PLAN_APPROVED_CHANNEL = "plannotator:plan-approved" as const;
 export const PLANNOTATOR_TIMEOUT_MS = 5_000;
 
 export type PlannotatorAction =
@@ -145,6 +146,13 @@ export interface PlannotatorReviewResultEvent {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+}
+
+export interface PlannotatorPlanApprovedEvent {
+	cwd: string;
+	planFilePath: string;
+	planContent: string;
+	feedback?: string;
 }
 
 export interface PlannotatorReviewStatusPayload {

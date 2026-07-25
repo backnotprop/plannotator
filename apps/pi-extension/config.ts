@@ -6,6 +6,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 export type PhaseName = "planning" | "executing" | "reviewing";
 export type RuntimePhase = PhaseName | "idle";
+export type ExecutionMode = "automatic" | "external";
 
 export interface PhaseModelRef {
   provider: string;
@@ -28,6 +29,7 @@ export interface PhaseProfile {
 }
 
 export interface PlannotatorConfig {
+  executionMode?: ExecutionMode | null;
   defaults?: PhaseProfile | null;
   phases?: Partial<Record<PhaseName, PhaseProfile | null>>;
 }
@@ -169,6 +171,7 @@ function mergeConfig(base: PlannotatorConfig, override: PlannotatorConfig): Plan
   }
 
   return {
+    executionMode: override.executionMode !== undefined ? override.executionMode : base.executionMode,
     defaults: mergeProfile(base.defaults, override.defaults),
     phases: Object.keys(phases).length > 0 ? phases : undefined,
   };
@@ -184,6 +187,9 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warning?: 
   if (!isRecord(raw)) return { config: {} };
 
   const config: PlannotatorConfig = {};
+  if (raw.executionMode === null || raw.executionMode === "automatic" || raw.executionMode === "external") {
+    config.executionMode = raw.executionMode;
+  }
   if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults);
 
   if ("phases" in raw && isRecord(raw.phases)) {
@@ -214,6 +220,10 @@ export function loadPlannotatorConfig(cwd: string): LoadedPlannotatorConfig {
 
   const merged = mergeConfig(mergeConfig(internal.config, globalConfig.config), projectConfig.config);
   return { config: merged, warnings };
+}
+
+export function resolveExecutionMode(config: PlannotatorConfig): ExecutionMode {
+  return config.executionMode ?? "automatic";
 }
 
 export function resolvePhaseProfile(config: PlannotatorConfig, phase: PhaseName): ResolvedPhaseProfile {
