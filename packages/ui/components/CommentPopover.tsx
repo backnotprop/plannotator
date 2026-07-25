@@ -322,17 +322,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
           {/* Footer */}
           <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
-            <div className="flex items-center gap-2">
-              {allowImages && (
-                <AttachmentsButton
-                  images={images}
-                  onAdd={(img) => setImages((prev) => [...prev, img])}
-                  onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
-                  variant="inline"
-                />
-              )}
-            </div>
             <div className="flex items-center gap-3">
+              <button
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              >
+                {isGlobal ? 'Add' : 'Save'}
+              </button>
               {onAskAI && (
                 <button
                   onClick={handleAskAI}
@@ -345,13 +342,16 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 </button>
               )}
               <span className="text-[10px] text-muted-foreground">{submitHint}</span>
-              <button
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-                className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-              >
-                {isGlobal ? 'Add' : 'Save'}
-              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              {allowImages && (
+                <AttachmentsButton
+                  images={images}
+                  onAdd={(img) => setImages((prev) => [...prev, img])}
+                  onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                  variant="inline"
+                />
+              )}
             </div>
           </div>
         </div>
@@ -444,17 +444,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
       {/* Footer */}
       <div className="flex items-center justify-between px-3 py-2 border-t border-border/50">
-        <div className="flex items-center gap-2">
-          {allowImages && (
-            <AttachmentsButton
-              images={images}
-              onAdd={(img) => setImages((prev) => [...prev, img])}
-              onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
-              variant="inline"
-            />
-          )}
-        </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+          >
+            {isGlobal ? 'Add' : 'Save'}
+          </button>
           {onAskAI && (
             <button
               onClick={handleAskAI}
@@ -467,13 +464,16 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             </button>
           )}
           <span className="text-[10px] text-muted-foreground">{submitHint}</span>
-          <button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-          >
-            {isGlobal ? 'Add' : 'Save'}
-          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          {allowImages && (
+            <AttachmentsButton
+              images={images}
+              onAdd={(img) => setImages((prev) => [...prev, img])}
+              onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+              variant="inline"
+            />
+          )}
         </div>
       </div>
       </div>
