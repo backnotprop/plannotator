@@ -5,10 +5,25 @@
  * self-contained while review diff logic remains sourced from one module.
  */
 
+import { lstat, readlink } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
-import { unquoteGitPath, parsePatchPathToken, parseDiffFilePathLines, parseDiffGitHeader } from "./diff-paths";
+import {
+  formatPatchPathToken,
+  unquoteGitPath,
+  parsePatchPathToken,
+  parseDiffFilePathLines,
+  parseDiffGitHeader,
+  parseDiffMetadataPathLines,
+} from "./diff-paths";
 
 export const JJ_TRUNK_REVSET = "trunk()";
+/** Maximum regular-file payload accepted for Git diff expansion. */
+export const MAX_REVIEW_FILE_CONTENT_BYTES = 5 * 1024 * 1024;
+
+const MAX_UNTRACKED_DIFF_CONCURRENCY = 4;
+// Fingerprints run every few seconds, so use a deliberately lower read ceiling
+// than one-shot diff generation. Larger files use size + mtime metadata.
+const MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES = 1024 * 1024;
 
 export type DiffType =
   | "since-base"
@@ -724,8 +739,51 @@ async function getUntrackedFileDiffs(
 
   if (files.length === 0) return { diff: "", paths: [] };
 
-  const diffs = await Promise.all(
-    files.map(async (file) => {
+  const mapWithConcurrency = async <T, R>(
+    items: T[],
+    concurrency: number,
+    mapper: (item: T) => Promise<R>,
+  ): Promise<R[]> => {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workers = Array.from(
+      { length: Math.min(concurrency, items.length) },
+      async () => {
+        while (nextIndex < items.length) {
+          const index = nextIndex++;
+          results[index] = await mapper(items[index]);
+        }
+      },
+    );
+    await Promise.all(workers);
+    return results;
+  };
+
+  const diffs = await mapWithConcurrency(
+    files,
+    MAX_UNTRACKED_DIFF_CONCURRENCY,
+    async (file) => {
+      // Avoid asking Git to inspect arbitrarily large untracked payloads. They
+      // remain visible in the review as binary additions, but their bytes never
+      // enter Git's diff machinery or the server's buffered stdout.
+      try {
+        const fileStat = await lstat(resolvePath(rootCwd ?? "", file));
+        if (fileStat.isFile() && fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) {
+          const mode = (fileStat.mode & 0o111) !== 0 ? "100755" : "100644";
+          const oldToken = formatPatchPathToken("a", file);
+          const newToken = formatPatchPathToken("b", file);
+          return [
+            `diff --git ${oldToken} ${newToken}`,
+            `new file mode ${mode}`,
+            `Binary files /dev/null and ${newToken} differ`,
+            "",
+          ].join("\n");
+        }
+      } catch {
+        // Preserve the existing best-effort/strict behavior below: Git reports
+        // the authoritative read error for files that disappear mid-snapshot.
+      }
+
       const diffResult = await runtime.runGit(
         [
           "diff",
@@ -752,7 +810,7 @@ async function getUntrackedFileDiffs(
         );
       }
       return diffResult.stdout;
-    }),
+    },
   );
 
   return { diff: diffs.join(""), paths: files };
@@ -1274,7 +1332,31 @@ async function appendUntrackedFingerprint(
   if (untracked.length > 0) {
     const baseDir = await resolveRepoToplevel(runtime, cwd);
     for (const path of untracked) {
-      const content = await runtime.readTextFile(baseDir ? resolvePath(baseDir, path) : path);
+      const fullPath = baseDir ? resolvePath(baseDir, path) : path;
+      try {
+        const fileStat = await lstat(fullPath);
+        if (fileStat.isSymbolicLink()) {
+          // Hash the link payload Git records without following it into a
+          // potentially huge target file.
+          parts.push(hashFingerprintPart(`symlink:${await readlink(fullPath)}`));
+          continue;
+        }
+        if (!fileStat.isFile()) {
+          parts.push(`non-file:${fileStat.size}:${fileStat.mtimeMs}`);
+          continue;
+        }
+        if (fileStat.size > MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES) {
+          // A metadata fingerprint avoids decoding a multi-GB binary into a JS
+          // string every five seconds. Size/mtime changes still invalidate the
+          // review, while small files retain content-accurate detection.
+          parts.push(`large:${fileStat.size}:${fileStat.mtimeMs}`);
+          continue;
+        }
+      } catch {
+        parts.push("unreadable");
+        continue;
+      }
+      const content = await runtime.readTextFile(fullPath);
       parts.push(content != null ? hashFingerprintPart(content) : "unreadable");
     }
   }
@@ -1407,8 +1489,16 @@ export async function getFileContentsForDiff(
   }
 
   async function gitShow(ref: string, path: string): Promise<string | null> {
+    const object = `${ref}:${path}`;
+    const sizeResult = await runtime.runGit(
+      ["cat-file", "-s", "--", object],
+      { cwd },
+    );
+    if (sizeResult.exitCode !== 0) return null;
+    const size = Number(sizeResult.stdout.trim());
+    if (!Number.isFinite(size) || size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
     // `--end-of-options` hardens against user-supplied refs starting with `-`.
-    const result = await runtime.runGit(["show", "--end-of-options", `${ref}:${path}`], { cwd });
+    const result = await runtime.runGit(["show", "--end-of-options", object], { cwd });
     return result.exitCode === 0 ? result.stdout : null;
   }
 
@@ -1419,6 +1509,16 @@ export async function getFileContentsForDiff(
     // sibling is immune: ref paths are root-relative regardless of cwd.)
     const baseDir = await resolveRepoToplevel(runtime, cwd);
     const fullPath = baseDir ? resolvePath(baseDir, path) : path;
+    try {
+      const fileStat = await lstat(fullPath);
+      // Git stores the link destination as the blob contents. Reading the link
+      // itself preserves expansion without following an arbitrarily large
+      // target.
+      if (fileStat.isSymbolicLink()) return await readlink(fullPath);
+      if (!fileStat.isFile() || fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+    } catch {
+      return null;
+    }
     return runtime.readTextFile(fullPath);
   }
 
@@ -1731,4 +1831,30 @@ export function listPatchFiles(
   }
 
   return files;
+}
+
+/** Whether the named file's patch chunk contains a Git binary marker. */
+export function isBinaryPatchFile(patch: string, filePath: string): boolean {
+  const chunkStarts = [...patch.matchAll(/^diff --git /gm)];
+  for (let i = 0; i < chunkStarts.length; i++) {
+    const start = chunkStarts[i].index ?? 0;
+    const end = chunkStarts[i + 1]?.index ?? patch.length;
+    const chunk = patch.slice(start, end);
+    const lines = chunk.split("\n");
+    const header = parseDiffGitHeader(lines[0] ?? "");
+    const fileLines = parseDiffFilePathLines(lines);
+    const metadata = parseDiffMetadataPathLines(lines);
+    const path =
+      metadata.newPath ??
+      fileLines.newPath ??
+      header.newPath ??
+      metadata.oldPath ??
+      fileLines.oldPath ??
+      header.oldPath;
+    if (path !== filePath) continue;
+    return lines.some(
+      (line) => line === "GIT binary patch" || line.startsWith("Binary files "),
+    );
+  }
+  return false;
 }
