@@ -3,6 +3,7 @@ import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type 
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
+import { useComposerKeys } from '../hooks/useComposerKeys';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { OverlayScrollArea } from './OverlayScrollArea';
 import { Button } from './ui/button';
@@ -468,15 +469,14 @@ const AnnotationCard: React.FC<{
     setIsEditing(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSaveEdit();
-    } else if (e.key === 'Escape') {
+  const handleKeyDown = useComposerKeys({
+    onSubmit: handleSaveEdit,
+    onCancel: (e) => {
       e.preventDefault();
       handleCancelEdit();
-    }
-  };
+    },
+    canSubmit: editText.trim().length > 0,
+  });
 
   const typeColor = TYPE_COLOR[annotation.type] ?? 'text-muted-foreground';
   const typeLabel = TYPE_LABEL[annotation.type] ?? 'Note';
@@ -656,6 +656,15 @@ const CodeAnnotationCard: React.FC<{
     setEditText(annotation.text || '');
   };
 
+  const handleEditKeyDown = useComposerKeys({
+    onSubmit: handleSaveEdit,
+    onCancel: (e) => {
+      e.preventDefault();
+      handleCancelEdit();
+    },
+    canSubmit: editText.trim().length > 0,
+  });
+
   return (
     <div
       data-annotation-id={annotation.id}
@@ -720,15 +729,7 @@ const CodeAnnotationCard: React.FC<{
             ref={textareaRef}
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                handleSaveEdit();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                handleCancelEdit();
-              }
-            }}
+            onKeyDown={handleEditKeyDown}
             placeholder="Add your comment..."
             aria-label="Annotation comment"
             className="w-full resize-none rounded-lg border border-border/50 bg-card px-2.5 py-2 text-base leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"

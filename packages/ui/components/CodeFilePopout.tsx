@@ -5,6 +5,7 @@ import { PopoutDialog } from './PopoutDialog';
 import { useTheme } from './ThemeProvider';
 import { CommentPopover } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
+import { useComposerKeys } from '../hooks/useComposerKeys';
 import type { CodeAnnotation, ImageAttachment } from '../types';
 
 export interface CodeFileAnnotationInput {
@@ -161,6 +162,16 @@ const CodeInlineAnnotation: React.FC<{
     setIsEditing(false);
   };
 
+  const handleEditKeyDown = useComposerKeys({
+    onSubmit: save,
+    onCancel: (e) => {
+      e.preventDefault();
+      setIsEditing(false);
+      setEditText(annotation.text ?? '');
+    },
+    canSubmit: editText.trim().length > 0,
+  });
+
   return (
     <div
       data-code-annotation-id={annotation.id}
@@ -221,16 +232,7 @@ const CodeInlineAnnotation: React.FC<{
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                setIsEditing(false);
-                setEditText(annotation.text ?? '');
-              } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                save();
-              }
-            }}
+            onKeyDown={handleEditKeyDown}
             rows={Math.min(editText.split('\n').length + 1, 8)}
             className="w-full resize-none rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           />

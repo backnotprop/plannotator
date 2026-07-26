@@ -9,6 +9,7 @@ import { ConventionalLabelPicker, type LabelDef } from './ConventionalLabelPicke
 import type { ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { useDraggable } from '@plannotator/ui/hooks/useDraggable';
+import { useComposerKeys } from '@plannotator/ui/hooks/useComposerKeys';
 
 interface AnnotationToolbarProps {
   toolbarState: ToolbarState;
@@ -105,6 +106,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     onCancel(); // close the whole toolbar
   };
 
+  const askAIFromComment = aiAvailable && !isEditing && !!onAskAI && commentText.trim().length > 0;
+  const handleCommentKeyDown = useComposerKeys({
+    onSubmit,
+    onAskAI: askAIFromComment ? handleAskAIClick : undefined,
+    onCancel: () => onDismiss(),
+    canSubmit: commentText.trim().length > 0 || suggestedCode.trim().length > 0,
+  });
+
   const content = (
     <div
       ref={toolbarRef}
@@ -180,13 +189,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             className="w-full min-h-[4.5rem] max-h-[calc(100vh-16rem)] px-3 py-2 bg-muted rounded-lg text-xs leading-6 resize-y border-0 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
             rows={3}
             autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                onDismiss();
-              } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-                onSubmit();
-              }
-            }}
+            onKeyDown={handleCommentKeyDown}
           />
 
           {/* Optional suggested code section */}

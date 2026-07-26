@@ -802,6 +802,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [fileBrowserSettings, setFileBrowserSettings] = useState<FileBrowserSettings>({ enabled: false, directories: [] });
   const [newDirPath, setNewDirPath] = useState('');
 
+  const composerSubmitKey = useConfigValue('composerSubmitKey');
+
   // Fetch available agents for OpenCode
   const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null, agentSurface);
 
@@ -1852,7 +1854,17 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {/* === SHORTCUTS TAB === */}
                 {activeTab === 'shortcuts' && (
-                  <KeyboardShortcuts mode={mode} vimModeEnabled={vimModeEnabled} />
+                  <div className="space-y-4">
+                    {/* Composer submit key — the reference table below rerenders from it. */}
+                    <ToggleSwitch
+                      checked={composerSubmitKey === 'enter'}
+                      onChange={(v) => configStore.set('composerSubmitKey', v ? 'enter' : 'mod-enter')}
+                      label="Enter sends"
+                      description={`Enter submits comments and AI messages, ${isMac ? 'Shift+Return' : 'Shift+Enter'} inserts a new line, ${modKey}+Enter asks AI. Off: ${modKey}+Enter submits.`}
+                    />
+                    <div className="border-t border-border" />
+                    <KeyboardShortcuts mode={mode} vimModeEnabled={vimModeEnabled} />
+                  </div>
                 )}
 
                 {/* === COMMENTS TAB === */}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { ImageAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
-import { submitHint } from '../utils/platform';
+import { useComposerAskAIHint, useComposerKeys, useComposerSubmitHint } from '../hooks/useComposerKeys';
 import { useDraggable } from '../hooks/useDraggable';
 import { SparklesIcon } from './SparklesIcon';
 import { hasUnsavedCommentContent } from '../utils/commentContent';
@@ -235,21 +235,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     onClose();
   }, [allowImages, askAIContext, contextText, draftKey, isGlobal, onAskAI, onClose, onDraftChange, text]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      if (mode === 'dialog') {
-        setMode('popover');
-      } else {
-        onClose();
-      }
-      return;
+  const handleCancelKey = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
+    e.stopPropagation();
+    if (mode === 'dialog') {
+      setMode('popover');
+    } else {
+      onClose();
     }
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
+  }, [mode, onClose]);
 
   const headerLabel = isGlobal
     ? 'Global Comment'
@@ -261,6 +254,15 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     hasUnsavedContent ||
     (allowEmptySubmit && initialText.trim().length > 0);
   const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
+
+  const handleKeyDown = useComposerKeys({
+    onSubmit: handleSubmit,
+    onAskAI: canAskAI ? handleAskAI : undefined,
+    onCancel: handleCancelKey,
+    canSubmit,
+  });
+  const submitHint = useComposerSubmitHint();
+  const askAIHint = useComposerAskAIHint();
 
   if (mode === 'dialog') {
     return createPortal(
@@ -340,6 +342,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 >
                   <SparklesIcon className="w-3 h-3" />
                   Ask AI
+                  {askAIHint && <span className="text-[10px] font-normal opacity-60">{askAIHint}</span>}
                 </button>
               )}
             </div>
@@ -462,6 +465,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             >
               <SparklesIcon className="w-3 h-3" />
               Ask AI
+              {askAIHint && <span className="text-[10px] font-normal opacity-60">{askAIHint}</span>}
             </button>
           )}
         </div>

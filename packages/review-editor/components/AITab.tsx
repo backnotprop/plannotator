@@ -9,7 +9,7 @@ import { CountBadge } from './CountBadge';
 import { CopyButton } from './CopyButton';
 import { PermissionCard } from './PermissionCard';
 import { AIConfigBar } from './AIConfigBar';
-import { submitHint } from '@plannotator/ui/utils/platform';
+import { useComposerKeys, useComposerSubmitHint } from '@plannotator/ui/hooks/useComposerKeys';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 
@@ -294,6 +294,11 @@ const GeneralInput: React.FC<{
   onStop?: () => void;
 }> = ({ value, onChange, onSubmit, disabled, isStreaming, onStop }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handleKeyDown = useComposerKeys({
+    onSubmit,
+    canSubmit: !disabled && value.trim().length > 0,
+  });
+  const submitHint = useComposerSubmitHint();
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -317,12 +322,7 @@ const GeneralInput: React.FC<{
           className="flex-1 px-2.5 py-1.5 bg-muted rounded-md text-xs text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 leading-relaxed"
           style={{ maxHeight: 120 }}
           disabled={disabled}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing && !disabled) {
-              e.preventDefault();
-              onSubmit();
-            }
-          }}
+          onKeyDown={handleKeyDown}
         />
         {isStreaming && onStop ? (
           <button

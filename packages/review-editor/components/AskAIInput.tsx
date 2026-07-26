@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { formatLineRange } from '../utils/formatLineRange';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import type { AIChatEntry } from '../hooks/useAIChat';
-import { submitHint } from '@plannotator/ui/utils/platform';
+import { useComposerKeys, useComposerSubmitHint } from '@plannotator/ui/hooks/useComposerKeys';
 
 interface AskAIInputProps {
   lineStart: number;
@@ -41,6 +41,13 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
     setQuestion('');
   };
 
+  const handleKeyDown = useComposerKeys({
+    onSubmit: handleSubmit,
+    onCancel: () => onCancel(),
+    canSubmit: !isLoading && question.trim().length > 0,
+  });
+  const submitHint = useComposerSubmitHint();
+
   return (
     <div className="w-80">
       <div className="flex items-center justify-between mb-2" {...dragHandleProps}>
@@ -67,13 +74,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
         rows={2}
         autoFocus
         disabled={isLoading}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            onCancel();
-          } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
-            handleSubmit();
-          }
-        }}
+        onKeyDown={handleKeyDown}
       />
 
       <div className="flex items-center gap-2 mt-2">

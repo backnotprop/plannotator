@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { sanitizeBlockHtml } from '@plannotator/ui/utils/sanitizeHtml';
+import { useComposerKeys } from '@plannotator/ui/hooks/useComposerKeys';
 import { CommentMeta } from './CommentMeta';
 import { CommentActions } from './CommentActions';
 import { FileNameChip } from './FileNameChip';
@@ -71,6 +72,12 @@ export const FileCommentCard: React.FC<{
     setIsEditing(false);
   };
 
+  const handleEditKeyDown = useComposerKeys({
+    onSubmit: saveEdit,
+    onCancel: (e) => { e.preventDefault(); setIsEditing(false); },
+    canSubmit: draft.trim().length > 0,
+  });
+
   return (
     <div
       className={`review-comment group${isSelected ? ' is-selected' : ''}`}
@@ -108,10 +115,7 @@ export const FileCommentCard: React.FC<{
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { e.preventDefault(); setIsEditing(false); }
-              else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEdit(); }
-            }}
+            onKeyDown={handleEditKeyDown}
             className="w-full min-h-[80px] resize-y rounded border border-border bg-background p-2 text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary/40"
             placeholder="File comment (markdown supported)…"
           />

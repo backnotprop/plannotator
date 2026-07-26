@@ -9,6 +9,7 @@ export const reviewAnnotationToolbarShortcuts = defineShortcutScope({
       description: 'Submit comment',
       bindings: ['Mod+Enter'],
       section: 'Annotations',
+      hint: 'With "Enter sends" enabled in Settings, Enter submits, Shift+Enter inserts a new line, and Mod+Enter asks AI.',
       displayOrder: 10,
     },
     indentSuggestedCode: {

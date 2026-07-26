@@ -1,4 +1,6 @@
 import React from 'react';
+import type { ComposerSubmitKey } from '@plannotator/core/config-types';
+import { useConfigValue } from '../config';
 import {
   formatShortcutBindingTokens,
   listScopeShortcuts,
@@ -84,16 +86,28 @@ const inputMethodShortcuts: ShortcutSection = {
   ],
 };
 
-const annotationShortcuts: ShortcutSection = {
+/** Composer rows for the active submit key, shared by the annotation sections. */
+function composerRows(submitKey: ComposerSubmitKey): Shortcut[] {
+  if (submitKey === 'enter') {
+    return [
+      { keys: [enter], desc: 'Submit comment' },
+      { keys: [shiftKey, enter], desc: 'New line' },
+      { keys: [modKey, enter], desc: 'Ask AI', hint: 'Sends the typed comment to AI. Submits instead where Ask AI is unavailable.' },
+    ];
+  }
+  return [{ keys: [modKey, enter], desc: 'Submit comment' }];
+}
+
+const annotationShortcuts = (submitKey: ComposerSubmitKey): ShortcutSection => ({
   title: 'Annotations',
   shortcuts: [
     { keys: ['a-z'], desc: 'Start typing comment', hint: 'When the annotation toolbar is open, any letter key opens the comment editor with that character' },
     { keys: [altKey, '1-0'], desc: 'Apply quick label', hint: 'Instantly applies the Nth preset label (0 = 10th). When the label picker is open, bare digits also work.' },
-    { keys: [modKey, enter], desc: 'Submit comment' },
+    ...composerRows(submitKey),
     { keys: [modKey, 'C'], desc: 'Copy selected text' },
     { keys: ['Esc'], desc: 'Close toolbar / Cancel' },
   ],
-};
+});
 
 const imageAnnotatorShortcuts: ShortcutSection = {
   title: 'Image Annotator',
@@ -107,9 +121,9 @@ const imageAnnotatorShortcuts: ShortcutSection = {
   ],
 };
 
-const sharedPlanEditorShortcuts: ShortcutSection[] = [
+const sharedPlanEditorShortcuts = (submitKey: ComposerSubmitKey): ShortcutSection[] => [
   inputMethodShortcuts,
-  annotationShortcuts,
+  annotationShortcuts(submitKey),
   imageAnnotatorShortcuts,
 ];
 
@@ -159,18 +173,18 @@ const annotateSidebarShortcuts: ShortcutSection = {
   ],
 };
 
-const planShortcuts: ShortcutSection[] = [
+const planShortcuts = (submitKey: ComposerSubmitKey): ShortcutSection[] => [
   planActionShortcuts,
-  ...sharedPlanEditorShortcuts,
+  ...sharedPlanEditorShortcuts(submitKey),
 ];
 
-const annotateShortcuts: ShortcutSection[] = [
+const annotateShortcuts = (submitKey: ComposerSubmitKey): ShortcutSection[] => [
   annotateActionShortcuts,
   annotateSidebarShortcuts,
-  ...sharedPlanEditorShortcuts,
+  ...sharedPlanEditorShortcuts(submitKey),
 ];
 
-const reviewShortcuts: ShortcutSection[] = [
+const reviewShortcuts = (submitKey: ComposerSubmitKey): ShortcutSection[] => [
   {
     title: 'Actions',
     shortcuts: [
@@ -205,7 +219,7 @@ const reviewShortcuts: ShortcutSection[] = [
   {
     title: 'Annotations',
     shortcuts: [
-      { keys: [modKey, enter], desc: 'Submit comment' },
+      ...composerRows(submitKey),
       { keys: ['Tab'], desc: 'Indent in editor' },
       { keys: ['Esc'], desc: 'Close toolbar / Cancel' },
     ],
@@ -219,11 +233,12 @@ export const KeyboardShortcuts: React.FC<{
   mode: 'plan' | 'annotate' | 'review';
   vimModeEnabled?: boolean;
 }> = ({ mode, vimModeEnabled = false }) => {
+  const submitKey = useConfigValue('composerSubmitKey');
   const baseSections = mode === 'review'
-    ? reviewShortcuts
+    ? reviewShortcuts(submitKey)
     : mode === 'annotate'
-      ? annotateShortcuts
-      : planShortcuts;
+      ? annotateShortcuts(submitKey)
+      : planShortcuts(submitKey);
   const sections = vimModeEnabled && mode !== 'review'
     ? [...vimShortcuts, ...baseSections]
     : baseSections;

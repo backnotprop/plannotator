@@ -1,7 +1,8 @@
 import React, { useRef } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
-import { useReviewAnnotationToolbarShortcuts } from '@plannotator/ui/shortcuts';
+import { matchesShortcutBinding, useReviewAnnotationToolbarShortcuts } from '@plannotator/ui/shortcuts';
+import { useComposerKeys } from '@plannotator/ui/hooks/useComposerKeys';
 
 interface ExpandedCommentDialogProps {
   title: string;
@@ -33,17 +34,11 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
   const askAIEnabled = aiAvailable && !!onAskAI && commentText.trim().length > 0;
   const submitLabel = isEditing ? 'Update' : 'Add Comment';
 
+  // Submit/Ask AI run off the popup's own keydown (see handleKeyDown below) so
+  // they follow the composer keymap; Escape stays document-level.
   useReviewAnnotationToolbarShortcuts({
     target: 'document',
     handlers: {
-      submitComment: {
-        when: (event) => canSubmit && !event.isComposing && event.target instanceof Node && !!dialogRef.current?.contains(event.target),
-        handle: (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onSubmit();
-        },
-      },
       cancel: {
         when: (event) => event.target instanceof Node && !!dialogRef.current?.contains(event.target),
         handle: (event) => {
@@ -58,6 +53,24 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
   const handleAskAI = () => {
     if (!askAIEnabled) return;
     onAskAI?.(commentText.trim());
+  };
+
+  const composerKeys = useComposerKeys({
+    onSubmit,
+    onAskAI: askAIEnabled ? handleAskAI : undefined,
+    canSubmit,
+  });
+
+  // Bound to the popup rather than the textarea so Mod+Enter is swallowed
+  // wherever focus sits, keeping it away from the window listener that submits
+  // the whole review. Only the textarea drives the composer keymap though -
+  // under "Enter sends", Enter on a focused button must still press it.
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.target === textareaRef.current) {
+      composerKeys(event);
+      return;
+    }
+    if (matchesShortcutBinding(event.nativeEvent, 'Mod+Enter')) event.stopPropagation();
   };
 
   return (
@@ -80,6 +93,7 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
             return textarea;
           }}
           finalFocus={false}
+          onKeyDown={handleKeyDown}
           className="fixed left-1/2 top-1/2 z-[2000] w-[calc(100vw-2rem)] max-w-2xl h-[min(36rem,85dvh)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
         >
           <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border/50">

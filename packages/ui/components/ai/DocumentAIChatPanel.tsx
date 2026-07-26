@@ -5,7 +5,7 @@ import { formatRelativeTime, renderChatMarkdown } from '../../utils/aiChatFormat
 import { OverlayScrollArea } from '../OverlayScrollArea';
 import { SparklesIcon } from '../SparklesIcon';
 import { AIProviderBar } from './AIProviderBar';
-import { submitHint } from '../../utils/platform';
+import { useComposerKeys, useComposerSubmitHint } from '../../hooks/useComposerKeys';
 
 interface DocumentAIChatPanelProps {
   messages: AIChatEntry[];
@@ -256,6 +256,11 @@ const GeneralInput: React.FC<{
   onStop?: () => void;
 }> = ({ value, onChange, onSubmit, disabled, isStreaming, onStop }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handleKeyDown = useComposerKeys({
+    onSubmit,
+    canSubmit: !disabled && value.trim().length > 0,
+  });
+  const submitHint = useComposerSubmitHint();
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -276,12 +281,7 @@ const GeneralInput: React.FC<{
           className="flex-1 px-2.5 py-1.5 bg-muted rounded-md text-xs text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 leading-relaxed"
           style={{ maxHeight: 120 }}
           disabled={disabled}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing && !disabled) {
-              event.preventDefault();
-              onSubmit();
-            }
-          }}
+          onKeyDown={handleKeyDown}
         />
         {isStreaming && onStop ? (
           <button

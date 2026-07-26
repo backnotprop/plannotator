@@ -9,7 +9,7 @@ export const reviewAiShortcuts = defineShortcutScope({
       description: 'Send message',
       bindings: ['Mod+Enter'],
       section: 'AI Assistant',
-      hint: 'Available in the AI tab and the Ask AI inline input.',
+      hint: 'Available in the AI tab and the Ask AI inline input. With "Enter sends" enabled in Settings, Enter sends and Shift+Enter inserts a new line.',
       displayOrder: 10,
     },
     cancel: {

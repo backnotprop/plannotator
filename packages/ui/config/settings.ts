@@ -9,7 +9,7 @@
  * Add new settings here. Cookie-only settings omit serverKey.
  */
 
-import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
+import type { ComposerSubmitKey, DiffLineBgIntensity } from '@plannotator/core/config-types';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 
@@ -302,6 +302,16 @@ export const SETTINGS = {
       return isDiffLineBgIntensity(v) ? v : undefined;
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
+  },
+  /** Submit keystroke for comment editors and AI chat inputs. See utils/composerKeymap. */
+  composerSubmitKey: {
+    defaultValue: 'mod-enter' as ComposerSubmitKey,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-composer-submit-key');
+      return v === 'enter' || v === 'mod-enter' ? v : undefined;
+    },
+    toCookie: (v: ComposerSubmitKey) => storage.setItem('plannotator-composer-submit-key', v),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
   conventionalComments: {
     defaultValue: false as boolean,
