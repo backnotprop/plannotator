@@ -320,9 +320,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             />
           </div>
 
-          {/* Footer */}
-          <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
-            <div className="flex items-center gap-3">
+          {/* Footer — DOM order sets tab order (Save first); row-reverse keeps the visual layout unchanged */}
+          <div className="flex flex-row-reverse items-center justify-between px-4 py-3 border-t border-border/50">
+            <div className="flex flex-row-reverse items-center gap-3">
               <button
                 onClick={handleSubmit}
                 disabled={!canSubmit}
@@ -330,6 +330,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               >
                 {isGlobal ? 'Add' : 'Save'}
               </button>
+              <span className="text-[10px] text-muted-foreground">{submitHint}</span>
               {onAskAI && (
                 <button
                   onClick={handleAskAI}
@@ -341,7 +342,6 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   Ask AI
                 </button>
               )}
-              <span className="text-[10px] text-muted-foreground">{submitHint}</span>
             </div>
             <div className="flex items-center gap-2">
               {allowImages && (
@@ -442,9 +442,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         />
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-border/50">
-        <div className="flex items-center gap-3">
+      {/* Footer — same DOM-order/row-reverse pattern as the dialog footer above */}
+      <div className="flex flex-row-reverse items-center justify-between px-3 py-2 border-t border-border/50">
+        <div className="flex flex-row-reverse items-center gap-3">
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
@@ -452,6 +452,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           >
             {isGlobal ? 'Add' : 'Save'}
           </button>
+          <span className="text-[10px] text-muted-foreground">{submitHint}</span>
           {onAskAI && (
             <button
               onClick={handleAskAI}
@@ -463,7 +464,6 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               Ask AI
             </button>
           )}
-          <span className="text-[10px] text-muted-foreground">{submitHint}</span>
         </div>
         <div className="flex items-center gap-2">
           {allowImages && (
