@@ -42,9 +42,9 @@ Controls which agent to switch to after plan approval. The dropdown is populated
 
 | Option | Behavior |
 |--------|----------|
-| **Build** (default) | Switch to the build agent after approval |
+| **Build** | Switch to the build agent after approval |
 | **Custom** | Enter a custom agent name (shows a warning if the agent isn't found) |
-| **Disabled** | Stay on the current agent after approval |
+| **Disabled** (default) | Stay on the current agent after approval |
 
 ### Auto-close tab
 

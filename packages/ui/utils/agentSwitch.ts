@@ -2,7 +2,7 @@
  * Agent Switch Settings Utility
  *
  * Manages settings for automatic agent switching after plan approval.
- * Supports built-in agents (build), disabled, or custom agent names.
+ * Supports discovered agents, disabled, or custom agent names.
  *
  * Uses cookies (not localStorage) because each hook invocation runs on a
  * random port, and localStorage is scoped by origin including port.
@@ -29,7 +29,7 @@ export const AGENT_OPTIONS: { value: string; label: string; description: string 
 ];
 
 const DEFAULT_SETTINGS: AgentSwitchSettings = {
-  switchTo: 'build',
+  switchTo: 'disabled',
 };
 
 /**
@@ -67,5 +67,8 @@ export function getEffectiveAgentName(settings: AgentSwitchSettings): string | u
   if (settings.switchTo === 'custom' && settings.customName) {
     return settings.customName;
   }
-  return settings.switchTo; // 'build' or fallback
+  if (settings.switchTo === 'custom') {
+    return undefined;
+  }
+  return settings.switchTo;
 }

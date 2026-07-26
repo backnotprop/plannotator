@@ -60,6 +60,7 @@ import {
   type OpenCodeBridgeContext,
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
+import { resolveValidatedTargetAgent } from "./agent-switch";
 
 // Lazy-load HTML at first use instead of embedding in the bundle.
 // The two SPA files are ~20 MB combined — inlining them as string literals
@@ -682,12 +683,16 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
             // Clean up backing file after approval
             try { unlinkSync(backingPath); } catch { /* already gone */ }
 
-            const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
-            const targetAgent = result.agentSwitch || 'build';
-            const shouldStartImplementation = shouldSwitchAgent
-              && shouldStartImplementationForAgent(targetAgent, workflowOptions);
+            const targetAgent = await resolveValidatedTargetAgent({
+              client: ctx.client,
+              targetAgent: result.agentSwitch,
+              directory: ctx.directory,
+            });
+            const shouldStartImplementation = targetAgent
+              ? shouldStartImplementationForAgent(targetAgent, workflowOptions)
+              : false;
 
-            if (shouldSwitchAgent) {
+            if (targetAgent) {
               try {
                 await ctx.client.session.prompt({
                   path: { id: context.sessionID },

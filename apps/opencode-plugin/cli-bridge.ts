@@ -10,12 +10,17 @@ import {
   getReviewApprovedPrompt,
   getReviewDeniedSuffix,
 } from "@plannotator/shared/prompts";
+import { resolveTargetAgent, resolveValidatedTargetAgent } from "./agent-switch";
 
 type LogLevel = "info" | "error";
 
 interface OpenCodeClient {
   app?: {
     log?: (entry: { level: LogLevel; message: string }) => unknown;
+    agents?: (input?: unknown) => Promise<{ data?: OpenCodeBridgeAgent[] }>;
+  };
+  tui?: {
+    showToast?: (input: unknown) => unknown;
   };
   session?: {
     messages?: (input: unknown) => Promise<{ data?: any[] }>;
@@ -318,7 +323,7 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
   );
   const loggedUrls = new Set<string>();
   const toastedUrls = new Set<string>();
-  const cwd = options.cwd || process.cwd();
+  const cwd = options.cwd ?? process.cwd();
   const env = {
     ...process.env,
     ...options.extraEnv,
@@ -538,8 +543,7 @@ export function buildReviewPromptFromBridgeOutcome(outcome: CliReviewOutcome): {
 } {
   if (outcome.decision === "dismissed") return { message: null };
 
-  const shouldSwitchAgent = outcome.agentSwitch && outcome.agentSwitch !== "disabled";
-  const targetAgent = shouldSwitchAgent ? outcome.agentSwitch : undefined;
+  const targetAgent = resolveTargetAgent(outcome.agentSwitch);
 
   if (outcome.approved || outcome.decision === "approved") {
     return {
@@ -584,12 +588,14 @@ export async function handleCliCommand(input: {
   cwd?: string;
   bridge?: OpenCodeBridgeContext;
 }): Promise<void> {
+  const cwd = input.cwd ?? process.cwd();
+
   try {
     if (input.command === "plannotator-review") {
       const result = await runPlannotatorCli({
         client: input.client,
         args: ["opencode-review"],
-        cwd: input.cwd,
+        cwd,
         input: JSON.stringify({
           arguments: input.rawArgs,
           ...buildBridgePayload(input.bridge),
@@ -606,8 +612,13 @@ export async function handleCliCommand(input: {
       const outcome = parseLastJson<CliReviewOutcome>(result.stdout);
       const prompt = buildReviewPromptFromBridgeOutcome(outcome);
       if (prompt.message) {
+        const targetAgent = await resolveValidatedTargetAgent({
+          client: input.client,
+          targetAgent: prompt.agent,
+          directory: cwd,
+        });
         await injectSessionPrompt(input.client, input.sessionId, prompt.message, {
-          agent: prompt.agent,
+          agent: targetAgent,
         });
       }
       return;
@@ -623,7 +634,7 @@ export async function handleCliCommand(input: {
       const result = await runPlannotatorCli({
         client: input.client,
         args: buildAnnotateCliArgs(parsed),
-        cwd: input.cwd,
+        cwd,
         readyLabel: "annotation UI",
         bridge: input.bridge,
       });
@@ -639,7 +650,7 @@ export async function handleCliCommand(input: {
           input.client,
           input.sessionId,
           getAnnotateFileFeedbackPrompt("opencode", undefined, {
-            fileHeader: getAnnotateFileHeader(parsed.filePath, input.cwd),
+            fileHeader: getAnnotateFileHeader(parsed.filePath, cwd),
             filePath: parsed.filePath,
             feedback: outcome.feedback,
           }),
@@ -664,7 +675,7 @@ export async function handleCliCommand(input: {
       const result = await runPlannotatorCli({
         client: input.client,
         args: ["opencode-annotate-last"],
-        cwd: input.cwd,
+        cwd,
         input: JSON.stringify({
           gate: parsed.gate,
           recentMessages,

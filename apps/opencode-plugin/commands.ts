@@ -31,6 +31,7 @@ import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-mar
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 import { statSync } from "fs";
 import path from "path";
+import { resolveValidatedTargetAgent } from "./agent-switch";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -172,8 +173,11 @@ export async function handleReviewCommand(
     const sessionId = event.properties?.sessionID;
 
     if (sessionId) {
-      const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
-      const targetAgent = result.agentSwitch || "build";
+      const targetAgent = await resolveValidatedTargetAgent({
+        client,
+        targetAgent: result.agentSwitch,
+        directory,
+      });
 
       // Append the verification-only suffix when the reviewer sent annotations to
       // act on (PR mode included). Platform PR actions post a status message
@@ -188,7 +192,7 @@ export async function handleReviewCommand(
         await client.session.prompt({
           path: { id: sessionId },
           body: {
-            ...(shouldSwitchAgent && { agent: targetAgent }),
+            ...(targetAgent && { agent: targetAgent }),
             parts: [{ type: "text", text: message }],
           },
         });
