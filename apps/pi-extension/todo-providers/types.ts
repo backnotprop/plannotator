@@ -17,7 +17,9 @@ export interface TodoProvider {
 	 * Implementations MUST be idempotent: repeated calls with the same arguments
 	 * converge on the same provider state instead of creating duplicates. This
 	 * runs once on plan approval and again whenever a `[DONE:n]` marker lands,
-	 * so it covers both the initial push and later status reflection.
+	 * so it covers both the initial push and later status reflection. An empty
+	 * `items` is not a no-op: it still reconciles against `planId`'s previously
+	 * synced state, closing any todos this call no longer lists.
 	 */
 	sync(items: ChecklistItem[], planId: string): Promise<void>;
 }
@@ -25,6 +27,6 @@ export interface TodoProvider {
 /** Host facts a provider needs. Kept narrow so providers stay testable. */
 export interface TodoProviderEnv {
 	cwd: string;
-	/** Session file path, recorded as the owning session when available. */
-	sessionFile?: string;
+	/** Session id, recorded as the owning session when available. */
+	sessionId?: string;
 }

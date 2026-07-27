@@ -155,8 +155,8 @@ export interface PlannotatorConfig {
   /**
    * Mirror the approved plan checklist into an editable todo provider during
    * execution (issue #484). "auto" (default) syncs whenever a provider is
-   * detected — currently pi-todos, found via PI_TODO_PATH or an existing
-   * .pi/todos directory. "off" disables the mirror.
+   * detected — currently pi-todos. Detection checks the configured todo
+   * directory; PI_TODO_PATH only redirects which directory is checked.
    *
    * The mirror is additive: the progress widget is left alone. pi-todos has no
    * live surface of its own (its list renders on demand in `/todos`), so the

@@ -335,15 +335,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 	 * pi-todos renders its list on demand in `/todos` and has no live surface,
 	 * so replacing the widget with it would trade a visible tracker for files
 	 * behind a keystroke. Failures are swallowed after one notification —
-	 * a todo mirror must never break plan execution.
+	 * a todo mirror must never break plan execution. Runs even when the
+	 * checklist is empty so a resubmitted-empty plan still reconciles
+	 * (closing todos it used to own) instead of leaving them orphaned.
 	 */
 	async function syncTodoProvider(ctx: ExtensionContext): Promise<void> {
 		if (todoProviderDisabled) return;
-		if (phase !== "executing" || checklistItems.length === 0 || !lastSubmittedPath) return;
+		if (phase !== "executing" || !lastSubmittedPath) return;
 		if (!todoProvider) {
 			todoProvider = resolveTodoProvider(loadConfig(), {
 				cwd: ctx.cwd,
-				sessionFile: ctx.sessionManager.getSessionFile() ?? undefined,
+				sessionId: ctx.sessionManager.getSessionId(),
 			});
 			if (!todoProvider) {
 				todoProviderDisabled = true;

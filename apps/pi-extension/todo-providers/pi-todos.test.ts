@@ -111,8 +111,23 @@ function checklist(...done: number[]): ChecklistItem[] {
 
 let cwd: string;
 let todosDir: string;
+let originalPiTodoPath: string | undefined;
+let originalTodoProviderEnv: string | undefined;
+
+/** Restore an env var to its pre-test value instead of deleting ambient state. */
+function restoreEnv(name: string, value: string | undefined): void {
+	if (value === undefined) delete process.env[name];
+	else process.env[name] = value;
+}
 
 beforeEach(async () => {
+	// Snapshot and clear so an ambient PI_TODO_PATH / PLANNOTATOR_TODO_PROVIDER
+	// on the host — or leaked from another test file sharing this process —
+	// can never redirect detection or writes outside the temp dir below.
+	originalPiTodoPath = process.env.PI_TODO_PATH;
+	originalTodoProviderEnv = process.env.PLANNOTATOR_TODO_PROVIDER;
+	delete process.env.PI_TODO_PATH;
+	delete process.env.PLANNOTATOR_TODO_PROVIDER;
 	cwd = await fs.mkdtemp(path.join(os.tmpdir(), "plannotator-pi-todos-"));
 	todosDir = path.join(cwd, ".pi", "todos");
 	await fs.mkdir(todosDir, { recursive: true });
@@ -120,12 +135,23 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	await fs.rm(cwd, { recursive: true, force: true });
-	delete process.env.PI_TODO_PATH;
+	restoreEnv("PI_TODO_PATH", originalPiTodoPath);
+	restoreEnv("PLANNOTATOR_TODO_PROVIDER", originalTodoProviderEnv);
 });
 
 describe("pi-todos provider", () => {
 	test("writes files the upstream parser reads back intact", async () => {
-		await createPiTodosProvider({ cwd, sessionFile: "session.json" }).sync(checklist(), PLAN_ID);
+		await createPiTodosProvider({ cwd, sessionId: "session-1" }).sync(checklist(), PLAN_ID);
+
+		// Upstream's directory scan derives a todo's id from its FILENAME, not
+		// from any "id" field inside the JSON front matter — check the actual
+		// on-disk names directly instead of routing through the oracle's id
+		// fallback, which would accept a mismatched filename as long as the
+		// JSON carried a matching "id".
+		const filenames = (await fs.readdir(todosDir)).filter((entry) => entry.endsWith(".md"));
+		expect(filenames).toHaveLength(3);
+		for (const filename of filenames) expect(filename).toMatch(/^[a-f0-9]{8}\.md$/);
+		expect(new Set(filenames).size).toBe(3);
 
 		const todos = await readViaOracle(todosDir);
 		expect(todos).toHaveLength(3);
@@ -139,9 +165,6 @@ describe("pi-todos provider", () => {
 			expect(todo.status).toBe("open");
 			expect(oracleIsTodoClosed(todo.status)).toBe(false);
 		}
-		// Filenames must match upstream's id pattern or its own loader skips them.
-		for (const todo of todos) expect(todo.id).toMatch(/^[a-f0-9]{8}$/);
-		expect(new Set(todos.map((todo) => todo.id)).size).toBe(3);
 	});
 
 	test("keeps plan order under the upstream sort", async () => {
@@ -167,8 +190,25 @@ describe("pi-todos provider", () => {
 		expect(third.map((todo) => todo.id).sort()).toEqual(first.map((todo) => todo.id).sort());
 	});
 
+	test("serializes overlapping syncs so a race can't duplicate todos", async () => {
+		const provider = createPiTodosProvider({ cwd });
+		// Neither call is awaited before the other starts. Without per-instance
+		// serialization both would read the same empty `readOwnedTodos()`
+		// snapshot and each mint a fresh random id per step, duplicating every
+		// todo. Asserting on the converged final state (not which call "wins")
+		// keeps this deterministic instead of racy: it only holds if the
+		// second call is queued fully behind the first.
+		const first = provider.sync(checklist(), PLAN_ID);
+		const second = provider.sync(checklist(1, 2, 3), PLAN_ID);
+		await Promise.all([first, second]);
+
+		const todos = await readViaOracle(todosDir);
+		expect(todos).toHaveLength(3);
+		for (const todo of todos) expect(oracleIsTodoClosed(todo.status)).toBe(true);
+	});
+
 	test("reflects DONE markers as closed and clears the session assignment", async () => {
-		const provider = createPiTodosProvider({ cwd, sessionFile: "session.json" });
+		const provider = createPiTodosProvider({ cwd, sessionId: "session-1" });
 		await provider.sync(checklist(), PLAN_ID);
 		await provider.sync(checklist(1, 2), PLAN_ID);
 
@@ -179,7 +219,7 @@ describe("pi-todos provider", () => {
 		// Closed todos drop their assignment, matching upstream, so they sort
 		// below live work instead of above it.
 		expect(byTitle.get("1. Add the provider interface")!.assigned_to_session).toBeUndefined();
-		expect(byTitle.get("3. Wire the extension")!.assigned_to_session).toBe("session.json");
+		expect(byTitle.get("3. Wire the extension")!.assigned_to_session).toBe("session-1");
 	});
 
 	test("sorts completed steps below open ones", async () => {
@@ -243,6 +283,19 @@ describe("pi-todos provider", () => {
 	test("no-ops on an empty checklist", async () => {
 		await createPiTodosProvider({ cwd }).sync([], PLAN_ID);
 		expect(await fs.readdir(todosDir)).toEqual([]);
+	});
+
+	test("closes previously owned todos when the checklist goes empty", async () => {
+		const provider = createPiTodosProvider({ cwd });
+		await provider.sync(checklist(), PLAN_ID);
+		await provider.sync([], PLAN_ID);
+
+		// Reconciliation, not deletion: the now-ownerless todos stay on disk,
+		// closed, so pi-todos' own GC reaps them instead of this provider
+		// unlinking work a user might still want to read.
+		const todos = await readViaOracle(todosDir);
+		expect(todos).toHaveLength(3);
+		for (const todo of todos) expect(oracleIsTodoClosed(todo.status)).toBe(true);
 	});
 });
 

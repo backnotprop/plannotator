@@ -60,11 +60,14 @@ export function resolveTodoDir(cwd: string): string {
 /**
  * True when pi-todos looks present and in use.
  *
- * Detection is deliberately conservative: an explicit PI_TODO_PATH counts, and
- * so does an existing .pi/todos directory (pi-todos creates it on first write).
- * A user who installed pi-todos but never created a todo reads as "absent" and
- * simply gets no mirror — the widget is unaffected either way, so a false
- * negative costs nothing.
+ * Detection is deliberately conservative: it only checks whether the todo
+ * directory exists — pi-todos creates it on first write, so an existing
+ * directory is the actual "in use" signal. PI_TODO_PATH does not detect
+ * the provider by itself; it only redirects which directory gets checked,
+ * so setting it with that directory absent still reads as "absent". A user
+ * who installed pi-todos but never created a todo also reads as "absent"
+ * and simply gets no mirror — the widget is unaffected either way, so a
+ * false negative costs nothing.
  */
 export function detectPiTodos(cwd: string): boolean {
 	return existsSync(resolveTodoDir(cwd));
@@ -156,15 +159,21 @@ async function withLock<T>(todosDir: string, id: string, fn: () => Promise<T>): 
 		throw error;
 	}
 	try {
-		await handle.writeFile(
-			JSON.stringify(
-				{ id, pid: process.pid, session: null, created_at: new Date().toISOString() },
-				null,
-				2,
-			),
-			"utf8",
-		);
-		await handle.close();
+		try {
+			await handle.writeFile(
+				JSON.stringify(
+					{ id, pid: process.pid, session: null, created_at: new Date().toISOString() },
+					null,
+					2,
+				),
+				"utf8",
+			);
+		} finally {
+			// Always release the fd, even when the write above threw, so a
+			// write failure can never leak a lock-file handle. Swallow the
+			// close error itself so it can never mask the original failure.
+			await handle.close().catch(() => {});
+		}
 		return await fn();
 	} finally {
 		await fs.unlink(lockPath).catch(() => {});
@@ -194,82 +203,101 @@ async function readOwnedTodos(todosDir: string, planId: string): Promise<Map<num
 
 export function createPiTodosProvider(env: TodoProviderEnv): TodoProvider {
 	const todosDir = resolveTodoDir(env.cwd);
+	// Serializes overlapping sync() calls on this instance. pi-todos has no
+	// atomic upsert: two syncs racing between readOwnedTodos and its writes
+	// would both see the same step as "missing" and each create a todo for
+	// it. Chaining keeps every call's read-then-write pair uninterrupted.
+	let queue: Promise<void> = Promise.resolve();
+
+	async function runSync(items: ChecklistItem[], planId: string): Promise<void> {
+		await fs.mkdir(todosDir, { recursive: true });
+		const owned = await readOwnedTodos(todosDir, planId);
+		// pi-todos sorts by created_at and has no explicit order field, and
+		// Date.now() only has ms resolution, so a tight creation loop would
+		// collide and fall back to readdir order (random hex filenames).
+		// Stamping base+index keeps todo order equal to plan order.
+		const base = Date.now();
+
+		for (const [index, item] of items.entries()) {
+			const title = `${item.step}. ${item.text}`;
+			const status = item.completed ? "done" : "open";
+			const existing = owned.get(item.step);
+
+			if (existing) {
+				if (existing.frontMatter.title === title && existing.frontMatter.status === status) {
+					continue;
+				}
+				await withLock(todosDir, existing.id, () =>
+					fs.writeFile(
+						path.join(todosDir, `${existing.id}.md`),
+						serialize({ ...existing.frontMatter, title, status }, existing.body),
+						"utf8",
+					),
+				);
+				continue;
+			}
+
+			let id = crypto.randomBytes(4).toString("hex");
+			for (
+				let attempt = 0;
+				attempt < 10 && existsSync(path.join(todosDir, `${id}.md`));
+				attempt += 1
+			) {
+				id = crypto.randomBytes(4).toString("hex");
+			}
+			await withLock(todosDir, id, () =>
+				fs.writeFile(
+					path.join(todosDir, `${id}.md`),
+					serialize(
+						{
+							id,
+							title,
+							tags: [OWNER_TAG, `${OWNER_TAG}:plan:${planId}`, `${OWNER_TAG}:step:${item.step}`],
+							status,
+							created_at: new Date(base + index).toISOString(),
+							assigned_to_session: env.sessionId,
+						},
+						`Plan step ${item.step} from \`${planId}\`.`,
+					),
+					"utf8",
+				),
+			);
+		}
+
+		// Steps that vanished from the plan (edited and re-approved,
+		// renumbered, or an empty resubmission) would otherwise sit in
+		// /todos as permanently-open work. Close them rather than unlink:
+		// the user's notes stay readable, and pi-todos' own GC reaps closed
+		// todos after gcDays. An empty `items` closes every owned step
+		// still open, so reconciling against nothing left to do still
+		// clears out what this planId used to own.
+		const liveSteps = new Set(items.map((item) => item.step));
+		for (const [step, stale] of owned) {
+			if (liveSteps.has(step)) continue;
+			if (["closed", "done"].includes(stale.frontMatter.status.toLowerCase())) continue;
+			await withLock(todosDir, stale.id, () =>
+				fs.writeFile(
+					path.join(todosDir, `${stale.id}.md`),
+					serialize({ ...stale.frontMatter, status: "closed" }, stale.body),
+					"utf8",
+				),
+			);
+		}
+	}
 
 	return {
 		name: "pi-todos",
 
-		async sync(items: ChecklistItem[], planId: string): Promise<void> {
-			if (items.length === 0) return;
-			await fs.mkdir(todosDir, { recursive: true });
-			const owned = await readOwnedTodos(todosDir, planId);
-			// pi-todos sorts by created_at and has no explicit order field, and
-			// Date.now() only has ms resolution, so a tight creation loop would
-			// collide and fall back to readdir order (random hex filenames).
-			// Stamping base+index keeps todo order equal to plan order.
-			const base = Date.now();
-
-			for (const [index, item] of items.entries()) {
-				const title = `${item.step}. ${item.text}`;
-				const status = item.completed ? "done" : "open";
-				const existing = owned.get(item.step);
-
-				if (existing) {
-					if (existing.frontMatter.title === title && existing.frontMatter.status === status) {
-						continue;
-					}
-					await withLock(todosDir, existing.id, () =>
-						fs.writeFile(
-							path.join(todosDir, `${existing.id}.md`),
-							serialize({ ...existing.frontMatter, title, status }, existing.body),
-							"utf8",
-						),
-					);
-					continue;
-				}
-
-				let id = crypto.randomBytes(4).toString("hex");
-				for (
-					let attempt = 0;
-					attempt < 10 && existsSync(path.join(todosDir, `${id}.md`));
-					attempt += 1
-				) {
-					id = crypto.randomBytes(4).toString("hex");
-				}
-				await withLock(todosDir, id, () =>
-					fs.writeFile(
-						path.join(todosDir, `${id}.md`),
-						serialize(
-							{
-								id,
-								title,
-								tags: [OWNER_TAG, `${OWNER_TAG}:plan:${planId}`, `${OWNER_TAG}:step:${item.step}`],
-								status,
-								created_at: new Date(base + index).toISOString(),
-								assigned_to_session: env.sessionFile,
-							},
-							`Plan step ${item.step} from \`${planId}\`.`,
-						),
-						"utf8",
-					),
-				);
-			}
-
-			// Steps that vanished from the plan (edited and re-approved, or
-			// renumbered) would otherwise sit in /todos as permanently-open
-			// work. Close them rather than unlink: the user's notes stay
-			// readable, and pi-todos' own GC reaps closed todos after gcDays.
-			const liveSteps = new Set(items.map((item) => item.step));
-			for (const [step, stale] of owned) {
-				if (liveSteps.has(step)) continue;
-				if (["closed", "done"].includes(stale.frontMatter.status.toLowerCase())) continue;
-				await withLock(todosDir, stale.id, () =>
-					fs.writeFile(
-						path.join(todosDir, `${stale.id}.md`),
-						serialize({ ...stale.frontMatter, status: "closed" }, stale.body),
-						"utf8",
-					),
-				);
-			}
+		sync(items: ChecklistItem[], planId: string): Promise<void> {
+			const run = queue.then(() => runSync(items, planId));
+			// Recover the queue after a rejection so the next call still
+			// runs; `run` itself still rejects, so the caller (index.ts)
+			// sees the error and handles/notifies it.
+			queue = run.then(
+				() => undefined,
+				() => undefined,
+			);
+			return run;
 		},
 	};
 }

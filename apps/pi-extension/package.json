@@ -39,6 +39,7 @@
     "config.ts",
     "plannotator.json",
     "server/",
+    "todo-providers/",
     "generated/",
     "README.md",
     "plannotator.html",
