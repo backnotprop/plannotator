@@ -53,6 +53,7 @@ export interface PromptConfig {
     fileFeedback?: string;
     messageFeedback?: string;
     approved?: string;
+    approvedWithNotes?: string;
   };
 }
 

@@ -27,6 +27,7 @@
     "./project": "./project.ts",
     "./storage": "./storage.ts",
     "./draft": "./draft.ts",
+    "./annotate-history": "./annotate-history.ts",
     "./html-diff": "./html-diff.ts",
     "./integrations-common": "./integrations-common.ts",
     "./repo": "./repo.ts",

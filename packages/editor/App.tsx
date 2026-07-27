@@ -61,7 +61,7 @@ import { PermissionModeSetup } from '@plannotator/ui/components/PermissionModeSe
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { deriveImageName } from '@plannotator/ui/components/AttachmentsButton';
 import { useSidebar, type SidebarTab } from '@plannotator/ui/hooks/useSidebar';
-import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
+import { usePlanDiff, type VersionInfo, type VersionEntry, type PlanDiffFetchers } from '@plannotator/ui/hooks/usePlanDiff';
 import { useLinkedDoc, type LinkedDocSessionState } from '@plannotator/ui/hooks/useLinkedDoc';
 import { useCodeFilePopout } from '@plannotator/ui/hooks/useCodeFilePopout';
 import { useAnnotationDraft, type DraftEditedDocument, type DraftSavedFileChange } from '@plannotator/ui/hooks/useAnnotationDraft';
@@ -116,6 +116,7 @@ const DEMO_PLAN_CONTENT = USE_DIFF_DEMO
   ? DIFF_DEMO_PLAN_CONTENT
   : DEFAULT_DEMO_PLAN_CONTENT;
 import { useCheckboxOverrides } from './hooks/useCheckboxOverrides';
+import { usePlanDiffViewAutoExit } from './hooks/usePlanDiffViewAutoExit';
 import { AppHeader } from './components/AppHeader';
 import {
   AnnotateAgentTerminalPanel,
@@ -134,10 +135,14 @@ import {
   buildDirectEditsSection,
   buildSavedFileChangePanelItems,
   buildSavedFileChangesSection,
-  composeFeedbackWithEditSections,
   computeEditStats,
   normalizeEditedMarkdown,
 } from './directEdits';
+import {
+  buildAnnotateApprovalBody,
+  buildCompleteAnnotateFeedback,
+  getAnnotateApprovalPolicy,
+} from './annotateSubmission';
 import {
   editableDocumentKey,
   useEditableDocuments,
@@ -149,7 +154,11 @@ import {
 } from './savedFileChangeValidation';
 import { fetchSourceDocumentSnapshot, probeSourceSave } from './sourceDocumentClient';
 import { reconcileSourceDocuments, type SourceDocumentReconcileEvent } from './sourceDocumentReconciliation';
-import { dirnameBrowserPath, normalizeBrowserPath, pathIsInsideDir } from './sourceDocumentPaths';
+import {
+  buildSourceWatchSubscription,
+  normalizeBrowserPath,
+  pathIsInsideDir,
+} from './sourceDocumentPaths';
 import { pickRestoredSingleFileDraftToDisplay } from './draftRestoreSelection';
 
 type NoteAutoSaveResults = {
@@ -295,6 +304,7 @@ const App: React.FC = () => {
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
+  const [showApproveWithNotesConfirmation, setShowApproveWithNotesConfirmation] = useState(false);
   const [showSourceFileEditWarning, setShowSourceFileEditWarning] = useState(false);
   const [sourceFileEditWarningAction, setSourceFileEditWarningAction] = useState<SourceFileEditWarningAction>('send-feedback');
   const sourceFileEditWarningContinuationRef = useRef<(() => void | Promise<void>) | null>(null);
@@ -377,6 +387,7 @@ const App: React.FC = () => {
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
   const [annotateMode, setAnnotateMode] = useState(false);
   const [gate, setGate] = useState(false);
+  const [approvalNotesSupported, setApprovalNotesSupported] = useState(false);
   const [annotateSource, setAnnotateSource] = useState<'file' | 'message' | 'folder' | null>(null);
   const [recentMessages, setRecentMessages] = useState<PickerMessage[]>([]);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
@@ -689,36 +700,6 @@ const App: React.FC = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isPlanDiffActive]);
 
-  // Plan diff computation. On the HTML surface the diff is rendered as the real
-  // page with inline highlights (htmlDiffHtml) instead of the markdown block diff,
-  // so suppress the markdown diff path there (markdown is empty for HTML).
-  const planDiff = usePlanDiff(
-    markdown,
-    isHtmlSurface ? null : previousPlan,
-    isHtmlSurface ? null : versionInfo,
-  );
-  const warnFinishEditingFirst = useCallback((target: 'versions' | 'diff') => {
-    toast('Finish editing first', {
-      description: target === 'versions'
-        ? 'Use "Done editing" before changing the comparison version.'
-        : 'Use "Done editing" before opening the version diff.',
-    });
-  }, []);
-  const handleSelectBaseVersion = useCallback((version: number) => {
-    if (isEditingMarkdown) {
-      warnFinishEditingFirst('versions');
-      return Promise.resolve();
-    }
-    return planDiff.selectBaseVersion(version);
-  }, [isEditingMarkdown, planDiff.selectBaseVersion, warnFinishEditingFirst]);
-  const handleActivatePlanDiff = useCallback(() => {
-    if (isEditingMarkdown) {
-      warnFinishEditingFirst('diff');
-      return;
-    }
-    setIsPlanDiffActive(true);
-  }, [isEditingMarkdown, warnFinishEditingFirst]);
-
   const linkedDocSidebar = useMemo(() => ({
     ...sidebar,
     open: openSidebarTab,
@@ -791,6 +772,84 @@ const App: React.FC = () => {
     getDocumentMarkdown: getLinkedDocumentMarkdown,
     onAfterBack: restoreLinkedDocumentEditableKey,
   });
+
+  // Active document's version-diff baseline: the root document's own
+  // previousPlan/versionInfo (set once from /api/plan) when no linked/folder
+  // doc is open, or the active document's own baseline when one is —
+  // captured from its /api/doc response and cached across navigation by
+  // useLinkedDoc. /api/doc only ever populates these for eligible folder
+  // files, so any other linked doc naturally resolves to null/null here,
+  // same as the (now-removed) blanket "linkedDocHook.isActive ? null : ..."
+  // suppression used to force.
+  const activeDiffPreviousPlan = linkedDocHook.isActive ? linkedDocHook.diffPreviousPlan : previousPlan;
+  const activeDiffVersionInfo = linkedDocHook.isActive ? linkedDocHook.diffVersionInfo : versionInfo;
+  const activeDocFilepath = linkedDocHook.isActive ? linkedDocHook.filepath : null;
+
+  // Per-document version fetchers: only needed while a document with its own
+  // diff baseline is active (folder annotate) — usePlanDiff's bare-endpoint
+  // defaults already cover the root document.
+  const activeDocDiffFetchers = useMemo<PlanDiffFetchers | undefined>(() => {
+    if (!activeDocFilepath) return undefined;
+    const filepath = activeDocFilepath;
+    return {
+      fetchVersion: async (version: number) => {
+        const res = await fetch(`/api/plan/version?v=${version}&path=${encodeURIComponent(filepath)}`);
+        if (!res.ok) throw new Error(`Failed to load version ${version}.`);
+        return (await res.json()) as { plan: string; version: number };
+      },
+      fetchVersions: async () => {
+        const res = await fetch(`/api/plan/versions?path=${encodeURIComponent(filepath)}`);
+        if (!res.ok) throw new Error('Failed to load versions.');
+        return (await res.json()) as { project: string; slug: string; versions: VersionEntry[] };
+      },
+    };
+  }, [activeDocFilepath]);
+
+  // Plan diff computation. On the HTML surface the diff is rendered as the real
+  // page with inline highlights (htmlDiffHtml) instead of the markdown block diff,
+  // so suppress the markdown diff path there (markdown is empty for HTML).
+  // `activeDocFilepath` as the docKey resets the diff-base state whenever the
+  // active document changes, so a newly opened document starts from ITS OWN
+  // baseline instead of inheriting whatever the previous document had.
+  const planDiff = usePlanDiff(
+    markdown,
+    isHtmlSurface ? null : activeDiffPreviousPlan,
+    isHtmlSurface ? null : activeDiffVersionInfo,
+    activeDocDiffFetchers,
+    activeDocFilepath,
+  );
+  // Exit diff view when the active document switches to one with no diff
+  // baseline (e.g. a history-less folder file) — otherwise the stale active
+  // flag hides the annotation toolstrip until Escape. Gated off HTML surfaces,
+  // whose diff view is driven by htmlDiffHtml (usePlanDiff is fed nulls there,
+  // so hasPreviousVersion is always false). See usePlanDiffViewAutoExit.
+  const exitPlanDiffView = useCallback(() => setIsPlanDiffActive(false), []);
+  usePlanDiffViewAutoExit(
+    isPlanDiffActive && !isHtmlSurface,
+    planDiff.hasPreviousVersion,
+    exitPlanDiffView,
+  );
+  const warnFinishEditingFirst = useCallback((target: 'versions' | 'diff') => {
+    toast('Finish editing first', {
+      description: target === 'versions'
+        ? 'Use "Done editing" before changing the comparison version.'
+        : 'Use "Done editing" before opening the version diff.',
+    });
+  }, []);
+  const handleSelectBaseVersion = useCallback((version: number) => {
+    if (isEditingMarkdown) {
+      warnFinishEditingFirst('versions');
+      return Promise.resolve();
+    }
+    return planDiff.selectBaseVersion(version);
+  }, [isEditingMarkdown, planDiff.selectBaseVersion, warnFinishEditingFirst]);
+  const handleActivatePlanDiff = useCallback(() => {
+    if (isEditingMarkdown) {
+      warnFinishEditingFirst('diff');
+      return;
+    }
+    setIsPlanDiffActive(true);
+  }, [isEditingMarkdown, warnFinishEditingFirst]);
 
   // Keep the early parse-path mirror in sync with the active linked doc so
   // the blocks/frontmatter memos (declared before this hook) parse with the
@@ -875,7 +934,7 @@ const App: React.FC = () => {
     if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return false;
     if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
         showSourceFileEditWarning ||
-        showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return false;
+        showExitWarning || showApproveWithNotesConfirmation || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return false;
     if (submitted || isSubmitting || isExiting || isEditingMarkdown) return false;
 
     const target = event.target as HTMLElement | null;
@@ -891,6 +950,7 @@ const App: React.FC = () => {
     showClaudeCodeWarning,
     showSourceFileEditWarning,
     showExitWarning,
+    showApproveWithNotesConfirmation,
     showAgentWarning,
     showPermissionModeSetup,
     pendingPasteImage,
@@ -1000,8 +1060,8 @@ const App: React.FC = () => {
   const buildMessageAnnotationEntries = React.useCallback((): MessageAnnotationEntry[] => {
     if (annotateSource !== 'message' || recentMessages.length === 0) return [];
     // Must be a PURE read: this runs on the render path via
-    // currentFeedbackPayload (useMemo) -> getCurrentFeedbackPayload ->
-    // buildFullAnnotationsOutput. saveCurrentMessageState() writes React state
+    // currentFeedbackPayload (useMemo) -> getCurrentFeedbackPayload.
+    // saveCurrentMessageState() writes React state
     // (setCachedMessageAnnotationCounts), which during render is an infinite
     // re-render loop in multi-message mode (#949). getMessageStatesWithCurrent
     // returns the same merged data without the setState side effect; the cache
@@ -1309,17 +1369,6 @@ const App: React.FC = () => {
       editorAnnotations.length +
       linkedDocHook.docAnnotationCount +
       globalAttachments.length;
-
-  const buildFullAnnotationsOutput = React.useCallback((): string => {
-    if (messageMultiSelectMode) {
-      let output = exportMessageAnnotations(buildMessageAnnotationEntries());
-      if (editorAnnotations.length > 0) {
-        output += `\n\n${exportEditorAnnotations(editorAnnotations)}`;
-      }
-      return output;
-    }
-    return '';
-  }, [messageMultiSelectMode, buildMessageAnnotationEntries, editorAnnotations]);
 
   const annotationsOutput = useMemo(() => {
     const docAnnotations = linkedDocHook.getDocAnnotations();
@@ -2062,20 +2111,50 @@ const App: React.FC = () => {
     );
   }, [savedFileChanges]);
 
-  // Prepends the Direct Edits section to annotation feedback. When edits exist
-  // but there are no annotations, the "no feedback" sentinel is replaced rather
-  // than appended to.
-  const composeFeedback = useCallback((annotationsText: string, checkedSavedFileChanges = savedFileChanges): string => {
-    return composeFeedbackWithEditSections(
-      annotationsText,
-      buildEditsSection(),
-      buildSavedChangesSection(checkedSavedFileChanges),
-    );
-  }, [buildEditsSection, buildSavedChangesSection]);
-
   const getCurrentFeedbackPayload = useCallback((checkedSavedFileChanges = savedFileChanges): string => {
-    return composeFeedback(messageMultiSelectMode ? buildFullAnnotationsOutput() : annotationsOutput, checkedSavedFileChanges);
-  }, [annotationsOutput, buildFullAnnotationsOutput, composeFeedback, messageMultiSelectMode, savedFileChanges]);
+    const linkedDocuments = linkedDocHook.getDocAnnotations();
+    const activeConverted = linkedDocHook.isActive
+      ? (linkedDocuments.get(linkedDocHook.filepath ?? '')?.isConverted ?? false)
+      : sourceConverted;
+    return buildCompleteAnnotateFeedback({
+      blocks,
+      annotations: allAnnotations,
+      globalAttachments,
+      linkedDocuments,
+      editorAnnotations,
+      codeAnnotations,
+      title: annotateSource === 'message'
+        ? 'Message Feedback'
+        : annotateSource === 'folder'
+          ? 'Folder Feedback'
+          : annotateSource === 'file'
+            ? 'File Feedback'
+            : 'Plan Feedback',
+      subject: annotateSource ?? 'plan',
+      sourceConverted: activeConverted,
+      directEditsSection: buildEditsSection(),
+      savedFileChangesSection: buildSavedChangesSection(checkedSavedFileChanges),
+      ...(messageMultiSelectMode
+        ? { messageEntries: buildMessageAnnotationEntries() }
+        : {}),
+    });
+  }, [
+    allAnnotations,
+    annotateSource,
+    blocks,
+    buildEditsSection,
+    buildMessageAnnotationEntries,
+    buildSavedChangesSection,
+    codeAnnotations,
+    editorAnnotations,
+    globalAttachments,
+    linkedDocHook.filepath,
+    linkedDocHook.getDocAnnotations,
+    linkedDocHook.isActive,
+    messageMultiSelectMode,
+    savedFileChanges,
+    sourceConverted,
+  ]);
 
   const withDraftGeneration = useCallback((path: string): string => {
     const separator = path.includes('?') ? '&' : '?';
@@ -2179,20 +2258,17 @@ const App: React.FC = () => {
     reconcileOpenSourceDocumentsRef.current = reconcileOpenSourceDocuments;
   }, [reconcileOpenSourceDocuments]);
 
-  const sourceWatchDirsKey = useMemo(() => {
-    const dirs = new Set<string>();
-    for (const doc of openSourceDocuments) dirs.add(dirnameBrowserPath(doc.sourceSave.path));
-    return [...dirs].sort().join('\n');
-  }, [openSourceDocuments]);
+  const sourceWatchSubscription = useMemo(
+    () => buildSourceWatchSubscription(openSourceDocuments.map((doc) => doc.sourceSave.path)),
+    [openSourceDocuments],
+  );
 
   useEffect(() => {
-    if (!sourceWatchDirsKey || typeof EventSource === 'undefined') return;
+    if (!sourceWatchSubscription.key || typeof EventSource === 'undefined') return;
 
-    const dirs = sourceWatchDirsKey.split('\n').filter(Boolean);
+    const dirs = sourceWatchSubscription.dirs;
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
-    const params = new URLSearchParams();
-    for (const dir of dirs) params.append('dirPath', dir);
-    const source = new EventSource(`/api/reference/files/stream?${params.toString()}`);
+    const source = new EventSource(`/api/reference/files/stream?${sourceWatchSubscription.query}`);
 
     const schedule = (dir?: string) => {
       const key = dir ?? '*';
@@ -2223,7 +2299,7 @@ const App: React.FC = () => {
       for (const timer of timers.values()) clearTimeout(timer);
       source.close();
     };
-  }, [sourceWatchDirsKey]);
+  }, [sourceWatchSubscription.key]);
 
   const handleTaterModeChange = useCallback((enabled: boolean) => {
     setTaterMode(enabled);
@@ -2254,7 +2330,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Session-level force-markdown preference (--markdown); threaded into folder/linked
@@ -2298,6 +2374,7 @@ const App: React.FC = () => {
         if (data.mode === 'annotate' || data.mode === 'annotate-last' || data.mode === 'annotate-folder') {
           setAnnotateMode(true);
           setGate(data.gate ?? false);
+          setApprovalNotesSupported(data.approvalNotesSupported ?? false);
         }
         if (data.mode === 'annotate-folder') {
           sidebar.open('files');
@@ -2651,6 +2728,11 @@ const App: React.FC = () => {
   const hasFeedbackToSend =
     hasFeedbackContent &&
     !isCurrentFeedbackDeliveredToAgent;
+  const annotateApprovalPolicy = getAnnotateApprovalPolicy({
+    gate,
+    approvalNotesSupported,
+    hasFeedback: hasFeedbackToSend,
+  });
 
   // API mode handlers
   const handleApprove = async () => {
@@ -2776,6 +2858,22 @@ const App: React.FC = () => {
 
   // Annotate mode handler — sends feedback to the running terminal agent when
   // available, otherwise through the original server feedback channel.
+  // Which message(s) a submission is about. Send Feedback and Approve with
+  // Notes must resolve this identically — otherwise notes delivered on the
+  // approve path anchor to the last message instead of the picked one.
+  const getFeedbackMessageScope = (): {
+    selectedMessageId?: string;
+    feedbackScope?: 'messages';
+  } => {
+    const scopedSelectedMessageId = messageMultiSelectMode
+      ? annotatedMessageIds.length === 1 ? annotatedMessageIds[0] : undefined
+      : selectedMessageId ?? undefined;
+    return {
+      ...(scopedSelectedMessageId ? { selectedMessageId: scopedSelectedMessageId } : {}),
+      ...(messageMultiSelectMode && annotatedMessageIds.length > 1 ? { feedbackScope: 'messages' as const } : {}),
+    };
+  };
+
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
     try {
@@ -2810,9 +2908,6 @@ const App: React.FC = () => {
         toast.error('Agent terminal is not ready. Sending through the original session.');
       }
 
-      const scopedSelectedMessageId = messageMultiSelectMode
-        ? annotatedMessageIds.length === 1 ? annotatedMessageIds[0] : undefined
-        : selectedMessageId ?? undefined;
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2821,8 +2916,7 @@ const App: React.FC = () => {
           feedback,
           annotations: allAnnotations,
           codeAnnotations,
-          ...(scopedSelectedMessageId ? { selectedMessageId: scopedSelectedMessageId } : {}),
-          ...(messageMultiSelectMode && annotatedMessageIds.length > 1 ? { feedbackScope: 'messages' } : {}),
+          ...getFeedbackMessageScope(),
         }),
       });
       if (!res.ok) throw new Error('Failed to send feedback');
@@ -2834,15 +2928,53 @@ const App: React.FC = () => {
     }
   };
 
-  // Annotate gate-mode handler — approves the artifact without feedback
+  // Annotate gate-mode handler — capable transports preserve complete feedback.
   const handleAnnotateApprove = async () => {
     setIsSubmitting(true);
     try {
-      await fetch(withDraftGeneration('/api/approve'), { method: 'POST' });
+      snapshotActiveEditableDocument();
+      const checkedSavedFileChanges = await validateSavedFileChangesBeforeSubmit();
+      if (checkedSavedFileChanges === null) {
+        setIsSubmitting(false);
+        return;
+      }
+      // hasFeedbackToSend (not hasFeedbackContent) so notes already delivered
+      // via the agent terminal are not re-sent on approve.
+      const feedback = hasFeedbackToSend
+        ? getCurrentFeedbackPayload(checkedSavedFileChanges)
+        : '';
+      const res = await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildAnnotateApprovalBody({
+          supported: approvalNotesSupported,
+          draftGeneration: getDraftGeneration(),
+          feedback,
+          annotations: allAnnotations,
+          codeAnnotations,
+          ...getFeedbackMessageScope(),
+        })),
+      });
+      if (!res.ok) throw new Error('Failed to approve');
+      dismissDraft();
       setSubmitted('approved');
     } catch {
       setIsSubmitting(false);
+      scheduleDraftSaveAfterSubmitFailure();
     }
+  };
+
+  const requestAnnotateApprove = () => {
+    if (hasFeedbackToSend && !approvalNotesSupported) {
+      setExitWarningAction('approve');
+      setShowExitWarning(true);
+      return;
+    }
+    if (annotateApprovalPolicy.confirmation) {
+      setShowApproveWithNotesConfirmation(true);
+      return;
+    }
+    handleAnnotateApprove();
   };
 
   // Exit annotation session without sending feedback
@@ -2924,7 +3056,7 @@ const App: React.FC = () => {
       // Don't intercept if any modal is open
       if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
           showSourceFileEditWarning ||
-          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showApproveWithNotesConfirmation || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted, submitting, or exiting
       if (submitted || isSubmitting || isExiting || goalSetupAction.isSubmitting) return;
@@ -2953,12 +3085,13 @@ const App: React.FC = () => {
 
       e.preventDefault();
 
-      // Annotate mode: gate-enabled + no annotations → approve (empty stdout).
-      // Otherwise: send feedback.
+      // Annotate mode: gate-enabled + no annotations → approve. With feedback
+      // present, Mod+Enter always means Send Feedback — Approve-with-Notes is
+      // reachable only via the header button and its confirmation dialog.
       if (annotateMode) {
         if (gate && !hasFeedbackToSend) {
-          if (maybeConfirmUnsavedSourceFileEdits('approve', () => handleAnnotateApprove())) return;
-          handleAnnotateApprove();
+          if (maybeConfirmUnsavedSourceFileEdits('approve', requestAnnotateApprove)) return;
+          requestAnnotateApprove();
           return;
         }
         if (maybeConfirmUnsavedSourceFileEdits('send-feedback', () => handleAnnotateFeedback())) return;
@@ -2993,10 +3126,10 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showAgentWarning,
+    showExport, showImport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showApproveWithNotesConfirmation, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isExiting, goalSetupAction.isSubmitting, isApiMode, isEditingMarkdown, linkedDocHook.isActive, annotations.length, codeAnnotations.length, externalAnnotations.length, annotateMode,
-    gate, hasFeedbackToSend, goalSetupMode, goalSetupAction.canSubmit, isAgentTerminalReady,
+    gate, approvalNotesSupported, hasFeedbackToSend, goalSetupMode, goalSetupAction.canSubmit, isAgentTerminalReady,
     annotateSource, origin, getAgentWarning,
     maybeConfirmUnsavedSourceFileEdits,
   ]);
@@ -3657,7 +3790,7 @@ const App: React.FC = () => {
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
           showSourceFileEditWarning ||
-          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showApproveWithNotesConfirmation || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       if (submitted || !isApiMode) return;
 
@@ -3691,7 +3824,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleSaveShortcut);
     return () => window.removeEventListener('keydown', handleSaveShortcut);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showAgentWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showApproveWithNotesConfirmation, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isApiMode, isEditingMarkdown, handleSaveEditedSourceFile, displayedMarkdown, annotationsOutput,
   ]);
@@ -3706,7 +3839,7 @@ const App: React.FC = () => {
 
       if (showExport || showFeedbackPrompt || showClaudeCodeWarning ||
           showSourceFileEditWarning ||
-          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showApproveWithNotesConfirmation || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       if (submitted) return;
 
@@ -3717,7 +3850,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handlePrintShortcut);
     return () => window.removeEventListener('keydown', handlePrintShortcut);
   }, [
-    showExport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showAgentWarning,
+    showExport, showFeedbackPrompt, showClaudeCodeWarning, showSourceFileEditWarning, showExitWarning, showApproveWithNotesConfirmation, showAgentWarning,
     showPermissionModeSetup, pendingPasteImage, submitted,
   ]);
 
@@ -3785,12 +3918,7 @@ const App: React.FC = () => {
     const approve = () => {
       const h = headerHandlersRef.current;
       if (annotateMode) {
-        if (hasFeedbackToSend) {
-          setExitWarningAction('approve');
-          setShowExitWarning(true);
-          return;
-        }
-        h.handleAnnotateApprove();
+        requestAnnotateApprove();
         return;
       }
       if (origin === 'claude-code' && hasFeedbackToSend) {
@@ -3809,7 +3937,7 @@ const App: React.FC = () => {
     };
     if (maybeConfirmUnsavedSourceFileEdits('approve', approve)) return;
     approve();
-  }, [annotateMode, hasFeedbackToSend, maybeConfirmUnsavedSourceFileEdits, origin]);
+  }, [annotateMode, maybeConfirmUnsavedSourceFileEdits, origin, requestAnnotateApprove]);
 
   const handleHeaderAnnotateFeedback = useCallback(() => {
     const sendFeedback = () => headerHandlersRef.current.handleAnnotateFeedback();
@@ -3818,10 +3946,9 @@ const App: React.FC = () => {
   }, [maybeConfirmUnsavedSourceFileEdits]);
 
   const handleHeaderAnnotateApprove = useCallback(() => {
-    const approve = () => headerHandlersRef.current.handleAnnotateApprove();
-    if (maybeConfirmUnsavedSourceFileEdits('approve', approve)) return;
-    approve();
-  }, [maybeConfirmUnsavedSourceFileEdits]);
+    if (maybeConfirmUnsavedSourceFileEdits('approve', requestAnnotateApprove)) return;
+    requestAnnotateApprove();
+  }, [maybeConfirmUnsavedSourceFileEdits, requestAnnotateApprove]);
   const handleHeaderDownloadAnnotations = useCallback(() => headerHandlersRef.current.handleDownloadAnnotations(), []);
   const handleHeaderCopyAgentInstructions = useCallback(() => headerHandlersRef.current.handleCopyAgentInstructions(), []);
   const handleHeaderCopyShareLink = useCallback(() => headerHandlersRef.current.handleCopyShareLink(), []);
@@ -3911,6 +4038,8 @@ const App: React.FC = () => {
           agentName={agentName}
           availableAgents={availableAgents}
           showAnnotationsWarning={hasFeedbackToSend}
+          annotateApproveLabel={annotateApprovalPolicy.label}
+          annotateApproveTitle={annotateApprovalPolicy.title}
           callbackConfig={callbackConfig}
           taterMode={taterMode}
           mobileSettingsOpen={mobileSettingsOpen}
@@ -4051,7 +4180,7 @@ const App: React.FC = () => {
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
               hasDiff={planDiff.hasPreviousVersion}
-              showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
+              showVersionsTab={!isHtmlSurface && activeDiffVersionInfo !== null && activeDiffVersionInfo.totalVersions > 1}
               showFilesTab={showFilesTab && !archive.archiveMode}
               showMessagesTab={annotateSource === 'message' && recentMessages.length > 1}
               showAgentTerminalTab={showAgentTerminalControls}
@@ -4111,8 +4240,8 @@ const App: React.FC = () => {
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
                 onFilesRetryVaultDir={(vaultPath) => fileBrowser.addVaultDir(vaultPath)}
                 hasFileAnnotations={hasFileAnnotations}
-                showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
-                versionInfo={versionInfo}
+                showVersionsTab={!isHtmlSurface && activeDiffVersionInfo !== null && activeDiffVersionInfo.totalVersions > 1}
+                versionInfo={activeDiffVersionInfo}
                 versions={planDiff.versions}
                 selectedBaseVersion={planDiff.diffBaseVersion}
                 onSelectBaseVersion={handleSelectBaseVersion}
@@ -4183,6 +4312,8 @@ const App: React.FC = () => {
                   isPlanDiffActive={isPlanDiffActive}
                   hasPreviousVersion={planDiff.hasPreviousVersion}
                   onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
+                  planDiffBaselineLabel={annotateMode ? 'since last review' : undefined}
+                  planDiffBaselineTooltip={annotateMode ? 'Changes since you last reviewed this file' : undefined}
                   archiveInfo={archive.currentInfo}
                   maxWidth={annotateReaderMaxWidth}
                   remountToken={viewerContentKey}
@@ -4421,10 +4552,12 @@ const App: React.FC = () => {
                     onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                     repoInfo={repoInfo}
                     stickyActions={uiPrefs.stickyActionsEnabled}
-                    planDiffStats={linkedDocHook.isActive ? null : planDiff.diffStats}
+                    planDiffStats={planDiff.diffStats}
                     isPlanDiffActive={isPlanDiffActive}
                     onPlanDiffToggle={() => setIsPlanDiffActive(!isPlanDiffActive)}
-                    hasPreviousVersion={!linkedDocHook.isActive && planDiff.hasPreviousVersion}
+                    hasPreviousVersion={planDiff.hasPreviousVersion}
+                    planDiffBaselineLabel={annotateMode ? 'since last review' : undefined}
+                    planDiffBaselineTooltip={annotateMode ? 'Changes since you last reviewed this file' : undefined}
                     showDemoBadge={!isApiMode && !isLoadingShared && !isSharedSession}
                     maxWidth={annotateReaderMaxWidth}
                     onOpenLinkedDoc={handleOpenLinkedDoc}
@@ -4675,6 +4808,22 @@ const App: React.FC = () => {
             </>
           }
           confirmText="Approve Anyway"
+          cancelText="Cancel"
+          variant="warning"
+          showCancel
+        />
+
+        {/* Capable annotate gates distinguish approval notes from change requests. */}
+        <ConfirmDialog
+          isOpen={showApproveWithNotesConfirmation}
+          onClose={() => setShowApproveWithNotesConfirmation(false)}
+          onConfirm={() => {
+            setShowApproveWithNotesConfirmation(false);
+            handleAnnotateApprove();
+          }}
+          title={annotateApprovalPolicy.confirmation?.title ?? 'Approve with Notes?'}
+          message={annotateApprovalPolicy.confirmation?.message ?? ''}
+          confirmText={annotateApprovalPolicy.confirmation?.confirmText ?? 'Approve with Notes'}
           cancelText="Cancel"
           variant="warning"
           showCancel

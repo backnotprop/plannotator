@@ -589,6 +589,7 @@ export async function startMarkdownAnnotationSession(
 		sourceInfo,
 		sourceConverted,
 		gate,
+		approvalNotesSupported: true,
 		rawHtml,
 		renderHtml,
 		convertHtml,

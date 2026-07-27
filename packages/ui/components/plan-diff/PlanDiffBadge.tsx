@@ -13,6 +13,18 @@ interface PlanDiffBadgeProps {
   isActive: boolean;
   onToggle: () => void;
   hasPreviousVersion: boolean;
+  /**
+   * Optional baseline context for surfaces whose diff baseline is NOT "the
+   * previous plan revision" — annotate/folder sessions pass "since last
+   * review" so the counts read against the right baseline (not, e.g., the
+   * git uncommitted-vs-HEAD numbers shown elsewhere). Rendered as a short
+   * muted suffix after the counts. Plan review passes nothing and renders
+   * exactly as before.
+   */
+  baselineLabel?: string;
+  /** Tooltip override for the inactive state, paired with `baselineLabel`
+   *  (e.g. "Changes since you last reviewed this file"). */
+  baselineTooltip?: string;
 }
 
 export const PlanDiffBadge: React.FC<PlanDiffBadgeProps> = ({
@@ -20,6 +32,8 @@ export const PlanDiffBadge: React.FC<PlanDiffBadgeProps> = ({
   isActive,
   onToggle,
   hasPreviousVersion,
+  baselineLabel,
+  baselineTooltip,
 }) => {
   if (!hasPreviousVersion || !stats) return null;
 
@@ -34,7 +48,11 @@ export const PlanDiffBadge: React.FC<PlanDiffBadgeProps> = ({
           ? "bg-primary/15"
           : "bg-muted/50 hover:bg-muted"
       }`}
-      title={isActive ? "Exit plan diff view" : "Show what changed from previous version"}
+      title={
+        isActive
+          ? "Exit plan diff view"
+          : baselineTooltip ?? "Show what changed from previous version"
+      }
     >
       <span className={isActive ? "text-success" : "text-success/70"}>
         +{stats.additions}
@@ -43,6 +61,9 @@ export const PlanDiffBadge: React.FC<PlanDiffBadgeProps> = ({
       <span className={isActive ? "text-destructive" : "text-destructive/70"}>
         -{stats.deletions}
       </span>
+      {baselineLabel && (
+        <span className="text-muted-foreground/60 ml-1">{baselineLabel}</span>
+      )}
     </button>
   );
 };

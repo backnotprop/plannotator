@@ -61,6 +61,9 @@ export const DEFAULT_ANNOTATE_MESSAGE_FEEDBACK_PROMPT =
 
 export const DEFAULT_ANNOTATE_APPROVED_PROMPT = "The user approved.";
 
+export const DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT =
+  "# Approved with Notes\n\nThe artifact is approved. The notes below are non-blocking guidance, not a request for another revision.\n\n{{contextBlock}}{{feedback}}\n\nDo not revise or reopen the artifact solely because of these notes unless the user explicitly requests it. Carry the notes into subsequent work where applicable.";
+
 // ─── Core resolver ───────────────────────────────────────────────────────────
 
 type PromptSection = "review" | "plan" | "annotate";
@@ -260,5 +263,27 @@ export function getAnnotateApprovedPrompt(
     runtime,
     config,
     fallback: DEFAULT_ANNOTATE_APPROVED_PROMPT,
+  });
+}
+
+export function getAnnotateApprovedWithNotesPrompt(
+  runtime?: PromptRuntime | null,
+  config?: PlannotatorConfig,
+  vars?: FeedbackVars,
+): string {
+  const template = getConfiguredPrompt({
+    section: "annotate",
+    key: "approvedWithNotes",
+    runtime,
+    config,
+    fallback: DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT,
+  });
+  // Spread vars first so an undefined `context` (e.g. the message-annotation
+  // path, which has no target file) cannot clobber the defaults and leave a
+  // literal `{{context}}` in custom templates.
+  return resolveTemplate(template, {
+    ...vars,
+    context: vars?.context ?? "",
+    contextBlock: vars?.contextBlock ?? (vars?.context ? `${vars.context}\n\n` : ""),
   });
 }

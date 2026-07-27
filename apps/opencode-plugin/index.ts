@@ -25,7 +25,6 @@ import {
   getPlanApprovedPrompt,
   getPlanApprovedWithNotesPrompt,
   getPlanToolName,
-  getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
@@ -61,6 +60,7 @@ import {
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
 import { resolveValidatedTargetAgent } from "./agent-switch";
+import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 
 // Lazy-load HTML at first use instead of embedding in the bundle.
 // The two SPA files are ~20 MB combined — inlining them as string literals
@@ -543,23 +543,18 @@ Do NOT proceed with implementation until your plan is approved.`);
           };
           const result = await embedded.handleEmbeddedCommand(cmd, event, deps);
           if (cmd === "plannotator-last" && result.feedback) {
-            try {
-              await ctx.client.session.prompt({
-                path: { id: input.sessionID },
-                body: {
-                  parts: [{
-                    type: "text",
-                    text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback: result.feedback }),
-                  }],
-                },
-              });
-            } catch {
-              // Session may not be available
-            }
+            await embedded.deliverEmbeddedAnnotateMessagePrompt({
+              client: ctx.client,
+              sessionId: input.sessionID,
+              approved: Boolean(result.approved),
+              feedback: result.feedback,
+            });
           }
           return;
         } catch (error) {
-          if (workflowOptions.runtime === "embedded") throw error;
+          if (!shouldFallbackAfterEmbeddedError(workflowOptions.runtime, error)) {
+            throw error;
+          }
           try {
             void ctx.client.app.log({
               level: "error",

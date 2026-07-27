@@ -68,6 +68,7 @@ import {
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
 import { isRemoteSession } from "./server/network.ts";
+import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -650,30 +651,44 @@ export default function plannotator(pi: ExtensionAPI): void {
 					.waitForDecision()
 					.then(async (result) => {
 						try {
-							if (result.exit) {
+							const outcome = classifyAnnotateOutcome(result);
+							if (outcome.notification === "closed") {
 								safeNotify(ctx, "Annotation session closed.", "info", origin);
 								return;
 							}
-							if (result.approved) {
-								safeNotify(ctx, "Annotation approved.", "info", origin);
-								return;
-							}
-							if (!result.feedback) {
+							if (!outcome.feedback) {
+								if (outcome.notification === "approved") {
+									safeNotify(ctx, "Annotation approved.", "info", origin);
+									return;
+								}
 								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
-							const { getAnnotateFileFeedbackPrompt } = await loadPlannotatorPrompts();
+							const {
+								getAnnotateApprovedWithNotesPrompt,
+								getAnnotateFileFeedbackPrompt,
+							} = await loadPlannotatorPrompts();
+							const context = `${isFolder ? "Folder" : "File"}: ${absolutePath}`;
+							const prompt = outcome.promptKind === "approved-with-notes"
+								? getAnnotateApprovedWithNotesPrompt("pi", loadConfig(), {
+										context,
+										feedback: outcome.feedback,
+									})
+								: getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
+										fileHeader: isFolder ? "Folder" : "File",
+										filePath: absolutePath,
+										feedback: outcome.feedback,
+									});
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								getAnnotateFileFeedbackPrompt("pi", loadConfig(), {
-									fileHeader: isFolder ? "Folder" : "File",
-									filePath: absolutePath,
-									feedback: result.feedback,
-								}),
+								prompt,
 								{ deliverAs: "followUp" },
 								"Plannotator annotation feedback could not be sent",
 								origin,
 							);
+							if (outcome.notification === "approved") {
+								safeNotify(ctx, "Annotation approved.", "info", origin);
+							}
 						} catch (err) {
 							reportBackgroundError(ctx, "Plannotator annotation feedback could not be sent", err, origin);
 						}
@@ -726,15 +741,16 @@ export default function plannotator(pi: ExtensionAPI): void {
 					.waitForDecision()
 					.then(async (result) => {
 						try {
-							if (result.exit) {
+							const outcome = classifyAnnotateOutcome(result);
+							if (outcome.notification === "closed") {
 								safeNotify(ctx, "Annotation session closed.", "info", origin);
 								return;
 							}
-							if (result.approved) {
-								safeNotify(ctx, "Message approved.", "info", origin);
-								return;
-							}
-							if (!result.feedback) {
+							if (!outcome.feedback) {
+								if (outcome.notification === "approved") {
+									safeNotify(ctx, "Message approved.", "info", origin);
+									return;
+								}
 								safeNotify(ctx, "Annotation closed (no feedback).", "info", origin);
 								return;
 							}
@@ -744,18 +760,29 @@ export default function plannotator(pi: ExtensionAPI): void {
 								? findAssistantMessageByEntryId(ctx, result.selectedMessageId) ?? snapshot
 								: snapshot;
 							const feedback = result.feedbackScope !== "messages" && shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
-									? anchorMessageFeedback(result.feedback, target.text)
-									: result.feedback;
-							const { getAnnotateMessageFeedbackPrompt } = await loadPlannotatorPrompts();
+									? anchorMessageFeedback(outcome.feedback, target.text)
+									: outcome.feedback;
+							const {
+								getAnnotateApprovedWithNotesPrompt,
+								getAnnotateMessageFeedbackPrompt,
+							} = await loadPlannotatorPrompts();
+							const prompt = outcome.promptKind === "approved-with-notes"
+								? getAnnotateApprovedWithNotesPrompt("pi", loadConfig(), {
+										feedback,
+									})
+								: getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
+										feedback,
+									});
 							sendUserMessageWithCurrentSessionFallback(
 								pi,
-								getAnnotateMessageFeedbackPrompt("pi", loadConfig(), {
-									feedback,
-								}),
+								prompt,
 								{ deliverAs: "followUp" },
 								"Plannotator message annotation feedback could not be sent",
 								origin,
 							);
+							if (outcome.notification === "approved") {
+								safeNotify(ctx, "Message approved.", "info", origin);
+							}
 						} catch (err) {
 							reportBackgroundError(ctx, "Plannotator message annotation feedback could not be sent", err, origin);
 						}

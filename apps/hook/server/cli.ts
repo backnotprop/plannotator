@@ -1,5 +1,64 @@
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
+export interface ParsedStrictAnnotateOptions {
+  requireApproval: boolean;
+  resultFile?: string;
+  remainingArgs: string[];
+}
+
+export function parseStrictAnnotateOptions(
+  args: string[],
+): ParsedStrictAnnotateOptions {
+  let requireApproval = false;
+  let resultFile: string | undefined;
+  const remainingArgs: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--require-approval") {
+      if (requireApproval) {
+        throw new Error("--require-approval may only be specified once");
+      }
+      requireApproval = true;
+      continue;
+    }
+    if (arg === "--result-file") {
+      if (resultFile !== undefined) {
+        throw new Error("--result-file may only be specified once");
+      }
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("Missing value for --result-file");
+      }
+      resultFile = value;
+      index += 1;
+      continue;
+    }
+    remainingArgs.push(arg);
+  }
+
+  if (!requireApproval && resultFile === undefined) {
+    return { requireApproval: false, remainingArgs };
+  }
+  if (remainingArgs[0] !== "annotate") {
+    throw new Error(
+      "--require-approval and --result-file are only valid with annotate",
+    );
+  }
+  if (!remainingArgs.includes("--gate") || !remainingArgs.includes("--json")) {
+    throw new Error(
+      "--require-approval and --result-file require --gate --json",
+    );
+  }
+  if (remainingArgs.includes("--hook")) {
+    throw new Error(
+      "--require-approval and --result-file cannot be used with --hook",
+    );
+  }
+
+  return { requireApproval, resultFile, remainingArgs };
+}
+
 /** True when any token is a help flag (`--help` / `-h`). */
 export function hasHelpFlag(args: string[]): boolean {
   return args.some((arg) => HELP_FLAGS.has(arg));
@@ -33,7 +92,7 @@ export function formatTopLevelHelp(): string {
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
     "  plannotator review [--git | --gitbutler] [PR_URL]",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "  plannotator annotate-last [--stdin] [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",
@@ -76,7 +135,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   annotate: [
     "Usage:",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json] [--hook]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
     "",
@@ -86,6 +145,11 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
     "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",
+    "  --require-approval",
+    "                Exit 1 unless the reviewer approves (requires --gate --json;",
+    "                usage/startup errors exit 2)",
+    "  --result-file <path>",
+    "                Atomically publish the stdout JSON (requires --gate --json)",
   ].join("\n"),
   "annotate-last": [
     "Usage:",

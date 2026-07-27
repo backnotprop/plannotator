@@ -5,12 +5,17 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
+  getAnnotateApprovedWithNotesPrompt,
   getAnnotateFileFeedbackPrompt,
   getAnnotateMessageFeedbackPrompt,
   getReviewApprovedPrompt,
   getReviewDeniedSuffix,
 } from "@plannotator/shared/prompts";
 import { resolveTargetAgent, resolveValidatedTargetAgent } from "./agent-switch";
+import {
+  deliverOpenCodePrompt,
+  isOpenCodePromptDeliveryError,
+} from "./prompt-delivery-error";
 
 type LogLevel = "info" | "error";
 
@@ -72,7 +77,7 @@ interface CliSpawnConfig {
   shell: false;
 }
 
-interface CliAnnotateOutcome {
+export interface CliAnnotateOutcome {
   decision?: "approved" | "dismissed" | "annotated";
   feedback?: string;
   selectedMessageId?: string;
@@ -456,6 +461,13 @@ export function buildAnnotateCliArgs(parsed: ParsedAnnotateArgs): string[] {
   return args;
 }
 
+export function canLaunchGatedAnnotate(
+  parsed: Pick<ParsedAnnotateArgs, "gate">,
+  sessionId: string | undefined,
+): boolean {
+  return !parsed.gate || Boolean(sessionId);
+}
+
 export async function runCliPlanReview(input: {
   client: OpenCodeClient;
   planContent: string;
@@ -486,25 +498,25 @@ export async function runCliPlanReview(input: {
   return parseLastJson<OpenCodePlanReviewResult>(result.stdout);
 }
 
-async function injectSessionPrompt(
+export async function injectSessionPrompt(
   client: OpenCodeClient,
   sessionId: string | undefined,
   text: string,
   options?: { agent?: string; noReply?: boolean },
 ): Promise<void> {
   if (!sessionId || !text.trim()) return;
-  try {
-    await client.session?.prompt?.({
+  await deliverOpenCodePrompt({
+    client,
+    prompt: {
       path: { id: sessionId },
       body: {
         ...(options?.agent && { agent: options.agent }),
         ...(options?.noReply && { noReply: true }),
         parts: [{ type: "text", text }],
       },
-    });
-  } catch {
-    // Session may be unavailable or busy.
-  }
+    },
+    failureMessage: "Could not deliver Plannotator feedback to the OpenCode session.",
+  });
 }
 
 export async function getRecentAssistantMessages(
@@ -580,6 +592,35 @@ function getAnnotateFileHeader(filePath: string, cwd?: string): "File" | "Folder
   }
 }
 
+export function buildAnnotatePromptFromBridgeOutcome(
+  outcome: CliAnnotateOutcome,
+  target:
+    | { kind: "file"; fileHeader: "File" | "Folder"; filePath: string }
+    | { kind: "message" },
+): string | null {
+  if (outcome.decision === "dismissed" || !outcome.feedback?.trim()) return null;
+  if (outcome.decision !== "annotated" && outcome.decision !== "approved") return null;
+
+  if (outcome.decision === "approved") {
+    return getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
+      context: target.kind === "file"
+        ? `${target.fileHeader}: ${target.filePath}`
+        : undefined,
+      feedback: outcome.feedback,
+    });
+  }
+
+  return target.kind === "message"
+    ? getAnnotateMessageFeedbackPrompt("opencode", undefined, {
+        feedback: outcome.feedback,
+      })
+    : getAnnotateFileFeedbackPrompt("opencode", undefined, {
+        fileHeader: target.fileHeader,
+        filePath: target.filePath,
+        feedback: outcome.feedback,
+      });
+}
+
 export async function handleCliCommand(input: {
   command: string;
   client: OpenCodeClient;
@@ -630,6 +671,10 @@ export async function handleCliCommand(input: {
         log(input.client, "error", "Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]");
         return;
       }
+      if (!canLaunchGatedAnnotate(parsed, input.sessionId)) {
+        log(input.client, "error", "No active session.");
+        return;
+      }
 
       const result = await runPlannotatorCli({
         client: input.client,
@@ -645,15 +690,16 @@ export async function handleCliCommand(input: {
 
       logCliWarnings(input.client, result.stderr);
       const outcome = parseLastJson<CliAnnotateOutcome>(result.stdout);
-      if (outcome.decision === "annotated" && outcome.feedback) {
+      const prompt = buildAnnotatePromptFromBridgeOutcome(outcome, {
+        kind: "file",
+        fileHeader: getAnnotateFileHeader(parsed.filePath, input.cwd),
+        filePath: parsed.filePath,
+      });
+      if (prompt) {
         await injectSessionPrompt(
           input.client,
           input.sessionId,
-          getAnnotateFileFeedbackPrompt("opencode", undefined, {
-            fileHeader: getAnnotateFileHeader(parsed.filePath, cwd),
-            filePath: parsed.filePath,
-            feedback: outcome.feedback,
-          }),
+          prompt,
         );
       }
       return;
@@ -691,11 +737,14 @@ export async function handleCliCommand(input: {
 
       logCliWarnings(input.client, result.stderr);
       const outcome = parseLastJson<CliAnnotateOutcome>(result.stdout);
-      if (outcome.decision === "annotated" && outcome.feedback) {
+      const prompt = buildAnnotatePromptFromBridgeOutcome(outcome, {
+        kind: "message",
+      });
+      if (prompt) {
         await injectSessionPrompt(
           input.client,
           input.sessionId,
-          getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback: outcome.feedback }),
+          prompt,
         );
       }
       return;
@@ -703,5 +752,6 @@ export async function handleCliCommand(input: {
 
   } catch (error) {
     log(input.client, "error", `[Plannotator] ${error instanceof Error ? error.message : String(error)}`);
+    if (isOpenCodePromptDeliveryError(error)) throw error;
   }
 }
