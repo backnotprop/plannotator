@@ -687,6 +687,7 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
               client: ctx.client,
               targetAgent: result.agentSwitch,
               directory: ctx.directory,
+              delivery: "plan-approval",
             });
             const shouldStartImplementation = targetAgent
               ? shouldStartImplementationForAgent(targetAgent, workflowOptions)

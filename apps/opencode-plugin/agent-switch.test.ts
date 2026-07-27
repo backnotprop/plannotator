@@ -66,6 +66,27 @@ describe("OpenCode agent switch validation", () => {
     });
   });
 
+  test("names plan approval in the warning on the plan path", async () => {
+    const agents = mock(async () => ({ data: [{ name: "plan" }] }));
+    const log = mock(() => undefined);
+    const showToast = mock(() => undefined);
+    const client = {
+      app: { agents, log },
+      tui: { showToast },
+    };
+
+    await expect(resolveValidatedTargetAgent({
+      client,
+      targetAgent: "build",
+      delivery: "plan-approval",
+    })).resolves.toBeUndefined();
+
+    expect(log).toHaveBeenCalledWith({
+      level: "info",
+      message: '[Plannotator] Configured OpenCode agent "build" is not available; approving the plan without switching agents.',
+    });
+  });
+
   test("omits explicit agents when OpenCode agent lookup fails", async () => {
     const agents = mock(async () => {
       throw new Error("agents unavailable");

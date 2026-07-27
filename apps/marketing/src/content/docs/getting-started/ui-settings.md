@@ -38,13 +38,15 @@ On first launch, Plannotator shows a one-time setup dialog for this setting. You
 
 > OpenCode only.
 
-Controls which agent to switch to after plan approval. The dropdown is populated dynamically from your OpenCode configuration.
+Controls which agent to switch to after plan approval or after sending code review feedback. The dropdown is populated dynamically from your OpenCode configuration.
 
 | Option | Behavior |
 |--------|----------|
-| **Build** | Switch to the build agent after approval |
+| **Build** | Switch to the build agent |
 | **Custom** | Enter a custom agent name (shows a warning if the agent isn't found) |
-| **Disabled** (default) | Stay on the current agent after approval |
+| **Disabled** | Stay on the current agent |
+
+Until you pick an option, the default differs by surface: plan approval hands off to the **build** agent, and review feedback stays on the current agent. Once you pick an option it applies to both.
 
 ### Auto-close tab
 

@@ -16,13 +16,32 @@ afterEach(() => {
 });
 
 describe("agent switch settings", () => {
-  test("defaults to no switch/current agent when unset", () => {
+  test("review feedback defaults to no switch/current agent when unset", () => {
     setStorageBackend(memoryStorage());
 
-    const settings = getAgentSwitchSettings();
+    const settings = getAgentSwitchSettings("review");
 
     expect(settings.switchTo).toBe("disabled");
     expect(getEffectiveAgentName(settings)).toBeUndefined();
+  });
+
+  test("plan approval defaults to the build hand-off when unset", () => {
+    setStorageBackend(memoryStorage());
+
+    const settings = getAgentSwitchSettings("plan");
+
+    expect(settings.switchTo).toBe("build");
+    expect(getEffectiveAgentName(settings)).toBe("build");
+    expect(getAgentSwitchSettings().switchTo).toBe("build");
+  });
+
+  test("an explicit choice overrides the surface default everywhere", () => {
+    setStorageBackend(memoryStorage());
+
+    saveAgentSwitchSettings({ switchTo: "disabled" });
+
+    expect(getAgentSwitchSettings("plan").switchTo).toBe("disabled");
+    expect(getAgentSwitchSettings("review").switchTo).toBe("disabled");
   });
 
   test("keeps an explicitly saved target agent", () => {
@@ -30,7 +49,7 @@ describe("agent switch settings", () => {
 
     saveAgentSwitchSettings({ switchTo: "build" });
 
-    const settings = getAgentSwitchSettings();
+    const settings = getAgentSwitchSettings("review");
     expect(settings.switchTo).toBe("build");
     expect(getEffectiveAgentName(settings)).toBe("build");
   });

@@ -12,13 +12,21 @@ interface OpenCodeClientLike {
   };
 }
 
+/** What the omitted agent switch would have applied to, used in the warning copy. */
+export type AgentSwitchDelivery = "feedback" | "plan-approval";
+
 export function resolveTargetAgent(agentSwitch?: string): string | undefined {
   const trimmed = agentSwitch?.trim();
   return trimmed && trimmed !== "disabled" ? trimmed : undefined;
 }
 
-function warnAgentUnavailable(client: OpenCodeClientLike, targetAgent: string): void {
-  const message = `Configured OpenCode agent "${targetAgent}" is not available; sending feedback without switching agents.`;
+function warnAgentUnavailable(
+  client: OpenCodeClientLike,
+  targetAgent: string,
+  delivery: AgentSwitchDelivery,
+): void {
+  const action = delivery === "plan-approval" ? "approving the plan" : "sending feedback";
+  const message = `Configured OpenCode agent "${targetAgent}" is not available; ${action} without switching agents.`;
 
   try {
     void client.app?.log?.({ level: "info", message: `[Plannotator] ${message}` });
@@ -42,6 +50,7 @@ export async function resolveValidatedTargetAgent(input: {
   client: OpenCodeClientLike;
   targetAgent?: string;
   directory?: string;
+  delivery?: AgentSwitchDelivery;
 }): Promise<string | undefined> {
   const targetAgent = resolveTargetAgent(input.targetAgent);
   if (!targetAgent) return undefined;
@@ -59,6 +68,6 @@ export async function resolveValidatedTargetAgent(input: {
     // send a stale/invalid target that OpenCode may reject.
   }
 
-  warnAgentUnavailable(input.client, targetAgent);
+  warnAgentUnavailable(input.client, targetAgent, input.delivery ?? "feedback");
   return undefined;
 }

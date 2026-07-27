@@ -145,7 +145,7 @@ This makes it possible to approve a plan while leaving minor suggestions that th
 
 ## Agent switching
 
-OpenCode supports multiple agents. By default, approved plans stay on your current agent (no switch). To hand off approved plans to another agent, configure [Agent switching settings](/docs/getting-started/ui-settings/#agent-switching):
+OpenCode supports multiple agents. By default, approved plans are handed off to the build agent, while code review feedback stays on your current agent. To change either, configure [Agent switching settings](/docs/getting-started/ui-settings/#agent-switching):
 
 1. Open **Settings** (gear icon)
 2. Under "Agent Switch", select from available agents or enter a custom agent name
