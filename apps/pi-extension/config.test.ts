@@ -80,6 +80,23 @@ describe("plannotator config", () => {
     expect(resolveExecutionMode(loaded.config)).toBe("automatic");
   });
 
+  test("warns and falls back to automatic for an unrecognized executionMode", () => {
+    const homeDir = makeTempDir("plannotator-config-home-execution-bad-");
+    const cwdDir = makeTempDir("plannotator-config-cwd-execution-bad-");
+    process.env.HOME = homeDir;
+
+    const projectConfigDir = join(cwdDir, ".pi");
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, "plannotator.json"), JSON.stringify({ executionMode: "handoff" }), "utf-8");
+
+    const loaded = loadPlannotatorConfig(cwdDir);
+
+    expect(loaded.warnings).toHaveLength(1);
+    expect(loaded.warnings[0]).toContain('Ignoring unknown executionMode "handoff"');
+    expect(loaded.warnings[0]).toContain("Falling back to automatic");
+    expect(resolveExecutionMode(loaded.config)).toBe("automatic");
+  });
+
   test("allows a project config to clear an inherited phase with null", () => {
     const homeDir = makeTempDir("plannotator-config-home-null-");
     const cwdDir = makeTempDir("plannotator-config-cwd-null-");

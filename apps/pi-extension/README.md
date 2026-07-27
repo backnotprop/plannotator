@@ -216,15 +216,21 @@ After approval, Plannotator returns to idle and emits `plannotator:plan-approved
 }
 ```
 
+`planFilePath` is the path exactly as it was submitted, so it is normally relative to `cwd`. Resolve it against `cwd` before reading the file rather than against the companion extension's own working directory.
+
 Companion extensions can subscribe through the shared event bus:
 
 ```ts
 import { PLANNOTATOR_PLAN_APPROVED_CHANNEL } from "@plannotator/pi-extension/plannotator-events";
+import { resolve } from "node:path";
 
 pi.events.on(PLANNOTATOR_PLAN_APPROVED_CHANNEL, (event) => {
+  const planPath = resolve(event.cwd, event.planFilePath);
   // Compile and dispatch the approved plan with an external orchestrator.
 });
 ```
+
+As with `plannotator:request`, the channel is a plain string, so a companion can listen with `pi.events.on("plannotator:plan-approved", ...)` and never import Plannotator internals. The constant and the `PlannotatorPlanApprovedEvent` type are exported purely as a typing convenience.
 
 Plannotator does not send `Continue with the approved plan`, enter its executing phase, or track checklist progress in this mode. The companion extension owns execution after the handoff.
 

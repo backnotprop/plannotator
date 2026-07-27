@@ -177,18 +177,25 @@ function mergeConfig(base: PlannotatorConfig, override: PlannotatorConfig): Plan
   };
 }
 
-function loadConfigSource(path: string): { config: PlannotatorConfig; warning?: string } {
+function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: string[] } {
   const parsed = readJsonFile(path);
   if (parsed.error) {
-    return { config: {}, warning: parsed.error };
+    return { config: {}, warnings: [parsed.error] };
   }
 
   const raw = parsed.data;
-  if (!isRecord(raw)) return { config: {} };
+  if (!isRecord(raw)) return { config: {}, warnings: [] };
 
+  const warnings: string[] = [];
   const config: PlannotatorConfig = {};
   if (raw.executionMode === null || raw.executionMode === "automatic" || raw.executionMode === "external") {
     config.executionMode = raw.executionMode;
+  } else if (raw.executionMode !== undefined) {
+    // Unrecognized values fall through to the inherited value (ultimately
+    // "automatic"), so say so instead of silently ignoring the key.
+    warnings.push(
+      `Ignoring unknown executionMode ${JSON.stringify(raw.executionMode)} in ${path}: expected "automatic" or "external". Falling back to automatic.`,
+    );
   }
   if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults);
 
@@ -201,22 +208,22 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warning?: 
     if (Object.keys(phases).length > 0) config.phases = phases;
   }
 
-  return { config };
+  return { config, warnings };
 }
 
 export function loadPlannotatorConfig(cwd: string): LoadedPlannotatorConfig {
   const warnings: string[] = [];
 
   const internal = loadConfigSource(INTERNAL_CONFIG_PATH);
-  if (internal.warning) warnings.push(internal.warning);
+  warnings.push(...internal.warnings);
 
   const globalPath = join(getAgentConfigDir(), "plannotator.json");
   const globalConfig = loadConfigSource(globalPath);
-  if (globalConfig.warning) warnings.push(globalConfig.warning);
+  warnings.push(...globalConfig.warnings);
 
   const projectPath = join(cwd, ".pi", "plannotator.json");
   const projectConfig = loadConfigSource(projectPath);
-  if (projectConfig.warning) warnings.push(projectConfig.warning);
+  warnings.push(...projectConfig.warnings);
 
   const merged = mergeConfig(mergeConfig(internal.config, globalConfig.config), projectConfig.config);
   return { config: merged, warnings };
