@@ -17,11 +17,29 @@ export interface AnnotateOutcome {
 /**
  * Exit code for gate errors, following the grep convention:
  * `0` = approved, `1` = negative human outcome (annotated/dismissed under
- * `--require-approval`), `2` = the gate itself was misconfigured or could not
- * start/deliver a decision (usage, startup, validation, and publication
- * failures). A gate error never publishes a decision record.
+ * `--require-approval`), `2` = the gate itself was misconfigured, could not
+ * start, or could not publish its result file (usage, startup, validation, and
+ * publication failures). Exit `2` never reports a reviewer outcome; when the
+ * decision itself completed, the stdout record is still emitted before exiting.
  */
 export const STRICT_GATE_ERROR_EXIT_CODE = 2;
+
+/**
+ * Exit code for an annotate startup failure (missing path, unreachable URL,
+ * empty folder, ambiguous name, missing file, oversized file).
+ *
+ * Legacy invocations keep exiting `1`. Under a strict flag, `1` is reserved for
+ * "the reviewer did not approve", so a startup failure must exit with the gate
+ * error code instead — otherwise automation reads a typo'd path as a rejection.
+ */
+export function annotateStartupFailureExitCode(strict: {
+  requireApproval: boolean;
+  resultFile?: string;
+}): number {
+  return strict.requireApproval || strict.resultFile
+    ? STRICT_GATE_ERROR_EXIT_CODE
+    : 1;
+}
 
 export function serializeStrictAnnotateResult(
   result: AnnotateOutcome,

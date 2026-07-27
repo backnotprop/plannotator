@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { completeAnnotateCommand } from "./annotate-command";
 import type { AnnotateOutcome } from "./strict-annotate-result";
 
@@ -78,8 +81,8 @@ describe("completeAnnotateCommand", () => {
       "decision",
       "settle",
       "stop",
-      "result",
       "stdout",
+      "result",
       "exit:0",
     ]);
   });
@@ -99,8 +102,8 @@ describe("completeAnnotateCommand", () => {
     ]);
     expect(annotated.resultBytes).toEqual(annotated.stdout);
     expect(annotated.events.slice(-3)).toEqual([
-      "result",
       "stdout",
+      "result",
       "exit:1",
     ]);
     expect(dismissed.stdout).toEqual([
@@ -108,8 +111,8 @@ describe("completeAnnotateCommand", () => {
     ]);
     expect(dismissed.resultBytes).toEqual(dismissed.stdout);
     expect(dismissed.events.slice(-3)).toEqual([
-      "result",
       "stdout",
+      "result",
       "exit:1",
     ]);
   });
@@ -135,8 +138,8 @@ describe("completeAnnotateCommand", () => {
     );
 
     expect(resultFileOnly.events.slice(-3)).toEqual([
-      "result",
       "stdout",
+      "result",
       "exit:0",
     ]);
     expect(resultFileOnly.resultBytes).toEqual(resultFileOnly.stdout);
@@ -144,9 +147,10 @@ describe("completeAnnotateCommand", () => {
     expect(approvalOnly.resultBytes).toEqual([]);
   });
 
-  test("exits 2 without emitting stdout when result publication fails", async () => {
+  test("emits the decision on stdout before exiting 2 on publication failure", async () => {
     const events: string[] = [];
     const errors: string[] = [];
+    const stdout: string[] = [];
 
     await completeAnnotateCommand({
       waitForDecision: async () => ({
@@ -161,8 +165,9 @@ describe("completeAnnotateCommand", () => {
         events.push("result");
         throw new Error("destination appeared");
       },
-      writeStdout: async () => {
+      writeStdout: async (bytes) => {
         events.push("stdout");
+        stdout.push(bytes);
       },
       emitLegacyOutcome: () => {
         events.push("legacy");
@@ -175,10 +180,46 @@ describe("completeAnnotateCommand", () => {
       },
     });
 
-    // No decision record was delivered, so this is an environment error
-    // (exit 2), never a reviewer outcome — and never approval.
-    expect(events).toEqual(["result", "exit:2"]);
+    // The reviewer's draft is already deleted by the time publication runs, so
+    // the completed decision must reach stdout before the failure aborts the
+    // run. Exit 2 still means "the result file was not published" — an
+    // environment error, never a reviewer outcome and never approval.
+    expect(events).toEqual(["stdout", "result", "exit:2"]);
+    expect(stdout).toEqual(['{"decision":"annotated","feedback":"revise"}\n']);
     expect(errors).toEqual(["destination appeared"]);
+  });
+
+  test("exits 2 without publishing a result file when stdout fails first", async () => {
+    const events: string[] = [];
+    const errors: string[] = [];
+
+    await completeAnnotateCommand({
+      waitForDecision: async () => ({ approved: true, feedback: "" }),
+      settleAfterDecision: async () => {},
+      stopServer: () => {},
+      requireApproval: true,
+      resultFile: "/unreachable.json",
+      writeResultFile: async () => {
+        events.push("result");
+      },
+      writeStdout: async () => {
+        events.push("stdout");
+        throw new Error("stdout closed");
+      },
+      emitLegacyOutcome: () => {
+        events.push("legacy");
+      },
+      exit: (code) => {
+        events.push(`exit:${code}`);
+      },
+      logError: (message) => {
+        errors.push(message);
+      },
+    });
+
+    // Only a stdout failure leaves no decision record anywhere.
+    expect(events).toEqual(["stdout", "exit:2"]);
+    expect(errors).toEqual(["stdout closed"]);
   });
 
   test("exits 2 when the stdout record cannot be written", async () => {
@@ -213,5 +254,51 @@ describe("completeAnnotateCommand", () => {
 
     expect(events).toEqual(["stdout", "exit:2"]);
     expect(errors).toEqual(["stdout closed"]);
+  });
+
+  test("emits stdout and exits 2 when the real publisher cannot write the destination", async () => {
+    // Real publisher, real filesystem: a destination whose parent directory does
+    // not exist is the cheap stand-in for the filesystems where publication
+    // fails outright (no hard links on exFAT/FAT32/SMB, read-only mounts).
+    const directory = await mkdtemp(join(tmpdir(), "plannotator-publish-"));
+    const stdout: string[] = [];
+    const errors: string[] = [];
+    const codes: number[] = [];
+
+    try {
+      await completeAnnotateCommand({
+        waitForDecision: async () => ({
+          approved: false,
+          exit: false,
+          feedback: "needs another pass",
+        }),
+        settleAfterDecision: async () => {},
+        stopServer: () => {},
+        requireApproval: true,
+        resultFile: join(directory, "missing", "result.json"),
+        writeStdout: async (bytes) => {
+          stdout.push(bytes);
+        },
+        emitLegacyOutcome: () => {
+          throw new Error("legacy output must not run in strict mode");
+        },
+        exit: (code) => {
+          codes.push(code);
+        },
+        logError: (message) => {
+          errors.push(message);
+        },
+      });
+
+      // The decision survives even though nothing was published.
+      expect(stdout).toEqual([
+        '{"decision":"annotated","feedback":"needs another pass"}\n',
+      ]);
+      expect(codes).toEqual([2]);
+      expect(errors).toHaveLength(1);
+      expect(await readdir(directory)).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -146,6 +146,7 @@ import {
 } from "./cli";
 import { completeAnnotateCommand } from "./annotate-command";
 import {
+  annotateStartupFailureExitCode,
   assertResultPathAvailable,
   resolveResultFilePath,
   STRICT_GATE_ERROR_EXIT_CODE,
@@ -899,10 +900,21 @@ if (args[0] === "sessions") {
   // ANNOTATE MODE
   // ============================================
 
+  // Startup failures below fire after flag parsing, so under a strict flag they
+  // must not exit 1 — that code means "the reviewer requested changes".
+  function exitAnnotateStartupFailure(message: string): never {
+    console.error(message);
+    process.exit(
+      annotateStartupFailureExitCode({
+        requireApproval: requireApprovalFlag,
+        resultFile,
+      }),
+    );
+  }
+
   const rawFilePath = args[1];
   if (!rawFilePath) {
-    console.error("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
-    process.exit(1);
+    exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
   }
 
   // Primary resolution strips the `@` reference marker; rawFilePath is
@@ -950,8 +962,7 @@ if (args[0] === "sessions") {
         console.error(`[DEBUG] Fetched via ${result.source} (${markdown.length} chars)`);
       }
     } catch (err) {
-      console.error(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
+      exitAnnotateStartupFailure(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`);
     }
     absolutePath = filePath; // Use URL as the "path" for display
     sourceInfo = filePath;   // Full URL for source attribution
@@ -966,8 +977,7 @@ if (args[0] === "sessions") {
       const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
       // Folder annotation mode (markdown/plain text/config + HTML files)
       if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
-        console.error(`No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}`);
-        process.exit(1);
+        exitAnnotateStartupFailure(`No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}`);
       }
       folderPath = resolvedArg;
       absolutePath = resolvedArg;
@@ -1005,11 +1015,10 @@ if (args[0] === "sessions") {
         }
 
         if (resolved.kind === "ambiguous") {
-          console.error(`Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`);
-          for (const match of resolved.matches) {
-            console.error(`  ${match}`);
-          }
-          process.exit(1);
+          exitAnnotateStartupFailure([
+            `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`,
+            ...resolved.matches.map((match) => `  ${match}`),
+          ].join("\n"));
         }
         if (resolved.kind === "not_found") {
           // Check if file exists but has unsupported type
@@ -1018,21 +1027,19 @@ if (args[0] === "sessions") {
 
           if (fileExists) {
             const ext = path.extname(resolvedPath).toLowerCase();
-            console.error(
+            exitAnnotateStartupFailure(
               `File type not supported: ${ext}\n` +
               `Supported types: ${ANNOTATABLE_EXTENSIONS_HINT}\n` +
               `For code review, use: plannotator review [file]`
             );
           } else {
-            console.error(`File not found: ${resolved.input}`);
+            exitAnnotateStartupFailure(`File not found: ${resolved.input}`);
           }
-          process.exit(1);
         }
 
         absolutePath = resolved.path;
         if (Bun.file(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
-          console.error(`File too large to annotate (max 2MB): ${absolutePath}`);
-          process.exit(1);
+          exitAnnotateStartupFailure(`File too large to annotate (max 2MB): ${absolutePath}`);
         }
         markdown = await Bun.file(absolutePath).text();
         console.error(`Resolved: ${absolutePath}`);
