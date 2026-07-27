@@ -14,6 +14,7 @@ import {
   findAnchorIndex,
   extractLastRenderedMessage,
   extractRecentRenderedMessages,
+  getRecentRenderedMessages,
   resolveActiveBranchIndices,
   findDroidSessionLogsForCwd,
   resolveDroidSessionLogForCwd,
@@ -918,6 +919,74 @@ describe("extractRecentRenderedMessages — after a rewind", () => {
       branchIndices: resolveActiveBranchIndices(entries),
     });
     expect(result.map((m) => m.messageId)).toEqual(["msg_1"]);
+  });
+});
+
+describe("getRecentRenderedMessages — after a /compact", () => {
+  // A compact boundary is written with `parentUuid: null`, so it is a tree
+  // root: the active branch stops there and pre-compaction entries are cut.
+  const compactedLog = () => {
+    const preCompact = linkChain([
+      userPrompt("early question"),
+      assistantText("msg_pre", "Pre-compaction answer"),
+    ]);
+    const boundary = JSON.stringify({
+      type: "system",
+      subtype: "compact_boundary",
+      uuid: "u-compact",
+      parentUuid: null,
+    });
+    const postPrompt = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "/plannotator-last" },
+      uuid: "u-after",
+      parentUuid: "u-compact",
+    });
+    return [...preCompact, boundary, postPrompt].join("\n");
+  };
+
+  test("the active branch stops at the compact boundary", () => {
+    const entries = parseSessionLog(compactedLog());
+    expect(resolveActiveBranchIndices(entries)).toEqual(new Set([2, 3]));
+  });
+
+  test("an empty active branch falls back to the file-order read", () => {
+    // Right after a compaction the branch holds no assistant messages. An
+    // empty result must not escape: callers treat it as "wrong log file" and
+    // walk off to an older session. Fail open to the file-order read instead.
+    const dir = join(tmpdir(), `plannotator-compact-test-${process.pid}`);
+    mkdirSync(dir, { recursive: true });
+    const logPath = join(dir, "session.jsonl");
+    try {
+      writeFileSync(logPath, compactedLog());
+      const result = getRecentRenderedMessages(logPath, 25, {
+        activeBranchOnly: true,
+      });
+      expect(result.map((m) => m.messageId)).toEqual(["msg_pre"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a post-compaction assistant message is preferred once one exists", () => {
+    // Once the compacted conversation has its own assistant message, the
+    // branch read stands on its own and the pre-compaction orphan stays out.
+    const log = [
+      compactedLog(),
+      linkChain([assistantText("msg_post", "Post-compaction answer")], "u-after").join("\n"),
+    ].join("\n");
+    const dir = join(tmpdir(), `plannotator-compact-test2-${process.pid}`);
+    mkdirSync(dir, { recursive: true });
+    const logPath = join(dir, "session.jsonl");
+    try {
+      writeFileSync(logPath, log);
+      const result = getRecentRenderedMessages(logPath, 25, {
+        activeBranchOnly: true,
+      });
+      expect(result.map((m) => m.messageId)).toEqual(["msg_post"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

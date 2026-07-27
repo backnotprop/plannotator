@@ -851,6 +851,13 @@ export function extractRecentRenderedMessages(
  * `/rewind` doesn't surface orphaned messages. Only meaningful for transcripts
  * that carry `uuid`/`parentUuid` (Claude Code); an untrustworthy or absent
  * chain silently degrades to a plain file-order read.
+ *
+ * A `/compact` boundary is also a tree root (`parentUuid: null`), so right
+ * after a compaction the active branch may contain no assistant messages at
+ * all. An empty filtered result falls back to the file-order read: callers
+ * treat "no messages" as "wrong log file" and would walk off to an older
+ * session, which is strictly worse than offering the pre-compaction messages
+ * the user just watched scroll by.
  */
 export function getRecentRenderedMessages(
   logPath: string,
@@ -863,9 +870,15 @@ export function getRecentRenderedMessages(
     const branchIndices = opts.activeBranchOnly
       ? resolveActiveBranchIndices(entries)
       : null;
-    return extractRecentRenderedMessages(entries, entries.length, limit, {
+    const messages = extractRecentRenderedMessages(entries, entries.length, limit, {
       branchIndices,
     });
+    if (messages.length === 0 && branchIndices) {
+      // Fail open, never fail empty: an empty active branch (fresh /compact)
+      // must not make this log look like the wrong file.
+      return extractRecentRenderedMessages(entries, entries.length, limit);
+    }
+    return messages;
   } catch {
     return [];
   }
