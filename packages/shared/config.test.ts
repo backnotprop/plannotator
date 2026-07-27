@@ -6,6 +6,7 @@ import {
   resolveAnnotateHistory,
   resolveGuideHistory,
   resolveUseJina,
+  resolveTodoProviderEnabled,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
@@ -22,6 +23,42 @@ describe("resolveAIEnabled", () => {
   test("other values keep AI enabled", () => {
     expect(resolveAIEnabled({ PLANNOTATOR_AI: "enabled" })).toBe(true);
     expect(resolveAIEnabled({ PLANNOTATOR_AI: "false" })).toBe(true);
+  });
+});
+
+const TODO_ENV = "PLANNOTATOR_TODO_PROVIDER";
+const originalTodoEnv = process.env[TODO_ENV];
+
+describe("resolveTodoProviderEnabled", () => {
+  beforeEach(() => {
+    delete process.env[TODO_ENV];
+  });
+  afterAll(() => {
+    if (originalTodoEnv === undefined) delete process.env[TODO_ENV];
+    else process.env[TODO_ENV] = originalTodoEnv;
+  });
+
+  test("defaults to enabled", () => {
+    expect(resolveTodoProviderEnabled({})).toBe(true);
+    expect(resolveTodoProviderEnabled({ todoProvider: "auto" })).toBe(true);
+  });
+
+  test("config key can turn the mirror off", () => {
+    expect(resolveTodoProviderEnabled({ todoProvider: "off" })).toBe(false);
+  });
+
+  test("env accepts the same off vocabulary as the other flags", () => {
+    for (const v of ["off", "OFF", "0", "false", "disabled"]) {
+      process.env[TODO_ENV] = v;
+      expect(resolveTodoProviderEnabled({})).toBe(false);
+    }
+  });
+
+  test("other env values keep the mirror on", () => {
+    for (const v of ["auto", "1", "true", "enabled"]) {
+      process.env[TODO_ENV] = v;
+      expect(resolveTodoProviderEnabled({ todoProvider: "off" })).toBe(true);
+    }
   });
 });
 

@@ -152,6 +152,19 @@ export interface PlannotatorConfig {
    * PLANNOTATOR_CURSOR_SANDBOX env var, which takes precedence.
    */
   cursorSandbox?: boolean;
+  /**
+   * Mirror the approved plan checklist into an editable todo provider during
+   * execution (issue #484). "auto" (default) syncs whenever a provider is
+   * detected — currently pi-todos, found via PI_TODO_PATH or an existing
+   * .pi/todos directory. "off" disables the mirror.
+   *
+   * The mirror is additive: the progress widget is left alone. pi-todos has no
+   * live surface of its own (its list renders on demand in `/todos`), so the
+   * widget stays the at-a-glance tracker while the provider contributes
+   * editable, session-durable todos. Sync is one-way; provider-side edits are
+   * never read back. Failures are non-fatal.
+   */
+  todoProvider?: "auto" | "off";
 }
 
 const CONFIG_DIR = getPlannotatorDataDir();
@@ -363,4 +376,26 @@ export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
     return v !== "0" && v !== "false" && v !== "disabled";
   }
   return coerceConfigBoolean(config.cursorSandbox, true);
+}
+
+/**
+ * Resolve whether the approved plan checklist is mirrored into an editable todo
+ * provider during execution.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_TODO_PROVIDER env var  →  config.todoProvider  →  default auto
+ *
+ * Env values `off` / `0` / `false` / `disabled` turn the mirror off, matching
+ * the vocabulary the other flags accept; anything else — including `auto` —
+ * keeps it on. Enabled only means "sync when a provider is detected": with no
+ * provider present, the progress widget is the whole experience either way.
+ */
+export function resolveTodoProviderEnabled(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_TODO_PROVIDER;
+  if (envVal !== undefined) {
+    const v = envVal.toLowerCase();
+    return v !== "off" && v !== "0" && v !== "false" && v !== "disabled";
+  }
+  if (config.todoProvider !== undefined) return config.todoProvider !== "off";
+  return true;
 }
