@@ -69,6 +69,9 @@ interface StickyHeaderLaneProps {
   isPlanDiffActive?: boolean;
   hasPreviousVersion?: boolean;
   onPlanDiffToggle?: () => void;
+  /** Baseline suffix + tooltip for the plan-diff badge (see DocBadges). */
+  planDiffBaselineLabel?: string;
+  planDiffBaselineTooltip?: string;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
 
   // Layout
@@ -94,6 +97,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   isPlanDiffActive,
   hasPreviousVersion,
   onPlanDiffToggle,
+  planDiffBaselineLabel,
+  planDiffBaselineTooltip,
   archiveInfo,
   maxWidth,
   remountToken,
@@ -251,6 +256,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
             isPlanDiffActive={isPlanDiffActive}
             hasPreviousVersion={hasPreviousVersion}
             onPlanDiffToggle={onPlanDiffToggle}
+            planDiffBaselineLabel={planDiffBaselineLabel}
+            planDiffBaselineTooltip={planDiffBaselineTooltip}
             archiveInfo={archiveInfo}
           />
         </div>

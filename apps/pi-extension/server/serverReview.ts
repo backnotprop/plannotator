@@ -6,7 +6,7 @@ import { basename, resolve as resolvePath } from "node:path";
 
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash, deleteDraft } from "../generated/draft.ts";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled, resolveCursorSandbox, resolveGuideHistory } from "../generated/config.ts";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveGuideHistory } from "../generated/config.ts";
 
 export type {
 	DiffOption,
@@ -43,6 +43,7 @@ import {
 	detectRemoteDefaultInfo,
 	getFileContentsForDiff as getFileContentsForDiffCore,
 	getSinceBaseSections,
+	isBinaryPatchFile,
 	isSameCwdCommitSwitch,
 	listPatchFiles,
 	parseCommitDiffType,
@@ -282,6 +283,7 @@ export async function startReviewServer(options: {
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
 }): Promise<ReviewServerResult> {
 	const gitUser = detectGitUser();
+	const aiEnabled = resolveAIEnabled();
 	let draftKey = contentHash(options.rawPatch);
 	let prMeta = options.prMetadata;
 	const isPRMode = !!prMeta;
@@ -746,7 +748,8 @@ export async function startReviewServer(options: {
 		patch: string = currentPatch,
 		base: string = currentBase,
 		diffType: DiffType = currentDiffType as DiffType,
-	): string {
+	): string | undefined {
+		if (!aiEnabled) return undefined;
 		const workspacePrompt = getWorkspacePromptContext();
 		if (workspacePrompt) {
 			return buildAgentReviewUserMessageForTarget(
@@ -1372,7 +1375,7 @@ export async function startReviewServer(options: {
 		resolveDecision = r;
 	});
 
-	const aiRuntime = await createPiAIRuntime({ getCwd: resolveAgentCwd });
+	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd }) : null;
 
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
@@ -1548,6 +1551,7 @@ export async function startReviewServer(options: {
 			json(res, {
 				rawPatch: servedPatch,
 				aiReviewContext: buildCurrentAiReviewContext(servedPatch, servedBase, servedDiffType as DiffType),
+				aiEnabled,
 				gitRef: servedGitRef,
 				snapshotId: servedSnapshotId,
 				origin: options.origin ?? "pi",
@@ -2328,6 +2332,11 @@ export async function startReviewServer(options: {
 				}
 			}
 
+			if (isBinaryPatchFile(currentPatch, filePath)) {
+				json(res, { oldContent: null, newContent: null });
+				return;
+			}
+
 			if (workspace) {
 				try {
 					const result = await workspace.getFileContents(filePath, oldPath);
@@ -2480,6 +2489,16 @@ export async function startReviewServer(options: {
 			await handleUploadRequest(req, res);
 		} else if (url.pathname === "/api/agents" && req.method === "GET") {
 			json(res, { agents: [] });
+		} else if (!aiEnabled && url.pathname.startsWith("/api/agents/")) {
+			// The exact endpoint above is feedback routing, not a review job.
+			if (
+				url.pathname.slice("/api/agents/".length) === "capabilities" &&
+				req.method === "GET"
+			) {
+				json(res, { mode: "review", providers: [], available: false });
+			} else {
+				json(res, { error: "AI features disabled" }, 503);
+			}
 		} else if (
 			url.pathname === "/api/agents/review-profiles" &&
 			req.method === "GET"
@@ -2680,7 +2699,7 @@ export async function startReviewServer(options: {
 			// AI sessions pin their cwd at creation — make sure the PR checkout
 			// exists first so sessions never root in a transient fallback
 			// (mirrors the Bun server; no-op while the pool entry is ready).
-			if (req.method === "POST" && url.pathname === "/api/ai/session" && options.worktreePool && prMeta) {
+			if (aiRuntime && req.method === "POST" && url.pathname === "/api/ai/session" && options.worktreePool && prMeta) {
 				// If the checkout can't be produced, refuse instead of starting a
 				// session rooted in the wrong directory.
 				try {

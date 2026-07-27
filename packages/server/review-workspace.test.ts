@@ -24,6 +24,7 @@ import { spawnSync } from "node:child_process";
 import {
   aggregateWorkspacePatch,
   buildLocalWorkspaceReview,
+  isRepoRelative,
   prefixPatchPaths,
   resolveWorkspaceFilePath,
   discoverWorkspaceRepoPaths,
@@ -947,6 +948,80 @@ describe("review-workspace", () => {
   });
 
   describe("workspace review server integration", () => {
+    it("short-circuits binary file expansion before provider content retrieval", async () => {
+      const root = makeTempDir("plannotator-workspace-binary-content-");
+      const repo = join(root, "api");
+      mkdirSync(join(repo, ".git"), { recursive: true });
+      let fileContentCalls = 0;
+
+      const runtime = {
+        async getVcsContext(cwd?: string): Promise<GitContext> {
+          return {
+            vcsType: "git",
+            currentBranch: "main",
+            defaultBranch: "main",
+            cwd: cwd ?? repo,
+            worktrees: [],
+            availableBranches: { local: [], remote: [] },
+            diffOptions: [{ id: "uncommitted", label: "Uncommitted changes" }],
+          };
+        },
+        async runVcsDiff() {
+          return {
+            patch: [
+              "diff --git a/asset.bin b/asset.bin",
+              "new file mode 100644",
+              "Binary files /dev/null and b/asset.bin differ",
+              "",
+            ].join("\n"),
+            label: "Uncommitted changes",
+          };
+        },
+        async getVcsFileContentsForDiff() {
+          fileContentCalls += 1;
+          return { oldContent: "unexpected", newContent: "unexpected" };
+        },
+        async getVcsDiffFingerprint() {
+          return "stable-binary-workspace";
+        },
+        async canStageFiles() {
+          return false;
+        },
+        async stageFile() {},
+        async unstageFile() {},
+      };
+
+      const workspace = await WorkspaceReviewSession.create(runtime, root);
+      const aggregate = aggregateWorkspacePatch(workspace.repos);
+      const server = await startReviewServer({
+        rawPatch: aggregate.rawPatch,
+        gitRef: aggregate.gitRef,
+        error: aggregate.errors.join("\n") || undefined,
+        origin: "claude-code",
+        workspace,
+        agentCwd: workspace.root,
+        htmlContent: "<!doctype html><html><body>review</body></html>",
+      });
+
+      try {
+        const diffPayload = await fetch(`${server.url}/api/diff`).then((response) =>
+          response.json()
+        ) as { snapshotId: string };
+        const response = await fetch(
+          `${server.url}/api/file-content?path=api/asset.bin&snapshot=${encodeURIComponent(diffPayload.snapshotId)}`,
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          oldContent: null,
+          newContent: null,
+        });
+        expect(fileContentCalls).toBe(0);
+      } finally {
+        server.stop();
+      }
+    });
+
     it("maps one workspace mode across mixed Git and JJ repos", async () => {
       const root = makeTempDir("plannotator-workspace-mixed-vcs-");
       const gitRepo = join(root, "api");
@@ -1125,6 +1200,16 @@ describe("review-workspace", () => {
       expect(workspace.normalizeAnnotationPath("api/src/file.ts")).toBe("api/src/file.ts");
       expect(workspace.normalizeAnnotationPath("src/file.ts")).toBe("api/src/file.ts");
       expect(workspace.normalizeAnnotationPath(join(api, "src/file.ts"))).toBe("api/src/file.ts");
+    });
+
+    it("treats cross-drive relative() results as escaping the repo", () => {
+      expect(isRepoRelative("src/file.ts")).toBe(true);
+      expect(isRepoRelative("nested/deep/file.ts")).toBe(true);
+      expect(isRepoRelative("../outside.ts")).toBe(false);
+      expect(isRepoRelative("")).toBe(false);
+      // On Windows, path.relative returns the target's absolute path when the
+      // base is on a different drive; after normalization that is "L:/...".
+      expect(isRepoRelative("L:/repos/project/src/file.ts")).toBe(false);
     });
 
     it("keeps requested Git-only workspace modes available when another child repo fails detection", async () => {

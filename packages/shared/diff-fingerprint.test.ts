@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getGitDiffFingerprint, type ReviewGitRuntime } from "./review-core";
+import {
+  getGitDiffFingerprint,
+  MAX_REVIEW_FILE_CONTENT_BYTES,
+  type ReviewGitRuntime,
+} from "./review-core";
 
 // Real-git runtime against a throwaway repo — fingerprints are only meaningful
 // against actual VCS behavior, so no mocks.
@@ -78,6 +82,26 @@ describe("getGitDiffFingerprint", () => {
     writeFileSync(join(repo, "new.txt"), "hello world\n");
     const edited = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
     expect(edited).not.toBe(created!);
+  });
+
+  test("large untracked files use metadata without entering the JS heap", async () => {
+    const path = join(repo, "large-untracked.bin");
+    writeFileSync(path, Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1));
+    let largeFileReads = 0;
+    const guardedRuntime: ReviewGitRuntime = {
+      ...runtime,
+      async readTextFile(requestedPath) {
+        if (requestedPath === path) largeFileReads++;
+        return runtime.readTextFile(requestedPath);
+      },
+    };
+
+    const before = await getGitDiffFingerprint(guardedRuntime, "uncommitted", "main", repo);
+    writeFileSync(path, Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 2, 1));
+    const after = await getGitDiffFingerprint(guardedRuntime, "uncommitted", "main", repo);
+
+    expect(largeFileReads).toBe(0);
+    expect(after).not.toBe(before);
   });
 
   test("uncommitted: changes when a commit lands (HEAD moves)", async () => {

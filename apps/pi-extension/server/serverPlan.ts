@@ -39,7 +39,7 @@ import {
 } from "./integrations.ts";
 import { listenOnPort } from "./network.ts";
 
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled } from "../generated/config.ts";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveSharingEnabled } from "../generated/config.ts";
 import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
 import { composeImproveContext } from "../generated/pfm-reminder.ts";
 import { detectProjectName, getRepoInfo } from "./project.ts";
@@ -158,7 +158,7 @@ export async function startPlanReviewServer(options: {
 	// Editor annotations (in-memory, VS Code integration — skip in archive mode)
 	const editorAnnotations = options.mode !== "archive" ? createEditorAnnotationHandler() : null;
 	const externalAnnotations = options.mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
-	const aiRuntime = options.mode !== "archive" ? await createPiAIRuntime() : null;
+	const aiRuntime = options.mode !== "archive" && resolveAIEnabled() ? await createPiAIRuntime() : null;
 
 	// Lazy cache for in-session archive tab
 	let cachedArchivePlans: ArchivedPlan[] | null = null;

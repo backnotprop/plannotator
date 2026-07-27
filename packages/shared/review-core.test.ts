@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import {
@@ -12,8 +19,11 @@ import {
   getWorkingTreeDiffFromBase,
   gitAddFile,
   gitResetFile,
+  isBinaryPatchFile,
   isSameCwdCommitSwitch,
+  listPatchFiles,
   listRecentCommits,
+  MAX_REVIEW_FILE_CONTENT_BYTES,
   parseCommitDiffType,
   parseWorktreeDiffType,
   prepareGitCommand,
@@ -233,6 +243,69 @@ describe("review-core", () => {
     expect(result.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
     expect(result.patch).toContain("diff --git a/untracked.txt b/untracked.txt");
     expect(result.patch).toContain("+++ b/untracked.txt");
+  });
+
+  test("large untracked files stay visible without diffing their contents", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(
+      join(repoDir, "large build.bin"),
+      Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1),
+    );
+
+    const result = await runGitDiff(runtime, "uncommitted", "main");
+
+    expect(result.patch).toContain('diff --git "a/large build.bin" "b/large build.bin"');
+    expect(result.patch).toContain('Binary files /dev/null and "b/large build.bin" differ');
+    expect(listPatchFiles(result.patch)).toContainEqual({
+      path: "large build.bin",
+      additions: 0,
+      deletions: 0,
+    });
+    expect(isBinaryPatchFile(result.patch, "large build.bin")).toBe(true);
+  });
+
+  test("binary patch detection follows rename metadata", () => {
+    const patch = [
+      'diff --git "a/old name.bin" "b/new name.bin"',
+      "similarity index 100%",
+      "rename from old name.bin",
+      "rename to new name.bin",
+      "GIT binary patch",
+      "",
+    ].join("\n");
+
+    expect(isBinaryPatchFile(patch, "new name.bin")).toBe(true);
+    expect(isBinaryPatchFile(patch, "old name.bin")).toBe(false);
+  });
+
+  test("untracked diff collection caps concurrent git processes", async () => {
+    const repoDir = initRepo();
+    const baseRuntime = makeRuntime(repoDir);
+    for (let index = 0; index < 12; index++) {
+      writeFileSync(join(repoDir, `untracked-${index}.txt`), `${index}\n`);
+    }
+    let active = 0;
+    let peak = 0;
+    const runtime: ReviewGitRuntime = {
+      ...baseRuntime,
+      async runGit(args, options) {
+        if (!args.includes("--no-index")) return baseRuntime.runGit(args, options);
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        try {
+          return await baseRuntime.runGit(args, options);
+        } finally {
+          active--;
+        }
+      },
+    };
+
+    await runGitDiff(runtime, "uncommitted", "main");
+
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(4);
   });
 
   test("ordinary working-tree diffs keep tracked changes when an untracked file cannot be read", async () => {
@@ -513,6 +586,43 @@ describe("review-core", () => {
     );
     expect(newFileContents.oldContent).toBeNull();
     expect(newFileContents.newContent).toBe("brand new\n");
+  });
+
+  test("file content lookup refuses oversized working-tree files", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(
+      join(repoDir, "large-generated.js"),
+      Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1, 0x20),
+    );
+
+    const contents = await getFileContentsForDiff(
+      runtime,
+      "uncommitted",
+      "main",
+      "large-generated.js",
+    );
+
+    expect(contents).toEqual({ oldContent: null, newContent: null });
+  });
+
+  test("file content lookup reads a symlink payload without following its target", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(
+      join(repoDir, "large-target.bin"),
+      Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1),
+    );
+    symlinkSync("large-target.bin", join(repoDir, "generated-link"));
+
+    const contents = await getFileContentsForDiff(
+      runtime,
+      "uncommitted",
+      "main",
+      "generated-link",
+    );
+
+    expect(contents).toEqual({ oldContent: null, newContent: "large-target.bin" });
   });
 
   test("getDefaultBranch falls back to local when origin/HEAD points at an unfetched ref", () => {

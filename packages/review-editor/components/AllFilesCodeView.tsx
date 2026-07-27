@@ -1101,7 +1101,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             newFile:
               data.newContent != null ? { name: file.path, contents: data.newContent } : undefined,
           });
-          if (!result) {
+          if (!result || result.isPartial) {
             augmentState.set(itemId, { status: 'done', controller, generation });
             return;
           }
