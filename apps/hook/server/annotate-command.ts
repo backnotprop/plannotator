@@ -50,15 +50,20 @@ export async function completeAnnotateCommand({
   if (requireApproval || resultFile) {
     const serialized = serializeStrictAnnotateResult(result);
     try {
+      // stdout first: the reviewer's autosaved draft is already gone by the
+      // time we get here, so their completed decision must reach at least one
+      // channel before a result-file publication failure can abort the run.
+      // Result-file publication is best-effort on top of that record.
+      await outputWriter(`${serialized}\n`);
       if (resultFile) {
         await writeResultFile(resultFile, serialized);
       }
-      await outputWriter(`${serialized}\n`);
     } catch (error) {
-      // Publication failed: no decision record was delivered, so this is an
-      // environment error ("the gate could not deliver a decision"), not a
-      // reviewer outcome. Exit 2 — fail-closed, but distinct from exit 1's
-      // "gate ran and the reviewer did not approve".
+      // The result file was not published (or stdout itself was unwritable):
+      // an environment error, not a reviewer outcome. Exit 2 — fail-closed, but
+      // distinct from exit 1's "gate ran and the reviewer did not approve".
+      // The stdout decision record has already been emitted unless stdout was
+      // the thing that failed.
       logError(error instanceof Error ? error.message : String(error));
       exit(STRICT_GATE_ERROR_EXIT_CODE);
       return;
