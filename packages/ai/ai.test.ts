@@ -6,12 +6,17 @@ import {
   registerProviderFactory,
   createProvider,
 } from "./provider.ts";
-import { AI_ENDPOINT_PATHS, createAIEndpoints } from "./endpoints.ts";
+import {
+  AI_ENDPOINT_PATHS,
+  createAIEndpoints,
+  createBestEffortOnce,
+} from "./endpoints.ts";
 import type {
   AIProvider,
   AISession,
   AIMessage,
   AIContext,
+  CreateSessionOptions,
 } from "./types.ts";
 import {
   buildWindowsCommandScriptSpawnCommand,
@@ -77,6 +82,40 @@ function mockProvider(name = "mock"): AIProvider {
     dispose() {},
   };
 }
+
+describe("createBestEffortOnce", () => {
+  test("coalesces concurrent calls and caches completion", async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const initialize = createBestEffortOnce(async () => {
+      calls++;
+      await gate;
+    });
+
+    const first = initialize();
+    const second = initialize();
+    expect(calls).toBe(1);
+    release();
+    await Promise.all([first, second]);
+    await initialize();
+    expect(calls).toBe(1);
+  });
+
+  test("swallows initialization failure and does not retry", async () => {
+    let calls = 0;
+    const initialize = createBestEffortOnce(async () => {
+      calls++;
+      throw new Error("discovery failed");
+    });
+
+    await expect(initialize()).resolves.toBeUndefined();
+    await expect(initialize()).resolves.toBeUndefined();
+    expect(calls).toBe(1);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Command path helpers
@@ -577,6 +616,27 @@ describe("AI endpoints", () => {
     expect(data.providers[0].capabilities.fork).toBe(true);
   });
 
+  test("capabilities does not activate providers", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let activated = false;
+    reg.register(mockProvider("codex-sdk"), "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        activated = true;
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(activated).toBe(false);
+  });
+
   test("capabilities waits for pending provider discovery", async () => {
     const reg = new ProviderRegistry();
     const sm = new SessionManager();
@@ -680,6 +740,80 @@ describe("AI endpoints", () => {
       })
     );
     expect(createRes.status).toBe(200);
+  });
+
+  test("session creation activates only the resolved provider before createSession", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const events: string[] = [];
+    reg.register(mockProvider("claude-agent-sdk"), "claude");
+    reg.register({
+      ...mockProvider("codex-sdk"),
+      async createSession() {
+        events.push("create");
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    }, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async (providerId) => {
+        events.push(`activate:${providerId}`);
+      },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          providerId: "codex",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(events).toEqual(["activate:codex", "create"]);
+  });
+
+  test("session creation replaces the static default with the discovered default", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let createdModel: string | undefined;
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+      async createSession(options: CreateSessionOptions) {
+        createdModel = options.model;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        provider.models = [
+          { id: "discovered-model", label: "Discovered", default: true },
+        ];
+      },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          providerId: "codex",
+          model: "static-model",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(createdModel).toBe("discovered-model");
   });
 
   test("session creation clamps client-supplied cost controls", async () => {

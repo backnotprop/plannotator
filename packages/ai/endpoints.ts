@@ -83,10 +83,22 @@ export interface AIEndpointDeps {
   getCwd?: () => string;
   /** Optional hook to finish lazy provider capability loading before reporting capabilities. */
   beforeCapabilities?: () => Promise<void> | void;
+  /** Optional hook to finish provider-specific lazy initialization before creating a session. */
+  beforeProviderSession?: (providerId: string) => Promise<void> | void;
 }
 
 const MAX_CLIENT_MAX_TURNS = 99;
 const MAX_CLIENT_BUDGET_USD = 5;
+
+export function createBestEffortOnce(
+  initialize: () => Promise<void>,
+): () => Promise<void> {
+  let result: Promise<void> | null = null;
+  return () => {
+    result ??= initialize().catch(() => {});
+    return result;
+  };
+}
 
 function clampPositiveInteger(value: unknown, max: number): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -113,7 +125,13 @@ function clampPositiveNumber(value: unknown, max: number): number | undefined {
  * ```
  */
 export function createAIEndpoints(deps: AIEndpointDeps) {
-  const { registry, sessionManager, getCwd, beforeCapabilities } = deps;
+  const {
+    registry,
+    sessionManager,
+    getCwd,
+    beforeCapabilities,
+    beforeProviderSession,
+  } = deps;
 
   return {
     "/api/ai/capabilities": async (_req: Request) => {
@@ -151,9 +169,10 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       // Resolve provider: by ID, or default
-      const provider = providerId
-        ? registry.get(providerId)
-        : registry.getDefault()?.provider;
+      const providerEntry = providerId
+        ? { id: providerId, provider: registry.get(providerId) }
+        : registry.getDefault();
+      const provider = providerEntry?.provider;
 
       if (!provider) {
         return Response.json(
@@ -163,12 +182,23 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       try {
+        const defaultModelBeforeActivation =
+          provider.models?.find((candidate) => candidate.default)?.id ??
+          provider.models?.[0]?.id;
+        await beforeProviderSession?.(providerEntry.id);
+        const defaultModelAfterActivation =
+          provider.models?.find((candidate) => candidate.default)?.id ??
+          provider.models?.[0]?.id;
+        const effectiveModel =
+          model === undefined || model === defaultModelBeforeActivation
+            ? defaultModelAfterActivation ?? model
+            : model;
         const boundedMaxTurns = clampPositiveInteger(maxTurns, MAX_CLIENT_MAX_TURNS);
         const boundedMaxBudgetUsd = clampPositiveNumber(maxBudgetUsd, MAX_CLIENT_BUDGET_USD);
         const options: CreateSessionOptions = {
           context,
           cwd: getCwd?.(),
-          model,
+          model: effectiveModel,
           ...(boundedMaxTurns !== undefined && { maxTurns: boundedMaxTurns }),
           ...(boundedMaxBudgetUsd !== undefined && { maxBudgetUsd: boundedMaxBudgetUsd }),
           reasoningEffort,
