@@ -431,7 +431,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 	}
 
-	async function exitToIdle(ctx: ExtensionContext): Promise<void> {
+	/**
+	 * The single exit sequence every idle transition shares: drop phase state,
+	 * hand back the tools the phase added, restore the pre-phase model/thinking
+	 * level, then refresh the UI and persist. Callers add their own messaging,
+	 * session entries, and events around it.
+	 */
+	async function returnToIdle(ctx: ExtensionContext): Promise<void> {
 		phase = "idle";
 		checklistItems = [];
 		lastSubmittedPath = null;
@@ -442,6 +448,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 		updateStatus(ctx);
 		updateWidget(ctx);
 		persistState();
+	}
+
+	async function exitToIdle(ctx: ExtensionContext): Promise<void> {
+		await returnToIdle(ctx);
 		ctx.ui.notify("Plannotator: disabled. Full access restored.");
 	}
 
@@ -459,16 +469,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 		planContent: string,
 		feedback?: string,
 	): Promise<void> {
-		phase = "idle";
-		checklistItems = [];
-		lastSubmittedPath = null;
-
-		await restoreSavedState(ctx);
-		savedState = null;
-		updateStatus(ctx);
-		updateWidget(ctx);
 		pi.appendEntry("plannotator-handoff", { planFilePath });
-		persistState();
+		await returnToIdle(ctx);
 		pi.events.emit(PLANNOTATOR_PLAN_APPROVED_CHANNEL, {
 			cwd: ctx.cwd,
 			planFilePath,
@@ -1327,16 +1329,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 				},
 				{ triggerTurn: false },
 			);
-			phase = "idle";
-			checklistItems = [];
-			lastSubmittedPath = null;
-
-			releaseAddedPhaseTools();
-			await restoreSavedState(ctx);
-			savedState = null;
-			updateStatus(ctx);
-			updateWidget(ctx);
-			persistState();
+			await returnToIdle(ctx);
 		}
 	});
 
