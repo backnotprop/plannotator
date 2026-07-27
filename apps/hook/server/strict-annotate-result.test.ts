@@ -11,10 +11,12 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   annotateOutcomeExitCode,
+  annotateStartupFailureExitCode,
   assertResultPathAvailable,
   resolveResultFilePath,
   serializeStrictAnnotateResult,
@@ -96,6 +98,83 @@ describe("strict annotate exit policy", () => {
     expect(
       annotateOutcomeExitCode({ exit: true, feedback: "" }, true),
     ).toBe(1);
+  });
+});
+
+describe("annotate startup failure exit codes", () => {
+  test("keeps legacy startup failures on exit 1", () => {
+    expect(
+      annotateStartupFailureExitCode({ requireApproval: false }),
+    ).toBe(1);
+    expect(
+      annotateStartupFailureExitCode({
+        requireApproval: false,
+        resultFile: undefined,
+      }),
+    ).toBe(1);
+  });
+
+  test("routes strict startup failures to the gate error code", () => {
+    // A mistyped path is a configuration error, not "the reviewer requested
+    // changes" — exit 1 would make automation misread it as a rejection.
+    expect(
+      annotateStartupFailureExitCode({ requireApproval: true }),
+    ).toBe(STRICT_GATE_ERROR_EXIT_CODE);
+    expect(
+      annotateStartupFailureExitCode({
+        requireApproval: false,
+        resultFile: "/tmp/result.json",
+      }),
+    ).toBe(STRICT_GATE_ERROR_EXIT_CODE);
+    expect(
+      annotateStartupFailureExitCode({
+        requireApproval: true,
+        resultFile: "/tmp/result.json",
+      }),
+    ).toBe(STRICT_GATE_ERROR_EXIT_CODE);
+  });
+
+  test("routes every annotate startup failure through the shared helper", () => {
+    // The annotate startup path in index.ts must not reach a bare
+    // `process.exit(1)`: each of the six failure classes (missing path,
+    // unreachable URL, empty folder, ambiguous name, missing/unsupported file,
+    // oversized file) has to pick its code from the parsed strict options.
+    const source = readFileSync(
+      join(import.meta.dir, "index.ts"),
+      "utf8",
+    );
+    const start = source.indexOf('} else if (args[0] === "annotate") {');
+    const end = source.indexOf(
+      '} else if (args[0] === "annotate-last" || args[0] === "last") {',
+      start,
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+
+    const annotateStartupBlock = source.slice(start, end);
+    // No bare exit(1) anywhere in the annotate startup path — that code is the
+    // reviewer-requested-changes signal once a strict flag is in play.
+    expect(annotateStartupBlock).not.toContain("process.exit(1)");
+    // Every failure class routes through the helper that reads the strict flags.
+    for (const failure of [
+      "Usage: plannotator annotate",
+      "Failed to fetch URL:",
+      "No annotatable files",
+      "Ambiguous filename",
+      "File type not supported:",
+      "File not found:",
+      "File too large to annotate",
+    ]) {
+      const site = annotateStartupBlock.indexOf(failure);
+      expect(site).toBeGreaterThan(-1);
+      expect(
+        annotateStartupBlock
+          .slice(0, site)
+          .lastIndexOf("exitAnnotateStartupFailure("),
+      ).toBeGreaterThan(
+        annotateStartupBlock.slice(0, site).lastIndexOf("console.error("),
+      );
+    }
   });
 });
 
