@@ -333,11 +333,37 @@ See the [verification docs](https://docs.plannotator.ai/open-source/start/instal
 
 Settings are saved in cookies (not localStorage) because each hook invocation runs on a random port. You can also set options through environment variables or `~/.plannotator/config.json`.
 
+### Optional Vim controls
+
+Plan and annotate views offer a default-off **Vim controls** profile under
+**Settings → Vim**. Once enabled, focus the document and use `j` / `k`
+to move one rendered block at a time. After `l` refines into a semantic level,
+`j` / `k` move among sibling rows, cells, or inline targets; `h` moves back to
+the containing target. Refining past the deepest target enters text. `v`
+starts characterwise Visual selection and
+`V` selects whole blocks. `Space` opens the normal annotation toolbar; `c`,
+`d`, `m`, and `t` select comment, redline, markup, and label actions. The same
+semantic target graph drives pointer Pinpoint and keyboard navigation. Press
+`?` in the document for the contextual key reference. Inputs, dialogs,
+editors, `Tab`, and all pointer interactions retain their native behavior.
+The document takes focus automatically when the page is otherwise neutral;
+press `Escape` from app chrome to return to it without clicking.
+An additional default-off **Vim HUD** toggle appears beneath Vim controls. It
+uses the product-demo styling for the live target reticle and navigation
+context. Its bottom-right **Key panel** is independently hideable while the
+reticle remains active; `?` still opens the complete key map on demand. The
+panel shows recent handled keys, the current block/line/word/Visual phase, and
+the command meaning without capturing text typed into comments or other
+controls.
+See [Vim controls](docs/vim-controls.md) for the interaction contract and
+implementation architecture.
+
 | Variable | Description |
 |---|---|
 | `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local, unset for SSH auto-detection |
 | `PLANNOTATOR_PORT` | Fixed port (default: random locally, `19432` remote) |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in |
+| `PLANNOTATOR_AI` | `disabled` to disable Ask AI, Review Agents, and Guided Review; the annotate agent terminal is separate |
 | `PLANNOTATOR_SHARE` | `disabled` to turn off URL sharing |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal) |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API |

@@ -75,6 +75,9 @@ describe('shortcuts', () => {
       'Actions',
       'Input Method',
       'Annotations',
+      'Vim Document Navigation',
+      'Vim Text Navigation',
+      'Vim Annotation Actions',
       'Image Annotator',
     ]);
 
@@ -83,6 +86,9 @@ describe('shortcuts', () => {
       'Sidebar',
       'Input Method',
       'Annotations',
+      'Vim Document Navigation',
+      'Vim Text Navigation',
+      'Vim Annotation Actions',
       'Image Annotator',
     ]);
 
@@ -114,12 +120,30 @@ describe('shortcuts', () => {
     const quickLabelEvent = { key: '3', ctrlKey: false, metaKey: false, shiftKey: false, altKey: true, code: 'Digit3' } as KeyboardEvent;
     const macOptionQuickLabelEvent = { key: '£', ctrlKey: false, metaKey: false, shiftKey: false, altKey: true, code: 'Digit3' } as KeyboardEvent;
     const wrongEvent = { key: 'Enter', ctrlKey: false, metaKey: false, shiftKey: false, altKey: true, code: 'Enter' } as KeyboardEvent;
+    const spaceEvent = {
+      key: ' ',
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      code: 'Space',
+    };
+    const questionEvent = {
+      key: '?',
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: true,
+      altKey: false,
+      code: 'Slash',
+    };
 
     expect(matchesShortcutBinding(submitEvent, 'Mod+Enter')).toBe(true);
     expect(matchesShortcutBinding(reverseSearchEvent, 'Shift+F3')).toBe(true);
     expect(matchesShortcutBinding(typeEvent, 'A-Z')).toBe(true);
     expect(matchesShortcutBinding(quickLabelEvent, 'Alt+1-0')).toBe(true);
     expect(matchesShortcutBinding(macOptionQuickLabelEvent, 'Alt+1-0')).toBe(true);
+    expect(matchesShortcutBinding(spaceEvent, 'Space')).toBe(true);
+    expect(matchesShortcutBinding(questionEvent, '?')).toBe(true);
     expect(matchesShortcutBinding(wrongEvent, 'Mod+Enter')).toBe(false);
   });
 

@@ -14,11 +14,13 @@
  * process-global and cannot be unset).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { startAnnotateServer } from "./annotate";
+import { deriveAnnotateHistorySlug } from "@plannotator/shared/annotate-history";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 
@@ -499,6 +501,639 @@ describe("annotate server: source save", () => {
       expect(existsSync(deletedPath)).toBe(false);
     } finally {
       await fetch(`${server.url}/api/draft`, { method: "DELETE" }).catch(() => {});
+      server.stop();
+    }
+  });
+});
+
+describe("annotate server: folder annotate history", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+  let savedHistoryFlag: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    savedHistoryFlag = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+    // Force the toggle on for every test but the one that explicitly flips it
+    // off — a real ~/.plannotator/config.json on the machine running these
+    // tests must never change the outcome.
+    process.env.PLANNOTATOR_ANNOTATE_HISTORY = "1";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+    if (savedHistoryFlag === undefined) delete process.env.PLANNOTATOR_ANNOTATE_HISTORY;
+    else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistoryFlag;
+  });
+
+  // Every test uses its own project namespace (history lives in the real
+  // ~/.plannotator data dir, same as storage.test.ts) so runs never collide.
+  // Every minted name is tracked and its history directory removed in
+  // afterAll below — this suite must never leave residue in the real data
+  // dir (including the stray non-directory file the "unwritable data dir"
+  // test deliberately plants inside its own project's history dir; removing
+  // the project dir recursively takes that with it).
+  const mintedProjects: string[] = [];
+  function uniqueProject(label: string): string {
+    const project = `_annotate_history_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    mintedProjects.push(project);
+    return project;
+  }
+
+  afterAll(() => {
+    const historyDir = join(getPlannotatorDataDir(), "history");
+    for (const project of mintedProjects) {
+      rmSync(join(historyDir, project), { recursive: true, force: true });
+    }
+  });
+
+  test("first open mints one version; reopening in the same session is memoized (no re-snapshot even if the file changes on disk)", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-first-open-"));
+    const docPath = join(folderPath, "note.md");
+    writeFileSync(docPath, "V1\n", "utf-8");
+    const project = uniqueProject("first-open");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const first = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      const firstJson = await first.json() as {
+        markdown?: string;
+        previousPlan?: string | null;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      expect(firstJson.markdown).toBe("V1\n");
+      expect(firstJson.previousPlan).toBeNull();
+      expect(firstJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+      // diffCurrent is intentionally not propagated on the folder /api/doc
+      // path — it always equals the doc's own markdown and the client never
+      // reads it (unlike single-file /api/plan, which keeps it for shape parity).
+      expect("diffCurrent" in firstJson).toBe(false);
+
+      // Change the file on disk between opens — a re-run of the pipeline
+      // would mint version 2. Memoization must prevent that.
+      writeFileSync(docPath, "V2\n", "utf-8");
+
+      const second = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      const secondJson = await second.json() as {
+        markdown?: string;
+        previousPlan?: string | null;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      // The live document content is always read fresh from disk...
+      expect(secondJson.markdown).toBe("V2\n");
+      // ...but the history snapshot/diff fields stay exactly what first-open computed.
+      expect(secondJson.previousPlan).toBeNull();
+      expect(secondJson.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+
+      const versions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+      const versionsJson = await versions.json() as { versions: unknown[] };
+      expect(versionsJson.versions).toHaveLength(1);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("content matching the latest stored version dedupes (mints nothing) and still serves correct previous-version fields", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-dedupe-"));
+    const docPath = join(folderPath, "note.md");
+    const project = uniqueProject("dedupe");
+
+    // Seed history for this exact path via the single-file flow, then make
+    // the folder file's on-disk content match that stored version exactly.
+    const seedServer = await startAnnotateServer({
+      markdown: "Same\n",
+      filePath: docPath,
+      htmlContent: MINIMAL_HTML,
+      mode: "annotate",
+      project,
+    });
+    seedServer.stop();
+    writeFileSync(docPath, "Same\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      const json = await response.json() as {
+        previousPlan?: string | null;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      // Dedup keeps it at version 1 — the folder open did not mint version 2.
+      expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+      expect(json.previousPlan).toBeNull();
+
+      const versions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+      const versionsJson = await versions.json() as { versions: unknown[] };
+      expect(versionsJson.versions).toHaveLength(1);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("cross-mode slug continuity: a version saved via single-file flow is served as the baseline when a folder session opens the same path", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-cross-mode-"));
+    const docPath = join(folderPath, "note.md");
+    const project = uniqueProject("cross-mode");
+
+    // Single-file session saves "V1" as version 1 for this exact resolved path.
+    const seedServer = await startAnnotateServer({
+      markdown: "V1\n",
+      filePath: docPath,
+      htmlContent: MINIMAL_HTML,
+      mode: "annotate",
+      project,
+    });
+    seedServer.stop();
+
+    // The folder session reads different content off disk, so it mints version 2.
+    writeFileSync(docPath, "V2\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      const json = await response.json() as {
+        previousPlan?: string | null;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      expect(json.previousPlan).toBe("V1\n");
+      expect(json.versionInfo).toEqual({ version: 2, totalVersions: 2, project });
+
+      const versionOne = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(docPath)}&v=1`);
+      const versionOneJson = await versionOne.json() as { plan?: string };
+      expect(versionOneJson.plan).toBe("V1\n");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("first-ever open of a never-annotated path carries no previous version but does report version 1 of 1 (parity with single-file)", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-never-seen-"));
+    const docPath = join(folderPath, "note.md");
+    writeFileSync(docPath, "Fresh\n", "utf-8");
+    const project = uniqueProject("never-seen");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      const json = await response.json() as {
+        previousPlan?: string | null;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      expect(json.previousPlan).toBeNull();
+      expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+      // diffCurrent is intentionally not propagated on the folder /api/doc path.
+      expect("diffCurrent" in json).toBe(false);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("config toggle off: no snapshot, no diff fields, doc still serves", async () => {
+    process.env.PLANNOTATOR_ANNOTATE_HISTORY = "0";
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-toggle-off-"));
+    const docPath = join(folderPath, "note.md");
+    writeFileSync(docPath, "Content\n", "utf-8");
+    const project = uniqueProject("toggle-off");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      expect(response.status).toBe(200);
+      const json = await response.json() as Record<string, unknown>;
+      expect(json.markdown).toBe("Content\n");
+      expect("previousPlan" in json).toBe(false);
+      expect("versionInfo" in json).toBe(false);
+      expect("diffCurrent" in json).toBe(false);
+
+      const versions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+      const versionsJson = await versions.json() as { slug: string | null; versions: unknown[] };
+      expect(versionsJson).toEqual({ project, slug: null, versions: [] });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("ineligible file type (HTML) serves as today with no snapshot", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-html-"));
+    const docPath = join(folderPath, "page.html");
+    writeFileSync(docPath, "<html><body>Hi</body></html>", "utf-8");
+    const project = uniqueProject("html");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      expect(response.status).toBe(200);
+      const json = await response.json() as Record<string, unknown>;
+      expect(json.renderAs).toBe("html");
+      expect("previousPlan" in json).toBe(false);
+      expect("versionInfo" in json).toBe(false);
+      expect("diffCurrent" in json).toBe(false);
+
+      const versions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+      const versionsJson = await versions.json() as { slug: string | null; versions: unknown[] };
+      expect(versionsJson).toEqual({ project, slug: null, versions: [] });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("eligibility matches the single-file plain-text set: .mdx mints a snapshot on first open", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-mdx-"));
+    const docPath = join(folderPath, "note.mdx");
+    writeFileSync(docPath, "MDX content\n", "utf-8");
+    const project = uniqueProject("mdx");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      const json = await response.json() as {
+        previousPlan?: string | null;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      expect(json.previousPlan).toBeNull();
+      expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("cross-mode continuity for config formats: a .yaml with single-file history diffs when opened via its folder", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-yaml-"));
+    const docPath = join(folderPath, "config.yaml");
+    const project = uniqueProject("yaml");
+
+    // Single-file session saves "a: 1" as version 1 for this exact path.
+    const seedServer = await startAnnotateServer({
+      markdown: "a: 1\n",
+      filePath: docPath,
+      htmlContent: MINIMAL_HTML,
+      mode: "annotate",
+      project,
+    });
+    seedServer.stop();
+
+    // The folder session reads different content off disk, so it mints version 2.
+    writeFileSync(docPath, "a: 2\n", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      // `doc=1` mirrors the file browser: it forces annotatable plain-text
+      // rendering for extensions that overlap CODE_FILE_REGEX (.yaml, .json…).
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
+      const json = await response.json() as {
+        previousPlan?: string | null;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      expect(json.previousPlan).toBe("a: 1\n");
+      expect(json.versionInfo).toEqual({ version: 2, totalVersions: 2, project });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test(".env stays ineligible: no snapshot is minted even though .env.example would be", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-env-"));
+    const docPath = join(folderPath, ".env");
+    writeFileSync(docPath, "SECRET=1\n", "utf-8");
+    const project = uniqueProject("env");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
+      const json = await response.json() as Record<string, unknown>;
+      // Whatever shape /api/doc answers with (.env is not annotatable, so it
+      // is never served as a document), no history fields may appear and no
+      // snapshot may be written.
+      expect("previousPlan" in json).toBe(false);
+      expect("versionInfo" in json).toBe(false);
+
+      const versions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+      const versionsJson = await versions.json() as { slug: string | null; versions: unknown[] };
+      expect(versionsJson).toEqual({ project, slug: null, versions: [] });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("an unwritable history directory degrades to a plain render, no error propagates", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-unwritable-"));
+    const docPath = join(folderPath, "note.md");
+    writeFileSync(docPath, "Content\n", "utf-8");
+    const project = uniqueProject("unwritable");
+
+    // Block the exact history directory the pipeline will try to mkdir by
+    // pre-creating a plain FILE at that path — mkdirSync(recursive) throws
+    // when a target segment exists and is not a directory, on every platform.
+    const slug = deriveAnnotateHistorySlug(docPath);
+    const historyProjectDir = join(getPlannotatorDataDir(), "history", project);
+    mkdirSync(historyProjectDir, { recursive: true });
+    writeFileSync(join(historyProjectDir, slug), "not a directory", "utf-8");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+      expect(response.status).toBe(200);
+      const json = await response.json() as Record<string, unknown>;
+      expect(json.markdown).toBe("Content\n");
+      expect("previousPlan" in json).toBe(false);
+      expect("versionInfo" in json).toBe(false);
+      expect("diffCurrent" in json).toBe(false);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("version endpoints: path param serves that file's versions; without path, single-session binding is unchanged", async () => {
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-endpoints-"));
+    const docPath = join(folderPath, "note.md");
+    writeFileSync(docPath, "V1\n", "utf-8");
+    const project = uniqueProject("endpoints");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      // No history yet for this path: version endpoints report empty, not an error.
+      const versionsBefore = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+      expect(await versionsBefore.json()).toEqual({ project, slug: null, versions: [] });
+      const versionBefore = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(docPath)}&v=1`);
+      expect(versionBefore.status).toBe(404);
+      expect(await versionBefore.json()).toEqual({ error: "No version history" });
+
+      // Open the file so history is initialized this session.
+      await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}`);
+
+      const versionsAfter = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(docPath)}`);
+      const versionsAfterJson = await versionsAfter.json() as { slug: string | null; versions: { version: number }[] };
+      expect(versionsAfterJson.slug).not.toBeNull();
+      expect(versionsAfterJson.versions).toHaveLength(1);
+
+      const versionAfter = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(docPath)}&v=1`);
+      expect(versionAfter.status).toBe(200);
+      expect(await versionAfter.json()).toEqual({ plan: "V1\n", version: 1 });
+
+      // A path outside the folder root is rejected the same way /api/doc rejects it.
+      const outsidePath = join(realpathSync(tmpdir()), "outside.md");
+      const deniedVersions = await fetch(`${server.url}/api/plan/versions?path=${encodeURIComponent(outsidePath)}`);
+      expect(deniedVersions.status).toBe(403);
+      const deniedVersion = await fetch(`${server.url}/api/plan/version?path=${encodeURIComponent(outsidePath)}&v=1`);
+      expect(deniedVersion.status).toBe(403);
+
+      // Without a path param at all, behavior is exactly today's: this
+      // session has no single-file annotateHistory binding (it's a folder
+      // session), so both endpoints report "no history" as before.
+      const noPathVersions = await fetch(`${server.url}/api/plan/versions`);
+      expect(await noPathVersions.json()).toEqual({ project, slug: null, versions: [] });
+      const noPathVersion = await fetch(`${server.url}/api/plan/version?v=1`);
+      expect(noPathVersion.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("annotate server: approval notes", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  test("returns the explicit approval-notes capability", async () => {
+    for (const approvalNotesSupported of [true, false]) {
+      const server = await startAnnotateServer({
+        markdown: "# Test",
+        filePath: join(tmpdir(), "approval-capability.md"),
+        htmlContent: MINIMAL_HTML,
+        approvalNotesSupported,
+      });
+
+      try {
+        const response = await fetch(`${server.url}/api/plan`);
+        const plan = await response.json() as { approvalNotesSupported?: boolean };
+        expect(plan.approvalNotesSupported).toBe(approvalNotesSupported);
+      } finally {
+        server.stop();
+      }
+    }
+  });
+
+  test("preserves feedback and annotations on approval", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "approval-notes.md"),
+      htmlContent: MINIMAL_HTML,
+      approvalNotesSupported: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: "Keep the retry bounded.",
+          annotations: [{ id: "a1" }],
+          draftGeneration: 3,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Keep the retry bounded.",
+        annotations: [{ id: "a1" }],
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  // Approve-with-notes must anchor exactly where Send Feedback would. Dropping
+  // the message scope made the notes land on the last message rather than the
+  // one the reviewer picked in a multi-message annotate-last session.
+  test("forwards the message scope on approval", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "approval-message-scope.md"),
+      htmlContent: MINIMAL_HTML,
+      approvalNotesSupported: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: "Scope this to the picked message.",
+          annotations: [],
+          selectedMessageId: "message-2",
+          feedbackScope: "messages",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Scope this to the picked message.",
+        annotations: [],
+        selectedMessageId: "message-2",
+        feedbackScope: "messages",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("keeps bodyless approval compatible", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "approval-bodyless.md"),
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/approve`, { method: "POST" });
+      expect(response.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "",
+        annotations: [],
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("rejects malformed or wrong-type approval bodies without resolving", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "approval-invalid.md"),
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const malformed = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      });
+      expect(malformed.status).toBe(400);
+      expect(await Promise.race([decision.then(() => "resolved"), Bun.sleep(25).then(() => "pending")])).toBe("pending");
+
+      const wrongType = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: 42, annotations: [] }),
+      });
+      expect(wrongType.status).toBe(400);
+      expect(await Promise.race([decision.then(() => "resolved"), Bun.sleep(25).then(() => "pending")])).toBe("pending");
+
+      await fetch(`${server.url}/api/approve`, { method: "POST" });
+      expect(await decision).toEqual({ approved: true, feedback: "", annotations: [] });
+    } finally {
       server.stop();
     }
   });

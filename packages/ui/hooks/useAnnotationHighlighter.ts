@@ -244,6 +244,7 @@ export interface UseAnnotationHighlighterOptions {
   onRestoreMismatch?: (annotation: Annotation, restoredText: string) => void;
 }
 
+/** Annotation UI state and mutation commands owned by one rendered document. */
 export interface UseAnnotationHighlighterReturn {
   highlighterRef: RefObject<Highlighter | null>;
 
@@ -259,12 +260,22 @@ export interface UseAnnotationHighlighterReturn {
   handleCommentClose: () => void;
   handleFloatingQuickLabel: (label: QuickLabel) => void;
   handleQuickLabelPickerDismiss: () => void;
+  /** Paint a caller-created DOM range through the same pipeline as pointer selection. */
+  highlightRange: (range: Range, modeOverride?: EditorMode) => void;
+  /** Annotate one rendered formula through the same path as a pointer click. */
+  highlightMathElement: (element: HTMLElement, modeOverride?: EditorMode) => void;
 
   removeHighlight: (id: string) => void;
   clearAllHighlights: () => void;
   applyAnnotations: (annotations: Annotation[]) => void;
 }
 
+/**
+ * Own pointer and caller-supplied range annotations for a Markdown container.
+ *
+ * Highlight restoration failures are reported through `onRestoreMismatch`
+ * when verification is enabled; malformed or stale ranges are ignored.
+ */
 export function useAnnotationHighlighter({
   containerRef,
   annotations,
@@ -283,6 +294,7 @@ export function useAnnotationHighlighter({
   const pendingSourceRef = useRef<any>(null);
   const pendingMathTargetsRef = useRef<MathAnnotationTarget[]>([]);
   const pendingMathElementRef = useRef<HTMLElement | null>(null);
+  const pendingModeOverrideRef = useRef<EditorMode | null>(null);
   const justCreatedIdRef = useRef<string | null>(null);
   const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const mouseDownMathRef = useRef<HTMLElement | null>(null);
@@ -834,10 +846,13 @@ export function useAnnotationHighlighter({
           setCommentPopover(null);
           setQuickLabelPicker(null);
 
-          if (modeRef.current === 'redline') {
+          const effectiveMode = pendingModeOverrideRef.current ?? modeRef.current;
+          pendingModeOverrideRef.current = null;
+
+          if (effectiveMode === 'redline') {
             createAnnotationFromSource(highlighter, source, AnnotationType.DELETION);
             window.getSelection()?.removeAllRanges();
-          } else if (modeRef.current === 'comment') {
+          } else if (effectiveMode === 'comment') {
             pendingSourceRef.current = source;
             setCommentPopover({
               anchorEl: doms[0] as HTMLElement,
@@ -845,7 +860,7 @@ export function useAnnotationHighlighter({
               selectedText: source.text,
               source,
             });
-          } else if (modeRef.current === 'quickLabel') {
+          } else if (effectiveMode === 'quickLabel') {
             pendingSourceRef.current = source;
             setQuickLabelPicker({
               anchorEl: doms[0] as HTMLElement,
@@ -985,6 +1000,86 @@ export function useAnnotationHighlighter({
       highlighter.dispose();
     };
   }, [clearPendingSelection, enabled]);
+
+  const highlightRange = useCallback((range: Range, modeOverride?: EditorMode) => {
+    const highlighter = highlighterRef.current;
+    const container = containerRef.current;
+    if (!highlighter || !container || range.collapsed) return;
+    if (!container.contains(range.commonAncestorContainer)) return;
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range.cloneRange());
+    pendingModeOverrideRef.current = modeOverride ?? null;
+
+    try {
+      highlighter.fromRange(range);
+    } finally {
+      pendingModeOverrideRef.current = null;
+      selection?.removeAllRanges();
+    }
+  }, [containerRef]);
+
+  const highlightMathElement = useCallback((
+    element: HTMLElement,
+    modeOverride?: EditorMode,
+  ) => {
+    const container = containerRef.current;
+    const mathElement = closestMathElement(element, container);
+    if (!container || !mathElement) return;
+
+    const effectiveMode = modeOverride ?? modeRef.current;
+    const existingId = mathElement.dataset.bindId;
+    if (existingId && effectiveMode !== 'redline') {
+      onSelectAnnotationRef.current?.(existingId);
+      return;
+    }
+
+    const source = mathSourceFromElement(mathElement);
+    if (!source) return;
+
+    const highlighter = highlighterRef.current;
+    if (pendingSourceRef.current && highlighter && !isMathAnnotationSource(pendingSourceRef.current)) {
+      highlighter.remove(pendingSourceRef.current.id);
+    }
+    clearPendingSelection();
+    setToolbarState(null);
+    setCommentPopover(null);
+    setQuickLabelPicker(null);
+
+    if (effectiveMode === 'redline') {
+      createAnnotationFromMathSource(source, AnnotationType.DELETION);
+      return;
+    }
+
+    pendingSourceRef.current = source;
+    showPendingMathPreview(source);
+
+    if (effectiveMode === 'comment') {
+      setCommentPopover({
+        anchorEl: source.element,
+        contextText: source.text.slice(0, 80),
+        selectedText: source.text,
+        source,
+      });
+      return;
+    }
+
+    if (effectiveMode === 'quickLabel') {
+      setQuickLabelPicker({
+        anchorEl: source.element,
+        cursorHint: lastMousePosRef.current,
+        source,
+      });
+      return;
+    }
+
+    setToolbarState({
+      element: source.element,
+      source,
+      selectionText: source.text,
+    });
+  }, [clearPendingSelection, containerRef, showPendingMathPreview]);
 
   // Apply CSS classes to existing annotations
   useEffect(() => {
@@ -1201,6 +1296,8 @@ export function useAnnotationHighlighter({
     handleCommentClose,
     handleFloatingQuickLabel,
     handleQuickLabelPickerDismiss,
+    highlightRange,
+    highlightMathElement,
     removeHighlight,
     clearAllHighlights,
     applyAnnotations: applyAnnotationsInternal,

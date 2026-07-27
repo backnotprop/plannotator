@@ -142,10 +142,22 @@ import {
   isSubcommandHelpInvocation,
   isTopLevelHelpInvocation,
   isVersionInvocation,
+  parseStrictAnnotateOptions,
 } from "./cli";
+import { completeAnnotateCommand } from "./annotate-command";
+import {
+  annotateStartupFailureExitCode,
+  assertResultPathAvailable,
+  resolveResultFilePath,
+  STRICT_GATE_ERROR_EXIT_CODE,
+} from "./strict-annotate-result";
 import path from "path";
 import { tmpdir } from "os";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
+import {
+  createAnnotateOutcomeEmitter,
+  supportsAnnotateApprovalNotes,
+} from "./annotate-output";
 
 // Embed the built HTML at compile time
 // @ts-ignore - Bun import attribute for text
@@ -157,7 +169,25 @@ import reviewHtml from "../dist/review.html" with { type: "text" };
 const reviewHtmlContent = reviewHtml as unknown as string;
 
 // Check for subcommand
-const args = process.argv.slice(2);
+let parsedStrictAnnotateOptions;
+try {
+  parsedStrictAnnotateOptions = parseStrictAnnotateOptions(
+    process.argv.slice(2),
+  );
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  // Usage error: the gate was misconfigured, not a reviewer decision.
+  process.exit(STRICT_GATE_ERROR_EXIT_CODE);
+}
+const args = parsedStrictAnnotateOptions.remainingArgs;
+const requireApprovalFlag =
+  parsedStrictAnnotateOptions.requireApproval;
+const resultFile = parsedStrictAnnotateOptions.resultFile
+  ? resolveResultFilePath(
+      parsedStrictAnnotateOptions.resultFile,
+      process.env.PLANNOTATOR_CWD || process.cwd(),
+    )
+  : undefined;
 
 // Global flag: --browser <name>
 const browserIdx = args.indexOf("--browser");
@@ -204,42 +234,10 @@ if (renderMarkdownFlag) args.splice(renderMarkdownIdx, 1);
 // Plaintext (default):
 //   Close → empty. Approve → "The user approved." Annotate → feedback.
 //
-// TODO: The plaintext --gate approval sentinel must stay as the exact string
-// "The user approved." because slash command templates (plannotator-annotate.md,
-// plannotator-last.md) instruct the agent to match it literally. Making this
-// configurable requires updating those templates to accept dynamic values or
-// switching gate mode to structured output only.
-const APPROVED_PLAINTEXT_MARKER = "The user approved.";
-
-function emitAnnotateOutcome(result: {
-  feedback: string;
-  exit?: boolean;
-  approved?: boolean;
-}): void {
-  if (hookFlag) {
-    if (result.approved || result.exit) return;
-    if (result.feedback) {
-      console.log(JSON.stringify({ decision: "block", reason: result.feedback }));
-    }
-    return;
-  }
-  if (jsonFlag) {
-    if (result.approved) {
-      console.log(JSON.stringify({ decision: "approved" }));
-    } else if (result.exit) {
-      console.log(JSON.stringify({ decision: "dismissed" }));
-    } else {
-      console.log(JSON.stringify({ decision: "annotated", feedback: result.feedback || "" }));
-    }
-    return;
-  }
-  if (result.exit) return;
-  if (result.approved) {
-    console.log(APPROVED_PLAINTEXT_MARKER);
-    return;
-  }
-  if (result.feedback) console.log(result.feedback);
-}
+const emitAnnotateOutcome = createAnnotateOutcomeEmitter({
+  hook: hookFlag,
+  json: jsonFlag,
+});
 
 async function loadGoalSetupBundle(
   stage: GoalSetupStage,
@@ -407,7 +405,10 @@ function emitOpenCodeAnnotateOutcome(result: {
   feedbackScope?: "message" | "messages";
 }): void {
   if (result.approved) {
-    console.log(JSON.stringify({ decision: "approved" }));
+    console.log(JSON.stringify({
+      decision: "approved",
+      ...(result.feedback ? { feedback: result.feedback } : {}),
+    }));
     return;
   }
   if (result.exit) {
@@ -899,10 +900,21 @@ if (args[0] === "sessions") {
   // ANNOTATE MODE
   // ============================================
 
+  // Startup failures below fire after flag parsing, so under a strict flag they
+  // must not exit 1 — that code means "the reviewer requested changes".
+  function exitAnnotateStartupFailure(message: string): never {
+    console.error(message);
+    process.exit(
+      annotateStartupFailureExitCode({
+        requireApproval: requireApprovalFlag,
+        resultFile,
+      }),
+    );
+  }
+
   const rawFilePath = args[1];
   if (!rawFilePath) {
-    console.error("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]");
-    process.exit(1);
+    exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
   }
 
   // Primary resolution strips the `@` reference marker; rawFilePath is
@@ -912,6 +924,16 @@ if (args[0] === "sessions") {
 
   // Use PLANNOTATOR_CWD if set (original working directory before script cd'd)
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
+
+  if (resultFile) {
+    try {
+      await assertResultPathAvailable(resultFile);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      // Startup validation error: the gate could not start.
+      process.exit(STRICT_GATE_ERROR_EXIT_CODE);
+    }
+  }
 
   if (process.env.PLANNOTATOR_DEBUG) {
     console.error(`[DEBUG] Project root: ${projectRoot}`);
@@ -940,8 +962,7 @@ if (args[0] === "sessions") {
         console.error(`[DEBUG] Fetched via ${result.source} (${markdown.length} chars)`);
       }
     } catch (err) {
-      console.error(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
+      exitAnnotateStartupFailure(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`);
     }
     absolutePath = filePath; // Use URL as the "path" for display
     sourceInfo = filePath;   // Full URL for source attribution
@@ -956,8 +977,7 @@ if (args[0] === "sessions") {
       const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
       // Folder annotation mode (markdown/plain text/config + HTML files)
       if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
-        console.error(`No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}`);
-        process.exit(1);
+        exitAnnotateStartupFailure(`No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}`);
       }
       folderPath = resolvedArg;
       absolutePath = resolvedArg;
@@ -995,11 +1015,10 @@ if (args[0] === "sessions") {
         }
 
         if (resolved.kind === "ambiguous") {
-          console.error(`Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`);
-          for (const match of resolved.matches) {
-            console.error(`  ${match}`);
-          }
-          process.exit(1);
+          exitAnnotateStartupFailure([
+            `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`,
+            ...resolved.matches.map((match) => `  ${match}`),
+          ].join("\n"));
         }
         if (resolved.kind === "not_found") {
           // Check if file exists but has unsupported type
@@ -1008,21 +1027,19 @@ if (args[0] === "sessions") {
 
           if (fileExists) {
             const ext = path.extname(resolvedPath).toLowerCase();
-            console.error(
+            exitAnnotateStartupFailure(
               `File type not supported: ${ext}\n` +
               `Supported types: ${ANNOTATABLE_EXTENSIONS_HINT}\n` +
               `For code review, use: plannotator review [file]`
             );
           } else {
-            console.error(`File not found: ${resolved.input}`);
+            exitAnnotateStartupFailure(`File not found: ${resolved.input}`);
           }
-          process.exit(1);
         }
 
         absolutePath = resolved.path;
         if (Bun.file(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
-          console.error(`File too large to annotate (max 2MB): ${absolutePath}`);
-          process.exit(1);
+          exitAnnotateStartupFailure(`File too large to annotate (max 2MB): ${absolutePath}`);
         }
         markdown = await Bun.file(absolutePath).text();
         console.error(`Resolved: ${absolutePath}`);
@@ -1045,6 +1062,11 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     gate: gateFlag,
+    approvalNotesSupported: supportsAnnotateApprovalNotes({
+      gate: gateFlag,
+      json: jsonFlag,
+      hook: hookFlag,
+    }),
     rawHtml,
     renderHtml: !!rawHtml,
     convertHtml: renderMarkdownFlag,
@@ -1079,18 +1101,14 @@ if (args[0] === "sessions") {
       : `annotate-${isUrl ? hostnameOrFallback(absolutePath) : path.basename(absolutePath)}`,
   });
 
-  // Wait for user feedback
-  const result = await server.waitForDecision();
-
-  // Give browser time to receive response and update UI
-  await Bun.sleep(1500);
-
-  // Cleanup
-  server.stop();
-
-  // Output feedback (captured by slash command)
-  emitAnnotateOutcome(result);
-  process.exit(0);
+  await completeAnnotateCommand({
+    waitForDecision: server.waitForDecision,
+    settleAfterDecision: () => Bun.sleep(1500),
+    stopServer: server.stop,
+    requireApproval: requireApprovalFlag,
+    resultFile,
+    emitLegacyOutcome: emitAnnotateOutcome,
+  });
 
 } else if (args[0] === "annotate-last" || args[0] === "last") {
   // ============================================
@@ -1248,6 +1266,11 @@ if (args[0] === "sessions") {
     shareBaseUrl,
     pasteApiUrl,
     gate: gateFlag,
+    approvalNotesSupported: supportsAnnotateApprovalNotes({
+      gate: gateFlag,
+      json: jsonFlag,
+      hook: hookFlag,
+    }),
     htmlContent: planHtmlContent,
     recentMessages: pickerMessages,
     onReady: async (url, isRemote, port) => {
@@ -1592,6 +1615,7 @@ if (args[0] === "sessions") {
     shareBaseUrl: bridgeShareBaseUrl,
     pasteApiUrl: bridgePasteApiUrl,
     gate: input.gate === true,
+    approvalNotesSupported: input.gate === true,
     htmlContent: planHtmlContent,
     onReady: (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
@@ -1743,6 +1767,11 @@ if (args[0] === "sessions") {
     sharingEnabled,
     shareBaseUrl,
     gate: gateFlag,
+    approvalNotesSupported: supportsAnnotateApprovalNotes({
+      gate: gateFlag,
+      json: jsonFlag,
+      hook: hookFlag,
+    }),
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);

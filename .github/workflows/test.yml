@@ -63,6 +63,10 @@ jobs:
           packages/ui/hooks/useExternalAnnotations.seam.test.tsx
           packages/ui/hooks/useAIChat.seam.test.tsx
           packages/ui/hooks/useFileBrowser.seam.test.tsx
+          packages/ui/hooks/usePlanDiff.test.tsx
+          packages/ui/hooks/useLinkedDoc.test.tsx
+          packages/ui/components/DocBadges.test.tsx
+          packages/editor/planDiffAutoExit.test.tsx
 
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an

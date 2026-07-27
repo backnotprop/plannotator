@@ -21,21 +21,26 @@ function nextHtmlAnnId(): string {
 interface BridgeSelectionMessage {
   type: `${typeof PREFIX}selection`;
   text: string;
-  rect: { top: number; left: number; width: number; height: number };
+  rect: BridgeRect;
+  modeOverride?: EditorMode;
 }
 
-interface BridgeMarkClickMessage {
-  type: `${typeof PREFIX}mark-click`;
-  id: string;
-}
-
-interface BridgeResizeMessage {
-  type: `${typeof PREFIX}resize`;
+interface BridgeRect {
+  top: number;
+  left: number;
+  width: number;
   height: number;
 }
 
-type BridgeMessage = BridgeSelectionMessage | BridgeMarkClickMessage | BridgeResizeMessage | { type: string };
+type BridgeMessage =
+  | BridgeSelectionMessage
+  | { type: `${typeof PREFIX}selection-clear` }
+  | { type: `${typeof PREFIX}selection-rect`; rect: BridgeRect }
+  | { type: `${typeof PREFIX}keytype`; key: string }
+  | { type: `${typeof PREFIX}mark-click`; id: string }
+  | { type: `${typeof PREFIX}resize`; height: number };
 
+/** Dependencies and callbacks for the sandboxed HTML annotation bridge. */
 export interface UseHtmlAnnotationOptions {
   iframeRef: RefObject<HTMLIFrameElement | null>;
   annotations: Annotation[];
@@ -50,6 +55,73 @@ function postToIframe(iframe: HTMLIFrameElement | null, msg: Record<string, unkn
   iframe?.contentWindow?.postMessage(msg, "*");
 }
 
+function parseEditorMode(value: unknown): EditorMode | undefined {
+  return value === "selection"
+    || value === "comment"
+    || value === "redline"
+    || value === "quickLabel"
+    ? value
+    : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseBridgeRect(value: unknown): BridgeRect | null {
+  if (!isRecord(value)) return null;
+  const { top, left, width, height } = value;
+  return typeof top === "number" && Number.isFinite(top)
+    && typeof left === "number" && Number.isFinite(left)
+    && typeof width === "number" && Number.isFinite(width)
+    && typeof height === "number" && Number.isFinite(height)
+    ? { top, left, width, height }
+    : null;
+}
+
+function parseBridgeMessage(value: unknown): BridgeMessage | null {
+  if (!isRecord(value) || typeof value.type !== "string") return null;
+
+  switch (value.type) {
+    case `${PREFIX}selection`: {
+      const rect = parseBridgeRect(value.rect);
+      if (typeof value.text !== "string" || !rect) return null;
+      return {
+        type: value.type,
+        text: value.text,
+        rect,
+        modeOverride: parseEditorMode(value.modeOverride),
+      };
+    }
+    case `${PREFIX}selection-clear`:
+      return { type: value.type };
+    case `${PREFIX}selection-rect`: {
+      const rect = parseBridgeRect(value.rect);
+      return rect ? { type: value.type, rect } : null;
+    }
+    case `${PREFIX}keytype`:
+      return typeof value.key === "string"
+        ? { type: value.type, key: value.key }
+        : null;
+    case `${PREFIX}mark-click`:
+      return typeof value.id === "string"
+        ? { type: value.type, id: value.id }
+        : null;
+    case `${PREFIX}resize`:
+      return typeof value.height === "number" && Number.isFinite(value.height)
+        ? { type: value.type, height: value.height }
+        : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Adapt source-validated iframe messages to the existing annotation UI.
+ *
+ * Malformed bridge payloads are ignored; annotations are posted back through
+ * the iframe protocol and reported through the supplied callbacks.
+ */
 export function useHtmlAnnotation({
   iframeRef,
   onAddAnnotation,
@@ -57,7 +129,10 @@ export function useHtmlAnnotation({
   selectedAnnotationId,
   mode,
   onResize,
-}: UseHtmlAnnotationOptions): Omit<UseAnnotationHighlighterReturn, "highlighterRef"> {
+}: UseHtmlAnnotationOptions): Omit<
+  UseAnnotationHighlighterReturn,
+  "highlighterRef" | "highlightRange" | "highlightMathElement"
+> {
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
@@ -115,18 +190,19 @@ export function useHtmlAnnotation({
   );
 
   useEffect(() => {
-    function handler(e: MessageEvent<BridgeMessage>) {
-      if (!e.data || typeof e.data.type !== "string" || !e.data.type.startsWith(PREFIX)) return;
+    function handler(e: MessageEvent<unknown>) {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      const message = parseBridgeMessage(e.data);
+      if (!message) return;
 
-      const type = e.data.type;
+      const type = message.type;
 
       if (type === `${PREFIX}selection`) {
-        const msg = e.data as BridgeSelectionMessage;
-        pendingTextRef.current = msg.text;
-        const anchor = positionAnchor(msg.rect);
+        pendingTextRef.current = message.text;
+        const anchor = positionAnchor(message.rect);
         if (!anchor) return;
 
-        const currentMode = modeRef.current;
+        const currentMode = message.modeOverride ?? modeRef.current;
 
         if (currentMode === "redline") {
           const id = nextHtmlAnnId();
@@ -137,7 +213,7 @@ export function useHtmlAnnotation({
             startOffset: 0,
             endOffset: 0,
             type: AnnotationType.DELETION,
-            originalText: msg.text,
+            originalText: message.text,
             author: getIdentity(),
             createdA: Date.now(),
           });
@@ -148,8 +224,8 @@ export function useHtmlAnnotation({
           iframeRef.current?.blur();
           setCommentPopover({
             anchorEl: anchor,
-            contextText: msg.text,
-            selectedText: msg.text,
+            contextText: message.text,
+            selectedText: message.text,
           });
         } else if (currentMode === "quickLabel") {
           setQuickLabelPicker({
@@ -160,7 +236,7 @@ export function useHtmlAnnotation({
           setToolbarState({
             element: anchor,
             source: null,
-            selectionText: msg.text,
+            selectionText: message.text,
           });
         }
       }
@@ -182,7 +258,7 @@ export function useHtmlAnnotation({
         const iframe = iframeRef.current;
         const anchor = anchorRef.current;
         if (!iframe || !anchor) return;
-        const r = (e.data as unknown as { rect: { top: number; left: number; width: number; height: number } }).rect;
+        const r = message.rect;
         const iframeRect = iframe.getBoundingClientRect();
         anchor.style.top = `${iframeRect.top + r.top}px`;
         anchor.style.left = `${iframeRect.left + r.left + r.width / 2}px`;
@@ -194,7 +270,7 @@ export function useHtmlAnnotation({
         // markdown path, where AnnotationToolbar owns this keydown). Open a comment
         // pre-filled with the typed char.
         if (!toolbarStateRef.current) return;
-        const key = (e.data as { key?: string }).key;
+        const key = message.key;
         const text = pendingTextRef.current;
         if (!key || !text) return;
         const anchor = anchorRef.current ?? getOrCreateAnchor();
@@ -206,13 +282,11 @@ export function useHtmlAnnotation({
       }
 
       if (type === `${PREFIX}mark-click`) {
-        const msg = e.data as BridgeMarkClickMessage;
-        onSelectRef.current?.(msg.id);
+        onSelectRef.current?.(message.id);
       }
 
       if (type === `${PREFIX}resize`) {
-        const msg = e.data as BridgeResizeMessage;
-        onResize?.(msg.height);
+        onResize?.(message.height);
       }
     }
 
@@ -304,14 +378,16 @@ export function useHtmlAnnotation({
   );
 
   const handleCommentClose = useCallback(() => {
+    postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
     setCommentPopover(null);
     pendingTextRef.current = "";
-  }, []);
+  }, [iframeRef]);
 
   const handleToolbarClose = useCallback(() => {
+    postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
     setToolbarState(null);
     pendingTextRef.current = "";
-  }, []);
+  }, [iframeRef]);
 
   const applyQuickLabel = useCallback(
     (label: QuickLabel, clearState: () => void) => {
@@ -349,9 +425,10 @@ export function useHtmlAnnotation({
   );
 
   const handleQuickLabelPickerDismiss = useCallback(() => {
+    postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
     setQuickLabelPicker(null);
     pendingTextRef.current = "";
-  }, []);
+  }, [iframeRef]);
 
   const removeHighlight = useCallback(
     (id: string) => {

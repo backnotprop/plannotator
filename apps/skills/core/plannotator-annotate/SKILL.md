@@ -20,5 +20,8 @@ Behavior:
 2. Wait for the browser review to finish.
 3. If annotations are returned, address them directly.
 4. If the session closes without feedback, say so briefly and continue.
+5. An approval may still carry notes — a `"decision": "approved"` result with a
+   `"feedback"` field. Read those notes and carry them into subsequent work, but
+   do not revise the document over them: they are guidance, not a change request.
 
 Do not ask the user to paste a shell command into the chat. Run the command yourself.

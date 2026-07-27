@@ -123,7 +123,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing) return;
+      if (e.defaultPrevented || e.isComposing) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
 
       // When picker is open, let FloatingQuickLabelPicker own all keyboard input

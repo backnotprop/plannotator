@@ -8,13 +8,25 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useVimDocumentFocus } from "../../hooks/useVimDocumentFocus";
+import {
+  isVimSelectionActionId,
+  type VimSelectionHudContext,
+} from "../../shortcuts";
 import type { Annotation, EditorMode, ImageAttachment, InputMethod } from "../../types";
 import { AnnotationType } from "../../types";
+import { copyTextPreservingFocus } from "../../utils/clipboard";
 import { getIdentity } from "../../utils/identity";
+import {
+  createVimHudCommand,
+  getVimHudPhase,
+  type VimHudCommand,
+} from "../../utils/vimHud";
 import { AnnotationToolbar } from "../AnnotationToolbar";
 import { AttachmentsButton } from "../AttachmentsButton";
 import { CommentPopover, type CommentAskAIHandler } from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
+import { VimKeyHud } from "../VimKeyHud";
 import type { ViewerHandle } from "../Viewer";
 import { useHtmlAnnotation } from "./useHtmlAnnotation";
 import {
@@ -41,6 +53,79 @@ function isLightTheme(): boolean {
   return document.documentElement.classList.contains("light");
 }
 
+function isBridgeReadyMessage(value: unknown): boolean {
+  return typeof value === "object"
+    && value !== null
+    && "type" in value
+    && value.type === `${PREFIX}ready`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseVimSelectionHudContext(
+  value: unknown,
+): VimSelectionHudContext | null {
+  return value === "inactive"
+    || value === "block"
+    || value === "inline"
+    || value === "text"
+    || value === "visual"
+    || value === "visual-block"
+    || value === "action"
+    ? value
+    : null;
+}
+
+interface VimBridgeCommand {
+  readonly actionId: Parameters<typeof createVimHudCommand>[1];
+  readonly key: string;
+  readonly context: VimSelectionHudContext;
+}
+
+function parseVimBridgeCommand(value: unknown): VimBridgeCommand | null {
+  if (
+    !isRecord(value)
+    || value.type !== `${PREFIX}vim-command`
+    || !isVimSelectionActionId(value.actionId)
+    || typeof value.key !== "string"
+  ) {
+    return null;
+  }
+  const context = parseVimSelectionHudContext(value.context);
+  return context
+    ? { actionId: value.actionId, key: value.key, context }
+    : null;
+}
+
+function parseVimBridgeState(value: unknown): VimSelectionHudContext | null {
+  return isRecord(value) && value.type === `${PREFIX}vim-state`
+    ? parseVimSelectionHudContext(value.phase)
+    : null;
+}
+
+function parseVimBridgeHelp(value: unknown): boolean | null {
+  return isRecord(value)
+    && value.type === `${PREFIX}vim-help`
+    && typeof value.open === "boolean"
+    ? value.open
+    : null;
+}
+
+const MAX_VIM_COPY_TEXT_LENGTH = 2 * 1024 * 1024;
+
+function parseVimBridgeCopy(value: unknown): string | null {
+  return isRecord(value)
+    && value.type === `${PREFIX}vim-copy`
+    && typeof value.text === "string"
+    && value.text.length > 0
+    && value.text.length <= MAX_VIM_COPY_TEXT_LENGTH
+    ? value.text
+    : null;
+}
+
+/** Inputs for the sandboxed raw-HTML viewer and its parent-side annotation UI. */
 export interface HtmlViewerProps {
   rawHtml: string;
   annotations: Annotation[];
@@ -50,6 +135,14 @@ export interface HtmlViewerProps {
   mode: EditorMode;
   /** Input method: 'drag' = text selection, 'pinpoint' = click an element. */
   inputMethod: InputMethod;
+  /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
+  vimModeEnabled?: boolean;
+  /** Replace the iframe-local compact badge with the shared live key HUD. */
+  vimHudEnabled?: boolean;
+  /** Show the parent key panel without affecting the iframe HUD reticle. */
+  vimHudKeyPanelEnabled?: boolean;
+  /** Persist a user request to hide the parent key panel. */
+  onVimHudKeyPanelChange?: (enabled: boolean) => void;
   globalAttachments?: ImageAttachment[];
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
   onRemoveGlobalAttachment?: (path: string) => void;
@@ -71,6 +164,10 @@ export interface HtmlViewerProps {
   title?: string;
 }
 
+/**
+ * Render arbitrary HTML in a sandbox and adapt its validated bridge messages
+ * to the same annotation controls used by the Markdown viewer.
+ */
 export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
@@ -81,6 +178,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       selectedAnnotationId,
       mode,
       inputMethod,
+      vimModeEnabled = false,
+      vimHudEnabled = false,
+      vimHudKeyPanelEnabled = true,
+      onVimHudKeyPanelChange,
       globalAttachments = [],
       onAddGlobalAttachment,
       onRemoveGlobalAttachment,
@@ -98,7 +199,16 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const globalCommentButtonRef = useRef<HTMLButtonElement>(null);
     const [iframeHeight, setIframeHeight] = useState(600);
-    const [iframeReady, setIframeReady] = useState(false);
+    // Increment on every bridge-ready event so srcdoc navigations re-send
+    // state even though the iframe element and its WindowProxy are reused.
+    const [iframeReadyVersion, setIframeReadyVersion] = useState(0);
+    const [iframeFocused, setIframeFocused] = useState(false);
+    const [vimBridgePhase, setVimBridgePhase] =
+      useState<VimSelectionHudContext>("inactive");
+    const [vimHudCommand, setVimHudCommand] = useState<VimHudCommand | null>(null);
+    const [vimHelpOpen, setVimHelpOpen] = useState(false);
+    const vimHudSequenceRef = useRef(0);
+    const vimHudActive = vimModeEnabled && vimHudEnabled;
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
@@ -133,34 +243,153 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     });
 
     useEffect(() => {
-      function handler(e: MessageEvent) {
-        if (e.data?.type === `${PREFIX}ready`) {
-          setIframeReady(true);
+      function handler(e: MessageEvent<unknown>) {
+        if (e.source !== iframeRef.current?.contentWindow) return;
+        if (isBridgeReadyMessage(e.data)) {
+          setIframeReadyVersion((version) => version + 1);
+          setVimBridgePhase("inactive");
+          setVimHudCommand(null);
+          setVimHelpOpen(false);
+          return;
+        }
+        const vimCopy = parseVimBridgeCopy(e.data);
+        if (vimCopy !== null) {
+          const iframe = iframeRef.current;
+          if (
+            vimModeEnabled
+            && iframe
+            && document.activeElement === iframe
+          ) {
+            copyTextPreservingFocus(vimCopy, iframe);
+          }
+          return;
+        }
+        if (!vimHudActive) return;
+        const vimHelp = parseVimBridgeHelp(e.data);
+        if (vimHelp !== null) {
+          setVimHelpOpen(vimHelp);
+          return;
+        }
+        const vimState = parseVimBridgeState(e.data);
+        if (vimState) {
+          setVimBridgePhase(vimState);
+          return;
+        }
+        const vimCommand = parseVimBridgeCommand(e.data);
+        if (vimCommand) {
+          vimHudSequenceRef.current += 1;
+          setVimHudCommand(createVimHudCommand(
+            vimHudSequenceRef.current,
+            vimCommand.actionId,
+            vimCommand.key,
+            vimCommand.context,
+          ));
         }
       }
       window.addEventListener("message", handler);
       return () => window.removeEventListener("message", handler);
-    }, []);
+    }, [vimHudActive, vimModeEnabled]);
 
     useEffect(() => {
-      if (!iframeReady) return;
+      if (vimHudActive) return;
+      setVimBridgePhase("inactive");
+      setVimHudCommand(null);
+      setVimHelpOpen(false);
+    }, [vimHudActive]);
+
+    const handleVimHelpOpenChange = useCallback((open: boolean) => {
+      setVimHelpOpen(open);
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: `${PREFIX}set-vim-help`, open },
+        "*",
+      );
+    }, []);
+
+    const handleVimHudFocusLeave = useCallback(() => {
+      if (iframeRef.current === document.activeElement) return;
+      setIframeFocused(false);
+    }, []);
+
+    const focusVimDocument = useCallback((): boolean => {
+      const iframe = iframeRef.current;
+      if (!vimModeEnabled || !iframe) return false;
+      if (document.activeElement === iframe) return false;
+      iframe.focus({ preventScroll: true });
+      if (document.activeElement !== iframe) return false;
+      iframe.contentWindow?.postMessage(
+        { type: `${PREFIX}focus-vim` },
+        "*",
+      );
+      return true;
+    }, [vimModeEnabled]);
+
+    useVimDocumentFocus({
+      enabled: vimModeEnabled,
+      blocked: !!hook.toolbarState || !!hook.commentPopover || !!hook.quickLabelPicker,
+      focusDocument: focusVimDocument,
+    });
+
+    useEffect(() => {
+      if (iframeReadyVersion === 0) return;
       if (annotations.length > 0) {
         hook.applyAnnotations(annotations);
       }
-    }, [iframeReady]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Tell the bridge the current input method (drag vs pinpoint). Re-posts on
     // ready (fresh iframe) and whenever the user switches it in the toolstrip.
     useEffect(() => {
-      if (!iframeReady) return;
+      if (iframeReadyVersion === 0) return;
       iframeRef.current?.contentWindow?.postMessage(
         { type: `${PREFIX}set-input-method`, method: inputMethod },
         "*",
       );
-    }, [iframeReady, inputMethod]);
+    }, [iframeReadyVersion, inputMethod]);
 
     useEffect(() => {
-      if (!iframeReady) return;
+      if (iframeReadyVersion === 0) return;
+      const iframe = iframeRef.current;
+      iframe?.contentWindow?.postMessage(
+        {
+          type: `${PREFIX}set-vim-mode`,
+          enabled: vimModeEnabled,
+          hudEnabled: vimHudEnabled,
+          mode,
+        },
+        "*",
+      );
+      if (vimModeEnabled && iframe === document.activeElement) {
+        // The initial parent focus can land before the sandbox bridge is ready.
+        // Reassert it after configuration so raw HTML enters BLOCK immediately,
+        // matching the Markdown surface instead of waiting for the first key.
+        iframe.contentWindow?.postMessage(
+          { type: `${PREFIX}focus-vim` },
+          "*",
+        );
+      }
+    }, [iframeReadyVersion, mode, vimHudEnabled, vimModeEnabled]);
+
+    const vimOverlayWasOpenRef = useRef(false);
+    useEffect(() => {
+      const overlayOpen = !!hook.toolbarState || !!hook.commentPopover || !!hook.quickLabelPicker;
+      const wasOpen = vimOverlayWasOpenRef.current;
+      vimOverlayWasOpenRef.current = overlayOpen;
+      if (
+        vimModeEnabled
+        && wasOpen
+        && !overlayOpen
+        && (document.activeElement === document.body || document.activeElement === null)
+      ) {
+        iframeRef.current?.focus({ preventScroll: true });
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: `${PREFIX}focus-vim` },
+          "*",
+        );
+      }
+    }, [hook.commentPopover, hook.quickLabelPicker, hook.toolbarState, vimModeEnabled]);
+
+    useEffect(() => {
+      if (iframeReadyVersion === 0) return;
       function sendTheme() {
         iframeRef.current?.contentWindow?.postMessage(
           {
@@ -179,7 +408,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         attributeFilter: ["class", "style"],
       });
       return () => observer.disconnect();
-    }, [iframeReady, hostTheme]);
+    }, [iframeReadyVersion, hostTheme]);
 
     useImperativeHandle(ref, () => ({
       removeHighlight: hook.removeHighlight,
@@ -279,20 +508,57 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               </div>
             )}
             <iframe
-            ref={iframeRef}
-            srcDoc={srcdoc}
-            sandbox="allow-scripts"
-            style={{
-              width: "100%",
-              height: fullViewport ? "100%" : `${iframeHeight}px`,
-              border: "none",
-              display: "block",
-              colorScheme: "auto",
-            }}
-            title={title}
-          />
+              ref={iframeRef}
+              srcDoc={srcdoc}
+              sandbox="allow-scripts"
+              style={{
+                width: "100%",
+                height: fullViewport ? "100%" : `${iframeHeight}px`,
+                border: "none",
+                display: "block",
+                colorScheme: "auto",
+                outline: vimModeEnabled ? "none" : undefined,
+              }}
+              title={title}
+              onFocus={() => setIframeFocused(true)}
+              onBlur={(event) => {
+                if (
+                  event.relatedTarget instanceof Element
+                  && event.relatedTarget.closest('[data-vim-key-hud]')
+                ) {
+                  return;
+                }
+                setIframeFocused(false);
+              }}
+            />
           </article>
         </div>
+
+        {vimHudActive
+          && (vimHelpOpen || (
+            vimHudKeyPanelEnabled
+            && vimBridgePhase !== "inactive"
+          ))
+          && (iframeFocused || vimBridgePhase === "action" || vimHelpOpen)
+          && createPortal(
+            <VimKeyHud
+              command={vimHudCommand}
+              phase={getVimHudPhase(vimBridgePhase, vimHudCommand?.actionId)}
+              inputMethod={inputMethod}
+              expanded={vimHelpOpen}
+              onExpandedChange={handleVimHelpOpenChange}
+              onHide={
+                onVimHudKeyPanelChange
+                  ? () => {
+                    handleVimHelpOpenChange(false);
+                    onVimHudKeyPanelChange(false);
+                  }
+                  : undefined
+              }
+              onFocusLeave={handleVimHudFocusLeave}
+            />,
+            document.body,
+          )}
 
         {/* Toolbar portal */}
         {hook.toolbarState &&

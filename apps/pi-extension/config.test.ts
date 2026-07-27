@@ -37,6 +37,7 @@ describe("plannotator config", () => {
     expect(resolveExecutionMode(loaded.config)).toBe("automatic");
     expect(planning.statusLabel).toBe("⏸ plan");
     expect(planning.activeTools).toEqual(["grep", "find", "ls", "plannotator_submit_plan"]);
+    expect(planning.systemPrompt).not.toContain("Available tools:");
   });
 
   test("defaults to automatic execution", () => {

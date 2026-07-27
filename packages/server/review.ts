@@ -94,7 +94,7 @@ import {
   extractMarkerNonce,
   type MarkerEngineId,
 } from "./marker-review";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveCursorSandbox, resolveGuideHistory } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveCursorSandbox, resolveGuideHistory } from "./config";
 import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
 import {
   PR_CONTEXT_HEARTBEAT_COMMENT,
@@ -108,7 +108,7 @@ import {
   PRArtifactDocumentError,
 } from "@plannotator/shared/pr-artifact-document";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
-import type { AIEndpoints } from "@plannotator/ai";
+import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
@@ -215,6 +215,7 @@ export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
   const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
+  const aiEnabled = resolveAIEnabled();
 
   let prMetadata = options.prMetadata;
   const isPRMode = !!prMetadata;
@@ -721,7 +722,8 @@ export async function startReviewServer(
     patch: string = currentPatch,
     base: string = currentBase,
     diffType: DiffType = currentDiffType as DiffType,
-  ): string => {
+  ): string | undefined => {
+    if (!aiEnabled) return undefined;
     const workspacePrompt = getWorkspacePromptContext();
     if (workspacePrompt) {
       return buildAgentReviewUserMessageForTarget(
@@ -1320,7 +1322,7 @@ export async function startReviewServer(
   });
 
   // AI provider setup (graceful — capabilities report unavailable if no provider is registered)
-  const aiRuntime = await createAIRuntime({ getCwd: resolveAgentCwd });
+  const aiRuntime = aiEnabled ? await createAIRuntime({ getCwd: resolveAgentCwd }) : null;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -1549,6 +1551,7 @@ export async function startReviewServer(
             return Response.json({
               rawPatch: servedPatch,
               aiReviewContext: buildCurrentAiReviewContext(servedPatch, servedBase, servedDiffType as DiffType),
+              aiEnabled,
               gitRef: servedGitRef,
               snapshotId: servedSnapshotId,
               origin,
@@ -2565,6 +2568,18 @@ export async function startReviewServer(
             return handleAgents(options.opencodeClient);
           }
 
+          // AI-disabled review sessions expose no agent discovery or launch
+          // surface. The exact endpoint above is feedback routing, not a job.
+          if (!aiEnabled && url.pathname.startsWith("/api/agents/")) {
+            if (
+              url.pathname.slice("/api/agents/".length) === "capabilities" &&
+              req.method === "GET"
+            ) {
+              return Response.json({ mode: "review", providers: [], available: false });
+            }
+            return Response.json({ error: "AI features disabled" }, { status: 503 });
+          }
+
           // API: Review profiles (custom reviews discovery). Reloaded per
           // request, no file watching. Profiles come from the user dir plus
           // builtins.
@@ -2819,6 +2834,15 @@ export async function startReviewServer(
 
           // AI endpoints
           if (url.pathname.startsWith("/api/ai/")) {
+            if (!aiRuntime) {
+              if (!isAIEndpointPath(url.pathname)) {
+                return handleApiNotFound(url.pathname);
+              }
+              if (url.pathname.slice("/api/ai/".length) === "capabilities" && req.method === "GET") {
+                return Response.json({ available: false, providers: [] });
+              }
+              return Response.json({ error: "AI backend not available" }, { status: 503 });
+            }
             const handler = aiRuntime.endpoints[url.pathname as keyof AIEndpoints];
             if (handler) {
               // AI sessions pin their cwd at creation — wait out the PR
@@ -2885,7 +2909,7 @@ export async function startReviewServer(
     stop: () => {
       process.removeListener("exit", exitHandler);
       agentJobs.killAll();
-      aiRuntime.dispose();
+      aiRuntime?.dispose();
       server.stop();
       // Invoke cleanup callback (e.g., remove temp worktree)
       if (options.onCleanup) {

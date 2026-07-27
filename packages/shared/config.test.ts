@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import {
+  resolveAIEnabled,
   resolveCursorSandbox,
   resolveUseGlimpse,
   resolveAnnotateHistory,
@@ -7,6 +8,22 @@ import {
   resolveUseJina,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
+
+describe("resolveAIEnabled", () => {
+  test("defaults to enabled", () => {
+    expect(resolveAIEnabled({})).toBe(true);
+  });
+
+  test("disabled is case-insensitive", () => {
+    expect(resolveAIEnabled({ PLANNOTATOR_AI: "disabled" })).toBe(false);
+    expect(resolveAIEnabled({ PLANNOTATOR_AI: "Disabled" })).toBe(false);
+  });
+
+  test("other values keep AI enabled", () => {
+    expect(resolveAIEnabled({ PLANNOTATOR_AI: "enabled" })).toBe(true);
+    expect(resolveAIEnabled({ PLANNOTATOR_AI: "false" })).toBe(true);
+  });
+});
 
 const ENV = "PLANNOTATOR_CURSOR_SANDBOX";
 const originalEnv = process.env[ENV];

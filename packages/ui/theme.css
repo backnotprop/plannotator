@@ -56,6 +56,487 @@
 @import "./themes/neutral.css";
 @import "./print.css";
 
+/* Live Vim HUD target — mirrors the four-corner treatment used in the
+ * product demo while measuring the real semantic target/caret/range. */
+.vim-target-reticle {
+  position: absolute;
+  inset: 0;
+  z-index: 23;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.vim-target-reticle__fill,
+.vim-target-reticle__corner,
+.vim-target-reticle__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  transition: transform 90ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.vim-target-reticle__fill {
+  width: 100px;
+  height: 100px;
+  transform-origin: 0 0;
+  border-radius: 8px;
+  background: rgba(167, 139, 250, 0.045);
+  box-shadow:
+    inset 0 0 0 1px rgba(196, 181, 253, 0.16),
+    0 0 42px rgba(139, 92, 246, 0.12);
+}
+
+.vim-target-reticle__corner {
+  width: 28px;
+  height: 28px;
+  border-color: #c4b5fd;
+  filter:
+    drop-shadow(0 0 6px rgba(167, 139, 250, 0.92))
+    drop-shadow(0 0 18px rgba(124, 58, 237, 0.42));
+}
+
+.vim-target-reticle__corner--top-left {
+  border-top: 3px solid;
+  border-left: 3px solid;
+  border-top-left-radius: 8px;
+}
+
+.vim-target-reticle__corner--top-right {
+  border-top: 3px solid;
+  border-right: 3px solid;
+  border-top-right-radius: 8px;
+}
+
+.vim-target-reticle__corner--bottom-left {
+  border-bottom: 3px solid;
+  border-left: 3px solid;
+  border-bottom-left-radius: 8px;
+}
+
+.vim-target-reticle__corner--bottom-right {
+  border-right: 3px solid;
+  border-bottom: 3px solid;
+  border-bottom-right-radius: 8px;
+}
+
+.vim-target-reticle__label {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 118px;
+  height: 30px;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 0 11px;
+  overflow: hidden;
+  border: 1px solid rgba(216, 206, 255, 0.42);
+  border-radius: 9px;
+  color: #f6f2ff;
+  background: rgba(18, 14, 28, 0.84);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.42),
+    0 0 20px rgba(139, 92, 246, 0.18);
+  backdrop-filter: blur(10px);
+  font: 700 10px/1 var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.13em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vim-target-reticle__label-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #c4b5fd;
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.94);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vim-target-reticle__fill,
+  .vim-target-reticle__corner,
+  .vim-target-reticle__label {
+    transition: none;
+  }
+}
+
+.vim-key-hud__map-toggle {
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease-out;
+  touch-action: manipulation;
+}
+
+.vim-key-hud__map-toggle:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.82);
+  outline-offset: 2px;
+}
+
+.vim-key-hud__map-toggle:active {
+  transform: scale(0.97);
+}
+
+.vim-key-hud__map-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.vim-key-hud__map-scroll {
+  scrollbar-color: rgba(196, 181, 253, 0.24) transparent;
+  scrollbar-width: thin;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .vim-key-hud__map-toggle:hover {
+    border-color: rgba(196, 181, 253, 0.34) !important;
+    color: #e1d8ef !important;
+    background: rgba(167, 139, 250, 0.16) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .vim-key-hud__map-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vim-key-hud__map-toggle {
+    transition: none;
+  }
+}
+
+/* First-run Vim announcement. The preview reuses the live HUD's violet
+ * glass, illuminated keycap, and four-corner targeting vocabulary. */
+.vim-announcement-backdrop {
+  animation: vim-announcement-backdrop-in 160ms ease-out both;
+}
+
+.vim-announcement-dialog {
+  animation: vim-announcement-dialog-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.vim-announcement-switch {
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+  touch-action: manipulation;
+}
+
+.vim-announcement-secondary-action {
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+}
+
+.vim-announcement-primary-action {
+  transition: opacity 140ms ease;
+}
+
+.vim-announcement-switch__track {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 75%, transparent);
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.vim-announcement-switch__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--muted-foreground);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  transform: translate3d(0, 0, 0);
+  transition:
+    background-color 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.vim-announcement-switch__track--checked {
+  border-color: color-mix(in srgb, var(--primary) 72%, transparent);
+  background: color-mix(in srgb, var(--primary) 58%, transparent);
+}
+
+.vim-announcement-switch__track--checked .vim-announcement-switch__thumb {
+  background: var(--primary-foreground);
+  transform: translate3d(18px, 0, 0);
+}
+
+.vim-announcement-step {
+  animation: vim-announcement-step 14s linear infinite both;
+}
+
+.vim-announcement-step--1 { animation-delay: 0s; }
+.vim-announcement-step--2 { animation-delay: -12s; }
+.vim-announcement-step--3 { animation-delay: -10s; }
+.vim-announcement-step--4 { animation-delay: -8s; }
+.vim-announcement-step--5 { animation-delay: -6s; }
+.vim-announcement-step--6 { animation-delay: -4s; }
+.vim-announcement-step--7 { animation-delay: -2s; }
+
+.vim-announcement-showcase[data-playing="false"] .vim-announcement-step,
+.vim-announcement-showcase[data-playing="false"] .vim-announcement-code-selection {
+  animation-play-state: paused;
+}
+
+.vim-announcement-showcase__canvas {
+  transform-origin: top left;
+}
+
+.vim-announcement-reticle {
+  position: absolute;
+  z-index: 12;
+  border-radius: 8px;
+  background: rgba(167, 139, 250, 0.045);
+  box-shadow:
+    inset 0 0 0 1px rgba(196, 181, 253, 0.16),
+    0 0 42px rgba(139, 92, 246, 0.14);
+  pointer-events: none;
+}
+
+.vim-announcement-reticle--block {
+  inset: -5px;
+}
+
+.vim-announcement-reticle--inline {
+  inset: -3px -8px;
+}
+
+.vim-announcement-reticle--cursor-start {
+  top: 50%;
+  left: -22px;
+  width: 44px;
+  height: 32px;
+  margin-top: -16px;
+}
+
+.vim-announcement-reticle--selection {
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 32px;
+  margin-top: -16px;
+  margin-left: -22px;
+}
+
+.vim-announcement-reticle__corner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: #c4b5fd;
+  filter:
+    drop-shadow(0 0 6px rgba(167, 139, 250, 0.92))
+    drop-shadow(0 0 18px rgba(124, 58, 237, 0.42));
+}
+
+.vim-announcement-reticle__corner--top-left {
+  top: 0;
+  left: 0;
+  border-top: 3px solid;
+  border-left: 3px solid;
+  border-top-left-radius: 8px;
+}
+
+.vim-announcement-reticle__corner--top-right {
+  top: 0;
+  right: 0;
+  border-top: 3px solid;
+  border-right: 3px solid;
+  border-top-right-radius: 8px;
+}
+
+.vim-announcement-reticle__corner--bottom-left {
+  bottom: 0;
+  left: 0;
+  border-bottom: 3px solid;
+  border-left: 3px solid;
+  border-bottom-left-radius: 8px;
+}
+
+.vim-announcement-reticle__corner--bottom-right {
+  right: 0;
+  bottom: 0;
+  border-right: 3px solid;
+  border-bottom: 3px solid;
+  border-bottom-right-radius: 8px;
+}
+
+.vim-announcement-reticle__label {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 27px;
+  max-width: 250px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid rgba(216, 206, 255, 0.38);
+  border-radius: 8px;
+  color: #f6f2ff;
+  background: rgba(18, 14, 28, 0.82);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.38),
+    0 0 18px rgba(139, 92, 246, 0.18);
+  backdrop-filter: blur(9px);
+  font: 800 8px/1 var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.vim-announcement-reticle--cursor-start .vim-announcement-reticle__label {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+.vim-announcement-reticle__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #c4b5fd;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.94);
+}
+
+.vim-announcement-code-selection {
+  animation: vim-announcement-selection 14s linear infinite both;
+}
+
+.vim-announcement-comment {
+  position: absolute;
+  top: calc(100% + 24px);
+  left: -18px;
+  z-index: 14;
+  width: 194px;
+  padding: 9px 11px;
+  border: 1px solid rgba(196, 181, 253, 0.28);
+  border-radius: 9px;
+  color: #f5f0ff;
+  background: rgba(27, 23, 38, 0.9);
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.42),
+    0 0 24px rgba(139, 92, 246, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+@keyframes vim-announcement-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes vim-announcement-dialog-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes vim-announcement-step {
+  0%,
+  11% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  14%,
+  96% {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes vim-announcement-selection {
+  0%,
+  70% {
+    color: #d2a8ff;
+    background: transparent;
+    box-shadow: none;
+  }
+  72%,
+  100% {
+    color: #f5f0ff;
+    background: rgba(139, 92, 246, 0.48);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.24);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .vim-announcement-switch:hover {
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    background: color-mix(in srgb, var(--muted) 48%, transparent);
+  }
+
+  .vim-announcement-secondary-action:hover {
+    color: var(--foreground);
+    background: var(--muted);
+  }
+
+  .vim-announcement-primary-action:hover {
+    opacity: 0.9;
+  }
+}
+
+@media (max-width: 820px) {
+  .vim-announcement-showcase__canvas {
+    width: calc(100% / 0.81);
+    height: calc(100% / 0.81);
+    transform: scale(0.81);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vim-announcement-backdrop,
+  .vim-announcement-dialog,
+  .vim-announcement-step,
+  .vim-announcement-code-selection {
+    animation: none;
+  }
+
+  .vim-announcement-switch,
+  .vim-announcement-switch__track,
+  .vim-announcement-switch__thumb,
+  .vim-announcement-secondary-action,
+  .vim-announcement-primary-action {
+    transition: none;
+  }
+
+  .vim-announcement-step {
+    opacity: 0;
+  }
+
+  .vim-announcement-step--6 {
+    opacity: 1;
+    transform: none;
+  }
+
+  .vim-announcement-code-selection {
+    color: #f5f0ff;
+    background: rgba(139, 92, 246, 0.48);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.24);
+  }
+}
+
 /* Tailwind bridge — maps CSS vars to utility classes */
 @theme inline {
   --color-background: var(--background);

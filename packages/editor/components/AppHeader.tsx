@@ -43,6 +43,8 @@ interface AppHeaderProps {
   agentName: string;
   availableAgents: Agent[];
   showAnnotationsWarning: boolean;
+  annotateApproveLabel: string;
+  annotateApproveTitle: string;
 
   // Callback config (null when no bot callback)
   callbackConfig: CallbackConfig | null;
@@ -119,6 +121,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   agentName,
   availableAgents,
   showAnnotationsWarning,
+  annotateApproveLabel,
+  annotateApproveTitle,
   callbackConfig,
   taterMode,
   mobileSettingsOpen,
@@ -281,7 +285,9 @@ export const AppHeader = React.memo<AppHeaderProps>(({
                     disabled={isSubmitting || (annotateMode && isExiting)}
                     isLoading={isSubmitting}
                     dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning}
-                    title={annotateMode ? 'Approve — no changes requested' : undefined}
+                    label={annotateMode ? annotateApproveLabel : undefined}
+                    mobileLabel={annotateMode ? annotateApproveLabel : undefined}
+                    title={annotateMode ? annotateApproveTitle : undefined}
                   />
                   {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning && (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">

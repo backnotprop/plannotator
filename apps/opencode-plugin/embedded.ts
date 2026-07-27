@@ -3,6 +3,11 @@ import {
   waitForPlanReviewCloseDelay,
   waitForPlanReviewDecision,
 } from "@plannotator/shared/plan-review-lifecycle";
+import {
+  getAnnotateApprovedWithNotesPrompt,
+  getAnnotateMessageFeedbackPrompt,
+} from "@plannotator/shared/prompts";
+import { deliverOpenCodePrompt } from "./prompt-delivery-error";
 
 export interface EmbeddedPlanReviewInput {
   client: any;
@@ -31,6 +36,34 @@ async function loadPlanServer() {
 async function loadCommandHandlers() {
   recoverNativeFetchConstructors();
   return await import("./commands");
+}
+
+export async function deliverEmbeddedAnnotateMessagePrompt(input: {
+  client: any;
+  sessionId: string;
+  approved: boolean;
+  feedback: string;
+}): Promise<void> {
+  const text = input.approved
+    ? getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
+        feedback: input.feedback,
+      })
+    : getAnnotateMessageFeedbackPrompt("opencode", undefined, {
+        feedback: input.feedback,
+      });
+
+  await deliverOpenCodePrompt({
+    client: input.client,
+    prompt: {
+      path: { id: input.sessionId },
+      body: {
+        parts: [{ type: "text", text }],
+      },
+    },
+    failureMessage: input.approved
+      ? "Could not deliver approved annotation notes to the OpenCode session."
+      : "Could not deliver annotation feedback to the OpenCode session.",
+  });
 }
 
 export async function runEmbeddedPlanReview(
@@ -83,7 +116,7 @@ export async function handleEmbeddedCommand(
     getPasteApiUrl: () => string | undefined;
     directory?: string;
   },
-): Promise<{ feedback?: string | null }> {
+): Promise<{ approved?: boolean; feedback?: string | null }> {
   const {
     handleReviewCommand,
     handleAnnotateCommand,
@@ -91,7 +124,7 @@ export async function handleEmbeddedCommand(
   } = await loadCommandHandlers();
 
   if (command === "plannotator-last") {
-    return { feedback: await handleAnnotateLastCommand(event, deps) };
+    return await handleAnnotateLastCommand(event, deps) ?? {};
   }
 
   if (command === "plannotator-annotate") {
