@@ -1245,6 +1245,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			checklistItems = [];
 			lastSubmittedPath = null;
 
+			releaseAddedPhaseTools();
 			await restoreSavedState(ctx);
 			savedState = null;
 			updateStatus(ctx);
