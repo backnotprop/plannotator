@@ -3,7 +3,6 @@ import {
 	getToolsForPhase,
 	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
-	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
 
 describe("pi plan tool scoping", () => {
@@ -20,29 +19,11 @@ describe("pi plan tool scoping", () => {
 		]);
 	});
 
-	test("idle and executing phases strip the planning-only submit tool", () => {
-		const leakedTools = ["read", "bash", "grep", PLAN_SUBMIT_TOOL, "write"];
+	test("idle and executing phases preserve the submit tool", () => {
+		const activeTools = ["read", "bash", "grep", PLAN_SUBMIT_TOOL, "write"];
 
-		expect(getToolsForPhase(leakedTools, "idle")).toEqual([
-			"read",
-			"bash",
-			"grep",
-			"write",
-		]);
-		expect(getToolsForPhase(leakedTools, "executing")).toEqual([
-			"read",
-			"bash",
-			"grep",
-			"write",
-		]);
-	});
-
-	test("stripping planning-only tools preserves unrelated tools", () => {
-		expect(stripPlanningOnlyTools([PLAN_SUBMIT_TOOL, "todo", "question", "read"])).toEqual([
-			"todo",
-			"question",
-			"read",
-		]);
+		expect(getToolsForPhase(activeTools, "idle")).toEqual(activeTools);
+		expect(getToolsForPhase(activeTools, "executing")).toEqual(activeTools);
 	});
 });
 

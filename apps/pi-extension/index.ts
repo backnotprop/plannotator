@@ -65,7 +65,6 @@ import {
 	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
 	type Phase,
-	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
 import { isRemoteSession } from "./server/network.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
@@ -367,7 +366,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		if (phase === "planning" || phase === "executing") {
-			const baseTools = stripPlanningOnlyTools(savedState?.activeTools ?? pi.getActiveTools());
+			const baseTools = savedState?.activeTools ?? pi.getActiveTools();
 			const toolSet = new Set(baseTools);
 			for (const tool of profile?.activeTools ?? []) toolSet.add(tool);
 			if (phase === "planning") {
@@ -812,8 +811,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 		name: PLAN_SUBMIT_TOOL,
 		label: "Submit Plan",
 		description:
-			"Submit your Plannotator plan for user review. " +
-			"Call this only while Plannotator planning mode is active, after writing your plan as a markdown file anywhere inside the working directory. " +
+			"Submit your Plannotator plan for user review from any mode. " +
+			"Call this after writing your plan as a markdown file anywhere inside the working directory. " +
 			"Pass the path to the plan file (e.g. PLAN.md or plans/auth.md). " +
 			"The user will review the plan in a visual browser UI and can approve, deny with feedback, or annotate it. " +
 			"If denied, edit the same file in place, then call this again with the same path.",
@@ -825,19 +824,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}) as any,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			// Guard: must be in planning phase
-			if (phase !== "planning") {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "Error: Not in plan mode. Use /plannotator to enter planning mode first.",
-						},
-					],
-					details: { approved: false },
-				};
-			}
-
+			const submissionPhase = phase;
 			const inputPath = (params as { filePath?: string })?.filePath?.trim();
 			if (!inputPath) {
 				return {
@@ -916,16 +903,34 @@ export default function plannotator(pi: ExtensionAPI): void {
 				};
 			}
 
-			lastSubmittedPath = inputPath;
-			checklistItems = parseChecklist(planContent);
+			const submittedChecklist = parseChecklist(planContent);
+			if (submissionPhase === "planning") {
+				lastSubmittedPath = inputPath;
+				checklistItems = submittedChecklist;
+			}
 
-			// Non-interactive or no HTML: auto-approve
-			if (!ctx.hasUI || !hasPlanBrowserHtml()) {
+			const beginExecution = async (): Promise<void> => {
+				lastSubmittedPath = inputPath;
+				checklistItems = submittedChecklist;
 				phase = "executing";
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 				justApprovedPlan = true;
+			};
+			const shouldBeginExecution = (): boolean =>
+				submissionPhase === "planning" && phase === "planning";
+
+			// Non-interactive or no HTML: auto-approve
+			if (!ctx.hasUI || !hasPlanBrowserHtml()) {
+				if (!shouldBeginExecution()) {
+					return {
+						content: [{ type: "text", text: "Plan approved. Continue in the current mode." }],
+						details: { approved: true },
+					};
+				}
+
+				await beginExecution();
 				const { getPlanAutoApprovedPrompt } = await loadPlannotatorPrompts();
 				return {
 					content: [
@@ -952,12 +957,22 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			if (result.approved) {
-				phase = "executing";
-				await applyPhaseConfig(ctx, { restoreSavedState: true });
-				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
-				persistState();
-				justApprovedPlan = true;
+				if (!shouldBeginExecution()) {
+					const feedback = result.feedback?.trim();
+					return {
+						content: [
+							{
+								type: "text",
+								text: feedback
+									? `Plan approved with notes:\n\n${feedback}`
+									: "Plan approved. Continue in the current mode.",
+							},
+						],
+						details: { approved: true, ...(feedback ? { feedback } : {}) },
+					};
+				}
 
+				await beginExecution();
 				const doneMsg =
 					checklistItems.length > 0
 						? `After completing each step, include [DONE:n] in your response where n is the step number.`
@@ -998,7 +1013,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			// Denied
-			persistState();
+			if (submissionPhase === "planning" && phase === "planning") persistState();
 			const feedbackText = result.feedback || "Plan rejected. Please revise.";
 			const { buildPlanFileRule, getPlanDeniedPrompt, getPlanToolName } = await loadPlannotatorPrompts();
 			return {
@@ -1342,11 +1357,6 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			if (savedState) {
 				await restoreSavedState(ctx);
 				savedState = null;
-			} else {
-				// Strip planning-only tools on fresh sessions where savedState is null.
-				// Without this, plannotator_submit_plan stays in the active tool set
-				// even though plan mode hasn't been activated. See #387.
-				pi.setActiveTools(stripPlanningOnlyTools(pi.getActiveTools()));
 			}
 		} else if (phase === "planning" || phase === "executing") {
 			await applyPhaseConfig(ctx, { restoreSavedState: true });
