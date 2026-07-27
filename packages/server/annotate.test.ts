@@ -1050,6 +1050,42 @@ describe("annotate server: approval notes", () => {
     }
   });
 
+  // Approve-with-notes must anchor exactly where Send Feedback would. Dropping
+  // the message scope made the notes land on the last message rather than the
+  // one the reviewer picked in a multi-message annotate-last session.
+  test("forwards the message scope on approval", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "approval-message-scope.md"),
+      htmlContent: MINIMAL_HTML,
+      approvalNotesSupported: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: "Scope this to the picked message.",
+          annotations: [],
+          selectedMessageId: "message-2",
+          feedbackScope: "messages",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Scope this to the picked message.",
+        annotations: [],
+        selectedMessageId: "message-2",
+        feedbackScope: "messages",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("keeps bodyless approval compatible", async () => {
     const server = await startAnnotateServer({
       markdown: "# Test",

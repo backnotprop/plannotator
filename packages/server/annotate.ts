@@ -733,6 +733,18 @@ export async function startAnnotateServer(
               feedback: (body.feedback as string | undefined) || "",
               annotations: (body.annotations as unknown[] | undefined) || [],
               approved: true,
+              // Approval notes carry the same message scoping as /api/feedback —
+              // without it, approve-with-notes in a multi-message annotate-last
+              // session anchors to the last message instead of the one the
+              // reviewer picked.
+              selectedMessageId:
+                typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
+              feedbackScope:
+                body.feedbackScope === "messages"
+                  ? "messages"
+                  : body.feedbackScope === "message"
+                    ? "message"
+                    : undefined,
             });
             return Response.json({ ok: true });
           }

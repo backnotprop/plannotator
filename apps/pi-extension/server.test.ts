@@ -378,6 +378,42 @@ describe("pi annotate approval notes", () => {
     }
   });
 
+  // Pi resolves the anchor message from selectedMessageId/feedbackScope, so
+  // approve-with-notes has to carry them exactly like /api/feedback does.
+  test("forwards the message scope on approval", async () => {
+    delete process.env.PLANNOTATOR_PORT;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(makeTempDir("plannotator-pi-approval-scope-"), "test.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      origin: "pi",
+      approvalNotesSupported: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: "Scope this to the picked message.",
+          annotations: [],
+          selectedMessageId: "message-2",
+          feedbackScope: "messages",
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Scope this to the picked message.",
+        annotations: [],
+        selectedMessageId: "message-2",
+        feedbackScope: "messages",
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("keeps bodyless approval compatible", async () => {
     delete process.env.PLANNOTATOR_PORT;
     const server = await startAnnotateServer({

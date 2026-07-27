@@ -22,6 +22,37 @@ describe("annotate approval submission", () => {
     });
   });
 
+  // The notes have to anchor to the same message Send Feedback would target.
+  test("carries the message scope so approval notes anchor like feedback", () => {
+    const input = {
+      draftGeneration: 4,
+      feedback: "Scope this to the picked message.",
+      annotations: [],
+      codeAnnotations: [],
+    };
+
+    expect(buildAnnotateApprovalBody({
+      supported: true,
+      ...input,
+      selectedMessageId: "message-2",
+      feedbackScope: "messages" as const,
+    })).toEqual({
+      ...input,
+      selectedMessageId: "message-2",
+      feedbackScope: "messages",
+    });
+
+    // Omitted entirely when there is no message scope (ordinary file annotate).
+    expect(buildAnnotateApprovalBody({ supported: true, ...input })).toEqual(input);
+
+    // Incapable transports still send nothing but the draft generation.
+    expect(buildAnnotateApprovalBody({
+      supported: false,
+      ...input,
+      selectedMessageId: "message-2",
+    })).toEqual({ draftGeneration: 4 });
+  });
+
   test("labels capable feedback approvals and requires a non-blocking confirmation", () => {
     expect(getAnnotateApprovalPolicy({
       gate: true,

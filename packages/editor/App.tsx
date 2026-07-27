@@ -2857,6 +2857,22 @@ const App: React.FC = () => {
 
   // Annotate mode handler — sends feedback to the running terminal agent when
   // available, otherwise through the original server feedback channel.
+  // Which message(s) a submission is about. Send Feedback and Approve with
+  // Notes must resolve this identically — otherwise notes delivered on the
+  // approve path anchor to the last message instead of the picked one.
+  const getFeedbackMessageScope = (): {
+    selectedMessageId?: string;
+    feedbackScope?: 'messages';
+  } => {
+    const scopedSelectedMessageId = messageMultiSelectMode
+      ? annotatedMessageIds.length === 1 ? annotatedMessageIds[0] : undefined
+      : selectedMessageId ?? undefined;
+    return {
+      ...(scopedSelectedMessageId ? { selectedMessageId: scopedSelectedMessageId } : {}),
+      ...(messageMultiSelectMode && annotatedMessageIds.length > 1 ? { feedbackScope: 'messages' as const } : {}),
+    };
+  };
+
   const handleAnnotateFeedback = async () => {
     setIsSubmitting(true);
     try {
@@ -2891,9 +2907,6 @@ const App: React.FC = () => {
         toast.error('Agent terminal is not ready. Sending through the original session.');
       }
 
-      const scopedSelectedMessageId = messageMultiSelectMode
-        ? annotatedMessageIds.length === 1 ? annotatedMessageIds[0] : undefined
-        : selectedMessageId ?? undefined;
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2902,8 +2915,7 @@ const App: React.FC = () => {
           feedback,
           annotations: allAnnotations,
           codeAnnotations,
-          ...(scopedSelectedMessageId ? { selectedMessageId: scopedSelectedMessageId } : {}),
-          ...(messageMultiSelectMode && annotatedMessageIds.length > 1 ? { feedbackScope: 'messages' } : {}),
+          ...getFeedbackMessageScope(),
         }),
       });
       if (!res.ok) throw new Error('Failed to send feedback');
@@ -2939,6 +2951,7 @@ const App: React.FC = () => {
           feedback,
           annotations: allAnnotations,
           codeAnnotations,
+          ...getFeedbackMessageScope(),
         })),
       });
       if (!res.ok) throw new Error('Failed to approve');

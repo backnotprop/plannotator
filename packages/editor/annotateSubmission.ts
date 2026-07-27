@@ -24,6 +24,10 @@ export interface AnnotateApprovalBodyInput {
   feedback: string;
   annotations: unknown[];
   codeAnnotations: unknown[];
+  /** Which message the notes are about (annotate-last picker). */
+  selectedMessageId?: string;
+  /** "messages" when the notes span more than one selected message. */
+  feedbackScope?: "message" | "messages";
 }
 
 export interface AnnotateApprovalPolicy {
@@ -66,6 +70,8 @@ export function buildAnnotateApprovalBody(
   feedback?: string;
   annotations?: unknown[];
   codeAnnotations?: unknown[];
+  selectedMessageId?: string;
+  feedbackScope?: "message" | "messages";
 } {
   if (!input.supported) {
     return { draftGeneration: input.draftGeneration };
@@ -75,6 +81,9 @@ export function buildAnnotateApprovalBody(
     feedback: input.feedback,
     annotations: input.annotations,
     codeAnnotations: input.codeAnnotations,
+    // Notes must anchor to the same message Send Feedback would target.
+    ...(input.selectedMessageId ? { selectedMessageId: input.selectedMessageId } : {}),
+    ...(input.feedbackScope ? { feedbackScope: input.feedbackScope } : {}),
   };
 }
 
