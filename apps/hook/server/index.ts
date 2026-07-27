@@ -1213,7 +1213,12 @@ if (args[0] === "sessions") {
         console.error(`[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`);
       }
       for (const logPath of paths) {
-        const recent = getRecentRenderedMessages(logPath, RECENT_MESSAGES_LIMIT);
+        // Claude Code transcripts are trees: `/rewind` re-parents the next
+        // message rather than truncating, so a file-order read returns
+        // orphaned messages. Follow the id chain instead.
+        const recent = getRecentRenderedMessages(logPath, RECENT_MESSAGES_LIMIT, {
+          activeBranchOnly: true,
+        });
         if (recent.length > 0) {
           recentMessages = recent;
           lastMessage = recent[0];
