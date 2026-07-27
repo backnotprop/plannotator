@@ -53,6 +53,7 @@ export interface PromptConfig {
     fileFeedback?: string;
     messageFeedback?: string;
     approved?: string;
+    approvedWithNotes?: string;
   };
 }
 
@@ -114,6 +115,13 @@ export interface PlannotatorConfig {
    */
   annotateHistory?: boolean;
   /**
+   * Persist successful Guided Reviews (guide content + per-section reviewed
+   * state) under ~/.plannotator/guides/ (or PLANNOTATOR_DATA_DIR) so they
+   * survive closing Plannotator. Set to false to disable writes; already-saved
+   * guides remain readable and listed. Default: true.
+   */
+  guideHistory?: boolean;
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -134,6 +142,16 @@ export interface PlannotatorConfig {
    * env var value, which takes precedence over this setting.
    */
   share?: "enabled" | "disabled";
+  /**
+   * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
+   * jobs. When true (default), review jobs run with Cursor's sandbox forced
+   * on as part of their read-only posture. Set to false on systems where
+   * Cursor's sandbox cannot start (e.g. NixOS / AppArmor-restricted Linux):
+   * the flag pair is then OMITTED entirely, deferring to the user's own
+   * Cursor Agent sandbox configuration. Mirrors the
+   * PLANNOTATOR_CURSOR_SANDBOX env var, which takes precedence.
+   */
+  cursorSandbox?: boolean;
 }
 
 const CONFIG_DIR = getPlannotatorDataDir();
@@ -225,6 +243,22 @@ export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType
 }
 
 /**
+ * Coerce a config.json value that should be a boolean. JSON parsing preserves
+ * whatever type the user typed, so a hand-edited `"false"` (quoted) arrives as
+ * a string and would fail `=== false` checks downstream. Accepts real booleans
+ * plus "true"/"false"/"1"/"0" strings; anything else falls back to the default.
+ */
+function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    if (v === "true" || v === "1") return true;
+    if (v === "false" || v === "0") return false;
+  }
+  return fallback;
+}
+
+/**
  * Resolve whether to use Glimpse native window.
  *
  * Priority (highest wins):
@@ -235,8 +269,7 @@ export function resolveUseGlimpse(config: PlannotatorConfig): boolean {
   if (envVal !== undefined) {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
-  if (config.glimpse !== undefined) return config.glimpse;
-  return true;
+  return coerceConfigBoolean(config.glimpse, true);
 }
 
 /**
@@ -256,8 +289,21 @@ export function resolveAnnotateHistory(config: PlannotatorConfig): boolean {
   if (envVal !== undefined) {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
-  if (config.annotateHistory !== undefined) return config.annotateHistory;
-  return true;
+  return coerceConfigBoolean(config.annotateHistory, true);
+}
+
+/**
+ * Resolve whether successful Guided Reviews are persisted to disk.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_GUIDE_HISTORY env var  →  config.guideHistory  →  default true
+ */
+export function resolveGuideHistory(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_GUIDE_HISTORY;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  return coerceConfigBoolean(config.guideHistory, true);
 }
 
 export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {
@@ -270,11 +316,8 @@ export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): b
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
 
-  // Config file
-  if (config.jina !== undefined) return config.jina;
-
-  // Default: enabled
-  return true;
+  // Config file (default: enabled)
+  return coerceConfigBoolean(config.jina, true);
 }
 
 /**
@@ -288,4 +331,36 @@ export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
   if (envVal !== undefined) return envVal !== "disabled";
   if (config.share !== undefined) return config.share !== "disabled";
   return true;
+}
+
+/**
+ * Resolve whether Plannotator-managed AI features are enabled.
+ *
+ * Set PLANNOTATOR_AI=disabled to prevent provider runtime initialization and
+ * hide the corresponding UI. External agents may still open Plannotator as a
+ * review surface and submit annotations through the external annotation API.
+ */
+export function resolveAIEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.PLANNOTATOR_AI?.toLowerCase() !== "disabled";
+}
+
+/**
+ * Resolve whether Cursor review jobs pass `--sandbox enabled` to the `agent` CLI.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_CURSOR_SANDBOX env var  →  config.cursorSandbox  →  default true
+ *
+ * Env values `0` / `false` / `disabled` turn the flag off (the pair is omitted
+ * from the argv, deferring to the user's own Cursor Agent configuration);
+ * anything else — including `1` / `true` / `enabled` — keeps the default.
+ */
+export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_CURSOR_SANDBOX;
+  if (envVal !== undefined) {
+    const v = envVal.toLowerCase();
+    return v !== "0" && v !== "false" && v !== "disabled";
+  }
+  return coerceConfigBoolean(config.cursorSandbox, true);
 }

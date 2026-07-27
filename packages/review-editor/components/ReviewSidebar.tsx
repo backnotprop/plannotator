@@ -16,6 +16,7 @@ import type { AIChatEntry } from '../hooks/useAIChat';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 
 export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
 
@@ -349,8 +350,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
 
   const renderDescriptionAnnotationCard = (annotation: Annotation) => renderProseAnnotationCard({
     id: annotation.id,
-    label: 'PR description',
-    quote: annotation.originalText,
+    label: annotation.artifact
+      ? `${annotation.artifact.artifactKind} · ${artifactAnchorLabel(annotation.artifact.anchor)}`
+      : 'PR description',
+    quote: annotation.artifact ? artifactAnnotationQuote(annotation.artifact) : annotation.originalText,
     quoteClamp: 'line-clamp-1',
     note: annotation.text,
     author: annotation.author,
@@ -363,8 +366,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
 
   const renderCommentAnnotationCard = (annotation: CommentAnnotation) => renderProseAnnotationCard({
     id: annotation.id,
-    label: 'PR comment',
-    quote: annotation.commentBody,
+    label: annotation.artifact
+      ? `${annotation.artifact.artifactKind} · ${artifactAnchorLabel(annotation.artifact.anchor)}`
+      : 'PR comment',
+    quote: annotation.artifact ? artifactAnnotationQuote(annotation.artifact) : annotation.commentBody,
     note: annotation.text,
     author: annotation.commentAuthor,
     createdAt: annotation.createdAt,

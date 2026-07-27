@@ -13,10 +13,18 @@ export interface CommitAnnotationContext {
   subject?: string;
 }
 
+export interface GitButlerAnnotationContext {
+  diffType: string;
+  label?: string;
+  base?: string;
+  snapshotId?: string;
+}
+
 export function useAnnotationFactory(
   prMetadata: PRMetadata | null,
   diffScope?: PRDiffScope,
   commitContext?: CommitAnnotationContext | null,
+  gitButlerContext?: GitButlerAnnotationContext | null,
 ) {
   const prContext = useMemo(() => ({
     ...(prMetadata ? {
@@ -30,7 +38,13 @@ export function useAnnotationFactory(
       commitSha: commitContext.sha,
       ...(commitContext.subject ? { commitSubject: commitContext.subject } : {}),
     } : {}),
-  }), [prMetadata, diffScope, commitContext]);
+    ...(gitButlerContext ? {
+      gitButlerDiffType: gitButlerContext.diffType,
+      ...(gitButlerContext.label ? { gitButlerDiffLabel: gitButlerContext.label } : {}),
+      ...(gitButlerContext.base ? { gitButlerBase: gitButlerContext.base } : {}),
+      ...(gitButlerContext.snapshotId ? { gitButlerSnapshotId: gitButlerContext.snapshotId } : {}),
+    } : {}),
+  }), [prMetadata, diffScope, commitContext, gitButlerContext]);
 
   const withPRContext = useCallback(
     (annotation: CodeAnnotation): CodeAnnotation => ({ ...annotation, ...prContext }),

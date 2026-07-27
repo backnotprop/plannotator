@@ -1,19 +1,32 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import {
+  detectRemoteDefaultInfo,
   getDefaultBranch,
   getFileContentsForDiff,
   getGitContext,
   getGitDiffFingerprint,
+  getWorkingTreeDiffFromBase,
   gitAddFile,
   gitResetFile,
+  isBinaryPatchFile,
   isSameCwdCommitSwitch,
+  listPatchFiles,
   listRecentCommits,
+  MAX_REVIEW_FILE_CONTENT_BYTES,
   parseCommitDiffType,
   parseWorktreeDiffType,
+  prepareGitCommand,
   runGitDiff,
   splitPorcelainRename,
   type DiffType,
@@ -106,6 +119,117 @@ afterEach(() => {
 });
 
 describe("review-core", () => {
+  test("background Git policy is process-local and noninteractive for OpenSSH", () => {
+    const environment = {
+      PATH: "/usr/bin",
+      GIT_SSH_COMMAND: "custom-ssh --proxy jump-host",
+    };
+
+    const command = prepareGitCommand(
+      ["ls-remote", "--symref", "origin", "HEAD"],
+      { timeoutMs: 5_000, interaction: "forbid" },
+      environment,
+    );
+
+    expect(environment).toEqual({
+      PATH: "/usr/bin",
+      GIT_SSH_COMMAND: "custom-ssh --proxy jump-host",
+    });
+    expect(command.args).toEqual([
+      "-c",
+      "core.quotePath=false",
+      "-c",
+      "credential.interactive=false",
+      "ls-remote",
+      "--symref",
+      "origin",
+      "HEAD",
+    ]);
+    expect(command.env).toMatchObject({
+      PATH: "/usr/bin",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_SSH_COMMAND: "custom-ssh --proxy jump-host -o BatchMode=yes -o ConnectTimeout=5",
+      SSH_ASKPASS_REQUIRE: "never",
+    });
+    expect(command.isolateProcessGroup).toBe(true);
+  });
+
+  test("background Git policy uses plink batch mode on Windows-style SSH setups", () => {
+    const command = prepareGitCommand(
+      ["ls-remote", "origin", "HEAD"],
+      { timeoutMs: 1_500, interaction: "forbid" },
+      {
+        GIT_SSH: "C:\\Program Files\\PuTTY\\plink.exe",
+        GIT_SSH_VARIANT: "plink",
+      },
+    );
+
+    expect(command.env?.GIT_TERMINAL_PROMPT).toBe("0");
+    expect(command.env?.GIT_SSH_COMMAND).toBe(
+      '"C:\\\\Program Files\\\\PuTTY\\\\plink.exe" -batch',
+    );
+    expect(command.isolateProcessGroup).toBe(true);
+  });
+
+  test("interactive Git policy preserves authentication and terminal behavior", () => {
+    const command = prepareGitCommand(
+      ["fetch", "origin", "main"],
+      { timeoutMs: 30_000 },
+      {
+        GIT_TERMINAL_PROMPT: "1",
+        GIT_SSH_COMMAND: "custom-ssh",
+      },
+    );
+
+    expect(command).toEqual({
+      args: ["-c", "core.quotePath=false", "fetch", "origin", "main"],
+      isolateProcessGroup: false,
+    });
+  });
+
+  test("remote-default discovery requests bounded noninteractive execution", async () => {
+    const calls: Array<{ args: string[]; options: unknown }> = [];
+    const runtime: ReviewGitRuntime = {
+      async runGit(args, options) {
+        calls.push({ args, options });
+        return { stdout: "", stderr: "origin is absent", exitCode: 2 };
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    await expect(detectRemoteDefaultInfo(runtime, "/repo")).resolves.toBeNull();
+    expect(calls).toEqual([
+      {
+        args: ["ls-remote", "--symref", "origin", "HEAD"],
+        options: { cwd: "/repo", timeoutMs: 5_000, interaction: "forbid" },
+      },
+    ]);
+  });
+
+  test("remote-default discovery tolerates a repository without an origin", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+
+    await expect(detectRemoteDefaultInfo(runtime, repoDir)).resolves.toBeNull();
+  });
+
+  test("remote-default discovery still resolves an accessible ordinary remote", async () => {
+    const repoDir = initRepo();
+    const remoteDir = makeTempDir("plannotator-review-core-remote-");
+    git(remoteDir, ["init", "--bare", "--initial-branch=main"]);
+    git(repoDir, ["remote", "add", "origin", remoteDir]);
+    git(repoDir, ["push", "--set-upstream", "origin", "main"]);
+    const head = git(repoDir, ["rev-parse", "HEAD"]);
+    const runtime = makeRuntime(repoDir);
+
+    await expect(detectRemoteDefaultInfo(runtime, repoDir)).resolves.toEqual({
+      branch: "origin/main",
+      remoteHeadSha: head,
+    });
+  });
+
   test("uncommitted diff includes tracked and untracked files", async () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
@@ -119,6 +243,170 @@ describe("review-core", () => {
     expect(result.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
     expect(result.patch).toContain("diff --git a/untracked.txt b/untracked.txt");
     expect(result.patch).toContain("+++ b/untracked.txt");
+  });
+
+  test("large untracked files stay visible without diffing their contents", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(
+      join(repoDir, "large build.bin"),
+      Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1),
+    );
+
+    const result = await runGitDiff(runtime, "uncommitted", "main");
+
+    expect(result.patch).toContain('diff --git "a/large build.bin" "b/large build.bin"');
+    expect(result.patch).toContain('Binary files /dev/null and "b/large build.bin" differ');
+    expect(listPatchFiles(result.patch)).toContainEqual({
+      path: "large build.bin",
+      additions: 0,
+      deletions: 0,
+    });
+    expect(isBinaryPatchFile(result.patch, "large build.bin")).toBe(true);
+  });
+
+  test("binary patch detection follows rename metadata", () => {
+    const patch = [
+      'diff --git "a/old name.bin" "b/new name.bin"',
+      "similarity index 100%",
+      "rename from old name.bin",
+      "rename to new name.bin",
+      "GIT binary patch",
+      "",
+    ].join("\n");
+
+    expect(isBinaryPatchFile(patch, "new name.bin")).toBe(true);
+    expect(isBinaryPatchFile(patch, "old name.bin")).toBe(false);
+  });
+
+  test("untracked diff collection caps concurrent git processes", async () => {
+    const repoDir = initRepo();
+    const baseRuntime = makeRuntime(repoDir);
+    for (let index = 0; index < 12; index++) {
+      writeFileSync(join(repoDir, `untracked-${index}.txt`), `${index}\n`);
+    }
+    let active = 0;
+    let peak = 0;
+    const runtime: ReviewGitRuntime = {
+      ...baseRuntime,
+      async runGit(args, options) {
+        if (!args.includes("--no-index")) return baseRuntime.runGit(args, options);
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        try {
+          return await baseRuntime.runGit(args, options);
+        } finally {
+          active--;
+        }
+      },
+    };
+
+    await runGitDiff(runtime, "uncommitted", "main");
+
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+
+  test("ordinary working-tree diffs keep tracked changes when an untracked file cannot be read", async () => {
+    const runtime: ReviewGitRuntime = {
+      async runGit(args) {
+        if (args[0] === "rev-parse") {
+          return { stdout: "/repo\n", stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "ls-files") {
+          return { stdout: "blocked.txt\n", stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "diff" && args.includes("--no-index")) {
+          return { stdout: "", stderr: "error: Could not access blocked.txt", exitCode: 128 };
+        }
+        if (args[0] === "diff") {
+          return { stdout: "tracked patch\n", stderr: "", exitCode: 0 };
+        }
+        throw new Error(`Unexpected git command: ${args.join(" ")}`);
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    await expect(getWorkingTreeDiffFromBase(runtime, "abc123", "/repo")).resolves.toBe(
+      "tracked patch\n",
+    );
+    await expect(getWorkingTreeDiffFromBase(runtime, "abc123", "/repo", undefined, "strict")).rejects.toThrow(
+      "Could not access blocked.txt",
+    );
+  });
+
+  test("ordinary working-tree diffs keep tracked changes when untracked discovery fails", async () => {
+    const runtime: ReviewGitRuntime = {
+      async runGit(args) {
+        if (args[0] === "rev-parse") {
+          return { stdout: "/repo\n", stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "ls-files") {
+          return { stdout: "", stderr: "fatal: cannot read index", exitCode: 128 };
+        }
+        if (args[0] === "diff") {
+          return { stdout: "tracked patch\n", stderr: "", exitCode: 0 };
+        }
+        throw new Error(`Unexpected git command: ${args.join(" ")}`);
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    await expect(getWorkingTreeDiffFromBase(runtime, "abc123", "/repo")).resolves.toBe(
+      "tracked patch\n",
+    );
+    await expect(getWorkingTreeDiffFromBase(runtime, "abc123", "/repo", undefined, "strict"))
+      .rejects.toThrow("cannot read index");
+  });
+
+  test("since-base includes committed, dirty, and untracked changes", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    git(repoDir, ["checkout", "-b", "feature"]);
+    writeFileSync(join(repoDir, "committed.txt"), "committed\n", "utf-8");
+    git(repoDir, ["add", "committed.txt"]);
+    git(repoDir, ["commit", "-m", "feature commit"]);
+    writeFileSync(join(repoDir, "tracked.txt"), "dirty\n", "utf-8");
+    writeFileSync(join(repoDir, "untracked.txt"), "new\n", "utf-8");
+
+    const result = await runGitDiff(runtime, "since-base", "main", repoDir);
+
+    expect(result.error).toBeUndefined();
+    expect(result.patch).toContain("diff --git a/committed.txt b/committed.txt");
+    expect(result.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
+    expect(result.patch).toContain("diff --git a/untracked.txt b/untracked.txt");
+  });
+
+  test("since-base falls back to HEAD when the requested base cannot resolve", async () => {
+    const repoDir = initRepo("trunk");
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(join(repoDir, "tracked.txt"), "dirty\n", "utf-8");
+    writeFileSync(join(repoDir, "untracked.txt"), "new\n", "utf-8");
+
+    const result = await runGitDiff(runtime, "since-base", "missing-base", repoDir);
+
+    expect(result.error).toBeUndefined();
+    expect(result.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
+    expect(result.patch).toContain("diff --git a/untracked.txt b/untracked.txt");
+  });
+
+  test("since-base handles an unborn HEAD without invoking merge-base", async () => {
+    const repoDir = makeTempDir("plannotator-review-core-unborn-");
+    git(repoDir, ["init"]);
+    git(repoDir, ["branch", "-M", "main"]);
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(join(repoDir, "first.txt"), "first\n", "utf-8");
+
+    const result = await runGitDiff(runtime, "since-base", "main", repoDir);
+
+    expect(result.error).toBeUndefined();
+    expect(result.patch).toContain("diff --git a/first.txt b/first.txt");
+    expect(result.patch).toContain("+first");
   });
 
   test("uncommitted diff includes untracked files with C-quoted (unicode) names", async () => {
@@ -298,6 +586,43 @@ describe("review-core", () => {
     );
     expect(newFileContents.oldContent).toBeNull();
     expect(newFileContents.newContent).toBe("brand new\n");
+  });
+
+  test("file content lookup refuses oversized working-tree files", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(
+      join(repoDir, "large-generated.js"),
+      Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1, 0x20),
+    );
+
+    const contents = await getFileContentsForDiff(
+      runtime,
+      "uncommitted",
+      "main",
+      "large-generated.js",
+    );
+
+    expect(contents).toEqual({ oldContent: null, newContent: null });
+  });
+
+  test("file content lookup reads a symlink payload without following its target", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(
+      join(repoDir, "large-target.bin"),
+      Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1),
+    );
+    symlinkSync("large-target.bin", join(repoDir, "generated-link"));
+
+    const contents = await getFileContentsForDiff(
+      runtime,
+      "uncommitted",
+      "main",
+      "generated-link",
+    );
+
+    expect(contents).toEqual({ oldContent: null, newContent: "large-target.bin" });
   });
 
   test("getDefaultBranch falls back to local when origin/HEAD points at an unfetched ref", () => {
@@ -526,4 +851,3 @@ describe("commit diff mode", () => {
     expect(after).toBe(before);
   });
 });
-

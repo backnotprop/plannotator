@@ -315,9 +315,19 @@ verify_attestation=0
 # Crude grep against a flat boolean — PlannotatorConfig has no nested
 # verifyAttestation, so false positives are not a concern.
 # Resolve the data directory, expanding ~ the same way the runtime does.
+# Unset: an existing ~/.plannotator (legacy default) always wins; otherwise
+# an explicitly-set absolute XDG_DATA_HOME places it at
+# $XDG_DATA_HOME/plannotator; otherwise ~/.plannotator.
 _raw_dir="${PLANNOTATOR_DATA_DIR:-}"
 case "$_raw_dir" in
-    "")      _config_dir="$HOME/.plannotator" ;;
+    "")
+        _config_dir="$HOME/.plannotator"
+        if [ ! -d "$_config_dir" ]; then
+            case "${XDG_DATA_HOME:-}" in
+                /*) _config_dir="$XDG_DATA_HOME/plannotator" ;;
+            esac
+        fi
+        ;;
     "~")     _config_dir="$HOME" ;;
     "~/"*)   _config_dir="$HOME/${_raw_dir#\~/}" ;;
     *)       _config_dir="$_raw_dir" ;;
@@ -415,7 +425,7 @@ if [ "$verify_attestation" -eq 1 ]; then
     fi
 else
     echo "SHA256 verified. For build provenance verification, see"
-    echo "https://plannotator.ai/docs/getting-started/installation/#verifying-your-install"
+    echo "https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release"
 fi
 
 # Remove old binary first (handles Windows .exe and locked file issues)
@@ -1084,10 +1094,10 @@ fi
 if [ "$extras_choice" = "yes" ] && [ "$extras_present" -eq 0 ]; then
     if [ "$can_prompt" -eq 1 ] && command -v npx >/dev/null 2>&1; then
         echo "Launching the skills CLI for the extras (pick your agents in its UI)..."
-        npx skills add backnotprop/plannotator/apps/skills/extra < /dev/tty || \
-            echo "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra"
+        npx skills add backnotprop/plannotator/apps/skills/extra --global < /dev/tty || \
+            echo "skills CLI did not complete — install later with: npx skills add backnotprop/plannotator/apps/skills/extra --global"
     else
-        echo "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra"
+        echo "Install the extras with: npx skills add backnotprop/plannotator/apps/skills/extra --global"
     fi
 fi
 
@@ -1442,7 +1452,7 @@ echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last comm
 if [ "$extras_choice" != "yes" ]; then
     echo ""
     echo "Optional skills (compound planning, setup-goal, visual explainer):"
-    echo "  npx skills add backnotprop/plannotator/apps/skills/extra"
+    echo "  npx skills add backnotprop/plannotator/apps/skills/extra --global"
 fi
 
 # Warn if plannotator is configured in both settings.json hooks AND the plugin (causes double execution)

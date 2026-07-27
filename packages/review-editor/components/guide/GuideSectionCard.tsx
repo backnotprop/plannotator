@@ -21,8 +21,9 @@ function Checkbox({ checked }: { checked: boolean }) {
   );
 }
 
-/** Left-column file chip: name, directory, +/- counts. Clicking scrolls the
- *  matching diff card in the right column into view. */
+/** Left-column file chip: name, directory, +/- counts. Clicking reveals the
+ *  matching diff card in the right column — expanding it if collapsed — and
+ *  scrolls it into view (via the guideRevealFile channel). */
 function FileChip({
   file,
   additions,
@@ -75,7 +76,8 @@ interface GuideSectionCardProps {
 /**
  * One chapter of the guide, laid out as a two-column body: overview on the
  * left (title, position, Reviewed checkbox, prose, file chips), the section's
- * diffs on the right. Clicking a file chip scrolls its diff into view.
+ * diffs on the right. Clicking a file chip reveals its diff (expanding it if
+ * collapsed) and scrolls it into view.
  *
  * Collapsing is independent of Reviewed: the chevron (or the collapsed row)
  * toggles it freely, while checking Reviewed also collapses by default.
@@ -98,11 +100,12 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   const position = `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
   const isCollapsed = collapsedOverride ?? reviewed;
 
-  // Reveal channel (state.guideRevealFile): a sidebar jump — annotation click
-  // or AI line citation — targeted a file placed in THIS section while the
-  // guide is open. Expand if collapsed (a reviewed section has no mounted
-  // viewer, so the jump would otherwise silently no-op), focus the file so
-  // the selection/AI history bind to it, then scroll its diff into view.
+  // Reveal channel (state.guideRevealFile): a jump — sidebar annotation click,
+  // AI line citation, or a section file chip — targeted a file placed in THIS
+  // section while the guide is open. Expand if collapsed (a reviewed section
+  // has no mounted viewer, so the jump would otherwise silently no-op), focus
+  // the file so the selection/AI history bind to it, then scroll its diff
+  // into view.
   // rAF: the expansion's mount commits first; the element exists by the next
   // frame. Keyed on the token so the same file can be revealed repeatedly;
   // only the (unique — first-placement-wins) containing card matches.
@@ -233,12 +236,15 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                     deletions={file?.deletions}
                     missing={!file}
                     onClick={() => {
-                      // Retarget the guide's focus arbiter too: scrolling under
-                      // a stationary pointer fires no pointerenter, so without
-                      // this the annotation toolbar / pending selection / AI
-                      // history stay bound to the previously-focused diff.
-                      if (file) onFocusFile(ref.file);
-                      diffElements.current.get(ref.file)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      // Route through the reveal channel rather than scrolling
+                      // directly: the target diff may be collapsed (marked
+                      // viewed), and only the reveal token re-expands it in
+                      // GuideDiffSection before this card's reveal effect
+                      // focuses and scrolls — a bare scrollIntoView would land
+                      // on the collapsed header with no code. The effect also
+                      // retargets the focus arbiter (scrolling under a
+                      // stationary pointer fires no pointerenter).
+                      state.onGuideRevealFile?.(ref.file);
                     }}
                   />
                 );

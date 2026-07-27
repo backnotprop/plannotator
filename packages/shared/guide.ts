@@ -32,5 +32,23 @@ export interface CodeGuideOutput {
   unplacedFiles?: string[];
 }
 
-/** UI-side guide shape: server output extended with persisted per-section reviewed state. */
-export type CodeGuideData = CodeGuideOutput & { reviewed: boolean[] };
+/** One row of GET /api/guides — a persisted guide for the current repo
+ *  (#1112). Loaded through the guide endpoints as the `saved:{id}` pseudo
+ *  job id. Browser-safe (types only); the store lives in guide-store.ts. */
+export interface SavedGuideListEntry {
+  id: string;
+  /** Review-target label — "PR #1082" or the branch name. */
+  label: string;
+  title: string;
+  /** Epoch ms when the guide was first persisted. */
+  savedAt: number;
+  progress: { reviewed: number; total: number };
+  /** True when the stored head sha differs from the current head. */
+  moved: boolean;
+}
+
+/** UI-side guide shape: server output extended with persisted per-section reviewed state.
+ *  `saved` is set when the guide is persisted on disk (autosaved live job, or a
+ *  `saved:{id}` load); `moved` is set only on `saved:` loads whose stored head
+ *  sha differs from the head currently under review. */
+export type CodeGuideData = CodeGuideOutput & { reviewed: boolean[]; saved?: boolean; moved?: boolean };

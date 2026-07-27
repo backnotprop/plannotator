@@ -16,7 +16,7 @@ export type WorkspaceDiffType =
   | "workspace-unstaged"
   | "workspace-last";
 
-export type WorkspaceChildVcsType = "git" | "jj";
+export type WorkspaceChildVcsType = "git" | "gitbutler" | "jj";
 
 export interface WorkspaceRepoState {
   id: string;
@@ -44,6 +44,8 @@ export interface WorkspaceReviewState {
 }
 
 export interface WorkspaceReviewRuntime {
+  /** Best-effort provider detection used to fail closed when context loading fails. */
+  detectVcsType?(cwd?: string): Promise<string | undefined>;
   getVcsContext(cwd?: string): Promise<GitContext>;
   runVcsDiff(
     diffType: DiffType,
@@ -114,7 +116,7 @@ function isWorkspaceDiffType(value: string | undefined): value is WorkspaceDiffT
 }
 
 function normalizeVcsType(value: string | undefined): WorkspaceChildVcsType | undefined {
-  return value === "git" || value === "jj" ? value : undefined;
+  return value === "git" || value === "gitbutler" || value === "jj" ? value : undefined;
 }
 
 export function mapWorkspaceModeToRepoDiffType(
@@ -130,6 +132,10 @@ export function mapWorkspaceModeToRepoDiffType(
       default:
         return null;
     }
+  }
+
+  if (vcsType === "gitbutler") {
+    return workspaceDiffType === "workspace-current" ? "gitbutler:workspace" : null;
   }
 
   if (vcsType === "git") {
@@ -155,6 +161,7 @@ export function mapRepoDiffTypeToWorkspaceMode(
   switch (diffType) {
     case "uncommitted":
     case "jj-current":
+    case "gitbutler:workspace":
       return "workspace-current";
     case "staged":
       return "workspace-staged";
@@ -191,6 +198,9 @@ export function workspaceModeAvailable(
     const detectedRepos = repos.filter((repo) => repo.vcsType);
     return detectedRepos.length > 0 && detectedRepos.every((repo) => repo.vcsType === "git");
   }
+  if (diffType === "workspace-last") {
+    return repos.every((repo) => repo.vcsType !== "gitbutler");
+  }
   return true;
 }
 
@@ -199,7 +209,9 @@ export function getWorkspaceDiffOptions(repos: WorkspaceRepoRuntimeState[]): Dif
   if (workspaceModeAvailable(repos, "workspace-staged")) {
     options.push(WORKSPACE_STAGED, WORKSPACE_UNSTAGED);
   }
-  options.push(WORKSPACE_LAST);
+  if (workspaceModeAvailable(repos, "workspace-last")) {
+    options.push(WORKSPACE_LAST);
+  }
   return options;
 }
 
@@ -212,6 +224,14 @@ function aggregateRepos(repos: WorkspaceRepoRuntimeState[]): WorkspaceDiffSnapsh
   };
 }
 
+// Guards a normalizeWorkspacePath(relative(...)) result: on Windows,
+// path.relative cannot relativize across drives and returns the target's
+// absolute path instead (after backslash normalization, e.g. "L:/other/..."),
+// which must be treated as escaping the repo the same as "..".
+export function isRepoRelative(rel: string): boolean {
+  return Boolean(rel) && !rel.startsWith("..") && !rel.startsWith("/") && !/^[A-Za-z]:/.test(rel);
+}
+
 function normalizeAgentPath(root: string, repos: WorkspaceRepoRuntimeState[], filePath: string): string {
   const normalized = normalizeWorkspacePath(filePath);
   if (resolveWorkspaceFilePath(repos, normalized)) return normalized;
@@ -219,13 +239,13 @@ function normalizeAgentPath(root: string, repos: WorkspaceRepoRuntimeState[], fi
   const sorted = [...repos].sort((a, b) => b.cwd.length - a.cwd.length);
   for (const repo of sorted) {
     const rel = normalizeWorkspacePath(relative(repo.cwd, filePath));
-    if (rel && !rel.startsWith("..") && !rel.startsWith("/")) {
+    if (isRepoRelative(rel)) {
       return `${normalizeWorkspacePath(repo.label)}/${rel}`;
     }
   }
 
   const rootRel = normalizeWorkspacePath(relative(root, filePath));
-  if (rootRel && !rootRel.startsWith("..") && !rootRel.startsWith("/")) {
+  if (isRepoRelative(rootRel)) {
     if (resolveWorkspaceFilePath(repos, rootRel)) return rootRel;
   }
 
@@ -234,7 +254,7 @@ function normalizeAgentPath(root: string, repos: WorkspaceRepoRuntimeState[], fi
     return `${normalizeWorkspacePath(changedRepos[0].label)}/${normalized}`;
   }
 
-  if (rootRel && !rootRel.startsWith("..") && !rootRel.startsWith("/")) return rootRel;
+  if (isRepoRelative(rootRel)) return rootRel;
   return normalized;
 }
 
@@ -293,11 +313,18 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
           gitRef: "",
         } satisfies WorkspaceRepoRuntimeState;
       } catch (error) {
+        let vcsType: WorkspaceChildVcsType | undefined;
+        try {
+          vcsType = normalizeVcsType(await runtime.detectVcsType?.(cwd));
+        } catch {
+          // Preserve the original context error; detection is only a safety hint.
+        }
         return {
           id: `repo-${index + 1}`,
           label,
           cwd,
           selected: false,
+          vcsType,
           rawPatch: "",
           gitRef: "",
           error: error instanceof Error ? error.message : String(error),
@@ -439,8 +466,12 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
       throw new Error("Old path is not part of the same workspace repository");
     }
 
+    const diffType = resolved.repo.diffType
+      ?? mapWorkspaceModeToRepoDiffType(this.diffType, resolved.repo.vcsType);
+    if (!diffType) throw new Error("VCS context is unavailable for this workspace repository");
+
     return this.runtime.getVcsFileContentsForDiff(
-      resolved.repo.diffType ?? mapWorkspaceModeToRepoDiffType(this.diffType, resolved.repo.vcsType) ?? "uncommitted",
+      diffType,
       resolved.repo.gitContext?.defaultBranch ?? "main",
       resolved.repoRelativePath,
       resolvedOld?.repoRelativePath,
@@ -452,7 +483,9 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     const resolved = resolveWorkspaceFilePath(this.repos, filePath);
     if (!resolved) throw new Error("File is not part of this workspace review");
 
-    const diffType = resolved.repo.diffType ?? mapWorkspaceModeToRepoDiffType(this.diffType, resolved.repo.vcsType) ?? "uncommitted";
+    const diffType = resolved.repo.diffType
+      ?? mapWorkspaceModeToRepoDiffType(this.diffType, resolved.repo.vcsType);
+    if (!diffType) throw new Error("VCS context is unavailable for this workspace repository");
     if (!(await this.runtime.canStageFiles(diffType, resolved.repo.cwd))) {
       throw new Error("Staging not available");
     }

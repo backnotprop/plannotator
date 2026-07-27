@@ -112,12 +112,12 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
         <button
           type="button"
           disabled={disabled}
-          className="text-xs text-annotation-comment/80 hover:text-annotation-comment inline-flex items-center gap-1 truncate max-w-[340px] rounded px-1 -mx-1 transition-colors hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+          className="h-7 text-xs text-annotation-comment/80 hover:text-annotation-comment inline-flex items-center gap-1 truncate max-w-[340px] rounded px-1 -mx-1 transition-colors hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
           title={prTitle}
         >
           <PullRequestIcon className="w-3 h-3 flex-shrink-0" />
           <span className="font-mono whitespace-nowrap">{mrNumberLabel}</span>
-          <span className="truncate hidden md:inline">{prTitle}</span>
+          <span className="truncate hidden lg:inline">{prTitle}</span>
           <svg
             className={`w-2.5 h-2.5 flex-shrink-0 text-muted-foreground/30 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
             fill="none"

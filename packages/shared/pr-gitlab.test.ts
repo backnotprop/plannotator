@@ -357,6 +357,107 @@ describe("fetchGlMRContext", () => {
       "Failed to fetch MR context: 429 Too Many Requests",
     );
   });
+
+  test("normalizes resolved discussions as review threads without duplicating their notes", async () => {
+    const calls: string[] = [];
+    const runtime: PRRuntime = {
+      async runCommand(command, args) {
+        calls.push([command, ...args].join(" "));
+        const endpoint = args[1] ?? "";
+        if (endpoint === "projects/g%2Fp/merge_requests/1") {
+          return {
+            stdout: JSON.stringify({
+              title: "Artifacts",
+              description: "",
+              state: "opened",
+              author: { username: "author" },
+              web_url: "https://gitlab.com/g/p/-/merge_requests/1",
+            }),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (endpoint.endsWith("/discussions?per_page=100")) {
+          return {
+            stdout: JSON.stringify([
+              {
+                id: "discussion-1",
+                individual_note: false,
+                notes: [
+                  {
+                    id: 101,
+                    body: "![resolved artifact](/uploads/hash/resolved.png)",
+                    author: { username: "reviewer" },
+                    created_at: "2026-07-16T12:00:00Z",
+                    resolvable: true,
+                    resolved: true,
+                    position: {
+                      old_path: "src/widget.ts",
+                      new_path: "src/widget.ts",
+                      new_line: 17,
+                    },
+                  },
+                ],
+              },
+            ]),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (endpoint.endsWith("/notes?sort=asc&per_page=100")) {
+          return {
+            stdout: JSON.stringify([
+              {
+                id: 101,
+                body: "![resolved artifact](/uploads/hash/resolved.png)",
+                author: { username: "reviewer" },
+                created_at: "2026-07-16T12:00:00Z",
+              },
+              {
+                id: 102,
+                body: "ordinary comment",
+                author: { username: "commenter" },
+                created_at: "2026-07-16T13:00:00Z",
+              },
+            ]),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        return { stdout: "[]", stderr: "", exitCode: 0 };
+      },
+    };
+
+    const result = await fetchGlMRContext(runtime, REF);
+
+    expect(calls).toContain(
+      "glab api projects/g%2Fp/merge_requests/1/discussions?per_page=100 --paginate",
+    );
+    expect(calls).toContain(
+      "glab api projects/g%2Fp/merge_requests/1/notes?sort=asc&per_page=100 --paginate",
+    );
+    expect(result.comments.map((comment) => comment.id)).toEqual(["102"]);
+    expect(result.reviewThreads).toEqual([
+      {
+        id: "discussion-1",
+        isResolved: true,
+        isOutdated: false,
+        path: "src/widget.ts",
+        line: 17,
+        startLine: null,
+        diffSide: "RIGHT",
+        comments: [
+          {
+            id: "101",
+            author: "reviewer",
+            body: "![resolved artifact](/uploads/hash/resolved.png)",
+            createdAt: "2026-07-16T12:00:00Z",
+            url: "https://gitlab.com/g/p/-/merge_requests/1#note_101",
+          },
+        ],
+      },
+    ]);
+  });
 });
 
 describe("parsePaginatedArray", () => {

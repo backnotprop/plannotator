@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { Origin } from '@plannotator/core/agents';
-import { getAgentSwitchSettings } from '../utils/agentSwitch';
+import { getAgentSwitchSettings, type AgentSwitchSurface } from '../utils/agentSwitch';
 
 export interface Agent {
   id: string;
@@ -25,7 +25,7 @@ export interface UseAgentsResult {
  * Fetch available agents from OpenCode API
  * Only fetches when origin is 'opencode'
  */
-export function useAgents(origin: Origin | null): UseAgentsResult {
+export function useAgents(origin: Origin | null, surface: AgentSwitchSurface = 'plan'): UseAgentsResult {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -56,7 +56,7 @@ export function useAgents(origin: Origin | null): UseAgentsResult {
   const getAgentWarning = useCallback((): string | null => {
     if (agents.length === 0) return null; // Can't validate without agents
 
-    const settings = getAgentSwitchSettings();
+    const settings = getAgentSwitchSettings(surface);
 
     if (settings.switchTo === 'disabled') {
       return null;
@@ -79,7 +79,7 @@ export function useAgents(origin: Origin | null): UseAgentsResult {
     }
 
     return null;
-  }, [agents, validateAgent]);
+  }, [agents, validateAgent, surface]);
 
   return {
     agents,

@@ -52,6 +52,19 @@ function makeSseResponse(textDelta: string): Response {
   });
 }
 
+function makeAbortableSseResponse(signal: AbortSignal): Response {
+  return new Response(new ReadableStream({
+    start(controller) {
+      signal.addEventListener('abort', () => {
+        controller.error(new DOMException('aborted', 'AbortError'));
+      }, { once: true });
+    },
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
 async function mountHook(context: AIContext | null): Promise<{
   result: { current: HookResult | null };
   unmount: () => Promise<void>;
@@ -71,6 +84,49 @@ async function mountHook(context: AIContext | null): Promise<{
       host.remove();
     },
   };
+}
+
+async function expectResetAbortsActiveTurn(resetKind: 'session' | 'thread'): Promise<void> {
+  const abortBodies: unknown[] = [];
+  let resolveQueryStarted: () => void = () => {};
+  const queryStarted = new Promise<void>((resolve) => {
+    resolveQueryStarted = resolve;
+  });
+
+  const fakeTransport: AITransport = {
+    session: async () => new Response(JSON.stringify({ sessionId: 'fake-session-reset' }), { status: 200 }),
+    query: async (_body, signal) => {
+      resolveQueryStarted();
+      return makeAbortableSseResponse(signal);
+    },
+    abort: async (body) => { abortBodies.push(body); },
+    permission: () => {},
+  };
+
+  setAITransport(fakeTransport);
+
+  const session = await mountHook(TEST_CONTEXT);
+  let askPromise: Promise<void> = Promise.resolve();
+
+  await act(async () => {
+    askPromise = session.result.current!.ask({ prompt: 'slow question' });
+  });
+  await queryStarted;
+
+  await act(async () => {
+    if (resetKind === 'session') {
+      session.result.current!.resetSession();
+    } else {
+      session.result.current!.resetThread();
+    }
+  });
+
+  await act(async () => { await new Promise<void>((r) => setTimeout(r, 0)); });
+  await askPromise;
+
+  expect(abortBodies).toEqual([{ sessionId: 'fake-session-reset' }]);
+
+  await session.unmount();
 }
 
 describe('AITransport seam', () => {
@@ -147,5 +203,13 @@ describe('AITransport seam', () => {
     expect(fetchCalls.some((u) => u.includes('/api/ai/session'))).toBe(true);
 
     await session.unmount();
+  });
+
+  test.skipIf(!hasDom)('resetSession aborts the active server turn', async () => {
+    await expectResetAbortsActiveTurn('session');
+  });
+
+  test.skipIf(!hasDom)('resetThread aborts the active server turn', async () => {
+    await expectResetAbortsActiveTurn('thread');
   });
 });

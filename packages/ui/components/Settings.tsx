@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { Origin } from '@plannotator/core/agents';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
@@ -28,9 +28,11 @@ import {
 } from '../utils/octarine';
 import {
   getAgentSwitchSettings,
+  getAgentSwitchDefaults,
   saveAgentSwitchSettings,
   AGENT_OPTIONS,
   type AgentSwitchSettings,
+  type AgentSwitchSurface,
 } from '../utils/agentSwitch';
 import {
   getPlanSaveSettings,
@@ -70,8 +72,9 @@ import {
   saveFileBrowserSettings,
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
+import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
 
-type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -169,23 +172,27 @@ function SegmentedControl<T extends string>({ options, value, onChange }: {
   );
 }
 
-function ToggleSwitch({ checked, onChange, label, description }: {
+function ToggleSwitch({ checked, onChange, label, description, disabled = false }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   description?: string;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={`flex items-center justify-between gap-4 ${disabled ? 'opacity-50' : ''}`}>
       <div>
         <div className="text-sm font-medium">{label}</div>
         {description && <div className="text-xs text-muted-foreground">{description}</div>}
       </div>
       <button
+        type="button"
         role="switch"
+        aria-label={label}
         aria-checked={checked}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed ${
           checked ? 'bg-primary' : 'bg-muted'
         }`}
       >
@@ -195,6 +202,88 @@ function ToggleSwitch({ checked, onChange, label, description }: {
           }`}
         />
       </button>
+    </div>
+  );
+}
+
+interface VimSettingsTabProps {
+  readonly vimModeEnabled: boolean;
+  readonly vimHudEnabled: boolean;
+  readonly vimHudKeyPanelEnabled: boolean;
+  readonly onVimModeChange: (enabled: boolean) => void;
+  readonly onVimHudChange: (enabled: boolean) => void;
+  readonly onVimHudKeyPanelChange: (enabled: boolean) => void;
+}
+
+/** First-class Vim configuration, separate from the shortcut reference. */
+function VimSettingsTab({
+  vimModeEnabled,
+  vimHudEnabled,
+  vimHudKeyPanelEnabled,
+  onVimModeChange,
+  onVimHudChange,
+  onVimHudKeyPanelChange,
+}: VimSettingsTabProps) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="text-sm font-semibold">Vim mode</div>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Navigate, select, and annotate the rendered document without reaching for the mouse.
+        </p>
+      </div>
+
+      <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+        <ToggleSwitch
+          checked={vimModeEnabled}
+          onChange={onVimModeChange}
+          label="Vim controls"
+          description="Use Vim-style keys for document navigation and annotation. Off by default."
+        />
+        <div className="border-t border-border" />
+        <ToggleSwitch
+          checked={vimModeEnabled && vimHudEnabled}
+          onChange={onVimHudChange}
+          label="Vim HUD"
+          description={
+            vimModeEnabled
+              ? 'Show the four-corner target reticle and navigation context.'
+              : 'Enable Vim controls first to use the target reticle.'
+          }
+          disabled={!vimModeEnabled}
+        />
+        <div className="border-t border-border" />
+        <ToggleSwitch
+          checked={vimModeEnabled && vimHudEnabled && vimHudKeyPanelEnabled}
+          onChange={onVimHudKeyPanelChange}
+          label="Key panel"
+          description={
+            vimModeEnabled && vimHudEnabled
+              ? 'Show the bottom-right live keypress legend and command panel.'
+              : 'Enable the Vim HUD first to use the live keypress legend.'
+          }
+          disabled={!vimModeEnabled || !vimHudEnabled}
+        />
+      </div>
+
+      <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/15 font-mono text-xs font-bold text-primary">
+            ?
+          </span>
+          <div>
+            <div className="text-xs font-semibold">Learn while you navigate</div>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Vim takes focus automatically when the page is ready. From other app controls, press{' '}
+              <span className="font-mono text-foreground">Esc</span> to return to the document, then
+              use <span className="font-mono text-foreground">j</span> and{' '}
+              <span className="font-mono text-foreground">k</span> to move by block. Press{' '}
+              <span className="font-mono text-foreground">?</span> for the complete key map,
+              even when the Key panel is hidden.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -653,7 +742,22 @@ const CommentsTab: React.FC = () => {
 
 export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, onDetectObsidianVaults }) => {
   const [showDialog, setShowDialog] = useState(false);
+  const settingsWasOpenRef = useRef(false);
   const [themePreview, setThemePreview] = useState(false);
+
+  useEffect(() => {
+    const wasOpen = settingsWasOpenRef.current;
+    settingsWasOpenRef.current = showDialog;
+    if (
+      wasOpen
+      && !showDialog
+      && !themePreview
+      && mode !== 'review'
+      && configStore.get('vimModeEnabled')
+    ) {
+      requestVimDocumentFocus();
+    }
+  }, [mode, showDialog, themePreview]);
 
   useEffect(() => {
     if (!themePreview) return;
@@ -665,6 +769,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const gridEnabled = useConfigValue('gridEnabled');
+  const vimModeEnabled = useConfigValue('vimModeEnabled');
+  const vimHudEnabled = useConfigValue('vimHudEnabled');
+  const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
   const [identity, setIdentity] = useState('');
   const [obsidian, setObsidian] = useState<ObsidianSettings>({
     enabled: false,
@@ -678,7 +785,10 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [vaultsLoading, setVaultsLoading] = useState(false);
   const [bear, setBear] = useState<BearSettings>({ enabled: false, customTags: '', tagPosition: 'append', autoSave: false });
   const [octarine, setOctarine] = useState<OctarineSettings>({ enabled: false, workspace: '', folder: 'plannotator', autoSave: false });
-  const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
+  // The agent switch default depends on the surface: plan approval hands off to
+  // the build agent, review feedback stays on the current agent.
+  const agentSurface: AgentSwitchSurface = mode === 'review' ? 'review' : 'plan';
+  const [agent, setAgent] = useState<AgentSwitchSettings>(() => getAgentSwitchDefaults(agentSurface));
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true, planWidth: 'compact' });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -693,7 +803,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [newDirPath, setNewDirPath] = useState('');
 
   // Fetch available agents for OpenCode
-  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null);
+  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null, agentSurface);
 
   const mainTabs = useMemo(() => {
     const t: { id: SettingsTab; label: string }[] = [{ id: 'general', label: 'General' }];
@@ -710,6 +820,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       if (aiProviders.length > 0) {
         t.push({ id: 'ai', label: 'AI' });
       }
+    }
+    if (mode !== 'review') {
+      t.push({ id: 'vim', label: 'Vim' });
     }
     t.push({ id: 'shortcuts', label: 'Shortcuts' });
     if (mode === 'plan') {
@@ -742,7 +855,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
       setOctarine(getOctarineSettings());
-      setAgent(getAgentSwitchSettings());
+      setAgent(getAgentSwitchSettings(agentSurface));
       setPlanSave(getPlanSaveSettings());
       setUiPrefs(getUIPreferences());
       setPermissionMode(getPermissionModeSettings().mode);
@@ -914,12 +1027,23 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         >
           <div
             className="bg-card border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="plannotator-settings-title"
             onClick={e => e.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape' || event.defaultPrevented) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setShowDialog(false);
+            }}
           >
             {taterMode && <TaterSpritePullup />}
             <div className="flex items-center justify-between p-4 border-b border-border">
-              <h3 className="font-semibold text-sm">Settings</h3>
+              <h3 id="plannotator-settings-title" className="font-semibold text-sm">Settings</h3>
               <button
+                type="button"
+                aria-label="Close settings"
                 onClick={() => setShowDialog(false)}
                 className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
               >
@@ -1655,7 +1779,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                       saveQuickLabels(updated);
                                       setEditingTipIndex(null);
                                     }
-                                    if (e.key === 'Escape') setEditingTipIndex(null);
+                                    if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setEditingTipIndex(null);
+                                    }
                                   }}
                                   placeholder="AI instruction tip..."
                                   className="flex-1 px-2 py-1 bg-background/60 rounded text-[10px] text-muted-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -1709,9 +1837,22 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                   </>
                 )}
 
+                {/* === VIM TAB === */}
+                {activeTab === 'vim' && mode !== 'review' && (
+                  <VimSettingsTab
+                    vimModeEnabled={vimModeEnabled}
+                    vimHudEnabled={vimHudEnabled}
+                    vimHudKeyPanelEnabled={vimHudKeyPanelEnabled}
+                    onVimModeChange={(enabled) => configStore.set('vimModeEnabled', enabled)}
+                    onVimHudChange={(enabled) => configStore.set('vimHudEnabled', enabled)}
+                    onVimHudKeyPanelChange={(enabled) =>
+                      configStore.set('vimHudKeyPanelEnabled', enabled)}
+                  />
+                )}
+
                 {/* === SHORTCUTS TAB === */}
                 {activeTab === 'shortcuts' && (
-                  <KeyboardShortcuts mode={mode} />
+                  <KeyboardShortcuts mode={mode} vimModeEnabled={vimModeEnabled} />
                 )}
 
                 {/* === COMMENTS TAB === */}

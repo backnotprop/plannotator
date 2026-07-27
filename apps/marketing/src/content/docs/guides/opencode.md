@@ -145,13 +145,13 @@ This makes it possible to approve a plan while leaving minor suggestions that th
 
 ## Agent switching
 
-OpenCode supports multiple agents. Plannotator lets you choose which agent handles the approved plan:
+OpenCode supports multiple agents. By default, approved plans are handed off to the build agent, while code review feedback stays on your current agent. To change either, configure [Agent switching settings](/docs/getting-started/ui-settings/#agent-switching):
 
 1. Open **Settings** (gear icon)
 2. Under "Agent Switch", select from available agents or enter a custom agent name
-3. On approval, the selected agent receives the plan
+3. On approval, the selected agent receives the plan (if Agent Switch is disabled, your current agent continues)
 
-If the configured agent isn't found in the current OpenCode session, Plannotator shows a warning before approval. You can approve anyway (the default agent will be used) or go back and change the setting.
+If the configured agent isn't found in the current OpenCode session, Plannotator logs a warning and shows a warning toast, then sends approval or feedback without switching agents.
 
 ## Slash commands
 

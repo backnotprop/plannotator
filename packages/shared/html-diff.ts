@@ -6,7 +6,9 @@ import { diffArrays } from "diff";
  * Given two versions of an HTML document, {@link htmlDiff} returns a single merged
  * HTML string: the NEW document with changed TEXT wrapped in `<ins>...</ins>`
  * (added) and removed TEXT wrapped in `<del>...</del>` (deleted), so it can be
- * rendered to visually show what changed.
+ * rendered to visually show what changed. Generated wrappers carry
+ * `class="plannotator-diff"` so viewers can style diff output without touching
+ * author-written `<ins>`/`<del>` markup (which passes through untagged).
  *
  * This is the classic "htmldiff" approach (à la the Ruby htmldiff / DaisyDiff
  * family): it diffs an ordered token stream where tokens are either complete
@@ -125,7 +127,7 @@ export function htmlDiff(oldHtml: string, newHtml: string): string {
       const flush = () => {
         if (buffer.length === 0) return;
         if (!isAllWhitespace(buffer)) {
-          out.push("<del>");
+          out.push('<del class="plannotator-diff">');
           for (const t of buffer) out.push(t.value);
           out.push("</del>");
         }
@@ -154,7 +156,7 @@ export function htmlDiff(oldHtml: string, newHtml: string): string {
         // Added whitespace-only run: emit verbatim, no <ins> noise.
         for (const t of buffer) out.push(t.value);
       } else {
-        out.push("<ins>");
+        out.push('<ins class="plannotator-diff">');
         for (const t of buffer) out.push(t.value);
         out.push("</ins>");
       }

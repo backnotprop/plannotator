@@ -1,7 +1,99 @@
 import { describe, expect, test } from "bun:test";
 import type { VaultNode } from "../../types";
 import type { WorkspaceFileChange, WorkspaceStatusPayload } from "@plannotator/core/workspace-status-types";
-import { getAggregateWorkspaceChange, getFileEditStatus, getWorkspaceChange, isFileTreeSelectionDisabled, normalizePathForLookup } from "./FileBrowser";
+import {
+  filterFileTree,
+  getAggregateWorkspaceChange,
+  getFileEditStatus,
+  getFileTreeFilterTokens,
+  getWorkspaceChange,
+  isFileTreeSelectionDisabled,
+  normalizePathForLookup,
+} from "./FileBrowser";
+
+describe("FileBrowser filtering", () => {
+  const tree: VaultNode[] = [
+    {
+      name: "docs",
+      path: "docs",
+      type: "folder",
+      children: [
+        { name: "intro.md", path: "docs/intro.md", type: "file" },
+        {
+          name: "auth",
+          path: "docs/auth",
+          type: "folder",
+          children: [
+            { name: "middleware.md", path: "docs/auth/middleware.md", type: "file" },
+            { name: "session.md", path: "docs/auth/session.md", type: "file" },
+          ],
+        },
+      ],
+    },
+    { name: "changelog.txt", path: "changelog.txt", type: "file" },
+  ];
+
+  test("keeps ancestor folders for matching descendant files", () => {
+    expect(filterFileTree(tree, getFileTreeFilterTokens("middleware"))).toEqual([
+      {
+        name: "docs",
+        path: "docs",
+        type: "folder",
+        children: [
+          {
+            name: "auth",
+            path: "docs/auth",
+            type: "folder",
+            children: [
+              { name: "middleware.md", path: "docs/auth/middleware.md", type: "file" },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("matches multiple tokens across the full path", () => {
+    expect(filterFileTree(tree, getFileTreeFilterTokens("auth session"))).toEqual([
+      {
+        name: "docs",
+        path: "docs",
+        type: "folder",
+        children: [
+          {
+            name: "auth",
+            path: "docs/auth",
+            type: "folder",
+            children: [
+              { name: "session.md", path: "docs/auth/session.md", type: "file" },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("keeps a matching folder subtree intact", () => {
+    expect(filterFileTree(tree, getFileTreeFilterTokens("auth"))).toEqual([
+      {
+        name: "docs",
+        path: "docs",
+        type: "folder",
+        children: [
+          {
+            name: "auth",
+            path: "docs/auth",
+            type: "folder",
+            children: [
+              { name: "middleware.md", path: "docs/auth/middleware.md", type: "file" },
+              { name: "session.md", path: "docs/auth/session.md", type: "file" },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+});
 
 describe("FileBrowser workspace status lookup", () => {
   test("matches Windows status keys when the UI path uses mixed separators", () => {

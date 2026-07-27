@@ -2,23 +2,86 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { DiffType, VcsSelection } from "./server.js";
-import { getRecentAssistantMessages } from "./assistant-message.js";
+import type { DiffType, VcsSelection } from "./server.ts";
 import {
 	getLastAssistantMessageText,
+	getRecentAssistantMessages,
+} from "./assistant-message.ts";
+import {
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
-	openCodeReview,
-	openLastMessageAnnotation,
-	openMarkdownAnnotation,
-	startCodeReviewBrowserSession,
-	startLastMessageAnnotationSession,
-	startMarkdownAnnotationSession,
-	startPlanReviewBrowserSession,
-} from "./plannotator-browser.js";
+	hasPlanBrowserHtml,
+	hasReviewBrowserHtml,
+	loadPlannotatorBrowser,
+} from "./plannotator-browser-runtime.ts";
+
+type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
+
+/** Start a plan-review browser session after loading the browser/server graph on demand. */
+export function startPlanReviewBrowserSession(
+	...args: Parameters<PlannotatorBrowserModule["startPlanReviewBrowserSession"]>
+): ReturnType<PlannotatorBrowserModule["startPlanReviewBrowserSession"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.startPlanReviewBrowserSession(...args));
+}
+
+/** Open a plan review after loading the browser/server graph on demand. */
+export function openPlanReviewBrowser(
+	...args: Parameters<PlannotatorBrowserModule["openPlanReviewBrowser"]>
+): ReturnType<PlannotatorBrowserModule["openPlanReviewBrowser"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.openPlanReviewBrowser(...args));
+}
+
+/** Start a code-review browser session after loading the browser/server graph on demand. */
+export function startCodeReviewBrowserSession(
+	...args: Parameters<PlannotatorBrowserModule["startCodeReviewBrowserSession"]>
+): ReturnType<PlannotatorBrowserModule["startCodeReviewBrowserSession"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.startCodeReviewBrowserSession(...args));
+}
+
+/** Open a code review after loading the browser/server graph on demand. */
+export function openCodeReview(
+	...args: Parameters<PlannotatorBrowserModule["openCodeReview"]>
+): ReturnType<PlannotatorBrowserModule["openCodeReview"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.openCodeReview(...args));
+}
+
+/** Start a markdown-annotation session after loading the browser/server graph on demand. */
+export function startMarkdownAnnotationSession(
+	...args: Parameters<PlannotatorBrowserModule["startMarkdownAnnotationSession"]>
+): ReturnType<PlannotatorBrowserModule["startMarkdownAnnotationSession"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.startMarkdownAnnotationSession(...args));
+}
+
+/** Open a markdown annotation after loading the browser/server graph on demand. */
+export function openMarkdownAnnotation(
+	...args: Parameters<PlannotatorBrowserModule["openMarkdownAnnotation"]>
+): ReturnType<PlannotatorBrowserModule["openMarkdownAnnotation"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.openMarkdownAnnotation(...args));
+}
+
+/** Start a last-message annotation session after loading the browser/server graph on demand. */
+export function startLastMessageAnnotationSession(
+	...args: Parameters<PlannotatorBrowserModule["startLastMessageAnnotationSession"]>
+): ReturnType<PlannotatorBrowserModule["startLastMessageAnnotationSession"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.startLastMessageAnnotationSession(...args));
+}
+
+/** Open a last-message annotation after loading the browser/server graph on demand. */
+export function openLastMessageAnnotation(
+	...args: Parameters<PlannotatorBrowserModule["openLastMessageAnnotation"]>
+): ReturnType<PlannotatorBrowserModule["openLastMessageAnnotation"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.openLastMessageAnnotation(...args));
+}
+
+/** Open the plan archive after loading the browser/server graph on demand. */
+export function openArchiveBrowserAction(
+	...args: Parameters<PlannotatorBrowserModule["openArchiveBrowserAction"]>
+): ReturnType<PlannotatorBrowserModule["openArchiveBrowserAction"]> {
+	return loadPlannotatorBrowser().then((browser) => browser.openArchiveBrowserAction(...args));
+}
 
 export const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request" as const;
 export const PLANNOTATOR_REVIEW_RESULT_CHANNEL = "plannotator:review-result" as const;
+export const PLANNOTATOR_PLAN_APPROVED_CHANNEL = "plannotator:plan-approved" as const;
 export const PLANNOTATOR_TIMEOUT_MS = 5_000;
 
 export type PlannotatorAction =
@@ -83,6 +146,13 @@ export interface PlannotatorReviewResultEvent {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+}
+
+export interface PlannotatorPlanApprovedEvent {
+	cwd: string;
+	planFilePath: string;
+	planContent: string;
+	feedback?: string;
 }
 
 export interface PlannotatorReviewStatusPayload {
@@ -365,14 +435,5 @@ export {
 	getLastAssistantMessageText,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
-	startCodeReviewBrowserSession,
-	startLastMessageAnnotationSession,
-	startMarkdownAnnotationSession,
 	getStartupErrorMessage,
-	openArchiveBrowserAction,
-	openCodeReview,
-	openLastMessageAnnotation,
-	openMarkdownAnnotation,
-	openPlanReviewBrowser,
-	startPlanReviewBrowserSession,
-} from "./plannotator-browser.js";
+};

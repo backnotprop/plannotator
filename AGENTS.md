@@ -48,7 +48,7 @@ plannotator/
 │       │   ├── plannotator-review/    # Lightweight: opens review UI
 │       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
 │       │   └── plannotator-last/      # Lightweight: annotates last message
-│       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra`
+│       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra --global`
 │           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
 │           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
 │           └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
@@ -133,14 +133,18 @@ claude --plugin-dir ./apps/hook
 | `PLANNOTATOR_AGENT_TERMINAL_REMOTE` | Set to `1` / `true` to enable the annotate-mode agent terminal while `PLANNOTATOR_REMOTE` is active. Off by default because remote mode binds beyond localhost. |
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. |
+| `PLANNOTATOR_AI` | Set to `disabled` to disable Ask AI and the Review Agents / Guided Review execution surfaces, including provider and agent-job endpoints. Persisted guide data is retained and its server APIs remain available, but the in-app history browser is hidden while AI is disabled. External agents can still open reviews and submit annotations. The explicit annotate-mode agent terminal is separate and remains controlled by its own settings. Default: enabled. |
 | `PLANNOTATOR_SHARE` | Set to `disabled` to turn off URL sharing entirely. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal). Default: `https://share.plannotator.ai`. |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API for short URL sharing. Default: `https://plannotator-paste.plannotator.workers.dev`. |
 | `PLANNOTATOR_ORIGIN` | Explicit agent-origin override at the top of the detection chain. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi`. Invalid values silently fall through to env-based detection. Unset by default. |
 | `PLANNOTATOR_JINA` | Set to `0` / `false` to disable Jina Reader for URL annotation, or `1` / `true` to enable. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `PLANNOTATOR_ANNOTATE_HISTORY` | Set to `0` / `false` to disable per-file version history in annotate mode (no copies of annotated files are written to the data dir; the annotate version diff is unavailable). Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "annotateHistory": false }`); the env var takes precedence. |
+| `PLANNOTATOR_GUIDE_HISTORY` | Set to `0` / `false` to disable persisting successful Guided Reviews (no guide copies are written to the data dir; the "Previous guides" list is then never populated, though already-saved guides remain readable and listed). Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "guideHistory": false }`); the env var takes precedence. |
+| `PLANNOTATOR_CURSOR_SANDBOX` | Set to `0` / `false` / `disabled` to stop passing `--sandbox enabled` when launching Cursor's `agent` CLI for review jobs — the flag pair is omitted entirely, deferring to the user's own Cursor Agent sandbox configuration. For systems where Cursor's sandbox cannot start (NixOS, AppArmor-restricted Linux). Default: enabled (`--sandbox enabled` is passed). Can also be set via `~/.plannotator/config.json` (`{ "cursorSandbox": false }`); the env var takes precedence. Note: opting out means the review job's write protection relies on `--mode ask` plus the user's own Cursor configuration. |
 | `JINA_API_KEY` | Optional Jina Reader API key for higher rate limits (500 RPM vs 20 RPM unauthenticated). Free keys include 10M tokens. |
-| `PLANNOTATOR_DATA_DIR` | Override the base data directory. Supports `~` expansion. Default: `~/.plannotator`. All data (plans, history, drafts, config, hooks, sessions, debug logs, IPC registry) is stored under this directory. |
+| `PLANNOTATOR_DATA_DIR` | Override the base data directory. Supports `~` expansion. Default: `~/.plannotator`. When unset, an existing `~/.plannotator` always wins; if it doesn't exist and `$XDG_DATA_HOME` is set to an absolute path, `$XDG_DATA_HOME/plannotator` is used; otherwise `~/.plannotator` (the XDG spec's implicit `~/.local/share` default is deliberately not applied). All data (plans, history, drafts, config, hooks, sessions, debug logs, IPC registry) is stored under this directory. |
+| `PLANNOTATOR_FILE_BROWSER_MAX_FILES` | File-discovery limit: regular files inspected by CLI markdown/folder resolution and startup code-file warming, supported files returned by the file browser, and directories scanned during multi-repo workspace discovery (symlinks may point outside the workspace, so the budget — not the root — bounds that walk). Must be a positive integer; invalid, zero, or negative values use the default of `5000`. |
 | `PLANNOTATOR_GLIMPSE` | Set to `0` / `false` to disable the Glimpse native window even when `glimpseui` is installed. Default: enabled. Can also be set via `~/.plannotator/config.json` (`{ "glimpse": false }`). |
 | `PLANNOTATOR_GLIMPSE_WIDTH` | Width in pixels for the Glimpse native window. Default: `1280`. |
 | `PLANNOTATOR_GLIMPSE_HEIGHT` | Height in pixels for the Glimpse native window. Default: `900`. |
@@ -186,8 +190,8 @@ User runs /plannotator-review command
 Claude Code: plannotator review subcommand runs
 OpenCode: event handler intercepts command
         ↓
-VCS diff captures local changes (git diff or jj diff). When review runs from a
-non-VCS parent that contains nested Git repos, child diffs are combined with
+VCS provider captures local changes (Git, GitButler, JJ, or P4 where supported). When review runs from a
+non-VCS parent that contains nested Git/JJ/GitButler repos, child diffs are combined with
 folder-prefixed paths.
         ↓
 Review server starts, opens browser with diff viewer
@@ -206,9 +210,17 @@ The default code-review diff is **`since-base`** — a composite of `merge-base(
 
 `since-base` is only offered when the base ref actually resolves — on a repo whose trunk isn't discoverable (`trunk`, no `origin/HEAD`) `getGitContext` omits it and the default falls through to `uncommitted`, so committed branch work is never silently hidden. The since-base patch/sections/fingerprint/file-content paths all degrade to `HEAD` together when merge-base fails for a resolvable-but-unrelated base. First-run shows `ReviewSetupDialog` (replaces the removed `DiffTypeSetupDialog`), which resets everyone to Git-status + since-base once and is reopenable from the review header menu. A one-time `GuideIntroDialog` (guided-reviews announcement) precedes it in the dialog chain (guide intro → look-and-feel → review setup); the three never stack.
 
+### GitButler review invariants
+
+GitButler is a distinct VCS provider, ordered after JJ and before Git in both Bun and Pi. It is selected only while symbolic `HEAD` is `refs/heads/gitbutler/workspace` (or legacy `gitbutler/integration`) and the repository has GitButler's local target-ref configuration; a leftover database or an ordinary branch with the reserved name is not detection. An active workspace requires `but >= 0.21.0` on `PATH`, and a missing/incompatible CLI is an explicit error rather than a fallback to ordinary Git staging against the synthetic workspace commit. `--gitbutler` forces this provider; `--git` remains the escape hatch.
+
+The default `gitbutler:workspace` view is GitButler's reported merge base versus the working tree plus untracked files, so it includes every applied committed change and assigned/unassigned worktree change. Multi-branch stack views are committed-only merge-base→stack-tip Git diffs; branch views are committed-only first-parent segment diffs. Client IDs encode branch-name anchors, never GitButler's transient CLI IDs. Do not concatenate independent GitButler hunks: their bases can differ. Assigned worktree hunks stay in Workspace until GitButler exposes an authoritative combined stack diff.
+
+GitButler assignment is not the Git index, so the provider never opts into stage/unstage. Git-status sections, commit history, remote-base discovery/fetch, and the first-run Git setup remain `vcsType: "git"` only. File expansion uses the exact object range for committed views and merge-base/working-tree pair for Workspace; fingerprints cover the visible Git content plus canonical stack/branch topology. Nested multi-repo mode maps only `workspace-current` to GitButler; staged/unstaged/last modes are unavailable when a GitButler child is present.
+
 ### Code-review Ask AI context
 
-Ask AI's "changes under review" context for **code review** is generated by the shared agent-review prompt machine (`buildAgentReviewUserMessage` / `buildAgentReviewUserMessageForTarget` in `packages/server/agent-review-message.ts`) — the same machine the launchable review jobs use — and is **delivered on the user's messages, not the system prompt**. The review server computes it for the current view (`buildCurrentAiReviewContext` in `packages/server/review.ts`, mirrored in `apps/pi-extension/server/serverReview.ts`) and ships it as `aiReviewContext` in the diff payloads (`/api/diff` and the switch/PR endpoints). The client (`packages/review-editor`) latches it onto each question via `buildReviewContextPreamble` (`packages/ui/utils/aiPrompt.ts`): the full block on the first message and whenever the view changes, a short reminder otherwise (never re-pasting a large diff). This keeps the agent looking at exactly the on-screen changeset across every mode (uncommitted/untracked, branch, merge-base, stacked-PR full-stack, hide-whitespace, PR worktrees, workspace, jj). The code-review system prompt (`buildCodeReviewPrompt` in `packages/ai/context.ts`) is intentionally role-only.
+Ask AI's "changes under review" context for **code review** is generated by the shared agent-review prompt machine (`buildAgentReviewUserMessage` / `buildAgentReviewUserMessageForTarget` in `packages/server/agent-review-message.ts`) — the same machine the launchable review jobs use — and is **delivered on the user's messages, not the system prompt**. The review server computes it for the current view (`buildCurrentAiReviewContext` in `packages/server/review.ts`, mirrored in `apps/pi-extension/server/serverReview.ts`) and ships it as `aiReviewContext` in the diff payloads (`/api/diff` and the switch/PR endpoints). The client (`packages/review-editor`) latches it onto each question via `buildReviewContextPreamble` (`packages/ui/utils/aiPrompt.ts`): the full block on the first message and whenever the view changes, a short reminder otherwise (never re-pasting a large diff). This keeps the agent looking at exactly the on-screen changeset across every mode (uncommitted/untracked, branch, merge-base, stacked-PR full-stack, hide-whitespace, PR worktrees, workspace, GitButler, jj). The code-review system prompt (`buildCodeReviewPrompt` in `packages/ai/context.ts`) is intentionally role-only.
 
 ## Ask AI Provider Defaults
 
@@ -238,7 +250,14 @@ Claude Code: plannotator annotate subcommand runs
 OpenCode/Pi: event handler intercepts command
         ↓
 Input type detected:
-  .md/.mdx   → file read from disk
+  .md/.mdx/.txt → file read from disk
+  plain-text config/data formats (.yaml .yml .json .jsonc .json5 .toml .ini .cfg .conf .properties .csv .tsv .log .xml .env.example)
+             → read from disk, rendered as plain text exactly like .txt (.env itself is
+               deliberately excluded — it commonly holds secrets and annotate history
+               copies file contents; source-code extensions stay with code review)
+             All single-file annotate reads and /api/doc document serves are capped at
+             2MB (`MAX_ANNOTATABLE_FILE_BYTES` in `packages/core/annotatable.ts`) —
+             larger files get a clear "File too large to annotate (max 2MB)" error.
   .html/.htm → file read, rendered as raw HTML by default (or converted to markdown with --markdown)
   https://   → fetched via Jina Reader (default) or fetch+Turndown (--no-jina)
   folder/    → file browser opened, files converted on demand
@@ -249,6 +268,12 @@ User annotates content, provides feedback
         ↓
 Send Annotations → feedback sent to agent session
 ```
+
+### Strict direct annotate results
+
+Direct `plannotator annotate` invocations may add `--require-approval` and/or `--result-file <path>` only with `--gate --json`; both reject `--hook` and are not shared with OpenCode/Pi slash-command parsing. Legacy plaintext, JSON, hook, and exit behavior remains unchanged when neither strict option is present.
+
+Strict decisions use one newline-terminated JSON record on stdout and, when requested, identical bytes in the result file. Exit codes follow the grep convention: approval exits `0`; with `--require-approval`, annotated and dismissed decisions are published before exiting `1` (negative human outcome); usage/startup/validation failures — bad flag combinations, strict flags outside `annotate --gate --json`, a missing `--result-file` parent, a pre-existing or dangling-symlink destination, and every annotate startup failure (missing path, unreachable URL, empty folder, ambiguous name, missing file, oversized file) — exit `2` (the gate itself was misconfigured or could not start). Those startup sites exit `1` as before for non-strict invocations; under a strict flag `1` is reserved for "the reviewer did not approve", so a typo'd path must never masquerade as a rejection. Post-decision publication failures (destination appears between validation and publish, hard links unavailable) also exit `2`: the result *file* was not published, so they present as environment errors — "the gate could not publish its result" — never as a reviewer outcome, and never as approval (still fail-closed, since only `0` means approved). The stdout decision record is written **before** result-file publication and is still emitted whenever the decision itself completed; only a stdout write failure leaves no record anywhere. Signal deaths keep `128+n`. Result paths resolve from the invocation working directory, require an existing parent and absent destination, and publish via a flushed/closed `0600` same-directory temporary file plus an atomic no-clobber hard link—never copy or overwrite fallback (the `0600` mode is a no-op on Windows, and the atomic link/rename is not followed by a parent-directory fsync, so publication is atomic but not crash-durable). Keep reviewed sources at stable project paths; unique result and diagnostic log files may use a narrow temporary directory. Explicit Close emits `dismissed`; missing results or process/browser failures are recovery cases, never approval.
 
 ## Archive Flow
 
@@ -310,7 +335,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | --------------------- | ------ | ------------------------------------------ |
 | `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, snapshotId, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd?, semanticDiff?, sections?, commitInfo?, baseBehindRemote? }`. `snapshotId` identifies this diff snapshot; the client echoes it on `/api/diff/fresh` probes (also returned by the switch/PR endpoints). `sections` is the since-base sidecar (Committed/Changes/Untracked partition); `commitInfo` is the commit-metadata sidecar (subject, markdown body, author + avatar) present only while a `commit:<sha>` diff is active; `baseBehindRemote` flags that the diff base is behind its remote tip. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
 | `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace?, explicitBase? }` — `diffType` includes the `commit:<sha>` family). `explicitBase: true` marks a base the user picked from the picker — the server then honors it verbatim and permanently disables the bare-local-name → `origin/*` canonicalization for the session (echoed bases stay canonicalizable). Response includes `semanticDiff?`, `sections?`, `commitInfo?`, `baseBehindRemote?`, or `{ superseded: true }` when a newer concurrent switch has taken over (client ignores it). |
-| `/api/commits`        | GET    | One page of the branch's linear `--first-parent` history for the Commits panel (`?limit=&before=`) → `{ commits, hasMore, base }`. Rows carry `isHead` / `isPastBase` (where the branch meets the active base) and best-effort author `avatarUrl`. Plain local git sessions only (PR/workspace/jj/p4 → 400); computed against the active diff's cwd, so worktree sessions list the worktree's history. |
+| `/api/commits`        | GET    | One page of the branch's linear `--first-parent` history for the Commits panel (`?limit=&before=`) → `{ commits, hasMore, base }`. Rows carry `isHead` / `isPastBase` (where the branch meets the active base) and best-effort author `avatarUrl`. Plain local git sessions only (PR/workspace/GitButler/jj/p4 → 400); computed against the active diff's cwd, so worktree sessions list the worktree's history. |
 | `/api/diff/fresh`     | GET    | Cheap staleness probe: recomputes the VCS fingerprint captured with the current diff snapshot and returns `{ fresh, fingerprint?, baseBehindRemote?, agentCwd? }`. Accepts `?snapshot=<id>` — the client echoes the `snapshotId` it received with its diff, and a mismatch with the server's current snapshot reports stale PER CLIENT (covers the startup base upgrade and cross-tab switches even when the VCS fingerprint matches). `baseBehindRemote` is carried on every response (omitting it would flicker the "behind GitHub" banner); `agentCwd` re-advertises the PR checkout in PR mode. Unfingerprintable modes (e.g. P4) always report fresh to a matching snapshot. Polled by the UI's "Diff out of date · Refresh" notice. |
 | `/api/fetch-base`     | POST   | Runs `git fetch` for the base's remote tracking ref, then re-queries the remote tip (fresh `ls-remote`) so narrow-refspec fetches report honestly. Backs the "Baseline is behind GitHub · Fetch" banner. Git-only, base-relative diff types only. |
 | `/api/semantic-diff`  | GET    | Runs semantic diff for the active patch and returns parsed sem output or an unavailable/error response (`?fileExt=` / `?fileExts=` optional). |
@@ -347,8 +372,10 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`). Response includes `semanticDiff?`. |
 | `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
 | `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
-| `/api/guide/:jobId` | GET | Fetch Guided Review result (ordered sections with overviews + file refs) for a completed guide job |
-| `/api/guide/:jobId/reviewed` | PUT | Persist per-section reviewed state for a guide |
+| `/api/guide/:jobId` | GET | Fetch Guided Review result (ordered sections with overviews + file refs) for a completed guide job, or a persisted guide via the `saved:{id}` pseudo job id |
+| `/api/guide/:jobId/reviewed` | PUT | Persist per-section reviewed state for a guide (live job ids write through to the job's autosaved file; `saved:{id}` ids persist directly) |
+| `/api/guides` | GET | List persisted guides for the current repo: `[{ id, label, title, savedAt, progress: { reviewed, total }, moved }]` — `moved` flags a stored head sha that differs from the head currently under review |
+| `/api/guides/:id` | DELETE | Delete a persisted guide |
 | `/api/guide/:jobId/output` | GET | Fetch a failed guide job's captured raw output for manual repair (404 if none captured) |
 | `/api/guide/:jobId/submit` | POST | Manually submit corrected guide JSON for a failed job (body: `{ payload }`) |
 | `/api/code-nav/resolve` | POST | Search for symbol definitions and references via ripgrep (body: `{ symbol, filePath, line, charStart, side, language? }`) |
@@ -402,7 +429,7 @@ Every plan is automatically saved to `~/.plannotator/history/{project}/{slug}/` 
 
 This powers the version history API (`/api/plan/version`, `/api/plan/versions`) and the plan diff system.
 
-**Annotate mode** also saves history on open, so the same version diff works when annotating a standalone `.md`/`.txt`/`.html` file. It keys the slug by **file path** — `annotate-{sanitized-basename}-{hash8}` — rather than heading + date, so re-opening the same file groups its versions even as its content (and headings) change. **Note this writes a copy of each annotated file's content** under `~/.plannotator/history/` (or `PLANNOTATOR_DATA_DIR`); disable via `PLANNOTATOR_ANNOTATE_HISTORY=0` or `{ "annotateHistory": false }` in `~/.plannotator/config.json` to keep annotate sessions stateless (the version diff is then unavailable). For `--render-html` files the diff is rendered as the real page with inline `<ins>`/`<del>` highlights via `htmlDiff()` (`packages/shared/html-diff.ts`).
+**Annotate mode** also saves history on open, so the same version diff works when annotating a standalone `.md`/`.txt`/`.html` file (or any other supported plain-text file, e.g. `.yaml`/`.json`/`.toml`). It keys the slug by **file path** — `annotate-{sanitized-basename}-{hash8}` — rather than heading + date, so re-opening the same file groups its versions even as its content (and headings) change. **Note this writes a copy of each annotated file's content** under `~/.plannotator/history/` (or `PLANNOTATOR_DATA_DIR`); disable via `PLANNOTATOR_ANNOTATE_HISTORY=0` or `{ "annotateHistory": false }` in `~/.plannotator/config.json` to keep annotate sessions stateless (the version diff is then unavailable). For `--render-html` files the diff is rendered as the real page with inline `<ins>`/`<del>` highlights via `htmlDiff()` (`packages/shared/html-diff.ts`).
 
 History saves independently of the `planSave` user setting (which controls decision snapshots in `~/.plannotator/plans/`). Storage functions live in `packages/shared/storage.ts` (runtime-agnostic, re-exported by `packages/server/storage.ts`). Pi copies the shared files at build time. Slug format: `{sanitized-heading}-YYYY-MM-DD` (heading first for readability).
 

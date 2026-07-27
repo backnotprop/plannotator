@@ -1,5 +1,6 @@
 import {
   canStageFiles,
+  detectManagedVcs,
   getVcsContext,
   getVcsDiffFingerprint,
   getVcsFileContentsForDiff,
@@ -14,6 +15,7 @@ import {
 
 export {
   WorkspaceReviewSession,
+  isRepoRelative,
   mapRepoDiffTypeToWorkspaceMode,
   mapWorkspaceModeToRepoDiffType,
   resolveWorkspaceInitialDiffType,
@@ -33,6 +35,9 @@ export {
 export type LocalWorkspaceReview = WorkspaceReviewSession;
 
 const workspaceRuntime = {
+  async detectVcsType(cwd?: string) {
+    return (await detectManagedVcs(cwd))?.id;
+  },
   getVcsContext,
   runVcsDiff,
   getVcsFileContentsForDiff,

@@ -45,8 +45,10 @@ import { DocBadges, type LinkedDocBadgeInfo } from './DocBadges';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useAnnotationHighlighter } from '../hooks/useAnnotationHighlighter';
+import { useVimSelection } from '../hooks/useVimSelection';
 import { useScrollViewport } from '../hooks/useScrollViewport';
 import { decodeAnchorHash } from '../utils/anchors';
+import { VimModeOverlay } from './VimModeOverlay';
 
 interface ViewerProps {
   blocks: Block[];
@@ -82,6 +84,10 @@ interface ViewerProps {
   isPlanDiffActive?: boolean;
   onPlanDiffToggle?: () => void;
   hasPreviousVersion?: boolean;
+  /** Baseline suffix + tooltip for the plan-diff badge (see DocBadges) —
+   *  annotate/folder sessions pass "since last review"; plan review omits. */
+  planDiffBaselineLabel?: string;
+  planDiffBaselineTooltip?: string;
   /** Show amber "Demo" badge (portal mode, no shared content loaded) */
   showDemoBadge?: boolean;
   /** Max width in px for the plan card; null removes the cap entirely. */
@@ -119,12 +125,26 @@ interface ViewerProps {
    *  comment, attachments, checkbox toggles). Existing annotations still
    *  render and remain selectable. Default false — today's behavior. */
   readOnly?: boolean;
+  /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
+  vimModeEnabled?: boolean;
+  /** Replace the compact Vim badge with the live video-style key HUD. */
+  vimHudEnabled?: boolean;
+  /** Show the bottom-right key panel without affecting the HUD reticle. */
+  vimHudKeyPanelEnabled?: boolean;
+  /** Persist a user request to hide the bottom-right key panel. */
+  onVimHudKeyPanelChange?: (enabled: boolean) => void;
 }
 
 export interface ViewerHandle {
   removeHighlight: (id: string) => void;
   clearAllHighlights: () => void;
   applySharedAnnotations: (annotations: Annotation[]) => void;
+}
+
+interface CodeBlockToolbarTarget {
+  readonly block: Block;
+  readonly element: HTMLElement;
+  readonly activation: 'pointer' | 'keyboard';
 }
 
 /**
@@ -160,6 +180,12 @@ const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }
   );
 };
 
+/**
+ * Render and annotate a parsed Markdown document.
+ *
+ * Pointer and opt-in keyboard annotations share the same highlight callbacks;
+ * the imperative handle mutates only highlights owned by this viewer.
+ */
 export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   blocks,
   markdown,
@@ -181,6 +207,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   isPlanDiffActive,
   onPlanDiffToggle,
   hasPreviousVersion,
+  planDiffBaselineLabel,
+  planDiffBaselineTooltip,
   showDemoBadge,
   maxWidth,
   onOpenLinkedDoc,
@@ -200,6 +228,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onAskAI,
   allowImages = true,
   readOnly = false,
+  vimModeEnabled = false,
+  vimHudEnabled = false,
+  vimHudKeyPanelEnabled = true,
+  onVimHudKeyPanelChange,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -243,7 +275,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
   const headingSlugMap = useMemo(() => buildHeadingSlugMap(blocks), [blocks]);
   const isTouchDevice = useMemo(() => window.matchMedia('(pointer: coarse)').matches, []);
-  const [hoveredCodeBlock, setHoveredCodeBlock] = useState<{ block: Block; element: HTMLElement } | null>(null);
+  const [codeBlockToolbar, setCodeBlockToolbar] =
+    useState<CodeBlockToolbarTarget | null>(null);
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
   const [hoveredTable, setHoveredTable] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isTableToolbarExiting, setIsTableToolbarExiting] = useState(false);
@@ -270,7 +303,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   // Shared annotation infrastructure via hook
   const {
-    highlighterRef,
     toolbarState,
     commentPopover: hookCommentPopover,
     quickLabelPicker: hookQuickLabelPicker,
@@ -282,6 +314,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     handleCommentClose: hookCommentClose,
     handleFloatingQuickLabel: hookFloatingQuickLabel,
     handleQuickLabelPickerDismiss: hookQuickLabelPickerDismiss,
+    highlightRange,
+    highlightMathElement,
     removeHighlight: hookRemoveHighlight,
     clearAllHighlights,
     applyAnnotations,
@@ -301,17 +335,56 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const modeRef = useRef<EditorMode>(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
+  const applyCodeBlockAnnotation = useCallback((
+    blockId: string,
+    codeEl: Element,
+    type: AnnotationType,
+    text?: string,
+    images?: ImageAttachment[],
+    isQuickLabel?: boolean,
+    quickLabelTip?: string,
+  ) => {
+    const id = `codeblock-${Date.now()}`;
+    const codeText = codeEl.textContent || '';
+
+    const wrapper = document.createElement('mark');
+    wrapper.className = `annotation-highlight ${type === AnnotationType.DELETION ? 'deletion' : type === AnnotationType.COMMENT ? 'comment' : ''}`.trim();
+    wrapper.dataset.bindId = id;
+    wrapper.textContent = codeText;
+
+    codeEl.replaceChildren(wrapper);
+
+    const newAnnotation: Annotation = {
+      id,
+      blockId,
+      startOffset: 0,
+      endOffset: codeText.length,
+      type,
+      text,
+      originalText: codeText,
+      createdA: Date.now(),
+      author: getIdentity(),
+      images,
+      ...(isQuickLabel ? { isQuickLabel: true } : {}),
+      ...(quickLabelTip ? { quickLabelTip } : {}),
+    };
+
+    onAddAnnotationRef.current(newAnnotation);
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
   // Pinpoint mode: hover + click to select elements
   const handlePinpointCodeBlockClick = useCallback((blockId: string, element: HTMLElement) => {
+    const block = blocks.find((candidate) => candidate.id === blockId);
     const codeEl = element.querySelector('code');
-    if (!codeEl) return;
+    if (!block || !codeEl) return;
     // In pinpoint mode, apply code block annotation based on current editor mode
     if (modeRef.current === 'redline') {
       applyCodeBlockAnnotation(blockId, codeEl, AnnotationType.DELETION);
     } else if (modeRef.current === 'quickLabel') {
       setCodeBlockQuickLabelPicker({
         anchorEl: element,
-        codeBlock: { block: blocks.find(b => b.id === blockId)!, element },
+        codeBlock: { block, element },
       });
     } else {
       // Show comment popover anchored to the code block
@@ -320,18 +393,111 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         contextText: (codeEl.textContent || '').slice(0, 80),
         selectedText: codeEl.textContent || '',
         isGlobal: false,
-        codeBlock: { block: blocks.find(b => b.id === blockId)!, element },
+        codeBlock: { block, element },
       });
     }
-  }, [blocks]);
+  }, [applyCodeBlockAnnotation, blocks]);
 
-  const { hoverTarget } = usePinpoint({
+  const handleKeyboardCodeBlockAction = useCallback((
+    blockId: string,
+    element: HTMLElement,
+    modeOverride?: EditorMode,
+  ) => {
+    const block = blocks.find((candidate) => candidate.id === blockId);
+    const codeEl = element.querySelector('code');
+    if (!block || !codeEl) return;
+
+    const effectiveMode = modeOverride ?? modeRef.current;
+    if (effectiveMode === 'redline') {
+      applyCodeBlockAnnotation(blockId, codeEl, AnnotationType.DELETION);
+      return;
+    }
+    if (effectiveMode === 'quickLabel') {
+      setCodeBlockQuickLabelPicker({
+        anchorEl: element,
+        codeBlock: { block, element },
+      });
+      return;
+    }
+    if (effectiveMode === 'selection') {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+      setCodeBlockToolbar({ block, element, activation: 'keyboard' });
+      return;
+    }
+    setViewerCommentPopover({
+      anchorEl: element,
+      contextText: (codeEl.textContent || '').slice(0, 80),
+      selectedText: codeEl.textContent || '',
+      isGlobal: false,
+      codeBlock: { block, element },
+    });
+  }, [applyCodeBlockAnnotation, blocks]);
+
+  const vimModeActive = vimModeEnabled && !readOnly;
+  const keyboardCodeBlockToolbarOpen = codeBlockToolbar?.activation === 'keyboard';
+  const vimBlocked = !!toolbarState
+    || !!hookCommentPopover
+    || !!viewerCommentPopover
+    || !!hookQuickLabelPicker
+    || !!codeBlockQuickLabelPicker
+    || keyboardCodeBlockToolbarOpen
+    || !!isPlanDiffActive
+    || !!popoutTable
+    || !!lightbox;
+  const clearPinpointHoverRef = useRef<() => void>(() => {});
+  const handleVimCommand = useCallback(() => {
+    clearPinpointHoverRef.current();
+  }, []);
+  const vim = useVimSelection({
     containerRef,
-    highlighterRef,
+    enabled: vimModeActive,
+    hudEnabled: vimHudEnabled,
+    blocked: vimBlocked,
+    activeMode: mode,
+    contentVersion: blocks,
+    onHighlightRange: highlightRange,
+    onCodeBlockAction: handleKeyboardCodeBlockAction,
+    onMathAction: highlightMathElement,
+    onHandledCommand: handleVimCommand,
+  });
+
+  const { hoverTarget, clearHover: clearPinpointHover } = usePinpoint({
+    containerRef,
     inputMethod,
-    enabled: !readOnly && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false),
+    enabled: !readOnly && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false) && !vim.helpOpen,
+    onSelectRange: highlightRange,
     onCodeBlockClick: handlePinpointCodeBlockClick,
   });
+  clearPinpointHoverRef.current = clearPinpointHover;
+  const vimOwnsHudTarget = vimHudEnabled
+    && vim.state.phase !== 'inactive'
+    && (vim.focused || vim.state.phase === 'action');
+  const vimOwnsDocumentNavigation = vimModeActive
+    && vim.focused
+    && vim.state.phase !== 'inactive'
+    && vim.state.phase !== 'action';
+  const legacyVimTarget = !vimHudEnabled
+    && (vim.focused || vim.state.phase === 'action')
+    ? vim.activeTarget
+    : null;
+  const pinpointOverlayTarget = vimOwnsHudTarget
+    ? null
+    : (inputMethod === 'pinpoint' ? hoverTarget : null) ?? legacyVimTarget;
+
+  useEffect(() => {
+    if (!vimOwnsDocumentNavigation) return;
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setCodeBlockToolbar((current) => (
+      current?.activation === 'pointer' ? null : current
+    ));
+    setIsCodeBlockToolbarExiting(false);
+  }, [vimOwnsDocumentNavigation]);
 
   // Suppress native context menu on touch devices (prevents cut/copy/paste overlay on mobile)
   useEffect(() => {
@@ -456,82 +622,43 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   // --- Viewer-specific: code block annotation ---
 
-  const applyCodeBlockAnnotation = (
-    blockId: string,
-    codeEl: Element,
-    type: AnnotationType,
-    text?: string,
-    images?: ImageAttachment[],
-    isQuickLabel?: boolean,
-    quickLabelTip?: string,
-  ) => {
-    const id = `codeblock-${Date.now()}`;
-    const codeText = codeEl.textContent || '';
-
-    const wrapper = document.createElement('mark');
-    wrapper.className = `annotation-highlight ${type === AnnotationType.DELETION ? 'deletion' : type === AnnotationType.COMMENT ? 'comment' : ''}`.trim();
-    wrapper.dataset.bindId = id;
-    wrapper.textContent = codeText;
-
-    codeEl.innerHTML = '';
-    codeEl.appendChild(wrapper);
-
-    const newAnnotation: Annotation = {
-      id,
-      blockId,
-      startOffset: 0,
-      endOffset: codeText.length,
-      type,
-      text,
-      originalText: codeText,
-      createdA: Date.now(),
-      author: getIdentity(),
-      images,
-      ...(isQuickLabel ? { isQuickLabel: true } : {}),
-      ...(quickLabelTip ? { quickLabelTip } : {}),
-    };
-
-    onAddAnnotationRef.current(newAnnotation);
-    window.getSelection()?.removeAllRanges();
-  };
-
   const handleCodeBlockAnnotate = (type: AnnotationType) => {
-    if (!hoveredCodeBlock) return;
-    const codeEl = hoveredCodeBlock.element.querySelector('code');
+    if (!codeBlockToolbar) return;
+    const codeEl = codeBlockToolbar.element.querySelector('code');
     if (!codeEl) return;
-    applyCodeBlockAnnotation(hoveredCodeBlock.block.id, codeEl, type);
-    setHoveredCodeBlock(null);
+    applyCodeBlockAnnotation(codeBlockToolbar.block.id, codeEl, type);
+    setCodeBlockToolbar(null);
   };
 
   const handleCodeBlockQuickLabel = (label: QuickLabel) => {
-    if (!hoveredCodeBlock) return;
-    const codeEl = hoveredCodeBlock.element.querySelector('code');
+    if (!codeBlockToolbar) return;
+    const codeEl = codeBlockToolbar.element.querySelector('code');
     if (!codeEl) return;
     applyCodeBlockAnnotation(
-      hoveredCodeBlock.block.id, codeEl, AnnotationType.COMMENT,
+      codeBlockToolbar.block.id, codeEl, AnnotationType.COMMENT,
       `${label.emoji} ${label.text}`, undefined, true, label.tip
     );
-    setHoveredCodeBlock(null);
+    setCodeBlockToolbar(null);
   };
 
   const handleCodeBlockToolbarClose = () => {
-    setHoveredCodeBlock(null);
+    setCodeBlockToolbar(null);
   };
 
   // Viewer-specific comment popover handlers (code blocks + global comments)
 
   const handleCodeBlockRequestComment = (initialChar?: string) => {
-    if (!hoveredCodeBlock) return;
-    const codeText = hoveredCodeBlock.element.querySelector('code')?.textContent || '';
+    if (!codeBlockToolbar) return;
+    const codeText = codeBlockToolbar.element.querySelector('code')?.textContent || '';
     setViewerCommentPopover({
-      anchorEl: hoveredCodeBlock.element,
+      anchorEl: codeBlockToolbar.element,
       contextText: codeText.slice(0, 80),
       selectedText: codeText,
       initialText: initialChar,
       isGlobal: false,
-      codeBlock: hoveredCodeBlock,
+      codeBlock: codeBlockToolbar,
     });
-    setHoveredCodeBlock(null);
+    setCodeBlockToolbar(null);
   };
 
   const handleViewerCommentSubmit = (text: string, images?: ImageAttachment[]) => {
@@ -574,8 +701,20 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       <article
         ref={containerRef}
         data-print-region="article"
-        className={`w-full bg-card rounded-xl py-5 md:py-8 lg:py-10 xl:py-12 relative ${gridEnabled ? 'px-5 md:px-8 lg:px-10 xl:px-12 shadow-xl border border-border/50' : ''} ${inputMethod === 'pinpoint' ? 'cursor-crosshair' : ''}`}
-        style={{ WebkitTouchCallout: 'none' } as React.CSSProperties}
+        data-vim-mode={vimModeActive ? 'enabled' : undefined}
+        data-vim-phase={vimModeActive ? vim.state.phase : undefined}
+        data-vim-focused={vimModeActive ? String(vim.focused) : undefined}
+        data-vim-blocked={vimModeActive ? String(vimBlocked) : undefined}
+        data-vim-target-key={vimModeActive ? vim.activeTarget?.key : undefined}
+        tabIndex={vimModeActive ? 0 : undefined}
+        onFocus={vim.onFocus}
+        onBlur={vim.onBlur}
+        onMouseDown={vim.onMouseDown}
+        className={`w-full bg-card rounded-xl py-5 md:py-8 lg:py-10 xl:py-12 relative ${gridEnabled ? 'px-5 md:px-8 lg:px-10 xl:px-12 shadow-xl border border-border/50' : ''} ${inputMethod === 'pinpoint' ? 'cursor-pointer' : ''}`}
+        style={{
+          WebkitTouchCallout: 'none',
+          ...(vimModeActive ? { outline: 'none' } : {}),
+        } as React.CSSProperties}
       >
         {/* Repo info + plan diff badge + demo badge + linked doc badge + archive badge - top left */}
         {(repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || openInAppPath) && (
@@ -587,6 +726,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isPlanDiffActive={isPlanDiffActive}
               hasPreviousVersion={hasPreviousVersion}
               onPlanDiffToggle={onPlanDiffToggle}
+              planDiffBaselineLabel={planDiffBaselineLabel}
+              planDiffBaselineTooltip={planDiffBaselineTooltip}
               showDemoBadge={showDemoBadge}
               archiveInfo={archiveInfo}
               linkedDocInfo={linkedDocInfo}
@@ -752,22 +893,35 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 // Cancel exit animation if re-entering
                 setIsCodeBlockToolbarExiting(false);
                 // Only show hover toolbar if no selection toolbar is active
-                if (!toolbarState) {
-                  setHoveredCodeBlock({ block: group.block, element });
+                if (
+                  !toolbarState
+                  && !vimOwnsDocumentNavigation
+                  && !keyboardCodeBlockToolbarOpen
+                ) {
+                  setCodeBlockToolbar({
+                    block: group.block,
+                    element,
+                    activation: 'pointer',
+                  });
                 }
               }}
               onLeave={inputMethod === 'pinpoint' ? () => {} : () => {
+                if (keyboardCodeBlockToolbarOpen) return;
                 // Delay then start exit animation
                 hoverTimeoutRef.current = setTimeout(() => {
                   setIsCodeBlockToolbarExiting(true);
                   // After exit animation, unmount
                   setTimeout(() => {
-                    setHoveredCodeBlock(null);
+                    setCodeBlockToolbar(null);
                     setIsCodeBlockToolbarExiting(false);
                   }, 150);
                 }, 100);
               }}
-              isHovered={inputMethod !== 'pinpoint' && hoveredCodeBlock?.block.id === group.block.id}
+              isHovered={
+                inputMethod !== 'pinpoint'
+                && !vimOwnsDocumentNavigation
+                && codeBlockToolbar?.block.id === group.block.id
+              }
             />
           ) : (
             <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={readOnly ? undefined : onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
@@ -826,35 +980,39 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Code block hover toolbar */}
-        {hoveredCodeBlock && !toolbarState && (
-          <ToolbarErrorBoundary>
-          <AnnotationToolbar
-            element={hoveredCodeBlock.element}
-            positionMode="top-right"
-            onAnnotate={handleCodeBlockAnnotate}
-            onClose={handleCodeBlockToolbarClose}
-            onRequestComment={handleCodeBlockRequestComment}
-            onQuickLabel={handleCodeBlockQuickLabel}
-            isExiting={isCodeBlockToolbarExiting}
-            onMouseEnter={() => {
-              if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = null;
-              }
-              setIsCodeBlockToolbarExiting(false);
-            }}
-            onMouseLeave={() => {
-              hoverTimeoutRef.current = setTimeout(() => {
-                setIsCodeBlockToolbarExiting(true);
-                setTimeout(() => {
-                  setHoveredCodeBlock(null);
+        {codeBlockToolbar
+          && !toolbarState
+          && !(vimOwnsDocumentNavigation && codeBlockToolbar.activation === 'pointer')
+          && (
+            <ToolbarErrorBoundary>
+              <AnnotationToolbar
+                element={codeBlockToolbar.element}
+                positionMode="top-right"
+                onAnnotate={handleCodeBlockAnnotate}
+                onClose={handleCodeBlockToolbarClose}
+                onRequestComment={handleCodeBlockRequestComment}
+                onQuickLabel={handleCodeBlockQuickLabel}
+                isExiting={isCodeBlockToolbarExiting}
+                onMouseEnter={() => {
+                  if (hoverTimeoutRef.current) {
+                    clearTimeout(hoverTimeoutRef.current);
+                    hoverTimeoutRef.current = null;
+                  }
                   setIsCodeBlockToolbarExiting(false);
-                }, 150);
-              }, 100);
-            }}
-          />
-          </ToolbarErrorBoundary>
-        )}
+                }}
+                onMouseLeave={() => {
+                  if (codeBlockToolbar.activation === 'keyboard') return;
+                  hoverTimeoutRef.current = setTimeout(() => {
+                    setIsCodeBlockToolbarExiting(true);
+                    setTimeout(() => {
+                      setCodeBlockToolbar(null);
+                      setIsCodeBlockToolbarExiting(false);
+                    }, 150);
+                  }, 100);
+                }}
+              />
+            </ToolbarErrorBoundary>
+          )}
 
         {/* Table popout dialog — portaled into containerRef so annotations */}
         {/* can walk into its text nodes the same way they do the inline table. */}
@@ -874,8 +1032,31 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         )}
 
         {/* Pinpoint hover overlay */}
-        {inputMethod === 'pinpoint' && (
-          <PinpointOverlay target={hoverTarget} containerRef={containerRef} />
+        {(inputMethod === 'pinpoint' || vim.activeTarget) && (
+          <PinpointOverlay
+            target={pinpointOverlayTarget}
+            containerRef={containerRef}
+          />
+        )}
+        {vimModeActive && (
+          <VimModeOverlay
+            containerRef={containerRef}
+            inputMethod={inputMethod}
+            state={vim.state}
+            focused={vim.focused}
+            hudEnabled={vimHudEnabled}
+            keyPanelEnabled={vimHudKeyPanelEnabled}
+            hudCommand={vim.hudCommand}
+            activeTarget={vim.activeTarget}
+            helpOpen={vim.helpOpen}
+            onHelpOpenChange={vim.onHelpOpenChange}
+            onKeyPanelHide={
+              onVimHudKeyPanelChange
+                ? () => onVimHudKeyPanelChange(false)
+                : undefined
+            }
+            onHudFocusLeave={vim.onHudFocusLeave}
+          />
         )}
 
         {/* Comment popover — hook handles text selection, Viewer handles global + code block */}
@@ -984,8 +1165,3 @@ const ImageLightbox: React.FC<{ src: string; alt: string; onClose: () => void }>
     </div>
   );
 };
-
-
-
-
-

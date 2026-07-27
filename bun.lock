@@ -63,7 +63,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.22.0",
+      "version": "0.24.1",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -85,7 +85,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.22.0",
+      "version": "0.24.1",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
         "@pierre/diffs": "1.2.8",
@@ -210,6 +210,7 @@
         "@plannotator/ui": "workspace:*",
         "highlight.js": "^11.11.1",
         "lucide-react": "^1.14.0",
+        "marked": "^17.0.6",
         "motion": "^12.38.0",
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
@@ -223,7 +224,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.22.0",
+      "version": "0.24.1",
       "dependencies": {
         "@pierre/diffs": "1.2.8",
         "@plannotator/ai": "workspace:*",
@@ -250,7 +251,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.24.0",
+      "version": "0.28.0",
       "dependencies": {
         "@base-ui/react": "^1.6.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -262,6 +263,7 @@
         "@codemirror/lang-yaml": "^6.1.3",
         "@codemirror/language": "^6.12.3",
         "@codemirror/legacy-modes": "^6.5.3",
+        "@codemirror/merge": "^6.12.2",
         "@codemirror/search": "^6.7.0",
         "@codemirror/state": "^6.6.0",
         "@codemirror/view": "^6.43.0",
@@ -270,9 +272,9 @@
         "@lezer/common": "^1.5.2",
         "@lezer/highlight": "^1.2.3",
         "@pierre/diffs": "1.2.8",
-        "@plannotator/atomic-editor": "^0.5.0",
+        "@plannotator/atomic-editor": "^0.8.0",
         "@plannotator/core": "workspace:*",
-        "@plannotator/markdown-editor": "^0.2.0",
+        "@plannotator/markdown-editor": "^0.4.0",
         "@plannotator/web-highlighter": "^0.8.1",
         "@tanstack/react-table": "^8.21.3",
         "@viz-js/viz": "^3.25.0",
@@ -515,6 +517,8 @@
     "@codemirror/legacy-modes": ["@codemirror/legacy-modes@6.5.3", "", { "dependencies": { "@codemirror/language": "^6.0.0" } }, "sha512-xCsmIzH78MyWkib9jlPaaun57XNkfbMIhagfaZVd0iLTqlpw3jXaIcbZm72MTmmn64eTZpBVNjbyYh+QXnxRsg=="],
 
     "@codemirror/lint": ["@codemirror/lint@6.9.7", "", { "dependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.42.0", "crelt": "^1.0.5" } }, "sha512-28/+iWLYxKxsvGYhSYL7zaCZqLz5+FFFDq9tVsvGv9kv8RY4fFAchJ5WX9M3YrrRlTIsECjsXPqeNgnSmNP2dg=="],
+
+    "@codemirror/merge": ["@codemirror/merge@6.12.2", "", { "dependencies": { "@codemirror/language": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.17.0", "@lezer/highlight": "^1.0.0", "style-mod": "^4.1.0" } }, "sha512-V8JvyAPjHbPupqP7BeMcsdsYCbyPij74jxIbaIJDORI+VZzW44zFmon8bF+oxGWvOKhcRmkiUMXd8MxHr3YA2w=="],
 
     "@codemirror/search": ["@codemirror/search@6.7.0", "", { "dependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.37.0", "crelt": "^1.0.5" } }, "sha512-ZvGm99wc/s2cITtMT15LFdn8aH/aS+V+DqyGq/N5ZlV5vWtH+nILvC2nw0zX7ByNoHHDZ2IxxdW38O0tc5nVHg=="],
 
@@ -794,7 +798,7 @@
 
     "@plannotator/ai": ["@plannotator/ai@workspace:packages/ai"],
 
-    "@plannotator/atomic-editor": ["@plannotator/atomic-editor@0.5.0", "", { "peerDependencies": { "@codemirror/autocomplete": "^6.0.0", "@codemirror/commands": "^6.0.0", "@codemirror/lang-cpp": "^6.0.0", "@codemirror/lang-css": "^6.0.0", "@codemirror/lang-go": "^6.0.0", "@codemirror/lang-html": "^6.0.0", "@codemirror/lang-java": "^6.0.0", "@codemirror/lang-javascript": "^6.0.0", "@codemirror/lang-json": "^6.0.0", "@codemirror/lang-markdown": "^6.0.0", "@codemirror/lang-php": "^6.0.0", "@codemirror/lang-python": "^6.0.0", "@codemirror/lang-rust": "^6.0.0", "@codemirror/lang-sql": "^6.0.0", "@codemirror/lang-xml": "^6.0.0", "@codemirror/lang-yaml": "^6.0.0", "@codemirror/language": "^6.0.0", "@codemirror/legacy-modes": "^6.0.0", "@codemirror/search": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0", "@lezer/common": "^1.0.0", "@lezer/highlight": "^1.0.0", "@lezer/markdown": "^1.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["@codemirror/lang-cpp", "@codemirror/lang-css", "@codemirror/lang-go", "@codemirror/lang-html", "@codemirror/lang-java", "@codemirror/lang-javascript", "@codemirror/lang-json", "@codemirror/lang-php", "@codemirror/lang-python", "@codemirror/lang-rust", "@codemirror/lang-sql", "@codemirror/lang-xml", "@codemirror/lang-yaml", "@codemirror/legacy-modes"] }, "sha512-nJfa6CZ3S0Ywg++HxJLZ9AqPrruhrurVAisFFvCIQmyUnyEt270CfNnVoVyUZBGYHPy47mtybtMZJaN9LXpnCg=="],
+    "@plannotator/atomic-editor": ["@plannotator/atomic-editor@0.8.0", "", { "peerDependencies": { "@codemirror/autocomplete": "^6.0.0", "@codemirror/commands": "^6.0.0", "@codemirror/lang-cpp": "^6.0.0", "@codemirror/lang-css": "^6.0.0", "@codemirror/lang-go": "^6.0.0", "@codemirror/lang-html": "^6.0.0", "@codemirror/lang-java": "^6.0.0", "@codemirror/lang-javascript": "^6.0.0", "@codemirror/lang-json": "^6.0.0", "@codemirror/lang-markdown": "^6.0.0", "@codemirror/lang-php": "^6.0.0", "@codemirror/lang-python": "^6.0.0", "@codemirror/lang-rust": "^6.0.0", "@codemirror/lang-sql": "^6.0.0", "@codemirror/lang-xml": "^6.0.0", "@codemirror/lang-yaml": "^6.0.0", "@codemirror/language": "^6.0.0", "@codemirror/legacy-modes": "^6.0.0", "@codemirror/merge": "^6.0.0", "@codemirror/search": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0", "@lezer/common": "^1.0.0", "@lezer/highlight": "^1.0.0", "@lezer/markdown": "^1.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0", "typescript": "^5.0.0 || ^6.0.0" }, "optionalPeers": ["@codemirror/lang-cpp", "@codemirror/lang-css", "@codemirror/lang-go", "@codemirror/lang-html", "@codemirror/lang-java", "@codemirror/lang-javascript", "@codemirror/lang-json", "@codemirror/lang-php", "@codemirror/lang-python", "@codemirror/lang-rust", "@codemirror/lang-sql", "@codemirror/lang-xml", "@codemirror/lang-yaml", "@codemirror/legacy-modes", "typescript"] }, "sha512-s4IaRrlFjluYvMVRS/XJjAaHVR5I/4yAxAFWlUHk74RE7W9BQO8lazWgYgNyRSYQtdlEZsJiPgzaDeOuocErWg=="],
 
     "@plannotator/core": ["@plannotator/core@workspace:packages/core"],
 
@@ -802,7 +806,7 @@
 
     "@plannotator/hooks": ["@plannotator/hooks@workspace:apps/hook"],
 
-    "@plannotator/markdown-editor": ["@plannotator/markdown-editor@0.2.0", "", { "peerDependencies": { "@codemirror/lang-javascript": "^6.0.0", "@codemirror/lang-json": "^6.0.0", "@codemirror/lang-python": "^6.0.0", "@codemirror/lang-yaml": "^6.0.0", "@codemirror/language": "^6.0.0", "@codemirror/legacy-modes": "^6.0.0", "@plannotator/atomic-editor": "^0.5.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["@codemirror/lang-javascript", "@codemirror/lang-json", "@codemirror/lang-python", "@codemirror/lang-yaml", "@codemirror/legacy-modes"] }, "sha512-ENy6mMZSJWU6NnEsG/15Ia/oZLMSUfwd0skdmDyJcY4HGFESAZ2CTApHfgO2fGTQAaoOafSQ6Dh28QxWxY9duA=="],
+    "@plannotator/markdown-editor": ["@plannotator/markdown-editor@0.4.0", "", { "peerDependencies": { "@codemirror/lang-javascript": "^6.0.0", "@codemirror/lang-json": "^6.0.0", "@codemirror/lang-python": "^6.0.0", "@codemirror/lang-yaml": "^6.0.0", "@codemirror/language": "^6.0.0", "@codemirror/legacy-modes": "^6.0.0", "@codemirror/state": "^6.0.0", "@plannotator/atomic-editor": "^0.8.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["@codemirror/lang-javascript", "@codemirror/lang-json", "@codemirror/lang-python", "@codemirror/lang-yaml", "@codemirror/legacy-modes"] }, "sha512-pXJj912NFY2KBUhQXusoTlGv169NGEDKLVo2bjTCkH+SPIzCMxQWwygdMvMzpNstsieZNDs6NY81fc+XBl5lCA=="],
 
     "@plannotator/marketing": ["@plannotator/marketing@workspace:apps/marketing"],
 

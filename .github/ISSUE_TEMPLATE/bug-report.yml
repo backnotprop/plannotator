@@ -1,0 +1,61 @@
+name: Bug report
+description: Something broke or didn't behave as expected
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead. Screenshots welcome.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plannotator version
+      description: Paste the output of `plannotator --version`
+      placeholder: plannotator 0.24.1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Devcontainer / SSH / remote
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      description: Which coding agent were you using Plannotator with?
+      options:
+        - Claude Code
+        - OpenCode
+        - Pi
+        - Codex
+        - Amp
+        - Droid
+        - Copilot CLI
+        - Gemini CLI
+        - Kiro CLI
+        - None / standalone CLI
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - Plan review
+        - Code review
+        - Annotate
+        - Install / CLI
+        - VS Code extension
+        - Other
+    validations:
+      required: true

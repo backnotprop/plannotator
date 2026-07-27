@@ -14,14 +14,16 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { type DiffType, prepareLocalReviewDiff, detectManagedVcs } from "@plannotator/server/vcs";
+import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
+  getAnnotateApprovedWithNotesPrompt,
   getReviewApprovedPrompt,
   getReviewDeniedSuffix,
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX, MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
@@ -30,6 +32,8 @@ import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-mar
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 import { statSync } from "fs";
 import path from "path";
+import { resolveValidatedTargetAgent } from "./agent-switch";
+import { deliverOpenCodePrompt } from "./prompt-delivery-error";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -62,6 +66,7 @@ export async function handleReviewCommand(
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
+  let initialFingerprint: string | undefined;
   let userDiffType: DiffType | WorkspaceDiffType | undefined;
   let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
@@ -114,6 +119,7 @@ export async function handleReviewCommand(
         rawPatch = diffResult.rawPatch;
         gitRef = diffResult.gitRef;
         diffError = diffResult.error;
+        initialFingerprint = diffResult.fingerprint;
       } catch (err) {
         client.app.log({ level: "error", message: err instanceof Error ? err.message : "Failed to prepare local review diff" });
         return;
@@ -124,7 +130,7 @@ export async function handleReviewCommand(
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       if (workspace.repos.length === 0) {
-        client.app.log({ level: "error", message: "Not in a VCS repo and no nested Git/JJ repositories were found." });
+        client.app.log({ level: "error", message: "Not in a VCS repo and no nested Git/JJ/GitButler repositories were found." });
         return;
       }
       rawPatch = workspace.rawPatch;
@@ -142,6 +148,7 @@ export async function handleReviewCommand(
     origin: "opencode",
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
+    initialFingerprint,
     prMetadata,
     workspace,
     agentCwd,
@@ -168,10 +175,13 @@ export async function handleReviewCommand(
     const sessionId = event.properties?.sessionID;
 
     if (sessionId) {
-      const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
-      const targetAgent = result.agentSwitch || "build";
+      const targetAgent = await resolveValidatedTargetAgent({
+        client,
+        targetAgent: result.agentSwitch,
+        directory,
+      });
 
-      // Append the triage-first suffix when the reviewer sent annotations to
+      // Append the verification-only suffix when the reviewer sent annotations to
       // act on (PR mode included). Platform PR actions post a status message
       // with no annotations — those go through verbatim, no suffix.
       const message = result.approved
@@ -184,7 +194,7 @@ export async function handleReviewCommand(
         await client.session.prompt({
           path: { id: sessionId },
           body: {
-            ...(shouldSwitchAgent && { agent: targetAgent }),
+            ...(targetAgent && { agent: targetAgent }),
             parts: [{ type: "text", text: message }],
           },
         });
@@ -209,6 +219,8 @@ export async function handleAnnotateCommand(
   // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
   // `rawFilePath` preserves it for the scoped-package markdown fallback.
   const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(rawArgs);
+  // @ts-ignore - Event properties contain sessionID
+  const sessionId = event.properties?.sessionID;
 
   if (!filePath) {
     client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]" });
@@ -252,8 +264,8 @@ export async function handleAnnotateCommand(
     }
 
     if (isFolder) {
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
-        client.app.log({ level: "error", message: `No markdown, text, or HTML files found in ${resolvedArg}` });
+      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
+        client.app.log({ level: "error", message: `No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}` });
         return;
       }
       folderPath = resolvedArg;
@@ -302,16 +314,25 @@ export async function handleAnnotateCommand(
       }
 
       absolutePath = resolved.path;
+      if (Bun.file(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
+        client.app.log({ level: "error", message: `File too large to annotate (max 2MB): ${absolutePath}` });
+        return;
+      }
       client.app.log({ level: "info", message: `Resolved: ${absolutePath}` });
       markdown = await Bun.file(absolutePath).text();
     }
   }
 
+  // Per-project scoping for the annotate version history — matches the hook
+  // and Pi runtimes, which both pass it (otherwise history lands in the
+  // shared "_unknown" bucket).
+  const annotateProject = (await detectProjectName()) ?? undefined;
   const server = await startServer({
     markdown,
     filePath: absolutePath,
     origin: "opencode",
     mode: annotateMode,
+    project: annotateProject,
     folderPath,
     sourceInfo,
     sourceConverted,
@@ -322,6 +343,7 @@ export async function handleAnnotateCommand(
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     gate,
+    approvalNotesSupported: Boolean(sessionId),
     agentCwd,
     htmlContent,
     onReady: (url, isRemote, port) => {
@@ -334,46 +356,50 @@ export async function handleAnnotateCommand(
   await Bun.sleep(1500);
   server.stop();
 
-  // Both exit and approve are "no-op for the agent" — skip session injection.
-  if (result.exit || result.approved) {
+  if (result.exit || (result.approved && !result.feedback)) {
     return;
   }
 
   if (result.feedback) {
-    // @ts-ignore - Event properties contain sessionID
-    const sessionId = event.properties?.sessionID;
-
     if (sessionId) {
-      try {
-        await client.session.prompt({
+      const text = result.approved
+        ? getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
+            context: `${isFolder ? "Folder" : "File"}: ${absolutePath}`,
+            feedback: result.feedback,
+          })
+        : getAnnotateFileFeedbackPrompt("opencode", undefined, {
+            fileHeader: isFolder ? "Folder" : "File",
+            filePath: absolutePath,
+            feedback: result.feedback,
+          });
+      await deliverOpenCodePrompt({
+        client,
+        prompt: {
           path: { id: sessionId },
           body: {
             parts: [{
               type: "text",
-              text: getAnnotateFileFeedbackPrompt("opencode", undefined, {
-                fileHeader: isFolder ? "Folder" : "File",
-                filePath: absolutePath,
-                feedback: result.feedback,
-              }),
+              text,
             }],
           },
-        });
-      } catch {
-        // Session may not be available
-      }
+        },
+        failureMessage: result.approved
+          ? "Could not deliver approved annotation notes to the OpenCode session."
+          : "Could not deliver annotation feedback to the OpenCode session.",
+      });
     }
   }
 }
 
 /**
  * Handle /plannotator-last command.
- * Called from command.execute.before — returns the feedback string
- * so the caller can set it as output.parts for the agent to see.
+ * Called from command.execute.before — returns approval-aware feedback so the
+ * caller can choose the correct prompt semantics before injecting it.
  */
 export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
-): Promise<string | null> {
+): Promise<{ approved: boolean; feedback: string } | null> {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
@@ -423,16 +449,19 @@ export async function handleAnnotateLastCommand(
 
   const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
 
+  const lastProject = (await detectProjectName()) ?? undefined;
   const server = await startServer({
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
     mode: "annotate-last",
+    project: lastProject,
     recentMessages: pickerMessages,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     gate,
+    approvalNotesSupported: true,
     htmlContent,
     onReady: (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
@@ -444,10 +473,11 @@ export async function handleAnnotateLastCommand(
   await Bun.sleep(1500);
   server.stop();
 
-  // Both exit and approve signal "don't inject feedback" — return null.
-  if (result.exit || result.approved) {
+  if (result.exit || (result.approved && !result.feedback)) {
     return null;
   }
 
-  return result.feedback || null;
+  return result.feedback
+    ? { approved: Boolean(result.approved), feedback: result.feedback }
+    : null;
 }

@@ -28,6 +28,7 @@ export interface SettingDef<T> {
   toServer?: (value: T) => Record<string, unknown>;
 }
 
+/** Typed registry of persisted UI settings and their storage codecs. */
 export const SETTINGS = {
   displayName: {
     defaultValue: () => generateIdentity(),
@@ -48,6 +49,46 @@ export const SETTINGS = {
       return v === 'true' ? true : v === 'false' ? false : undefined;
     },
     toCookie: (v: boolean) => storage.setItem('plannotator-grid-enabled', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  vimModeEnabled: {
+    // Vim bindings deliberately default OFF. Unmodified letter keys must remain
+    // inert for existing users until they explicitly opt into modal document
+    // navigation from Settings > Vim.
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-vim-mode-enabled');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-vim-mode-enabled', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  vimHudEnabled: {
+    // The larger command HUD is an optional presentation layer on top of Vim
+    // controls. It has no effect while Vim mode itself is disabled.
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-vim-hud-enabled');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-vim-hud-enabled', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  vimHudKeyPanelEnabled: {
+    // Preserve the existing full HUD for current users while allowing the
+    // bottom-right key panel to be hidden independently from the reticle.
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-vim-hud-key-panel-enabled');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-vim-hud-key-panel-enabled', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 

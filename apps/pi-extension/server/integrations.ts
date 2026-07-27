@@ -21,9 +21,9 @@ import {
 	buildHashtags,
 	buildBearContent,
 	detectObsidianVaults,
-} from "../generated/integrations-common.js";
-import { sanitizeTag } from "../generated/project.js";
-import { resolveUserPath } from "../generated/resolve-file.js";
+} from "../generated/integrations-common.ts";
+import { sanitizeTag } from "../generated/project.ts";
+import { resolveUserPath } from "../generated/resolve-file.ts";
 
 export type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult };
 export {

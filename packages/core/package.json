@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./agents": "./agents.ts",
+    "./annotatable": "./annotatable.ts",
     "./agent-jobs": "./agent-jobs.ts",
     "./agent-terminal": "./agent-terminal.ts",
     "./browser-paths": "./browser-paths.ts",

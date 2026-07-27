@@ -152,7 +152,7 @@ export function StackedPRLabel({
             type="button"
             disabled={isSwitchingScope}
             title={`Stack: comparing vs ${scopeTarget}`}
-            className="text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+            className="h-7 text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
           />
         }
       >

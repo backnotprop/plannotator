@@ -47,6 +47,12 @@ jobs:
           packages/ui/markdownEditorFidelity.test.tsx
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
+          packages/ui/components/html-viewer/srcdoc.test.ts
+          packages/ui/components/InlineMarkdown.resolveLinkedDoc.test.tsx
+          packages/ui/components/MarkdownDiff.frozen.test.tsx
+          packages/ui/components/MarkdownEditor.extensions.test.tsx
+          packages/ui/components/sidebar/FileBrowser.test.ts
+          packages/editor/editableDocumentsHook.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
           packages/ui/components/Viewer.consumer.test.tsx
           packages/ui/components/InlineMarkdown.seam.test.tsx
@@ -57,6 +63,10 @@ jobs:
           packages/ui/hooks/useExternalAnnotations.seam.test.tsx
           packages/ui/hooks/useAIChat.seam.test.tsx
           packages/ui/hooks/useFileBrowser.seam.test.tsx
+          packages/ui/hooks/usePlanDiff.test.tsx
+          packages/ui/hooks/useLinkedDoc.test.tsx
+          packages/ui/components/DocBadges.test.tsx
+          packages/editor/planDiffAutoExit.test.tsx
 
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an
@@ -72,7 +82,7 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
 
@@ -82,6 +92,9 @@ jobs:
       - name: Generate Pi extension shared copies
         shell: bash
         run: bash apps/pi-extension/vendor.sh
+
+      - name: Run workspace symlink tests
+        run: bun test packages/server/review-workspace.test.ts --test-name-pattern discoverWorkspaceRepoPaths
 
       - name: Build Pi AI runtime smoke
         run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"

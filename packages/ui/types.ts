@@ -25,6 +25,38 @@ export interface ImageAttachment {
   name: string;
 }
 
+/** DOM-relative text position used to restore a document annotation selection. */
+export interface AnnotationTextMeta {
+  parentTagName: string;
+  parentIndex: number;
+  textOffset: number;
+}
+
+/** Durable, media-specific location for a note created in the PR artifact viewer. */
+export type ArtifactAnnotationAnchor =
+  | {
+      kind: 'document';
+      originalText: string;
+      blockId: string;
+      startOffset: number;
+      endOffset: number;
+      startMeta?: AnnotationTextMeta;
+      endMeta?: AnnotationTextMeta;
+    }
+  | { kind: 'image'; x: number; y: number }
+  | { kind: 'video'; timestamp: number }
+  | { kind: 'page' };
+
+/** Context shared by description and comment annotations created on a PR artifact. */
+export interface ArtifactAnnotationMeta {
+  artifactId: string;
+  artifactName: string;
+  artifactUrl: string;
+  artifactKind: 'image' | 'gif' | 'video' | 'html' | 'markdown';
+  sourceUrl: string;
+  anchor: ArtifactAnnotationAnchor;
+}
+
 export interface Annotation {
   id: string;
   blockId: string; // Legacy - not used with web-highlighter
@@ -40,6 +72,7 @@ export interface Annotation {
   isQuickLabel?: boolean; // true if created via quick label chip
   quickLabelTip?: string; // optional instruction tip from the label definition
   diffContext?: 'added' | 'removed' | 'modified'; // set when annotation created in plan diff view
+  artifact?: ArtifactAnnotationMeta; // code-review artifact viewer anchor + source context
   mathTargets?: Array<{
     blockId: string;
     tex: string;
@@ -47,16 +80,8 @@ export interface Annotation {
   }>; // math elements covered by a mixed text+formula selection
   prUrl?: string; // code-review PR mode: the PR this note belongs to, so it isn't shown/exported against another PR after an in-place switch
   // web-highlighter metadata for cross-element selections
-  startMeta?: {
-    parentTagName: string;
-    parentIndex: number;
-    textOffset: number;
-  };
-  endMeta?: {
-    parentTagName: string;
-    parentIndex: number;
-    textOffset: number;
-  };
+  startMeta?: AnnotationTextMeta;
+  endMeta?: AnnotationTextMeta;
 }
 
 export type AlertKind = 'note' | 'tip' | 'warning' | 'caution' | 'important';
@@ -122,6 +147,7 @@ export interface CommentAnnotation {
   text: string;           // the reviewer's note
   createdAt: number;
   prUrl?: string;         // the PR this note belongs to (see Annotation.prUrl)
+  artifact?: ArtifactAnnotationMeta; // optional artifact anchor within this source comment
 }
 
 export interface CodeAnnotation {
@@ -159,6 +185,14 @@ export interface CodeAnnotation {
   commitSha?: string;
   /** The commit's one-line subject, captured for readable export labels. */
   commitSubject?: string;
+  /** GitButler target that supplied this annotation's line coordinates. */
+  gitButlerDiffType?: string;
+  /** Human-readable GitButler target label captured with the annotation. */
+  gitButlerDiffLabel?: string;
+  /** GitButler merge base active when the annotation was created. */
+  gitButlerBase?: string;
+  /** Exact server snapshot that supplied the GitButler line coordinates. */
+  gitButlerSnapshotId?: string;
 }
 
 /** Token-level metadata passed from selection to annotation creation. */

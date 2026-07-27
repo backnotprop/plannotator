@@ -65,22 +65,24 @@ export const PinpointOverlay: React.FC<PinpointOverlayProps> = ({ target, contai
 
   return (
     <>
-      {/* Outline box */}
+      {/* Background wash */}
       <div
-        className="border-2 border-dashed border-primary/50 bg-primary/5 rounded"
+        data-pinpoint-overlay
+        className="bg-primary/10 rounded-sm"
         style={{
           position: 'absolute',
-          top: position.top - 2,
-          left: position.left - 2,
-          width: position.width + 4,
-          height: position.height + 4,
+          top: position.top,
+          left: position.left,
+          width: position.width,
+          height: position.height,
           pointerEvents: 'none',
           zIndex: 20,
-          transition: 'all 100ms ease-out',
+          transition: 'top 100ms ease-out, left 100ms ease-out, width 100ms ease-out, height 100ms ease-out',
         }}
       />
       {/* Label badge */}
       <div
+        data-pinpoint-label={target.label}
         style={{
           position: 'absolute',
           top: position.top - 22,

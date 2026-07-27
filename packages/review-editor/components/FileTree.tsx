@@ -12,6 +12,7 @@ import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearch
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
+import { Paperclip } from 'lucide-react';
 
 import { SidebarActionRow, SemanticDiffRow, AllFilesRow } from './PanelNavRows';
 
@@ -73,6 +74,10 @@ interface FileTreeProps {
   prOverviewNumber?: string;
   /** PR title for the PR overview row. */
   prOverviewTitle?: string;
+  /** Opens the hosted PR/MR attachment gallery; omitted for local reviews. */
+  onSelectPRArtifacts?: () => void;
+  isPRArtifactsActive?: boolean;
+  prArtifactCount?: number;
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
@@ -141,6 +146,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
   isPROverviewActive = false,
   prOverviewNumber,
   prOverviewTitle,
+  onSelectPRArtifacts,
+  isPRArtifactsActive = false,
+  prArtifactCount,
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
@@ -168,7 +176,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
   // Keyboard navigation: j/k or arrow keys
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (!enableKeyboardNav) return;
+    if (!enableKeyboardNav || e.defaultPrevented) return;
 
     // Don't interfere with input fields
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
@@ -520,6 +528,19 @@ export const FileTree: React.FC<FileTreeProps> = ({
               <span className="truncate text-muted-foreground/80">{prOverviewTitle}</span>
             </SidebarActionRow>
           )}
+          {onSelectPRArtifacts && prArtifactCount !== undefined && (
+            <SidebarActionRow
+              active={isPRArtifactsActive}
+              onClick={onSelectPRArtifacts}
+              title="View attachments shared in this pull request or merge request"
+            >
+              <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
+              <span>Artifacts</span>
+              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+                {prArtifactCount}
+              </span>
+            </SidebarActionRow>
+          )}
           {semanticDiffAvailable && onSelectSemanticDiff && (
             <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
           )}
@@ -537,7 +558,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               node={node}
               expandedFolders={expandedFolders}
               onToggleFolder={handleToggleFolder}
-              activeFileIndex={isAllFilesActive || isSemanticDiffActive || isPROverviewActive ? -1 : activeFileIndex}
+              activeFileIndex={isAllFilesActive || isSemanticDiffActive || isPROverviewActive || isPRArtifactsActive ? -1 : activeFileIndex}
               scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
               onSelectFile={onSelectFile}
               onDoubleClickFile={onDoubleClickFile}

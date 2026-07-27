@@ -61,6 +61,16 @@ function Harness({
       >
         trigger
       </button>
+      <button
+        data-testid="trigger-keyboard-range"
+        onClick={() => {
+          const selection = window.getSelection();
+          if (!selection || selection.rangeCount === 0) return;
+          hook.highlightRange(selection.getRangeAt(0), 'redline');
+        }}
+      >
+        trigger keyboard
+      </button>
     </div>
   );
 }
@@ -97,6 +107,61 @@ function SelectionProbeHarness({
 }
 
 describe('useAnnotationHighlighter math annotations', () => {
+  test.skipIf(!hasDom)('keyboard ranges create the same annotation as the pointer range seam', async () => {
+    const runRange = async (triggerTestId: string) => {
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      const root = createRoot(host);
+      const annotations: Annotation[] = [];
+
+      await act(async () => {
+        root.render(<Harness mode="redline" onAdd={(ann) => annotations.push(ann)} />);
+      });
+
+      const before = host.querySelector<HTMLElement>('[data-testid="text-before"]');
+      if (!before?.firstChild) throw new Error('Missing selection fixture text');
+      const range = document.createRange();
+      range.setStart(before.firstChild, 0);
+      range.setEnd(before.firstChild, 'Formula'.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+
+      const trigger = host.querySelector<HTMLButtonElement>(
+        `[data-testid="${triggerTestId}"]`,
+      );
+      if (!trigger) throw new Error(`Missing ${triggerTestId}`);
+      await act(async () => {
+        trigger.click();
+      });
+
+      const annotation = annotations[0];
+      act(() => root.unmount());
+      host.remove();
+      if (!annotation) throw new Error('Range did not create an annotation');
+      return annotation;
+    };
+
+    const pointer = await runRange('trigger-range');
+    const keyboard = await runRange('trigger-keyboard-range');
+    const comparable = (annotation: Annotation) => ({
+      type: annotation.type,
+      blockId: annotation.blockId,
+      startOffset: annotation.startOffset,
+      endOffset: annotation.endOffset,
+      originalText: annotation.originalText,
+    });
+
+    expect(comparable(keyboard)).toEqual(comparable(pointer));
+    expect(comparable(keyboard)).toEqual({
+      type: AnnotationType.DELETION,
+      blockId: 'block-1',
+      startOffset: 0,
+      endOffset: 'Formula'.length,
+      originalText: 'Formula',
+    });
+  });
+
   test.skipIf(!hasDom)('redline mode annotates an inline formula as a whole math target', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);

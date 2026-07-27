@@ -2,9 +2,19 @@
 
 When visual-explainer's workflow says to pick a palette and font pairing, use these Plannotator tokens instead. Everything else — layout, structure, components, anti-slop rules — stays as visual-explainer prescribes.
 
+## Host theme opt-in (required)
+
+Plannotator's HTML viewer renders arbitrary documents untouched — it never injects bare theme tokens into a document unless the document asks for them. For the generated file to follow the active Plannotator theme when embedded in raw HTML annotation mode, it MUST declare the opt-in in its `<head>`:
+
+```html
+<meta name="plannotator-theme" content="host">
+```
+
+With this tag present, the viewer overrides the document's bare tokens (`--background`, `--muted`, …) with the host theme's values and mirrors the host's light/dark mode. Without it, the `:root` defaults below are all the document ever sees.
+
 ## CSS Custom Properties
 
-Replace visual-explainer's `--bg`, `--surface`, `--border`, `--text`, `--accent` variables with Plannotator's semantic tokens. Include these as `:root` defaults so the file works standalone. When embedded in Plannotator's raw HTML annotation mode, these get overridden by the active theme.
+Replace visual-explainer's `--bg`, `--surface`, `--border`, `--text`, `--accent` variables with Plannotator's semantic tokens. Include these as `:root` defaults so the file works standalone. When embedded in Plannotator's raw HTML annotation mode (with the meta opt-in above), these get overridden by the active theme.
 
 ```css
 :root {
@@ -71,18 +81,47 @@ The `--font-display` (serif) is still used for headings to create visual contras
 
 ## Mermaid theming
 
-When visual-explainer instructs you to set `themeVariables` in Mermaid config, use Plannotator tokens:
+Mermaid processes `themeVariables` itself and derives additional colors from them. That color-processing boundary does not accept every color syntax that browsers accept in CSS. Use Mermaid-compatible literal hex colors here instead of copying the semantic CSS token declarations above.
+
+Do not pass OKLCH color functions, CSS custom-property references such as `var()`, or `color-mix()` values directly into `themeVariables`. This restriction applies only to Mermaid's color-processing boundary. Continue using Plannotator's OKLCH custom properties and other modern color functions for ordinary page CSS.
+
+Use the same light/dark state as the page, but keep both Mermaid palettes literal. With the host-theme opt-in, Plannotator synchronizes `color-scheme`; standalone documents fall back to the operating-system preference:
 
 ```javascript
+const colorScheme = getComputedStyle(document.documentElement).colorScheme;
+const isDark = colorScheme === 'dark'
+  || (colorScheme === 'normal'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+const mermaidThemeVariables = isDark
+  ? {
+      darkMode: true,
+      primaryColor: '#9a9dff',
+      primaryTextColor: '#070b14',
+      primaryBorderColor: '#343b45',
+      lineColor: '#9da5b2',
+      secondaryColor: '#1e242e',
+      secondaryTextColor: '#dadee5',
+      tertiaryColor: '#1e242e',
+      tertiaryTextColor: '#dadee5',
+      background: '#070b14',
+    }
+  : {
+      primaryColor: '#5537eb',
+      primaryTextColor: '#ffffff',
+      primaryBorderColor: '#d4d8de',
+      lineColor: '#414853',
+      secondaryColor: '#e1e5eb',
+      secondaryTextColor: '#414853',
+      tertiaryColor: '#e1e5eb',
+      tertiaryTextColor: '#414853',
+      background: '#f3f5f9',
+    };
+
 mermaid.initialize({
   theme: 'base',
   themeVariables: {
-    primaryColor: 'oklch(0.50 0.25 280)',         // --primary
-    primaryTextColor: 'oklch(1 0 0)',              // --primary-foreground
-    primaryBorderColor: 'oklch(0.88 0.01 260)',    // --border
-    lineColor: 'oklch(0.40 0.02 260)',             // --muted-foreground
-    secondaryColor: 'oklch(0.92 0.01 260)',        // --muted
-    tertiaryColor: 'oklch(0.92 0.01 260)',         // --muted
+    ...mermaidThemeVariables,
     fontFamily: "'Inter', system-ui, sans-serif",
     fontSize: '14px',
   }
@@ -91,7 +130,7 @@ mermaid.initialize({
 
 ## Dark mode
 
-Plannotator handles dark/light via theme classes, not `prefers-color-scheme`. The standalone defaults above are the light theme. When embedded in raw HTML annotation mode, the active theme's tokens override automatically — no media query needed in the generated HTML.
+Plannotator handles dark/light via theme classes, not `prefers-color-scheme`. The standalone defaults above are the light theme. When embedded in raw HTML annotation mode (with the `plannotator-theme` meta opt-in), the active theme's tokens override automatically — no media query needed in the generated HTML.
 
 For standalone viewing, you may optionally add a `prefers-color-scheme: dark` block with the Plannotator dark theme values:
 

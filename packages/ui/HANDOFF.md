@@ -187,12 +187,14 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `types` | `Annotation`, `Block`, `AnnotationType`, etc. |
 | `utils/parser` (`parseMarkdownToBlocks`, `exportAnnotations`) | Pure — no backend. |
 | `components/BlockRenderer` + the block components it renders (`TableBlock`, `HtmlBlock`, `Callout`, `MermaidBlock`, `MathBlock`, …) | Pure rendering. |
-| `components/InlineMarkdown` | Code-file hover previews route through the `docPreviewFetcher` seam. |
+| `components/InlineMarkdown` | Code-file hover previews route through the `docPreviewFetcher` seam. Wiki-link rendering takes the sync `resolveLinkedDoc` prop (live labels + deleted-doc treatment; see "Wiki-link seams (0.27.0)"). |
 | `components/Viewer` | The full annotatable document. Required props: `markdown` and `taterMode` (pass `false`). **Pass `disableCodePathValidation` unless you implement `/api/doc/exists`** — code-path validation is a prop-level opt-out, not a `configure` seam. |
-| `components/MarkdownEditor` | Theme-bridging wrapper over `@plannotator/markdown-editor`. See the Yjs note below. |
+| `components/MarkdownEditor` | Theme-bridging wrapper over `@plannotator/markdown-editor`. Takes CM6 extensions via the `extensions` prop (captured ONCE per `documentId` — see "Wiki-link seams (0.27.0)") and re-exports `wikiLinks` + its config types. |
+| `components/MarkdownDiff` | Theme-bridging wrapper over `@plannotator/markdown-editor`'s frozen two-revision diff. Same shim pattern as `components/MarkdownEditor` (ThemeProvider bridge, `extensions` passthrough, grid card chrome); never editable. See "Frozen markdown diff (0.28.0)". |
 | `components/CommentPopover` | Anchor capture + comment entry. Ask-AI UI renders only if you pass `onAskAI`. |
 | `components/AnnotationPanel` | Renders from your annotation state; no fetches of its own. |
 | `components/ThemeProvider` | Color-mode context. |
+| `theme-modes` (`THEME_MODES`, `Mode`) | The supported Light/Dark/System catalog and mode type. `Mode` also remains exported from `components/ThemeProvider` for compatibility with existing consumers. |
 | `components/ImageThumbnail` / `getImageSrc` | Routes through `imageSrcResolver`. |
 | `components/AttachmentsButton` | Routes through `uploadTransport`. |
 | Seam-backed hooks: `useAnnotationHighlighter`, `useAnnotationDraft`, `useCodeAnnotationDraft`, `useExternalAnnotations`, `useFileBrowser` | Their network access goes through the seams in the catalog above. |
@@ -275,7 +277,7 @@ interface Annotation {
 
 3. **Module-level singletons, not a Provider.** Covered above — safe because Workspaces is client-side, not SSR. Only revisit if SSR is added.
 
-4. **The markdown editor can't take live-collab extensions yet.** Live multi-user editing is a hard requirement for Workspaces (its ADR 0010), and the underlying editor (`@atomic-editor/editor`, CodeMirror 6) supports extensions — but **neither wrapper layer exposes them**: `@plannotator/markdown-editor`'s `MarkdownEditorProps` has no `extensions` prop, and `@plannotator/ui`'s `MarkdownEditor` wrapper therefore can't pass one. So today you cannot thread `y-codemirror.next` (or any CM6 extension) into the editor. **Do not treat live editing as available in this release.** The plan of record (updated now that the editor is forked as `github.com/plannotator/atomic-editor`, published as `@plannotator/atomic-editor`): one atomic change threading an optional `extensions?` prop through `@plannotator/atomic-editor` and `@plannotator/markdown-editor`, then a version bump here — no monorepo import needed. Single-user editing works today; the first Workspaces UI slice doesn't need live collab.
+4. **~~The markdown editor can't take live-collab extensions yet.~~ RESOLVED in 0.27.0.** The plan of record shipped exactly as written: `@plannotator/atomic-editor` ≥0.7.0 and `@plannotator/markdown-editor` ≥0.3.2 thread an optional `extensions?` prop through to the CM6 editor, and the ui shim now declares and forwards it (see "Wiki-link seams (0.27.0)"). You can thread `y-codemirror.next` — or any CM6 extension, e.g. `wikiLinks` — through `components/MarkdownEditor`. Mind the capture-once-per-`documentId` caveat.
 
 None of these block adoption. They're the honest "here's what we'd polish next" list.
 
@@ -331,9 +333,85 @@ Six items accumulated through Workspaces' first three integration slices. All ar
 
 ---
 
+## HtmlViewer rendering neutrality (0.25.0)
+
+`HtmlViewer` no longer writes into a rendered document's namespace (Workspaces' upstream brief; supersedes the H-ask-1 patch — delete it on adoption). Arbitrary HTML now renders exactly as in a standalone browser tab:
+
+1. **No bare token injection.** Host theme tokens travel only as viewer-owned `--pn-*` properties (srcdoc block and the bridge's theme handler, which now refuses non-`--pn-` writes). A document defining `--muted`/`--background`/etc. keeps its own values in both host themes.
+2. **No root mutations.** The `light` class toggle and the `color-scheme: light` injection are gone for arbitrary documents; light/dark resolves from the document + OS.
+3. **Diff CSS gated and scoped.** `<ins>`/`<del>` styles are injected only while `diffActive` and target `ins.plannotator-diff`/`del.plannotator-diff`. If your host renders its own version-diff HTML through the viewer, tag the generated wrappers with `class="plannotator-diff"`; author-written `<ins>`/`<del>` markup is never restyled.
+4. **Host theming is opt-in per document.** `<meta name="plannotator-theme" content="host">` in the document's head restores the bare-token push, the `light` root class, and a symmetric `color-scheme` sync — for that document only. Documents relying on the old implicit override must add the tag.
+
+The contract is pinned by `components/html-viewer/srcdoc.test.ts` (no bare custom-property declarations, no `color-scheme`, `--pn-*`-only bridge writes, scoped diff selectors).
+
+---
+
+## Resize-handle seams + file-browser filtering (0.26.0)
+
+Two additive changes; every default reproduces 0.25.0 behavior.
+
+1. **Resize-handle host seams** (`ResizeHandle` + `useResizablePanel`, both already blessed). For hosts that want different edge interactions:
+   - `ResizeHandle` new props: `hideHoverTrack?: boolean` (suppress the hover color-reveal entirely), `trackClassName?: string` (restyle the inner 4px track — `className` only reaches the outer wrapper), and `tooltip?: ReactNode` (cursor-following hint, portaled to `document.body`, hidden mid-drag). The track also carries a `[data-resize-track]` attribute (same host-CSS pattern as `[data-collapse]`), so you can kill the hover reveal from plain CSS: `[data-resize-track] { background: none !important; }`.
+   - `useResizablePanel` new options: `onClick?: () => void` and `clickThreshold?: number` (default 4). `onClick` fires on pointer-up only when the pointer never traveled past the threshold — the hook owns the pointer state machine, so this is the only reliable way to tell a click from a drag-start. Use it to make the whole handle a click-to-collapse target. It never fires on a snap-close or on `pointercancel` (aborted gestures — palm rejection, system gestures — only clean up drag state). When `onClick` handles a click, the width is left untouched (not committed/persisted).
+   - Plannotator's own apps now wire these into a new handle UX (no hover track, cursor tooltip, single-click collapse). The package defaults are unchanged — pass nothing and 0.25.0 behavior is exactly preserved.
+   - `packages/ui/README.md` § "Resize-handle seams" documents the same from the host's perspective.
+2. **File-browser filtering** (`FileBrowser`, reached via `useFileBrowser`). A built-in filter row above the tree: whitespace-separated tokens AND-match case-insensitively against each file's name (with and without extension) and path (backslashes normalized); folders match on their own name too. While filtering, folders are force-expanded (and non-interactive) and directory collapse state is ignored; Escape clears the query, then closes the input. No new props — consumers get it for free. Behavior pinned by `components/sidebar/FileBrowser.test.ts`.
+
+---
+
+## Wiki-link seams (0.27.0)
+
+Consumer-enablement round for wiki-links (Workspaces' `[[doc_01XYZ|label]]` links over opaque doc ids). Three additive seams plus a housekeeping fix; every default reproduces 0.26.0 behavior.
+
+1. **`MarkdownEditor` `extensions` passthrough.** The shim (`components/MarkdownEditor`) now declares `extensions?: readonly Extension[]` (`Extension` from `@codemirror/state`) and forwards it through `@plannotator/markdown-editor` into the CM6 engine, appended after the built-ins. This is the seam for `wikiLinks(config)`, `y-codemirror.next` collab bindings, custom keymaps (wrap in `Prec.high` to beat built-ins), etc.
+
+   > **⚠️ Captured ONCE per `documentId` — not reactive.** The engine reads the array a single time, when it mounts the document. Swapping in a different array later is **silently ignored** until the next remount (a `documentId` change). Pass a stable reference (module constant or `useMemo` keyed on `documentId`), and never encode changing data in the array itself — extension config callbacks may close over live state (refs/getters); that is the supported way to feed dynamic data into a mounted editor.
+
+   Build extensions against **your own** `@codemirror/*` install: both editor packages declare `@codemirror/state` as a peer, so there is one shared copy — a second copy breaks the editor. Seam pinned end-to-end by `components/MarkdownEditor.extensions.test.tsx` (a facet-based probe mounted through the shim reaches the engine DOM).
+
+2. **`wikiLinks` re-exported through the ui surface.** Hosts must not import `@plannotator/atomic-editor` (outside the import allowlist); `@plannotator/ui` is the single contract. `components/MarkdownEditor` re-exports `wikiLinks` and its types — `WikiLinksConfig`, `WikiLinkSuggestion`, `WikiLinkResolvedTarget`, `WikiLinkStatus`. Usage: build `wikiLinks(config)` and pass it via the `extensions` prop. The config callbacks (`suggest`, `resolve`, `onOpen`) may close over live state — see the capture-once caveat above. Engine 0.7.0's `preferResolvedLabel?: boolean` flag (labeled `[[target|label]]` links opt into showing the resolved title instead of the stored label) is part of the re-exported `WikiLinksConfig`.
+
+3. **`InlineMarkdown` `resolveLinkedDoc`.** Synchronous host resolution of wiki-links in the *viewer*:
+
+   ```ts
+   resolveLinkedDoc?: (target: string) => { label?: string; status?: 'active' | 'deleted' } | null;
+   ```
+
+   - Callback absent, or returning `null` → exactly the previous rendering (stored label, live link).
+   - `label` → displayed instead of the stored label; the stored label is the fallback, the raw target the last resort.
+   - `status: 'deleted'` → a muted, struck-through **non-link** span titled "Document deleted" — no anchor, no pointer, no link icon, and `onOpenLinkedDoc` is not wired — even when `onOpenLinkedDoc` is passed.
+   - The callback receives the **raw stored target** (`doc_01XYZ`), *before* the `.md`-appending path normalization; `onOpenLinkedDoc` keeps receiving the normalized path (`doc_01XYZ.md`) for non-deleted links, unchanged.
+   - **Sync-only by design** — back it with an in-memory cache you keep hydrated. There is deliberately no async variant, no loading state, no phantom-doc creation, no backlink machinery.
+
+   Behavior pinned by `components/InlineMarkdown.resolveLinkedDoc.test.tsx`, including `null` → byte-identical `innerHTML`.
+
+4. **H-ask-1 retired.** The two one-line TS6133 fixes Workspaces carried against `components/html-viewer` (unused `React` default import in `HtmlViewer.tsx`; unused `annotations` destructured binding in `useHtmlAnnotation.ts`) are applied at source. The shipped html-viewer files pass `tsc` under the strict-consumer flags (`--noUnusedLocals` included) — **delete your patch on adoption.**
+
+**Dependency note:** 0.27.0 requires `@plannotator/markdown-editor ^0.3.2` (adds `extensions`) and `@plannotator/atomic-editor ^0.7.0` (adds `wikiLinks` + `preferResolvedLabel`).
+
+---
+
+## Frozen markdown diff (0.28.0)
+
+One additive component for the Workspaces versions/approvals surface: `components/MarkdownDiff`, a theme-bridging shim over `@plannotator/markdown-editor@0.4.0`'s `MarkdownDiff` — a **frozen two-revision markdown comparison**. The newer revision renders as the real document (uncollapsed, full length); deletions are projected struck-through at their original positions; changed spans get character/word emphasis; a toolbar shows the change count with prev/next navigation; a clickable, keyboard-accessible overview rail and a changed-line gutter complete the review chrome. Every 0.27.0 surface is unchanged.
+
+1. **Same shim pattern as `MarkdownEditor`.** Import from `@plannotator/ui/components/MarkdownDiff` — never `AtomicDiffEditor` or `@plannotator/atomic-editor` directly (outside the import allowlist). The shim resolves the color mode from `ThemeProvider` (hosts without the provider pass `mode` directly), imports the same `@plannotator/markdown-editor/themes/plannotator.css` theme the editor shim imports, and maps `gridEnabled` to the identical design-system card chrome — so toggling editor ↔ diff over the same document doesn't jump.
+
+2. **The byte contract lives on the handle.** `editorHandleRef` receives a `MarkdownDiffHandle`: `getMarkdown()` returns the exact `modifiedMarkdown` supplied and `getOriginalMarkdown()` the exact `originalMarkdown` — **byte-identical, including CRLF and trailing whitespace** (the handle returns the caller's strings, not a CM6 read-back). Navigation rides the same handle: `getChangeCount()`, `goToNextChange()`, `goToPreviousChange()`, plus `getContentDOM()` for host-level inspection.
+
+3. **Frozen means frozen.** The surface is never editable: document-changing transactions are rejected at both the state and view dispatch boundaries, and the content DOM is `contenteditable="false"`. Rendered links still work (`onLinkClick`).
+
+4. **`extensions` composes like the editor's.** Same seam, same calling convention: build `wikiLinks(config)` (still re-exported from `components/MarkdownEditor`) and pass it through `extensions` — wiki-links render inside the frozen view. Captured ONCE per mounted comparison (keyed on `documentId` + both document strings): pass a stable array, feed changing data through callbacks that close over live state, and build against your own `@codemirror/*` copies (one shared `@codemirror/state`, as ever).
+
+Seam pinned end-to-end by `components/MarkdownDiff.reexport.test.tsx` (public surface + types) and `components/MarkdownDiff.frozen.test.tsx` (byte preservation incl. CRLF/trailing-space fixtures, `contenteditable="false"`, change navigation, wiki-link composition through the shim, theme/host-class forwarding).
+
+**Dependency note:** 0.28.0 requires `@plannotator/markdown-editor ^0.4.0` (adds `MarkdownDiff`) and `@plannotator/atomic-editor ^0.8.0` (adds the frozen diff engine; new required peer `@codemirror/merge`, which `@plannotator/ui` now declares — single-copy discipline unchanged).
+
+---
+
 ## Publishing & versioning
 
-- `@plannotator/core` and `@plannotator/ui` are versioned **in lockstep with the repo** (`@plannotator/ui` is now `0.24.0`; `@plannotator/core` remains `0.22.0` until its next change — the ui→core dependency still resolves exactly at pack time).
+- `@plannotator/core` and `@plannotator/ui` are versioned **in lockstep with the repo** (`@plannotator/ui` is now `0.28.0`; `@plannotator/core` remains `0.22.0` until its next change — the ui→core dependency still resolves exactly at pack time).
 - They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --provenance --access public`). Publish **`core` first, then `ui`**.
 - `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS.
 - There is **no CI publish job for these two packages yet** — first publish is manual from `main` after merge. (Wiring a CI publish job is a follow-up.)

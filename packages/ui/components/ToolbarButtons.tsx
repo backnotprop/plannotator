@@ -1,7 +1,9 @@
 import React from 'react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
-import { Send, Check } from 'lucide-react';
+import { Send, Check, X } from 'lucide-react';
+
+type ToolbarLabelBreakpoint = 'md' | 'lg';
 
 interface FeedbackButtonProps {
   onClick: () => void;
@@ -13,6 +15,7 @@ interface FeedbackButtonProps {
   shortLoadingLabel?: string;
   title?: string;
   muted?: boolean;
+  labelBreakpoint?: ToolbarLabelBreakpoint;
 }
 
 export const FeedbackButton: React.FC<FeedbackButtonProps> = ({
@@ -25,6 +28,7 @@ export const FeedbackButton: React.FC<FeedbackButtonProps> = ({
   shortLoadingLabel,
   title = 'Send Feedback',
   muted = false,
+  labelBreakpoint = 'md',
 }) => (
   <Button
     variant="outline"
@@ -37,11 +41,17 @@ export const FeedbackButton: React.FC<FeedbackButtonProps> = ({
   >
     {shortLabel ? (
       <>
-        <span className="hidden md:inline lg:hidden">{isLoading ? (shortLoadingLabel ?? loadingLabel) : shortLabel}</span>
-        <span className="hidden lg:inline">{isLoading ? loadingLabel : label}</span>
+        <span className={labelBreakpoint === 'lg' ? 'hidden lg:inline xl:hidden' : 'hidden md:inline lg:hidden'}>
+          {isLoading ? (shortLoadingLabel ?? loadingLabel) : shortLabel}
+        </span>
+        <span className={labelBreakpoint === 'lg' ? 'hidden xl:inline' : 'hidden lg:inline'}>
+          {isLoading ? loadingLabel : label}
+        </span>
       </>
     ) : (
-      <span className="hidden md:inline">{isLoading ? loadingLabel : label}</span>
+      <span className={labelBreakpoint === 'lg' ? 'hidden lg:inline' : 'hidden md:inline'}>
+        {isLoading ? loadingLabel : label}
+      </span>
     )}
   </Button>
 );
@@ -58,6 +68,7 @@ export interface ApproveButtonProps {
   dimmed?: boolean;
   muted?: boolean;
   className?: string;
+  labelBreakpoint?: ToolbarLabelBreakpoint;
 }
 
 export const ApproveButton: React.FC<ApproveButtonProps> = ({
@@ -72,6 +83,7 @@ export const ApproveButton: React.FC<ApproveButtonProps> = ({
   dimmed = false,
   muted = false,
   className,
+  labelBreakpoint = 'md',
 }) => (
   <Button
     variant="success"
@@ -87,8 +99,12 @@ export const ApproveButton: React.FC<ApproveButtonProps> = ({
       className,
     )}
   >
-    <span className="md:hidden">{isLoading ? mobileLoadingLabel : mobileLabel}</span>
-    <span className="hidden md:inline">{isLoading ? loadingLabel : label}</span>
+    <span className={labelBreakpoint === 'lg' ? 'lg:hidden' : 'md:hidden'}>
+      {isLoading ? mobileLoadingLabel : mobileLabel}
+    </span>
+    <span className={labelBreakpoint === 'lg' ? 'hidden lg:inline' : 'hidden md:inline'}>
+      {isLoading ? loadingLabel : label}
+    </span>
   </Button>
 );
 
@@ -97,6 +113,7 @@ interface ExitButtonProps {
   disabled?: boolean;
   isLoading?: boolean;
   title?: string;
+  labelBreakpoint?: ToolbarLabelBreakpoint;
 }
 
 export const ExitButton: React.FC<ExitButtonProps> = ({
@@ -104,6 +121,7 @@ export const ExitButton: React.FC<ExitButtonProps> = ({
   disabled = false,
   isLoading = false,
   title = 'Close session without sending feedback',
+  labelBreakpoint = 'md',
 }) => (
   <Button
     variant="secondary"
@@ -111,9 +129,12 @@ export const ExitButton: React.FC<ExitButtonProps> = ({
     onClick={onClick}
     disabled={disabled || isLoading}
     title={title}
+    aria-label={title}
     className="bg-muted text-muted-foreground hover:bg-muted/80"
   >
-    <span className="md:hidden">{isLoading ? '...' : '✕'}</span>
-    <span className="hidden md:inline">{isLoading ? 'Closing...' : 'Close'}</span>
+    <span className={labelBreakpoint === 'lg' ? 'lg:hidden' : 'md:hidden'}>
+      {isLoading ? '…' : <X className="size-3.5" aria-hidden="true" />}
+    </span>
+    <span className={labelBreakpoint === 'lg' ? 'hidden lg:inline' : 'hidden md:inline'}>{isLoading ? 'Closing...' : 'Close'}</span>
   </Button>
 );

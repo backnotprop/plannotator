@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://plannotator.ai/docs/getting-started/installation/">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a>
+  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a>
 </p>
 
 # Plannotator
@@ -63,7 +63,7 @@ Annotate plans, specs, messages, html, then send the feedback to your agent.
 
 ### Code Review
 
-Review local changes or remote PRs. Comment on diffs, suggest code. Your comments go back to the agent. Works with git, jj, p4, GitHub, and GitLab.
+Review local changes or remote PRs. Comment on diffs, suggest code. Your comments go back to the agent. Works with Git, GitButler, Jujutsu (`jj`), Perforce (`p4`), GitHub, and GitLab.
 
 </td>
 <td width="60%">
@@ -100,13 +100,18 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
 /plannotator-last                                # Annotate the agent's last message
 ```
 
+Need a realistic document to try? Copy the [product requirements document template and filled example](https://docs.plannotator.ai/templates/product-requirements-document) as Markdown.
+
 ### Code review
 
 ```
 /plannotator-review                    # Review uncommitted changes
 /plannotator-review <github-pr-url>    # Review a GitHub pull request
 /plannotator-review <gitlab-mr-url>    # Review a GitLab merge request
+plannotator review --gitbutler         # Review an active GitButler workspace
 ```
+
+GitButler users can review the whole workspace, one stack, or one branch layer. See the [GitButler workflow guide](https://docs.plannotator.ai/open-source/workflows/gitbutler).
 
 ### Plan mode
 
@@ -146,7 +151,7 @@ Share a plan with a teammate and they can annotate it themselves. Import their f
 
 **Large plans** go through a short-link service, encrypted in your browser with AES-256-GCM. The server stores only ciphertext, and the key never leaves the URL fragment. Pastes auto-delete after 7 days.
 
-Same model as [PrivateBin](https://privatebin.info/). The paste service is [self-hostable](https://plannotator.ai/docs/guides/sharing-and-collaboration/).
+Same model as [PrivateBin](https://privatebin.info/). The paste service is [self-hostable](https://docs.plannotator.ai/open-source/workflows/sharing).
 
 Sharing can be disabled entirely with `PLANNOTATOR_SHARE=disabled`.
 
@@ -189,7 +194,7 @@ Then finish the step for your agent:
 | **OpenCode** | Add `"plugin": ["@plannotator/opencode@latest"]` to `opencode.json`. Restart OpenCode. | [README](apps/opencode-plugin/README.md) |
 | **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator`. | [README](apps/pi-extension/README.md) |
 
-Full walkthroughs live in the [installation docs](https://plannotator.ai/docs/getting-started/installation/).
+Full walkthroughs live in the [installation docs](https://docs.plannotator.ai/open-source/start/installation).
 
 <details>
 <summary>Claude Code: manual hook setup (without the plugin system)</summary>
@@ -320,7 +325,7 @@ Requires `gh` installed and authenticated. Can also be set persistently in `~/.p
 { "verifyAttestation": true }
 ```
 
-See the [verification docs](https://plannotator.ai/docs/reference/verifying-your-install/) for details.
+See the [verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
 
 ---
 
@@ -328,17 +333,50 @@ See the [verification docs](https://plannotator.ai/docs/reference/verifying-your
 
 Settings are saved in cookies (not localStorage) because each hook invocation runs on a random port. You can also set options through environment variables or `~/.plannotator/config.json`.
 
+### Optional Vim controls
+
+Plan and annotate views offer a default-off **Vim controls** profile under
+**Settings → Vim**. Once enabled, focus the document and use `j` / `k`
+to move one rendered block at a time. After `l` refines into a semantic level,
+`j` / `k` move among sibling rows, cells, or inline targets; `h` moves back to
+the containing target. Refining past the deepest target enters text. `v`
+starts characterwise Visual selection and
+`V` selects whole blocks. `Space` opens the normal annotation toolbar; `c`,
+`d`, `m`, and `t` select comment, redline, markup, and label actions. The same
+semantic target graph drives pointer Pinpoint and keyboard navigation. Press
+`?` in the document for the contextual key reference. Inputs, dialogs,
+editors, `Tab`, and all pointer interactions retain their native behavior.
+The document takes focus automatically when the page is otherwise neutral;
+press `Escape` from app chrome to return to it without clicking.
+An additional default-off **Vim HUD** toggle appears beneath Vim controls. It
+uses the product-demo styling for the live target reticle and navigation
+context. Its bottom-right **Key panel** is independently hideable while the
+reticle remains active; `?` still opens the complete key map on demand. The
+panel shows recent handled keys, the current block/line/word/Visual phase, and
+the command meaning without capturing text typed into comments or other
+controls.
+See [Vim controls](docs/vim-controls.md) for the interaction contract and
+implementation architecture.
+
 | Variable | Description |
 |---|---|
 | `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local, unset for SSH auto-detection |
 | `PLANNOTATOR_PORT` | Fixed port (default: random locally, `19432` remote) |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in |
+| `PLANNOTATOR_AI` | `disabled` to disable Ask AI, Review Agents, and Guided Review; the annotate agent terminal is separate |
 | `PLANNOTATOR_SHARE` | `disabled` to turn off URL sharing |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal) |
 | `PLANNOTATOR_PASTE_URL` | Base URL of the paste service API |
 | `PLANNOTATOR_ORIGIN` | Override agent detection: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi` |
 | `PLANNOTATOR_JINA` | `0`/`false` to disable Jina Reader for URL annotation |
 | `JINA_API_KEY` | Jina Reader API key for higher rate limits |
+| `PLANNOTATOR_DATA_DIR` | Base directory for all Plannotator data (plans, history, drafts, `config.json`). Default: `~/.plannotator`; if that directory doesn't exist and `$XDG_DATA_HOME` is set to an absolute path, `$XDG_DATA_HOME/plannotator` is used instead |
+
+All Plannotator data lives in a single directory — `~/.plannotator` by default. To relocate it (e.g. for an XDG-clean home):
+
+```bash
+export PLANNOTATOR_DATA_DIR=~/.local/share/plannotator
+```
 
 ---
 

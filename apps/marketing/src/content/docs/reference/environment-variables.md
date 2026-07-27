@@ -13,15 +13,16 @@ All Plannotator environment variables and their defaults.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
-| `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. When not set, local sessions use a random port; remote sessions default to `19432`. |
+| `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port or inclusive range such as `19432-19463`. A range uses the first available port. When not set, local sessions use a random port; remote sessions default to `19432`. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser to open the UI in. macOS: app name or path. Linux/Windows: executable path. Can also be a script. Takes priority over `BROWSER`. Also settable per-invocation with `--browser`. |
 | `BROWSER` | (none) | Standard env var for specifying a browser. VS Code sets this automatically in devcontainers. Used as fallback when `PLANNOTATOR_BROWSER` is not set. |
 | `PLANNOTATOR_ORIGIN` | auto-detect | Explicit agent-origin override. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `pi`, `gemini-cli`, `kiro-cli`. Invalid values silently fall through to env-based detection. |
 | `PLANNOTATOR_READY_FILE` | (none) | Internal host-plugin side channel. When set, Plannotator appends server-ready JSON lines containing the local UI URL. |
 | `PLANNOTATOR_SKIP_BROWSER_OPEN` | unset | Internal host-plugin flag. Set to `1` to prevent Plannotator from opening the browser itself when the host will open the URL. |
+| `PLANNOTATOR_AI` | enabled | Set to `disabled` to disable Ask AI and the Review Agents / Guided Review execution surfaces, including provider and agent-job endpoints. Persisted guide data is retained and its server APIs remain available, but the in-app history browser is hidden while AI is disabled. External agents can still open reviews and submit annotations; the annotate agent terminal is separate. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off sharing. Hides share UI and import options. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`); the env var takes precedence. |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Base URL for share links. Set this when self-hosting the share portal. |
-| `PLANNOTATOR_DATA_DIR` | `~/.plannotator` | Override the base data directory. Supports `~` expansion. All data (plans, history, drafts, config, hooks, sessions) is stored under this directory.* |
+| `PLANNOTATOR_DATA_DIR` | `~/.plannotator` | Override the base data directory. Supports `~` expansion. All data (plans, history, drafts, config, hooks, sessions) is stored under this directory.* When unset, an existing `~/.plannotator` is always used; if it doesn't exist and `$XDG_DATA_HOME` is set to an absolute path, `$XDG_DATA_HOME/plannotator` is used; otherwise `~/.plannotator`. (The XDG spec's implicit `~/.local/share` default is deliberately not applied — only an explicitly-set `$XDG_DATA_HOME` moves the directory.) |
 | `PLANNOTATOR_PLAN_TIMEOUT_SECONDS` | `345600` | OpenCode only. `submit_plan` wait timeout in seconds. Set `0` to disable timeout. |
 
 \* If you use the VS Code extension, make sure `PLANNOTATOR_DATA_DIR` is visible to both your terminal and VS Code. On macOS, apps launched from the Dock don't inherit shell env vars — launch VS Code from the terminal (`code .`) or set the variable via `launchctl setenv`.
@@ -40,6 +41,12 @@ All Plannotator environment variables and their defaults.
 |----------|---------|-------------|
 | `PLANNOTATOR_JINA` | enabled | Set to `0` or `false` to disable Jina Reader for URL annotation. Set to `1` or `true` to enable (this is the default). Can also be set via `~/.plannotator/config.json` (`{ "jina": false }`) or per-invocation via `--no-jina`. |
 | `JINA_API_KEY` | (none) | Optional Jina Reader API key for higher rate limits. Without it: 20 req/min. With it: 500 req/min. Free keys available from [Jina](https://jina.ai/reader/) and include 10M tokens. |
+
+## Code review variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLANNOTATOR_CURSOR_SANDBOX` | enabled | Set to `0`, `false`, or `disabled` to stop passing `--sandbox enabled` when launching Cursor's `agent` CLI for review jobs. The flag pair is omitted entirely (never `--sandbox disabled`), so your own Cursor Agent sandbox configuration governs — for systems where Cursor's sandbox cannot start (e.g. NixOS or AppArmor-restricted Linux). Set to `1` or `true` to keep it enabled (this is the default). Can also be set via `~/.plannotator/config.json` (`{ "cursorSandbox": false }`); the env var takes precedence. Note: opting out means the review job's write protection relies on `--mode ask` plus your own Cursor configuration. |
 
 ## Paste service variables
 
@@ -89,9 +96,11 @@ If either is present, Plannotator enables remote mode automatically when `PLANNO
 
 ## Port resolution order
 
-1. `PLANNOTATOR_PORT` environment variable (if valid integer 0-65535; `0` means random)
+1. `PLANNOTATOR_PORT` environment variable: one integer from `0` to `65535` (`0` means random), or an inclusive range such as `19432-19463`
 2. `19432` if in remote mode
 3. `0` (random) if in local mode
+
+For a range, Plannotator tries each port from lowest to highest and binds the first available one.
 
 ## Custom browser examples
 

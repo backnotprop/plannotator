@@ -9,7 +9,7 @@ interface Props {
 const {
   title,
   description = 'Interactive Plan Review: Mark up and refine coding-agent plans in a browser UI, share with your team, and integrate with Claude Code, Codex, OpenCode, and more.',
-  ogImage = 'https://plannotator.ai/og-image.webp',
+  ogImage = 'https://plannotator.ai/assets/plannotator-generic-og-v1.jpg',
   canonicalUrl,
 } = Astro.props;
 
@@ -23,7 +23,7 @@ import '../styles/global.css';
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title}</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png">
     <meta name="description" content={description} />
 
     <meta property="og:type" content="website" />

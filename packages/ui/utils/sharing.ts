@@ -298,7 +298,6 @@ export async function createShortShareUrl(
     }
     // Service unavailable — expected for self-hosted setups without a paste backend.
     // The caller is responsible for falling back to hash-based sharing silently.
-    console.debug('[sharing] Short URL service unavailable, using hash-based sharing:', e);
     return null;
   }
 }

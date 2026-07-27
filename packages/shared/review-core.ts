@@ -5,10 +5,25 @@
  * self-contained while review diff logic remains sourced from one module.
  */
 
+import { lstat, readlink } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
-import { unquoteGitPath, parsePatchPathToken, parseDiffFilePathLines, parseDiffGitHeader } from "./diff-paths";
+import {
+  formatPatchPathToken,
+  unquoteGitPath,
+  parsePatchPathToken,
+  parseDiffFilePathLines,
+  parseDiffGitHeader,
+  parseDiffMetadataPathLines,
+} from "./diff-paths";
 
 export const JJ_TRUNK_REVSET = "trunk()";
+/** Maximum regular-file payload accepted for Git diff expansion. */
+export const MAX_REVIEW_FILE_CONTENT_BYTES = 5 * 1024 * 1024;
+
+const MAX_UNTRACKED_DIFF_CONCURRENCY = 4;
+// Fingerprints run every few seconds, so use a deliberately lower read ceiling
+// than one-shot diff generation. Larger files use size + mtime metadata.
+const MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES = 1024 * 1024;
 
 export type DiffType =
   | "since-base"
@@ -26,6 +41,7 @@ export type DiffType =
   | "all"
   | `commit:${string}`
   | `worktree:${string}`
+  | `gitbutler:${string}`
   | "p4-default"
   | `p4-changelist:${string}`;
 
@@ -96,7 +112,9 @@ export interface GitContext {
   compareTarget?: CompareTargetConfig;
   repository?: RepositoryContext;
   cwd?: string;
-  vcsType?: "git" | "jj" | "p4";
+  vcsType?: "git" | "gitbutler" | "jj" | "p4";
+  /** Hash of the exact GitButler branch/commit topology used for this context. */
+  gitButlerRevision?: string;
   /** Evolution log entries for the current jj change (jj only). */
   jjEvologs?: JjEvoLogEntry[];
   /** HEAD ancestry, newest first. Powers the commit-based baseline picker (#709). */
@@ -107,6 +125,14 @@ export interface DiffResult {
   patch: string;
   label: string;
   error?: string;
+  /**
+   * Provider context captured from the same source revision as `patch`.
+   * Providers whose topology can change independently of Git refs use this
+   * to let the server publish one atomic review snapshot.
+   */
+  gitContext?: GitContext;
+  /** Freshness baseline captured from the same source revision as `patch`. */
+  fingerprint?: string;
 }
 
 export interface GitCommandResult {
@@ -115,12 +141,96 @@ export interface GitCommandResult {
   exitCode: number;
 }
 
+/** Per-command execution policy understood by every review Git runtime. */
+export interface GitCommandOptions {
+  cwd?: string;
+  timeoutMs?: number;
+  /** Whether the command may ask the user for credentials. Defaults to `"allow"`. */
+  interaction?: "allow" | "forbid";
+}
+
+/** Runtime-neutral Git arguments and subprocess policy produced at the process boundary. */
+export interface PreparedGitCommand {
+  /** Arguments passed after the `git` executable. */
+  args: string[];
+  /** Per-process environment. Omitted when the inherited environment is unchanged. */
+  env?: Record<string, string | undefined>;
+  /** Whether the runtime must put the command in its own killable process group. */
+  isolateProcessGroup: boolean;
+}
+
 export interface ReviewGitRuntime {
   runGit: (
     args: string[],
-    options?: { cwd?: string; timeoutMs?: number },
+    options?: GitCommandOptions,
   ) => Promise<GitCommandResult>;
   readTextFile: (path: string) => Promise<string | null>;
+}
+
+function quoteGitSshPath(path: string): string {
+  return `"${path.replace(/["\\$`]/g, "\\$&")}"`;
+}
+
+function inheritedSshCommand(environment: Readonly<Record<string, string | undefined>>): string {
+  const command = environment.GIT_SSH_COMMAND?.trim();
+  if (command) return command;
+  const executable = environment.GIT_SSH?.trim();
+  return executable ? quoteGitSshPath(executable) : "ssh";
+}
+
+function usesPlink(
+  environment: Readonly<Record<string, string | undefined>>,
+  sshCommand: string,
+): boolean {
+  const variant = environment.GIT_SSH_VARIANT?.trim().toLowerCase();
+  if (variant === "plink" || variant === "tortoiseplink") return true;
+  if (variant === "ssh" || variant === "simple") return false;
+  return /(?:^|[\\/])(?:tortoise)?plink(?:\.exe)?(?:[\s"']|$)/i.test(sshCommand);
+}
+
+/**
+ * Prepare one Git subprocess without mutating the parent environment.
+ *
+ * Commands that forbid interaction disable Git credential prompts, request SSH
+ * batch mode (including PuTTY/plink), and request process-group isolation so
+ * the runtime can terminate transport children on timeout. Interactive Git
+ * commands retain the caller's exact authentication behavior.
+ */
+export function prepareGitCommand(
+  args: string[],
+  options: GitCommandOptions | undefined,
+  environment: Readonly<Record<string, string | undefined>>,
+): PreparedGitCommand {
+  const interaction = options?.interaction ?? "allow";
+  if (interaction === "allow") {
+    return {
+      args: ["-c", "core.quotePath=false", ...args],
+      isolateProcessGroup: false,
+    };
+  }
+
+  const sshCommand = inheritedSshCommand(environment);
+  const connectTimeoutSeconds = Math.max(1, Math.ceil((options?.timeoutMs ?? 5_000) / 1_000));
+  const sshBatchOptions = usesPlink(environment, sshCommand)
+    ? "-batch"
+    : `-o BatchMode=yes -o ConnectTimeout=${connectTimeoutSeconds}`;
+
+  return {
+    args: [
+      "-c",
+      "core.quotePath=false",
+      "-c",
+      "credential.interactive=false",
+      ...args,
+    ],
+    env: {
+      ...environment,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_SSH_COMMAND: `${sshCommand} ${sshBatchOptions}`,
+      SSH_ASKPASS_REQUIRE: "never",
+    },
+    isolateProcessGroup: true,
+  };
 }
 
 export interface GitDiffOptions {
@@ -237,8 +347,9 @@ export interface RemoteDefaultInfo {
  * background at server startup — the caller fires it with `.then()` and uses
  * the result if/when it arrives.
  *
- * Timeout-guarded: if the network is slow or absent, the promise resolves
- * (with `null`) once the timeout fires. Never throws.
+ * Noninteractive and timeout-guarded: credential/SSH prompts are forbidden,
+ * and a slow or absent network resolves with `null` once the timeout fires.
+ * Never throws.
  */
 export async function detectRemoteDefaultInfo(
   runtime: ReviewGitRuntime,
@@ -247,7 +358,7 @@ export async function detectRemoteDefaultInfo(
   try {
     const lsRemote = await runtime.runGit(
       ["ls-remote", "--symref", "origin", "HEAD"],
-      { cwd, timeoutMs: 5000 },
+      { cwd, timeoutMs: 5000, interaction: "forbid" },
     );
     if (lsRemote.exitCode !== 0) return null;
     const match = lsRemote.stdout.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD/m);
@@ -596,6 +707,7 @@ async function getUntrackedFileDiffs(
   dstPrefix = "b/",
   cwd?: string,
   options?: GitDiffOptions,
+  failurePolicy: UntrackedFailurePolicy = "best-effort",
 ): Promise<{ diff: string; paths: string[] }> {
   // git ls-files scopes to the CWD subtree and returns CWD-relative paths,
   // unlike git diff HEAD which always covers the full repo with root-relative
@@ -607,7 +719,12 @@ async function getUntrackedFileDiffs(
     ["ls-files", "--others", "--exclude-standard"],
     { cwd: rootCwd },
   );
-  if (lsResult.exitCode !== 0) return { diff: "", paths: [] };
+  if (lsResult.exitCode !== 0) {
+    if (failurePolicy === "strict") {
+      assertGitSuccess(lsResult, ["ls-files", "--others", "--exclude-standard"]);
+    }
+    return { diff: "", paths: [] };
+  }
 
   // ls-files C-quotes unusual paths (unicode, control chars — NOT plain
   // spaces). The quoted form breaks everything downstream: the --no-index
@@ -622,8 +739,51 @@ async function getUntrackedFileDiffs(
 
   if (files.length === 0) return { diff: "", paths: [] };
 
-  const diffs = await Promise.all(
-    files.map(async (file) => {
+  const mapWithConcurrency = async <T, R>(
+    items: T[],
+    concurrency: number,
+    mapper: (item: T) => Promise<R>,
+  ): Promise<R[]> => {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workers = Array.from(
+      { length: Math.min(concurrency, items.length) },
+      async () => {
+        while (nextIndex < items.length) {
+          const index = nextIndex++;
+          results[index] = await mapper(items[index]);
+        }
+      },
+    );
+    await Promise.all(workers);
+    return results;
+  };
+
+  const diffs = await mapWithConcurrency(
+    files,
+    MAX_UNTRACKED_DIFF_CONCURRENCY,
+    async (file) => {
+      // Avoid asking Git to inspect arbitrarily large untracked payloads. They
+      // remain visible in the review as binary additions, but their bytes never
+      // enter Git's diff machinery or the server's buffered stdout.
+      try {
+        const fileStat = await lstat(resolvePath(rootCwd ?? "", file));
+        if (fileStat.isFile() && fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) {
+          const mode = (fileStat.mode & 0o111) !== 0 ? "100755" : "100644";
+          const oldToken = formatPatchPathToken("a", file);
+          const newToken = formatPatchPathToken("b", file);
+          return [
+            `diff --git ${oldToken} ${newToken}`,
+            `new file mode ${mode}`,
+            `Binary files /dev/null and ${newToken} differ`,
+            "",
+          ].join("\n");
+        }
+      } catch {
+        // Preserve the existing best-effort/strict behavior below: Git reports
+        // the authoritative read error for files that disappear mid-snapshot.
+      }
+
       const diffResult = await runtime.runGit(
         [
           "diff",
@@ -637,11 +797,61 @@ async function getUntrackedFileDiffs(
         ],
         { cwd: rootCwd },
       );
+      // `git diff --no-index` uses 1 for a normal difference. Anything above
+      // 1 is a real read/command failure: ordinary Git stays best-effort, while
+      // authoritative callers fail closed through the strict policy.
+      if (diffResult.exitCode !== 0 && diffResult.exitCode !== 1) {
+        if (failurePolicy === "best-effort") return "";
+        const stderr = diffResult.stderr.trim();
+        throw new Error(
+          stderr
+            ? `git diff --no-index failed for ${JSON.stringify(file)}: ${stderr}`
+            : `git diff --no-index failed for ${JSON.stringify(file)} with exit code ${diffResult.exitCode}`,
+        );
+      }
       return diffResult.stdout;
-    }),
+    },
   );
 
   return { diff: diffs.join(""), paths: files };
+}
+
+/** How a working-tree diff handles failures while reading untracked files. */
+export type UntrackedFailurePolicy = "best-effort" | "strict";
+
+/**
+ * Diff one already-resolved Git object directly against the working tree,
+ * including untracked files. Unlike `since-base`, this never discovers or
+ * substitutes another base; callers that receive an authoritative base from
+ * another VCS can request the strict policy and fail closed instead of
+ * silently degrading. Ordinary Git uses the best-effort default.
+ */
+export async function getWorkingTreeDiffFromBase(
+  runtime: ReviewGitRuntime,
+  base: string,
+  cwd?: string,
+  options?: GitDiffOptions,
+  untrackedFailurePolicy: UntrackedFailurePolicy = "best-effort",
+): Promise<string> {
+  const args = [
+    "diff",
+    "--no-ext-diff",
+    ...(options?.hideWhitespace ? ["-w"] : []),
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "--end-of-options",
+    base,
+  ];
+  const trackedPatch = assertGitSuccess(await runtime.runGit(args, { cwd }), args).stdout;
+  const untracked = await getUntrackedFileDiffs(
+    runtime,
+    "a/",
+    "b/",
+    cwd,
+    options,
+    untrackedFailurePolicy,
+  );
+  return removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
 }
 
 /**
@@ -654,11 +864,11 @@ function displayRef(ref: string): string {
 
 /** Resolve the empty-tree object id (hash-object honors repo hash algorithm;
  * the SHA-1 constant is the fallback for the degenerate no-repo case). */
-async function getEmptyTreeSha(
+export async function getEmptyTreeSha(
   runtime: ReviewGitRuntime,
   cwd?: string,
 ): Promise<string> {
-  const result = await runtime.runGit(["hash-object", "-t", "tree", "/dev/null"], { cwd });
+  const result = await runtime.runGit(["hash-object", "-t", "tree", "--stdin"], { cwd });
   return result.exitCode === 0
     ? result.stdout.trim()
     : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -839,22 +1049,14 @@ export async function runGitDiff(
           const mergeBase = mergeBaseResult.exitCode === 0
             ? mergeBaseResult.stdout.trim()
             : "HEAD";
-          const sinceBaseDiffArgs = [
-            "diff",
-            "--no-ext-diff",
-            ...wFlag,
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "--end-of-options",
-            mergeBase,
-          ];
-          trackedPatch = assertGitSuccess(
-            await runtime.runGit(sinceBaseDiffArgs, { cwd }),
-            sinceBaseDiffArgs,
-          ).stdout;
+          trackedPatch = await getWorkingTreeDiffFromBase(runtime, mergeBase, cwd, options);
         }
-        const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options);
-        patch = removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
+        if (hasHead) {
+          patch = trackedPatch;
+        } else {
+          const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options);
+          patch = untracked.diff;
+        }
         label = `All changes since ${displayRef(defaultBranch)}`;
         break;
       }
@@ -1085,6 +1287,82 @@ const MAX_UNTRACKED_FINGERPRINT_FILES = 20;
 const UNTRACKED_STATUS_OUTPUT_CAP = 2 * 1024 * 1024;
 const collapsedUntrackedCwds = new Set<string>();
 
+type ReadOnlyGitRunner = (args: string[]) => Promise<GitCommandResult>;
+
+async function appendDiffFingerprint(
+  runReadOnlyGit: ReadOnlyGitRunner,
+  parts: string[],
+  whitespaceArgs: string[],
+  args: string[],
+): Promise<boolean> {
+  const result = await runReadOnlyGit(["diff", "--no-ext-diff", ...whitespaceArgs, ...args]);
+  if (result.exitCode !== 0) return false;
+  parts.push(hashFingerprintPart(result.stdout));
+  return true;
+}
+
+async function appendUntrackedFingerprint(
+  runtime: ReviewGitRuntime,
+  runReadOnlyGit: ReadOnlyGitRunner,
+  parts: string[],
+  cwd?: string,
+): Promise<boolean> {
+  // -uall: without it, an untracked directory collapses to a single `?? dir/`
+  // line, so edits to files inside it never change the fingerprint and the
+  // "Diff out of date" banner never fires — even though the patch enumerates
+  // individual files. Permanently collapse a pathological repo after its
+  // output crosses the circuit-breaker cap.
+  const cwdKey = cwd ?? "";
+  const collapsed = collapsedUntrackedCwds.has(cwdKey);
+  const status = await runReadOnlyGit([
+    "status",
+    "--porcelain",
+    collapsed ? "-unormal" : "-uall",
+  ]);
+  if (status.exitCode !== 0) return false;
+  if (!collapsed && status.stdout.length > UNTRACKED_STATUS_OUTPUT_CAP) {
+    collapsedUntrackedCwds.add(cwdKey);
+  }
+  parts.push(hashFingerprintPart(status.stdout));
+  const untracked = status.stdout
+    .split("\n")
+    .filter((line) => line.startsWith("?? "))
+    .map((line) => unquoteGitPath(line.slice(3).trim()))
+    .slice(0, MAX_UNTRACKED_FINGERPRINT_FILES);
+  if (untracked.length > 0) {
+    const baseDir = await resolveRepoToplevel(runtime, cwd);
+    for (const path of untracked) {
+      const fullPath = baseDir ? resolvePath(baseDir, path) : path;
+      try {
+        const fileStat = await lstat(fullPath);
+        if (fileStat.isSymbolicLink()) {
+          // Hash the link payload Git records without following it into a
+          // potentially huge target file.
+          parts.push(hashFingerprintPart(`symlink:${await readlink(fullPath)}`));
+          continue;
+        }
+        if (!fileStat.isFile()) {
+          parts.push(`non-file:${fileStat.size}:${fileStat.mtimeMs}`);
+          continue;
+        }
+        if (fileStat.size > MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES) {
+          // A metadata fingerprint avoids decoding a multi-GB binary into a JS
+          // string every five seconds. Size/mtime changes still invalidate the
+          // review, while small files retain content-accurate detection.
+          parts.push(`large:${fileStat.size}:${fileStat.mtimeMs}`);
+          continue;
+        }
+      } catch {
+        parts.push("unreadable");
+        continue;
+      }
+      const content = await runtime.readTextFile(fullPath);
+      parts.push(content != null ? hashFingerprintPart(content) : "unreadable");
+    }
+  }
+  return true;
+}
+
 export async function getGitDiffFingerprint(
   runtime: ReviewGitRuntime,
   diffType: DiffType,
@@ -1130,58 +1408,15 @@ export async function getGitDiffFingerprint(
     const headSha = head.exitCode === 0 ? head.stdout.trim() : "no-head";
     const parts = ["git", effectiveDiffType, headSha];
 
-    const hashDiffOutput = async (args: string[]): Promise<boolean> => {
-      const result = await runReadOnlyGit(["diff", "--no-ext-diff", ...wFlag, ...args]);
-      if (result.exitCode !== 0) return false;
-      parts.push(hashFingerprintPart(result.stdout));
-      return true;
-    };
+    const hashDiffOutput = (args: string[]): Promise<boolean> =>
+      appendDiffFingerprint(runReadOnlyGit, parts, wFlag, args);
 
     // Untracked files: porcelain `??` lines capture existence; hash their
     // contents too so editing a freshly-created (untracked) file is detected.
     // Capped — a pathological number of untracked files degrades to
     // existence-only detection rather than unbounded reads.
-    const hashUntracked = async (): Promise<boolean> => {
-      // -uall: without it, an untracked directory collapses to a single `?? dir/`
-      // line, so edits to files inside it never change the fingerprint and the
-      // "Diff out of date" banner never fires — even though the patch (which
-      // enumerates individual untracked files) includes them. Match that here —
-      // unless this cwd already tripped the output cap (see
-      // UNTRACKED_STATUS_OUTPUT_CAP), in which case stay collapsed.
-      const cwdKey = cwd ?? "";
-      const collapsed = collapsedUntrackedCwds.has(cwdKey);
-      const status = await runReadOnlyGit([
-        "status",
-        "--porcelain",
-        collapsed ? "-unormal" : "-uall",
-      ]);
-      if (status.exitCode !== 0) return false;
-      if (!collapsed && status.stdout.length > UNTRACKED_STATUS_OUTPUT_CAP) {
-        collapsedUntrackedCwds.add(cwdKey);
-      }
-      parts.push(hashFingerprintPart(status.stdout));
-      const untracked = status.stdout
-        .split("\n")
-        .filter((line) => line.startsWith("?? "))
-        // Unquote — porcelain double-quotes any path with a space/unicode
-        // regardless of core.quotePath, and a raw quoted string never resolves
-        // on disk (so the fingerprint would go blind to edits on those files).
-        .map((line) => unquoteGitPath(line.slice(3).trim()))
-        .slice(0, MAX_UNTRACKED_FINGERPRINT_FILES);
-      if (untracked.length > 0) {
-        // Porcelain paths are repo-root-relative, NOT cwd-relative. Resolve them
-        // against the git toplevel so a review launched from a subdirectory can
-        // still read (and hash edits to) untracked files — resolving against cwd
-        // double-prefixes the path, readTextFile returns null, and the untracked
-        // half of the fingerprint goes permanently blind.
-        const baseDir = await resolveRepoToplevel(runtime, cwd);
-        for (const path of untracked) {
-          const content = await runtime.readTextFile(baseDir ? resolvePath(baseDir, path) : path);
-          parts.push(content != null ? hashFingerprintPart(content) : "unreadable");
-        }
-      }
-      return true;
-    };
+    const hashUntracked = (): Promise<boolean> =>
+      appendUntrackedFingerprint(runtime, runReadOnlyGit, parts, cwd);
 
     switch (effectiveDiffType) {
       case "since-base": {
@@ -1254,8 +1489,16 @@ export async function getFileContentsForDiff(
   }
 
   async function gitShow(ref: string, path: string): Promise<string | null> {
+    const object = `${ref}:${path}`;
+    const sizeResult = await runtime.runGit(
+      ["cat-file", "-s", "--", object],
+      { cwd },
+    );
+    if (sizeResult.exitCode !== 0) return null;
+    const size = Number(sizeResult.stdout.trim());
+    if (!Number.isFinite(size) || size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
     // `--end-of-options` hardens against user-supplied refs starting with `-`.
-    const result = await runtime.runGit(["show", "--end-of-options", `${ref}:${path}`], { cwd });
+    const result = await runtime.runGit(["show", "--end-of-options", object], { cwd });
     return result.exitCode === 0 ? result.stdout : null;
   }
 
@@ -1266,6 +1509,16 @@ export async function getFileContentsForDiff(
     // sibling is immune: ref paths are root-relative regardless of cwd.)
     const baseDir = await resolveRepoToplevel(runtime, cwd);
     const fullPath = baseDir ? resolvePath(baseDir, path) : path;
+    try {
+      const fileStat = await lstat(fullPath);
+      // Git stores the link destination as the blob contents. Reading the link
+      // itself preserves expansion without following an arbitrarily large
+      // target.
+      if (fileStat.isSymbolicLink()) return await readlink(fullPath);
+      if (!fileStat.isFile() || fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+    } catch {
+      return null;
+    }
     return runtime.readTextFile(fullPath);
   }
 
@@ -1578,4 +1831,30 @@ export function listPatchFiles(
   }
 
   return files;
+}
+
+/** Whether the named file's patch chunk contains a Git binary marker. */
+export function isBinaryPatchFile(patch: string, filePath: string): boolean {
+  const chunkStarts = [...patch.matchAll(/^diff --git /gm)];
+  for (let i = 0; i < chunkStarts.length; i++) {
+    const start = chunkStarts[i].index ?? 0;
+    const end = chunkStarts[i + 1]?.index ?? patch.length;
+    const chunk = patch.slice(start, end);
+    const lines = chunk.split("\n");
+    const header = parseDiffGitHeader(lines[0] ?? "");
+    const fileLines = parseDiffFilePathLines(lines);
+    const metadata = parseDiffMetadataPathLines(lines);
+    const path =
+      metadata.newPath ??
+      fileLines.newPath ??
+      header.newPath ??
+      metadata.oldPath ??
+      fileLines.oldPath ??
+      header.oldPath;
+    if (path !== filePath) continue;
+    return lines.some(
+      (line) => line === "GIT binary patch" || line.startsWith("Binary files "),
+    );
+  }
+  return false;
 }

@@ -45,7 +45,7 @@ import {
 } from "./command-path.ts";
 
 const PROVIDER_NAME = "codex-sdk";
-const DEFAULT_MODEL = "gpt-5.4";
+const DEFAULT_MODEL = "gpt-5.6-sol";
 const CLIENT_NAME = "plannotator";
 /** Kill an idle app-server process after this long with no query. */
 const IDLE_TIMEOUT_MS = 10 * 60_000;
@@ -73,6 +73,8 @@ const REASONING_EFFORT_LABELS: Record<string, string> = {
   medium: "Medium",
   high: "High",
   xhigh: "xhigh",
+  max: "Max",
+  ultra: "Ultra",
 };
 
 type ProviderModel = {
@@ -525,7 +527,7 @@ export class CodexAppServerProvider implements AIProvider {
   // (model/list). Reasoning efforts are intentionally omitted here so the UI
   // hides the control until we have the model's actual supported set.
   models: ProviderModel[] = [
-    { id: "gpt-5.4", label: "GPT-5.4", default: true },
+    { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", default: true },
   ];
 
   private config: CodexSDKConfig;

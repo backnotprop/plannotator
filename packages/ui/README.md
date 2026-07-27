@@ -30,6 +30,54 @@ configurePlannotatorUI({
 
 Anything you don't pass keeps Plannotator's default. A few component-specific overrides (e.g. an "open in editor" diff action) are passed as props where you render that component.
 
+### Resize-handle seams (`ResizeHandle` / `useResizablePanel`)
+
+The sidebar/panel resize handle exposes seams for hosts that want different edge interactions (e.g. no hover reveal, click-to-collapse). All default to today's behavior — pass nothing and it's unchanged.
+
+- **Suppress / restyle the hover reveal.** The inner visible track carries a `[data-resize-track]` attribute (same host-CSS pattern as the collapse button's `[data-collapse]`), and `ResizeHandle` takes a `trackClassName` prop. To kill the pop-in from host CSS:
+  ```css
+  [data-resize-track] { background: none !important; }
+  ```
+- **Click-to-collapse anywhere on the handle.** The handle can't tell a click from a drag-start on its own — the hook owns the pointer state machine. Pass `onClick` to `useResizablePanel`; it fires on pointer-up only when the pointer never traveled past `clickThreshold` (default 4px), so a genuine click on the full-width handle can collapse the panel while drags still resize:
+  ```ts
+  const resize = useResizablePanel({ storageKey, side: "left", onSnapClose: collapse, onClick: collapse });
+  ```
+
+Building your own tooltip and removing the built-in double-click reset are host-side concerns (override `onDoubleClick` where you render the handle).
+
+### Markdown editor extensions + wiki links (`MarkdownEditor` / `InlineMarkdown`)
+
+- **`MarkdownEditor` takes CM6 extensions.** `extensions?: readonly Extension[]` (from `@codemirror/state`) is forwarded verbatim into the underlying editor — the seam for `wikiLinks(config)`, `y-codemirror.next` collab bindings, custom keymaps.
+
+  > **⚠️ Captured once per `documentId` — not reactive.** The engine reads the array a single time at document mount; swapping the array later is silently ignored until a `documentId` change remounts. Pass a stable reference, and feed changing data through extension config callbacks that close over live state (refs/getters) — never through new arrays.
+
+- **`wikiLinks` is re-exported from `@plannotator/ui/components/MarkdownEditor`** together with `WikiLinksConfig`, `WikiLinkSuggestion`, `WikiLinkResolvedTarget`, `WikiLinkStatus`. Import it from there — `@plannotator/atomic-editor` stays off the supported-import list:
+  ```tsx
+  import { MarkdownEditor, wikiLinks } from "@plannotator/ui/components/MarkdownEditor";
+
+  const editorExtensions = [wikiLinks({ suggest, resolve, onOpen })]; // stable reference!
+  <MarkdownEditor markdown={md} documentId={docId} editorHandleRef={ref} extensions={editorExtensions} />
+  ```
+- **The viewer resolves wiki-links synchronously.** `InlineMarkdown` takes `resolveLinkedDoc?: (target) => { label?; status?: 'active' | 'deleted' } | null` — called with the raw stored target (opaque ids like `doc_01XYZ`, no `.md` normalization). Return a `label` to display live titles (stored label is the fallback, target the last resort); return `status: 'deleted'` for a muted non-link ("Document deleted") instead of a live link. Absent or `null` → rendering is unchanged. Sync-only by design: back it with an in-memory cache.
+
+Requires `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0`. See HANDOFF.md § "Wiki-link seams (0.27.0)".
+
+### Frozen markdown diff (`MarkdownDiff`)
+
+- **`MarkdownDiff` renders two markdown revisions as a frozen, themed comparison** — the newer revision as the real (uncollapsed) document, deletions projected struck-through in place, char/word change emphasis, a change-count toolbar with prev/next, a clickable keyboard-accessible overview rail, and a changed-line gutter. The surface is never editable (edits are rejected at the state and view boundaries; the content DOM is `contenteditable="false"`).
+- **Same shim pattern as `MarkdownEditor`:** theme resolves from `ThemeProvider` (or pass `mode` directly), `gridEnabled` applies the identical card chrome, and `extensions` composes CM6 extensions — `wikiLinks` included — into the frozen view, with the same captured-once, stable-reference calling convention:
+  ```tsx
+  import { MarkdownDiff } from "@plannotator/ui/components/MarkdownDiff";
+  import { wikiLinks } from "@plannotator/ui/components/MarkdownEditor";
+
+  const diffExtensions = [wikiLinks({ resolve, onOpen })]; // stable reference!
+  <MarkdownDiff originalMarkdown={older} modifiedMarkdown={newer} documentId={docId}
+                editorHandleRef={ref} extensions={diffExtensions} />
+  ```
+- **Bytes are the contract:** `ref.current.getMarkdown()` / `.getOriginalMarkdown()` return the exact input strings (CRLF and trailing whitespace included); `getChangeCount()` / `goToNextChange()` / `goToPreviousChange()` drive review navigation.
+
+Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^0.8.0` (which adds a `@codemirror/merge` peer — declared by this package). See HANDOFF.md § "Frozen markdown diff (0.28.0)".
+
 ## Consuming it (e.g. from Workspaces)
 
 ```bash

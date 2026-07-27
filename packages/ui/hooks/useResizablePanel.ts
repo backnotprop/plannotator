@@ -23,6 +23,16 @@ interface UseResizablePanelOptions {
    * (still rAF-coalesced).
    */
   apply?: (width: number) => void;
+  /**
+   * Fires on pointer-up when the pointer never moved beyond `clickThreshold` —
+   * i.e. a genuine click on the handle, not a drag. The hook owns the pointer
+   * state machine, so this is the only reliable way to tell a click from a
+   * drag-start. Lets a host make the whole handle a click target (e.g. click
+   * anywhere on the handle to collapse the panel). Not fired on a snap-close.
+   */
+  onClick?: () => void;
+  /** Max pointer travel (px) still counted as a click for `onClick`. Default 4. */
+  clickThreshold?: number;
 }
 
 export interface ResizeHandleProps {
@@ -43,6 +53,8 @@ export function useResizablePanel({
   onSnapClose,
   snapCloseRatio = 0.6,
   apply,
+  onClick,
+  clickThreshold = 4,
 }: UseResizablePanelOptions) {
   const [width, setWidth] = useState(() => {
     const saved = storage.getItem(storageKey);
@@ -61,6 +73,9 @@ export function useResizablePanel({
   const startWidthRef = useRef(0);
   const draggingRef = useRef(false);
   const snappedRef = useRef(false);
+  // Latches true once the pointer travels past clickThreshold — distinguishes a
+  // click from a drag. Reset on each pointerdown.
+  const movedRef = useRef(false);
   const latestXRef = useRef(0);
   const rafRef = useRef<number | null>(null);
 
@@ -69,6 +84,8 @@ export function useResizablePanel({
   applyRef.current = apply;
   const onSnapCloseRef = useRef(onSnapClose);
   onSnapCloseRef.current = onSnapClose;
+  const onClickRef = useRef(onClick);
+  onClickRef.current = onClick;
 
   // rAF tick: compute the width from the most recent pointer position and apply
   // it. At most one DOM/state write per frame regardless of pointer-event rate.
@@ -110,6 +127,7 @@ export function useResizablePanel({
       startWidthRef.current = widthRef.current;
       latestXRef.current = pos;
       snappedRef.current = false;
+      movedRef.current = false;
       draggingRef.current = true;
       setIsDragging(true);
 
@@ -120,6 +138,8 @@ export function useResizablePanel({
       const onMove = (ev: PointerEvent) => {
         if (!draggingRef.current) return;
         latestXRef.current = axis === 'y' ? ev.clientY : ev.clientX;
+        if (Math.abs(latestXRef.current - startXRef.current) > clickThreshold)
+          movedRef.current = true;
         if (rafRef.current == null) rafRef.current = requestAnimationFrame(flush);
       };
       const cleanup = () => {
@@ -127,7 +147,11 @@ export function useResizablePanel({
         window.removeEventListener('pointerup', onUp);
         window.removeEventListener('pointercancel', onUp);
       };
-      function onUp() {
+      function onUp(e: PointerEvent) {
+        // pointercancel = the browser aborted the gesture (palm rejection, a
+        // system gesture, focus loss). It is NOT a completed click — only clean
+        // up drag state, never treat it as a click-to-collapse.
+        const cancelled = e?.type === 'pointercancel';
         const wasSnapped = snappedRef.current;
         draggingRef.current = false;
         snappedRef.current = false;
@@ -137,9 +161,16 @@ export function useResizablePanel({
         }
         setIsDragging(false);
         if (!wasSnapped) {
-          // Commit the live width to React state + persist.
-          setWidth(widthRef.current);
-          storage.setItem(storageKey, String(widthRef.current));
+          if (onClickRef.current && !movedRef.current && !cancelled) {
+            // A pointerdown+up that never crossed the threshold is a click, not
+            // a resize — fire onClick and leave the width untouched. Only when a
+            // host opts in via onClick; otherwise commit exactly as before.
+            onClickRef.current();
+          } else {
+            // Commit the live width to React state + persist.
+            setWidth(widthRef.current);
+            storage.setItem(storageKey, String(widthRef.current));
+          }
         }
         cleanup();
       }
@@ -148,7 +179,7 @@ export function useResizablePanel({
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onUp);
     },
-    [flush, storageKey, axis],
+    [flush, storageKey, axis, clickThreshold],
   );
 
   const resetWidth = useCallback(() => {

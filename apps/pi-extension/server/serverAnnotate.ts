@@ -1,14 +1,17 @@
 import { createServer } from "node:http";
+import type { IncomingMessage } from "node:http";
 import { dirname, resolve as resolvePath } from "node:path";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
-import { contentHash, deleteDraft } from "../generated/draft.js";
-import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "../generated/storage.js";
-import { htmlDiff } from "../generated/html-diff.js";
-import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveSharingEnabled, resolveAnnotateHistory } from "../generated/config.js";
-import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.js";
-import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.js";
+import { contentHash, deleteDraft } from "../generated/draft.ts";
+import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
+import { computeAnnotateHistory, deriveAnnotateHistorySlug, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
+import { htmlDiff } from "../generated/html-diff.ts";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, type PromptRuntime } from "../generated/config.ts";
+import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
+import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.ts";
+import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.ts";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromText,
@@ -16,7 +19,7 @@ import {
 	resolveFolderSourceFile,
 	resolveFolderSourceFileForSave,
 	saveSourceFileAtomic,
-} from "../generated/source-save-node.js";
+} from "../generated/source-save-node.ts";
 
 import {
 	handleDraftRequest,
@@ -26,14 +29,14 @@ import {
 	readDraftGenerationFromUrl,
 	handleSaveNotesRequest,
 	handleUploadRequest,
-} from "./handlers.js";
-import { html, json, parseBody, requestUrl } from "./helpers.js";
-import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
+} from "./handlers.ts";
+import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.ts";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
-import { isRemoteSession, listenOnPort } from "./network.js";
-import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.js";
+import { isRemoteSession, listenOnPort } from "./network.ts";
+import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
 
-import { getRepoInfo } from "./project.js";
+import { getRepoInfo } from "./project.ts";
 import {
 	handleDocRequest,
 	handleDocExistsRequest,
@@ -41,23 +44,25 @@ import {
 	handleObsidianVaultsRequest,
 	handleObsidianFilesRequest,
 	handleObsidianDocRequest,
-} from "./reference.js";
-import { handleFileBrowserStreamRequest } from "./file-browser-watch.js";
-import { resolveUserPath, warmFileListCache } from "../generated/resolve-file.js";
-import { createExternalAnnotationHandler } from "./external-annotations.js";
-import { createNodeAgentTerminalBridge } from "./agent-terminal.js";
+	resolveAllowedDocPath,
+	type FolderAnnotateHistory,
+} from "./reference.ts";
+import { handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
+import { resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
+import { createExternalAnnotationHandler } from "./external-annotations.ts";
+import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
 	HTML_ASSET_ROUTE_PREFIX,
 	encodeHtmlAssetPath,
 	htmlAssetContentType,
 	normalizeHtmlAssetRoutePath,
 	rewriteHtmlAssetReferences,
-} from "../generated/html-assets.js";
-import { inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.js";
+} from "../generated/html-assets.ts";
+import { inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
-} from "../generated/agent-terminal.js";
+} from "../generated/agent-terminal.ts";
 
 export interface AnnotateServerResult {
 	port: number;
@@ -65,6 +70,31 @@ export interface AnnotateServerResult {
 	url: string;
 	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>;
 	stop: () => void;
+}
+
+function parseOptionalApprovalBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+	return new Promise((resolve, reject) => {
+		let data = "";
+		req.on("data", (chunk) => {
+			data += chunk;
+		});
+		req.on("error", reject);
+		req.on("end", () => {
+			if (!data.trim()) {
+				resolve({});
+				return;
+			}
+			try {
+				const parsed = JSON.parse(data);
+				if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+					throw new Error("Expected a JSON object.");
+				}
+				resolve(parsed as Record<string, unknown>);
+			} catch (err) {
+				reject(err);
+			}
+		});
+	});
 }
 
 function createHtmlAssetRegistry() {
@@ -173,6 +203,7 @@ export async function startAnnotateServer(options: {
 	sourceInfo?: string;
 	sourceConverted?: boolean;
 	gate?: boolean;
+	approvalNotesSupported?: boolean;
 	rawHtml?: string;
 	renderHtml?: boolean;
 	convertHtml?: boolean;
@@ -180,8 +211,6 @@ export async function startAnnotateServer(options: {
 	/** Project name for keying per-file version history (powers the annotate version diff). */
 	project?: string;
 }): Promise<AnnotateServerResult> {
-	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
-	void warmFileListCache(process.cwd(), "code");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
@@ -222,52 +251,48 @@ export async function startAnnotateServer(options: {
 	// when headings change. Diff content is the markdown, or the raw HTML source
 	// when rendering HTML. Only single local files (not URLs/folders/messages).
 	const annotateProjectName = options.project ?? "_unknown";
-	let annotateHistory:
-		| {
-				slug: string;
-				diffCurrent: string;
-				previousPlan: string | null;
-				versionInfo: { version: number; totalVersions: number; project: string };
-		  }
-		| null = null;
+	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+	let annotateHistory: AnnotateHistoryResult | null = null;
 	{
 		const historyContent = options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
 		const eligible =
 			(options.mode || "annotate") === "annotate" &&
 			!/^https?:\/\//i.test(options.filePath) &&
 			historyContent.length > 0 &&
-			resolveAnnotateHistory(loadConfig());
+			annotateHistoryEnabled;
+		// History is an enhancement, never a gate: a read-only/full data dir
+		// must degrade to stateless annotate (no version diff), not fail the
+		// whole session before the UI ever opens. (computeAnnotateHistory never
+		// throws — it logs and returns null on any storage error.)
 		if (eligible) {
-			const base =
-				(options.filePath.split(/[\\/]/).pop() || "document")
-					.toLowerCase()
-					.replace(/[^a-z0-9]+/g, "-")
-					.replace(/^-+|-+$/g, "")
-					.slice(0, 60) || "document";
-			const slug = `annotate-${base}-${contentHash(resolvePath(options.filePath)).slice(0, 8)}`;
-			const saved = saveToHistory(annotateProjectName, slug, historyContent);
-			const previousPlan =
-				saved.version > 1
-					? getPlanVersion(annotateProjectName, slug, saved.version - 1)
-					: null;
-			annotateHistory = {
-				slug,
-				diffCurrent: historyContent,
-				previousPlan,
-				versionInfo: {
-					version: saved.version,
-					totalVersions: getVersionCount(annotateProjectName, slug),
-					project: annotateProjectName,
-				},
-			};
+			annotateHistory = computeAnnotateHistory(annotateProjectName, resolvePath(options.filePath), historyContent);
 		}
+	}
+
+	// Folder annotate: the same per-file version history, but run lazily the
+	// first time a folder file is opened via /api/doc (not eagerly for every
+	// file in the folder) and memoized per resolved absolute path for the life
+	// of this server — reopening the same file in this session never re-snapshots.
+	// The memo drops `diffCurrent` (it always equals the request's own content
+	// and the client never reads it off /api/doc) — only slug/previousPlan/
+	// versionInfo are retained.
+	const folderAnnotateHistoryCache = new Map<string, FolderAnnotateHistory | null>();
+	function computeFolderAnnotateHistory(resolvedFilePath: string, content: string): FolderAnnotateHistory | null {
+		const cached = folderAnnotateHistoryCache.get(resolvedFilePath);
+		if (cached !== undefined) return cached;
+		const full = computeAnnotateHistory(annotateProjectName, resolvedFilePath, content);
+		const result: FolderAnnotateHistory | null = full
+			? { slug: full.slug, previousPlan: full.previousPlan, versionInfo: full.versionInfo }
+			: null;
+		folderAnnotateHistoryCache.set(resolvedFilePath, result);
+		return result;
 	}
 
 	// Detect repo info (cached for this session)
 	const repoInfo = getRepoInfo();
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
-	const aiRuntime = await createPiAIRuntime();
+	const aiRuntime = resolveAIEnabled() ? await createPiAIRuntime() : null;
 	const htmlAssets = createHtmlAssetRegistry();
 	let agentTerminalCapability: AgentTerminalCapability = {
 		enabled: false,
@@ -409,6 +434,7 @@ export async function startAnnotateServer(options: {
 				sourceConverted: options.sourceConverted ?? false,
 				sourceSave: primarySource.sourceSave,
 				gate: options.gate ?? false,
+				approvalNotesSupported: options.approvalNotesSupported ?? false,
 				renderAs: displayRawHtml ? 'html' : 'markdown',
 				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
 				...(diffHtml ? { diffHtml } : {}),
@@ -428,12 +454,50 @@ export async function startAnnotateServer(options: {
 				serverConfig: getServerConfig(gitUser),
 				agentTerminal: agentTerminalCapability,
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
+				// Resolved copy-wrapper templates (config-aware, placeholders
+				// intact) so clipboard Copy matches what Send Feedback produces
+				// instead of the plan-deny wrap (#1107). Resolved per request so
+				// config edits mid-session behave like Send Feedback (which
+				// resolves at submit time).
+				feedbackTemplates: {
+					fileFeedback: getAnnotateFileFeedbackTemplate(
+						(options.origin ?? "pi") as PromptRuntime,
+					),
+					messageFeedback: getAnnotateMessageFeedbackTemplate(
+						(options.origin ?? "pi") as PromptRuntime,
+					),
+				},
 			});
 		} else if (url.pathname === "/api/plan/version" && req.method === "GET") {
 			// fetch a specific version of the annotated file (version diff base picker)
-			if (!annotateHistory) {
-				json(res, { error: "No version history" }, 404);
-				return;
+			//
+			// Folder sessions pass `?path=` (optionally `&base=`) to identify which
+			// file's history to read, resolved and containment-checked exactly like
+			// /api/doc; the slug is always derived server-side from that resolved
+			// path — a client-supplied slug is never accepted, since the history
+			// lookup joins it into a filesystem path unsanitized. Without `path`,
+			// behavior is unchanged: the single session's own history is used.
+			const pathParam = url.searchParams.get("path");
+			let slug: string;
+			if (pathParam !== null) {
+				const resolved = resolveAllowedDocPath(pathParam, url.searchParams.get("base"), {
+					rootPaths: getReferenceRootPaths(),
+				});
+				if (resolved.kind === "denied") {
+					json(res, { error: "Access denied: path is outside project root" }, 403);
+					return;
+				}
+				slug = deriveAnnotateHistorySlug(resolved.path);
+				if (getVersionCount(annotateProjectName, slug) === 0) {
+					json(res, { error: "No version history" }, 404);
+					return;
+				}
+			} else {
+				if (!annotateHistory) {
+					json(res, { error: "No version history" }, 404);
+					return;
+				}
+				slug = annotateHistory.slug;
 			}
 			const vParam = url.searchParams.get("v");
 			const v = vParam ? parseInt(vParam, 10) : NaN;
@@ -441,7 +505,7 @@ export async function startAnnotateServer(options: {
 				json(res, { error: "Invalid version number" }, 400);
 				return;
 			}
-			const content = getPlanVersion(annotateProjectName, annotateHistory.slug, v);
+			const content = getPlanVersion(annotateProjectName, slug, v);
 			if (content === null) {
 				json(res, { error: "Version not found" }, 404);
 				return;
@@ -449,6 +513,25 @@ export async function startAnnotateServer(options: {
 			json(res, { plan: content, version: v });
 		} else if (url.pathname === "/api/plan/versions" && req.method === "GET") {
 			// list all stored versions of the annotated file (Version Browser)
+			// Same `?path=`/`&base=` parameterization as /api/plan/version above.
+			const pathParam = url.searchParams.get("path");
+			if (pathParam !== null) {
+				const resolved = resolveAllowedDocPath(pathParam, url.searchParams.get("base"), {
+					rootPaths: getReferenceRootPaths(),
+				});
+				if (resolved.kind === "denied") {
+					json(res, { error: "Access denied: path is outside project root" }, 403);
+					return;
+				}
+				const slug = deriveAnnotateHistorySlug(resolved.path);
+				const versions = listVersions(annotateProjectName, slug);
+				json(res, {
+					project: annotateProjectName,
+					slug: versions.length > 0 ? slug : null,
+					versions,
+				});
+				return;
+			}
 			if (!annotateHistory) {
 				json(res, { project: annotateProjectName, slug: null, versions: [] });
 				return;
@@ -536,6 +619,10 @@ export async function startAnnotateServer(options: {
 				sourceSaveFolderPath: options.mode === "annotate-folder" ? options.folderPath : undefined,
 				onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
 				rootPaths: getReferenceRootPaths(),
+				annotateHistory:
+					options.mode === "annotate-folder" && annotateHistoryEnabled
+						? { compute: computeFolderAnnotateHistory }
+						: undefined,
 			});
 		} else if (url.pathname === "/api/source/save" && req.method === "POST") {
 			let body: SourceSaveRequest;
@@ -602,16 +689,41 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
 			handleFileBrowserStreamRequest(req, res, url);
 			return;
-		} else if (url.pathname === "/favicon.svg") {
+		} else if (url.pathname === "/favicon.png") {
 			handleFavicon(res);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			deleteDraft(draftKey, readDraftGenerationFromUrl(req));
 			resolveDecision({ feedback: "", annotations: [], exit: true });
 			json(res, { ok: true });
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {
-			deleteDraft(draftKey, readDraftGenerationFromUrl(req));
-			resolveDecision({ feedback: "", annotations: [], approved: true });
-			json(res, { ok: true });
+			try {
+				const body = await parseOptionalApprovalBody(req);
+				if (
+					(body.feedback !== undefined && typeof body.feedback !== "string") ||
+					(body.annotations !== undefined && !Array.isArray(body.annotations)) ||
+					(body.codeAnnotations !== undefined && !Array.isArray(body.codeAnnotations)) ||
+					(body.draftGeneration !== undefined && typeof body.draftGeneration !== "number")
+				) {
+					json(res, { error: "Invalid approval body." }, 400);
+					return;
+				}
+
+				deleteDraft(draftKey, readDraftGenerationFromBody(body));
+				resolveDecision({
+					feedback: (body.feedback as string | undefined) || "",
+					annotations: (body.annotations as unknown[] | undefined) || [],
+					approved: true,
+					// Approval notes carry the same message scoping as /api/feedback —
+					// without it, approve-with-notes in a multi-message annotate-last
+					// session anchors to the last message instead of the one the
+					// reviewer picked.
+					selectedMessageId: typeof body.selectedMessageId === "string" ? body.selectedMessageId : undefined,
+					feedbackScope: body.feedbackScope === "messages" ? "messages" : body.feedbackScope === "message" ? "message" : undefined,
+				});
+				json(res, { ok: true });
+			} catch (err) {
+				json(res, { error: err instanceof Error ? err.message : "Invalid JSON body." }, 400);
+			}
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
 			try {
 				const body = await parseBody(req);
@@ -629,6 +741,8 @@ export async function startAnnotateServer(options: {
 			}
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
 			await handleSaveNotesRequest(req, res);
+		} else if (url.pathname.startsWith("/api/")) {
+			handleApiNotFound(res, url.pathname);
 		} else {
 			html(res, options.htmlContent);
 		}
@@ -641,6 +755,9 @@ export async function startAnnotateServer(options: {
 	agentTerminalCapability = agentTerminal.capability;
 
 	const { port, portSource } = await listenOnPort(server);
+
+	// Mirror the Bun server: bind first, then warm through the async shared walk.
+	void warmFileListCache(process.cwd(), "code");
 
 	return {
 		port,

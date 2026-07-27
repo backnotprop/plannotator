@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getGitDiffFingerprint, type ReviewGitRuntime } from "./review-core";
+import {
+  getGitDiffFingerprint,
+  MAX_REVIEW_FILE_CONTENT_BYTES,
+  type ReviewGitRuntime,
+} from "./review-core";
 
 // Real-git runtime against a throwaway repo — fingerprints are only meaningful
 // against actual VCS behavior, so no mocks.
@@ -80,12 +84,45 @@ describe("getGitDiffFingerprint", () => {
     expect(edited).not.toBe(created!);
   });
 
+  test("large untracked files use metadata without entering the JS heap", async () => {
+    const path = join(repo, "large-untracked.bin");
+    writeFileSync(path, Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1));
+    let largeFileReads = 0;
+    const guardedRuntime: ReviewGitRuntime = {
+      ...runtime,
+      async readTextFile(requestedPath) {
+        if (requestedPath === path) largeFileReads++;
+        return runtime.readTextFile(requestedPath);
+      },
+    };
+
+    const before = await getGitDiffFingerprint(guardedRuntime, "uncommitted", "main", repo);
+    writeFileSync(path, Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 2, 1));
+    const after = await getGitDiffFingerprint(guardedRuntime, "uncommitted", "main", repo);
+
+    expect(largeFileReads).toBe(0);
+    expect(after).not.toBe(before);
+  });
+
   test("uncommitted: changes when a commit lands (HEAD moves)", async () => {
     const before = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
     await git("add", "-A");
     await git("commit", "-m", "snapshot");
     const after = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
     expect(after).not.toBe(before!);
+  });
+
+  test("since-base: tracks visible working-tree and untracked content", async () => {
+    const before = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    writeFileSync(join(repo, "a.txt"), "since-base edit\n");
+    const trackedEdit = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    expect(trackedEdit).not.toBe(before!);
+    writeFileSync(join(repo, "since-base-new.txt"), "new\n");
+    const untrackedCreated = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    expect(untrackedCreated).not.toBe(trackedEdit!);
+    writeFileSync(join(repo, "since-base-new.txt"), "newer\n");
+    const untrackedEdited = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    expect(untrackedEdited).not.toBe(untrackedCreated!);
   });
 
   test("last-commit: stable across working-tree edits, changes on commit", async () => {

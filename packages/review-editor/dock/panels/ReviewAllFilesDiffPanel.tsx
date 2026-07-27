@@ -37,6 +37,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       scrollTargetAnnotation={state.scrollTargetAnnotation}
       pendingSelection={state.pendingSelection}
       reviewBase={state.reviewBase}
+      reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
       onLineSelection={state.onLineSelection}
       onAddAnnotationForFile={state.onAddAnnotationForFile}
       onEditAnnotation={state.onEditAnnotation}

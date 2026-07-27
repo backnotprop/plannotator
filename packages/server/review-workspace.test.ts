@@ -6,7 +6,17 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -14,6 +24,7 @@ import { spawnSync } from "node:child_process";
 import {
   aggregateWorkspacePatch,
   buildLocalWorkspaceReview,
+  isRepoRelative,
   prefixPatchPaths,
   resolveWorkspaceFilePath,
   discoverWorkspaceRepoPaths,
@@ -49,6 +60,10 @@ function initRepo(dir: string, initialBranch = "main"): void {
   writeFileSync(join(dir, "README.md"), "# Test\n", "utf-8");
   git(dir, ["add", "README.md"]);
   git(dir, ["commit", "-m", "initial"]);
+}
+
+function linkDirectory(target: string, path: string): void {
+  symlinkSync(resolve(target), path, process.platform === "win32" ? "junction" : "dir");
 }
 
 function makeMockSem(dir: string, options: {
@@ -92,6 +107,35 @@ function makeMockSem(dir: string, options: {
   );
   chmodSync(semPath, 0o755);
   return semPath;
+}
+
+function makeBlockingSem(dir: string): { semPath: string; startedPath: string; releasePath: string } {
+  const semPath = join(dir, "sem-blocking");
+  const startedPath = join(dir, "started");
+  const releasePath = join(dir, "release");
+  writeFileSync(semPath, [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'if [ "${1:-}" = "--version" ]; then',
+    `  : > ${JSON.stringify(startedPath)}`,
+    `  while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.02; done`,
+    '  echo "sem 0.8.0"',
+    "  exit 0",
+    "fi",
+    "cat >/dev/null",
+    "echo '{}'",
+    "",
+  ].join("\n"), "utf-8");
+  chmodSync(semPath, 0o755);
+  return { semPath, startedPath, releasePath };
+}
+
+async function waitForFile(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (existsSync(path)) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Timed out waiting for ${path}`);
 }
 
 afterEach(() => {
@@ -168,6 +212,56 @@ describe("review-workspace", () => {
         server.stop();
       }
     });
+
+    it.skipIf(process.platform === "win32")("does not partially commit a valid switch superseded by an invalid request", async () => {
+      const repoDir = makeTempDir("plannotator-switch-atomic-");
+      const semDir = makeTempDir("plannotator-switch-atomic-sem-");
+      initRepo(repoDir);
+      writeFileSync(join(repoDir, "README.md"), "# Dirty\n", "utf-8");
+      const gitContext = await getVcsContext(repoDir, "git");
+      const blocker = makeBlockingSem(semDir);
+      process.env.PLANNOTATOR_SEM_PATH = blocker.semPath;
+      const initialPatch = "diff --git a/initial.txt b/initial.txt\n";
+      const server = await startReviewServer({
+        rawPatch: initialPatch,
+        gitRef: "Initial snapshot",
+        diffType: "uncommitted",
+        gitContext,
+        origin: "claude-code",
+        htmlContent: "<!doctype html><html><body>review</body></html>",
+      });
+
+      try {
+        const validSwitch = fetch(`${server.url}/api/diff/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diffType: "last-commit" }),
+        });
+        await waitForFile(blocker.startedPath);
+        const invalid = await fetch(`${server.url}/api/diff/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        expect(invalid.status).toBe(400);
+        writeFileSync(blocker.releasePath, "release\n", "utf-8");
+        await expect(validSwitch.then((response) => response.json())).resolves.toEqual({ superseded: true });
+
+        const current = await fetch(`${server.url}/api/diff`).then((response) => response.json()) as {
+          rawPatch: string;
+          diffType: string;
+          gitRef: string;
+        };
+        expect(current).toMatchObject({
+          rawPatch: initialPatch,
+          diffType: "uncommitted",
+          gitRef: "Initial snapshot",
+        });
+      } finally {
+        if (!existsSync(blocker.releasePath)) writeFileSync(blocker.releasePath, "release\n", "utf-8");
+        server.stop();
+      }
+    }, 10_000);
 
     it("runs semantic diff from the local agent cwd when one is available", async () => {
       const dir = makeTempDir("plannotator-sem-agent-");
@@ -580,6 +674,148 @@ describe("review-workspace", () => {
       expect(repos).not.toContain(backend); // backend itself is not a repo
     });
 
+    it("uses a symlinked Git repo's logical workspace path end to end", async () => {
+      const root = makeTempDir("plannotator-workspace-symlink-git-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-git-target-");
+      const targetRepo = join(targetRoot, "backend-service");
+      const alias = join(root, "backend");
+      mkdirSync(targetRepo, { recursive: true });
+      initRepo(targetRepo);
+      writeFileSync(join(targetRepo, "README.md"), "# Changed through alias\n", "utf-8");
+      linkDirectory(targetRepo, alias);
+
+      const workspace = await buildLocalWorkspaceReview(root);
+
+      expect(workspace.repos).toHaveLength(1);
+      expect(workspace.repos[0]).toMatchObject({ cwd: alias, label: "backend", selected: true });
+      expect(workspace.rawPatch).toContain("diff --git a/backend/README.md b/backend/README.md");
+    });
+
+    it("discovers a symlinked JJ repo using its logical workspace path", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-jj-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-jj-target-");
+      const targetRepo = join(targetRoot, "jj-service");
+      const alias = join(root, "frontend");
+      mkdirSync(join(targetRepo, ".jj"), { recursive: true });
+      linkDirectory(targetRepo, alias);
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([alias]);
+    });
+
+    it("discovers repos nested below a symlinked directory", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-nested-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-nested-target-");
+      const targetRepo = join(targetRoot, "services", "api");
+      const alias = join(root, "projects");
+      mkdirSync(targetRepo, { recursive: true });
+      initRepo(targetRepo);
+      linkDirectory(targetRoot, alias);
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([join(alias, "services", "api")]);
+    });
+
+    it("does not recurse forever through a directory-link cycle", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-cycle-");
+      const container = join(root, "packages");
+      const repo = join(container, "api");
+      mkdirSync(repo, { recursive: true });
+      initRepo(repo);
+      linkDirectory(root, join(container, "back-to-root"));
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([repo]);
+    });
+
+    it("ignores broken directory links", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-broken-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-broken-target-");
+      const brokenTarget = join(targetRoot, "removed");
+      mkdirSync(brokenTarget, { recursive: true });
+      linkDirectory(brokenTarget, join(root, "broken"));
+      rmSync(brokenTarget, { recursive: true });
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([]);
+    });
+
+    it.skipIf(process.platform === "win32")("ignores symlinks to files", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-file-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-file-target-");
+      const targetFile = join(targetRoot, "README.md");
+      writeFileSync(targetFile, "not a directory\n", "utf-8");
+      symlinkSync(targetFile, join(root, "linked-file"), "file");
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([]);
+    });
+
+    it("bounds discovery when a symlink escapes into a huge external tree", () => {
+      // Regression for the #1060 follow-up: a symlink inside the workspace
+      // pointing at a large unrelated tree must not be enumerated unboundedly
+      // before the server starts. The walk shares the file-discovery budget.
+      const root = makeTempDir("plannotator-workspace-symlink-budget-");
+      const huge = makeTempDir("plannotator-workspace-symlink-budget-target-");
+      // 40 directories, each with 5 subdirectories — 200+ nodes, no repos.
+      for (let i = 0; i < 40; i++) {
+        for (let j = 0; j < 5; j++) {
+          mkdirSync(join(huge, `dir-${String(i).padStart(2, "0")}`, `sub-${j}`), { recursive: true });
+        }
+      }
+      linkDirectory(huge, join(root, "escape"));
+      // A legitimate repo that sorts BEFORE the escape link so it is found
+      // within the budget.
+      const repo = join(root, "app");
+      mkdirSync(repo, { recursive: true });
+      initRepo(repo);
+
+      const prior = process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES;
+      process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = "25";
+      try {
+        const repos = discoverWorkspaceRepoPaths(root);
+        expect(repos).toEqual([repo]);
+      } finally {
+        if (prior === undefined) delete process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES;
+        else process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = prior;
+      }
+    });
+
+    it("keeps discovering symlinked repos under the default budget", () => {
+      // The budget must not break the feature it bounds: an external
+      // symlinked repo is still found with default limits.
+      const root = makeTempDir("plannotator-workspace-symlink-budget-ok-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-budget-ok-target-");
+      const targetRepo = join(targetRoot, "service");
+      mkdirSync(targetRepo, { recursive: true });
+      initRepo(targetRepo);
+      linkDirectory(targetRepo, join(root, "linked"));
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([join(root, "linked")]);
+    });
+
+    it("chooses the first logical alias deterministically for duplicate targets", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-duplicates-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-duplicates-target-");
+      const targetRepo = join(targetRoot, "service");
+      const alphaAlias = join(root, "alpha");
+      mkdirSync(targetRepo, { recursive: true });
+      initRepo(targetRepo);
+      linkDirectory(targetRepo, join(root, "zeta"));
+      linkDirectory(targetRepo, alphaAlias);
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([alphaAlias]);
+    });
+
+    it("does not follow a directory link whose logical name is skipped", () => {
+      const root = makeTempDir("plannotator-workspace-symlink-skip-");
+      const targetRoot = makeTempDir("plannotator-workspace-symlink-skip-target-");
+      const targetRepo = join(targetRoot, "dependency-repo");
+      const realRepo = join(root, "app");
+      mkdirSync(targetRepo, { recursive: true });
+      mkdirSync(realRepo, { recursive: true });
+      initRepo(targetRepo);
+      initRepo(realRepo);
+      linkDirectory(targetRepo, join(root, "node_modules"));
+
+      expect(discoverWorkspaceRepoPaths(root)).toEqual([realRepo]);
+    });
+
     it("stops recursion at git repo boundaries (does not discover nested repos inside other repos)", () => {
       const root = makeTempDir("plannotator-workspace-boundary-");
 
@@ -712,6 +948,80 @@ describe("review-workspace", () => {
   });
 
   describe("workspace review server integration", () => {
+    it("short-circuits binary file expansion before provider content retrieval", async () => {
+      const root = makeTempDir("plannotator-workspace-binary-content-");
+      const repo = join(root, "api");
+      mkdirSync(join(repo, ".git"), { recursive: true });
+      let fileContentCalls = 0;
+
+      const runtime = {
+        async getVcsContext(cwd?: string): Promise<GitContext> {
+          return {
+            vcsType: "git",
+            currentBranch: "main",
+            defaultBranch: "main",
+            cwd: cwd ?? repo,
+            worktrees: [],
+            availableBranches: { local: [], remote: [] },
+            diffOptions: [{ id: "uncommitted", label: "Uncommitted changes" }],
+          };
+        },
+        async runVcsDiff() {
+          return {
+            patch: [
+              "diff --git a/asset.bin b/asset.bin",
+              "new file mode 100644",
+              "Binary files /dev/null and b/asset.bin differ",
+              "",
+            ].join("\n"),
+            label: "Uncommitted changes",
+          };
+        },
+        async getVcsFileContentsForDiff() {
+          fileContentCalls += 1;
+          return { oldContent: "unexpected", newContent: "unexpected" };
+        },
+        async getVcsDiffFingerprint() {
+          return "stable-binary-workspace";
+        },
+        async canStageFiles() {
+          return false;
+        },
+        async stageFile() {},
+        async unstageFile() {},
+      };
+
+      const workspace = await WorkspaceReviewSession.create(runtime, root);
+      const aggregate = aggregateWorkspacePatch(workspace.repos);
+      const server = await startReviewServer({
+        rawPatch: aggregate.rawPatch,
+        gitRef: aggregate.gitRef,
+        error: aggregate.errors.join("\n") || undefined,
+        origin: "claude-code",
+        workspace,
+        agentCwd: workspace.root,
+        htmlContent: "<!doctype html><html><body>review</body></html>",
+      });
+
+      try {
+        const diffPayload = await fetch(`${server.url}/api/diff`).then((response) =>
+          response.json()
+        ) as { snapshotId: string };
+        const response = await fetch(
+          `${server.url}/api/file-content?path=api/asset.bin&snapshot=${encodeURIComponent(diffPayload.snapshotId)}`,
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          oldContent: null,
+          newContent: null,
+        });
+        expect(fileContentCalls).toBe(0);
+      } finally {
+        server.stop();
+      }
+    });
+
     it("maps one workspace mode across mixed Git and JJ repos", async () => {
       const root = makeTempDir("plannotator-workspace-mixed-vcs-");
       const gitRepo = join(root, "api");
@@ -790,6 +1100,61 @@ describe("review-workspace", () => {
       );
     });
 
+    it("limits mixed GitButler workspaces to the safe aggregate-current mode", async () => {
+      const root = makeTempDir("plannotator-workspace-gitbutler-");
+      const gitRepo = join(root, "api");
+      const gitButlerRepo = join(root, "web");
+      mkdirSync(join(gitRepo, ".git"), { recursive: true });
+      mkdirSync(join(gitButlerRepo, ".git"), { recursive: true });
+      const calls: Array<{ cwd?: string; diffType: DiffType }> = [];
+
+      const runtime = {
+        async getVcsContext(cwd?: string): Promise<GitContext> {
+          const isGitButler = cwd === gitButlerRepo;
+          return {
+            vcsType: isGitButler ? "gitbutler" : "git",
+            currentBranch: isGitButler ? "GitButler Workspace" : "main",
+            defaultBranch: "abc1234",
+            cwd: cwd ?? root,
+            worktrees: [],
+            availableBranches: { local: [], remote: [] },
+            diffOptions: isGitButler
+              ? [{ id: "gitbutler:workspace", label: "Workspace (all applied changes)" }]
+              : [{ id: "uncommitted", label: "Uncommitted changes" }],
+          };
+        },
+        async runVcsDiff(diffType: DiffType, _defaultBranch?: string, cwd?: string) {
+          calls.push({ cwd, diffType });
+          return {
+            patch: "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n",
+            label: diffType,
+          };
+        },
+        async getVcsFileContentsForDiff() {
+          return { oldContent: null, newContent: null };
+        },
+        async canStageFiles() {
+          return false;
+        },
+        async stageFile() {},
+        async unstageFile() {},
+      };
+
+      const workspace = await WorkspaceReviewSession.create(runtime, root, {
+        requestedDiffType: "last-commit",
+      });
+
+      expect(workspace.diffType).toBe("workspace-current");
+      expect(workspace.diffOptions.map((option) => option.id)).toEqual(["workspace-current"]);
+      expect(calls).toEqual(expect.arrayContaining([
+        { cwd: gitRepo, diffType: "uncommitted" },
+        { cwd: gitButlerRepo, diffType: "gitbutler:workspace" },
+      ]));
+      await expect(workspace.rebuild({ diffType: "workspace-last" })).rejects.toThrow(
+        "Workspace diff mode is not available",
+      );
+    });
+
     it("normalizes agent annotation paths to workspace-prefixed paths", async () => {
       const root = makeTempDir("plannotator-workspace-agent-path-");
       const api = join(root, "api");
@@ -835,6 +1200,16 @@ describe("review-workspace", () => {
       expect(workspace.normalizeAnnotationPath("api/src/file.ts")).toBe("api/src/file.ts");
       expect(workspace.normalizeAnnotationPath("src/file.ts")).toBe("api/src/file.ts");
       expect(workspace.normalizeAnnotationPath(join(api, "src/file.ts"))).toBe("api/src/file.ts");
+    });
+
+    it("treats cross-drive relative() results as escaping the repo", () => {
+      expect(isRepoRelative("src/file.ts")).toBe(true);
+      expect(isRepoRelative("nested/deep/file.ts")).toBe(true);
+      expect(isRepoRelative("../outside.ts")).toBe(false);
+      expect(isRepoRelative("")).toBe(false);
+      // On Windows, path.relative returns the target's absolute path when the
+      // base is on a different drive; after normalization that is "L:/...".
+      expect(isRepoRelative("L:/repos/project/src/file.ts")).toBe(false);
     });
 
     it("keeps requested Git-only workspace modes available when another child repo fails detection", async () => {
@@ -894,6 +1269,59 @@ describe("review-workspace", () => {
       ]);
     });
 
+    it("preserves a failed GitButler child's identity and never falls back to Git operations", async () => {
+      const root = makeTempDir("plannotator-workspace-failed-gitbutler-");
+      const api = join(root, "api");
+      const broken = join(root, "broken");
+      mkdirSync(join(api, ".git"), { recursive: true });
+      mkdirSync(join(broken, ".git"), { recursive: true });
+      const fileContentDiffTypes: DiffType[] = [];
+      const stagingDiffTypes: string[] = [];
+
+      const runtime = {
+        async detectVcsType(cwd?: string) {
+          return cwd === broken ? "gitbutler" : "git";
+        },
+        async getVcsContext(cwd?: string): Promise<GitContext> {
+          if (cwd === broken) throw new Error("GitButler CLI missing");
+          return {
+            vcsType: "git",
+            currentBranch: "main",
+            defaultBranch: "main",
+            cwd: cwd ?? api,
+            worktrees: [],
+            availableBranches: { local: [], remote: [] },
+            diffOptions: [{ id: "uncommitted", label: "Uncommitted changes" }],
+          };
+        },
+        async runVcsDiff() {
+          return { patch: "", label: "No changes" };
+        },
+        async getVcsFileContentsForDiff(diffType: DiffType) {
+          fileContentDiffTypes.push(diffType);
+          return { oldContent: null, newContent: null };
+        },
+        async canStageFiles(diffType: string) {
+          stagingDiffTypes.push(diffType);
+          return false;
+        },
+        async stageFile() {},
+        async unstageFile() {},
+      };
+
+      const workspace = await WorkspaceReviewSession.create(runtime, root, {
+        requestedDiffType: "staged",
+      });
+
+      expect(workspace.diffType).toBe("workspace-current");
+      expect(workspace.diffOptions.map((option) => option.id)).toEqual(["workspace-current"]);
+      expect(workspace.error).toContain("GitButler CLI missing");
+      await workspace.getFileContents("broken/file.txt");
+      await expect(workspace.stageFile("broken/file.txt")).rejects.toThrow("Staging not available");
+      expect(fileContentDiffTypes).toEqual(["gitbutler:workspace"]);
+      expect(stagingDiffTypes).toEqual(["gitbutler:workspace"]);
+    });
+
     it("passes hide-whitespace through child repo diffs", async () => {
       const root = makeTempDir("plannotator-workspace-whitespace-");
       const api = join(root, "api");
@@ -932,6 +1360,13 @@ describe("review-workspace", () => {
       writeFileSync(join(web, "new.txt"), "new file\n", "utf-8");
 
       const workspace = await buildLocalWorkspaceReview(root);
+      const getFingerprint = workspace.getFingerprint.bind(workspace);
+      let fingerprintCalls = 0;
+      workspace.getFingerprint = async () => {
+        fingerprintCalls += 1;
+        await Bun.sleep(25);
+        return getFingerprint();
+      };
       const aggregate = aggregateWorkspacePatch(workspace.repos);
       const server = await startReviewServer({
         rawPatch: aggregate.rawPatch,
@@ -1000,8 +1435,21 @@ describe("review-workspace", () => {
           body: JSON.stringify({ diffType: "workspace-current", hideWhitespace: false }),
         });
         expect(currentResponse.status).toBe(200);
+        const currentPayload = await currentResponse.json() as { snapshotId: string };
+        fingerprintCalls = 0;
 
-        const fileContentResponse = await fetch(`${server.url}/api/file-content?path=api/tracked.txt`);
+        const concurrentExpansions = await Promise.all(Array.from({ length: 6 }, () =>
+          fetch(
+            `${server.url}/api/file-content?path=api/tracked.txt&snapshot=${encodeURIComponent(currentPayload.snapshotId)}`,
+          )
+        ));
+        expect(concurrentExpansions.every((response) => response.status === 200)).toBe(true);
+        // All six expansion requests share one probe after the switch capture.
+        expect(fingerprintCalls).toBe(1);
+
+        const fileContentResponse = await fetch(
+          `${server.url}/api/file-content?path=api/tracked.txt&snapshot=${encodeURIComponent(currentPayload.snapshotId)}`,
+        );
         expect(fileContentResponse.status).toBe(200);
         const fileContent = await fileContentResponse.json() as {
           oldContent: string | null;
@@ -1009,6 +1457,10 @@ describe("review-workspace", () => {
         };
         expect(fileContent.oldContent).toBe("before\n");
         expect(fileContent.newContent).toBe("after\n");
+        const staleContentResponse = await fetch(
+          `${server.url}/api/file-content?path=api/tracked.txt&snapshot=stale-snapshot`,
+        );
+        expect(staleContentResponse.status).toBe(409);
 
         const stageResponse = await fetch(`${server.url}/api/git-add`, {
           method: "POST",

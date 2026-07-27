@@ -167,17 +167,20 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     anchorEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [anchorEl]);
 
-  // Focus textarea on mount and mode changes
-  useEffect(() => {
-    const id = setTimeout(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.focus();
-        el.selectionStart = el.selectionEnd = el.value.length;
-      }
+  // Focus the textarea when it mounts (initial open and popover/dialog switches).
+  // A ref callback rather than a mount effect: in popover mode the textarea only
+  // renders after `position` is measured, and WebKit fires 0ms timers ahead of
+  // that commit, so an effect keyed on mode alone can run before the textarea
+  // exists and never focus it (e.g. in WKWebView hosts like Glimpse).
+  const focusOnMountRef = useCallback((el: HTMLTextAreaElement | null) => {
+    textareaRef.current = el;
+    if (!el) return;
+    setTimeout(() => {
+      if (!el.isConnected) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
     }, 0);
-    return () => clearTimeout(id);
-  }, [mode]);
+  }, []);
 
   // Click-outside for popover mode
   useEffect(() => {
@@ -307,7 +310,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {/* Textarea */}
           <div className="px-4 py-3 flex-1">
             <textarea
-              ref={textareaRef}
+              ref={focusOnMountRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -317,19 +320,17 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             />
           </div>
 
-          {/* Footer */}
-          <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
-            <div className="flex items-center gap-2">
-              {allowImages && (
-                <AttachmentsButton
-                  images={images}
-                  onAdd={(img) => setImages((prev) => [...prev, img])}
-                  onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
-                  variant="inline"
-                />
-              )}
-            </div>
-            <div className="flex items-center gap-3">
+          {/* Footer — DOM order sets tab order (Save first); row-reverse keeps the visual layout unchanged */}
+          <div className="flex flex-row-reverse items-center justify-between px-4 py-3 border-t border-border/50">
+            <div className="flex flex-row-reverse items-center gap-3">
+              <button
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              >
+                {isGlobal ? 'Add' : 'Save'}
+              </button>
+              <span className="text-[10px] text-muted-foreground">{submitHint}</span>
               {onAskAI && (
                 <button
                   onClick={handleAskAI}
@@ -341,14 +342,16 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   Ask AI
                 </button>
               )}
-              <span className="text-[10px] text-muted-foreground">{submitHint}</span>
-              <button
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-                className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-              >
-                {isGlobal ? 'Add' : 'Save'}
-              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              {allowImages && (
+                <AttachmentsButton
+                  images={images}
+                  onAdd={(img) => setImages((prev) => [...prev, img])}
+                  onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                  variant="inline"
+                />
+              )}
             </div>
           </div>
         </div>
@@ -429,7 +432,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       {/* Textarea */}
       <div className="px-3 py-2">
         <textarea
-          ref={textareaRef}
+          ref={focusOnMountRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -439,19 +442,17 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         />
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-border/50">
-        <div className="flex items-center gap-2">
-          {allowImages && (
-            <AttachmentsButton
-              images={images}
-              onAdd={(img) => setImages((prev) => [...prev, img])}
-              onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
-              variant="inline"
-            />
-          )}
-        </div>
-        <div className="flex items-center gap-3">
+      {/* Footer — same DOM-order/row-reverse pattern as the dialog footer above */}
+      <div className="flex flex-row-reverse items-center justify-between px-3 py-2 border-t border-border/50">
+        <div className="flex flex-row-reverse items-center gap-3">
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+          >
+            {isGlobal ? 'Add' : 'Save'}
+          </button>
+          <span className="text-[10px] text-muted-foreground">{submitHint}</span>
           {onAskAI && (
             <button
               onClick={handleAskAI}
@@ -463,14 +464,16 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               Ask AI
             </button>
           )}
-          <span className="text-[10px] text-muted-foreground">{submitHint}</span>
-          <button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-          >
-            {isGlobal ? 'Add' : 'Save'}
-          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          {allowImages && (
+            <AttachmentsButton
+              images={images}
+              onAdd={(img) => setImages((prev) => [...prev, img])}
+              onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+              variant="inline"
+            />
+          )}
         </div>
       </div>
       </div>

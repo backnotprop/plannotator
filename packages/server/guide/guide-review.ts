@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { loadConfig, resolveCursorSandbox } from "../config";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
 import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
@@ -925,7 +926,11 @@ export interface GuideSession {
    *  when the reviewer gets around to fixing the JSON. */
   launchChangedFiles: Map<string, string[]>;
   buildCommand(opts: GuideSessionBuildCommandOptions): Promise<GuideSessionBuildCommandResult>;
-  onJobComplete(opts: GuideSessionOnJobCompleteOptions): Promise<{ summary: GuideSessionJobSummary | null }>;
+  onJobComplete(opts: GuideSessionOnJobCompleteOptions): Promise<{
+    summary: GuideSessionJobSummary | null;
+    /** Sanitized provider failure when transport succeeded but the Pi run did not. */
+    error?: string;
+  }>;
   getGuide(jobId: string): (CodeGuideOutput & { reviewed: boolean[] }) | null;
   saveReviewed(jobId: string, reviewed: boolean[]): void;
   getFailedPayload(jobId: string): string | null;
@@ -1126,7 +1131,7 @@ export function createGuideSession(): GuideSession {
           const thinking = "minimal";
           const nonce = makeMarkerNonce();
           const markerPrompt = composeGuideMarkerRepairPrompt(repair.payload, nonce);
-          const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking });
+          const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
           return { command, prompt: markerPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: markerEngine.id, model, thinking };
         }
 
@@ -1134,8 +1139,9 @@ export function createGuideSession(): GuideSession {
 
         if (engine === "codex") {
           const outputPath = generateGuideOutputPath();
-          const command = await buildGuideCodexCommand({ cwd, outputPath, prompt: repairPrompt, model: model || undefined, reasoningEffort: "minimal", fastMode: false });
-          return { command, outputPath, prompt: repairPrompt, label: "Guide Repair", engine: "codex", model, reasoningEffort: "minimal" };
+          // "low" not "minimal": no current Codex model supports minimal.
+          const command = await buildGuideCodexCommand({ cwd, outputPath, prompt: repairPrompt, model: model || undefined, reasoningEffort: "low", fastMode: false });
+          return { command, outputPath, prompt: repairPrompt, label: "Guide Repair", engine: "codex", model, reasoningEffort: "low" };
         }
 
         const { command, stdinPrompt } = buildGuideClaudeCommand(repairPrompt, model, "low");
@@ -1155,7 +1161,7 @@ export function createGuideSession(): GuideSession {
         const thinking = typeof config?.thinking === "string" && config.thinking ? config.thinking : undefined;
         const nonce = makeMarkerNonce();
         const markerPrompt = composeGuideMarkerPrompt(userMessage, nonce);
-        const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking });
+        const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
         return { command, prompt: markerPrompt, cwd, label: "Guided Review", captureStdout: true, engine: markerEngine.id, model, thinking };
       }
 
@@ -1191,7 +1197,19 @@ export function createGuideSession(): GuideSession {
         // discipline as the review path's marker ingestion).
         const nonce = extractMarkerNonce(job.prompt ?? "");
         output = nonce && meta.stdout ? parseGuideMarkerOutput(meta.stdout, markerEngine, nonce) : null;
-        if (meta.stdout) rawCandidate = extractMarkerFailedPayload(markerEngine, meta.stdout, nonce);
+        if (meta.stdout) {
+          // A valid guide always wins, even if the stream contains an earlier
+          // transient error. Only classify the structured provider failure
+          // after strict marker parsing has failed.
+          if (!output) {
+            const { providerError } = reduceMarkerStream(meta.stdout, markerEngine);
+            if (providerError) {
+              console.error(`[guide] ${markerEngine.author} provider error for job ${job.id}: ${providerError}`);
+              return { summary: null, error: providerError };
+            }
+          }
+          rawCandidate = extractMarkerFailedPayload(markerEngine, meta.stdout, nonce);
+        }
       } else if (job.engine === "codex" && meta.outputPath) {
         const rawText = await readGuideOutputFile(meta.outputPath);
         output = rawText !== null ? parseGuideOutputText(rawText) : null;

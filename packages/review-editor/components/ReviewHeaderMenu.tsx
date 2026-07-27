@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import {
   ActionMenu,
   ActionMenuDivider,
@@ -6,6 +6,8 @@ import {
   ActionMenuSectionLabel,
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { THEME_MODES } from '@plannotator/ui/components/themeModes';
+import { isThemeModeAvailable } from '@plannotator/ui/utils/themeRegistry';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
@@ -44,22 +46,20 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
   origin,
   isWSL = false,
 }) => {
-  const { theme, resolvedMode, setTheme } = useTheme();
-  const activeTheme = useMemo<'light' | 'dark'>(() => {
-    return theme === 'system' ? resolvedMode : theme;
-  }, [resolvedMode, theme]);
+  const { theme, setTheme, colorTheme } = useTheme();
 
   const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
 
   return (
     <ActionMenu
+      panelWidth="wide"
       renderTrigger={({ isOpen, toggleMenu }) => (
         <button
           onClick={() => {
             if (!isOpen && showUpdateDot) updateInfo?.dismiss();
             toggleMenu();
           }}
-          className={`relative flex items-center gap-1.5 p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-colors ${
+          className={`relative flex h-7 items-center gap-1.5 px-1.5 lg:px-2.5 rounded-md text-xs font-medium transition-colors ${
             isOpen
               ? 'bg-muted text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -70,14 +70,14 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
           {showUpdateDot ? (
-            <TextShimmer className="hidden md:inline text-xs font-medium" duration={2.5} spread={1.5}>
+            <TextShimmer className="hidden lg:inline text-xs font-medium" duration={2.5} spread={1.5}>
               Options
             </TextShimmer>
           ) : (
-            <span className="hidden md:inline">Options</span>
+            <span className="hidden lg:inline">Options</span>
           )}
           {showUpdateDot && (
-            <span className="absolute top-0.5 right-0.5 md:-top-0.5 md:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
+            <span className="absolute top-0.5 right-0.5 lg:-top-0.5 lg:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
           )}
         </button>
       )}
@@ -87,23 +87,30 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           <div className="px-3 py-2 space-y-1.5">
             <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
-              {(['light', 'dark'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => {
-                    closeMenu();
-                    setTheme(mode);
-                  }}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                    activeTheme === mode
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {mode === 'light' ? <SunIcon /> : <MoonIcon />}
-                  <span className="capitalize">{mode}</span>
-                </button>
-              ))}
+              {THEME_MODES.map(({ id, label, Icon }) => {
+                const available = isThemeModeAvailable(colorTheme, id);
+                return (
+                  <button
+                    key={id}
+                    disabled={!available}
+                    title={available ? undefined : 'Not supported by the current color theme'}
+                    onClick={() => {
+                      closeMenu();
+                      setTheme(id);
+                    }}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                      !available
+                        ? 'cursor-not-allowed text-muted-foreground opacity-40'
+                        : theme === id
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Icon />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -210,19 +217,6 @@ const SettingsIcon = () => (
 const ExportIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-  </svg>
-);
-
-const SunIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25M12 18.75V21M3 12h2.25M18.75 12H21M5.636 5.636l1.591 1.591M16.773 16.773l1.591 1.591M5.636 18.364l1.591-1.591M16.773 7.227l1.591-1.591" />
-    <circle cx="12" cy="12" r="3.25" />
-  </svg>
-);
-
-const MoonIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3c-.18.57-.21 1.19-.21 1.82A8 8 0 0019.18 13c.63 0 1.25-.03 1.82-.21z" />
   </svg>
 );
 

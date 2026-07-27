@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 
-import { contentHash, deleteDraft } from "../generated/draft.js";
+import { contentHash, deleteDraft } from "../generated/draft.ts";
 import {
 	type ArchivedPlan,
 	generateSlug,
@@ -14,9 +14,9 @@ import {
 	saveAnnotations,
 	saveFinalSnapshot,
 	saveToHistory,
-} from "../generated/storage.js";
-import { createEditorAnnotationHandler } from "./annotations.js";
-import { createExternalAnnotationHandler } from "./external-annotations.js";
+} from "../generated/storage.ts";
+import { createEditorAnnotationHandler } from "./annotations.ts";
+import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleDraftRequest,
 	handleFavicon,
@@ -24,10 +24,10 @@ import {
 	readDraftGenerationFromBody,
 	handleSaveNotesRequest,
 	handleUploadRequest,
-} from "./handlers.js";
-import { html, json, parseBody, requestUrl } from "./helpers.js";
-import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.js";
-import { openEditorDiff } from "./ide.js";
+} from "./handlers.ts";
+import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.ts";
+import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
+import { openEditorDiff } from "./ide.ts";
 import {
 	type BearConfig,
 	type IntegrationResult,
@@ -36,13 +36,13 @@ import {
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
-} from "./integrations.js";
-import { listenOnPort } from "./network.js";
+} from "./integrations.ts";
+import { listenOnPort } from "./network.ts";
 
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveSharingEnabled } from "../generated/config.js";
-import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.js";
-import { composeImproveContext } from "../generated/pfm-reminder.js";
-import { detectProjectName, getRepoInfo } from "./project.js";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveSharingEnabled } from "../generated/config.ts";
+import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
+import { composeImproveContext } from "../generated/pfm-reminder.ts";
+import { detectProjectName, getRepoInfo } from "./project.ts";
 import {
 	handleDocRequest,
 	handleDocExistsRequest,
@@ -50,9 +50,9 @@ import {
 	handleObsidianDocRequest,
 	handleObsidianFilesRequest,
 	handleObsidianVaultsRequest,
-} from "./reference.js";
-import { handleFileBrowserStreamRequest } from "./file-browser-watch.js";
-import { warmFileListCache } from "../generated/resolve-file.js";
+} from "./reference.ts";
+import { handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
+import { warmFileListCache } from "../generated/resolve-file.ts";
 
 export interface PlanReviewDecision {
 	approved: boolean;
@@ -84,8 +84,6 @@ export async function startPlanReviewServer(options: {
 	mode?: "archive";
 	customPlanPath?: string | null;
 }): Promise<PlanServerResult> {
-	// Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
-	void warmFileListCache(process.cwd(), "code");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
@@ -160,7 +158,7 @@ export async function startPlanReviewServer(options: {
 	// Editor annotations (in-memory, VS Code integration — skip in archive mode)
 	const editorAnnotations = options.mode !== "archive" ? createEditorAnnotationHandler() : null;
 	const externalAnnotations = options.mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
-	const aiRuntime = options.mode !== "archive" ? await createPiAIRuntime() : null;
+	const aiRuntime = options.mode !== "archive" && resolveAIEnabled() ? await createPiAIRuntime() : null;
 
 	// Lazy cache for in-session archive tab
 	let cachedArchivePlans: ArchivedPlan[] | null = null;
@@ -184,7 +182,7 @@ export async function startPlanReviewServer(options: {
 				return;
 			}
 			const markdown = readArchivedPlan(filename, customPath);
-			if (!markdown) {
+			if (markdown === null) {
 				json(res, { error: "Not found" }, 404);
 				return;
 			}
@@ -251,11 +249,12 @@ export async function startPlanReviewServer(options: {
 			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; pfmReminder?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
+				if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
 				if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
 				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
 				json(res, { ok: true });
@@ -325,7 +324,7 @@ export async function startPlanReviewServer(options: {
 			}
 		} else if (url.pathname === "/api/agents" && req.method === "GET") {
 			json(res, { agents: [] });
-		} else if (url.pathname === "/favicon.svg") {
+		} else if (url.pathname === "/favicon.png") {
 			handleFavicon(res);
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
 			await handleSaveNotesRequest(req, res);
@@ -445,12 +444,17 @@ export async function startPlanReviewServer(options: {
 			deleteDraft(draftKey, draftGeneration);
 			publishDecision({ approved: false, feedback, savedPath });
 			json(res, { ok: true, savedPath });
+		} else if (url.pathname.startsWith("/api/")) {
+			handleApiNotFound(res, url.pathname);
 		} else {
 			html(res, options.htmlContent);
 		}
 	});
 
 	const { port, portSource } = await listenOnPort(server);
+
+	// Mirror the Bun server: bind first, then warm through the async shared walk.
+	void warmFileListCache(process.cwd(), "code");
 
 	return {
 		reviewId,

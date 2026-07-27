@@ -269,9 +269,10 @@ export async function fetchGlMRContext(
   const mrEndpoint = `projects/${encoded}/merge_requests/${ref.iid}`;
 
   // Fetch all context in parallel
-  const [mrResult, notesResult, approvalsResult, pipelinesResult, issuesResult] = await Promise.all([
+  const [mrResult, notesResult, discussionsResult, approvalsResult, pipelinesResult, issuesResult] = await Promise.all([
     runtime.runCommand("glab", apiArgs(ref.host, mrEndpoint)),
-    runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/notes?sort=asc&per_page=100`)),
+    runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/notes?sort=asc&per_page=100`, ["--paginate"])),
+    runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/discussions?per_page=100`, ["--paginate"])),
     runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/approvals`)),
     runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/pipelines?per_page=5`)),
     runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/closes_issues`)),
@@ -347,22 +348,86 @@ export async function fetchGlMRContext(
     ? (mergeStateMap[detailedStatus] ?? detailedStatus.toUpperCase())
     : mergeable;
 
+  // --- Discussions (inline review threads) ---
+  const reviewThreads: PRContext["reviewThreads"] = [];
+  const discussionNoteIds = new Set<string>();
+  if (discussionsResult.exitCode === 0) {
+    try {
+      const parsed: unknown = parsePaginatedArray<unknown>(discussionsResult.stdout);
+      if (Array.isArray(parsed)) {
+        for (const rawDiscussion of parsed) {
+          if (!isRecord(rawDiscussion) || rawDiscussion.individual_note === true) continue;
+          const rawDiscussionNotes = Array.isArray(rawDiscussion.notes)
+            ? rawDiscussion.notes.filter(isRecord)
+            : [];
+          const visibleNotes = rawDiscussionNotes.filter((note) => note.system !== true);
+          const positionNote = visibleNotes.find((note) => isRecord(note.position));
+          const resolvableNotes = visibleNotes.filter((note) => note.resolvable === true);
+          if (positionNote === undefined && resolvableNotes.length === 0) continue;
+
+          const position = positionNote && isRecord(positionNote.position)
+            ? positionNote.position
+            : null;
+          const lineRange = position && isRecord(position.line_range) ? position.line_range : null;
+          const rangeStart = lineRange && isRecord(lineRange.start) ? lineRange.start : null;
+          const newLine = position ? numberValue(position.new_line) : null;
+          const oldLine = position ? numberValue(position.old_line) : null;
+          const startNewLine = rangeStart ? numberValue(rangeStart.new_line) : null;
+          const startOldLine = rangeStart ? numberValue(rangeStart.old_line) : null;
+          const comments = visibleNotes.map((note) => {
+            const id = stringValue(note.id);
+            if (id !== "") discussionNoteIds.add(id);
+            const author = isRecord(note.author) ? note.author : null;
+            const avatarUrl = resolveAvatar(author?.avatar_url);
+            const fallbackUrl = `${str(mr.web_url)}#note_${id}`;
+            return {
+              id,
+              author: str(author?.username),
+              ...(avatarUrl ? { avatarUrl } : {}),
+              ...(isGitlabBot(author) ? { isBot: true } : {}),
+              body: str(note.body),
+              createdAt: str(note.created_at),
+              url: str(note.web_url) || fallbackUrl,
+            };
+          });
+          if (comments.length === 0) continue;
+
+          reviewThreads.push({
+            id: stringValue(rawDiscussion.id),
+            isResolved: resolvableNotes.length > 0
+              && resolvableNotes.every((note) => note.resolved === true),
+            // GitLab does not expose an isOutdated equivalent on discussions.
+            isOutdated: false,
+            path: position ? str(position.new_path) || str(position.old_path) : "",
+            line: newLine ?? oldLine,
+            startLine: startNewLine ?? startOldLine,
+            diffSide: newLine !== null ? "RIGHT" : oldLine !== null ? "LEFT" : null,
+            comments,
+          });
+        }
+      }
+    } catch { /* non-JSON response */ }
+  }
+
   // --- Notes (comments) ---
   const notes: PRContext["comments"] = [];
   if (notesResult.exitCode === 0) {
     try {
-      const rawNotes = JSON.parse(notesResult.stdout) as any[];
-      for (const n of rawNotes) {
-        if (n.system) continue;
-        const avatarUrl = resolveAvatar(n.author?.avatar_url);
+      const rawNotes = parsePaginatedArray<unknown>(notesResult.stdout);
+      for (const rawNote of rawNotes) {
+        if (!isRecord(rawNote)) continue;
+        const id = stringValue(rawNote.id);
+        if (rawNote.system === true || discussionNoteIds.has(id)) continue;
+        const author = isRecord(rawNote.author) ? rawNote.author : null;
+        const avatarUrl = resolveAvatar(author?.avatar_url);
         notes.push({
-          id: String(n.id ?? ""),
-          author: str(n.author?.username),
+          id,
+          author: str(author?.username),
           ...(avatarUrl ? { avatarUrl } : {}),
-          ...(isGitlabBot(n.author) ? { isBot: true } : {}),
-          body: str(n.body),
-          createdAt: str(n.created_at),
-          url: str(n.web_url) || "",
+          ...(isGitlabBot(author) ? { isBot: true } : {}),
+          body: str(rawNote.body),
+          createdAt: str(rawNote.created_at),
+          url: str(rawNote.web_url) || "",
         });
       }
     } catch { /* non-JSON response */ }
@@ -460,7 +525,7 @@ export async function fetchGlMRContext(
     mergeStateStatus,
     comments: notes,
     reviews,
-    reviewThreads: [],  // TODO: parse DiffNote positions from notes for thread support
+    reviewThreads,
     checks,
     linkedIssues,
   };
@@ -468,6 +533,14 @@ export async function fetchGlMRContext(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 // --- File Content ---

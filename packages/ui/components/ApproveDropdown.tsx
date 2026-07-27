@@ -36,7 +36,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   disabled = false,
   isLoading = false,
 }) => {
-  const [setting, setSetting] = useState<AgentSwitchSettings>(() => getAgentSwitchSettings());
+  const [setting, setSetting] = useState<AgentSwitchSettings>(() => getAgentSwitchSettings('plan'));
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 

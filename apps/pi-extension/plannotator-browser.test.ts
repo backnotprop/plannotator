@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { shouldUseLocalPrCheckout } from "./plannotator-browser";
+import { shouldUseLocalPrCheckout } from "./plannotator-browser.ts";
 
 describe("shouldUseLocalPrCheckout", () => {
 	test("uses local PR checkout by default", () => {
