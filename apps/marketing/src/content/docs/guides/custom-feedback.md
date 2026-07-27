@@ -49,9 +49,9 @@ These are sent when you annotate a file (`/plannotator-annotate`) or the last as
 |-----|---------------|-------------------|
 | `fileFeedback` | You annotate a file or folder | `{{fileHeader}}`, `{{filePath}}`, `{{feedback}}` |
 | `messageFeedback` | You annotate the last assistant message | `{{feedback}}` |
-| `approvedWithNotes` | You approve a capable annotation gate with notes | `{{context}}`, `{{feedback}}` |
+| `approvedWithNotes` | You approve a capable annotation gate with notes | `{{contextBlock}}`, `{{context}}`, `{{feedback}}` |
 
-`approvedWithNotes` is separate from ordinary annotation feedback so approval notes remain non-blocking. For file and folder annotations, `{{context}}` contains the target label and path (for example, `File: src/app.ts`); for message annotations it is empty.
+`approvedWithNotes` is separate from ordinary annotation feedback so approval notes remain non-blocking. For file and folder annotations, `{{context}}` contains the target label and path (for example, `File: src/app.ts`); for message annotations it is empty. `{{contextBlock}}` is the same value followed by a blank line, or nothing at all when there is no context — the built-in default uses it so message annotations don't get a stray blank line.
 
 ### Review feedback
 
@@ -78,6 +78,7 @@ Templates use `{{variable}}` placeholders. Here's what each one contains:
 | `{{fileHeader}}` | Either `"File"` or `"Folder"`, depending on what was annotated. |
 | `{{filePath}}` | Path to the annotated file or folder. |
 | `{{context}}` | Optional approval-note target context (`File: …` or `Folder: …`); empty for message annotations. |
+| `{{contextBlock}}` | `{{context}}` followed by a blank line, or empty when there is no context. Used by the built-in `annotate.approvedWithNotes` default so it can sit directly in front of `{{feedback}}`. |
 
 If you use a `{{variable}}` that doesn't exist for that message type, it stays in the output as-is. This means you can include literal `{{text}}` in your templates without worrying about it being stripped.
 
@@ -186,14 +187,16 @@ Please address the annotation feedback above.
 The artifact is approved. The notes below are non-blocking guidance,
 not a request for another revision.
 
-{{context}}
-
-{{feedback}}
+{{contextBlock}}{{feedback}}
 
 Do not revise or reopen the artifact solely because of these notes
 unless the user explicitly requests it. Carry the notes into
 subsequent work where applicable.
 ```
+
+The default uses `{{contextBlock}}` rather than `{{context}}` so message
+annotations — which have no target file — don't leave a stray blank line
+where the context would have been.
 
 **Review feedback suffix (default):**
 
