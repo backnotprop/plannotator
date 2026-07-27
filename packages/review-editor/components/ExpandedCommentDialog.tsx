@@ -61,16 +61,16 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
     canSubmit,
   });
 
-  // Bound to the popup rather than the textarea so Mod+Enter is swallowed
-  // wherever focus sits, keeping it away from the window listener that submits
-  // the whole review. Only the textarea drives the composer keymap though -
-  // under "Enter sends", Enter on a focused button must still press it.
+  // Bound to the popup rather than the textarea so Mod+Enter keeps working
+  // wherever focus sits inside the dialog.
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.target === textareaRef.current) {
-      composerKeys(event);
-      return;
-    }
-    if (matchesShortcutBinding(event.nativeEvent, 'Mod+Enter')) event.stopPropagation();
+    const isModEnter = matchesShortcutBinding(event.nativeEvent, 'Mod+Enter');
+    // The textarea gets the whole keymap. Elsewhere only Mod+Enter runs: under
+    // "Enter sends", bare Enter on a focused button must press that button.
+    if (event.target === textareaRef.current || isModEnter) composerKeys(event);
+    // Mod+Enter must never reach the window listener that submits the whole
+    // review while this dialog is open, even when the composer declined it.
+    if (isModEnter) event.stopPropagation();
   };
 
   return (
