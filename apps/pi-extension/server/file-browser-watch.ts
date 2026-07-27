@@ -65,6 +65,29 @@ function getFileSignature(filePath: string): string {
 	}
 }
 
+export function createExactFileWatchListener(
+	watchPath: string,
+	exactFilePath: string,
+	onChange: () => void,
+): (event: unknown, filename: string | Buffer | null | undefined) => void {
+	let signature = getFileSignature(exactFilePath);
+	return (_event, filename) => {
+		try {
+			const nextSignature = getFileSignature(exactFilePath);
+			// Events on the watched directory itself arrive without a filename, as
+			// null on some platforms and undefined on others (Bun on Linux).
+			const eventMatches = filename == null
+				|| resolve(watchPath, filename.toString()) === exactFilePath;
+			if (eventMatches || nextSignature !== signature) {
+				signature = nextSignature;
+				onChange();
+			}
+		} catch {
+			// A watcher event must never take down the server.
+		}
+	};
+}
+
 function broadcast(entry: WatchEntry, reason: FileBrowserChangeEvent["reason"]): void {
 	for (const [res, clientDirPath] of entry.subscribers) {
 		const payload = serialize({
@@ -116,17 +139,11 @@ function ensureWatcher(target: WatchTarget): WatchEntry {
 	};
 
 	if (target.exactFilePath) {
-		const exactFilePath = target.exactFilePath;
-		let signature = getFileSignature(exactFilePath);
-		entry.contentWatcher = watch(target.watchPath, { persistent: true }, (_event, filename) => {
-			const nextSignature = getFileSignature(exactFilePath);
-			const eventMatches = filename === null
-				|| resolve(target.watchPath, filename.toString()) === exactFilePath;
-			if (eventMatches || nextSignature !== signature) {
-				signature = nextSignature;
-				scheduleBroadcast(entry, "files");
-			}
-		});
+		entry.contentWatcher = watch(
+			target.watchPath,
+			{ persistent: true },
+			createExactFileWatchListener(target.watchPath, target.exactFilePath, () => scheduleBroadcast(entry, "files")),
+		);
 		entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
 	} else {
 		entry.contentWatcher = chokidar.watch(target.watchPath, {

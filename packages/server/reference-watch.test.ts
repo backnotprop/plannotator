@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { handleFileBrowserFilesStream, isFileBrowserWatchIgnoredPath } from "./reference-watch";
+import {
+	createExactFileWatchListener,
+	handleFileBrowserFilesStream,
+	isFileBrowserWatchIgnoredPath,
+} from "./reference-watch";
 
 const tempDirs: string[] = [];
 const WATCH_READY_MS = 250;
@@ -332,6 +336,52 @@ describe("handleFileBrowserFilesStream", () => {
 			await collector.next();
 			await waitForWatcher();
 			writeFileSync(join(nested, "plan.md"), "nested");
+			expect(await collector.next()).toMatchObject({ type: "changed", dirPath: root, reason: "files" });
+		} finally {
+			await collector.close();
+		}
+	});
+
+	test("tolerates watcher events delivered without a filename", () => {
+		const root = makeTempDir("plannotator-watch-nameless-");
+		const target = join(root, "plan.md");
+		writeFileSync(target, "initial");
+		let changes = 0;
+		const listener = createExactFileWatchListener(root, target, () => {
+			changes += 1;
+		});
+		const hostileName = { toString: () => { throw new Error("unreadable filename"); } } as unknown as string;
+
+		// Bun on Linux reports undefined (not null) for events on the watched directory.
+		expect(() => listener("rename", undefined)).not.toThrow();
+		expect(() => listener("change", null)).not.toThrow();
+		expect(() => listener("rename", hostileName)).not.toThrow();
+		expect(changes).toBe(2);
+
+		changes = 0;
+		listener("change", "sibling.md");
+		expect(changes).toBe(0);
+	});
+
+	test("keeps streaming when the watched parent directory itself changes", async () => {
+		const root = makeTempDir("plannotator-watch-parent-");
+		const target = join(root, "plan.md");
+		writeFileSync(target, "initial");
+		await waitForWatcher();
+		const url = new URL("http://localhost/api/reference/files/stream");
+		url.searchParams.append("filePath", target);
+		const collector = collectSSE(handleFileBrowserFilesStream(new Request(url)));
+
+		try {
+			expect(await collector.next()).toMatchObject({ type: "ready", dirPath: root });
+			await waitForWatcher();
+
+			// Metadata churn on the parent directory (tar -x, rsync -a, cp -a).
+			chmodSync(root, statSync(root).mode);
+			utimesSync(root, new Date(), new Date());
+			await waitForWatcher();
+
+			writeFileSync(target, "written");
 			expect(await collector.next()).toMatchObject({ type: "changed", dirPath: root, reason: "files" });
 		} finally {
 			await collector.close();
