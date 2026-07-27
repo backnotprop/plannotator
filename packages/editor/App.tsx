@@ -73,6 +73,7 @@ import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
+import { buildAnnotateAgentInstructions } from '@plannotator/ui/utils/annotateAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { getFileEditStatus } from '@plannotator/ui/components/sidebar/FileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
@@ -3765,12 +3766,13 @@ const App: React.FC = () => {
     toast.success(`Reloaded ${reloaded.basename} from disk`);
   }, [applyEditedDocument, editableDocuments, repaintHighlights, scheduleDraftSave]);
 
-  // Agent Instructions — copy a clipboard payload teaching external agents
-  // (Claude Code, Codex, etc.) how to POST annotations into this session via
-  // /api/external-annotations. The instruction body lives in a separate module
-  // (utils/agentInstructions.ts) so it's easy to edit independently of UI code.
   const handleCopyAgentInstructions = async () => {
-    const payload = buildPlanAgentInstructions(window.location.origin);
+    const payload = annotateMode
+      ? buildAnnotateAgentInstructions(window.location.origin, {
+          source: annotateSource,
+          filePath: terminalAskReadableFilePath ?? undefined,
+        })
+      : buildPlanAgentInstructions(window.location.origin);
     try {
       await navigator.clipboard.writeText(payload);
       toast.success('Agent instructions copied');
@@ -4099,7 +4101,7 @@ const App: React.FC = () => {
           appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
           updateInfo={updateInfo}
           isWSL={isWSL}
-          agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode && !goalSetupMode}
+          agentInstructionsEnabled={isApiMode && !archive.archiveMode && !goalSetupMode}
           obsidianConfigured={isObsidianConfigured()}
           bearConfigured={getBearSettings().enabled}
           octarineConfigured={isOctarineConfigured()}
