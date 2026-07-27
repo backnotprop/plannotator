@@ -15,6 +15,7 @@ import {
   type LinkedDocAnnotationEntry,
   type MessageAnnotationEntry,
 } from "@plannotator/ui/utils/parser";
+import { shouldStripFrontmatter } from "@plannotator/shared/annotatable";
 import { composeFeedbackWithEditSections } from "./directEdits";
 
 export interface AnnotateApprovalBodyInput {
@@ -133,8 +134,17 @@ export function buildCompleteAnnotateFeedback(
       if (hasLinkedAnnotations) {
         const enriched = new Map<string, LinkedDocAnnotationEntry>();
         for (const [filepath, entry] of input.linkedDocuments) {
+          // Parse each linked doc exactly the way it was rendered: plain-text
+          // sources (.yaml/.json/.toml/…) keep a leading `---` as real content,
+          // so stripping it here would shift every block id and mis-label the
+          // exported line numbers.
           enriched.set(filepath, entry.markdown
-            ? { ...entry, blocks: parseMarkdownToBlocks(entry.markdown) }
+            ? {
+                ...entry,
+                blocks: parseMarkdownToBlocks(entry.markdown, {
+                  frontmatter: shouldStripFrontmatter(filepath),
+                }),
+              }
             : entry);
         }
         annotationsText += exportLinkedDocAnnotations(enriched);
