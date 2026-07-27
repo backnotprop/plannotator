@@ -35,7 +35,7 @@ describe("plannotator config", () => {
 
     expect(loaded.warnings).toEqual([]);
     expect(planning.statusLabel).toBe("⏸ plan");
-    expect(planning.activeTools).toEqual(["plannotator_submit_plan"]);
+    expect(planning.activeTools).toEqual(["grep", "find", "ls", "plannotator_submit_plan"]);
     expect(planning.systemPrompt).not.toContain("Available tools:");
   });
 

@@ -143,12 +143,72 @@ describe("Plannotator phase tool ownership", () => {
 		expect(runtime.getActiveTools()).toEqual([
 			"inspect",
 			"search",
+			"grep",
+			"find",
+			"ls",
 			"plannotator_submit_plan",
 		]);
 
 		runtime.setActiveTools(["search", "external_new", "plannotator_submit_plan"]);
 		await runtime.commands.get("plannotator")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual(["search", "external_new"]);
+	});
+
+	test("planning adds the default discovery tools and releases them on exit", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime(["read", "bash", "edit", "write"]);
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual([
+			"read",
+			"bash",
+			"edit",
+			"write",
+			"grep",
+			"find",
+			"ls",
+			"plannotator_submit_plan",
+		]);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual(["read", "bash", "edit", "write"]);
+	});
+
+	test("a discovery tool already active before planning survives the exit", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime(["read", "bash", "grep"]);
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual([
+			"read",
+			"bash",
+			"grep",
+			"find",
+			"ls",
+			"plannotator_submit_plan",
+		]);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual(["read", "bash", "grep"]);
+	});
+
+	test("user config still overrides the default planning tools", async () => {
+		const cwd = makeWorkspace({
+			phases: { planning: { activeTools: ["my_planning_tool"] } },
+		});
+		const runtime = createRuntime(["read", "bash"]);
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual(["read", "bash", "my_planning_tool"]);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual(["read", "bash"]);
 	});
 
 	test("completing the plan releases the executing phase tools", async () => {
