@@ -377,10 +377,20 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 		if (phase === "planning" || phase === "executing") {
 			const activeTools = pi.getActiveTools();
+			const configuredTools = profile?.activeTools ?? [];
+			// A user-supplied phases.planning.activeTools replaces the built-in list
+			// wholesale, so union the submit tool back in: the planning system prompt
+			// instructs the model to call it, and without it the phase is a dead end.
+			// It still flows through phaseAddedTools, so it is released on phase exit
+			// like any other addition (and is skipped if already active).
+			const phaseTools =
+				phase === "planning" && !configuredTools.includes(PLAN_SUBMIT_TOOL)
+					? [...configuredTools, PLAN_SUBMIT_TOOL]
+					: configuredTools;
 			const selection = applyPhaseTools(
 				activeTools,
 				phaseAddedTools,
-				profile?.activeTools ?? [],
+				phaseTools,
 			);
 			phaseAddedTools = selection.addedTools;
 			if (

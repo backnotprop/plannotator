@@ -205,7 +205,58 @@ describe("Plannotator phase tool ownership", () => {
 		await runtime.run("session_start", context);
 
 		await runtime.commands.get("plannotator")?.handler("", context);
-		expect(runtime.getActiveTools()).toEqual(["read", "bash", "my_planning_tool"]);
+		expect(runtime.getActiveTools()).toEqual([
+			"read",
+			"bash",
+			"my_planning_tool",
+			"plannotator_submit_plan",
+		]);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual(["read", "bash"]);
+	});
+
+	test("custom planning tools keep the submit tool and release it on exit", async () => {
+		const cwd = makeWorkspace({
+			phases: { planning: { activeTools: ["my_planning_tool"] } },
+		});
+		const runtime = createRuntime(["read", "bash"]);
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		const planningTools = runtime.getActiveTools();
+		expect(planningTools).toContain("my_planning_tool");
+		expect(planningTools).toContain("plannotator_submit_plan");
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "planning",
+			phaseAddedTools: ["my_planning_tool", "plannotator_submit_plan"],
+		});
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		const exitTools = runtime.getActiveTools();
+		expect(exitTools).not.toContain("my_planning_tool");
+		expect(exitTools).not.toContain("plannotator_submit_plan");
+		expect(exitTools).toEqual(["read", "bash"]);
+	});
+
+	test("a custom planning config that already lists the submit tool adds it once", async () => {
+		const cwd = makeWorkspace({
+			phases: {
+				planning: { activeTools: ["plannotator_submit_plan", "my_planning_tool"] },
+			},
+		});
+		const runtime = createRuntime(["read", "bash"]);
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator")?.handler("", context);
+		expect(runtime.getActiveTools()).toEqual([
+			"read",
+			"bash",
+			"plannotator_submit_plan",
+			"my_planning_tool",
+		]);
 
 		await runtime.commands.get("plannotator")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual(["read", "bash"]);

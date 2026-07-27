@@ -136,7 +136,7 @@ Later layers overwrite earlier ones. If a field is omitted, it inherits the valu
 | `phases.reviewing` | object | Reserved for future review-mode customization |
 | `model` | `{ provider, id }` \| `null` | Sets the model for the phase; `null` leaves the current model unchanged |
 | `thinking` | `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `null` | Sets the thinking level; `null` leaves the current level unchanged |
-| `activeTools` | string[] \| `null` | Extra tools to enable for the phase; `[]` or `null` means no extra phase tools |
+| `activeTools` | string[] \| `null` | Tools to turn on for the phase. Setting it **replaces** the inherited list rather than adding to it (phase overrides `defaults`, your config overrides the built-in one); `[]` or `null` means no extra phase tools. `plannotator_submit_plan` is always enabled during planning regardless of this setting |
 | `statusLabel` | string \| `null` | Optional UI label for the phase; empty/null clears it |
 | `systemPrompt` | string \| `null` | Phase system prompt template; empty/null disables prompt injection |
 
@@ -154,7 +154,9 @@ Use these inside `systemPrompt` strings:
 #### Behavior notes
 
 - Unknown template variables trigger a warning in the UI and are rendered as empty strings.
-- `activeTools` are additive with the tools currently active in the session, so Plannotator still preserves tools provided by other extensions.
+- `activeTools` **replaces** the list it inherits — it does not merge with it. Defining `phases.planning.activeTools` in your own config supersedes the built-in `["grep", "find", "ls", "plannotator_submit_plan"]` entirely, so list every tool you want for that phase.
+- The resolved list is then turned on *alongside* whatever tools are already active in the session, so Plannotator still preserves tools provided by other extensions, and on phase exit it turns off only the tools it added.
+- `plannotator_submit_plan` is always enabled during planning even if your `activeTools` omits it — the planning system prompt tells the model to call it, so the phase cannot complete without it.
 - Execution progress remains dynamic (`[DONE:n]` + checklist tracking), even if `statusLabel` is set.
 
 #### Example files
