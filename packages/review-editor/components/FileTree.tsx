@@ -14,7 +14,7 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
 import { Paperclip } from 'lucide-react';
 
-import { SidebarActionRow, SemanticDiffRow, AllFilesRow } from './PanelNavRows';
+import { SidebarActionRow, SemanticDiffRow, EslintCheckRow, AllFilesRow } from './PanelNavRows';
 
 interface FileTreeProps {
   files: DiffFile[];
@@ -81,6 +81,9 @@ interface FileTreeProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+  onSelectEslintCheck?: () => void;
+  isEslintCheckActive?: boolean;
+  eslintCheckFileCount?: number;
   onSelectAllFiles?: () => void;
   isAllFilesActive?: boolean;
   scrollHighlightIndex?: number;
@@ -152,6 +155,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
+  onSelectEslintCheck,
+  isEslintCheckActive = false,
+  eslintCheckFileCount,
   onSelectAllFiles,
   isAllFilesActive = false,
   scrollHighlightIndex,
@@ -544,6 +550,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
           {semanticDiffAvailable && onSelectSemanticDiff && (
             <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
           )}
+          {onSelectEslintCheck && (
+            <EslintCheckRow active={isEslintCheckActive} onClick={onSelectEslintCheck} fileCount={eslintCheckFileCount} />
+          )}
           {onSelectAllFiles && (
             <AllFilesRow
               active={isAllFilesActive}
@@ -558,7 +567,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               node={node}
               expandedFolders={expandedFolders}
               onToggleFolder={handleToggleFolder}
-              activeFileIndex={isAllFilesActive || isSemanticDiffActive || isPROverviewActive || isPRArtifactsActive ? -1 : activeFileIndex}
+              activeFileIndex={isAllFilesActive || isSemanticDiffActive || isEslintCheckActive || isPROverviewActive || isPRArtifactsActive ? -1 : activeFileIndex}
               scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
               onSelectFile={onSelectFile}
               onDoubleClickFile={onDoubleClickFile}

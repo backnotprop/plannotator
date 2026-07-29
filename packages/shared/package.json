@@ -58,6 +58,8 @@
     "./goal-setup": "./goal-setup.ts",
     "./semantic-diff": "./semantic-diff.ts",
     "./semantic-diff-types": "./semantic-diff-types.ts",
+    "./eslint-check": "./eslint-check.ts",
+    "./eslint-check-types": "./eslint-check-types.ts",
     "./single-flight": "./single-flight.ts",
     "./source-save": "./source-save.ts",
     "./source-save-node": "./source-save-node.ts",

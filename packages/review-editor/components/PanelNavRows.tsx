@@ -42,6 +42,30 @@ export function SemanticDiffRow({ active, onClick }: { active: boolean; onClick:
   );
 }
 
+export function EslintCheckRow({
+  active,
+  onClick,
+  fileCount,
+}: {
+  active: boolean;
+  onClick: () => void;
+  fileCount?: number;
+}) {
+  return (
+    <SidebarActionRow
+      active={active}
+      onClick={onClick}
+      title="Run the reviewed project's local ESLint configuration"
+    >
+      <span className="w-3.5 h-3.5 flex flex-shrink-0 items-center justify-center font-mono text-[10px] font-semibold" aria-hidden="true">ES</span>
+      <span>ESLint</span>
+      {fileCount !== undefined && (
+        <span className="ml-auto text-[10px] tabular-nums opacity-60">{fileCount}</span>
+      )}
+    </SidebarActionRow>
+  );
+}
+
 export function AllFilesRow({
   active,
   onClick,
@@ -71,4 +95,3 @@ export function AllFilesRow({
     </SidebarActionRow>
   );
 }
-

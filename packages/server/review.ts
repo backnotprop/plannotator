@@ -47,6 +47,13 @@ import {
 } from "@plannotator/shared/semantic-diff";
 import type { SemanticDiffAvailability, SemanticDiffResponse } from "@plannotator/shared/semantic-diff-types";
 import {
+  buildEslintCheckInput,
+  getEslintCheckAvailability,
+  isEslintCheckCompatibleReviewView,
+  runEslintCheck,
+} from "@plannotator/shared/eslint-check";
+import type { EslintCheckAdvert, EslintCheckResponse } from "@plannotator/shared/eslint-check-types";
+import {
   getPRDiffScopeOptions,
   getPRFullStackFingerprint,
   getPRStackInfo,
@@ -791,6 +798,134 @@ export async function startReviewServer(
     return result;
   };
 
+  const eslintCheckCompatibleView = (): boolean => {
+    return isEslintCheckCompatibleReviewView({
+      isPRMode,
+      isWorkspaceMode,
+      diffType: currentDiffType as string,
+    });
+  };
+
+  const eslintCheckUnavailableReason = (): string => {
+    if (isPRMode) return "pr-review-unsupported";
+    return eslintCheckCompatibleView() ? "local-checkout-unavailable" : "snapshot-not-working-tree";
+  };
+
+  const resolveEslintCheckInput = () => {
+    if (!eslintCheckCompatibleView()) return null;
+    const cwd = workspace?.root
+      ?? (isPRMode
+        ? resolvePRLocalCwd()
+        : resolveAgentCwd());
+    if (!cwd) return null;
+    return buildEslintCheckInput(
+      currentPatch,
+      cwd,
+      workspace?.repos.map((repo) => ({ label: repo.label, cwd: repo.cwd })),
+    );
+  };
+
+  const getEslintCheckAdvert = (): EslintCheckAdvert => {
+    const input = resolveEslintCheckInput();
+    if (!input) {
+      return {
+        available: false,
+        reason: eslintCheckUnavailableReason(),
+      };
+    }
+    return getEslintCheckAvailability(input);
+  };
+
+  interface EslintCheckBaseline {
+    snapshotId: string;
+    fingerprintGeneration: number;
+    fingerprint: string | null;
+  }
+
+  const resolveEslintCheckBaseline = async (
+    requestedSnapshotId: string | undefined,
+  ): Promise<EslintCheckBaseline | null> => {
+    if (requestedSnapshotId !== currentSnapshotId()) return null;
+    const baselineGeneration = fingerprintGeneration;
+    let baseline = currentFingerprint;
+    const pendingCapture = pendingFingerprintCapture;
+    if (baseline == null && pendingCapture) {
+      baseline = await pendingCapture;
+    }
+    if (
+      requestedSnapshotId !== currentSnapshotId()
+      || baselineGeneration !== fingerprintGeneration
+    ) {
+      return null;
+    }
+    if (baseline != null) {
+      const probe = await fileContentFingerprintProbes.run(
+        `${requestedSnapshotId}:${baselineGeneration}`,
+        computeDiffFingerprint,
+      );
+      if (
+        requestedSnapshotId !== currentSnapshotId()
+        || currentFingerprint !== baseline
+        || (probe != null && probe !== baseline)
+      ) {
+        return null;
+      }
+    }
+    return {
+      snapshotId: requestedSnapshotId,
+      fingerprintGeneration: baselineGeneration,
+      fingerprint: baseline,
+    };
+  };
+
+  const sameEslintCheckBaseline = (
+    left: EslintCheckBaseline,
+    right: EslintCheckBaseline,
+  ): boolean => left.snapshotId === right.snapshotId
+    && left.fingerprintGeneration === right.fingerprintGeneration
+    && left.fingerprint === right.fingerprint;
+
+  let eslintCheckCache: {
+    baseline: EslintCheckBaseline;
+    response: EslintCheckResponse;
+  } | null = null;
+  const getEslintCheck = async (requestedSnapshotId: string | undefined): Promise<EslintCheckResponse> => {
+    const baseline = await resolveEslintCheckBaseline(requestedSnapshotId);
+    if (!baseline) {
+      return {
+        status: "error",
+        reason: "stale-snapshot",
+        message: "The reviewed diff changed before ESLint started. Run the check again.",
+      };
+    }
+    if (eslintCheckCache && sameEslintCheckBaseline(eslintCheckCache.baseline, baseline)) {
+      return eslintCheckCache.response;
+    }
+    const input = resolveEslintCheckInput();
+    if (!input) {
+      return {
+        status: "unavailable",
+        reason: eslintCheckUnavailableReason(),
+        message: isPRMode
+          ? "ESLint is currently available only for local code reviews."
+          : eslintCheckCompatibleView()
+            ? "ESLint requires a local checkout of the code under review."
+            : "ESLint is available only when the review's new side is the current working tree.",
+      };
+    }
+    const response = await runEslintCheck(input);
+    const completedBaseline = await resolveEslintCheckBaseline(requestedSnapshotId);
+    if (!completedBaseline || !sameEslintCheckBaseline(baseline, completedBaseline)) {
+      return {
+        status: "error",
+        reason: "stale-snapshot",
+        message: "The reviewed diff changed while ESLint was running. Run the check again.",
+      };
+    }
+    if (response.status === "ok") eslintCheckCache = { baseline, response };
+    return response;
+  };
+
   const agentJobs = createAgentJobHandler({
     mode: "review",
     getServerUrl: () => serverUrl,
@@ -1511,6 +1646,7 @@ export async function startReviewServer(
               ...(baseBehindRemote && { baseBehindRemote: true }),
               ...(servedError && { error: servedError }),
               semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
+              eslintCheck: getEslintCheckAdvert(),
               serverConfig: getServerConfig(gitUser),
             });
           }
@@ -1622,6 +1758,13 @@ export async function startReviewServer(
             return Response.json(await getSemanticDiff(url));
           }
 
+          if (url.pathname === "/api/eslint-check" && req.method === "POST") {
+            const body = await req.json().catch(() => ({})) as { snapshotId?: unknown };
+            const requestedSnapshotId = typeof body.snapshotId === "string" ? body.snapshotId : undefined;
+            const result = await getEslintCheck(requestedSnapshotId);
+            return Response.json(result, { status: result.status === "error" && result.reason === "stale-snapshot" ? 409 : 200 });
+          }
+
           // API: Linear commit history for the Commits panel. Git-local
           // sessions only — PR/workspace/jj/p4 don't offer the view (same
           // gate the client's commitsCapable applies). Computed against the
@@ -1717,6 +1860,7 @@ export async function startReviewServer(
                   hideWhitespace: currentHideWhitespace,
                   ...(currentError && { error: currentError }),
                   semanticDiff: await getSemanticDiffAdvert(),
+                  eslintCheck: getEslintCheckAdvert(),
                 });
               }
 
@@ -1848,6 +1992,7 @@ export async function startReviewServer(
                 ...(updatedContext && { gitContext: updatedContext }),
                 ...(currentError && { error: currentError }),
                 semanticDiff: switchSemanticDiff,
+                eslintCheck: getEslintCheckAdvert(),
               });
             } catch (err) {
               const message =
@@ -1938,6 +2083,7 @@ export async function startReviewServer(
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
                   ...((currentError ?? upgradeError) && { error: currentError ?? upgradeError }),
                   semanticDiff: await getSemanticDiffAdvert(),
+                  eslintCheck: getEslintCheckAdvert(),
                 });
               }
 
@@ -1982,6 +2128,7 @@ export async function startReviewServer(
                 snapshotId: currentSnapshotId(),
                 prDiffScope: currentPRDiffScope,
                 semanticDiff: await getSemanticDiffAdvert(),
+                eslintCheck: getEslintCheckAdvert(),
               });
             } catch (err) {
               const message =
@@ -2120,6 +2267,7 @@ export async function startReviewServer(
                 ...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
                 ...(currentError ? { error: currentError } : {}),
                 semanticDiff: await getSemanticDiffAdvert(),
+                eslintCheck: getEslintCheckAdvert(),
               });
             } catch (err) {
               const message = err instanceof Error ? err.message : "Failed to switch PR";
