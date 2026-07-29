@@ -53,4 +53,3 @@ export type EslintCheckResponse =
   | EslintCheckOkResponse
   | EslintCheckUnavailableResponse
   | EslintCheckErrorResponse;
-
