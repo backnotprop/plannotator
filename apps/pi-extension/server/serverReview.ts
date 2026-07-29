@@ -860,16 +860,20 @@ export async function startReviewServer(options: {
 
 	function eslintCheckUnavailableReason(): string {
 		if (isPRMode) return "pr-review-unsupported";
+
 		return eslintCheckCompatibleView() ? "local-checkout-unavailable" : "snapshot-not-working-tree";
 	}
 
 	function resolveEslintCheckInput() {
 		if (!eslintCheckCompatibleView()) return null;
+
 		const cwd = workspace?.root
 			?? (isPRMode
 				? resolvePRLocalCwd()
 				: resolveAgentCwd());
+
 		if (!cwd) return null;
+
 		return buildEslintCheckInput(
 			currentPatch,
 			cwd,
@@ -879,12 +883,14 @@ export async function startReviewServer(options: {
 
 	function getEslintCheckAdvert(): EslintCheckAdvert {
 		const input = resolveEslintCheckInput();
+
 		if (!input) {
 			return {
 				available: false,
 				reason: eslintCheckUnavailableReason(),
 			};
 		}
+
 		return getEslintCheckAvailability(input);
 	}
 
@@ -898,23 +904,28 @@ export async function startReviewServer(options: {
 		requestedSnapshotId: string | undefined,
 	): Promise<EslintCheckBaseline | null> {
 		if (requestedSnapshotId !== currentSnapshotId()) return null;
+
 		const baselineGeneration = fingerprintGeneration;
 		let baseline = currentFingerprint;
 		const pendingCapture = pendingFingerprintCapture;
+
 		if (baseline == null && pendingCapture) {
 			baseline = await pendingCapture;
 		}
+
 		if (
 			requestedSnapshotId !== currentSnapshotId()
 			|| baselineGeneration !== fingerprintGeneration
 		) {
 			return null;
 		}
+
 		if (baseline != null) {
 			const probe = await fileContentFingerprintProbes.run(
 				`${requestedSnapshotId}:${baselineGeneration}`,
 				computeDiffFingerprint,
 			);
+
 			if (
 				requestedSnapshotId !== currentSnapshotId()
 				|| currentFingerprint !== baseline
@@ -923,6 +934,7 @@ export async function startReviewServer(options: {
 				return null;
 			}
 		}
+
 		return {
 			snapshotId: requestedSnapshotId,
 			fingerprintGeneration: baselineGeneration,
@@ -943,8 +955,10 @@ export async function startReviewServer(options: {
 		baseline: EslintCheckBaseline;
 		response: EslintCheckResponse;
 	} | null = null;
+
 	async function getEslintCheck(requestedSnapshotId: string | undefined): Promise<EslintCheckResponse> {
 		const baseline = await resolveEslintCheckBaseline(requestedSnapshotId);
+
 		if (!baseline) {
 			return {
 				status: "error",
@@ -952,10 +966,13 @@ export async function startReviewServer(options: {
 				message: "The reviewed diff changed before ESLint started. Run the check again.",
 			};
 		}
+
 		if (eslintCheckCache && sameEslintCheckBaseline(eslintCheckCache.baseline, baseline)) {
 			return eslintCheckCache.response;
 		}
+
 		const input = resolveEslintCheckInput();
+
 		if (!input) {
 			return {
 				status: "unavailable",
@@ -967,8 +984,10 @@ export async function startReviewServer(options: {
 						: "ESLint is available only when the review's new side is the current working tree.",
 			};
 		}
+
 		const response = await runEslintCheck(input);
 		const completedBaseline = await resolveEslintCheckBaseline(requestedSnapshotId);
+
 		if (!completedBaseline || !sameEslintCheckBaseline(baseline, completedBaseline)) {
 			return {
 				status: "error",
@@ -976,7 +995,9 @@ export async function startReviewServer(options: {
 				message: "The reviewed diff changed while ESLint was running. Run the check again.",
 			};
 		}
+
 		if (response.status === "ok") eslintCheckCache = { baseline, response };
+
 		return response;
 	}
 

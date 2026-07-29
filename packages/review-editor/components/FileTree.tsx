@@ -81,9 +81,11 @@ interface FileTreeProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+
   onSelectEslintCheck?: () => void;
   isEslintCheckActive?: boolean;
   eslintCheckFileCount?: number;
+
   onSelectAllFiles?: () => void;
   isAllFilesActive?: boolean;
   scrollHighlightIndex?: number;
@@ -155,9 +157,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
+
   onSelectEslintCheck,
   isEslintCheckActive = false,
   eslintCheckFileCount,
+
   onSelectAllFiles,
   isAllFilesActive = false,
   scrollHighlightIndex,
@@ -550,9 +554,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
           {semanticDiffAvailable && onSelectSemanticDiff && (
             <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
           )}
+
           {onSelectEslintCheck && (
-            <EslintCheckRow active={isEslintCheckActive} onClick={onSelectEslintCheck} fileCount={eslintCheckFileCount} />
+            <EslintCheckRow
+              active={isEslintCheckActive}
+              onClick={onSelectEslintCheck}
+              fileCount={eslintCheckFileCount}
+            />
           )}
+
           {onSelectAllFiles && (
             <AllFilesRow
               active={isAllFilesActive}

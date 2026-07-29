@@ -57,10 +57,12 @@ export function isEslintCheckCompatibleReviewView(options: {
 }): boolean {
   if (options.isPRMode) return false;
   if (options.isWorkspaceMode) return options.diffType === "workspace-current";
+
   const worktreeSeparator = options.diffType.lastIndexOf(":");
   const type = options.diffType.startsWith("worktree:") && worktreeSeparator !== -1
     ? options.diffType.slice(worktreeSeparator + 1)
     : options.diffType;
+
   return type === "since-base"
     || type === "uncommitted"
     || type === "unstaged"
@@ -207,6 +209,7 @@ function defaultRunCommand(
 
 export function createDefaultEslintCheckRuntime(): EslintCheckRuntime {
   const runningUnderBun = (process.versions as Record<string, string | undefined>).bun !== undefined;
+
   return {
     fileExists: existsSync,
     readTextFile: (path) => readFileSync(path, "utf-8"),
@@ -222,6 +225,7 @@ export function buildEslintCheckInput(
   workspaceRoots?: EslintWorkspaceRoot[],
 ): EslintCheckInput {
   const patchFiles = listPatchFiles(rawPatch);
+
   if (!workspaceRoots?.length) {
     return {
       rawPatch,
@@ -231,12 +235,16 @@ export function buildEslintCheckInput(
 
   const sortedRoots = [...workspaceRoots].sort((a, b) => b.label.length - a.label.length);
   const grouped = new Map<string, EslintCheckRoot>();
+
   for (const file of patchFiles) {
     const root = sortedRoots.find((candidate) => file.path.startsWith(`${candidate.label}/`));
     if (!root) continue;
+
     const relativePath = file.path.slice(root.label.length + 1);
     if (!relativePath) continue;
+
     const group = grouped.get(root.cwd) ?? { cwd: root.cwd, files: [] };
+
     group.files.push({ path: relativePath, displayPath: file.path });
     grouped.set(root.cwd, group);
   }
@@ -246,17 +254,20 @@ export function buildEslintCheckInput(
 
 function extensionOf(path: string): string {
   const dot = path.lastIndexOf(".");
+
   return dot === -1 ? "" : path.slice(dot).toLowerCase();
 }
 
 function isWithinRoot(root: string, candidate: string): boolean {
   const rel = relative(root, candidate);
+
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function readJson(runtime: EslintCheckRuntime, path: string): Record<string, unknown> | null {
   try {
     const value = JSON.parse(runtime.readTextFile(path));
+
     return value && typeof value === "object" && !Array.isArray(value)
       ? value as Record<string, unknown>
       : null;
@@ -267,20 +278,26 @@ function readJson(runtime: EslintCheckRuntime, path: string): Record<string, unk
 
 function directoryHasConfig(runtime: EslintCheckRuntime, directory: string): boolean {
   if (CONFIG_FILENAMES.some((name) => runtime.fileExists(join(directory, name)))) return true;
+
   const packageJson = join(directory, "package.json");
   if (!runtime.fileExists(packageJson)) return false;
+
   return readJson(runtime, packageJson)?.eslintConfig !== undefined;
 }
 
 function findConfigRoot(runtime: EslintCheckRuntime, filePath: string, root: string): string | null {
   let current = dirname(filePath);
+
   while (isWithinRoot(root, current)) {
     if (directoryHasConfig(runtime, current)) return current;
     if (current === root) break;
+
     const parent = dirname(current);
     if (parent === current) break;
+
     current = parent;
   }
+
   return null;
 }
 
@@ -290,8 +307,10 @@ function resolveEslintPackage(
   root: string,
 ): EslintPackage | null {
   let current = start;
+
   while (isWithinRoot(root, current)) {
     const packagePath = join(current, "node_modules", "eslint", "package.json");
+
     if (runtime.fileExists(packagePath)) {
       const packageJson = readJson(runtime, packagePath);
       const packageRoot = dirname(packagePath);
@@ -302,6 +321,7 @@ function resolveEslintPackage(
           ? (bin as Record<string, string>).eslint
           : "bin/eslint.js";
       const entryPath = resolve(packageRoot, binPath);
+
       if (isWithinRoot(packageRoot, entryPath) && runtime.fileExists(entryPath)) {
         return {
           entryPath,
@@ -309,11 +329,15 @@ function resolveEslintPackage(
         };
       }
     }
+
     if (current === root) break;
+
     const parent = dirname(current);
     if (parent === current) break;
+
     current = parent;
   }
+
   return null;
 }
 
@@ -323,24 +347,30 @@ function prepareGroups(input: EslintCheckInput, runtime: EslintCheckRuntime): Pr
 
   for (const rootInput of input.roots) {
     const root = resolve(rootInput.cwd);
+
     for (const file of rootInput.files) {
       if (preparedCount >= ESLINT_MAX_FILES) break;
       if (!LINTABLE_EXTENSIONS.has(extensionOf(file.path))) continue;
+
       const absolutePath = resolve(root, file.path);
       if (!isWithinRoot(root, absolutePath) || !runtime.fileExists(absolutePath)) continue;
+
       const configRoot = findConfigRoot(runtime, absolutePath, root);
       if (!configRoot) continue;
+
       const eslint = resolveEslintPackage(runtime, configRoot, root);
       if (!eslint) continue;
 
       const key = `${configRoot}\0${eslint.entryPath}`;
       const group = groups.get(key) ?? { cwd: configRoot, eslint, files: [] };
+
       group.files.push({
         absolutePath,
         relativePath: relative(configRoot, absolutePath),
         displayPath: file.displayPath ?? file.path,
         configRoot,
       });
+
       groups.set(key, group);
       preparedCount += 1;
     }
@@ -357,10 +387,13 @@ export function getEslintCheckAvailability(
     (count, root) => count + root.files.filter((file) => LINTABLE_EXTENSIONS.has(extensionOf(file.path))).length,
     0,
   );
+
   if (lintableCount === 0) return { available: false, reason: "no-lintable-files" };
 
   const groups = prepareGroups(input, runtime);
+
   if (groups.length === 0) return { available: false, reason: "eslint-not-configured" };
+
   return {
     available: true,
     fileCount: groups.reduce((count, group) => count + group.files.length, 0),
@@ -379,17 +412,22 @@ export function extractChangedLines(rawPatch: string): Map<string, Set<number>> 
     const fileLines = parseDiffFilePathLines(lines);
     const header = parseDiffGitHeader(lines[0] ?? "");
     const path = fileLines.newPath ?? header.newPath;
+
     if (!path) continue;
 
     const changed = result.get(path) ?? new Set<number>();
     let newLine = 0;
+
     for (const line of lines) {
       const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+
       if (hunk) {
         newLine = Number.parseInt(hunk[1], 10);
         continue;
       }
+
       if (newLine === 0) continue;
+
       if (line.startsWith("+") && !line.startsWith("+++")) {
         changed.add(newLine);
         newLine += 1;
@@ -397,6 +435,7 @@ export function extractChangedLines(rawPatch: string): Map<string, Set<number>> 
         newLine += 1;
       }
     }
+
     result.set(path, changed);
   }
 
@@ -418,23 +457,31 @@ function parseDiagnostics(
   } catch {
     return null;
   }
+
   if (!Array.isArray(parsed)) return null;
 
   const filesByAbsolutePath = new Map(group.files.map((file) => [resolve(file.absolutePath), file]));
   const diagnostics: EslintDiagnostic[] = [];
+
   for (const rawResult of parsed as RawEslintResult[]) {
     if (!rawResult || typeof rawResult !== "object" || typeof rawResult.filePath !== "string") continue;
+
     const rawAbsolutePath = resolve(rawResult.filePath);
     const normalizedRawPath = rawAbsolutePath.replaceAll("\\", "/");
     const file = filesByAbsolutePath.get(rawAbsolutePath)
       ?? group.files.find((candidate) => normalizedRawPath.endsWith(`/${candidate.relativePath.replaceAll("\\", "/")}`));
+
     if (!file || !Array.isArray(rawResult.messages)) continue;
+
     for (const rawMessage of rawResult.messages as RawEslintMessage[]) {
       if (!rawMessage || typeof rawMessage !== "object") continue;
+
       const severity = rawMessage.severity === 2 ? 2 : rawMessage.severity === 1 ? 1 : null;
       if (!severity || typeof rawMessage.message !== "string") continue;
+
       const line = numeric(rawMessage.line, 1);
       const fileChangedLines = changedLines.get(file.displayPath);
+
       diagnostics.push({
         filePath: file.displayPath,
         line,
@@ -449,6 +496,7 @@ function parseDiagnostics(
       });
     }
   }
+
   return diagnostics;
 }
 
@@ -457,6 +505,7 @@ export async function runEslintCheck(
   runtime: EslintCheckRuntime = createDefaultEslintCheckRuntime(),
 ): Promise<EslintCheckResponse> {
   const groups = prepareGroups(input, runtime);
+
   if (groups.length === 0) {
     return {
       status: "unavailable",
@@ -468,16 +517,20 @@ export async function runEslintCheck(
   const changedLines = extractChangedLines(input.rawPatch);
   const diagnostics: EslintDiagnostic[] = [];
   const deadline = runtime.now() + ESLINT_TIMEOUT_MS;
+
   for (const group of groups) {
     const remainingMs = deadline - runtime.now();
+
     if (remainingMs <= 0) {
       return { status: "error", reason: "timeout", message: "ESLint did not finish within 30 seconds." };
     }
+
     const command = await runtime.runCommand(
       runtime.nodePath,
       [group.eslint.entryPath, "--format", "json", "--no-color", "--", ...group.files.map((file) => file.relativePath)],
       { cwd: group.cwd, timeoutMs: remainingMs, maxOutputBytes: ESLINT_MAX_OUTPUT_BYTES },
     );
+
     if (command.timedOut) {
       return { status: "error", reason: "timeout", message: "ESLint did not finish within 30 seconds." };
     }
@@ -496,7 +549,9 @@ export async function runEslintCheck(
         ...(command.stderr.trim() && { stderr: command.stderr.trim() }),
       };
     }
+
     const groupDiagnostics = parseDiagnostics(command.stdout, group, changedLines);
+
     if (!groupDiagnostics) {
       return {
         status: "error",
@@ -504,12 +559,14 @@ export async function runEslintCheck(
         message: command.stderr.trim() || "ESLint returned invalid JSON output.",
       };
     }
+
     diagnostics.push(...groupDiagnostics);
   }
 
   diagnostics.sort((a, b) =>
     a.filePath.localeCompare(b.filePath) || a.line - b.line || a.column - b.column || b.severity - a.severity,
   );
+
   const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 2).length;
   const warnings = diagnostics.length - errors;
   const changedLineDiagnostics = diagnostics.filter((diagnostic) => diagnostic.onChangedLine);

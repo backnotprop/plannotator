@@ -73,9 +73,11 @@ interface SectionsPanelProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+
   onSelectEslintCheck?: () => void;
   isEslintCheckActive?: boolean;
   eslintCheckFileCount?: number;
+
   /** Footer copy-diffs. */
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
@@ -192,9 +194,11 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive,
   semanticDiffAvailable,
+
   onSelectEslintCheck,
   isEslintCheckActive,
   eslintCheckFileCount,
+
   onCopyRawDiff,
   canCopyRawDiff,
   copyRawDiffStatus = 'idle',
@@ -576,9 +580,15 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
           {semanticDiffAvailable && onSelectSemanticDiff && (
             <SemanticDiffRow active={isSemanticDiffActive ?? false} onClick={onSelectSemanticDiff} />
           )}
+
           {onSelectEslintCheck && (
-            <EslintCheckRow active={isEslintCheckActive ?? false} onClick={onSelectEslintCheck} fileCount={eslintCheckFileCount} />
+            <EslintCheckRow
+              active={isEslintCheckActive ?? false}
+              onClick={onSelectEslintCheck}
+              fileCount={eslintCheckFileCount}
+            />
           )}
+
           {onSelectAllFiles && (
             <AllFilesRow
               active={isAllFilesActive ?? false}

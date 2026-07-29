@@ -20,6 +20,7 @@ function makeRuntime(options: {
   const files = new Set(options.files ?? []);
   const contents = options.contents ?? {};
   const calls: Array<{ command: string; args: string[]; cwd: string; timeoutMs: number }> = [];
+
   return {
     calls,
     nodePath: "/usr/bin/node",

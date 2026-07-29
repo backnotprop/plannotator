@@ -183,6 +183,7 @@ export interface ReviewState {
   onSemanticDiffUnavailable: () => void;
   onSemanticDiffLoadError: () => boolean;
   onSemanticDiffLoadSuccess: () => void;
+
   snapshotId: string | null;
   eslintCheckAvailable: boolean;
 
