@@ -30,6 +30,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
+    expect(output).toContain("plannotator copilot-last [--gate] [--json] [--hook]");
     expect(output).toContain("plannotator setup-goal <interview|facts>");
     expect(output).toContain("Run 'plannotator <command> --help' for command-specific usage.");
     expect(output).toContain("running 'plannotator' without arguments is for hook integration");
@@ -78,6 +79,7 @@ describe("CLI subcommand help", () => {
     // advertised "run 'plannotator <command> --help'" contract holds.
     for (const sub of [
       "annotate",
+      "copilot-last",
       "setup-goal",
       "archive",
       "sessions",
