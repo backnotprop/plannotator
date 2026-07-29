@@ -4,7 +4,10 @@
  * Extracts recent assistant messages and plan content from a Copilot CLI session.
  * Copilot CLI stores sessions at ~/.copilot/session-state/<uuid>/
  *
- * Detection: The COPILOT_CLI=1 environment variable is set in Copilot CLI sessions.
+ * Detection: Copilot CLI sets no identifying environment variable. Instead,
+ * each live session holds a session-state/<uuid>/inuse.<pid>.lock file, where
+ * <pid> is the copilot process. Matching lock pids against our ancestor pids
+ * identifies the session this process was spawned from.
  *
  * Session directory contents:
  *   events.jsonl    — All session events (JSONL format)
@@ -21,8 +24,10 @@
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { join, basename } from "node:path";
 import { homedir } from "node:os";
+import { getAncestorPids, createDefaultGetParentPid } from "./session-log";
 
 // --- Types ---
 
@@ -107,6 +112,115 @@ export function findCopilotSessionForCwd(cwd: string): string | null {
     entries[0]?.path ??
     null
   );
+}
+
+// --- Session Lock Detection ---
+
+/**
+ * Match a pid chain against the lock files under `sessionStateDir`
+ * (`<uuid>/inuse.<pid>.lock`). Returns the first pid in `pids` that owns a
+ * lock, with its session directory. Malformed lock names and unreadable
+ * session dirs are skipped; a missing `sessionStateDir` returns null.
+ */
+export function matchCopilotSessionLockToPids(
+  sessionStateDir: string,
+  pids: number[],
+): { sessionDir: string; pid: number } | null {
+  if (pids.length === 0) return null;
+
+  let entries;
+  try {
+    entries = readdirSync(sessionStateDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const lockOwners = new Map<number, string>();
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dirPath = join(sessionStateDir, entry.name);
+    let files: string[];
+    try {
+      files = readdirSync(dirPath);
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const lockPid = f.match(/^inuse\.(\d+)\.lock$/)?.[1];
+      if (!lockPid) continue;
+      const pid = parseInt(lockPid, 10);
+      if (!lockOwners.has(pid)) lockOwners.set(pid, dirPath);
+    }
+  }
+
+  for (const pid of pids) {
+    const sessionDir = lockOwners.get(pid);
+    if (sessionDir) return { sessionDir, pid };
+  }
+  return null;
+}
+
+/**
+ * Resolve the Copilot session that spawned this process by walking up the
+ * pid chain and matching each ancestor against session lock files.
+ *
+ * Locks can outlive their session and pids get reused, so a match only
+ * counts if the matched pid still names a copilot process. Returns null when
+ * no ancestor holds a live lock, or where the process table or `ps` is
+ * unavailable.
+ */
+export function findCopilotSessionByAncestorPids(
+  opts: {
+    startPid?: number;
+    sessionStateDir?: string;
+    getParentPid?: (pid: number) => number | null;
+    getProcessName?: (pid: number) => string | null;
+    maxHops?: number;
+  } = {},
+): string | null {
+  const startPid = opts.startPid ?? process.pid;
+  if (!startPid) return null;
+  const copilotHome = process.env.COPILOT_HOME || join(homedir(), ".copilot");
+  const sessionStateDir =
+    opts.sessionStateDir ?? join(copilotHome, "session-state");
+  const getParent = opts.getParentPid ?? createDefaultGetParentPid();
+  const getProcessName = opts.getProcessName ?? getProcessCommand;
+  const maxHops = opts.maxHops ?? 8;
+
+  let pids = getAncestorPids(startPid, maxHops, getParent);
+  while (pids.length > 0) {
+    const match = matchCopilotSessionLockToPids(sessionStateDir, pids);
+    if (!match) return null;
+    if (isCopilotProcessName(getProcessName(match.pid))) {
+      return match.sessionDir;
+    }
+    // Stale lock or reused pid: drop it and retry with the remaining chain
+    pids = pids.filter((p) => p !== match.pid);
+  }
+  return null;
+}
+
+function isCopilotProcessName(command: string | null): boolean {
+  if (!command) return false;
+  return basename(command.trim()).startsWith("copilot");
+}
+
+/**
+ * `ps -o comm=` for one pid. Null on any failure; without a process name the
+ * pid-reuse guard rejects every match, so platforms lacking `ps` degrade to
+ * no detection.
+ */
+function getProcessCommand(pid: number): string | null {
+  try {
+    const result = spawnSync("ps", ["-o", "comm=", "-p", String(pid)], {
+      encoding: "utf-8",
+      timeout: 2000,
+    });
+    if (result.status !== 0) return null;
+    return result.stdout.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 // --- Plan Content Discovery ---

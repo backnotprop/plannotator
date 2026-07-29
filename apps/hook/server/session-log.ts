@@ -316,7 +316,7 @@ function snapshotProcessTable(): Map<number, number> {
  * on first call and caches it for the lifetime of the closure, so walking
  * up to `maxHops` ancestors costs a single spawn instead of one per hop.
  */
-function createDefaultGetParentPid(): (pid: number) => number | null {
+export function createDefaultGetParentPid(): (pid: number) => number | null {
   let table: Map<number, number> | null = null;
   return (pid: number) => {
     if (table === null) table = snapshotProcessTable();
