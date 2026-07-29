@@ -132,7 +132,7 @@ import {
   type RenderedMessage,
 } from "./session-log";
 import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
-import { findCopilotPlanContent, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
+import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
   formatSubcommandHelp,
@@ -1122,6 +1122,7 @@ if (args[0] === "sessions") {
   const codexThreadId = process.env.CODEX_THREAD_ID;
   const isCodex = !!codexThreadId;
   const isDroid = detectedOrigin === "droid";
+  const isCopilot = detectedOrigin === "copilot-cli";
 
   // Collect up to N recent assistant messages so the user can pick the right
   // one — defaults to the same selection as the legacy "last message"
@@ -1132,6 +1133,18 @@ if (args[0] === "sessions") {
   const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
   let recentMessages: RenderedMessage[] = [];
+
+  // Copilot CLI sets no env fingerprint, so detection matches ancestor pids
+  // against session-state inuse locks (spawns ps). Only attempted when no
+  // earlier branch claims the invocation.
+  let copilotLockSessionDir: string | null = null;
+  let copilotSessionDir: string | null = null;
+  if (!stdinFlag && !isCodex && !isDroid) {
+    copilotLockSessionDir = findCopilotSessionByAncestorPids();
+    copilotSessionDir = copilotLockSessionDir ??
+      (isCopilot ? findCopilotSessionForCwd(projectRoot) : null);
+  }
+  const copilotDetected = isCopilot || copilotSessionDir !== null;
 
   if (stdinFlag) {
     const text = (await Bun.stdin.text()).trim();
@@ -1181,6 +1194,20 @@ if (args[0] === "sessions") {
     }
     if (droidLog) {
       recentMessages = getRecentRenderedMessages(droidLog, RECENT_MESSAGES_LIMIT);
+      lastMessage = recentMessages[0] ?? null;
+    }
+  } else if (copilotDetected) {
+    // Copilot path: prefer the session whose inuse lock an ancestor copilot
+    // process holds; with the origin override and no lock match, fall back
+    // to the cwd heuristic.
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Copilot detected, project root: ${projectRoot}`);
+      console.error(`[DEBUG] Copilot ancestor lock session: ${copilotLockSessionDir ?? "(none)"}`);
+      console.error(`[DEBUG] Copilot selected session: ${copilotSessionDir ?? "(none)"}`);
+    }
+    if (copilotSessionDir) {
+      recentMessages = getRecentCopilotMessages(copilotSessionDir, RECENT_MESSAGES_LIMIT)
+        .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
       lastMessage = recentMessages[0] ?? null;
     }
   } else {
@@ -1260,7 +1287,7 @@ if (args[0] === "sessions") {
   const server = await startAnnotateServer({
     markdown: annotatedMessage.text,
     filePath: "last-message",
-    origin: detectedOrigin,
+    origin: copilotDetected ? "copilot-cli" : detectedOrigin,
     mode: "annotate-last",
     sharingEnabled,
     shareBaseUrl,
