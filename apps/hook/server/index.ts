@@ -1757,10 +1757,17 @@ if (args[0] === "sessions") {
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
   if (process.env.PLANNOTATOR_DEBUG) {
-    console.error(`[DEBUG] Copilot CLI detected, finding session for CWD: ${projectRoot}`);
+    console.error(`[DEBUG] Copilot CLI detected, project root: ${projectRoot}`);
   }
 
-  const sessionDir = findCopilotSessionForCwd(projectRoot);
+  // Prefer the session locked by an ancestor copilot process; the cwd
+  // heuristic can pick a stale session when several exist for one repo.
+  const lockSessionDir = findCopilotSessionByAncestorPids();
+  if (process.env.PLANNOTATOR_DEBUG) {
+    console.error(`[DEBUG] Ancestor lock session: ${lockSessionDir ?? "(none)"}`);
+  }
+
+  const sessionDir = lockSessionDir ?? findCopilotSessionForCwd(projectRoot);
 
   if (!sessionDir) {
     console.error("No Copilot CLI session found.");
