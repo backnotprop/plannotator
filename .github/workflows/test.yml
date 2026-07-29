@@ -49,6 +49,7 @@ jobs:
           packages/ui/codeAnnotationDraftPersistence.test.tsx
           packages/ui/components/html-viewer/srcdoc.test.ts
           packages/ui/utils/clipboard.test.ts
+          packages/ui/utils/vimScroll.test.ts
           packages/ui/components/InlineMarkdown.resolveLinkedDoc.test.tsx
           packages/ui/components/MarkdownDiff.frozen.test.tsx
           packages/ui/components/MarkdownEditor.extensions.test.tsx

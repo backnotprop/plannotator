@@ -47,11 +47,14 @@ import {
   type VimVisualBlockState,
   type VimVisualState,
 } from '../utils/vimNavigation';
+import { scrollVimTargetIntoView } from '../utils/vimScroll';
 import { useVimDocumentFocus } from './useVimDocumentFocus';
 
 /** Inputs required by the Markdown semantic Vim controller. */
 export interface UseVimSelectionOptions {
   readonly containerRef: RefObject<HTMLElement | null>;
+  /** The element that actually scrolls (ScrollViewportContext value). */
+  readonly scrollViewport?: HTMLElement | null;
   readonly enabled: boolean;
   readonly hudEnabled: boolean;
   readonly blocked: boolean;
@@ -234,6 +237,7 @@ function applyVisualBlockSelection(
  */
 export function useVimSelection({
   containerRef,
+  scrollViewport,
   enabled,
   hudEnabled,
   blocked,
@@ -256,6 +260,11 @@ export function useVimSelection({
   const wasBlockedRef = useRef(blocked);
   const pointerFocusRef = useRef(false);
   const restoringFocusRef = useRef(false);
+
+  // Read the live scroll viewport without adding a dependency to every
+  // navigation callback below.
+  const scrollViewportRef = useRef(scrollViewport);
+  scrollViewportRef.current = scrollViewport;
 
   const setState = useCallback((next: VimSelectionState) => {
     stateRef.current = next;
@@ -283,7 +292,7 @@ export function useVimSelection({
     const next: VimBlockState = { phase: 'block', targetKey: initial.key };
     setState(next);
     window.getSelection()?.removeAllRanges();
-    initial.element.scrollIntoView({ block: 'nearest' });
+    scrollVimTargetIntoView(initial.element, scrollViewportRef.current);
     return next;
   }, [containerRef, setState]);
 
@@ -358,7 +367,7 @@ export function useVimSelection({
   const setSemanticTarget = useCallback((target: SemanticTarget) => {
     setState(semanticStateForTarget(target));
     window.getSelection()?.removeAllRanges();
-    target.element.scrollIntoView({ block: 'nearest' });
+    scrollVimTargetIntoView(target.element, scrollViewportRef.current);
   }, [setState]);
 
   const updateTextState = useCallback((
@@ -373,9 +382,9 @@ export function useVimSelection({
       normalized.cursor,
       normalized.phase === 'visual' ? normalized.anchor : null,
     );
-    resolveTextPosition(graph.container, normalized.cursor)
-      ?.node.parentElement
-      ?.scrollIntoView({ block: 'nearest' });
+    const cursorParent = resolveTextPosition(graph.container, normalized.cursor)
+      ?.node.parentElement;
+    if (cursorParent) scrollVimTargetIntoView(cursorParent, scrollViewportRef.current);
   }, [setState]);
 
   const enterTextAtTarget = useCallback((
@@ -420,7 +429,7 @@ export function useVimSelection({
     if (!getTextElementBounds(graph.container, block.element)) return false;
     setState(next);
     applyVisualBlockSelection(graph, next);
-    block.element.scrollIntoView({ block: 'nearest' });
+    scrollVimTargetIntoView(block.element, scrollViewportRef.current);
     return true;
   }, [setState]);
 
@@ -730,7 +739,7 @@ export function useVimSelection({
       };
       setState(nextState);
       applyVisualBlockSelection(graph, nextState);
-      next.element.scrollIntoView({ block: 'nearest' });
+      scrollVimTargetIntoView(next.element, scrollViewportRef.current);
       return true;
     }
     if (key === 'o') {
