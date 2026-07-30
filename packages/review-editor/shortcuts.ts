@@ -23,6 +23,12 @@ export const reviewEditorShortcuts = defineShortcutScope({
       section: 'Actions',
       displayOrder: 10,
     },
+    copyFeedback: {
+      description: 'Copy feedback to clipboard',
+      bindings: ['Mod+Shift+Y'],
+      section: 'Actions',
+      displayOrder: 20,
+    },
     focusSearch: {
       description: 'Focus search',
       bindings: ['Mod+F'],

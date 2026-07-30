@@ -2842,6 +2842,27 @@ const ReviewApp: React.FC = () => {
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
 
+  // Cmd/Ctrl+Shift+Y keyboard shortcut to copy feedback, mirroring the
+  // Copy Feedback button in the header and the review sidebar.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'y' || !(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (platformCommentDialog || showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
+
+      e.preventDefault();
+      handleCopyFeedback();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    platformCommentDialog, showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
+    handleCopyFeedback
+  ]);
+
   if (isLoading) {
     return (
       <ThemeProvider defaultTheme="dark">
