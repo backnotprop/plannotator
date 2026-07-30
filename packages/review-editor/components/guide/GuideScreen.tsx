@@ -256,12 +256,10 @@ function ActiveGuide({
   const dismissedRef = useRef<Set<string>>(new Set());
   const [, bumpDismissTick] = useState(0);
 
-  // focusedFile otherwise stays null until pointerenter (see GuideDiffSection),
-  // which leaves a keyboard-only user with nothing focused (no annotation
-  // toolbar target) until they touch the mouse. Default it once the guide
-  // loads: the first section's first diff file that still resolves against
-  // the current diff (guide refs can go stale if the diff changed since
-  // generation — see GuideDiffSection's "no longer in the current diff" case).
+  // Default the virtualized guide to its first resolvable file. CodeView takes
+  // over active-file reporting after its initial window mounts; this seed keeps
+  // the summary and annotation toolbar meaningful for keyboard-only users too.
+  // Guide refs can go stale when the diff changes after generation.
   useEffect(() => {
     if (focusedFile !== null || !guide) return;
     const filePathsInDiff = new Set(state.files.map((f) => f.path));

@@ -210,6 +210,10 @@ interface AllFilesCodeViewProps {
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
   // File-tree active-file highlight follows scroll.
   onVisibleFileChange?: (filePath: string | null) => void;
+  /** Tokenized request to reveal a file through CodeView's own item navigation.
+   *  Guided Review uses this for outline chips and sidebar/AI jumps. The token
+   *  lets repeated requests for the same path fire again. */
+  fileScrollTarget?: { filePath: string; token: number } | null;
   // Which left panel drives the item order: 'tree' (folders-first visual
   // order) or 'list' (files array verbatim — the sections view's order).
   fileOrder?: 'tree' | 'list';
@@ -220,6 +224,12 @@ interface AllFilesCodeViewProps {
   /** Seed every file collapsed (commit diffs open as a folded overview under
    * the commit-description header). The collapse-all toggle still works. */
   defaultCollapsed?: boolean;
+  /** Restore an inner CodeView position after an outer virtualized shell remounts. */
+  initialScrollPosition?: number;
+  /** Persist the current inner CodeView position outside this component. */
+  onScrollPositionChange?: (position: number) => void;
+  /** Report collapse changes so an outer shell can preserve them across remounts. */
+  onFileCollapsedChange?: (filePath: string, collapsed: boolean) => void;
   /** Content rendered ABOVE the first file, inside the scroller — it scrolls
    * away with the diff (not pinned). Implemented as layout.paddingTop +
    * a portal into CodeView's scroll container, since CodeView owns both the
@@ -435,10 +445,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   activeSearchMatch = null,
   onCodeNavRequest,
   onVisibleFileChange,
+  fileScrollTarget,
   fileOrder,
   registerCollapseAllToggle,
   onAllCollapsedChange,
   defaultCollapsed,
+  initialScrollPosition = 0,
+  onScrollPositionChange,
+  onFileCollapsedChange,
   leadingContent,
   isActive = true,
   aiAvailable = false,
@@ -845,6 +859,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     setAllCollapsed(!anyExpanded);
   });
 
+  const reportFileCollapsed = useStableCallback((itemId: string, collapsed: boolean) => {
+    const filePath = itemIdToFilePath.get(itemId);
+    if (filePath) onFileCollapsedChange?.(filePath, collapsed);
+  });
+
   const toggleItemCollapsed = useStableCallback((itemId: string) => {
     const handle = viewerRef.current;
     const viewer = handle?.getInstance();
@@ -859,6 +878,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.version = (item.version ?? 0) + 1;
     if (!handle.updateItem(item)) return;
     syncAllCollapsedMirror();
+    reportFileCollapsed(itemId, item.collapsed === true);
 
     if (itemTop != null && itemTop < viewer.getScrollTop()) {
       viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
@@ -875,6 +895,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.version = (item.version ?? 0) + 1;
     handle.updateItem(item);
     syncAllCollapsedMirror();
+    reportFileCollapsed(itemId, true);
   });
 
   const isItemCollapsed = useCallback((itemId: string): boolean => {
@@ -893,6 +914,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       item.collapsed = collapsed;
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
+      reportFileCollapsed(id, collapsed);
     }
     if (collapsed) {
       const first = identity.items[0]?.id;
@@ -1657,8 +1679,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // scroll EVENT, which can outpace frames during momentum scrolling. Also
   // stamps scroll activity for the augmentation idle-flush.
   const scrollReportRafRef = useRef<number | null>(null);
-  const handleScroll = useStableCallback(() => {
+  const handleScroll = useStableCallback((position: number) => {
     lastScrollTsRef.current = Date.now();
+    onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
     scrollReportRafRef.current = requestAnimationFrame(() => {
       scrollReportRafRef.current = null;
@@ -1680,6 +1703,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return () => cancelAnimationFrame(raf);
   }, [reportVisibleFile, fileSetKey]);
 
+  // Outer Guide file shells survive while this CodeView is evicted. Restore
+  // their last inner position after CodeView has seeded its first window.
+  useEffect(() => {
+    if (initialScrollPosition <= 0) return;
+    const raf = requestAnimationFrame(() => {
+      viewerRef.current?.scrollTo({ type: 'position', position: initialScrollPosition });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [fileSetKey, initialScrollPosition]);
+
   // --- [/]/z/v/a/c/x navigation + header actions driven by CodeView ----------
 
   const scrollToItem = useCallback((itemId: string) => {
@@ -1687,6 +1720,31 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (viewer == null) return;
     viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
   }, []);
+
+  // File-level navigation for surfaces whose lightweight navigation UI lives
+  // outside CodeView (Guided Review's outline). Expand before scrolling so a
+  // viewed/collapsed target reveals code rather than only its file header.
+  // rAF waits for CodeView's initial seed/remount to publish the imperative
+  // handle; token semantics allow the same file to be requested repeatedly.
+  useEffect(() => {
+    if (!fileScrollTarget) return;
+    const itemId = filePathToItemId.get(fileScrollTarget.filePath);
+    if (itemId == null) return;
+    const raf = requestAnimationFrame(() => {
+      const handle = viewerRef.current;
+      const item = handle?.getItem(itemId);
+      if (handle == null || item == null) return;
+      if (item.collapsed === true) {
+        item.collapsed = false;
+        item.version = (item.version ?? 0) + 1;
+        handle.updateItem(item);
+        syncAllCollapsedMirror();
+        reportFileCollapsed(itemId, false);
+      }
+      handle.scrollTo({ type: 'item', id: itemId, align: 'start' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [fileScrollTarget?.filePath, fileScrollTarget?.token, fileSetKey, filePathToItemId, syncAllCollapsedMirror, reportFileCollapsed]);
 
   // --- Selected-annotation highlight + navigation ----------------------------
 

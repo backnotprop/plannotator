@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { GuideSection } from '@plannotator/shared/guide';
+import type { DiffFile } from '../../types';
 import { renderMarkdownProse } from '../../utils/renderMarkdownProse';
 import { useReviewState } from '../../dock/ReviewStateContext';
-import { GuideDiffSection } from './GuideDiffSection';
+import { GuideFileCard } from './GuideFileCard';
 
 function Checkbox({ checked }: { checked: boolean }) {
   return (
@@ -21,42 +22,39 @@ function Checkbox({ checked }: { checked: boolean }) {
   );
 }
 
-/** Left-column file chip: name, directory, +/- counts. Clicking reveals the
- *  matching diff card in the right column — expanding it if collapsed — and
- *  scrolls it into view (via the guideRevealFile channel). */
 function FileChip({
+  filePath,
+  summary,
   file,
-  additions,
-  deletions,
-  missing,
+  active,
   onClick,
 }: {
-  file: string;
-  additions?: number;
-  deletions?: number;
-  missing: boolean;
+  filePath: string;
+  summary?: string;
+  file: DiffFile | undefined;
+  active: boolean;
   onClick: () => void;
 }) {
-  const slash = file.lastIndexOf('/');
-  const name = slash >= 0 ? file.slice(slash + 1) : file;
-  const dir = slash >= 0 ? file.slice(0, slash) : '';
+  const slash = filePath.lastIndexOf('/');
+  const name = slash >= 0 ? filePath.slice(slash + 1) : filePath;
+  const dir = slash >= 0 ? filePath.slice(0, slash) : '';
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-md border border-border/50 bg-background px-2.5 py-1.5 text-left transition-colors hover:border-border"
-      title={file}
+      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${
+        active ? 'border-primary/40 bg-primary/10' : 'border-border/50 bg-background hover:border-border'
+      }`}
+      title={summary ? `${filePath}\n\n${summary}` : filePath}
     >
       <span className="truncate font-mono text-[11px] font-medium text-foreground">{name}</span>
       {dir && <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/60">{dir}</span>}
-      {missing ? (
+      {!file ? (
         <span className="flex-shrink-0 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/50">outdated</span>
       ) : (
         <span className="ml-auto flex-shrink-0 font-mono text-[10px]">
-          {additions !== undefined && additions > 0 && <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>}
-          {deletions !== undefined && deletions > 0 && (
-            <span className="ml-1 text-red-600/80 dark:text-red-400/80">-{deletions}</span>
-          )}
+          {file.additions > 0 && <span className="text-emerald-600 dark:text-emerald-400">+{file.additions}</span>}
+          {file.deletions > 0 && <span className="ml-1 text-red-600/80 dark:text-red-400/80">-{file.deletions}</span>}
         </span>
       )}
     </button>
@@ -65,89 +63,84 @@ function FileChip({
 
 interface GuideSectionCardProps {
   section: GuideSection;
+  files: DiffFile[];
   index: number;
   total: number;
-  reviewed: boolean;
-  onToggleReviewed: () => void;
+  reviewed?: boolean;
+  showReviewed?: boolean;
+  onToggleReviewed?: () => void;
   focusedFile: string | null;
-  onFocusFile: (filePath: string) => void;
+  revealTarget: { filePath: string; token: number } | null;
+  onActivate: (filePath: string) => void;
+  onRequestReveal: (filePath: string) => void;
 }
 
 /**
- * One chapter of the guide, laid out as a two-column body: overview on the
- * left (title, position, Reviewed checkbox, prose, file chips), the section's
- * diffs on the right. Clicking a file chip reveals its diff (expanding it if
- * collapsed) and scrolls it into view.
- *
- * Collapsing is independent of Reviewed: the chevron (or the collapsed row)
- * toggles it freely, while checking Reviewed also collapses by default.
- * `collapsedOverride` records an explicit user choice; null falls back to
- * "collapsed iff reviewed". Toggling Reviewed clears the override so the
- * default relationship resumes.
+ * One original Guided Review chapter. Every file keeps its natural description
+ * and bounded card in document flow; GuideFileCard decides whether that shell's
+ * one-file Pierre CodeView is inside the shared outer mount window.
  */
 export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   section,
+  files,
   index,
   total,
-  reviewed,
+  reviewed = false,
+  showReviewed = true,
   onToggleReviewed,
   focusedFile,
-  onFocusFile,
+  revealTarget,
+  onActivate,
+  onRequestReveal,
 }) => {
   const [collapsedOverride, setCollapsedOverride] = useState<boolean | null>(null);
   const state = useReviewState();
-  const diffElements = useRef(new Map<string, HTMLDivElement | null>());
+  const cardRef = useRef<HTMLDivElement>(null);
   const position = `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
-  const isCollapsed = collapsedOverride ?? reviewed;
+  const isCollapsed = showReviewed ? collapsedOverride ?? reviewed : collapsedOverride === true;
 
-  // Reveal channel (state.guideRevealFile): a jump — sidebar annotation click,
-  // AI line citation, or a section file chip — targeted a file placed in THIS
-  // section while the guide is open. Expand if collapsed (a reviewed section
-  // has no mounted viewer, so the jump would otherwise silently no-op), focus
-  // the file so the selection/AI history bind to it, then scroll its diff
-  // into view.
-  // rAF: the expansion's mount commits first; the element exists by the next
-  // frame. Keyed on the token so the same file can be revealed repeatedly;
-  // only the (unique — first-placement-wins) containing card matches.
-  const revealTarget =
-    state.guideRevealFile && section.diffs.some((d) => d.file === state.guideRevealFile?.path)
-      ? state.guideRevealFile
-      : null;
+  const filesByPath = useMemo(() => new Map(state.files.map((file) => [file.path, file])), [state.files]);
+  const summaryByPath = useMemo(() => {
+    const summaries = new Map<string, string>();
+    for (const ref of section.diffs) {
+      if (ref.summary) summaries.set(ref.file, ref.summary);
+    }
+    return summaries;
+  }, [section.diffs]);
+
+  const targetBelongsHere = revealTarget && section.diffs.some((ref) => ref.file === revealTarget.filePath)
+    ? revealTarget
+    : null;
+
+  // Reopen a reviewed chapter before its target file shell force-mounts and
+  // scrolls itself into view. Reviewed persistence remains unchanged because
+  // this is only the local visual override.
   useEffect(() => {
-    if (!revealTarget) return;
+    if (!targetBelongsHere) return;
     setCollapsedOverride(false);
-    onFocusFile(revealTarget.path);
-    const raf = requestAnimationFrame(() => {
-      diffElements.current.get(revealTarget.path)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    return () => cancelAnimationFrame(raf);
-    // Token identifies the reveal event (it increments on every set), so it's
-    // the only dependency that matters; path/handler churn must not re-fire it.
+    onActivate(targetBelongsHere.filePath);
+    // Token identifies the reveal event; callback identity must not replay it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealTarget?.token]);
+  }, [targetBelongsHere?.token]);
 
   const handleToggleReviewed = () => {
     setCollapsedOverride(null);
-    onToggleReviewed();
+    onToggleReviewed?.();
   };
 
   if (isCollapsed) {
-    // Two SIBLING buttons in a flex row, not a button nested inside a button:
-    // the previous markup put a clickable checkbox `<span onClick>` inside
-    // the row's `<button>`, which is both invalid HTML (interactive-in-
-    // interactive) and unreachable by keyboard/screen reader as its own
-    // control. Same visual result, valid semantics, both independently
-    // focusable and operable with Enter/Space.
     return (
-      <div className="flex w-full items-center gap-3 rounded-lg border border-border/50 bg-muted/10 px-4 py-3">
-        <button
-          type="button"
-          onClick={handleToggleReviewed}
-          aria-label={reviewed ? 'Un-mark as reviewed' : 'Mark as reviewed'}
-          className="flex-shrink-0 rounded"
-        >
-          <Checkbox checked={reviewed} />
-        </button>
+      <div ref={cardRef} className="flex w-full items-center gap-3 rounded-lg border border-border/50 bg-muted/10 px-4 py-3">
+        {showReviewed && (
+          <button
+            type="button"
+            onClick={handleToggleReviewed}
+            aria-label={reviewed ? 'Un-mark as reviewed' : 'Mark as reviewed'}
+            className="flex-shrink-0 rounded"
+          >
+            <Checkbox checked={reviewed} />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setCollapsedOverride(false)}
@@ -167,113 +160,80 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   }
 
   return (
-    // overflow-CLIP, not overflow-hidden: both clip the rounded corners, but
-    // hidden makes this card a (non-scrolling) scroll container, which silently
-    // breaks the left column's position:sticky below — sticky binds to the
-    // nearest scroll container, and a box that never scrolls never sticks.
-    // clip clips paint only, so sticky binds to the guide page's scroller.
-    <div className="overflow-clip rounded-lg border border-border/50 bg-card">
+    <div ref={cardRef} className="scroll-mt-4 overflow-clip rounded-lg border border-border/50 bg-card">
       <div className="md:grid md:grid-cols-[440px_minmax(0,1fr)]">
-        {/* Left column: overview. The cell spans the full row height (grid
-            stretch) so its border-r runs the card's height; the CONTENT is
-            sticky within the cell — it pins near the top of the page scroller
-            while this section's diffs scroll, then is pushed out naturally by
-            the cell's bottom edge as the next chapter arrives. md+ only: the
-            stacked mobile layout must not pin prose over the diffs. */}
         <div className="border-b border-border/40 md:border-b-0 md:border-r">
-          {/* Capped at the visible height (48px offset ≈ the app header above
-              the page scroller) and laid out as a flex column so that when the
-              cap bites, ONLY the file list shrinks and scrolls internally —
-              title, meta, and prose stay fixed (md:flex-none). The outer
-              overflow-y-auto is a graceful fallback for the rare section whose
-              prose ALONE exceeds the viewport: then the whole column scrolls.
-              overflow-x-hidden matters: per spec, overflow-y:auto forces the
-              computed overflow-x to auto too, which grew a horizontal
-              scrollbar here. Vertical scroll only. */}
           <div className="px-6 py-5 md:sticky md:top-0 md:flex md:max-h-[calc(100dvh-48px)] md:flex-col md:overflow-y-auto md:overflow-x-hidden">
-          <div className="flex items-start gap-2 md:flex-none">
-            <h3 className="flex-1 text-[15px] font-semibold leading-snug text-foreground [text-wrap:balance]">
-              {section.title}
-            </h3>
-            <button
-              type="button"
-              onClick={() => setCollapsedOverride(true)}
-              className="mt-0.5 flex-shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-foreground"
-              title="Collapse section"
-            >
-              <ChevronDown className="rotate-180" size={13} />
-            </button>
-          </div>
-          <div className="mt-2 flex items-center gap-3 md:flex-none">
-            <span className="font-mono text-[11px] text-muted-foreground/60">{position}</span>
-            <button
-              type="button"
-              onClick={handleToggleReviewed}
-              className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
-              title={reviewed ? 'Un-mark as reviewed' : 'Mark as reviewed'}
-            >
-              <Checkbox checked={reviewed} />
-              Reviewed
-            </button>
-          </div>
+            <div className="flex items-start gap-2 md:flex-none">
+              <h3 className="flex-1 text-[15px] font-semibold leading-snug text-foreground [text-wrap:balance]">
+                {section.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCollapsedOverride(true)}
+                className="mt-0.5 flex-shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-foreground"
+                title="Collapse section"
+              >
+                <ChevronDown className="rotate-180" size={13} />
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-3 md:flex-none">
+              <span className="font-mono text-[11px] text-muted-foreground/60">{position}</span>
+              {showReviewed && (
+                <button
+                  type="button"
+                  onClick={handleToggleReviewed}
+                  className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+                  title={reviewed ? 'Un-mark as reviewed' : 'Mark as reviewed'}
+                >
+                  <Checkbox checked={reviewed} />
+                  Reviewed
+                </button>
+              )}
+            </div>
 
-          {section.overview && (
-            <div className="mt-3.5 space-y-2.5 md:flex-none">{renderMarkdownProse(section.overview, { tone: 'muted' })}</div>
-          )}
+            {section.overview && (
+              <div className="mt-3.5 space-y-2.5 md:flex-none">{renderMarkdownProse(section.overview, { tone: 'muted' })}</div>
+            )}
 
-          {/* The one shrinkable region: when the sticky column hits its height
-              cap, this list scrolls internally (min-h floor keeps a few chips
-              visible) while everything above stays put. */}
-          {section.diffs.length > 0 && (
-            <div className="mt-5 space-y-1.5 md:min-h-[84px] md:overflow-y-auto md:overflow-x-hidden">
-              {section.diffs.map((ref) => {
-                const file = state.files.find((f) => f.path === ref.file);
-                return (
+            {section.diffs.length > 0 && (
+              <div className="mt-5 space-y-1.5 md:min-h-[84px] md:overflow-y-auto md:overflow-x-hidden">
+                {section.diffs.map((ref) => (
                   <FileChip
                     key={ref.file}
-                    file={ref.file}
-                    additions={file?.additions}
-                    deletions={file?.deletions}
-                    missing={!file}
-                    onClick={() => {
-                      // Route through the reveal channel rather than scrolling
-                      // directly: the target diff may be collapsed (marked
-                      // viewed), and only the reveal token re-expands it in
-                      // GuideDiffSection before this card's reveal effect
-                      // focuses and scrolls — a bare scrollIntoView would land
-                      // on the collapsed header with no code. The effect also
-                      // retargets the focus arbiter (scrolling under a
-                      // stationary pointer fires no pointerenter).
-                      state.onGuideRevealFile?.(ref.file);
-                    }}
+                    filePath={ref.file}
+                    summary={ref.summary}
+                    file={filesByPath.get(ref.file)}
+                    active={focusedFile === ref.file}
+                    onClick={() => onRequestReveal(ref.file)}
                   />
-                );
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right column: the diffs themselves */}
-        {section.diffs.length > 0 && (
-          <div className="min-w-0 space-y-4 bg-muted/[0.07] px-4 py-4">
-            {section.diffs.map((diffRef) => (
-              <div
-                key={diffRef.file}
-                ref={(el) => {
-                  diffElements.current.set(diffRef.file, el);
-                }}
-                className="scroll-mt-4"
-              >
-                <GuideDiffSection
-                  diffRef={diffRef}
-                  isFocused={focusedFile === diffRef.file}
-                  onFocus={() => onFocusFile(diffRef.file)}
-                />
+        <div className="min-w-0 space-y-4 bg-muted/[0.07] px-4 py-4">
+          {files.length > 0 ? (
+            files.map((file) => (
+              <GuideFileCard
+                key={file.path}
+                file={file}
+                summary={summaryByPath.get(file.path)}
+                focused={focusedFile === file.path}
+                revealTarget={targetBelongsHere}
+                onActivate={onActivate}
+              />
+            ))
+          ) : (
+            <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
+              <div>
+                <p className="text-xs font-medium text-foreground">No chapter files in the current diff</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">The generated references may be out of date.</p>
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

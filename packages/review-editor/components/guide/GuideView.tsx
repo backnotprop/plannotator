@@ -1,60 +1,121 @@
-import React, { useEffect, useRef } from 'react';
-import type { CodeGuideData } from '@plannotator/shared/guide';
-import { renderInlineMarkdown } from '../../utils/renderInlineMarkdown';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CodeGuideData, GuideSection } from '@plannotator/shared/guide';
+import type { DiffFile } from '../../types';
 import { useReviewState } from '../../dock/ReviewStateContext';
+import { renderInlineMarkdown } from '../../utils/renderInlineMarkdown';
 import { GuideSectionCard } from './GuideSectionCard';
-import { GuideDiffSection } from './GuideDiffSection';
+import { GuideViewportProvider } from './GuideViewportManager';
 
 interface GuideViewProps {
   guide: CodeGuideData;
   reviewed: boolean[];
   onToggleReviewed: (index: number) => void;
-  /** e.g. "Claude" / "Codex" — omitted when the generating job/engine is unknown
-   *  (demo guide, or a job the client no longer has in its jobs list). */
+  /** e.g. "Claude" / "Codex" — omitted when the generating job/engine is unknown. */
   engineLabel?: string;
   focusedFile: string | null;
   onFocusFile: (filePath: string) => void;
-  /** Launch a fresh guide for the current changeset — wired to the shared
-   *  guide-launch defaults (useGuideLaunch). Only rendered when the guide is
-   *  outdated (`guide.moved`) and a launch is possible. */
+  /** Launch a fresh guide when a persisted guide no longer matches this branch. */
   onRegenerate?: () => void;
 }
 
-/**
- * The generated guide itself: title + intent, ordered section chapters (each a
- * two-column overview/diffs card), and a trailing "Everything else" bucket for
- * files the model didn't place anywhere (the server's coverage guarantee —
- * every changed file appears exactly once across sections + unplacedFiles).
- */
-export const GuideView: React.FC<GuideViewProps> = ({ guide, reviewed, onToggleReviewed, engineLabel, focusedFile, onFocusFile, onRegenerate }) => {
-  const total = guide.sections.length;
-  const reviewedCount = reviewed.filter(Boolean).length;
-  const state = useReviewState();
-  const unplacedElements = useRef(new Map<string, HTMLDivElement | null>());
+export interface ResolvedGuideSections {
+  sectionFiles: DiffFile[][];
+  unplacedFiles: DiffFile[];
+}
 
-  // Reveal channel for the "Everything else" bucket — the section-card effect
-  // only covers PLACED files, so a sidebar jump (annotation click / AI line
-  // citation) targeting an unplaced file would focus nothing and appear dead.
-  // No collapse handling needed here: the bucket is always rendered.
-  const revealTarget =
-    state.guideRevealFile && guide.unplacedFiles?.includes(state.guideRevealFile.path)
-      ? state.guideRevealFile
-      : null;
+/** Resolve guide refs against the current patch while preserving generated
+ * order. First placement wins globally; stale refs remain in chapter chips but
+ * are omitted from CodeView items. */
+export function resolveGuideSectionFiles(guide: CodeGuideData, files: DiffFile[]): ResolvedGuideSections {
+  const filesByPath = new Map(files.map((file) => [file.path, file]));
+  const seen = new Set<string>();
+  const sectionFiles = guide.sections.map((section) => {
+    const resolved: DiffFile[] = [];
+    for (const ref of section.diffs) {
+      if (seen.has(ref.file)) continue;
+      seen.add(ref.file);
+      const file = filesByPath.get(ref.file);
+      if (file) resolved.push(file);
+    }
+    return resolved;
+  });
+
+  const unplacedFiles: DiffFile[] = [];
+  for (const filePath of guide.unplacedFiles ?? []) {
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
+    const file = filesByPath.get(filePath);
+    if (file) unplacedFiles.push(file);
+  }
+
+  return { sectionFiles, unplacedFiles };
+}
+
+/**
+ * Generated guide with the original vertical chapter/file-card layout. Every
+ * lightweight file shell stays in document flow while GuideViewportProvider
+ * bounds the mounted one-file Pierre CodeViews across all chapters.
+ */
+export const GuideView: React.FC<GuideViewProps> = ({
+  guide,
+  reviewed,
+  onToggleReviewed,
+  engineLabel,
+  focusedFile,
+  onFocusFile,
+  onRegenerate,
+}) => {
+  const state = useReviewState();
+  const resolved = useMemo(() => resolveGuideSectionFiles(guide, state.files), [guide, state.files]);
+  const hasUnplaced = (guide.unplacedFiles?.length ?? 0) > 0;
+  const cardTotal = guide.sections.length + (hasUnplaced ? 1 : 0);
+  const reviewedCount = reviewed.filter(Boolean).length;
+  const effectiveFocusedFile = focusedFile
+    ?? resolved.sectionFiles.find((files) => files.length > 0)?.[0]?.path
+    ?? resolved.unplacedFiles[0]?.path
+    ?? null;
+
+  const localRevealTokenRef = useRef(0);
+  const [localRevealTarget, setLocalRevealTarget] = useState<{ filePath: string; token: number } | null>(null);
+  const externalRevealTarget = state.guideRevealFile
+    ? { filePath: state.guideRevealFile.path, token: state.guideRevealFile.token }
+    : null;
+  const revealTarget = externalRevealTarget ?? localRevealTarget;
+
   useEffect(() => {
     if (!revealTarget) return;
-    onFocusFile(revealTarget.path);
-    const raf = requestAnimationFrame(() => {
-      unplacedElements.current.get(revealTarget.path)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    return () => cancelAnimationFrame(raf);
-    // Token identifies the reveal event (increments on every set) — path and
-    // handler churn must not re-fire it. Mirrors GuideSectionCard's effect.
+    onFocusFile(revealTarget.filePath);
+    // Token identifies a navigation event; callback identity must not replay it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealTarget?.token]);
+  }, [revealTarget?.filePath, revealTarget?.token]);
+
+  const handleRequestReveal = useCallback(
+    (filePath: string) => {
+      onFocusFile(filePath);
+      if (state.onGuideRevealFile) {
+        state.onGuideRevealFile(filePath);
+      } else {
+        localRevealTokenRef.current += 1;
+        setLocalRevealTarget({ filePath, token: localRevealTokenRef.current });
+      }
+    },
+    [onFocusFile, state.onGuideRevealFile],
+  );
+
+  const unplacedSection = useMemo<GuideSection | null>(
+    () =>
+      hasUnplaced
+        ? {
+            title: 'Everything else',
+            overview: "Changed files the guide didn't place into a section — shown so nothing is silently left out.",
+            diffs: (guide.unplacedFiles ?? []).map((file) => ({ file })),
+          }
+        : null,
+    [guide.unplacedFiles, hasUnplaced],
+  );
 
   return (
-    // Full width — the guide owns the whole center area, like the wireframe.
-    <div className="w-full px-10 py-8">
+    <GuideViewportProvider className="w-full px-10 py-8">
       <div className="max-w-[72ch]">
         <h1 className="text-[22px] font-semibold tracking-tight text-foreground [text-wrap:balance]">{guide.title}</h1>
         {guide.intent && (
@@ -62,8 +123,8 @@ export const GuideView: React.FC<GuideViewProps> = ({ guide, reviewed, onToggleR
         )}
         <p className="mt-2 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground/60">
           <span>
-            {total} section{total !== 1 ? 's' : ''}
-            {reviewedCount > 0 && ` · ${reviewedCount}/${total} reviewed`}
+            {guide.sections.length} section{guide.sections.length !== 1 ? 's' : ''}
+            {reviewedCount > 0 && ` · ${reviewedCount}/${guide.sections.length} reviewed`}
             {engineLabel && ` · generated by ${engineLabel}`}
           </span>
           {guide.saved && (
@@ -95,41 +156,37 @@ export const GuideView: React.FC<GuideViewProps> = ({ guide, reviewed, onToggleR
       </div>
 
       <div className="mt-6 space-y-4">
-        {guide.sections.map((section, i) => (
+        {guide.sections.map((section, index) => (
           <GuideSectionCard
-            key={`${section.title}:${i}`}
+            key={`${section.title}:${index}`}
             section={section}
-            index={i}
-            total={total}
-            reviewed={!!reviewed[i]}
-            onToggleReviewed={() => onToggleReviewed(i)}
-            focusedFile={focusedFile}
-            onFocusFile={onFocusFile}
+            files={resolved.sectionFiles[index] ?? []}
+            index={index}
+            total={cardTotal}
+            reviewed={!!reviewed[index]}
+            onToggleReviewed={() => onToggleReviewed(index)}
+                        focusedFile={effectiveFocusedFile}
+
+            revealTarget={revealTarget}
+            onActivate={onFocusFile}
+            onRequestReveal={handleRequestReveal}
           />
         ))}
 
-        {guide.unplacedFiles && guide.unplacedFiles.length > 0 && (
-          <div className="overflow-hidden rounded-lg border border-border/50 bg-card">
-            <div className="border-b border-border/40 px-5 py-3.5">
-              <h3 className="text-[15px] font-semibold text-foreground">Everything else</h3>
-              <p className="mt-0.5 text-[12px] text-muted-foreground/70">
-                Changed files the guide didn't place into a section — shown so nothing is silently left out.
-              </p>
-            </div>
-            <div className="space-y-4 bg-muted/[0.07] px-4 py-4">
-              {guide.unplacedFiles.map((file) => (
-                <div key={file} ref={(el) => { unplacedElements.current.set(file, el); }}>
-                  <GuideDiffSection
-                    diffRef={{ file }}
-                    isFocused={focusedFile === file}
-                    onFocus={() => onFocusFile(file)}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
+        {unplacedSection && (
+          <GuideSectionCard
+            section={unplacedSection}
+            files={resolved.unplacedFiles}
+            index={guide.sections.length}
+            total={cardTotal}
+            showReviewed={false}
+            focusedFile={effectiveFocusedFile}
+            revealTarget={revealTarget}
+            onActivate={onFocusFile}
+            onRequestReveal={handleRequestReveal}
+          />
         )}
       </div>
-    </div>
+    </GuideViewportProvider>
   );
 };

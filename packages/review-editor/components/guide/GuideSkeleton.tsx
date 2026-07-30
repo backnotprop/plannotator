@@ -1,9 +1,9 @@
 import React from 'react';
 
 /**
- * Full-width skeleton section cards mirroring GuideSectionCard's two-column
- * layout — shown while a guide is generating and while a completed guide is
- * being fetched, so the page always reads as "sections are coming".
+ * Lightweight section placeholders shown while a guide is generating and
+ * while a completed guide is being fetched, so the page reads as "sections
+ * are coming" before the virtualized chapter cards take over.
  */
 export function GuideSectionSkeleton({ count = 3 }: { count?: number }) {
   return (
