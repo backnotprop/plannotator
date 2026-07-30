@@ -20,6 +20,13 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return tagName === 'INPUT' || tagName === 'TEXTAREA' || element.isContentEditable;
 }
 
+export function shouldHandleReviewSearchShortcut(
+  target: EventTarget | null,
+  searchInput: HTMLInputElement | null,
+): boolean {
+  return !isTypingTarget(target) || target === searchInput;
+}
+
 interface UseReviewSearchOptions {
   files: ReviewSearchableDiffFile[];
   activeFilePath: string | null;
@@ -72,7 +79,12 @@ export function useReviewSearch({
 
   const openSearch = useCallback(() => {
     setIsSearchOpen(true);
-    requestAnimationFrame(() => searchInputRef.current?.focus());
+    requestAnimationFrame(() => {
+      const input = searchInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.select();
+    });
   }, []);
 
   const closeSearch = useCallback(() => {

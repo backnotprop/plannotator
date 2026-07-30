@@ -34,7 +34,12 @@ import { useAIChat } from './hooks/useAIChat';
 import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
 import { extractLinesFromPatch } from './utils/patchParser';
-import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks/useReviewSearch';
+import {
+  shouldHandleReviewSearchShortcut,
+  isTypingTarget,
+  useReviewSearch,
+  type ReviewSearchMatch,
+} from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs, jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
@@ -1193,7 +1198,13 @@ const ReviewApp: React.FC = () => {
       // Bail while the guide takeover is open (file tree isn't rendered) and
       // don't intercept in the Commits view (its rail has no search input) —
       // in both cases capturing the key would mutate hidden state or no-op.
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !isTypingTarget(e.target)) {
+      // Let the same shortcut reselect the current query when search already
+      // has focus, while preserving native shortcuts in every other input.
+      if (
+        (e.metaKey || e.ctrlKey)
+        && e.key.toLowerCase() === 'f'
+        && shouldHandleReviewSearchShortcut(e.target, searchInputRef.current)
+      ) {
         if (guideOpen) return;
         if (hasSearchableFiles && !showCommitsPanel) {
           e.preventDefault();

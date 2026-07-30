@@ -53,6 +53,7 @@ jobs:
           packages/ui/components/MarkdownEditor.extensions.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
+          packages/review-editor/hooks/useReviewSearch.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
           packages/ui/components/Viewer.consumer.test.tsx
           packages/ui/components/InlineMarkdown.seam.test.tsx
