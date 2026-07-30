@@ -637,6 +637,59 @@ describe("AI endpoints", () => {
     expect(activated).toBe(false);
   });
 
+  test("capabilities?activate= runs the provider initializer and reports refreshed models", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const activations: string[] = [];
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async (providerId) => {
+        activations.push(providerId);
+        provider.models = [
+          { id: "discovered-model", label: "Discovered", default: true },
+        ];
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities?activate=codex"),
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(activations).toEqual(["codex"]);
+    expect(data.providers[0].models).toEqual([
+      { id: "discovered-model", label: "Discovered", default: true },
+    ]);
+  });
+
+  test("capabilities?activate= ignores unknown provider ids", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let activated = false;
+    reg.register(mockProvider("codex-sdk"), "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        activated = true;
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities?activate=missing"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(activated).toBe(false);
+  });
+
   test("capabilities waits for pending provider discovery", async () => {
     const reg = new ProviderRegistry();
     const sm = new SessionManager();
@@ -814,6 +867,118 @@ describe("AI endpoints", () => {
 
     expect(res.status).toBe(200);
     expect(createdModel).toBe("discovered-model");
+  });
+
+  test("session creation honors a requested model the provider still offers", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let createdModel: string | undefined;
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+      async createSession(options: CreateSessionOptions) {
+        createdModel = options.model;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        provider.models = [
+          { id: "discovered-default", label: "Default", default: true },
+          { id: "discovered-alt", label: "Alt" },
+        ];
+      },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          providerId: "codex",
+          model: "discovered-alt",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(createdModel).toBe("discovered-alt");
+  });
+
+  test("session creation snaps an unlisted model to the discovered default on every session", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const createdModels: Array<string | undefined> = [];
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+      async createSession(options: CreateSessionOptions) {
+        createdModels.push(options.model);
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        provider.models = [
+          { id: "discovered-model", label: "Discovered", default: true },
+        ];
+      },
+    });
+
+    // Two sessions with the stale pre-discovery fallback id: the second one
+    // runs after activation already happened, and must not pin the stale id
+    // just because it no longer matches the pre-activation default.
+    for (let i = 0; i < 2; i++) {
+      const res = await endpoints["/api/ai/session"](
+        new Request("http://localhost/api/ai/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: { mode: "plan-review", plan: { plan: "# Test" } },
+            providerId: "codex",
+            model: "static-model",
+          }),
+        }),
+      );
+      expect(res.status).toBe(200);
+    }
+
+    expect(createdModels).toEqual(["discovered-model", "discovered-model"]);
+  });
+
+  test("session creation passes the requested model through when the provider reports no models", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let createdModel: string | undefined;
+    reg.register({
+      ...mockProvider("mock"),
+      async createSession(options: CreateSessionOptions) {
+        createdModel = options.model;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    });
+
+    const endpoints = createAIEndpoints({ registry: reg, sessionManager: sm });
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          model: "anything-goes",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(createdModel).toBe("anything-goes");
   });
 
   test("session creation clamps client-supplied cost controls", async () => {

@@ -88,6 +88,20 @@ describe('AI provider origin defaults', () => {
     expect(next.preferredModels['codex-local']).toBe('codex-alt');
   });
 
+  it('leaves the saved preferred model untouched when no model is passed', () => {
+    // A provider switch (or any non-model change) persists without a model:
+    // a resolver-derived fallback must never overwrite a saved preference
+    // that the currently-advertised model list happens not to include (e.g.
+    // before deferred Codex discovery has run).
+    const next = applyAIProviderSelection(
+      settings({ preferredModels: { 'codex-local': 'gpt-5.3-codex' } }),
+      { providerId: 'codex-local', model: null, origin: 'codex' },
+    );
+
+    expect(next.preferredModels['codex-local']).toBe('gpt-5.3-codex');
+    expect(next.providerByOrigin.codex).toBe('codex-local');
+  });
+
   it('stores explicit choices as the global fallback for origins without a dedicated provider', () => {
     const next = applyAIProviderSelection(
       settings({ providerId: 'claude-local' }),

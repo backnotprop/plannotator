@@ -134,8 +134,19 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
   } = deps;
 
   return {
-    "/api/ai/capabilities": async (_req: Request) => {
+    "/api/ai/capabilities": async (req: Request) => {
       await beforeCapabilities?.();
+      // Explicit provider activation (?activate=<providerId>): run the same
+      // deferred initializer the session path uses, then report the refreshed
+      // metadata — so the client's model picker can move past a provider's
+      // static fallback without creating a session. A plain capabilities
+      // probe must never activate anything: the editor calls it automatically
+      // on load, and activating there would reintroduce the eager launch this
+      // deferral exists to prevent.
+      const activateId = new URL(req.url).searchParams.get("activate");
+      if (activateId && registry.get(activateId)) {
+        await beforeProviderSession?.(activateId);
+      }
       const defaultEntry = registry.getDefault();
       const providerDetails = registry.list().map(id => {
         const p = registry.get(id)!;
@@ -182,17 +193,17 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       try {
-        const defaultModelBeforeActivation =
-          provider.models?.find((candidate) => candidate.default)?.id ??
-          provider.models?.[0]?.id;
         await beforeProviderSession?.(providerEntry.id);
-        const defaultModelAfterActivation =
-          provider.models?.find((candidate) => candidate.default)?.id ??
-          provider.models?.[0]?.id;
+        // Resolve the model against the post-activation list: a requested
+        // model the (possibly refreshed) provider still offers is honored,
+        // anything else — including a stale pre-discovery fallback id — snaps
+        // to the provider's current default. Providers that report no models
+        // pass the request through verbatim.
+        const models = provider.models ?? [];
         const effectiveModel =
-          model === undefined || model === defaultModelBeforeActivation
-            ? defaultModelAfterActivation ?? model
-            : model;
+          model && models.some((candidate) => candidate.id === model)
+            ? model
+            : models.find((candidate) => candidate.default)?.id ?? models[0]?.id ?? model;
         const boundedMaxTurns = clampPositiveInteger(maxTurns, MAX_CLIENT_MAX_TURNS);
         const boundedMaxBudgetUsd = clampPositiveNumber(maxBudgetUsd, MAX_CLIENT_BUDGET_USD);
         const options: CreateSessionOptions = {

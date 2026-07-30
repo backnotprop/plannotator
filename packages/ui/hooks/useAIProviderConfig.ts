@@ -99,9 +99,13 @@ export function useAIProviderConfig({
         }
         const reasoningEffort = model ? (reasoningEffortByModel[model] ?? null) : null;
         const next = { ...prev, providerId, model, reasoningEffort, reasoningEffortByModel };
+        // Only an explicit model pick is persisted. A resolver-derived model
+        // (e.g. the static fallback a lazily-discovered provider advertises
+        // before activation) must never overwrite the user's saved preference
+        // — the session request may fall back, the cookie may not.
         saveAIProviderSelection({
           providerId: next.providerId,
-          model: next.model,
+          model: config.model !== undefined ? next.model : null,
           origin,
           settings: saved,
         });
