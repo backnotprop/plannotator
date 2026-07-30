@@ -102,6 +102,16 @@ export const GuideView: React.FC<GuideViewProps> = ({
     [onFocusFile, state.onGuideRevealFile],
   );
 
+  // Search results are global to the review, but an offscreen guide file has no
+  // CodeView to receive the active match. Route each match change through the
+  // same reveal channel as outline/sidebar jumps so its chapter opens, its shell
+  // mounts, and the target viewer becomes active before line navigation runs.
+  const activeSearchMatch = state.allFilesActiveSearchMatch;
+  useEffect(() => {
+    if (!activeSearchMatch) return;
+    handleRequestReveal(activeSearchMatch.filePath);
+  }, [activeSearchMatch?.id, activeSearchMatch?.filePath, handleRequestReveal]);
+
   const unplacedSection = useMemo<GuideSection | null>(
     () =>
       hasUnplaced
@@ -165,8 +175,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
             total={cardTotal}
             reviewed={!!reviewed[index]}
             onToggleReviewed={() => onToggleReviewed(index)}
-                        focusedFile={effectiveFocusedFile}
-
+            focusedFile={effectiveFocusedFile}
             revealTarget={revealTarget}
             onActivate={onFocusFile}
             onRequestReveal={handleRequestReveal}

@@ -17,6 +17,37 @@ const { GuideView, resolveGuideSectionFiles } = await import('./GuideView');
 
 const hasDom = typeof document !== 'undefined';
 
+class FakeIntersectionObserver {
+  static latest: FakeIntersectionObserver | null = null;
+
+  private readonly callback: IntersectionObserverCallback;
+  private readonly observed = new Set<Element>();
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+    FakeIntersectionObserver.latest = this;
+  }
+
+  observe = (target: Element) => {
+    this.observed.add(target);
+  };
+
+  unobserve = (target: Element) => {
+    this.observed.delete(target);
+  };
+
+  disconnect = () => {
+    this.observed.clear();
+  };
+
+  trigger(entries: Array<{ target: Element; isIntersecting: boolean }>) {
+    const observedEntries = entries
+      .filter(({ target }) => this.observed.has(target))
+      .map(({ target, isIntersecting }) => ({ target, isIntersecting }) as IntersectionObserverEntry);
+    this.callback(observedEntries, this as unknown as IntersectionObserver);
+  }
+}
+
 function makeGuide(overrides: Partial<CodeGuideData> = {}): CodeGuideData {
   return {
     title: 'Persisted guide',
@@ -41,6 +72,9 @@ function makeState(overrides: Partial<ReviewState> = {}): ReviewState {
   return {
     files: [],
     guideRevealFile: null,
+    allFilesActiveSearchMatch: null,
+    aiMessages: [],
+    onClickAIMarker: () => {},
     ...overrides,
   } as unknown as ReviewState;
 }
@@ -67,22 +101,31 @@ async function renderView(
     onFocusFile?: (path: string) => void;
   } = {},
 ) {
-  host = document.createElement('div');
-  document.body.appendChild(host);
-  await act(async () => {
-    root = createRoot(host!);
-    root.render(
+  const Harness = () => {
+    const [focusedFile, setFocusedFile] = React.useState<string | null>(null);
+    const handleFocusFile = React.useCallback((path: string) => {
+      setFocusedFile(path);
+      options.onFocusFile?.(path);
+    }, [options.onFocusFile]);
+    return (
       <ReviewStateProvider value={options.state ?? makeState()}>
         <GuideView
           guide={guide}
           reviewed={guide.reviewed}
           onToggleReviewed={() => {}}
-          focusedFile={null}
-          onFocusFile={options.onFocusFile ?? (() => {})}
+          focusedFile={focusedFile}
+          onFocusFile={handleFocusFile}
           onRegenerate={options.onRegenerate}
         />
-      </ReviewStateProvider>,
+      </ReviewStateProvider>
     );
+  };
+
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(<Harness />);
   });
 }
 
@@ -215,6 +258,169 @@ describe('GuideView per-file windowing', () => {
     expect(chip).not.toBeNull();
     await act(async () => chip!.click());
     expect(reveals).toEqual(['a.ts']);
+  });
+
+  test.skipIf(!hasDom)('reveals, mounts, and activates an offscreen search result', async () => {
+    const files = Array.from({ length: 20 }, (_, index) => makeFile(`src/file-${index}.ts`));
+    const target = files[19];
+    const match = {
+      id: `${target.path}:addition:1:0:0`,
+      filePath: target.path,
+      side: 'addition' as const,
+      lineNumber: 1,
+      text: 'new',
+      matchStart: 0,
+      matchEnd: 3,
+      snippet: 'new',
+    };
+    const guide = makeGuide({
+      sections: [{
+        title: 'Large chapter',
+        overview: '',
+        diffs: files.map((file) => ({ file: file.path })),
+      }],
+      reviewed: [false],
+    });
+
+    await renderView(guide, {
+      state: makeState({
+        files,
+        activeSearchMatchId: match.id,
+        allFilesActiveSearchMatch: match,
+        searchMatches: [match],
+      }),
+    });
+
+    const targetProps = [...latestCodeViewProps].reverse().find(
+      (props) => (props.files as DiffFile[])[0]?.path === target.path,
+    );
+    expect(targetProps?.fileScrollTarget).toEqual({ filePath: target.path, token: 1 });
+    expect(targetProps?.activeSearchMatch).toEqual(match);
+    expect(targetProps?.isActive).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('updates the bounded fallback window while scrolling without IntersectionObserver', async () => {
+    const originalObserver = globalThis.IntersectionObserver;
+    Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: undefined });
+
+    try {
+      const files = Array.from({ length: 20 }, (_, index) => makeFile(`src/file-${index}.ts`));
+      const guide = makeGuide({
+        sections: [{
+          title: 'Large chapter',
+          overview: '',
+          diffs: files.map((file) => ({ file: file.path })),
+        }],
+        reviewed: [false],
+      });
+      await renderView(guide, { state: makeState({ files }) });
+
+      const shells = [...host!.querySelectorAll<HTMLElement>('[data-guide-file-shell]')];
+      shells.forEach((shell, index) => {
+        const top = index === 19 ? 100 : 5_000 + index * 100;
+        shell.getBoundingClientRect = () => ({
+          x: 0,
+          y: top,
+          top,
+          right: 800,
+          bottom: top + 80,
+          left: 0,
+          width: 800,
+          height: 80,
+          toJSON: () => ({}),
+        });
+      });
+
+      await act(async () => {
+        window.dispatchEvent(new Event('scroll'));
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[19].path}"]`)).not.toBeNull();
+      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBeLessThanOrEqual(8);
+    } finally {
+      Object.defineProperty(globalThis, 'IntersectionObserver', {
+        configurable: true,
+        value: originalObserver,
+      });
+    }
+  });
+
+  test.skipIf(!hasDom)('pins the focused card and restores collapsed state after a real eviction', async () => {
+    const originalObserver = globalThis.IntersectionObserver;
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: FakeIntersectionObserver,
+    });
+
+    try {
+      const files = Array.from({ length: 20 }, (_, index) => makeFile(`src/file-${index}.ts`));
+      const guide = makeGuide({
+        sections: [{
+          title: 'Large chapter',
+          overview: '',
+          diffs: files.map((file) => ({ file: file.path })),
+        }],
+        reviewed: [false],
+      });
+      await renderView(guide, { state: makeState({ files }) });
+
+      const observer = FakeIntersectionObserver.latest;
+      expect(observer).not.toBeNull();
+      const shells = [...host!.querySelectorAll<HTMLElement>('[data-guide-file-shell]')];
+      await act(async () => {
+        observer!.trigger(shells.map((target, index) => ({ target, isIntersecting: index < 8 })));
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+
+      const focusedBefore = host!.querySelector<HTMLElement>(
+        `[data-testid="file-code-view"][data-file="${files[0].path}"]`,
+      );
+      expect(focusedBefore).not.toBeNull();
+
+      const fileOneProps = [...latestCodeViewProps].reverse().find(
+        (props) => (props.files as DiffFile[])[0]?.path === files[1].path,
+      );
+      await act(async () => {
+        (fileOneProps!.onFileCollapsedChange as (path: string, collapsed: boolean) => void)(files[1].path, true);
+      });
+
+      // Let the old 1.5s force-mount lease expire; only the focus pin may keep
+      // file 0 alive when the observer moves the near window away.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1_550));
+      });
+      await act(async () => {
+        observer!.trigger(shells.map((target, index) => ({
+          target,
+          isIntersecting: index >= 8 && index < 16,
+        })));
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[0].path}"]`)).toBe(focusedBefore);
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[1].path}"]`)).toBeNull();
+      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBeLessThanOrEqual(8);
+
+      await act(async () => {
+        observer!.trigger(shells.map((target, index) => ({
+          target,
+          isIntersecting: index === 1 || (index >= 8 && index < 15),
+        })));
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+
+      const remountedFileOneProps = [...latestCodeViewProps].reverse().find(
+        (props) => (props.files as DiffFile[])[0]?.path === files[1].path,
+      );
+      expect(remountedFileOneProps?.mountCollapsed).toBe(true);
+    } finally {
+      FakeIntersectionObserver.latest = null;
+      Object.defineProperty(globalThis, 'IntersectionObserver', {
+        configurable: true,
+        value: originalObserver,
+      });
+    }
   });
 
   test.skipIf(!hasDom)('only the focused file enables CodeView keyboard handling', async () => {

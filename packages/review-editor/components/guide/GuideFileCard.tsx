@@ -34,7 +34,8 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const shellRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionRef = useRef(0);
   const [collapsed, setCollapsed] = useState(false);
-  const { mounted, register, requestMount } = useGuideFileWindow(file.path);
+  const fileList = useMemo(() => [file], [file]);
+  const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused);
   const diffHeight = useMemo(() => estimateDiffHeight(file.patch), [file.patch]);
   const target = revealTarget?.filePath === file.path ? revealTarget : null;
   const renderedHeight = collapsed ? 49 : diffHeight;
@@ -93,7 +94,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       >
         {mounted ? (
           <AllFilesCodeView
-            files={[file]}
+            files={fileList}
             diffStyle={state.diffStyle}
             diffOverflow={state.diffOverflow}
             diffIndicators={state.diffIndicators}
@@ -132,7 +133,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
             onCodeNavRequest={state.onCodeNavRequest}
             fileScrollTarget={target}
             fileOrder="list"
-            defaultCollapsed={collapsed}
+            mountCollapsed={collapsed}
             initialScrollPosition={scrollPositionRef.current}
             onScrollPositionChange={(position) => {
               scrollPositionRef.current = position;
@@ -145,7 +146,10 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
             onAskAIForFile={state.onAskAIForFile}
             isAILoading={state.isAILoading}
             onViewAIResponse={state.onViewAIResponse}
+            aiMessages={state.aiMessages}
+            onClickAIMarker={state.onClickAIMarker}
             getAIHistoryForFile={state.getAIHistoryForFile}
+            allowScrollChaining
           />
         ) : (
           <div className="flex h-full flex-col" aria-hidden="true">

@@ -38,6 +38,8 @@ function makeState(overrides: Partial<ReviewState> = {}): ReviewState {
   return {
     files: [],
     guideRevealFile: null,
+    aiMessages: [],
+    onClickAIMarker: () => {},
     ...overrides,
   } as unknown as ReviewState;
 }
@@ -163,7 +165,60 @@ describe('GuideSectionCard', () => {
     expect(shell?.style.height).toBe('49px');
 
     const rerendered = codeViewProps[codeViewProps.length - 1];
-    expect(rerendered.defaultCollapsed).toBe(true);
+    expect(rerendered.mountCollapsed).toBe(true);
+    expect(rerendered.defaultCollapsed).toBeUndefined();
+  });
+
+  test.skipIf(!hasDom)('keeps the one-file array stable across guide rerenders', async () => {
+    const files = [makeFile()];
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(renderCard(makeState({ files }), { files }));
+    });
+    const firstFileList = codeViewProps[codeViewProps.length - 1].files;
+
+    await act(async () => {
+      root!.render(renderCard(makeState({ files, viewedFiles: new Set() }), { files }));
+    });
+
+    expect(codeViewProps[codeViewProps.length - 1].files).toBe(firstFileList);
+  });
+
+  test.skipIf(!hasDom)('passes AI marker state and enables outer scroll chaining', async () => {
+    const file = makeFile();
+    const aiMessage = {
+      question: {
+        id: 'question-1',
+        prompt: 'Why did this change?',
+        filePath: file.path,
+        lineStart: 1,
+        lineEnd: 1,
+        side: 'new' as const,
+        createdAt: 1,
+      },
+      response: {
+        questionId: 'question-1',
+        text: 'Because localization moved here.',
+        isStreaming: false,
+        createdAt: 2,
+      },
+    };
+    const clicked: string[] = [];
+    const onClickAIMarker = (questionId: string) => clicked.push(questionId);
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(renderCard(makeState({ files: [file], aiMessages: [aiMessage], onClickAIMarker })));
+    });
+
+    const latest = codeViewProps[codeViewProps.length - 1];
+    expect(latest.aiMessages).toEqual([aiMessage]);
+    expect(latest.allowScrollChaining).toBe(true);
+    (latest.onClickAIMarker as (questionId: string) => void)('question-1');
+    expect(clicked).toEqual(['question-1']);
   });
 
   test.skipIf(!hasDom)('passes keyboard ownership only to the focused file CodeView', async () => {

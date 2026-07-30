@@ -35,6 +35,7 @@ import { FileCommentBanner } from './FileCommentBanner';
 import { annotationMatchesPrScope, isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import { InlineAnnotation } from './InlineAnnotation';
+import { InlineAIMarker } from './InlineAIMarker';
 import { detectLanguage } from '../utils/detectLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -224,6 +225,10 @@ interface AllFilesCodeViewProps {
   /** Seed every file collapsed (commit diffs open as a folded overview under
    * the commit-description header). The collapse-all toggle still works. */
   defaultCollapsed?: boolean;
+  /** Guide-only seed captured once for this component mount. Local collapse
+   * changes therefore do not alter CodeView's key; a true outer remount captures
+   * the shell's latest value. */
+  mountCollapsed?: boolean;
   /** Restore an inner CodeView position after an outer virtualized shell remounts. */
   initialScrollPosition?: number;
   /** Persist the current inner CodeView position outside this component. */
@@ -245,7 +250,13 @@ interface AllFilesCodeViewProps {
   onAskAIForFile?: (filePath: string, question: string) => void;
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
+  /** Line-scoped questions rendered as inline sparkle markers. */
+  aiMessages?: AIChatEntry[];
+  onClickAIMarker?: (questionId: string) => void;
   getAIHistoryForFile?: (filePath: string) => AIChatEntry[];
+  /** Let wheel/touch gestures continue into a containing page when this nested
+   * viewer reaches either vertical boundary. Guided Review file cards opt in. */
+  allowScrollChaining?: boolean;
 }
 
 // Diffshub-style stable path-based id allocation. Plannotator's file list is
@@ -288,13 +299,40 @@ function hashString(value: string): string {
 // lineNumber = lineEnd, metadata = DiffAnnotationMetadata). File-scoped comments
 // are deliberately excluded — they render in the file header (renderCustomHeader),
 // not the gutter (see fileCommentsByPath).
+export function projectFileAIMarkers(
+  aiMessages: AIChatEntry[],
+  filePath: string,
+): DiffLineAnnotation<DiffAnnotationMetadata>[] {
+  return aiMessages
+    .filter(
+      ({ question }) =>
+        question.filePath === filePath &&
+        question.lineStart != null &&
+        question.lineEnd != null,
+    )
+    .map(({ question, response }) => ({
+      side: question.side === 'new' ? ('additions' as const) : ('deletions' as const),
+      lineNumber: question.lineEnd!,
+      metadata: {
+        annotationId: question.id,
+        type: 'comment' as CodeAnnotationType,
+        kind: 'ai-marker' as const,
+        questionId: question.id,
+        promptPreview: question.prompt.slice(0, 40) + (question.prompt.length > 40 ? '...' : ''),
+        hasResponse: !!response.text && !response.error,
+        isStreaming: response.isStreaming,
+      },
+    }));
+}
+
 function projectFileAnnotations(
   annotations: CodeAnnotation[],
+  aiMessages: AIChatEntry[],
   filePath: string,
   prUrl: string | undefined,
   prDiffScope: string | undefined,
 ): DiffLineAnnotation<DiffAnnotationMetadata>[] {
-  return annotations
+  const reviewAnnotations = annotations
     .filter(
       (a) =>
         a.filePath === filePath &&
@@ -306,12 +344,14 @@ function projectFileAnnotations(
       lineNumber: ann.lineEnd,
       metadata: lineAnnotationMetadata(ann),
     }));
+  return [...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
 }
 
 function buildItemIdentity(
   files: DiffFile[],
   visualOrder: number[],
   annotations: CodeAnnotation[],
+  aiMessages: AIChatEntry[],
   prUrl: string | undefined,
   prDiffScope: string | undefined,
   patchHashes: string[],
@@ -364,7 +404,7 @@ function buildItemIdentity(
     fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
-    const fileAnnotations = projectFileAnnotations(annotations, file.path, prUrl, prDiffScope);
+    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope);
     items.push({
       id,
       type: 'diff',
@@ -405,6 +445,8 @@ const HUNK_SEPARATOR_HEIGHT = 32;
 // (item growth + re-render) are allowed to land. Slightly above Pierre's own
 // post-interaction restore delay (120ms).
 const AUGMENT_APPLY_IDLE_MS = 150;
+const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
+const noopAIMarkerClick = () => {};
 
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   files,
@@ -450,6 +492,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   registerCollapseAllToggle,
   onAllCollapsedChange,
   defaultCollapsed,
+  mountCollapsed,
   initialScrollPosition = 0,
   onScrollPositionChange,
   onFileCollapsedChange,
@@ -459,8 +502,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onAskAIForFile,
   isAILoading = false,
   onViewAIResponse,
+  aiMessages = EMPTY_AI_MESSAGES,
+  onClickAIMarker,
   getAIHistoryForFile,
+  allowScrollChaining = false,
 }) => {
+  const mountCollapsedRef = useRef(mountCollapsed);
+  const seedCollapsed = mountCollapsedRef.current ?? defaultCollapsed;
+
   // showFileHeader: true suppresses usePierreTheme's `[data-title]` hide rule.
   // With renderCustomHeader the built-in header runs in 'custom' mode (only the
   // header-custom slot, no [data-title] element), so that rule is moot either
@@ -541,8 +590,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const prevStagedRef = useRef<Set<string> | undefined>(stagedFiles);
   const prevStagingRef = useRef<string | null | undefined>(stagingFile);
   const prevStageErrorRef = useRef<string | null | undefined>(stageError);
-  // Previous annotations snapshot for the per-item annotation-sync effect (P4).
+  // Previous line-card snapshots for the per-item annotation-sync effect (P4).
   const prevAnnotationsRef = useRef<CodeAnnotation[]>(annotations);
+  const prevAIMessagesRef = useRef<AIChatEntry[]>(aiMessages);
 
   // Order items to mirror whichever left panel is active: 'tree' replays the
   // file-tree's visual order (folders-first); 'list' keeps the files array
@@ -569,21 +619,30 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // the CodeView remount it drives via fileSetKey) must only change when the
   // FILE SET changes — otherwise every annotation add/edit/delete would remount
   // the whole CodeView and lose scroll/selection state. Existing annotations are
-  // seeded into items on (re)build via the captured `annotations` closure for
-  // the first paint; subsequent annotation changes are applied incrementally per
-  // item by the annotation-sync effect below (updateItem on only the changed
-  // file). We read the latest annotations through a ref at build time so a
-  // remount triggered by a file-set change still seeds current annotations.
+  // seeded into items on (re)build via the latest refs for the first paint;
+  // subsequent annotation/AI-message changes are applied incrementally per item
+  // by the annotation-sync effect below (updateItem on only the changed file).
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+  const aiMessagesRef = useRef(aiMessages);
+  aiMessagesRef.current = aiMessages;
   // Per-file patch content hashes — shared by fileSetKey (remount detection)
   // and the items' cacheKeys (highlight cache identity). Hashed once per
   // files-identity change.
   const patchHashes = useMemo(() => files.map((f) => hashString(f.patch)), [files]);
   const identity = useMemo<ItemIdentity>(
-    () => buildItemIdentity(files, visualOrder, annotationsRef.current, prUrl, prDiffScope, patchHashes, defaultCollapsed === true),
+    () => buildItemIdentity(
+      files,
+      visualOrder,
+      annotationsRef.current,
+      aiMessagesRef.current,
+      prUrl,
+      prDiffScope,
+      patchHashes,
+      seedCollapsed === true,
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [files, visualOrder, prUrl, prDiffScope, patchHashes, defaultCollapsed],
+    [files, visualOrder, prUrl, prDiffScope, patchHashes, seedCollapsed],
   );
   const { filePathToItemId, filePathToItemIds, itemIdToFilePath, itemIdToFile } = identity;
 
@@ -597,10 +656,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // annotations ref and can't otherwise detect the filter change.
     // fileOrder is part of the key: CodeView seeds initialItems once per
     // instance, so an order change must remount to re-seed in the new order.
-    // defaultCollapsed is part of the key: CodeView seeds item collapsed state
-    // once per instance, so a seed change must remount to take effect.
-    () => `${fileOrder ?? 'tree'}:${defaultCollapsed ? 'c' : 'e'}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
-    [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, defaultCollapsed],
+    // seedCollapsed is part of the key: normal surfaces can change their live
+    // default, while guide mounts keep their captured seed stable.
+    () => `${fileOrder ?? 'tree'}:${seedCollapsed ? 'c' : 'e'}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
+    [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, seedCollapsed],
   );
 
   // Visual-order list of file paths (for [/] stepping). Derived from items so it
@@ -773,6 +832,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     ) => {
       if (!('side' in annotation) || item.type !== 'diff') return null;
       if (!annotation.metadata) return null;
+      if (annotation.metadata.kind === 'ai-marker') {
+        return (
+          <InlineAIMarker
+            questionId={annotation.metadata.questionId!}
+            promptPreview={annotation.metadata.promptPreview!}
+            hasResponse={annotation.metadata.hasResponse!}
+            isStreaming={annotation.metadata.isStreaming!}
+            onClick={onClickAIMarker ?? noopAIMarkerClick}
+          />
+        );
+      }
       const filePath = itemIdToFilePath.get(item.id);
       return (
         <InlineAnnotation
@@ -818,9 +888,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     prevStagedRef.current = stagedFiles;
     prevStagingRef.current = stagingFile;
     prevStageErrorRef.current = stageError;
-    // Annotations are seeded into the remounted items at build time, so resync
-    // the snapshot here to avoid a spurious full annotation refresh post-remount.
+    // Line cards are seeded into the remounted items at build time, so resync
+    // both snapshots here to avoid a spurious refresh post-remount.
     prevAnnotationsRef.current = annotations;
+    prevAIMessagesRef.current = aiMessages;
     // Garbage-collect STALE-generation content fetches. Generation-aware on
     // purpose: this passive effect runs AFTER the remounted CodeView's seed
     // layout effect has already fired the new diff's first postRender wave —
@@ -840,11 +911,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // --- Collapse via CodeView item state (Diffshub pattern + anchor fix) ------
 
-  const [allCollapsed, setAllCollapsed] = useState(defaultCollapsed === true);
+  const [allCollapsed, setAllCollapsed] = useState(seedCollapsed === true);
 
   // Reset the global collapse toggle when the file set changes — items re-seed
   // with the current default on CodeView remount.
-  useEffect(() => setAllCollapsed(defaultCollapsed === true), [identity.items, defaultCollapsed]);
+  useEffect(() => setAllCollapsed(seedCollapsed === true), [identity.items, seedCollapsed]);
 
   // Re-derive the collapse-all mirror from live item state after any
   // per-file toggle. Matters most for commit diffs (seeded all-collapsed):
@@ -1357,41 +1428,41 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // --- Annotations through CodeView item state (P4) ---------------------------
 
-  // Set an item's annotations to the current per-file projection, bump version,
-  // and updateItem. Mirrors Diffshub's updateViewerDiffItem (getItem, mutate,
-  // version++, updateItem) but rebuilds the whole annotation array from the
-  // source-of-truth `annotations` rather than splicing a single entry — the diff
-  // is computed at the item granularity by the sync effect below, so only files
-  // whose annotation set actually changed get an updateItem.
+  // Set an item's review annotations and AI markers to the current per-file
+  // projection, then republish that item only. This preserves CodeView scroll
+  // state while streaming answers update their inline marker.
   const syncItemAnnotations = useCallback(
-    (filePath: string, itemId: string, allAnnotations: CodeAnnotation[]) => {
+    (
+      filePath: string,
+      itemId: string,
+      allAnnotations: CodeAnnotation[],
+      allAIMessages: AIChatEntry[],
+    ) => {
       const handle = viewerRef.current;
       const item = handle?.getItem(itemId);
       if (handle == null || item == null || item.type !== 'diff') return;
-      item.annotations = projectFileAnnotations(allAnnotations, filePath, prUrl, prDiffScope);
+      item.annotations = projectFileAnnotations(
+        allAnnotations,
+        allAIMessages,
+        filePath,
+        prUrl,
+        prDiffScope,
+      );
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
     },
     [prUrl, prDiffScope],
   );
 
-  // Whenever the `annotations` prop changes, re-project per file and updateItem
-  // ONLY on the files whose annotation set changed (so a single add/edit/delete
-  // re-renders just its owning file, never the whole CodeView). Diff is keyed on
-  // a per-file annotation signature so unrelated files are untouched. New diffs
-  // remount CodeView via fileSetKey and seed annotations at build time, so the
-  // diff-switch reset effect resynchronizes prevAnnotationsRef to avoid a
-  // spurious full refresh right after a remount.
+  // Keep review annotations incremental: a single add/edit/delete republishes
+  // only files whose annotation signature changed. New diffs seed the current
+  // projection during build, so this path never remounts CodeView.
   useEffect(() => {
     const handle = viewerRef.current;
     const prev = prevAnnotationsRef.current;
     prevAnnotationsRef.current = annotations;
     if (handle == null || prev === annotations) return;
 
-    // Per-file annotation signature: id|line|side|content fingerprint. We only
-    // need to know whether a file's gutter annotations changed, so a stable
-    // string built from the fields that affect rendering is sufficient and far
-    // cheaper than deep-equality of the projected objects.
     const signatures = (list: CodeAnnotation[]) => {
       const map = new Map<string, string>();
       for (const a of list) {
@@ -1429,14 +1500,34 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     });
 
     for (const path of changedPaths) {
-      // Fan out to ALL items rendering this path (duplicate display paths
-      // produce twins; updating only the canonical first item would leave the
-      // twin rendering deleted/stale annotations until the next remount).
       for (const itemId of filePathToItemIds.get(path) ?? []) {
-        syncItemAnnotations(path, itemId, annotations);
+        syncItemAnnotations(path, itemId, annotations, aiMessages);
       }
     }
-  }, [annotations, prUrl, prDiffScope, filePathToItemIds, syncItemAnnotations]);
+  }, [annotations, aiMessages, prUrl, prDiffScope, filePathToItemIds, syncItemAnnotations]);
+
+  // AI answers stream independently of review annotations. Any message change
+  // republishes only the files represented by the previous or next message set;
+  // projectFileAnnotations performs the final line-scope/path filter.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    const prev = prevAIMessagesRef.current;
+    // If the worker-pool gate still hides CodeView, retain the old snapshot.
+    // The workerPoolReady dependency replays this sync once the handle exists.
+    if (handle == null) return;
+    prevAIMessagesRef.current = aiMessages;
+    if (prev === aiMessages) return;
+
+    const changedPaths = new Set<string>();
+    for (const { question } of [...prev, ...aiMessages]) {
+      if (question.filePath) changedPaths.add(question.filePath);
+    }
+    for (const path of changedPaths) {
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        syncItemAnnotations(path, itemId, annotations, aiMessages);
+      }
+    }
+  }, [aiMessages, annotations, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
 
   // --- Header actions ---------------------------------------------------------
 
@@ -1704,9 +1795,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [reportVisibleFile, fileSetKey]);
 
   // Outer Guide file shells survive while this CodeView is evicted. Restore
-  // their last inner position after CodeView has seeded its first window.
+  // their last inner position once after this component mount; later parent
+  // renders may expose a newer live ref value, but must not snap active scrolling.
+  const hasRestoredInitialScrollRef = useRef(false);
   useEffect(() => {
-    if (initialScrollPosition <= 0) return;
+    if (hasRestoredInitialScrollRef.current || initialScrollPosition <= 0) return;
+    hasRestoredInitialScrollRef.current = true;
     const raf = requestAnimationFrame(() => {
       viewerRef.current?.scrollTo({ type: 'position', position: initialScrollPosition });
     });
@@ -2138,7 +2232,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         // overflow-anchor:none disables the BROWSER's scroll anchoring, which
         // otherwise fights CodeView's own anchor resolution whenever item
         // heights change (our augmentation applies).
-        className="relative h-full overflow-y-auto overflow-x-clip overscroll-contain [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]"
+        className={`relative h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
         initialItems={identity.items}
         options={options}
         selectedLines={selectedLines}

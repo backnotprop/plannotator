@@ -2,6 +2,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -50,6 +51,7 @@ class GuideViewportManager {
   private entries = new Map<string, RegisteredShell>();
   private elementIds = new WeakMap<HTMLElement, string>();
   private mounted = new Set<string>();
+  private pinned = new Set<string>();
   private subscribers = new Map<string, Set<Subscriber>>();
   private observer: IntersectionObserver | null = null;
   private scrollRoot: HTMLElement | null = null;
@@ -72,9 +74,13 @@ class GuideViewportManager {
     this.lastScrollTop = this.readScrollTop();
     this.lastScrollAt = performance.now();
 
+    // Distance-based reconciliation still works without IntersectionObserver,
+    // but only if scrolling continues to schedule it. Register this listener for
+    // both paths so older embedded browsers do not freeze the initial window.
+    const scrollTarget: EventTarget = this.scrollRoot ?? window;
+    scrollTarget.addEventListener('scroll', this.handleOuterScroll, { passive: true });
+
     if (typeof IntersectionObserver === 'undefined') {
-      // happy-dom and older embedded browsers: keep the contract bounded even
-      // without viewport signals. Tests can still prove we never mount 250.
       for (const entry of this.entries.values()) entry.near = true;
       this.reconcile();
       return;
@@ -86,9 +92,6 @@ class GuideViewportManager {
       threshold: 0,
     });
     for (const entry of this.entries.values()) this.observer.observe(entry.element);
-
-    const scrollTarget: EventTarget = this.scrollRoot ?? window;
-    scrollTarget.addEventListener('scroll', this.handleOuterScroll, { passive: true });
   };
 
   register = (id: string, element: HTMLElement | null): void => {
@@ -101,6 +104,7 @@ class GuideViewportManager {
 
     if (!element) {
       this.entries.delete(id);
+      this.pinned.delete(id);
       // Ref detachment means the subscriber is unmounting too; remove the id
       // without notifying that departing component. A future shell with the
       // same id reads the fresh false snapshot on subscription.
@@ -137,6 +141,24 @@ class GuideViewportManager {
   };
 
   isMounted = (id: string): boolean => this.mounted.has(id);
+
+  setPinned = (id: string, pinned: boolean): void => {
+    if (pinned === this.pinned.has(id)) return;
+    if (!pinned) {
+      this.pinned.delete(id);
+      this.scheduleReconcile();
+      return;
+    }
+
+    this.pinned.add(id);
+    const next = new Set(this.mounted);
+    next.add(id);
+    if (next.size > MAX_MOUNTED_CODE_VIEWS) {
+      const eviction = this.farthestMountedFrom(id, next);
+      if (eviction) next.delete(eviction);
+    }
+    this.setMounted(next);
+  };
 
   requestMount = (id: string): void => {
     this.forcedId = id;
@@ -203,7 +225,7 @@ class GuideViewportManager {
   private reconcile(): void {
     const rootRect = this.getRootRect();
     const candidates = [...this.entries.entries()]
-      .filter(([id, entry]) => entry.near || id === this.forcedId)
+      .filter(([id, entry]) => entry.near || id === this.forcedId || this.pinned.has(id))
       .map(([id, entry]) => ({
         id,
         distance: this.distanceFromViewport(entry.element.getBoundingClientRect(), rootRect)
@@ -216,7 +238,13 @@ class GuideViewportManager {
     if (candidates.length === 0 && this.mounted.size > 0) return;
 
     const next = new Set<string>();
-    if (this.forcedId && this.entries.has(this.forcedId)) next.add(this.forcedId);
+    for (const id of this.pinned) {
+      if (next.size >= MAX_MOUNTED_CODE_VIEWS) break;
+      if (this.entries.has(id)) next.add(id);
+    }
+    if (this.forcedId && this.entries.has(this.forcedId) && next.size < MAX_MOUNTED_CODE_VIEWS) {
+      next.add(this.forcedId);
+    }
     for (const candidate of candidates) {
       if (next.size >= MAX_MOUNTED_CODE_VIEWS) break;
       next.add(candidate.id);
@@ -228,7 +256,7 @@ class GuideViewportManager {
     const rootRect = this.getRootRect();
     let farthest: { id: string; distance: number } | null = null;
     for (const id of ids) {
-      if (id === protectedId) continue;
+      if (id === protectedId || this.pinned.has(id)) continue;
       const entry = this.entries.get(id);
       if (!entry) return id;
       const distance = this.distanceFromViewport(entry.element.getBoundingClientRect(), rootRect);
@@ -307,7 +335,7 @@ export function GuideViewportProvider({
   );
 }
 
-export function useGuideFileWindow(id: string): {
+export function useGuideFileWindow(id: string, pinned = false): {
   mounted: boolean;
   register: (element: HTMLElement | null) => void;
   requestMount: () => void;
@@ -320,6 +348,14 @@ export function useGuideFileWindow(id: string): {
   const mounted = useSyncExternalStore(subscribe, getSnapshot, () => false);
   const register = useCallback((element: HTMLElement | null) => manager.register(id, element), [manager, id]);
   const requestMount = useCallback(() => manager.requestMount(id), [manager, id]);
+
+  // The guide has one focus arbiter. Keeping that file pinned preserves any
+  // portaled annotation composer and its draft-owning CodeView during scrolling.
+  useEffect(() => {
+    manager.setPinned(id, pinned);
+    return () => manager.setPinned(id, false);
+  }, [manager, id, pinned]);
+
   return { mounted, register, requestMount };
 }
 
