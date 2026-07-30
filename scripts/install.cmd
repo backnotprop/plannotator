@@ -227,6 +227,15 @@ if /i "!VERSION!"=="latest" (
     REM a predictable path can't redirect curl's output.
     set "RELEASE_JSON=%TEMP%\plannotator-release-%RANDOM%.json"
     curl -fsSL !GH_AUTH_HEADER! "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"
+    REM A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
+    REM dotfiles, direnv) gets a 401 here and would break an install that
+    REM works fine anonymously today. If the authenticated call failed and
+    REM we had a token, retry once without the header so a bad token costs
+    REM one extra request but never blocks an otherwise-working install.
+    REM See backnotprop/plannotator#1157.
+    if !ERRORLEVEL! neq 0 if defined GH_AUTH_HEADER (
+        curl -fsSL "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"
+    )
     REM Clear token from memory - not needed for release downloads or git clone.
     set "GH_TOKEN_VAL="
     set "GH_AUTH_HEADER="

@@ -1296,7 +1296,7 @@ describe("install shared behavior", () => {
 
     // install.sh: header array splatted into the api curl.
     expect(sh).toContain("GH_AUTH_HEADER=()");
-    expect(sh).toContain('"${GH_AUTH_HEADER[@]}" "https://api.github.com/repos/${REPO}/releases/latest"');
+    expect(sh).toContain('"${GH_AUTH_HEADER[@]}" "$_api_url"');
 
     // install.ps1: hashtable passed via -Headers to Invoke-RestMethod.
     expect(ps).toContain('$ghHeaders = if ($ghToken) { @{ Authorization = "Bearer $ghToken" } } else { @{} }');
@@ -1321,17 +1321,45 @@ describe("install shared behavior", () => {
     // they don't linger for the download phase.
     expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" -o "$tmp_file"');
     expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" "$checksum_url"');
-    expect(sh).toContain("unset _gh_token GH_AUTH_HEADER");
+    expect(sh).toContain("unset _gh_token GH_AUTH_HEADER _api_url");
 
     // install.ps1: binary download must NOT carry $ghHeaders, which is nulled.
     expect(ps).not.toContain('Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -Headers $ghHeaders');
-    expect(ps).toContain('$ghToken = $null; $ghHeaders = $null');
+    expect(ps).toContain('$ghToken = $null; $ghHeaders = $null; $apiUrl = $null');
 
     // install.cmd: binary download must NOT carry !GH_AUTH_HEADER!. Token
     // vars cleared after the api call.
     expect(cmdScript).not.toContain('curl -fsSL !GH_AUTH_HEADER! "!BINARY_URL!"');
     expect(cmdScript).toContain('set "GH_TOKEN_VAL="');
     expect(cmdScript).toContain('set "GH_AUTH_HEADER="');
+  });
+
+  test("all installers retry anonymously if the authenticated api call fails", () => {
+    // A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
+    // dotfiles, direnv) gets a 401 and would break an install that works
+    // fine anonymously today. Each installer must retry the api.github.com
+    // call without the auth header when the authenticated attempt fails,
+    // so a bad token costs one extra request but never blocks an otherwise
+    // working install. See backnotprop/plannotator#1157 (review feedback).
+    const cmdScript = readScript("install.cmd");
+
+    // install.sh: `|| true` swallows the authed curl failure, then a
+    // `[ -z "$latest_tag" ]` gate retries without the header array.
+    expect(sh).toContain('|| true');
+    expect(sh).toContain('if [ -z "$latest_tag" ] && [ ${#GH_AUTH_HEADER[@]} -gt 0 ]; then');
+    expect(sh).toContain('latest_tag=$(curl -fsSL "$_api_url" | grep');
+
+    // install.ps1: try/catch around Invoke-RestMethod; on catch, when a
+    // header was present, retry with no -Headers.
+    expect(ps).toContain('} catch {');
+    expect(ps).toContain("if ($ghHeaders.Count -eq 0)");
+    expect(ps).toContain("Write-Error");
+    expect(ps).toContain("$release = Invoke-RestMethod -Uri $apiUrl");
+
+    // install.cmd: ERRORLEVEL check after the authed curl; when a header
+    // was set, retry without it.
+    expect(cmdScript).toContain('if !ERRORLEVEL! neq 0 if defined GH_AUTH_HEADER (');
+    expect(cmdScript).toContain('curl -fsSL "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"');
   });
 });
 

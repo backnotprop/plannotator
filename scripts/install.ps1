@@ -112,14 +112,23 @@ if ($Version -eq "latest") {
         try { $ghToken = (gh auth token 2>$null) } catch { }
     }
     $ghHeaders = if ($ghToken) { @{ Authorization = "Bearer $ghToken" } } else { @{} }
+    # A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
+    # dotfiles, direnv) gets a 401 here and would break an install that
+    # works fine anonymously today. If the authenticated call fails, retry
+    # once without the header so a bad token costs one extra request but
+    # never blocks an otherwise-working install. See backnotprop/plannotator#1157.
+    $apiUrl = "https://api.github.com/repos/$repo/releases/latest"
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers $ghHeaders
+        $release = Invoke-RestMethod -Uri $apiUrl -Headers $ghHeaders
     } catch {
-        Write-Error "Failed to fetch latest version (the GitHub API may be rate-limiting your IP; see https://github.com/backnotprop/plannotator/issues/1156)"
-        exit 1
+        if ($ghHeaders.Count -eq 0) {
+            Write-Error "Failed to fetch latest version (the GitHub API may be rate-limiting your IP; see https://github.com/backnotprop/plannotator/issues/1156)"
+            exit 1
+        }
+        $release = Invoke-RestMethod -Uri $apiUrl
     }
     # Clear token from memory - not needed for release downloads or git clone.
-    $ghToken = $null; $ghHeaders = $null
+    $ghToken = $null; $ghHeaders = $null; $apiUrl = $null
     $latestTag = $release.tag_name
 
     if (-not $latestTag) {

@@ -302,11 +302,17 @@ if [ "$VERSION" = "latest" ]; then
             GH_AUTH_HEADER=(-H "Authorization: Bearer ${_gh_token}")
         fi
     fi
-    latest_tag=$(curl -fsSL "${GH_AUTH_HEADER[@]}" "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
-    # Clear the token from memory immediately after use - it is not needed
-    # for the release downloads or git clone (which are not rate-limited at
-    # 60/hr and don't need auth). Defense in depth against env leakage.
-    unset _gh_token GH_AUTH_HEADER
+    # A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
+    # dotfiles, direnv) gets a 401 here and would break an install that
+    # works fine anonymously today. If the authenticated call fails, retry
+    # once without the header so a bad token costs one extra request but
+    # never blocks an otherwise-working install. See backnotprop/plannotator#1157.
+    _api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    latest_tag=$(curl -fsSL "${GH_AUTH_HEADER[@]}" "$_api_url" | grep '"tag_name"' | cut -d'"' -f4) || true
+    if [ -z "$latest_tag" ] && [ ${#GH_AUTH_HEADER[@]} -gt 0 ]; then
+        latest_tag=$(curl -fsSL "$_api_url" | grep '"tag_name"' | cut -d'"' -f4)
+    fi
+    unset _gh_token GH_AUTH_HEADER _api_url
 
     if [ -z "$latest_tag" ]; then
         echo "Failed to fetch latest version" >&2
