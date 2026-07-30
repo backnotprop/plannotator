@@ -210,11 +210,44 @@ if /i "!VERSION!"=="latest" (
     REM Authorization header when a token is available (raises the limit to
     REM 5000/hour); when none is found, fall back to anonymous (unchanged
     REM behavior). Precedence matches `gh`: GITHUB_TOKEN > GH_TOKEN > gh auth token.
+    REM Read the env vars via delayed expansion, never percent expansion, so
+    REM the value is not re-parsed by cmd's phase-1 expansion - a value
+    REM containing metacharacters or exclamation marks can neither inject
+    REM commands nor be corrupted here.
     set "GH_TOKEN_VAL="
-    if defined GITHUB_TOKEN set "GH_TOKEN_VAL=%GITHUB_TOKEN%"
-    if not defined GH_TOKEN_VAL if defined GH_TOKEN set "GH_TOKEN_VAL=%GH_TOKEN%"
+    if defined GITHUB_TOKEN set "GH_TOKEN_VAL=!GITHUB_TOKEN!"
+    if not defined GH_TOKEN_VAL if defined GH_TOKEN set "GH_TOKEN_VAL=!GH_TOKEN!"
     if not defined GH_TOKEN_VAL (
-        for /f "delims=" %%i in ('gh auth token 2^>nul') do set "GH_TOKEN_VAL=%%i"
+        REM Resolve gh via `where` and invoke the absolute path so the for /f
+        REM command line never runs a bare `gh` name, which cmd would resolve
+        REM from the current directory first. (`where` itself also searches
+        REM the CWD first - accepted limitation, documented here.)
+        REM --hostname github.com scopes the fallback to github.com
+        REM credentials, so a gh setup whose default host is a GitHub
+        REM Enterprise server never leaks a GHES token to api.github.com. On
+        REM an ancient gh without the flag, stderr is swallowed and we fall
+        REM back to anonymous.
+        set "GH_EXE="
+        for /f "delims=" %%g in ('where gh 2^>nul') do if not defined GH_EXE set "GH_EXE=%%g"
+        if defined GH_EXE (
+            for /f "delims=" %%i in ('"!GH_EXE!" auth token --hostname github.com 2^>nul') do set "GH_TOKEN_VAL=%%i"
+        )
+        set "GH_EXE="
+    )
+    REM Charset allowlist: GitHub tokens are [A-Za-z0-9_] (plus - to be
+    REM safe). Strip every allowed character (cmd substitution is
+    REM case-insensitive, covering A-Z too); anything left over means an
+    REM unexpected character - a quote in particular could break out of the
+    REM quoted Authorization header on the curl line below - so drop the
+    REM token and go anonymous. Done with pure delayed-expansion
+    REM substitutions: a findstr pipe cannot be used because delayed
+    REM expansion does not survive into pipe children, and writing the token
+    REM to a temp file for findstr would leak the secret to disk.
+    if defined GH_TOKEN_VAL (
+        set "TOKEN_RESIDUE=!GH_TOKEN_VAL!"
+        for %%c in (a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 _ -) do if defined TOKEN_RESIDUE set "TOKEN_RESIDUE=!TOKEN_RESIDUE:%%c=!"
+        if defined TOKEN_RESIDUE set "GH_TOKEN_VAL="
+        set "TOKEN_RESIDUE="
     )
     if defined GH_TOKEN_VAL (
         set "GH_AUTH_HEADER=-H "Authorization: Bearer !GH_TOKEN_VAL!""
@@ -232,17 +265,26 @@ if /i "!VERSION!"=="latest" (
     REM works fine anonymously today. If the authenticated call failed and
     REM we had a token, retry once without the header so a bad token costs
     REM one extra request but never blocks an otherwise-working install.
-    REM See backnotprop/plannotator#1157.
+    REM Note: install.sh / install.ps1 inspect the HTTP status and retry
+    REM only on 401; capturing the status portably in batch is not worth the
+    REM complexity, so cmd retries on any failure when a token was used - an
+    REM accepted cmd-only compromise. See backnotprop/plannotator#1157.
+    REM Both ERRORLEVEL reads below sit immediately adjacent to the curl
+    REM they test (only REM lines and a no-op if in between); the token
+    REM clears deliberately come AFTER the failure check because `set` can
+    REM disturb ERRORLEVEL.
     if !ERRORLEVEL! neq 0 if defined GH_AUTH_HEADER (
         curl -fsSL "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"
     )
-    REM Clear token from memory - not needed for release downloads or git clone.
-    set "GH_TOKEN_VAL="
-    set "GH_AUTH_HEADER="
     if !ERRORLEVEL! neq 0 (
         echo Failed to get latest version >&2
         exit /b 1
     )
+    REM Drop the local token copies; downloads and git clone are anonymous.
+    REM GITHUB_TOKEN / GH_TOKEN themselves remain in the environment exactly
+    REM as the user set them.
+    set "GH_TOKEN_VAL="
+    set "GH_AUTH_HEADER="
 
     REM Extract tag_name from JSON
     for /f "tokens=2 delims=:," %%i in ('findstr /c:"\"tag_name\"" "!RELEASE_JSON!"') do (

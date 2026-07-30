@@ -109,25 +109,42 @@ if ($Version -eq "latest") {
     $ghToken = $env:GITHUB_TOKEN
     if (-not $ghToken) { $ghToken = $env:GH_TOKEN }
     if (-not $ghToken -and (Get-Command gh -ErrorAction SilentlyContinue)) {
-        try { $ghToken = (gh auth token 2>$null) } catch { }
+        # --hostname github.com scopes the fallback to github.com credentials,
+        # so a gh setup whose default host is a GitHub Enterprise server never
+        # leaks a GHES token to api.github.com. On an ancient gh without the
+        # flag, stderr is swallowed and we fall back to anonymous.
+        try { $ghToken = (gh auth token --hostname github.com 2>$null) } catch { }
     }
     $ghHeaders = if ($ghToken) { @{ Authorization = "Bearer $ghToken" } } else { @{} }
     # A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
     # dotfiles, direnv) gets a 401 here and would break an install that
-    # works fine anonymously today. If the authenticated call fails, retry
-    # once without the header so a bad token costs one extra request but
-    # never blocks an otherwise-working install. See backnotprop/plannotator#1157.
+    # works fine anonymously today. Retry anonymously ONLY on HTTP 401:
+    # requests carrying invalid credentials count against the anonymous
+    # 60/hour per-IP pool, so a blind retry on any failure would double the
+    # burn, and network failures gain nothing from a second attempt. The
+    # [int] cast handles both Windows PowerShell 5.1 (HttpWebResponse enum)
+    # and PowerShell 7 (HttpResponseMessage); the inner try guards a null
+    # Response (e.g. DNS failure). See backnotprop/plannotator#1157.
     $apiUrl = "https://api.github.com/repos/$repo/releases/latest"
     try {
         $release = Invoke-RestMethod -Uri $apiUrl -Headers $ghHeaders
     } catch {
-        if ($ghHeaders.Count -eq 0) {
-            Write-Error "Failed to fetch latest version (the GitHub API may be rate-limiting your IP; see https://github.com/backnotprop/plannotator/issues/1156)"
+        $status = $null
+        try { $status = [int]$_.Exception.Response.StatusCode } catch { }
+        if ($ghHeaders.Count -gt 0 -and $status -eq 401) {
+            try {
+                $release = Invoke-RestMethod -Uri $apiUrl
+            } catch {
+                Write-Error "Failed to fetch latest version: $($_.Exception.Message)"
+                exit 1
+            }
+        } else {
+            Write-Error "Failed to fetch latest version: $($_.Exception.Message) (if this is HTTP 403, the GitHub API may be rate-limiting your IP; see https://github.com/backnotprop/plannotator/issues/1156)"
             exit 1
         }
-        $release = Invoke-RestMethod -Uri $apiUrl
     }
-    # Clear token from memory - not needed for release downloads or git clone.
+    # Drop the local token copies; GITHUB_TOKEN / GH_TOKEN themselves remain
+    # in the environment exactly as the user set them.
     $ghToken = $null; $ghHeaders = $null; $apiUrl = $null
     $latestTag = $release.tag_name
 

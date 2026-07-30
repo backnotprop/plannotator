@@ -88,7 +88,7 @@ For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the envir
 
 The installer queries the GitHub API (`api.github.com`) to resolve the latest release tag. Unauthenticated API requests are capped at **60 per hour per source IP**, so installs can fail on shared egress IPs (corporate proxies, NAT/CGNAT, CI runners) or when retrying/debugging within the same hour, with an opaque `Failed to fetch latest version` error.
 
-If you hit this, export a token before running the installer - it reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when the `gh` CLI is authenticated (raising the limit to 5000/hour):
+If you hit this, export a token before running the installer - it reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` (github.com credentials only) when the `gh` CLI is authenticated. A personal access token raises the limit to 5,000/hour; the built-in `GITHUB_TOKEN` in GitHub Actions gets 1,000/hour per repository. The repository is public, so a token with no scopes is sufficient - prefer a fine-grained or zero-scope token over a broad classic PAT:
 
 ```bash
 export GITHUB_TOKEN=ghp_xxx

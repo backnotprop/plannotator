@@ -298,21 +298,37 @@ if [ "$VERSION" = "latest" ]; then
     if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
         GH_AUTH_HEADER=(-H "Authorization: Bearer ${GITHUB_TOKEN:-${GH_TOKEN}}")
     elif command -v gh >/dev/null 2>&1; then
-        if _gh_token="$(gh auth token 2>/dev/null)" && [ -n "$_gh_token" ]; then
+        # --hostname github.com scopes the fallback to github.com credentials,
+        # so a gh setup whose default host is a GitHub Enterprise server never
+        # leaks a GHES token to api.github.com. On an ancient gh without the
+        # flag, stderr is swallowed and we fall back to anonymous.
+        if _gh_token="$(gh auth token --hostname github.com 2>/dev/null)" && [ -n "$_gh_token" ]; then
             GH_AUTH_HEADER=(-H "Authorization: Bearer ${_gh_token}")
         fi
     fi
     # A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
     # dotfiles, direnv) gets a 401 here and would break an install that
-    # works fine anonymously today. If the authenticated call fails, retry
-    # once without the header so a bad token costs one extra request but
-    # never blocks an otherwise-working install. See backnotprop/plannotator#1157.
+    # works fine anonymously today. Retry anonymously ONLY on HTTP 401:
+    # requests carrying invalid credentials count against the anonymous
+    # 60/hour per-IP pool, so a blind retry on any failure would double the
+    # burn, and network failures gain nothing from a second attempt.
+    # Note: no -f here, so a 401 body doesn't abort curl before -w prints
+    # the status code. See backnotprop/plannotator#1157.
     _api_url="https://api.github.com/repos/${REPO}/releases/latest"
-    latest_tag=$(curl -fsSL "${GH_AUTH_HEADER[@]}" "$_api_url" | grep '"tag_name"' | cut -d'"' -f4) || true
-    if [ -z "$latest_tag" ] && [ ${#GH_AUTH_HEADER[@]} -gt 0 ]; then
-        latest_tag=$(curl -fsSL "$_api_url" | grep '"tag_name"' | cut -d'"' -f4)
+    _api_body=$(curl -sSL -w '\n%{http_code}' "${GH_AUTH_HEADER[@]}" "$_api_url" 2>/dev/null) || true
+    _api_code="${_api_body##*$'\n'}"
+    if [ "$_api_code" = "401" ] && [ ${#GH_AUTH_HEADER[@]} -gt 0 ]; then
+        _api_body=$(curl -sSL -w '\n%{http_code}' "$_api_url" 2>/dev/null) || true
+        _api_code="${_api_body##*$'\n'}"
     fi
-    unset _gh_token GH_AUTH_HEADER _api_url
+    if [ "$_api_code" = "200" ]; then
+        latest_tag=$(printf '%s' "$_api_body" | grep '"tag_name"' | cut -d'"' -f4)
+    else
+        latest_tag=""
+    fi
+    # Drop the local token copies; GITHUB_TOKEN / GH_TOKEN themselves remain
+    # in the environment exactly as the user set them.
+    unset _gh_token GH_AUTH_HEADER _api_url _api_body _api_code
 
     if [ -z "$latest_tag" ]; then
         echo "Failed to fetch latest version" >&2

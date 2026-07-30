@@ -1291,8 +1291,30 @@ describe("install shared behavior", () => {
       expect(script, `${name} should read GITHUB_TOKEN`).toContain("GITHUB_TOKEN");
       expect(script, `${name} should read GH_TOKEN`).toContain("GH_TOKEN");
       expect(script, `${name} should use a Bearer scheme`).toContain("Bearer ");
-      expect(script, `${name} should fall back to gh auth token`).toContain("gh auth token");
+      // The gh fallback is pinned to github.com so a gh setup whose default
+      // host is a GitHub Enterprise server never leaks a GHES token to
+      // api.github.com. (cmd invokes gh via a where-resolved absolute path,
+      // so match on the flag-bearing suffix common to all three.)
+      expect(script, `${name} should scope the gh fallback to github.com`).toContain(
+        "auth token --hostname github.com",
+      );
     }
+
+    // Precedence pin: GITHUB_TOKEN is consulted before GH_TOKEN in every
+    // installer (matching gh's own precedence).
+    expect(sh).toContain("${GITHUB_TOKEN:-${GH_TOKEN:-}}");
+    const psGithubRead = ps.indexOf("$ghToken = $env:GITHUB_TOKEN");
+    const psGhRead = ps.indexOf("{ $ghToken = $env:GH_TOKEN }");
+    expect(psGithubRead).toBeGreaterThan(0);
+    expect(psGhRead).toBeGreaterThan(psGithubRead);
+    const cmdGithubRead = cmdScript.indexOf('set "GH_TOKEN_VAL=!GITHUB_TOKEN!"');
+    const cmdGhRead = cmdScript.indexOf('set "GH_TOKEN_VAL=!GH_TOKEN!"');
+    expect(cmdGithubRead).toBeGreaterThan(0);
+    expect(cmdGhRead).toBeGreaterThan(cmdGithubRead);
+    // The percent-expansion reads are injection vectors (cmd's phase-1 %
+    // expansion re-parses metacharacters in the value) and must stay gone.
+    expect(cmdScript).not.toContain('set "GH_TOKEN_VAL=%GITHUB_TOKEN%"');
+    expect(cmdScript).not.toContain('set "GH_TOKEN_VAL=%GH_TOKEN%"');
 
     // install.sh: header array splatted into the api curl.
     expect(sh).toContain("GH_AUTH_HEADER=()");
@@ -1334,32 +1356,65 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain('set "GH_AUTH_HEADER="');
   });
 
-  test("all installers retry anonymously if the authenticated api call fails", () => {
+  test("sh and ps1 retry anonymously ONLY on HTTP 401; cmd retry is token-gated", () => {
     // A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
     // dotfiles, direnv) gets a 401 and would break an install that works
-    // fine anonymously today. Each installer must retry the api.github.com
-    // call without the auth header when the authenticated attempt fails,
-    // so a bad token costs one extra request but never blocks an otherwise
-    // working install. See backnotprop/plannotator#1157 (review feedback).
+    // fine anonymously today. install.sh and install.ps1 inspect the HTTP
+    // status and retry WITHOUT the header only on 401: requests carrying
+    // invalid credentials count against the anonymous 60/hour per-IP pool,
+    // so a blind retry on any failure would double the burn, and network
+    // failures gain nothing from a second attempt. install.cmd keeps
+    // retry-on-any-failure (portable status capture in batch is not worth
+    // the complexity) but only when a token was actually used.
+    // See backnotprop/plannotator#1157 (second review).
     const cmdScript = readScript("install.cmd");
 
-    // install.sh: `|| true` swallows the authed curl failure, then a
-    // `[ -z "$latest_tag" ]` gate retries without the header array.
-    expect(sh).toContain('|| true');
-    expect(sh).toContain('if [ -z "$latest_tag" ] && [ ${#GH_AUTH_HEADER[@]} -gt 0 ]; then');
-    expect(sh).toContain('latest_tag=$(curl -fsSL "$_api_url" | grep');
+    // install.sh: status captured via curl -w; anonymous retry is gated on
+    // a 401 AND a previously attached header.
+    expect(sh).toContain("curl -sSL -w '\\n%{http_code}'");
+    expect(sh).toContain('if [ "$_api_code" = "401" ] && [ ${#GH_AUTH_HEADER[@]} -gt 0 ]; then');
+    // The anonymous retry line drops the header array entirely (and is not
+    // a substring of the authenticated call).
+    expect(sh).toContain(
+      "_api_body=$(curl -sSL -w '\\n%{http_code}' \"$_api_url\" 2>/dev/null) || true",
+    );
+    // The tag is only parsed out of a 200 response.
+    expect(sh).toContain('if [ "$_api_code" = "200" ]; then');
 
-    // install.ps1: try/catch around Invoke-RestMethod; on catch, when a
-    // header was present, retry with no -Headers.
-    expect(ps).toContain('} catch {');
-    expect(ps).toContain("if ($ghHeaders.Count -eq 0)");
-    expect(ps).toContain("Write-Error");
-    expect(ps).toContain("$release = Invoke-RestMethod -Uri $apiUrl");
+    // install.ps1: the catch inspects the response status; the anonymous
+    // retry requires a token AND a 401, and both terminal error paths
+    // surface the original exception message.
+    expect(ps).toContain("$status = [int]$_.Exception.Response.StatusCode");
+    expect(ps).toContain("if ($ghHeaders.Count -gt 0 -and $status -eq 401) {");
+    expect(ps).toContain('Failed to fetch latest version: $($_.Exception.Message)');
 
-    // install.cmd: ERRORLEVEL check after the authed curl; when a header
-    // was set, retry without it.
+    // install.cmd: retry only when a token was present, with the anonymous
+    // retry curl adjacent to the first curl's ERRORLEVEL read.
     expect(cmdScript).toContain('if !ERRORLEVEL! neq 0 if defined GH_AUTH_HEADER (');
     expect(cmdScript).toContain('curl -fsSL "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"');
+    // F7 pin: the failure check must appear BEFORE the token clears in file
+    // order - `set` can disturb ERRORLEVEL, so every ERRORLEVEL read stays
+    // immediately adjacent to the curl it tests.
+    const cmdFailureCheck = cmdScript.indexOf("Failed to get latest version");
+    const cmdTokenClear = cmdScript.lastIndexOf('set "GH_TOKEN_VAL="');
+    const cmdHeaderClear = cmdScript.lastIndexOf('set "GH_AUTH_HEADER="');
+    expect(cmdFailureCheck).toBeGreaterThan(0);
+    expect(cmdTokenClear).toBeGreaterThan(cmdFailureCheck);
+    expect(cmdHeaderClear).toBeGreaterThan(cmdFailureCheck);
+  });
+
+  test("install.cmd hardens the gh fallback and token value (second review)", () => {
+    const cmdScript = readScript("install.cmd");
+    // gh is resolved via `where` and invoked by absolute path, so the for /f
+    // command line never runs a bare `gh` name that cmd would resolve from
+    // the current directory first.
+    expect(cmdScript).toContain("('where gh 2^>nul')");
+    expect(cmdScript).toContain('"!GH_EXE!" auth token --hostname github.com');
+    expect(cmdScript).not.toContain("('gh auth token");
+    // Charset allowlist: a token containing anything outside [A-Za-z0-9_-]
+    // (a quote in particular could break out of the quoted Authorization
+    // header on the curl line) is dropped and the call goes anonymous.
+    expect(cmdScript).toContain('if defined TOKEN_RESIDUE set "GH_TOKEN_VAL="');
   });
 });
 
