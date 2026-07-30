@@ -6,6 +6,23 @@ sidebar:
 section: "Guides"
 ---
 
+## Installer fails with "Failed to fetch latest version"
+
+The installer queries the GitHub API (`api.github.com`) to resolve the latest release tag. Unauthenticated API requests are capped at **60 per hour per source IP** - not per user - so the install fails (with `Failed to fetch latest version` on macOS/Linux/WSL, `Failed to get latest version` on Windows) on shared egress IPs (corporate proxies, NAT/CGNAT, CI runners) or when retrying within the same hour.
+
+Provide a token and the installer attaches it to that API call automatically (raising the limit to 5000/hour). It reads, in order:
+
+1. `GITHUB_TOKEN` env var
+2. `GH_TOKEN` env var
+3. `gh auth token` (when the `gh` CLI is installed and authenticated)
+
+```bash
+export GITHUB_TOKEN=ghp_xxx
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Or run `gh auth login` once - no env var needed. To pin a specific version instead (which skips the API call entirely), use `--version vX.Y.Z`. Only the version-resolution call is authenticated; release downloads and `git clone` are unaffected. See [issue #1156](https://github.com/backnotprop/plannotator/issues/1156).
+
 ## Lost a Plannotator tab?
 
 If you accidentally close a Plannotator browser tab, the server is still running in the background. You can find and reopen it:

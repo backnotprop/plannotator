@@ -204,11 +204,32 @@ REM Get version to install
 if /i "!VERSION!"=="latest" (
     echo Fetching latest version...
 
+    REM api.github.com caps unauthenticated requests at 60/hour per source IP,
+    REM which fails installs behind shared egress IPs (NAT/CGNAT/corporate
+    REM proxies) and during repeated/debug runs within an hour. Attach an
+    REM Authorization header when a token is available (raises the limit to
+    REM 5000/hour); when none is found, fall back to anonymous (unchanged
+    REM behavior). Precedence matches `gh`: GITHUB_TOKEN > GH_TOKEN > gh auth token.
+    set "GH_TOKEN_VAL="
+    if defined GITHUB_TOKEN set "GH_TOKEN_VAL=%GITHUB_TOKEN%"
+    if not defined GH_TOKEN_VAL if defined GH_TOKEN set "GH_TOKEN_VAL=%GH_TOKEN%"
+    if not defined GH_TOKEN_VAL (
+        for /f "delims=" %%i in ('gh auth token 2^>nul') do set "GH_TOKEN_VAL=%%i"
+    )
+    if defined GH_TOKEN_VAL (
+        set "GH_AUTH_HEADER=-H "Authorization: Bearer !GH_TOKEN_VAL!""
+    ) else (
+        set "GH_AUTH_HEADER="
+    )
+
     REM Download release info to a randomized temp file so concurrent
     REM invocations don't collide and a same-user pre-placed symlink at
     REM a predictable path can't redirect curl's output.
     set "RELEASE_JSON=%TEMP%\plannotator-release-%RANDOM%.json"
-    curl -fsSL "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"
+    curl -fsSL !GH_AUTH_HEADER! "https://api.github.com/repos/!REPO!/releases/latest" -o "!RELEASE_JSON!"
+    REM Clear token from memory - not needed for release downloads or git clone.
+    set "GH_TOKEN_VAL="
+    set "GH_AUTH_HEADER="
     if !ERRORLEVEL! neq 0 (
         echo Failed to get latest version >&2
         exit /b 1

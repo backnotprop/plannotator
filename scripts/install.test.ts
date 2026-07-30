@@ -1274,6 +1274,65 @@ describe("install shared behavior", () => {
     expect(guardIdx).toBeGreaterThan(-1);
     expect(execIdx).toBeGreaterThan(guardIdx);
   });
+
+  test("all installers authenticate the api.github.com version-resolution call", () => {
+    // api.github.com caps unauthenticated requests at 60/hour per source IP
+    // (not per user), which fails installs behind shared egress IPs
+    // (NAT/CGNAT/corporate proxies) and during repeated/debug runs within an
+    // hour. Each installer must attach an Authorization header to the
+    // releases/latest call when a token is available, using the same
+    // precedence across platforms: GITHUB_TOKEN > GH_TOKEN > `gh auth token`.
+    // When no token is found it must fall back to anonymous (unchanged
+    // behavior). See backnotprop/plannotator#1156.
+    const cmdScript = readScript("install.cmd");
+
+    // Shared precedence + bearer scheme across all three installers.
+    for (const [name, script] of [["install.sh", sh], ["install.ps1", ps], ["install.cmd", cmdScript]] as const) {
+      expect(script, `${name} should read GITHUB_TOKEN`).toContain("GITHUB_TOKEN");
+      expect(script, `${name} should read GH_TOKEN`).toContain("GH_TOKEN");
+      expect(script, `${name} should use a Bearer scheme`).toContain("Bearer ");
+      expect(script, `${name} should fall back to gh auth token`).toContain("gh auth token");
+    }
+
+    // install.sh: header array splatted into the api curl.
+    expect(sh).toContain("GH_AUTH_HEADER=()");
+    expect(sh).toContain('"${GH_AUTH_HEADER[@]}" "https://api.github.com/repos/${REPO}/releases/latest"');
+
+    // install.ps1: hashtable passed via -Headers to Invoke-RestMethod.
+    expect(ps).toContain('$ghHeaders = if ($ghToken) { @{ Authorization = "Bearer $ghToken" } } else { @{} }');
+    expect(ps).toContain("-Headers $ghHeaders");
+
+    // install.cmd: arg splatted into the api curl via delayed expansion.
+    expect(cmdScript).toContain('set "GH_AUTH_HEADER=-H "Authorization: Bearer !GH_TOKEN_VAL!""');
+    expect(cmdScript).toContain('curl -fsSL !GH_AUTH_HEADER! "https://api.github.com/repos/!REPO!/releases/latest"');
+  });
+
+  test("auth header is used ONLY on the api.github.com call, never on downloads", () => {
+    // The 60/hr REST limit applies only to api.github.com. Release-asset
+    // downloads (github.com/.../releases/download) are not subject to it,
+    // and authing those would expose the token in argv/process list for the
+    // full duration of a large binary download. Tripwire: if a future edit
+    // splats the auth header into any download curl, these fail. See
+    // backnotprop/plannotator#1156.
+    const cmdScript = readScript("install.cmd");
+
+    // install.sh: binary download and checksum download must NOT carry the
+    // auth header array. Token vars cleared right after the api call so
+    // they don't linger for the download phase.
+    expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" -o "$tmp_file"');
+    expect(sh).not.toContain('curl -fsSL "${GH_AUTH_HEADER[@]}" "$checksum_url"');
+    expect(sh).toContain("unset _gh_token GH_AUTH_HEADER");
+
+    // install.ps1: binary download must NOT carry $ghHeaders, which is nulled.
+    expect(ps).not.toContain('Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -Headers $ghHeaders');
+    expect(ps).toContain('$ghToken = $null; $ghHeaders = $null');
+
+    // install.cmd: binary download must NOT carry !GH_AUTH_HEADER!. Token
+    // vars cleared after the api call.
+    expect(cmdScript).not.toContain('curl -fsSL !GH_AUTH_HEADER! "!BINARY_URL!"');
+    expect(cmdScript).toContain('set "GH_TOKEN_VAL="');
+    expect(cmdScript).toContain('set "GH_AUTH_HEADER="');
+  });
 });
 
 describe("PlannotatorConfig schema", () => {

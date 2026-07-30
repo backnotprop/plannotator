@@ -99,7 +99,27 @@ foreach ($oldPath in $oldLocations) {
 
 if ($Version -eq "latest") {
     Write-Host "Fetching latest version..."
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+
+    # api.github.com caps unauthenticated requests at 60/hour per source IP,
+    # which fails installs behind shared egress IPs (NAT/CGNAT/corporate
+    # proxies) and during repeated/debug runs within an hour. Attach an
+    # Authorization header when a token is available (raises the limit to
+    # 5000/hour); when none is found, fall back to anonymous (unchanged
+    # behavior). Precedence matches `gh`: GITHUB_TOKEN > GH_TOKEN > gh auth token.
+    $ghToken = $env:GITHUB_TOKEN
+    if (-not $ghToken) { $ghToken = $env:GH_TOKEN }
+    if (-not $ghToken -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+        try { $ghToken = (gh auth token 2>$null) } catch { }
+    }
+    $ghHeaders = if ($ghToken) { @{ Authorization = "Bearer $ghToken" } } else { @{} }
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers $ghHeaders
+    } catch {
+        Write-Error "Failed to fetch latest version (the GitHub API may be rate-limiting your IP; see https://github.com/backnotprop/plannotator/issues/1156)"
+        exit 1
+    }
+    # Clear token from memory - not needed for release downloads or git clone.
+    $ghToken = $null; $ghHeaders = $null
     $latestTag = $release.tag_name
 
     if (-not $latestTag) {

@@ -287,7 +287,26 @@ fi
 
 if [ "$VERSION" = "latest" ]; then
     echo "Fetching latest version..."
-    latest_tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+
+    # api.github.com caps unauthenticated requests at 60/hour per source IP,
+    # which fails installs behind shared egress IPs (NAT/CGNAT/corporate
+    # proxies) and during repeated/debug runs within an hour. Attach an
+    # Authorization header when a token is available (raises the limit to
+    # 5000/hour); when none is found, fall back to anonymous (unchanged
+    # behavior). Precedence matches `gh`: GITHUB_TOKEN > GH_TOKEN > gh auth token.
+    GH_AUTH_HEADER=()
+    if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
+        GH_AUTH_HEADER=(-H "Authorization: Bearer ${GITHUB_TOKEN:-${GH_TOKEN}}")
+    elif command -v gh >/dev/null 2>&1; then
+        if _gh_token="$(gh auth token 2>/dev/null)" && [ -n "$_gh_token" ]; then
+            GH_AUTH_HEADER=(-H "Authorization: Bearer ${_gh_token}")
+        fi
+    fi
+    latest_tag=$(curl -fsSL "${GH_AUTH_HEADER[@]}" "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+    # Clear the token from memory immediately after use - it is not needed
+    # for the release downloads or git clone (which are not rate-limited at
+    # 60/hr and don't need auth). Defense in depth against env leakage.
+    unset _gh_token GH_AUTH_HEADER
 
     if [ -z "$latest_tag" ]; then
         echo "Failed to fetch latest version" >&2
