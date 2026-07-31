@@ -273,9 +273,99 @@ const normalizeRefLabel = (label: string): string =>
  *   inside `<details>…</details>` or `<pre>…</pre>` is protected exactly as
  *   far as the block parser's own HTML block extends.
  */
+// Generous bound on how many lines ahead a balanced open/close depth scan may
+// look for a multi-line HTML block's closing tag. Real nested HTML blocks in
+// a plan/review document are never remotely this long; this only exists to
+// bound the residual pathological case handled below (a closing tag exists
+// somewhere far away but the running depth never actually returns to zero
+// before it) so that case stays a bounded, constant amount of work too.
+const MAX_HTML_BLOCK_SCAN_LINES = 2000;
+
+/**
+ * Lazily builds, once per tag name, a suffix boolean array answering "does a
+ * closing tag for this tag name exist at or after line k" in O(1) per query
+ * after an O(N) one-time build. Caching this per tag name (not per opening
+ * line) is what turns a document with many consecutive unclosed openers of
+ * the SAME tag (e.g. thousands of bare `<div>` lines) linear: the very first
+ * `<div>` pays the one-time O(N) cost, and every subsequent `<div>` gets an
+ * O(1) answer instead of independently re-scanning to end-of-document. The
+ * cache must be created fresh per document (per `markProtectedLines`/
+ * `parseMarkdownToBlocks` call) since it indexes into that specific `lines`
+ * array.
+ */
+function closeExistsFromLine(
+  lines: string[],
+  tagName: string,
+  cache: Map<string, boolean[]>,
+): boolean[] {
+  const cached = cache.get(tagName);
+  if (cached) return cached;
+  const closeRe = new RegExp(`</${tagName}\\s*>`, 'i');
+  const arr = new Array<boolean>(lines.length + 1).fill(false);
+  for (let k = lines.length - 1; k >= 0; k--) {
+    arr[k] = arr[k + 1] || closeRe.test(lines[k]);
+  }
+  cache.set(tagName, arr);
+  return arr;
+}
+
+/**
+ * Shared, bounded/linear helper computing the last line index of a balanced
+ * open/close-tag HTML block that opens at `startIndex` with the given
+ * already-computed `depth` (the opening line's own open-tag count minus
+ * close-tag count). Used by both `markProtectedLines` (the resolver's
+ * protection pass) and `parseMarkdownToBlocks` (the block parser) so the two
+ * can never disagree about a multi-line HTML block's extent, and so the fix
+ * below lives in exactly one place instead of two copies drifting apart.
+ *
+ * Root cause fixed here: naively scanning line-by-line from `startIndex`
+ * until depth returns to zero (or giving up at end-of-document) is fine for
+ * ONE opener, but a document with many consecutive unclosed openers repeats
+ * that full scan from every single one of them — each of the N openers pays
+ * for the O(N) tail, an O(N^2) hazard well within the 2MB annotate cap (this
+ * is exactly what a document full of bare `<div>` lines with no `</div>`
+ * anywhere triggers). Fixed with two layers:
+ *
+ *  1. `closeExistsFromLine` rejects in O(1) when no closing tag for this tag
+ *     name exists anywhere later in the document — the common pathological
+ *     case (no close at all) never scans a single line.
+ *  2. `MAX_HTML_BLOCK_SCAN_LINES` bounds the residual case (a closing tag
+ *     exists far away but depth never actually reaches zero before it) to a
+ *     constant amount of work per start position. This is a deliberate,
+ *     documented degradation: a block whose true close sits beyond the cap
+ *     is treated as unclosed, exactly like today's "no close ever found"
+ *     case — i.e. it degrades to just its opening line, never partially or
+ *     incorrectly extended.
+ *
+ * Returns `startIndex` unchanged when the block never closes (depth <= 0,
+ * no close exists anywhere, or the cap is hit without depth reaching zero).
+ */
+function findHtmlBlockEnd(
+  lines: string[],
+  startIndex: number,
+  tagName: string,
+  depth: number,
+  closeCache: Map<string, boolean[]>,
+): number {
+  if (depth <= 0) return startIndex;
+  if (!closeExistsFromLine(lines, tagName, closeCache)[startIndex + 1]) return startIndex;
+  const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
+  const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
+  const limit = Math.min(lines.length - 1, startIndex + MAX_HTML_BLOCK_SCAN_LINES);
+  let j = startIndex;
+  let d = depth;
+  while (d > 0 && j < limit) {
+    j++;
+    d += (lines[j].match(openRe) || []).length;
+    d -= (lines[j].match(closeRe) || []).length;
+  }
+  return d === 0 ? j : startIndex;
+}
+
 const markProtectedLines = (lines: string[]): boolean[] => {
   const isProtected = new Array<boolean>(lines.length).fill(false);
   let fenceLen = 0; // 0 = not currently inside a fence
+  const closeCache = new Map<string, boolean[]>();
   for (let i = 0; i < lines.length; i++) {
     if (fenceLen > 0) {
       isProtected[i] = true;
@@ -307,20 +397,10 @@ const markProtectedLines = (lines: string[]): boolean[] => {
         const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
         const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
         const depth = (lines[i].match(openRe) || []).length - (lines[i].match(closeRe) || []).length;
-        if (depth > 0) {
-          let j = i;
-          let d = depth;
-          const scanned: number[] = [];
-          while (d > 0 && j + 1 < lines.length) {
-            j++;
-            scanned.push(j);
-            d += (lines[j].match(openRe) || []).length;
-            d -= (lines[j].match(closeRe) || []).length;
-          }
-          if (d === 0) {
-            i = j;
-            for (const idx of scanned) isProtected[idx] = true;
-          }
+        const end = findHtmlBlockEnd(lines, i, tagName, depth, closeCache);
+        if (end > i) {
+          for (let idx = i + 1; idx <= end; idx++) isProtected[idx] = true;
+          i = end;
         }
       }
     }
@@ -462,6 +542,11 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
   const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;
+  // Cache for findHtmlBlockEnd's "does a close tag exist later" fast path —
+  // scoped per parse call (per document) and shared across every HTML-block
+  // opener encountered below, so a document with many consecutive unclosed
+  // openers of the same tag only pays its one-time O(N) build cost once.
+  const htmlCloseCache = new Map<string, boolean[]>();
 
   let buffer: string[] = [];
   let currentType: Block['type'] = 'paragraph';
@@ -852,23 +937,15 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
         const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
         const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
         const depth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
-        if (depth > 0) {
-          // Scan ahead for the matching close tag. If none is ever found — a
-          // self-closing <video/>, or an unclosed <picture>/<div> — do NOT swallow
-          // the rest of the document into this block; keep it to the opening line.
-          let j = i;
-          let d = depth;
-          const scanned: string[] = [];
-          while (d > 0 && j + 1 < lines.length) {
-            j++;
-            scanned.push(lines[j]);
-            d += (lines[j].match(openRe) || []).length;
-            d -= (lines[j].match(closeRe) || []).length;
-          }
-          if (d === 0) {
-            i = j;
-            for (const s of scanned) htmlLines.push(s);
-          }
+        // Scan ahead for the matching close tag via the shared, bounded/
+        // linear helper (see its doc comment for why a naive per-opener scan
+        // is quadratic). If none is ever found — a self-closing <video/>, or
+        // an unclosed <picture>/<div> — do NOT swallow the rest of the
+        // document into this block; keep it to the opening line.
+        const end = findHtmlBlockEnd(lines, i, tagName, depth, htmlCloseCache);
+        if (end > i) {
+          for (let k = i + 1; k <= end; k++) htmlLines.push(lines[k]);
+          i = end;
         }
       }
 

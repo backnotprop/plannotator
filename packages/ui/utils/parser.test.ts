@@ -1220,6 +1220,76 @@ describe("parseMarkdownToBlocks — raw HTML blocks", () => {
   });
 });
 
+describe("parseMarkdownToBlocks / resolveReferenceLinks — unclosed-HTML-opener perf (PR #1168 follow-up)", () => {
+  // Root cause: the balanced open/close depth scan for a multi-line HTML
+  // block does not advance the outer index when it fails to find a closing
+  // tag — so a document with many consecutive unclosed openers (e.g.
+  // thousands of bare `<div>` lines with no `</div>` anywhere) makes EVERY
+  // one of them independently re-scan all the way to end-of-document. That
+  // is O(N^2) work for N such lines, a real DoS-shaped hazard well within
+  // the 2MB annotate cap. Both markProtectedLines (used by
+  // resolveReferenceLinks) and parseMarkdownToBlocks's own HTML-block
+  // section duplicate this exact scan, so both must be fixed.
+  const N = 8000;
+  // Generous bound: a linear/bounded fix finishes in well under 100ms for
+  // this input; the pre-fix O(N^2) scan takes multiple seconds (measured
+  // ~2.2s for N=8000 during triage). 800ms leaves large machine-variance
+  // headroom while still failing clearly against the quadratic behavior.
+  const TIME_BOUND_MS = 800;
+
+  test("parseMarkdownToBlocks stays fast with many consecutive unclosed <div> openers", () => {
+    const md = Array.from({ length: N }, () => "<div>").join("\n");
+    const start = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const elapsed = performance.now() - start;
+    expect(blocks).toHaveLength(N);
+    expect(blocks.every((b) => b.type === "html")).toBe(true);
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+  });
+
+  test("resolveReferenceLinks stays fast with many consecutive unclosed <div> openers", () => {
+    const md =
+      Array.from({ length: N }, () => "<div>").join("\n") +
+      "\n\n[x][id]\n\n[id]: https://e.com";
+    const start = performance.now();
+    const result = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    expect(result).toContain("[x](https://e.com)");
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+  });
+
+  test("parity: a real <details>...</details> block stays intact and identically protected/parsed among thousands of unclosed <div> decoys", () => {
+    const decoyCount = 5000;
+    const decoys = Array.from({ length: decoyCount }, () => "<div>").join("\n");
+    const md =
+      `${decoys}\n\n` +
+      "<details>\n<summary>Notes</summary>\n\n[id]: https://from-details.com\n\n</details>" +
+      "\n\nAfter.";
+
+    const start = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const resolved = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+
+    // parseMarkdownToBlocks: the real <details> block is captured whole,
+    // undisturbed by the decoys before it, followed by its own paragraph.
+    const detailsBlock = blocks.find((b) => b.type === "html" && b.content.startsWith("<details>"));
+    expect(detailsBlock).toBeDefined();
+    expect(detailsBlock!.content).toBe(
+      "<details>\n<summary>Notes</summary>\n\n[id]: https://from-details.com\n\n</details>",
+    );
+    const paragraph = blocks.find((b) => b.type === "paragraph" && b.content === "After.");
+    expect(paragraph).toBeDefined();
+
+    // resolveReferenceLinks: the SAME <details> span is protected — the
+    // definition inside it is never consumed by anything, so it stays
+    // visible verbatim, exactly mirroring the block parser's own boundary
+    // for this block (not corrupted, not partially rewritten).
+    expect(resolved).toContain("[id]: https://from-details.com");
+  });
+});
+
 describe("computeListIndices", () => {
   test("all unordered → all null", () => {
     const blocks = [li(0, false), li(0, false), li(0, false)];
