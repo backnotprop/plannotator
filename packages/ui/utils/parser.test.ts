@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations } from "./parser";
+import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations, resolveReferenceLinks } from "./parser";
 import { shouldStripFrontmatter } from "@plannotator/core/annotatable";
 import type { Block } from "../types";
 
@@ -13,6 +13,131 @@ const li = (level: number, ordered: boolean, orderedStart?: number): Block => ({
   orderedStart,
   order: 0,
   startLine: 1,
+});
+
+describe("resolveReferenceLinks (#923)", () => {
+  test("resolves full, collapsed, and shortcut references to inline links", () => {
+    expect(resolveReferenceLinks("[text][id]\n\n[id]: https://e.com")).toBe(
+      "[text](https://e.com)\n\n",
+    );
+    expect(resolveReferenceLinks("[text][]\n\n[text]: https://e.com")).toBe(
+      "[text](https://e.com)\n\n",
+    );
+    expect(resolveReferenceLinks("[text]\n\n[text]: https://e.com")).toBe(
+      "[text](https://e.com)\n\n",
+    );
+  });
+
+  test("matches labels case-insensitively and collapses internal whitespace", () => {
+    expect(resolveReferenceLinks("[Text][My  Ref]\n\n[my ref]: https://e.com")).toBe(
+      "[Text](https://e.com)\n\n",
+    );
+  });
+
+  test("supports the angle-bracket destination form and reference images", () => {
+    expect(resolveReferenceLinks("[x][id]\n\n[id]: <https://e.com>")).toBe(
+      "[x](https://e.com)\n\n",
+    );
+    expect(resolveReferenceLinks("![alt][id]\n\n[id]: /img.png")).toBe(
+      "![alt](/img.png)\n\n",
+    );
+  });
+
+  test("uses the first definition when a label is defined more than once", () => {
+    expect(
+      resolveReferenceLinks("[id]: https://one.com\n[id]: https://two.com\n\n[x][id]"),
+    ).toBe("\n\n\n[x](https://one.com)");
+  });
+
+  test("leaves unknown references and non-reference brackets untouched", () => {
+    expect(resolveReferenceLinks("[text][missing].")).toBe("[text][missing].");
+    // No definitions at all: fast path returns the input unchanged.
+    expect(resolveReferenceLinks("array [0] and [TODO] here")).toBe(
+      "array [0] and [TODO] here",
+    );
+    // A shortcut that does not name a definition stays literal even when other
+    // definitions exist.
+    expect(resolveReferenceLinks("[TODO] and [0]\n\n[id]: https://e.com")).toBe(
+      "[TODO] and [0]\n\n",
+    );
+  });
+
+  test("does not double-link an inline link whose text matches a definition", () => {
+    expect(
+      resolveReferenceLinks("[text](https://real.com)\n\n[text]: https://def.com"),
+    ).toBe("[text](https://real.com)\n\n");
+  });
+
+  test("never rewrites references inside fenced code blocks or inline code spans", () => {
+    expect(resolveReferenceLinks("```\n[a][b]\n```\n\n[b]: https://e.com")).toBe(
+      "```\n[a][b]\n```\n\n",
+    );
+    expect(resolveReferenceLinks("use `[a][b]` here\n\n[b]: https://e.com")).toBe(
+      "use `[a][b]` here\n\n",
+    );
+  });
+
+  test("does not collect a definition that sits inside a fenced code block", () => {
+    // The only `[id]:` is inside code, so `[id]` outside stays a literal shortcut.
+    expect(
+      resolveReferenceLinks("```\n[id]: https://code.com\n```\n\n[id]"),
+    ).toBe("```\n[id]: https://code.com\n```\n\n[id]");
+  });
+
+  test("does not treat prose with an invalid title as a definition", () => {
+    expect(
+      resolveReferenceLinks("[Reminder]: call the bank tomorrow\n\n[Reminder]"),
+    ).toBe("[Reminder]: call the bank tomorrow\n\n[Reminder]");
+  });
+
+  test("does not corrupt bare space-delimited numbers on a resolved line", () => {
+    expect(resolveReferenceLinks("value is 0 and 1 and [x][id]\n\n[id]: https://e.com")).toBe(
+      "value is 0 and 1 and [x](https://e.com)\n\n",
+    );
+  });
+
+  test("blanks definition lines in place so block start-lines stay accurate", () => {
+    const blocks = parseMarkdownToBlocks("[id]: https://e.com\n\n# Heading\n\ntext [x][id]");
+    // The definition line renders nothing; the heading and paragraph keep their
+    // original source line numbers.
+    const heading = blocks.find((b) => b.type === "heading");
+    const paragraph = blocks.find((b) => b.type === "paragraph");
+    expect(heading?.startLine).toBe(3);
+    expect(paragraph?.startLine).toBe(5);
+    expect(paragraph?.content).toBe("text [x](https://e.com)");
+    expect(blocks.some((b) => b.content.includes("[id]: https://e.com"))).toBe(false);
+  });
+
+  test("does not delete a definition-shaped line that continues a paragraph", () => {
+    // CommonMark: a definition cannot interrupt a paragraph. The second line
+    // must survive as content, not be silently blanked.
+    expect(resolveReferenceLinks("The config keys are:\n[timeout]: 30")).toBe(
+      "The config keys are:\n[timeout]: 30",
+    );
+    expect(resolveReferenceLinks("text before\n[id]: url\nmore [x][id]")).toBe(
+      "text before\n[id]: url\nmore [x][id]",
+    );
+  });
+
+  test("collects a definition after a blank line, a code fence, or another definition", () => {
+    expect(resolveReferenceLinks("[a]: https://one.com\n[b]: https://two.com\n\n[x][a] [y][b]")).toBe(
+      "\n\n\n[x](https://one.com) [y](https://two.com)",
+    );
+    expect(resolveReferenceLinks("```\ncode\n```\n[id]: https://e.com\n\n[x][id]")).toBe(
+      "```\ncode\n```\n\n\n[x](https://e.com)",
+    );
+  });
+
+  test("does not clobber a checked task-list item when an [x] definition exists", () => {
+    expect(resolveReferenceLinks("- [x] done task\n- [ ] todo\n\n[x]: https://e.com")).toBe(
+      "- [x] done task\n- [ ] todo\n\n",
+    );
+    expect(resolveReferenceLinks("1. [x] done\n\n[x]: https://e.com")).toBe("1. [x] done\n\n");
+  });
+
+  test("resolves the shortcut image form", () => {
+    expect(resolveReferenceLinks("![id]\n\n[id]: /img.png")).toBe("![id](/img.png)\n\n");
+  });
 });
 
 describe("parseMarkdownToBlocks — code fences", () => {

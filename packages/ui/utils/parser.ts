@@ -204,16 +204,154 @@ export interface ParseMarkdownOptions {
   frontmatter?: boolean;
 }
 
+// A link reference definition: `[label]: destination "optional title"`, with up
+// to three leading spaces. The destination is a bare token or an <...> form; any
+// trailing text must be a quoted or parenthesized title, otherwise the line is
+// ordinary prose (so `[Reminder]: call the bank` is NOT a definition). Matches
+// the CommonMark shape closely enough for the simplified parser.
+const REFERENCE_DEFINITION_RE =
+  /^ {0,3}\[([^\]]+)\]:[ \t]*(?:<([^>]*)>|(\S+))[ \t]*(?:"[^"]*"|'[^']*'|\([^)]*\))?[ \t]*$/;
+
+// One left-to-right pass over a line. The first alternative matches a whole
+// inline code span (balanced backtick run) so its contents are skipped; the
+// second matches a reference link/image: optional `!`, the bracketed text, then
+// an optional second bracket for the full (`[label]`) or collapsed (`[]`) forms.
+// A bare `[text]` is the shortcut form, resolved only when it names a definition
+// and is not actually an inline link. Groups: 1 code ticks, 2 `!`, 3 text,
+// 4 second bracket, 5 label.
+const REFERENCE_LINK_RE = /(`+).+?\1|(!?)\[([^\]]+)\](\[([^\]]*)\])?/g;
+
+// CommonMark label matching is case-insensitive and collapses internal runs of
+// whitespace.
+const normalizeRefLabel = (label: string): string =>
+  label.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Mark every line that sits inside a fenced code block (opener, content, and
+ * closer), so link reference definitions and links inside code are left
+ * untouched. Mirrors the variable-length ``` / ~~~ fence handling in the block
+ * loop below.
+ */
+const markFencedLines = (lines: string[]): boolean[] => {
+  const fenced = new Array<boolean>(lines.length).fill(false);
+  let fenceChar = '';
+  let fenceLen = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].replace(/^ {0,3}/, '');
+    const opener = trimmed.match(/^(`{3,}|~{3,})/);
+    if (fenceLen === 0) {
+      if (opener) {
+        fenceChar = opener[1][0];
+        fenceLen = opener[1].length;
+        fenced[i] = true;
+      }
+    } else {
+      fenced[i] = true;
+      const closer = new RegExp('^' + fenceChar + '{' + fenceLen + ',}[ \\t]*$');
+      if (opener && opener[1][0] === fenceChar && closer.test(trimmed)) {
+        fenceChar = '';
+        fenceLen = 0;
+      }
+    }
+  }
+  return fenced;
+};
+
+/** Resolve reference links/images in one non-code line. A single left-to-right
+ * pass: an inline code span is matched as a whole and returned verbatim, so a
+ * reference-looking pattern inside backticks is never rewritten; only bracketed
+ * references outside code are resolved. */
+const resolveRefsInLine = (line: string, defs: Map<string, string>): string => {
+  if (!line.includes('[')) return line;
+  return line.replace(
+    REFERENCE_LINK_RE,
+    (match, codeTicks, bang, text, secondBracket, label, offset: number, whole: string) => {
+      if (codeTicks !== undefined) return match; // inline code span: keep verbatim
+      let refLabel: string;
+      if (secondBracket === undefined) {
+        // Shortcut `[text]`: not a link when an inline `(...)` destination
+        // follows (that is an inline link the existing renderer already draws).
+        if (whole[offset + match.length] === '(') return match;
+        // Nor when it is a task-list checkbox marker at the start of a list
+        // item (`- [x]`); the checkbox parser owns that `[x]`, and resolving it
+        // against a stray `x`/`X` definition would clobber the item.
+        if (/^[ xX]$/.test(text) && /^\s*(?:[-*+]|\d+[.)])\s+$/.test(whole.slice(0, offset))) {
+          return match;
+        }
+        refLabel = text;
+      } else {
+        refLabel = label === '' ? text : label;
+      }
+      const dest = defs.get(normalizeRefLabel(refLabel));
+      // An unknown reference stays literal, matching CommonMark and avoiding
+      // false links for bracketed prose like `[TODO]` or array indices.
+      return dest ? `${bang}[${text}](${dest})` : match;
+    },
+  );
+};
+
+/**
+ * Resolve CommonMark link reference definitions and reference links into inline
+ * `[text](url)` links, so the shared inline renderer draws them instead of
+ * showing raw `[text][id]` and `[id]: url` text (issue #923). Definitions and
+ * references inside fenced code blocks and inline code spans are left untouched.
+ * Definition lines are blanked in place rather than removed so block start-line
+ * numbers stay accurate. No-op (returns the input) when the document defines no
+ * references.
+ */
+export const resolveReferenceLinks = (markdown: string): string => {
+  if (!markdown.includes('[')) return markdown;
+  const lines = markdown.split('\n');
+  const fenced = markFencedLines(lines);
+  const defs = new Map<string, string>();
+  const isDefLine = new Array<boolean>(lines.length).fill(false);
+  // A definition cannot interrupt a paragraph (CommonMark 4.7): a line matching
+  // the definition shape is only a definition when it can start a block, i.e.
+  // the previous line is the document start, blank, a fenced-code line (a code
+  // block is its own block), or itself a definition. Otherwise the line is
+  // paragraph continuation text and must be left untouched, or a bare
+  // `[word]: token` under a sentence would be silently deleted.
+  let canStartDefinition = true;
+  for (let i = 0; i < lines.length; i++) {
+    if (fenced[i]) {
+      canStartDefinition = true;
+      continue;
+    }
+    const blank = lines[i].trim() === '';
+    const match = canStartDefinition && !blank ? lines[i].match(REFERENCE_DEFINITION_RE) : null;
+    if (match) {
+      const label = normalizeRefLabel(match[1]);
+      const dest = match[2] !== undefined ? match[2] : match[3];
+      // First definition wins, per CommonMark.
+      if (label && dest && !defs.has(label)) defs.set(label, dest);
+      isDefLine[i] = true;
+      // A run of definitions stays eligible; canStartDefinition remains true.
+    } else {
+      // Blank keeps a new block startable; any other non-definition line starts
+      // (or continues) a paragraph, so a following definition-shaped line is text.
+      canStartDefinition = blank;
+    }
+  }
+  if (defs.size === 0) return markdown;
+  return lines
+    .map((line, i) => (isDefLine[i] ? '' : fenced[i] ? line : resolveRefsInLine(line, defs)))
+    .join('\n');
+};
+
 /**
  * A simplified markdown parser that splits content into linear blocks.
  * For a production app, we would use a robust AST walker (remark),
  * but for this demo, we want predictable text-anchoring.
  */
 export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownOptions): Block[] => {
-  const { content: cleanMarkdown, contentStartLine } =
+  const { content: rawContent, contentStartLine } =
     options?.frontmatter === false
       ? { content: markdown, contentStartLine: 1 }
       : extractFrontmatter(markdown);
+  // Resolve link reference definitions into inline links before splitting. This
+  // blanks definition lines in place, so line count (and every block's
+  // startLine) is preserved.
+  const cleanMarkdown = resolveReferenceLinks(rawContent);
   const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;
