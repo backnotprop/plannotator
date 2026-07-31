@@ -42,7 +42,7 @@ function runCommand(
 			cwd: options?.cwd,
 			detached: isolateProcessGroup,
 			env: preparedGitCommand?.env ?? commandEnvironment,
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 			windowsHide: true,
 		});
 
@@ -73,6 +73,7 @@ function runCommand(
 		const stderrChunks: Buffer[] = [];
 		proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
 		proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+		if (options?.stdin !== undefined) proc.stdin!.end(options.stdin);
 
 		proc.on("close", (code) => {
 			if (timer) clearTimeout(timer);

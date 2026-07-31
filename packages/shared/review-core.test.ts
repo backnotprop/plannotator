@@ -79,6 +79,7 @@ function makeRuntime(baseCwd: string): ReviewGitRuntime {
         cwd: options?.cwd ?? baseCwd,
         encoding: "utf-8",
         maxBuffer: MAX_REVIEW_FILE_CONTENT_BYTES * 4,
+        input: options?.stdin,
       });
 
       return {
@@ -412,6 +413,139 @@ describe("review-core", () => {
     expect(renamed.patch).toContain("Binary files");
     expect(listPatchFiles(renamed.patch).map((file) => file.path)).toContain(renamedTo);
   }, 20_000);
+
+  test("fingerprinting oversized tracked worktree files uses metadata without hashing them", async () => {
+    const repoDir = initRepo();
+    const largeSize = MAX_REVIEW_FILE_CONTENT_BYTES + 1;
+    writeFileSync(join(repoDir, "tracked.txt"), "a".repeat(largeSize), "utf-8");
+    git(repoDir, ["add", "tracked.txt"]);
+    git(repoDir, ["commit", "-m", "add large file"]);
+
+    const baseRuntime = makeRuntime(repoDir);
+    let hashObjectCalls = 0;
+    const runtime: ReviewGitRuntime = {
+      ...baseRuntime,
+      async runGit(args, options) {
+        if (args[0] === "--no-optional-locks" && args[1] === "hash-object") {
+          hashObjectCalls++;
+        }
+        return baseRuntime.runGit(args, options);
+      },
+    };
+
+    writeFileSync(join(repoDir, "tracked.txt"), "b".repeat(largeSize), "utf-8");
+    const first = await getGitDiffFingerprint(runtime, "uncommitted", "main");
+    writeFileSync(join(repoDir, "tracked.txt"), `b${"b".repeat(largeSize)}`, "utf-8");
+    const second = await getGitDiffFingerprint(runtime, "uncommitted", "main");
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBe(first);
+    expect(hashObjectCalls).toBe(0);
+  }, 20_000);
+
+  test("preflights many tracked objects with one cat-file batch query", async () => {
+    const objectIds = Array.from({ length: 12 }, (_, index) => index.toString(16).padStart(40, "0"));
+    let individualSizeCalls = 0;
+    let batchCalls = 0;
+    const runtime: ReviewGitRuntime = {
+      async runGit(args, options) {
+        if (args[0] === "diff" && args.includes("--raw")) {
+          return {
+            stdout: objectIds.map((objectId, index) =>
+              `:100644 100644 ${objectId} ${objectId} M\0file-${index}.txt\0`,
+            ).join(""),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (args[0] === "cat-file" && args[1] === "-s") {
+          individualSizeCalls++;
+          return { stdout: `${MAX_REVIEW_FILE_CONTENT_BYTES + 1}\n`, stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "cat-file" && args.some((arg) => arg.startsWith("--batch-check"))) {
+          batchCalls++;
+          const input = (options as { stdin?: string } | undefined)?.stdin ?? "";
+          return {
+            stdout: input.trim().split("\n").map((objectId) =>
+              `${objectId} blob ${MAX_REVIEW_FILE_CONTENT_BYTES + 1}`,
+            ).join("\n"),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (args[0] === "rev-parse") return { stdout: "/repo\n", stderr: "", exitCode: 0 };
+        if (args[0] === "diff") return { stdout: "", stderr: "", exitCode: 0 };
+        throw new Error(`Unexpected git command: ${args.join(" ")}`);
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    const result = await runGitDiff(runtime, "staged", "main", "/repo");
+
+    expect(result.patch.length).toBeLessThan(8_000);
+    expect(batchCalls).toBe(1);
+    expect(individualSizeCalls).toBe(0);
+  });
+
+  test("synthesizes quoted rename and copy metadata from raw status details", async () => {
+    const renamedFrom = 'old "rename" path';
+    const renamedTo = "new \\ rename path";
+    const copiedFrom = 'old "copy" path';
+    const copiedTo = "new \\ copy path";
+    const oldObjectId = "a".repeat(40);
+    const newObjectId = "b".repeat(40);
+    const runtime: ReviewGitRuntime = {
+      async runGit(args, options) {
+        if (args[0] === "diff" && args.includes("--raw")) {
+          return {
+            stdout: [
+              `:100644 100755 ${oldObjectId} ${newObjectId} R087`,
+              renamedFrom,
+              renamedTo,
+              `:100644 100644 ${oldObjectId} ${newObjectId} C065`,
+              copiedFrom,
+              copiedTo,
+              "",
+            ].join("\0"),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (args[0] === "cat-file" && args[1] === "-s") {
+          return { stdout: `${MAX_REVIEW_FILE_CONTENT_BYTES + 1}\n`, stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "cat-file" && args.some((arg) => arg.startsWith("--batch-check"))) {
+          const input = (options as { stdin?: string } | undefined)?.stdin ?? "";
+          return {
+            stdout: input.trim().split("\n").map((objectId) =>
+              `${objectId} blob ${MAX_REVIEW_FILE_CONTENT_BYTES + 1}`,
+            ).join("\n"),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (args[0] === "rev-parse") return { stdout: "/repo\n", stderr: "", exitCode: 0 };
+        if (args[0] === "diff") return { stdout: "", stderr: "", exitCode: 0 };
+        throw new Error(`Unexpected git command: ${args.join(" ")}`);
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    const result = await runGitDiff(runtime, "staged", "main", "/repo");
+
+    expect(result.patch).toContain("similarity index 87%");
+    expect(result.patch).toContain(`rename from ${JSON.stringify(renamedFrom)}`);
+    expect(result.patch).toContain(`rename to ${JSON.stringify(renamedTo)}`);
+    expect(result.patch).toContain("old mode 100644\nnew mode 100755");
+    expect(result.patch).toContain("similarity index 65%");
+    expect(result.patch).toContain(`copy from ${JSON.stringify(copiedFrom)}`);
+    expect(result.patch).toContain(`copy to ${JSON.stringify(copiedTo)}`);
+    expect(result.patch).not.toContain("similarity index 100%");
+  });
 
   test("binary patch detection follows rename metadata", () => {
     const patch = [

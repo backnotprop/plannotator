@@ -16,6 +16,9 @@ const runtime: ReviewGitRuntime = {
       cwd: options?.cwd,
       stdout: "pipe",
       stderr: "pipe",
+      stdin: options?.stdin === undefined
+        ? "ignore"
+        : new TextEncoder().encode(options.stdin),
     });
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),

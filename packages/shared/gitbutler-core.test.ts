@@ -90,7 +90,7 @@ function createRuntime(options: {
   let patch = "diff --git a/file.txt b/file.txt\n-old\n+new\n";
 
   const runtime: ReviewGitButlerRuntime = {
-    async runGit(args: string[]): Promise<GitCommandResult> {
+    async runGit(args: string[], commandOptions?: GitCommandOptions): Promise<GitCommandResult> {
       gitCalls.push(args);
       const commandArgs = args[0] === "--no-optional-locks" ? args.slice(1) : args;
       if (commandArgs[0] === "symbolic-ref") {
@@ -121,6 +121,13 @@ function createRuntime(options: {
       }
       if (commandArgs[0] === "cat-file" && commandArgs[1] === "-s") {
         return commandResult("10\n");
+      }
+      if (commandArgs[0] === "cat-file" && commandArgs.some((arg) => arg.startsWith("--batch-check"))) {
+        return commandResult(
+          (commandOptions?.stdin ?? "").trim().split("\n").filter(Boolean).map((objectId) =>
+            `${objectId} blob 10`,
+          ).join("\n"),
+        );
       }
       if (commandArgs[0] === "diff" && commandArgs.includes("--raw")) {
         return commandResult(

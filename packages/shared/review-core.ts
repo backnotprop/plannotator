@@ -8,6 +8,7 @@
 import { lstat, readlink } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import {
+  formatDiffMetadataPathToken,
   formatPatchPathToken,
   unquoteGitPath,
   parsePatchPathToken,
@@ -145,6 +146,8 @@ export interface GitCommandResult {
 export interface GitCommandOptions {
   cwd?: string;
   timeoutMs?: number;
+  /** UTF-8 data written to stdin, then closed before waiting for output. */
+  stdin?: string;
   /** Whether the command may ask the user for credentials. Defaults to `"allow"`. */
   interaction?: "allow" | "forbid";
 }
@@ -760,16 +763,37 @@ function isNullObjectId(objectId: string): boolean {
   return NULL_OBJECT_ID.test(objectId);
 }
 
-async function getGitObjectSize(
+async function getGitObjectSizes(
   runtime: ReviewGitRuntime,
-  objectId: string,
+  objectIds: string[],
   cwd?: string,
-): Promise<number | null> {
-  if (isNullObjectId(objectId)) return null;
-  const result = await runtime.runGit(["cat-file", "-s", "--", objectId], { cwd });
-  if (result.exitCode !== 0) return Number.POSITIVE_INFINITY;
-  const size = Number(result.stdout.trim());
-  return Number.isFinite(size) && size >= 0 ? size : Number.POSITIVE_INFINITY;
+): Promise<Map<string, number>> {
+  const uniqueObjectIds = [...new Set(objectIds.filter((objectId) => !isNullObjectId(objectId)))];
+  const sizes = new Map<string, number>();
+  if (uniqueObjectIds.length === 0) return sizes;
+
+  const result = await runtime.runGit(
+    ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
+    { cwd, stdin: `${uniqueObjectIds.join("\n")}\n` },
+  );
+  if (result.exitCode !== 0) {
+    for (const objectId of uniqueObjectIds) sizes.set(objectId, Number.POSITIVE_INFINITY);
+    return sizes;
+  }
+
+  for (const line of result.stdout.split("\n")) {
+    const [objectId, objectType, objectSize] = line.split(" ");
+    if (!objectId || objectType === "missing") continue;
+    const size = Number(objectSize);
+    sizes.set(
+      objectId,
+      Number.isFinite(size) && size >= 0 ? size : Number.POSITIVE_INFINITY,
+    );
+  }
+  for (const objectId of uniqueObjectIds) {
+    if (!sizes.has(objectId)) sizes.set(objectId, Number.POSITIVE_INFINITY);
+  }
+  return sizes;
 }
 
 async function getWorkingTreeFileInfo(
@@ -819,17 +843,30 @@ function buildOversizedTrackedStub(entry: OversizedTrackedDiffEntry): string {
   if (!entry.oldPath) lines.push(`new file mode ${entry.newMode}`);
   if (!entry.newPath) lines.push(`deleted file mode ${entry.oldMode}`);
   if (entry.status[0] === "R") {
-    lines.push("similarity index 100%");
-    lines.push(`rename from ${entry.oldPath}`);
-    lines.push(`rename to ${entry.newPath}`);
+    const similarity = Number(entry.status.slice(1));
+    if (Number.isFinite(similarity)) lines.push(`similarity index ${similarity}%`);
+    lines.push(`rename from ${formatDiffMetadataPathToken(entry.oldPath!)}`);
+    lines.push(`rename to ${formatDiffMetadataPathToken(entry.newPath!)}`);
   } else if (entry.status[0] === "C") {
-    lines.push("similarity index 100%");
-    lines.push(`copy from ${entry.oldPath}`);
-    lines.push(`copy to ${entry.newPath}`);
+    const similarity = Number(entry.status.slice(1));
+    if (Number.isFinite(similarity)) lines.push(`similarity index ${similarity}%`);
+    lines.push(`copy from ${formatDiffMetadataPathToken(entry.oldPath!)}`);
+    lines.push(`copy to ${formatDiffMetadataPathToken(entry.newPath!)}`);
   }
-  lines.push(`index ${oldId}..${newId} ${entry.newMode}`);
+  if (entry.oldPath && entry.newPath && entry.oldMode !== entry.newMode) {
+    lines.push(`old mode ${entry.oldMode}`);
+    lines.push(`new mode ${entry.newMode}`);
+  }
+  lines.push(
+    `index ${oldId}..${newId}${entry.oldMode === entry.newMode ? ` ${entry.newMode}` : ""}`,
+  );
   lines.push(`Binary files ${oldToken} and ${newToken} differ`, "");
   return lines.join("\n");
+}
+
+interface BoundedTrackedDiff {
+  patch: string;
+  fingerprintMetadata: string[];
 }
 
 /**
@@ -840,11 +877,12 @@ function buildOversizedTrackedStub(entry: OversizedTrackedDiffEntry): string {
  * represented by a small, parseable binary stub. The stub's object ids retain
  * a content-sensitive fingerprint without putting file bytes in patch output.
  */
-export async function runBoundedTrackedDiff(
+async function buildBoundedTrackedDiff(
   runtime: ReviewGitRuntime,
   args: string[],
   cwd?: string,
-): Promise<string> {
+  fingerprintMode = false,
+): Promise<BoundedTrackedDiff> {
   const diffIndex = args.indexOf("diff");
   if (diffIndex === -1) throw new Error("Expected a git diff command");
   const safeArgs = args.includes("--no-textconv")
@@ -860,16 +898,27 @@ export async function runBoundedTrackedDiff(
   const rawResult = assertGitSuccess(await runtime.runGit(rawArgs, { cwd }), rawArgs);
   const entries = parseRawDiffEntries(rawResult.stdout);
   if (entries.length === 0) {
-    return assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout;
+    return {
+      patch: assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout,
+      fingerprintMetadata: [],
+    };
   }
 
   const root = await resolveRepoToplevel(runtime, cwd);
   const oversized: OversizedTrackedDiffEntry[] = [];
+  const fingerprintMetadata: string[] = [];
+  const objectSizes = await getGitObjectSizes(
+    runtime,
+    entries.flatMap((entry) => [entry.oldObjectId, entry.newObjectId]),
+    cwd,
+  );
   for (const entry of entries) {
-    const [oldSize, newObjectSize] = await Promise.all([
-      getGitObjectSize(runtime, entry.oldObjectId, cwd),
-      getGitObjectSize(runtime, entry.newObjectId, cwd),
-    ]);
+    const oldSize = isNullObjectId(entry.oldObjectId)
+      ? null
+      : objectSizes.get(entry.oldObjectId) ?? Number.POSITIVE_INFINITY;
+    const newObjectSize = isNullObjectId(entry.newObjectId)
+      ? null
+      : objectSizes.get(entry.newObjectId) ?? Number.POSITIVE_INFINITY;
     const workingTreeInfo = isNullObjectId(entry.newObjectId)
       ? await getWorkingTreeFileInfo(root, entry.newPath)
       : null;
@@ -879,7 +928,16 @@ export async function runBoundedTrackedDiff(
       && (newSize ?? 0) <= MAX_REVIEW_FILE_CONTENT_BYTES) {
       continue;
     }
-    const workingObjectId = workingTreeInfo && entry.newPath
+    // Fingerprint polling follows the large-untracked policy: path, byte
+    // size, and mtime avoid re-reading a large file every few seconds. As with
+    // untracked files, same-size edits within a filesystem timestamp tick can
+    // collide; one-shot patch generation still hashes exact content.
+    if (fingerprintMode && workingTreeInfo && entry.newPath) {
+      fingerprintMetadata.push(
+        `large:${entry.newPath}:${workingTreeInfo.size}:${workingTreeInfo.mtimeMs}`,
+      );
+    }
+    const workingObjectId = !fingerprintMode && workingTreeInfo && entry.newPath
       ? await hashOversizedWorkingTreeFile(runtime, entry.newPath, workingTreeInfo, cwd)
       : null;
     oversized.push({
@@ -891,7 +949,10 @@ export async function runBoundedTrackedDiff(
   }
 
   if (oversized.length === 0) {
-    return assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout;
+    return {
+      patch: assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout,
+      fingerprintMetadata,
+    };
   }
 
   const exclusions = oversized.flatMap((entry) => [
@@ -902,7 +963,18 @@ export async function runBoundedTrackedDiff(
   ]);
   const patchArgs = [...safeArgs, "--", ...exclusions];
   const boundedPatch = assertGitSuccess(await runtime.runGit(patchArgs, { cwd }), patchArgs).stdout;
-  return boundedPatch + oversized.map(buildOversizedTrackedStub).join("");
+  return {
+    patch: boundedPatch + oversized.map(buildOversizedTrackedStub).join(""),
+    fingerprintMetadata,
+  };
+}
+
+export async function runBoundedTrackedDiff(
+  runtime: ReviewGitRuntime,
+  args: string[],
+  cwd?: string,
+): Promise<string> {
+  return (await buildBoundedTrackedDiff(runtime, args, cwd)).patch;
 }
 
 async function getUntrackedFileDiffs(
@@ -1467,7 +1539,10 @@ const MAX_UNTRACKED_FINGERPRINT_FILES = 20;
 const UNTRACKED_STATUS_OUTPUT_CAP = 2 * 1024 * 1024;
 const collapsedUntrackedCwds = new Set<string>();
 
-type ReadOnlyGitRunner = (args: string[]) => Promise<GitCommandResult>;
+type ReadOnlyGitRunner = (
+  args: string[],
+  options?: GitCommandOptions,
+) => Promise<GitCommandResult>;
 
 async function appendDiffFingerprint(
   runReadOnlyGit: ReadOnlyGitRunner,
@@ -1476,14 +1551,16 @@ async function appendDiffFingerprint(
   args: string[],
 ): Promise<boolean> {
   try {
-    const patch = await runBoundedTrackedDiff(
+    const diff = await buildBoundedTrackedDiff(
       {
-        runGit: (diffArgs) => runReadOnlyGit(diffArgs),
+        runGit: (diffArgs, options) => runReadOnlyGit(diffArgs, options),
         readTextFile: async () => null,
       },
       ["diff", "--no-ext-diff", ...whitespaceArgs, ...args],
+      undefined,
+      true,
     );
-    parts.push(hashFingerprintPart(patch));
+    parts.push(hashFingerprintPart(diff.patch), ...diff.fingerprintMetadata);
     return true;
   } catch {
     return false;
@@ -1575,8 +1652,8 @@ export async function getGitDiffFingerprint(
     // every few seconds) and must NEVER take git's index lock — `status`/`diff`
     // opportunistically refresh the index by default, which races concurrent
     // `git add`/commit operations (the agent working while the user reviews).
-    const runReadOnlyGit = (args: string[]) =>
-      runtime.runGit(["--no-optional-locks", ...args], { cwd });
+    const runReadOnlyGit = (args: string[], options?: GitCommandOptions) =>
+      runtime.runGit(["--no-optional-locks", ...args], { ...options, cwd });
 
     // commit:<sha> — the diff is anchored to an immutable object, so the
     // fingerprint is the sha plus whether it still resolves. Deliberately NOT

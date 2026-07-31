@@ -47,7 +47,9 @@ async function runGit(
     cwd: options?.cwd,
     detached: command.isolateProcessGroup,
     env: command.env,
-    stdin: "ignore",
+    stdin: options?.stdin === undefined
+      ? "ignore"
+      : new TextEncoder().encode(options.stdin),
     stdout: "pipe",
     stderr: "pipe",
     windowsHide: true,
