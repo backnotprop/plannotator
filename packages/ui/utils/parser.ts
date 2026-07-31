@@ -274,31 +274,47 @@ const normalizeRefLabel = (label: string): string =>
  *   far as the block parser's own HTML block extends.
  */
 /**
- * Lazily builds, once per tag name, a suffix boolean array answering "does a
- * closing tag for this tag name exist at or after line k" in O(1) per query
- * after an O(N) one-time build. Caching this per tag name (not per opening
- * line) is what turns a document with many consecutive unclosed openers of
- * the SAME tag (e.g. thousands of bare `<div>` lines) linear: the very first
- * `<div>` pays the one-time O(N) cost, and every subsequent `<div>` gets an
- * O(1) answer instead of independently re-scanning to end-of-document. The
- * cache must be created fresh per document (per `markProtectedLines`/
- * `parseMarkdownToBlocks` call) since it indexes into that specific `lines`
- * array.
+ * Per-tag-name index backing `findHtmlBlockEnd`. `augmented` is the running
+ * open-tag-count-minus-close-tag-count prefix sum for this tag name, with a
+ * virtual baseline of 0 prepended at index 0 — so `augmented[k]` is the sum
+ * through line `k-1` (the depth baseline a block opening at line `k` must
+ * return to) and `augmented[k+1]` is the sum through line `k`.
+ * `nextAtOrBelow[m]` is the classic "next element at or below this one"
+ * index over `augmented`: the smallest `m' > m` with `augmented[m'] <=
+ * augmented[m]`, or -1 if none exists.
  */
-function closeExistsFromLine(
-  lines: string[],
-  tagName: string,
-  cache: Map<string, boolean[]>,
-): boolean[] {
-  const cached = cache.get(tagName);
-  if (cached) return cached;
-  const closeRe = new RegExp(`</${tagName}\\s*>`, 'i');
-  const arr = new Array<boolean>(lines.length + 1).fill(false);
-  for (let k = lines.length - 1; k >= 0; k--) {
-    arr[k] = arr[k + 1] || closeRe.test(lines[k]);
+interface TagCloseIndex {
+  augmented: number[];
+  nextAtOrBelow: number[];
+}
+
+/**
+ * Builds a `TagCloseIndex` for one tag name in a single O(N) pass (plus a
+ * classic O(N) monotonic-stack pass for `nextAtOrBelow` — each index is
+ * pushed and popped at most once, so the two passes together are linear in
+ * the document's line count, independent of how many opening/closing tags
+ * it contains).
+ */
+function buildTagCloseIndex(lines: string[], tagName: string): TagCloseIndex {
+  const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
+  const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
+  const n = lines.length;
+  const augmented = new Array<number>(n + 1);
+  augmented[0] = 0;
+  let running = 0;
+  for (let k = 0; k < n; k++) {
+    running += (lines[k].match(openRe) || []).length;
+    running -= (lines[k].match(closeRe) || []).length;
+    augmented[k + 1] = running;
   }
-  cache.set(tagName, arr);
-  return arr;
+  const nextAtOrBelow = new Array<number>(n + 1).fill(-1);
+  const stack: number[] = [];
+  for (let m = n; m >= 0; m--) {
+    while (stack.length && augmented[stack[stack.length - 1]] > augmented[m]) stack.pop();
+    nextAtOrBelow[m] = stack.length ? stack[stack.length - 1] : -1;
+    stack.push(m);
+  }
+  return { augmented, nextAtOrBelow };
 }
 
 /**
@@ -310,57 +326,59 @@ function closeExistsFromLine(
  * about a multi-line HTML block's extent, and so a fix here lives in exactly
  * one place instead of two copies drifting apart.
  *
- * Root cause originally fixed here: naively scanning line-by-line from
- * `startIndex` until depth returns to zero (or giving up at
- * end-of-document) is fine for ONE opener, but a document with many
- * consecutive unclosed openers repeats that full scan from every single one
- * of them — each of the N openers pays for the O(N) tail, an O(N^2) hazard
- * well within the 2MB annotate cap (this is exactly what a document full of
- * bare `<div>` lines with no `</div>` anywhere triggers).
+ * History: naively scanning line-by-line from `startIndex` until depth
+ * returns to zero (or giving up at end-of-document) is O(N^2) for a
+ * document with many consecutive unclosed openers (e.g. thousands of bare
+ * `<div>` lines), since every one of them re-scans to EOF. A first fix
+ * added an O(1) "does a close exist anywhere" pre-check plus a fixed
+ * line-count cap on the residual scan — but that cap silently truncated
+ * VALID blocks longer than it, and removing the cap alone reopened a
+ * closely related O(N^2) case: N unclosed openers followed by a SINGLE
+ * trailing close still all pass the "a close exists somewhere" pre-check,
+ * so every one of them still scans forward (mostly to EOF) before giving up.
  *
- * `closeExistsFromLine` rejects in O(1) when no closing tag for this tag
- * name exists anywhere later in the document — the pathological case (no
- * close at all, e.g. thousands of bare unclosed openers) never scans a
- * single line ahead. When a close DOES exist somewhere, the scan below runs
- * unbounded to its actual, real end: a valid block is scanned exactly once,
- * however long it is (a >2000-line `<details>` or raw `<table>` block is
- * legitimate content within the 2MB annotate cap and must never be
- * truncated — a fixed line-count cap here previously did exactly that and
- * was removed for it). This does not reintroduce the quadratic hazard: the
- * O(1) reject already eliminates the "many failing scans" case, and a
- * scan that actually succeeds only ever runs once per document (the outer
- * loop jumps past every line it consumes).
+ * Fixed properly here with a per-tag-name prefix-sum index
+ * (`buildTagCloseIndex`, O(N), built once per tag name and cached per
+ * document — see `closeCache`): finding "the exact line where a block
+ * starting at `startIndex` closes, if ever" is exactly the classic "next
+ * smaller-or-equal element" query against that prefix sum, which the index
+ * answers in O(1). No scanning happens per opener at all — not for a block
+ * that never closes, not for one that closes after any number of
+ * intervening lines, however many. This is provably linear overall (a
+ * document with T distinct protected tag names costs O(T * N) to index,
+ * and T is bounded by the small, fixed `HTML_BLOCK_TAGS` set) and can never
+ * truncate a valid block, because it always finds the block's real end
+ * (however far away) rather than giving up at a fixed distance.
  *
- * Returns `startIndex` unchanged when the block never closes (depth <= 0,
- * no close exists anywhere, or the running depth never returns to exactly
- * zero before end-of-document despite a close existing somewhere — e.g. an
- * unbalanced/self-closing tag).
+ * Returns `startIndex` unchanged when the block never closes: depth <= 0,
+ * or the running depth never returns to exactly zero anywhere in the rest
+ * of the document (whether because no close exists at all, or one exists
+ * but is insufficient to bring the count back to exactly the opener's own
+ * baseline — e.g. an unbalanced/self-closing tag).
  */
 function findHtmlBlockEnd(
   lines: string[],
   startIndex: number,
   tagName: string,
   depth: number,
-  closeCache: Map<string, boolean[]>,
+  closeCache: Map<string, TagCloseIndex>,
 ): number {
   if (depth <= 0) return startIndex;
-  if (!closeExistsFromLine(lines, tagName, closeCache)[startIndex + 1]) return startIndex;
-  const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
-  const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
-  let j = startIndex;
-  let d = depth;
-  while (d > 0 && j + 1 < lines.length) {
-    j++;
-    d += (lines[j].match(openRe) || []).length;
-    d -= (lines[j].match(closeRe) || []).length;
+  let index = closeCache.get(tagName);
+  if (!index) {
+    index = buildTagCloseIndex(lines, tagName);
+    closeCache.set(tagName, index);
   }
-  return d === 0 ? j : startIndex;
+  const { augmented, nextAtOrBelow } = index;
+  const m = nextAtOrBelow[startIndex];
+  if (m === -1) return startIndex;
+  return augmented[m] === augmented[startIndex] ? m - 1 : startIndex;
 }
 
 const markProtectedLines = (lines: string[]): boolean[] => {
   const isProtected = new Array<boolean>(lines.length).fill(false);
   let fenceLen = 0; // 0 = not currently inside a fence
-  const closeCache = new Map<string, boolean[]>();
+  const closeCache = new Map<string, TagCloseIndex>();
   for (let i = 0; i < lines.length; i++) {
     if (fenceLen > 0) {
       isProtected[i] = true;
@@ -537,11 +555,11 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
   const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;
-  // Cache for findHtmlBlockEnd's "does a close tag exist later" fast path —
-  // scoped per parse call (per document) and shared across every HTML-block
-  // opener encountered below, so a document with many consecutive unclosed
-  // openers of the same tag only pays its one-time O(N) build cost once.
-  const htmlCloseCache = new Map<string, boolean[]>();
+  // Cache for findHtmlBlockEnd's per-tag-name prefix-sum index — scoped per
+  // parse call (per document) and shared across every HTML-block opener
+  // encountered below, so a document with many consecutive openers of the
+  // same tag only pays its one-time O(N) build cost once.
+  const htmlCloseCache = new Map<string, TagCloseIndex>();
 
   let buffer: string[] = [];
   let currentType: Block['type'] = 'paragraph';

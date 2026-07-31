@@ -1389,6 +1389,90 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML bloc
   });
 });
 
+describe("parseMarkdownToBlocks / resolveReferenceLinks — linear matching-close index (owner follow-up on a55db2b9)", () => {
+  // Owner-flagged regression: removing the fixed cap fixed truncation but
+  // reintroduced O(N^2) for a different adversarial shape — N unclosed
+  // `<div>` openers followed by a SINGLE trailing `</div>`.
+  // closeExistsFromLine's "does a close exist anywhere" pre-check is true
+  // for every one of the N openers (the trailing close exists), so every
+  // one of them still independently scans forward — most all the way to
+  // end-of-document — before giving up. Measured (pre-fix): 5000 → ~1.0s,
+  // 10000 → ~4.1s (textbook ~4x per doubling). Fixed by replacing the
+  // scan entirely with a per-tag-name prefix-sum + "next smaller-or-equal
+  // element" index (a classic O(N) monotonic-stack construction, built once
+  // per tag name and cached per document), so every opener's closing
+  // position — whether it exists, and exactly where if so, however far away
+  // — is an O(1) lookup with no scanning at all.
+  const N = 40_000;
+  const TIME_BOUND_MS = 1500;
+
+  test("N unclosed <div> openers followed by one trailing </div> stay fast", () => {
+    const md = Array.from({ length: N }, () => "<div>").join("\n") + "\n</div>";
+
+    const parseStart = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const parseElapsed = performance.now() - parseStart;
+    expect(parseElapsed).toBeLessThan(TIME_BOUND_MS);
+
+    // Only the LAST opener (immediately preceding the trailing close) can
+    // actually pair with it — every earlier opener's cumulative depth
+    // overshoots and never returns to its own baseline, so it stays an
+    // unclosed, single-line block. N-1 singles + 1 paired block = N blocks.
+    expect(blocks).toHaveLength(N);
+    expect(blocks.slice(0, N - 1).every((b) => b.type === "html" && b.content === "<div>")).toBe(
+      true,
+    );
+    expect(blocks[N - 1].type).toBe("html");
+    expect(blocks[N - 1].content).toBe("<div>\n</div>");
+  });
+
+  test("resolveReferenceLinks stays fast and agrees with the parser on the same N-openers-plus-one-close document", () => {
+    const md =
+      Array.from({ length: N }, () => "<div>").join("\n") +
+      "\n</div>\n\n[x][id]\n\n[id]: https://e.com";
+
+    const start = performance.now();
+    const resolved = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+    expect(resolved).toContain("[x](https://e.com)");
+    // Every decoy line and the paired <div>/</div> stay literal (protected),
+    // exactly mirroring the parser's block boundaries above.
+    expect(resolved.split("\n").filter((l) => l === "<div>")).toHaveLength(N);
+    expect(resolved).toContain("</div>");
+  });
+
+  test("nested same-tag blocks still balance correctly (depth, not just presence, matters)", () => {
+    const md =
+      "<details>\n<summary>Outer</summary>\n<details>\n<summary>Inner</summary>\n</details>\nouter tail\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("mixed tag types nest independently — a <table> inside a <details> does not confuse the details/details matcher", () => {
+    const md =
+      "<details>\n<summary>Notes</summary>\n<table>\n<tr><td>1</td></tr>\n</table>\nafter table\n</details>\n\nAfter.";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(
+      "<details>\n<summary>Notes</summary>\n<table>\n<tr><td>1</td></tr>\n</table>\nafter table\n</details>",
+    );
+    expect(blocks[1].content).toBe("After.");
+  });
+
+  test("a valid >2000-line <details> block still survives (no truncating cap reintroduced)", () => {
+    const innerLineCount = 3000;
+    const inner = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    const md = `<details>\n<summary>Big</summary>\n${inner}\n</details>\n\nAfter.`;
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].content).toBe(`<details>\n<summary>Big</summary>\n${inner}\n</details>`);
+  });
+});
+
 describe("computeListIndices", () => {
   test("all unordered → all null", () => {
     const blocks = [li(0, false), li(0, false), li(0, false)];
