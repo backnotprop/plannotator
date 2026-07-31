@@ -273,14 +273,6 @@ const normalizeRefLabel = (label: string): string =>
  *   inside `<details>…</details>` or `<pre>…</pre>` is protected exactly as
  *   far as the block parser's own HTML block extends.
  */
-// Generous bound on how many lines ahead a balanced open/close depth scan may
-// look for a multi-line HTML block's closing tag. Real nested HTML blocks in
-// a plan/review document are never remotely this long; this only exists to
-// bound the residual pathological case handled below (a closing tag exists
-// somewhere far away but the running depth never actually returns to zero
-// before it) so that case stays a bounded, constant amount of work too.
-const MAX_HTML_BLOCK_SCAN_LINES = 2000;
-
 /**
  * Lazily builds, once per tag name, a suffix boolean array answering "does a
  * closing tag for this tag name exist at or after line k" in O(1) per query
@@ -310,35 +302,39 @@ function closeExistsFromLine(
 }
 
 /**
- * Shared, bounded/linear helper computing the last line index of a balanced
- * open/close-tag HTML block that opens at `startIndex` with the given
- * already-computed `depth` (the opening line's own open-tag count minus
- * close-tag count). Used by both `markProtectedLines` (the resolver's
- * protection pass) and `parseMarkdownToBlocks` (the block parser) so the two
- * can never disagree about a multi-line HTML block's extent, and so the fix
- * below lives in exactly one place instead of two copies drifting apart.
+ * Shared helper computing the last line index of a balanced open/close-tag
+ * HTML block that opens at `startIndex` with the given already-computed
+ * `depth` (the opening line's own open-tag count minus close-tag count).
+ * Used by both `markProtectedLines` (the resolver's protection pass) and
+ * `parseMarkdownToBlocks` (the block parser) so the two can never disagree
+ * about a multi-line HTML block's extent, and so a fix here lives in exactly
+ * one place instead of two copies drifting apart.
  *
- * Root cause fixed here: naively scanning line-by-line from `startIndex`
- * until depth returns to zero (or giving up at end-of-document) is fine for
- * ONE opener, but a document with many consecutive unclosed openers repeats
- * that full scan from every single one of them — each of the N openers pays
- * for the O(N) tail, an O(N^2) hazard well within the 2MB annotate cap (this
- * is exactly what a document full of bare `<div>` lines with no `</div>`
- * anywhere triggers). Fixed with two layers:
+ * Root cause originally fixed here: naively scanning line-by-line from
+ * `startIndex` until depth returns to zero (or giving up at
+ * end-of-document) is fine for ONE opener, but a document with many
+ * consecutive unclosed openers repeats that full scan from every single one
+ * of them — each of the N openers pays for the O(N) tail, an O(N^2) hazard
+ * well within the 2MB annotate cap (this is exactly what a document full of
+ * bare `<div>` lines with no `</div>` anywhere triggers).
  *
- *  1. `closeExistsFromLine` rejects in O(1) when no closing tag for this tag
- *     name exists anywhere later in the document — the common pathological
- *     case (no close at all) never scans a single line.
- *  2. `MAX_HTML_BLOCK_SCAN_LINES` bounds the residual case (a closing tag
- *     exists far away but depth never actually reaches zero before it) to a
- *     constant amount of work per start position. This is a deliberate,
- *     documented degradation: a block whose true close sits beyond the cap
- *     is treated as unclosed, exactly like today's "no close ever found"
- *     case — i.e. it degrades to just its opening line, never partially or
- *     incorrectly extended.
+ * `closeExistsFromLine` rejects in O(1) when no closing tag for this tag
+ * name exists anywhere later in the document — the pathological case (no
+ * close at all, e.g. thousands of bare unclosed openers) never scans a
+ * single line ahead. When a close DOES exist somewhere, the scan below runs
+ * unbounded to its actual, real end: a valid block is scanned exactly once,
+ * however long it is (a >2000-line `<details>` or raw `<table>` block is
+ * legitimate content within the 2MB annotate cap and must never be
+ * truncated — a fixed line-count cap here previously did exactly that and
+ * was removed for it). This does not reintroduce the quadratic hazard: the
+ * O(1) reject already eliminates the "many failing scans" case, and a
+ * scan that actually succeeds only ever runs once per document (the outer
+ * loop jumps past every line it consumes).
  *
  * Returns `startIndex` unchanged when the block never closes (depth <= 0,
- * no close exists anywhere, or the cap is hit without depth reaching zero).
+ * no close exists anywhere, or the running depth never returns to exactly
+ * zero before end-of-document despite a close existing somewhere — e.g. an
+ * unbalanced/self-closing tag).
  */
 function findHtmlBlockEnd(
   lines: string[],
@@ -351,10 +347,9 @@ function findHtmlBlockEnd(
   if (!closeExistsFromLine(lines, tagName, closeCache)[startIndex + 1]) return startIndex;
   const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
   const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
-  const limit = Math.min(lines.length - 1, startIndex + MAX_HTML_BLOCK_SCAN_LINES);
   let j = startIndex;
   let d = depth;
-  while (d > 0 && j < limit) {
+  while (d > 0 && j + 1 < lines.length) {
     j++;
     d += (lines[j].match(openRe) || []).length;
     d -= (lines[j].match(closeRe) || []).length;

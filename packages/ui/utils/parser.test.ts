@@ -1290,6 +1290,105 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — unclosed-HTML-opener
   });
 });
 
+describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML blocks must not be truncated (owner follow-up on 9440be06)", () => {
+  // Regression: a fixed MAX_HTML_BLOCK_SCAN_LINES cap on the balanced
+  // open/close depth scan incorrectly cut off VALID HTML blocks whose
+  // closing tag sits beyond the cap. closeExistsFromLine already rejects a
+  // truly-unclosed opener in O(1) without scanning at all, so a genuinely
+  // closed block — however long — should simply be scanned once to its
+  // real end, not capped. A cap that can truncate valid parsing is not an
+  // acceptable trade-off no matter how generous its value.
+  const N_UNCLOSED = 40_000;
+  const TIME_BOUND_MS = 1500;
+
+  test("a <details> block with its closing tag more than 2000 lines below the opener stays one whole html block", () => {
+    const innerLineCount = 2500; // deliberately past the old 2000-line cap
+    const inner = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    const md = `<details>\n<summary>Big</summary>\n${inner}\n</details>\n\nAfter.`;
+
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(`<details>\n<summary>Big</summary>\n${inner}\n</details>`);
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("After.");
+  });
+
+  test("a raw HTML <table> block with its closing tag more than 2000 lines below the opener stays one whole html block", () => {
+    const rowCount = 2200; // deliberately past the old 2000-line cap
+    const rows = Array.from({ length: rowCount }, (_, i) => `<tr><td>${i}</td></tr>`).join("\n");
+    const md = `<table>\n${rows}\n</table>\n\nAfter table.`;
+
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(`<table>\n${rows}\n</table>`);
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("After table.");
+  });
+
+  test("a link definition inside a long (>2000-line) <details> block stays protected by resolveReferenceLinks, and never wins over a real outside definition", () => {
+    const innerLineCount = 2500;
+    const filler = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    // Same label defined both inside the (protected) details block and
+    // outside it. If the interior is genuinely protected, the inside
+    // definition is never collected at all, so the outside one — the only
+    // real candidate — wins and resolves the reference. If protection were
+    // to end early (the truncation bug), the inside definition would be
+    // collected FIRST (first-definition-wins) and incorrectly win instead,
+    // and would incorrectly be blanked as "consumed" too.
+    const md =
+      `<details>\n<summary>Big</summary>\n${filler}\n\n[id]: https://inside-details.com\n\n</details>` +
+      `\n\n[id]: https://outside.com\n\ntext [x][id]`;
+    const resolved = resolveReferenceLinks(md);
+    expect(resolved).toContain(`[id]: https://inside-details.com`); // stays visible, untouched
+    expect(resolved).toContain("text [x](https://outside.com)"); // outside definition wins
+    expect(resolved).not.toContain("[id]: https://outside.com\n"); // the real (consumed) one is blanked
+  });
+
+  test("40k unclosed <div> openers (no close anywhere) stay fast, with parity between parser and resolver", () => {
+    const decoys = Array.from({ length: N_UNCLOSED }, () => "<div>").join("\n");
+    const md = `${decoys}\n\n[x][id]\n\n[id]: https://e.com`;
+
+    const parseStart = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const parseElapsed = performance.now() - parseStart;
+
+    const resolveStart = performance.now();
+    const resolved = resolveReferenceLinks(md);
+    const resolveElapsed = performance.now() - resolveStart;
+
+    expect(parseElapsed).toBeLessThan(TIME_BOUND_MS);
+    expect(resolveElapsed).toBeLessThan(TIME_BOUND_MS);
+
+    // Parity: every decoy is its own single-line html block to the parser...
+    expect(blocks.filter((b) => b.type === "html")).toHaveLength(N_UNCLOSED);
+    // ...and every decoy line is likewise individually protected (never
+    // rewritten) by the resolver — same boundary, both call sites agree.
+    expect(resolved).toContain("[x](https://e.com)");
+    expect(resolved.split("\n").filter((l) => l === "<div>")).toHaveLength(N_UNCLOSED);
+  });
+
+  test("a long valid <details> block survives even when preceded by thousands of unclosed <div> decoys", () => {
+    const decoyCount = 5000;
+    const decoys = Array.from({ length: decoyCount }, () => "<div>").join("\n");
+    const innerLineCount = 2500;
+    const inner = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    const md = `${decoys}\n\n<details>\n<summary>Big</summary>\n${inner}\n</details>\n\nAfter.`;
+
+    const start = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+
+    const detailsBlock = blocks.find((b) => b.type === "html" && b.content.startsWith("<details>"));
+    expect(detailsBlock).toBeDefined();
+    expect(detailsBlock!.content).toBe(`<details>\n<summary>Big</summary>\n${inner}\n</details>`);
+    const paragraph = blocks.find((b) => b.type === "paragraph" && b.content === "After.");
+    expect(paragraph).toBeDefined();
+  });
+});
+
 describe("computeListIndices", () => {
   test("all unordered → all null", () => {
     const blocks = [li(0, false), li(0, false), li(0, false)];
