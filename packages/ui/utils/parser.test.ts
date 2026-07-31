@@ -56,24 +56,32 @@ describe("resolveReferenceLinks (#923)", () => {
       "array [0] and [TODO] here",
     );
     // A shortcut that does not name a definition stays literal even when other
-    // definitions exist.
+    // definitions exist. The definition itself is never consumed by anything
+    // in this document, so it stays visible too (PR #1168: unused definitions
+    // are not blanked).
     expect(resolveReferenceLinks("[TODO] and [0]\n\n[id]: https://e.com")).toBe(
-      "[TODO] and [0]\n\n",
+      "[TODO] and [0]\n\n[id]: https://e.com",
     );
   });
 
   test("does not double-link an inline link whose text matches a definition", () => {
+    // The inline link uses its own explicit URL and never consumes the
+    // definition, so the definition stays visible (PR #1168).
     expect(
       resolveReferenceLinks("[text](https://real.com)\n\n[text]: https://def.com"),
-    ).toBe("[text](https://real.com)\n\n");
+    ).toBe("[text](https://real.com)\n\n[text]: https://def.com");
   });
 
   test("never rewrites references inside fenced code blocks or inline code spans", () => {
+    // Both definitions are only ever "referenced" from inside a protected
+    // region (a fence, an inline code span), so neither reference resolves
+    // and neither definition is consumed — both stay visible verbatim
+    // (PR #1168).
     expect(resolveReferenceLinks("```\n[a][b]\n```\n\n[b]: https://e.com")).toBe(
-      "```\n[a][b]\n```\n\n",
+      "```\n[a][b]\n```\n\n[b]: https://e.com",
     );
     expect(resolveReferenceLinks("use `[a][b]` here\n\n[b]: https://e.com")).toBe(
-      "use `[a][b]` here\n\n",
+      "use `[a][b]` here\n\n[b]: https://e.com",
     );
   });
 
@@ -129,14 +137,199 @@ describe("resolveReferenceLinks (#923)", () => {
   });
 
   test("does not clobber a checked task-list item when an [x] definition exists", () => {
+    // The checkbox guard means the task-list `[x]` never resolves as a
+    // reference, so the "x" definition is never consumed and stays visible
+    // (PR #1168).
     expect(resolveReferenceLinks("- [x] done task\n- [ ] todo\n\n[x]: https://e.com")).toBe(
-      "- [x] done task\n- [ ] todo\n\n",
+      "- [x] done task\n- [ ] todo\n\n[x]: https://e.com",
     );
-    expect(resolveReferenceLinks("1. [x] done\n\n[x]: https://e.com")).toBe("1. [x] done\n\n");
+    expect(resolveReferenceLinks("1. [x] done\n\n[x]: https://e.com")).toBe(
+      "1. [x] done\n\n[x]: https://e.com",
+    );
   });
 
   test("resolves the shortcut image form", () => {
     expect(resolveReferenceLinks("![id]\n\n[id]: /img.png")).toBe("![id](/img.png)\n\n");
+  });
+});
+
+describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
+  test("does not rewrite a reference inside a fence indented 4+ spaces (block parser still treats it as code)", () => {
+    // The block parser detects a fence via `trimmed.startsWith('```')` after a
+    // full `.trim()` — ANY indentation still opens a code block. The resolver
+    // must recognize the exact same fence, not just fences within 3 spaces.
+    const md = "    ```\n    [a][b]\n    ```\n\n[b]: https://e.com";
+    // The code content must survive verbatim, and since "b" is never consumed
+    // outside the code fence, the definition itself must remain visible too —
+    // as its own trailing paragraph, not silently dropped.
+    expect(parseMarkdownToBlocks(md).map((b) => b.type)).toEqual(["code", "paragraph"]);
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not rewrite a reference inside a fence nested inside a list item at 4+ spaces", () => {
+    const md = "- outer\n  - inner\n    ```\n    [a][b]\n    ```\n\n[b]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("protects a link definition sitting inside a <details> raw HTML block", () => {
+    const md = "<details>\n<summary>Notes</summary>\n\n[id]: https://from-details.com\n\n</details>";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("protects references and definitions inside a <pre> raw HTML block", () => {
+    const md = "<pre>\n[a][b]\n</pre>\n\n[b]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("a reference used only inside a <details> block never counts as consumed, so the definition stays visible", () => {
+    const md = "<details>\n\n[x][id]\n\n</details>\n\n[id]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not treat a GFM footnote definition ([^label]: ...) as a link reference definition", () => {
+    // A footnote body that is a bare token (looks exactly like a definition
+    // destination) is the real hazard — prose bodies with spaces already fail
+    // the destination shape by accident.
+    const md = "See the note.[^1]\n\n[^1]: https://example.com/footnote";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not clobber a footnote reference ([^1]) that happens to share a label with a real definition", () => {
+    const md = "See[^1] and [x][1]\n\n[^1]: https://footnote.com\n\n[1]: https://real-def.com";
+    expect(resolveReferenceLinks(md)).toBe(
+      "See[^1] and [x](https://real-def.com)\n\n[^1]: https://footnote.com\n\n",
+    );
+  });
+
+  test("leaves an entirely unused link reference definition visible", () => {
+    expect(resolveReferenceLinks("[id]: https://e.com\n\nSome unrelated text.")).toBe(
+      "[id]: https://e.com\n\nSome unrelated text.",
+    );
+  });
+
+  test("leaves a definition visible when its only reference sits inside a fenced code block", () => {
+    const md = "```\n[x][id]\n```\n\n[id]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("still blanks every definition line for a label once it is genuinely consumed, including redefinitions", () => {
+    expect(
+      resolveReferenceLinks("[id]: https://one.com\n[id]: https://two.com\n\n[x][id]"),
+    ).toBe("\n\n\n[x](https://one.com)");
+  });
+
+  test("preserves total line count for a document mixing consumed, unused, and protected definitions", () => {
+    const md = [
+      "# Heading",
+      "",
+      "[used]: https://used.com",
+      "[unused]: https://unused.com",
+      "",
+      "text [x][used]",
+      "",
+      "```",
+      "[y][coded]",
+      "```",
+      "",
+      "[coded]: https://coded.com",
+    ].join("\n");
+    const resolved = resolveReferenceLinks(md);
+    expect(resolved.split("\n").length).toBe(md.split("\n").length);
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks.find((b) => b.type === "heading")?.startLine).toBe(1);
+    // "unused" and "coded" (only referenced inside the fence) must remain
+    // visible; only the genuinely consumed "used" definition is blanked.
+    expect(resolved).toContain("[unused]: https://unused.com");
+    expect(resolved).toContain("[coded]: https://coded.com");
+    expect(resolved).not.toContain("[used]: https://used.com");
+    expect(resolved).toContain("text [x](https://used.com)");
+  });
+
+  test("supports CRLF documents and preserves the CRLF line endings", () => {
+    const md = "[text][id]\r\n\r\n[id]: https://e.com\r\n";
+    expect(resolveReferenceLinks(md)).toBe("[text](https://e.com)\r\n\r\n\r\n");
+  });
+
+  test("leaves an unconsumed CRLF definition visible with its line ending intact", () => {
+    const md = "[id]: https://e.com\r\n\r\nunrelated text\r\n";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not exhibit quadratic slowdown on a long run of unmatched '[' characters", () => {
+    const junk = "[".repeat(200_000);
+    const md = `${junk}\n\n[id]: https://e.com`;
+    const start = performance.now();
+    const result = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    // A naive unbounded backtracking scan would take many seconds to minutes
+    // here; a bounded one-pass scan finishes in well under a second.
+    expect(elapsed).toBeLessThan(1500);
+    expect(result.startsWith(junk)).toBe(true);
+  });
+
+  test("caps reference/definition label length so a single pathological label cannot force backtracking", () => {
+    const longLabel = "x".repeat(1500);
+    const md = `[text][${longLabel}]\n\n[${longLabel}]: https://e.com`;
+    // Deliberate safe degradation: a label above the bound is not resolved
+    // and its definition-shaped line is not collected either, so both sides
+    // are left untouched rather than partially/incorrectly rewritten.
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("is idempotent: resolving an already-resolved document is a no-op", () => {
+    const inputs = [
+      "[text][id]\n\n[id]: https://e.com",
+      "![alt][id]\n\n[id]: /img.png",
+      "```\n[a][b]\n```\n\n[b]: https://e.com",
+      "- [x] done\n\n[x]: https://e.com",
+      "<pre>\n[a][b]\n</pre>\n\n[b]: https://e.com",
+      "[id]: https://e.com\n\nunused elsewhere",
+      "See[^1]\n\n[^1]: https://footnote.com",
+    ];
+    for (const md of inputs) {
+      const once = resolveReferenceLinks(md);
+      const twice = resolveReferenceLinks(once);
+      expect(twice).toBe(once);
+    }
+  });
+
+  test("aligns tilde-fence handling with the block parser (neither treats ~~~ as a code fence)", () => {
+    const md = "~~~\n[a][b]\n~~~\n\n[b]: https://e.com";
+    expect(parseMarkdownToBlocks(md).some((b) => b.type === "code")).toBe(false);
+    expect(resolveReferenceLinks(md)).toBe("~~~\n[a](https://e.com)\n~~~\n\n");
+  });
+
+  test("resolves a destination containing a closing parenthesis", () => {
+    expect(resolveReferenceLinks("[x][id]\n\n[id]: https://e.com/a(b)")).toBe(
+      "[x](https://e.com/a(b))\n\n",
+    );
+  });
+
+  test("backslash-escaped brackets never resolve, and their captured (unusable) label leaves the definition visible", () => {
+    const md = "Not a ref: \\[text\\]\\[id\\]\n\n[id]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("a genuinely nested-bracket shortcut does not corrupt the destination pipeline or crash", () => {
+    // Unescaped nested brackets in link text are not legal CommonMark; the
+    // simplified single-pass scanner does not fully recover the intended
+    // reference, but it must never throw and must never do something that
+    // could bypass URL sanitization later.
+    const md = "[outer [inner] text][id]\n\n[id]: https://e.com";
+    expect(() => resolveReferenceLinks(md)).not.toThrow();
+    const result = resolveReferenceLinks(md);
+    expect(result).toContain("https://e.com");
+  });
+
+  test("dangerous destinations still go through sanitizeLinkUrl identically to a hand-written inline link", () => {
+    // resolveReferenceLinks only ever emits `[text](dest)`, so it reuses the
+    // exact same inline-link rendering/sanitization path — it must never
+    // special-case or bypass it.
+    const resolved = resolveReferenceLinks("[x][id]\n\n[id]: javascript:alert(1)");
+    expect(resolved).toBe("[x](javascript:alert(1))\n\n");
+    // The literal string is unchanged (dangerous-protocol stripping happens
+    // downstream in sanitizeLinkUrl at render time), confirming this pass
+    // does not attempt — and therefore cannot get wrong — its own filtering.
   });
 });
 

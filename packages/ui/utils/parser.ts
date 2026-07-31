@@ -204,13 +204,36 @@ export interface ParseMarkdownOptions {
   frontmatter?: boolean;
 }
 
+// CommonMark bounds a link label to 999 characters. Reusing that bound here
+// also caps the worst-case backtracking cost of the bracket-matching groups
+// below to a constant per starting position, turning a document with a very
+// long run of unmatched `[` characters (a real hazard within the 2MB annotate
+// cap) into a linear scan instead of a quadratic one. A label longer than
+// this is a deliberate, documented degradation: it is neither collected as a
+// definition nor resolved as a reference, so it is simply left untouched
+// rather than partially or incorrectly rewritten.
+const MAX_REF_LABEL_CHARS = 999;
+// Same reasoning applied to the inline-code-span alternative: bounding how far
+// a lazy scan for a closing backtick run can travel keeps a line with many
+// stray, unterminated backticks linear too. 5000 is far beyond any realistic
+// inline code span, so legitimate spans are unaffected.
+const MAX_CODE_SPAN_CHARS = 5000;
+// Defense-in-depth cap on the number of definitions collected from a single
+// document. A pathological document could otherwise grow the map without
+// bound; this keeps that growth bounded even though ordinary documents never
+// approach it.
+const MAX_TRACKED_DEFINITIONS = 20_000;
+
 // A link reference definition: `[label]: destination "optional title"`, with up
 // to three leading spaces. The destination is a bare token or an <...> form; any
 // trailing text must be a quoted or parenthesized title, otherwise the line is
 // ordinary prose (so `[Reminder]: call the bank` is NOT a definition). Matches
-// the CommonMark shape closely enough for the simplified parser.
-const REFERENCE_DEFINITION_RE =
-  /^ {0,3}\[([^\]]+)\]:[ \t]*(?:<([^>]*)>|(\S+))[ \t]*(?:"[^"]*"|'[^']*'|\([^)]*\))?[ \t]*$/;
+// the CommonMark shape closely enough for the simplified parser. `\r?` before
+// the end anchor tolerates a CRLF source (lines are split on `\n` only, so a
+// CRLF line keeps its trailing `\r`).
+const REFERENCE_DEFINITION_RE = new RegExp(
+  `^ {0,3}\\[([^\\]]{1,${MAX_REF_LABEL_CHARS}})\\]:[ \\t]*(?:<([^>]*)>|(\\S+))[ \\t]*(?:"[^"]*"|'[^']*'|\\([^)]*\\))?[ \\t]*\\r?$`,
+);
 
 // One left-to-right pass over a line. The first alternative matches a whole
 // inline code span (balanced backtick run) so its contents are skipped; the
@@ -219,7 +242,10 @@ const REFERENCE_DEFINITION_RE =
 // A bare `[text]` is the shortcut form, resolved only when it names a definition
 // and is not actually an inline link. Groups: 1 code ticks, 2 `!`, 3 text,
 // 4 second bracket, 5 label.
-const REFERENCE_LINK_RE = /(`+).+?\1|(!?)\[([^\]]+)\](\[([^\]]*)\])?/g;
+const REFERENCE_LINK_RE = new RegExp(
+  `(\`+)[^\\n]{0,${MAX_CODE_SPAN_CHARS}}?\\1|(!?)\\[([^\\]]{1,${MAX_REF_LABEL_CHARS}})\\](\\[([^\\]]{0,${MAX_REF_LABEL_CHARS}})\\])?`,
+  'g',
+);
 
 // CommonMark label matching is case-insensitive and collapses internal runs of
 // whitespace.
@@ -227,41 +253,92 @@ const normalizeRefLabel = (label: string): string =>
   label.trim().replace(/\s+/g, ' ').toLowerCase();
 
 /**
- * Mark every line that sits inside a fenced code block (opener, content, and
- * closer), so link reference definitions and links inside code are left
- * untouched. Mirrors the variable-length ``` / ~~~ fence handling in the block
- * loop below.
+ * One pass over the lines that marks every line the block parser (below) will
+ * render as code or raw HTML — fenced code blocks and HTML blocks — so link
+ * reference definitions and references inside them are left completely
+ * untouched. This reuses the exact same conditions the block parser itself
+ * uses (not a looser approximation), so the two can never disagree about
+ * where code/HTML starts and ends:
+ *
+ * - Fences: `trimmed.startsWith('```')` after a full `.trim()` — the block
+ *   parser has no minimum-indent exemption, so ANY indentation (a fence
+ *   nested inside a list item, or simply indented 4+ spaces) still opens a
+ *   code block, and this must too. Only backtick fences are recognized —
+ *   the block parser has no `~~~` support, so this doesn't either (a `~~~`
+ *   line is ordinary text to both).
+ * - Raw HTML blocks: the same `HTML_BLOCK_OPEN_RE`/`HTML_BLOCK_TAGS`/
+ *   `VOID_HTML_TAGS` the block parser uses, with the same three extents
+ *   (blank-line termination for a leading close tag, single-line for void
+ *   tags, balanced-depth scanning otherwise) — so a definition sitting
+ *   inside `<details>…</details>` or `<pre>…</pre>` is protected exactly as
+ *   far as the block parser's own HTML block extends.
  */
-const markFencedLines = (lines: string[]): boolean[] => {
-  const fenced = new Array<boolean>(lines.length).fill(false);
-  let fenceChar = '';
-  let fenceLen = 0;
+const markProtectedLines = (lines: string[]): boolean[] => {
+  const isProtected = new Array<boolean>(lines.length).fill(false);
+  let fenceLen = 0; // 0 = not currently inside a fence
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].replace(/^ {0,3}/, '');
-    const opener = trimmed.match(/^(`{3,}|~{3,})/);
-    if (fenceLen === 0) {
-      if (opener) {
-        fenceChar = opener[1][0];
-        fenceLen = opener[1].length;
-        fenced[i] = true;
-      }
-    } else {
-      fenced[i] = true;
-      const closer = new RegExp('^' + fenceChar + '{' + fenceLen + ',}[ \\t]*$');
-      if (opener && opener[1][0] === fenceChar && closer.test(trimmed)) {
-        fenceChar = '';
-        fenceLen = 0;
+    if (fenceLen > 0) {
+      isProtected[i] = true;
+      if (new RegExp('^\\s*`{' + fenceLen + ',}').test(lines[i])) fenceLen = 0;
+      continue;
+    }
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('```')) {
+      fenceLen = trimmed.match(/^`+/)![0].length;
+      isProtected[i] = true;
+      continue;
+    }
+    const htmlTagMatch = trimmed.match(HTML_BLOCK_OPEN_RE);
+    if (htmlTagMatch && HTML_BLOCK_TAGS.has(htmlTagMatch[1].toLowerCase())) {
+      const tagName = htmlTagMatch[1].toLowerCase();
+      const isCloseTag = trimmed.startsWith('</');
+      isProtected[i] = true;
+      if (isCloseTag) {
+        while (i + 1 < lines.length && lines[i + 1].trim() !== '') {
+          i++;
+          isProtected[i] = true;
+        }
+      } else if (VOID_HTML_TAGS.has(tagName)) {
+        while (!lines[i].includes('>') && i + 1 < lines.length && lines[i + 1].trim() !== '') {
+          i++;
+          isProtected[i] = true;
+        }
+      } else {
+        const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
+        const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
+        const depth = (lines[i].match(openRe) || []).length - (lines[i].match(closeRe) || []).length;
+        if (depth > 0) {
+          let j = i;
+          let d = depth;
+          const scanned: number[] = [];
+          while (d > 0 && j + 1 < lines.length) {
+            j++;
+            scanned.push(j);
+            d += (lines[j].match(openRe) || []).length;
+            d -= (lines[j].match(closeRe) || []).length;
+          }
+          if (d === 0) {
+            i = j;
+            for (const idx of scanned) isProtected[idx] = true;
+          }
+        }
       }
     }
   }
-  return fenced;
+  return isProtected;
 };
 
-/** Resolve reference links/images in one non-code line. A single left-to-right
- * pass: an inline code span is matched as a whole and returned verbatim, so a
- * reference-looking pattern inside backticks is never rewritten; only bracketed
- * references outside code are resolved. */
-const resolveRefsInLine = (line: string, defs: Map<string, string>): string => {
+/** Resolve reference links/images in one non-code, non-HTML line. A single
+ * left-to-right pass: an inline code span is matched as a whole and returned
+ * verbatim, so a reference-looking pattern inside backticks is never
+ * rewritten; only bracketed references outside code are resolved. Every label
+ * that actually resolves against a definition is recorded into `usedLabels`,
+ * so the caller can tell a genuinely consumed definition from an unused one. */
+const resolveRefsInLine = (
+  line: string,
+  defs: Map<string, string>,
+  usedLabels: Set<string>,
+): string => {
   if (!line.includes('[')) return line;
   return line.replace(
     REFERENCE_LINK_RE,
@@ -282,10 +359,13 @@ const resolveRefsInLine = (line: string, defs: Map<string, string>): string => {
       } else {
         refLabel = label === '' ? text : label;
       }
-      const dest = defs.get(normalizeRefLabel(refLabel));
+      const normalized = normalizeRefLabel(refLabel);
+      const dest = defs.get(normalized);
       // An unknown reference stays literal, matching CommonMark and avoiding
       // false links for bracketed prose like `[TODO]` or array indices.
-      return dest ? `${bang}[${text}](${dest})` : match;
+      if (!dest) return match;
+      usedLabels.add(normalized);
+      return `${bang}[${text}](${dest})`;
     },
   );
 };
@@ -294,37 +374,52 @@ const resolveRefsInLine = (line: string, defs: Map<string, string>): string => {
  * Resolve CommonMark link reference definitions and reference links into inline
  * `[text](url)` links, so the shared inline renderer draws them instead of
  * showing raw `[text][id]` and `[id]: url` text (issue #923). Definitions and
- * references inside fenced code blocks and inline code spans are left untouched.
- * Definition lines are blanked in place rather than removed so block start-line
- * numbers stay accurate. No-op (returns the input) when the document defines no
- * references.
+ * references inside fenced code blocks, raw HTML blocks, and inline code spans
+ * are left untouched. A definition-shaped line is only ever blanked when its
+ * label was actually consumed by a resolved reference outside a protected
+ * region — an unused definition, or one referenced only from inside code/HTML,
+ * stays visible exactly as written. Blanked lines keep block start-line
+ * numbers accurate (and their own CRLF ending, so line endings round-trip).
+ * GFM footnote definitions (`[^label]: ...`) are never treated as link
+ * definitions. No-op (returns the input) when the document defines no
+ * (non-footnote) references.
  */
 export const resolveReferenceLinks = (markdown: string): string => {
   if (!markdown.includes('[')) return markdown;
   const lines = markdown.split('\n');
-  const fenced = markFencedLines(lines);
+  const isProtected = markProtectedLines(lines);
   const defs = new Map<string, string>();
-  const isDefLine = new Array<boolean>(lines.length).fill(false);
+  // The normalized label a definition-shaped line defines, or null if the
+  // line isn't a definition (or is a footnote definition, which is never
+  // collected/blanked).
+  const defLabelByLine = new Array<string | null>(lines.length).fill(null);
   // A definition cannot interrupt a paragraph (CommonMark 4.7): a line matching
   // the definition shape is only a definition when it can start a block, i.e.
-  // the previous line is the document start, blank, a fenced-code line (a code
-  // block is its own block), or itself a definition. Otherwise the line is
-  // paragraph continuation text and must be left untouched, or a bare
+  // the previous line is the document start, blank, a protected code/HTML
+  // line (each is its own block), or itself a definition. Otherwise the line
+  // is paragraph continuation text and must be left untouched, or a bare
   // `[word]: token` under a sentence would be silently deleted.
   let canStartDefinition = true;
   for (let i = 0; i < lines.length; i++) {
-    if (fenced[i]) {
+    if (isProtected[i]) {
       canStartDefinition = true;
       continue;
     }
     const blank = lines[i].trim() === '';
     const match = canStartDefinition && !blank ? lines[i].match(REFERENCE_DEFINITION_RE) : null;
     if (match) {
-      const label = normalizeRefLabel(match[1]);
-      const dest = match[2] !== undefined ? match[2] : match[3];
-      // First definition wins, per CommonMark.
-      if (label && dest && !defs.has(label)) defs.set(label, dest);
-      isDefLine[i] = true;
+      const rawLabel = match[1];
+      // GFM footnote definition ([^label]: ...) — not a link reference
+      // definition. Leave it out of `defs` entirely so it can never be
+      // collected, blanked, or accidentally satisfy a footnote reference's
+      // lookup; it stays block-starting like any other definition line.
+      if (!rawLabel.startsWith('^') && defs.size < MAX_TRACKED_DEFINITIONS) {
+        const label = normalizeRefLabel(rawLabel);
+        const dest = match[2] !== undefined ? match[2] : match[3];
+        // First definition wins, per CommonMark.
+        if (label && dest && !defs.has(label)) defs.set(label, dest);
+        defLabelByLine[i] = label;
+      }
       // A run of definitions stays eligible; canStartDefinition remains true.
     } else {
       // Blank keeps a new block startable; any other non-definition line starts
@@ -333,8 +428,20 @@ export const resolveReferenceLinks = (markdown: string): string => {
     }
   }
   if (defs.size === 0) return markdown;
-  return lines
-    .map((line, i) => (isDefLine[i] ? '' : fenced[i] ? line : resolveRefsInLine(line, defs)))
+  const usedLabels = new Set<string>();
+  // Resolve references first; definition-shaped lines are passed through
+  // unresolved (never fed to resolveRefsInLine) so a definition's own
+  // `[label]` can never be mistaken for a reference to itself.
+  const resolved = lines.map((line, i) =>
+    isProtected[i] || defLabelByLine[i] !== null ? line : resolveRefsInLine(line, defs, usedLabels),
+  );
+  return resolved
+    .map((line, i) => {
+      const label = defLabelByLine[i];
+      if (label === null || !usedLabels.has(label)) return line;
+      // Blank in place, preserving this line's own CRLF ending if it had one.
+      return line.endsWith('\r') ? '\r' : '';
+    })
     .join('\n');
 };
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computePlanDiff, computeInlineDiff } from "./planDiffEngine";
+import { parseMarkdownToBlocks } from "./parser";
 
 describe("computePlanDiff — block-level behavior", () => {
   test("pure unchanged produces a single unchanged block, no stats", () => {
@@ -545,5 +546,45 @@ describe("computePlanDiff — modified blocks populate inlineTokens when qualifi
     if (mod) {
       expect(mod.inlineTokens).toBeUndefined();
     }
+  });
+});
+
+describe("computePlanDiff — reference-link definition edits (PR #1168)", () => {
+  test("a URL-only edit to a link reference definition renders as a real change, not an empty diff", () => {
+    // diffLines isolates just the definition line into its own hunk (the
+    // paragraph that actually uses [docs][ref] is unchanged and elsewhere).
+    // Before the resolver stopped blanking unconsumed definitions, resolving
+    // that isolated one-line chunk on its own (no co-located reference to
+    // consume the label) blanked it to nothing on both sides, so the diff
+    // silently rendered zero blocks for a real content change.
+    const oldText =
+      "Read the [docs][ref] for details.\n\n[ref]: https://old.example.com/docs\n";
+    const newText =
+      "Read the [docs][ref] for details.\n\n[ref]: https://new.example.com/docs\n";
+    const { blocks } = computePlanDiff(oldText, newText);
+    const modified = blocks.find((b) => b.type === "modified");
+    expect(modified).toBeDefined();
+    expect(modified!.content.trim().length).toBeGreaterThan(0);
+    expect(modified!.oldContent!.trim().length).toBeGreaterThan(0);
+    // The isolated chunk must render as at least one visible block on each
+    // side — this is exactly what PlanCleanDiffView's MarkdownChunk uses to
+    // draw the change; zero blocks here is the "non-empty edit renders as
+    // empty" bug.
+    expect(parseMarkdownToBlocks(modified!.oldContent!).length).toBeGreaterThan(0);
+    expect(parseMarkdownToBlocks(modified!.content).length).toBeGreaterThan(0);
+    // The isolated chunk resolves to a single paragraph on each side (no
+    // co-located reference to consume the definition), so it qualifies for
+    // word-level inline diffing and the URL change is actually visible.
+    expect(modified!.inlineTokens).toBeDefined();
+    const removedText = modified!.inlineTokens!
+      .filter((t) => t.type === "removed")
+      .map((t) => t.value)
+      .join("");
+    const addedText = modified!.inlineTokens!
+      .filter((t) => t.type === "added")
+      .map((t) => t.value)
+      .join("");
+    expect(removedText).toContain("old");
+    expect(addedText).toContain("new");
   });
 });
