@@ -9,6 +9,11 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
+import {
+  presentUrl as presentUrlImpl,
+  trackPresentation,
+  type PresentationKind,
+} from "@plannotator/shared/presenter";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
 import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
@@ -163,10 +168,12 @@ export function handleFavicon(): Response {
   });
 }
 
-interface ServerReadyOptions {
+export interface ServerReadyOptions {
   readyFile?: string;
   skipBrowserOpen?: boolean;
   openBrowser?: typeof openBrowserImpl;
+  presentUrl?: typeof presentUrlImpl;
+  kind?: PresentationKind;
 }
 
 export interface ServerReadyMetadata {
@@ -216,6 +223,20 @@ export async function handleServerReady(
 
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
   if (skipBrowserOpen) return;
+
+  const presented = await (options.presentUrl ?? presentUrlImpl)(
+    url,
+    options.kind ?? "plan",
+  );
+  if (presented.opened) {
+    trackPresentation(url, presented.presentation);
+    return;
+  }
+  if (presented.attempted) {
+    process.stderr.write(
+      `[plannotator] External presenter failed; opening the default browser: ${presented.error}\n`,
+    );
+  }
 
   const opened = await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
 

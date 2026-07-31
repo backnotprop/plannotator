@@ -35,6 +35,11 @@ import { parseRemoteUrl } from "./generated/repo.ts";
 import { fetchRef, createWorktree, removeWorktree, ensureObjectAvailable } from "./generated/worktree.ts";
 import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "./generated/config.ts";
 import {
+	presentUrl,
+	type ExternalPresentation,
+	type PresentationKind,
+} from "./generated/presenter.ts";
+import {
 	WorkspaceReviewSession,
 	type WorkspaceDiffType,
 } from "./generated/review-workspace.ts";
@@ -45,6 +50,7 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 } from "./plannotator-browser-runtime.ts";
+import type { PiAnnotateDecision } from "./annotate-outcome.ts";
 export { getLastAssistantMessageText } from "./assistant-message.ts";
 export {
 	getStartupErrorMessage,
@@ -64,7 +70,8 @@ export interface PlanReviewDecision {
 export interface BrowserDecisionSession<T> {
 	url: string;
 	waitForDecision: () => Promise<T>;
-	stop: () => void;
+	/** Stop the server and resolve only after any external presentation is dismissed. */
+	stop: () => Promise<void>;
 }
 
 type CodeReviewOptions = {
@@ -84,7 +91,34 @@ type CodeReviewDecision = {
 	exit?: boolean;
 };
 
+type RecentMessage = {
+	messageId: string;
+	text: string;
+	timestamp?: string;
+};
+
+type MarkdownAnnotationOptions = {
+	folderPath?: string;
+	sourceInfo?: string;
+	sourceConverted?: boolean;
+	gate?: boolean;
+	rawHtml?: string;
+	renderHtml?: boolean;
+	convertHtml?: boolean;
+	recentMessages?: RecentMessage[];
+};
+
 const CODE_REVIEW_PROGRESS_STATUS = "plannotator-review";
+const BROWSER_SESSIONS_SHUTTING_DOWN_MESSAGE = "Plannotator browser sessions are shutting down.";
+
+type ActiveBrowserDecisionSession = {
+	stop: () => Promise<void>;
+};
+
+const activeBrowserDecisionSessions = new Set<ActiveBrowserDecisionSession>();
+const pendingBrowserDecisionSessionStarts = new Set<Promise<unknown>>();
+let activeBrowserDecisionSessionsCleanup: Promise<void> | undefined;
+let browserDecisionSessionStartsAllowed = true;
 
 function setCodeReviewProgress(ctx: ExtensionContext, message?: string): void {
 	ctx.ui.setStatus(
@@ -102,13 +136,38 @@ function delay(ms: number): Promise<void> {
 	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
+async function openBrowserForServer(
+	serverUrl: string,
+	ctx: ExtensionContext,
+	kind: PresentationKind,
+	signal?: AbortSignal,
+): Promise<ExternalPresentation | undefined> {
+	if (signal?.aborted) return undefined;
+	const presented = await presentUrl(serverUrl, kind, { signal });
+	if (presented.opened) {
+		if (signal?.aborted) {
+			await presented.presentation.dismiss();
+			return undefined;
+		}
+		return presented.presentation;
+	}
+	if (signal?.aborted) return undefined;
+	if (presented.attempted) {
+		ctx.ui.notify(
+			`External presenter failed; opening the default browser instead: ${presented.error}`,
+			"warning",
+		);
+	}
+	if (signal?.aborted) return undefined;
+
 	const browserResult = await openBrowser(serverUrl);
+	if (signal?.aborted) return undefined;
 	if (isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
 	}
+	return undefined;
 }
 
 async function buildLocalWorkspaceReview(
@@ -129,55 +188,159 @@ async function buildLocalWorkspaceReview(
 	}, root, options);
 }
 
-async function openBrowserAndWait<T>(
-	server: { url: string; stop: () => void },
-	ctx: ExtensionContext,
-	waitForResult: () => Promise<T>,
-): Promise<T> {
-	await openBrowserForServer(server.url, ctx);
-	return waitForDecisionWithCleanup(server, waitForResult);
+function createBrowserSessionsShuttingDownError(): Error {
+	return new Error(BROWSER_SESSIONS_SHUTTING_DOWN_MESSAGE);
 }
 
-async function waitForDecisionWithCleanup<T>(
-	server: { url: string; stop: () => void },
-	waitForResult: () => Promise<T>,
-): Promise<T> {
-	try {
-		const result = await waitForResult();
-		await delay(1500);
-		return result;
-	} finally {
-		server.stop();
+/**
+ * Track a pending browser-session start so shutdown waits for it and rejects
+ * any session that finishes starting after shutdown has begun.
+ */
+export function trackBrowserDecisionSessionStart<T>(start: () => Promise<T>): Promise<T> {
+	if (!browserDecisionSessionStartsAllowed) {
+		return Promise.reject(createBrowserSessionsShuttingDownError());
 	}
+
+	let startPromise: Promise<T>;
+	try {
+		startPromise = start();
+	} catch (error) {
+		return Promise.reject(error);
+	}
+	pendingBrowserDecisionSessionStarts.add(startPromise);
+	void startPromise.then(
+		() => {
+			pendingBrowserDecisionSessionStarts.delete(startPromise);
+		},
+		() => {
+			pendingBrowserDecisionSessionStarts.delete(startPromise);
+		},
+	);
+	return startPromise;
 }
 
-function startBrowserDecisionSession<T>(
+/**
+ * Stop every browser decision session owned by the Pi extension.
+ *
+ * The shutdown latch is set before pending starts are awaited, so late starts
+ * are rejected and already-pending starts cannot register an orphaned session.
+ * Concurrent cleanup calls share one promise.
+ */
+export function stopActiveBrowserDecisionSessions(): Promise<void> {
+	browserDecisionSessionStartsAllowed = false;
+	if (activeBrowserDecisionSessionsCleanup) {
+		return activeBrowserDecisionSessionsCleanup;
+	}
+
+	const cleanup = (async () => {
+		const errors: unknown[] = [];
+		await Promise.allSettled([...pendingBrowserDecisionSessionStarts]);
+		while (activeBrowserDecisionSessions.size > 0) {
+			const sessions = [...activeBrowserDecisionSessions];
+			const results = await Promise.allSettled(sessions.map((session) => session.stop()));
+			for (const result of results) {
+				if (result.status === "rejected") errors.push(result.reason);
+			}
+		}
+
+		if (errors.length === 1) throw errors[0];
+		if (errors.length > 1) {
+			throw new AggregateError(errors, "Failed to stop every active Plannotator browser session.");
+		}
+	})();
+	activeBrowserDecisionSessionsCleanup = cleanup.finally(() => {
+		activeBrowserDecisionSessionsCleanup = undefined;
+	});
+	return activeBrowserDecisionSessionsCleanup;
+}
+
+/**
+ * Allow browser session starts for the next Pi session.
+ *
+ * If called while prior-session cleanup is still settling, cleanup retains
+ * ownership and is allowed to finish before the latch is reopened.
+ */
+export async function resumeBrowserDecisionSessions(): Promise<void> {
+	const cleanup = activeBrowserDecisionSessionsCleanup;
+	if (cleanup) {
+		try {
+			await cleanup;
+		} catch {
+			// The session_shutdown caller owns reporting the prior cleanup failure.
+		}
+	}
+	browserDecisionSessionStartsAllowed = true;
+}
+
+/** Create and register one browser decision session with awaitable, idempotent cleanup. */
+export function startBrowserDecisionSession<T>(
 	server: { url: string; stop: () => void },
 	ctx: ExtensionContext,
 	waitForResult: () => Promise<T>,
+	kind: PresentationKind,
 ): BrowserDecisionSession<T> {
-	// Fire-and-forget so the caller's turn is not blocked on a browser launch.
-	// Nothing may escape: an unhandled rejection here — a launcher that failed,
-	// or a `ctx` invalidated by a session replacement while the browser was
-	// opening — is an uncaught error that kills the whole pi process.
-	void openBrowserForServer(server.url, ctx).catch((err: unknown) => {
+	if (!browserDecisionSessionStartsAllowed) {
+		const shutdownError = createBrowserSessionsShuttingDownError();
+		try {
+			server.stop();
+		} catch (stopError) {
+			throw new AggregateError(
+				[shutdownError, stopError],
+				"Failed to reject and close a late Plannotator browser session.",
+			);
+		}
+		throw shutdownError;
+	}
+
+	const presentationAbort = new AbortController();
+	const presentationPromise = openBrowserForServer(
+		server.url,
+		ctx,
+		kind,
+		presentationAbort.signal,
+	).catch((err: unknown) => {
 		console.error(
 			`Plannotator: could not announce the browser URL ${server.url}: ${err instanceof Error ? err.message : String(err)}`,
 		);
+		return undefined;
 	});
 	let stopped = false;
 	let stopReject: ((err: Error) => void) | undefined;
 	let decisionPromise: Promise<T> | undefined;
+	let stopPromise: Promise<void> | undefined;
 	const createStoppedError = () => new Error("Plannotator browser session was stopped.");
-	const stop = () => {
-		if (stopped) return;
+	let session: BrowserDecisionSession<T>;
+	const stop = (): Promise<void> => {
+		if (stopPromise) return stopPromise;
 		stopped = true;
-		server.stop();
+		presentationAbort.abort();
+		const cleanupErrors: unknown[] = [];
+		try {
+			server.stop();
+		} catch (error) {
+			cleanupErrors.push(error);
+		}
 		stopReject?.(createStoppedError());
 		stopReject = undefined;
+		stopPromise = (async () => {
+			try {
+				const presentation = await presentationPromise;
+				await presentation?.dismiss();
+			} catch (error) {
+				cleanupErrors.push(error);
+			} finally {
+				activeBrowserDecisionSessions.delete(session);
+			}
+
+			if (cleanupErrors.length === 1) throw cleanupErrors[0];
+			if (cleanupErrors.length > 1) {
+				throw new AggregateError(cleanupErrors, "Failed to stop the Plannotator browser session.");
+			}
+		})();
+		return stopPromise;
 	};
 
-	return {
+	session = {
 		url: server.url,
 		waitForDecision: () => {
 			if (decisionPromise) return decisionPromise;
@@ -192,46 +355,52 @@ function startBrowserDecisionSession<T>(
 					await delay(1500);
 					return result;
 				} finally {
-					stop();
+					await stop();
 				}
 			})();
 			return decisionPromise;
 		},
 		stop,
 	};
+	activeBrowserDecisionSessions.add(session);
+	return session;
 }
 
-export async function startPlanReviewBrowserSession(
+/** Start a tracked plan-review session unless Pi is shutting the current session down. */
+export function startPlanReviewBrowserSession(
 	ctx: ExtensionContext,
 	planContent: string,
 ): Promise<PlanReviewBrowserSession> {
-	if (!ctx.hasUI) {
-		throw new Error("Plannotator browser review is unavailable in this session.");
-	}
-	const planHtmlContent = getPlanBrowserHtml();
-	if (!planHtmlContent) {
-		throw new Error("Plannotator browser review is unavailable in this session.");
-	}
+	return trackBrowserDecisionSessionStart(async () => {
+		if (!ctx.hasUI) {
+			throw new Error("Plannotator browser review is unavailable in this session.");
+		}
+		const planHtmlContent = getPlanBrowserHtml();
+		if (!planHtmlContent) {
+			throw new Error("Plannotator browser review is unavailable in this session.");
+		}
 
-	const server = await startPlanReviewServer({
-		plan: planContent,
-		htmlContent: planHtmlContent,
-		origin: "pi",
-		sharingEnabled: resolveSharingEnabled(loadConfig()),
-		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
-		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
+		const server = await startPlanReviewServer({
+			plan: planContent,
+			htmlContent: planHtmlContent,
+			origin: "pi",
+			sharingEnabled: resolveSharingEnabled(loadConfig()),
+			shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+			pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
+		});
+
+		const session = startBrowserDecisionSession(server, ctx, server.waitForDecision, "plan");
+		server.onDecision(async () => {
+			await delay(1500);
+			await session.stop();
+		});
+
+		return {
+			...session,
+			reviewId: server.reviewId,
+			onDecision: server.onDecision,
+		};
 	});
-
-	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision);
-	server.onDecision(() => {
-		setTimeout(() => session.stop(), 1500);
-	});
-
-	return {
-		...session,
-		reviewId: server.reviewId,
-		onDecision: server.onDecision,
-	};
 }
 
 export async function openPlanReviewBrowser(
@@ -254,15 +423,18 @@ export async function openCodeReview(
 	return session.waitForDecision();
 }
 
-export async function startCodeReviewBrowserSession(
+/** Start a tracked code-review session unless Pi is shutting the current session down. */
+export function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
 	options: CodeReviewOptions = {},
 ): Promise<BrowserDecisionSession<CodeReviewDecision>> {
-	try {
-		return await createCodeReviewBrowserSession(ctx, options);
-	} finally {
-		setCodeReviewProgress(ctx);
-	}
+	return trackBrowserDecisionSessionStart(async () => {
+		try {
+			return await createCodeReviewBrowserSession(ctx, options);
+		} finally {
+			setCodeReviewProgress(ctx);
+		}
+	});
 }
 
 async function createCodeReviewBrowserSession(
@@ -527,7 +699,7 @@ async function createCodeReviewBrowserSession(
 		onCleanup: worktreeCleanup,
 	});
 
-	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
+	return startBrowserDecisionSession(server, ctx, server.waitForDecision, "review");
 }
 
 export async function openMarkdownAnnotation(
@@ -539,34 +711,52 @@ export async function openMarkdownAnnotation(
 	sourceInfo?: string,
 	sourceConverted?: boolean,
 	gate?: boolean,
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
+): Promise<PiAnnotateDecision> {
 	const session = await startMarkdownAnnotationSession(
 		ctx,
 		filePath,
 		markdown,
 		mode,
-		folderPath,
-		sourceInfo,
-		sourceConverted,
-		gate,
+		{ folderPath, sourceInfo, sourceConverted, gate },
 	);
 	return session.waitForDecision();
 }
 
-export async function startMarkdownAnnotationSession(
+/** Start a tracked markdown-annotation session unless Pi is shutting down. */
+export function startMarkdownAnnotationSession(
 	ctx: ExtensionContext,
 	filePath: string,
 	markdown: string,
 	mode: AnnotateMode,
-	folderPath?: string,
-	sourceInfo?: string,
-	sourceConverted?: boolean,
-	gate?: boolean,
-	rawHtml?: string,
-	renderHtml?: boolean,
-	convertHtml?: boolean,
-	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
+	options: MarkdownAnnotationOptions = {},
+): Promise<BrowserDecisionSession<PiAnnotateDecision>> {
+	return trackBrowserDecisionSessionStart(() =>
+		createMarkdownAnnotationSession(
+			ctx,
+			filePath,
+			markdown,
+			mode,
+			options,
+		),
+	);
+}
+
+async function createMarkdownAnnotationSession(
+	ctx: ExtensionContext,
+	filePath: string,
+	markdown: string,
+	mode: AnnotateMode,
+	{
+		folderPath,
+		sourceInfo,
+		sourceConverted,
+		gate,
+		rawHtml,
+		renderHtml,
+		convertHtml,
+		recentMessages,
+	}: MarkdownAnnotationOptions,
+): Promise<BrowserDecisionSession<PiAnnotateDecision>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
 	}
@@ -610,38 +800,34 @@ export async function startMarkdownAnnotationSession(
 		project: detectProjectName(),
 	});
 
-	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
+	return startBrowserDecisionSession(server, ctx, server.waitForDecision, "annotate");
 }
 
 export async function openLastMessageAnnotation(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }> {
+	recentMessages?: RecentMessage[],
+): Promise<PiAnnotateDecision> {
 	const session = await startLastMessageAnnotationSession(ctx, lastText, gate, recentMessages);
 	return session.waitForDecision();
 }
 
-export async function startLastMessageAnnotationSession(
+/** Start a tracked last-message session unless Pi is shutting the current session down. */
+export function startLastMessageAnnotationSession(
 	ctx: ExtensionContext,
 	lastText: string,
 	gate?: boolean,
-	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
-): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
-	return startMarkdownAnnotationSession(
-		ctx,
-		"last-message",
-		lastText,
-		"annotate-last",
-		undefined,
-		undefined,
-		undefined,
-		gate,
-		undefined,
-		undefined,
-		undefined,
-		recentMessages,
+	recentMessages?: RecentMessage[],
+): Promise<BrowserDecisionSession<PiAnnotateDecision>> {
+	return trackBrowserDecisionSessionStart(() =>
+		createMarkdownAnnotationSession(
+			ctx,
+			"last-message",
+			lastText,
+			"annotate-last",
+			{ gate, recentMessages },
+		),
 	);
 }
 
@@ -649,29 +835,32 @@ export async function openArchiveBrowserAction(
 	ctx: ExtensionContext,
 	customPlanPath?: string,
 ): Promise<{ opened: boolean }> {
-	if (!ctx.hasUI) {
-		throw new Error("Plannotator archive browser is unavailable in this session.");
-	}
-	const planHtmlContent = getPlanBrowserHtml();
-	if (!planHtmlContent) {
-		throw new Error("Plannotator archive browser is unavailable in this session.");
-	}
-
-	const server = await startPlanReviewServer({
-		plan: "",
-		htmlContent: planHtmlContent,
-		origin: "pi",
-		mode: "archive",
-		customPlanPath,
-		sharingEnabled: resolveSharingEnabled(loadConfig()),
-		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
-		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
-	});
-
-	return openBrowserAndWait(server, ctx, async () => {
-		if (server.waitForDone) {
-			await server.waitForDone();
+	const session = await trackBrowserDecisionSessionStart(async () => {
+		if (!ctx.hasUI) {
+			throw new Error("Plannotator archive browser is unavailable in this session.");
 		}
-		return { opened: true };
+		const planHtmlContent = getPlanBrowserHtml();
+		if (!planHtmlContent) {
+			throw new Error("Plannotator archive browser is unavailable in this session.");
+		}
+
+		const server = await startPlanReviewServer({
+			plan: "",
+			htmlContent: planHtmlContent,
+			origin: "pi",
+			mode: "archive",
+			customPlanPath,
+			sharingEnabled: resolveSharingEnabled(loadConfig()),
+			shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
+			pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
+		});
+
+		return startBrowserDecisionSession(server, ctx, async () => {
+			if (server.waitForDone) {
+				await server.waitForDone();
+			}
+			return { opened: true };
+		}, "archive");
 	});
+	return session.waitForDecision();
 }

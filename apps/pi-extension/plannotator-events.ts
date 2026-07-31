@@ -12,6 +12,8 @@ import {
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	loadPlannotatorBrowser,
+	resumeLoadedPlannotatorBrowserSessions,
+	stopLoadedPlannotatorBrowserSessions,
 } from "./plannotator-browser-runtime.ts";
 
 type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
@@ -77,6 +79,16 @@ export function openArchiveBrowserAction(
 	...args: Parameters<PlannotatorBrowserModule["openArchiveBrowserAction"]>
 ): ReturnType<PlannotatorBrowserModule["openArchiveBrowserAction"]> {
 	return loadPlannotatorBrowser().then((browser) => browser.openArchiveBrowserAction(...args));
+}
+
+/** Stop every active Pi Plannotator browser session without defeating lazy startup. */
+export function stopActivePlannotatorBrowserSessions(): Promise<void> {
+	return stopLoadedPlannotatorBrowserSessions();
+}
+
+/** Reopen Pi Plannotator browser starts without defeating lazy startup. */
+export function resumePlannotatorBrowserSessions(): Promise<void> {
+	return resumeLoadedPlannotatorBrowserSessions();
 }
 
 export const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request" as const;

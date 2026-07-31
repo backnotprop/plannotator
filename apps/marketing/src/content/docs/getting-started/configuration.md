@@ -15,6 +15,7 @@ Plannotator is configured through environment variables, hook/plugin configurati
 | `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. Useful for port forwarding in remote environments. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser or script to open the UI. |
+| `PLANNOTATOR_PRESENTER` | unset | Executable implementing the external presenter protocol (JSON on stdin/stdout) so a terminal host such as Herdr can present the review URL instead of opening a browser; a dismiss is sent on session stop. Can also be set via the `presenter` key in `~/.plannotator/config.json`. `PLANNOTATOR_SKIP_BROWSER_OPEN=1` wins over the presenter. |
 | `PLANNOTATOR_AI` | enabled | Set to `disabled` to disable Ask AI, Review Agents, and Guided Review. External agents can still open reviews and submit annotations; the annotate agent terminal is separate. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off URL sharing entirely. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`). |
 | `PLANNOTATOR_SHARE_URL` | `https://share.plannotator.ai` | Point share links at a self-hosted portal. |
@@ -103,6 +104,8 @@ Approved and denied plans are saved to `~/.plannotator/plans/` by default. You c
 Plannotator reads `~/.plannotator/config.json` for persistent settings. This includes display name, diff options, conventional comment labels, and feedback message customization.
 
 You can customize the messages Plannotator sends to the agent when you approve, deny, or annotate plans and documents. See the [custom feedback guide](/docs/guides/custom-feedback/) for the full config shape, template variables, and runtime-specific overrides.
+
+The config file can also register an external presenter — an executable that receives the review URL as JSON on stdin so a terminal host can present it instead of opening a browser: `{ "presenter": { "command": "/path/to/presenter", "when": "herdr" } }`. The default `"when": "herdr"` only activates it inside a Herdr pane; `"when": "always"` enables it everywhere. The `PLANNOTATOR_PRESENTER` env var takes precedence over the config key, and `PLANNOTATOR_SKIP_BROWSER_OPEN=1` wins over both.
 
 ## Remote mode
 

@@ -75,3 +75,28 @@ export function loadPlannotatorBrowser(): Promise<PlannotatorBrowserModule> {
 	}
 	return browserModulePromise;
 }
+
+/**
+ * Stop sessions from the browser graph if that graph has already been requested.
+ *
+ * This preserves lazy startup: a Pi session that never opened Plannotator does
+ * not import the server graph merely because it is shutting down.
+ */
+export async function stopLoadedPlannotatorBrowserSessions(): Promise<void> {
+	const loadedBrowserModule = browserModulePromise;
+	if (!loadedBrowserModule) return;
+	const browser = await loadedBrowserModule;
+	await browser.stopActiveBrowserDecisionSessions();
+}
+
+/**
+ * Reopen browser-session starts if the browser graph was previously requested.
+ *
+ * A session that never used Plannotator still avoids importing the graph.
+ */
+export async function resumeLoadedPlannotatorBrowserSessions(): Promise<void> {
+	const loadedBrowserModule = browserModulePromise;
+	if (!loadedBrowserModule) return;
+	const browser = await loadedBrowserModule;
+	await browser.resumeBrowserDecisionSessions();
+}

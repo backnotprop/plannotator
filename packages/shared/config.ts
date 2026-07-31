@@ -57,6 +57,16 @@ export interface PromptConfig {
   };
 }
 
+export interface PresenterConfig {
+  /** Executable implementing Plannotator's JSON presenter protocol. */
+  command: string;
+  /**
+   * "herdr" (the default) only enables the presenter inside a Herdr pane.
+   * "always" enables it in every environment.
+   */
+  when?: "herdr" | "always";
+}
+
 const PROMPT_SECTIONS = ["review", "plan", "annotate"] as const;
 
 export function mergePromptConfig(
@@ -88,6 +98,11 @@ export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
   prompts?: PromptConfig;
+  /**
+   * Optional external UI presenter. The executable receives one JSON request
+   * on stdin and returns one JSON response on stdout.
+   */
+  presenter?: PresenterConfig;
   conventionalComments?: boolean;
   /** null = explicitly cleared (use defaults), undefined = not set */
   conventionalLabels?: CCLabelConfig[] | null;

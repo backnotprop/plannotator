@@ -61,6 +61,55 @@ async function runCompletion(
 }
 
 describe("completeAnnotateCommand", () => {
+  test("waits for server cleanup before publishing or exiting", async () => {
+    const events: string[] = [];
+    let finishCleanup!: () => void;
+    const cleanupFinished = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
+    let confirmCleanupStarted!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => {
+      confirmCleanupStarted = resolve;
+    });
+
+    const completion = completeAnnotateCommand({
+      waitForDecision: async () => {
+        events.push("decision");
+        return { approved: true, feedback: "" };
+      },
+      settleAfterDecision: async () => {
+        events.push("settle");
+      },
+      stopServer: async () => {
+        events.push("stop:start");
+        confirmCleanupStarted();
+        await cleanupFinished;
+        events.push("stop:done");
+      },
+      requireApproval: false,
+      emitLegacyOutcome: () => {
+        events.push("legacy");
+      },
+      exit: (code) => {
+        events.push(`exit:${code}`);
+      },
+    });
+
+    await cleanupStarted;
+    expect(events).toEqual(["decision", "settle", "stop:start"]);
+
+    finishCleanup();
+    await completion;
+    expect(events).toEqual([
+      "decision",
+      "settle",
+      "stop:start",
+      "stop:done",
+      "legacy",
+      "exit:0",
+    ]);
+  });
+
   test("publishes approved feedback to matching stdout and result bytes", async () => {
     const result = await runCompletion(
       {
@@ -77,12 +126,14 @@ describe("completeAnnotateCommand", () => {
       '{"decision":"approved","feedback":"Keep the cache bounded."}\n';
     expect(result.resultBytes).toEqual([expected]);
     expect(result.stdout).toEqual([expected]);
+    // Strict publication runs BEFORE cleanup so a failing stopServer() can
+    // never erase the reviewer's completed decision record.
     expect(result.events).toEqual([
       "decision",
-      "settle",
-      "stop",
       "stdout",
       "result",
+      "settle",
+      "stop",
       "exit:0",
     ]);
   });
@@ -101,18 +152,24 @@ describe("completeAnnotateCommand", () => {
       '{"decision":"annotated","feedback":"revise"}\n',
     ]);
     expect(annotated.resultBytes).toEqual(annotated.stdout);
-    expect(annotated.events.slice(-3)).toEqual([
+    expect(annotated.events).toEqual([
+      "decision",
       "stdout",
       "result",
+      "settle",
+      "stop",
       "exit:1",
     ]);
     expect(dismissed.stdout).toEqual([
       '{"decision":"dismissed"}\n',
     ]);
     expect(dismissed.resultBytes).toEqual(dismissed.stdout);
-    expect(dismissed.events.slice(-3)).toEqual([
+    expect(dismissed.events).toEqual([
+      "decision",
       "stdout",
       "result",
+      "settle",
+      "stop",
       "exit:1",
     ]);
   });
@@ -137,13 +194,22 @@ describe("completeAnnotateCommand", () => {
       { requireApproval: true },
     );
 
-    expect(resultFileOnly.events.slice(-3)).toEqual([
+    expect(resultFileOnly.events).toEqual([
+      "decision",
       "stdout",
       "result",
+      "settle",
+      "stop",
       "exit:0",
     ]);
     expect(resultFileOnly.resultBytes).toEqual(resultFileOnly.stdout);
-    expect(approvalOnly.events.slice(-2)).toEqual(["stdout", "exit:1"]);
+    expect(approvalOnly.events).toEqual([
+      "decision",
+      "stdout",
+      "settle",
+      "stop",
+      "exit:1",
+    ]);
     expect(approvalOnly.resultBytes).toEqual([]);
   });
 
@@ -300,5 +366,51 @@ describe("completeAnnotateCommand", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("publishes the decision record before cleanup and exits 2 when cleanup fails", async () => {
+    const events: string[] = [];
+    const errors: string[] = [];
+    const stdout: string[] = [];
+    const resultBytes: string[] = [];
+
+    await completeAnnotateCommand({
+      waitForDecision: async () => ({ approved: true, feedback: "" }),
+      settleAfterDecision: async () => {
+        events.push("settle");
+      },
+      stopServer: async () => {
+        events.push("stop");
+        throw new Error("presenter cleanup exploded");
+      },
+      requireApproval: true,
+      resultFile: "/result.json",
+      writeResultFile: async (_path, serialized) => {
+        events.push("result");
+        resultBytes.push(`${serialized}\n`);
+      },
+      writeStdout: async (bytes) => {
+        events.push("stdout");
+        stdout.push(bytes);
+      },
+      emitLegacyOutcome: () => {
+        events.push("legacy");
+      },
+      exit: (code) => {
+        events.push(`exit:${code}`);
+      },
+      logError: (message) => {
+        errors.push(message);
+      },
+    });
+
+    // The decision record and result file are already published when cleanup
+    // rejects, and the failure routes to the documented environment-failure
+    // exit 2 — never a bare unhandled rejection, and never exit 1's "the
+    // reviewer did not approve".
+    expect(events).toEqual(["stdout", "result", "settle", "stop", "exit:2"]);
+    expect(stdout).toEqual(['{"decision":"approved"}\n']);
+    expect(resultBytes).toEqual(stdout);
+    expect(errors).toEqual(["presenter cleanup exploded"]);
   });
 });

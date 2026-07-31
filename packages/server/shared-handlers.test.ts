@@ -8,6 +8,7 @@ import {
   isCodexDesktopHost,
   writeServerReadyMetadata,
 } from "./shared-handlers";
+import { dismissPresentation } from "@plannotator/shared/presenter";
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -135,6 +136,51 @@ describe("handleServerReady", () => {
     }
 
     expect(opened).toBe(false);
+  });
+
+  test("uses an external presenter before the native browser", async () => {
+    let opened = false;
+    let dismissed = 0;
+    const url = "http://localhost:12346";
+
+    await handleServerReady(url, false, 12346, {
+      kind: "review",
+      presentUrl: async (presentedUrl, kind) => ({
+        attempted: true,
+        opened: true,
+        presentation: {
+          handle: { paneId: "pane-1" },
+          dismiss: async () => {
+            dismissed += 1;
+            return { ok: true };
+          },
+        },
+      }),
+      openBrowser: async () => {
+        opened = true;
+        return true;
+      },
+    });
+
+    expect(opened).toBe(false);
+    expect(await dismissPresentation(url)).toEqual({ ok: true });
+    expect(dismissed).toBe(1);
+  });
+
+  test("falls back to the native browser when the presenter fails", async () => {
+    let opened = "";
+    await handleServerReady("http://localhost:12347", false, 12347, {
+      presentUrl: async () => ({
+        attempted: true,
+        opened: false,
+        error: "presenter unavailable",
+      }),
+      openBrowser: async (url) => {
+        opened = url;
+        return true;
+      },
+    });
+    expect(opened).toBe("http://localhost:12347");
   });
 
   // Regression: a remote session must surface a reachable URL in the terminal

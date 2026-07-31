@@ -54,6 +54,7 @@ import { createExternalAnnotationHandler } from "./external-annotations";
 import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
+import { takePresentation } from "@plannotator/shared/presenter";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -589,11 +590,17 @@ export async function startPlannotatorServer(
   const serverUrl = `http://localhost:${port}`;
   let stopPromise: Promise<void> | undefined;
   const stop = () => {
-    stopPromise ??= (async () => {
+    if (stopPromise) return stopPromise;
+    const presentation = takePresentation(serverUrl);
+    stopPromise = (async () => {
       try {
         aiRuntime?.dispose();
       } finally {
-        await server.stop(true);
+        try {
+          await server.stop(true);
+        } finally {
+          await presentation?.dismiss();
+        }
       }
     })();
     return stopPromise;

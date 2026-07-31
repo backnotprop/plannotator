@@ -156,15 +156,15 @@ export async function handleReviewCommand(
     shareBaseUrl: getShareBaseUrl(),
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
-    onReady: (url, isRemote, port) => {
-      handleReviewServerReady(url, isRemote, port);
+    onReady: async (url, isRemote, port) => {
+      await handleReviewServerReady(url, isRemote, port);
       client.app.log({ level: "info", message: `[Plannotator] Open code review: ${url}` });
     },
   });
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
-  server.stop();
+  await server.stop();
 
   if (result.exit) {
     return;
@@ -346,15 +346,15 @@ export async function handleAnnotateCommand(
     approvalNotesSupported: Boolean(sessionId),
     agentCwd,
     htmlContent,
-    onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
+    onReady: async (url, isRemote, port) => {
+      await handleAnnotateServerReady(url, isRemote, port);
       client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
-  server.stop();
+  await server.stop();
 
   if (result.exit || (result.approved && !result.feedback)) {
     return;
@@ -463,15 +463,15 @@ export async function handleAnnotateLastCommand(
     gate,
     approvalNotesSupported: true,
     htmlContent,
-    onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
+    onReady: async (url, isRemote, port) => {
+      await handleAnnotateServerReady(url, isRemote, port);
       client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
-  server.stop();
+  await server.stop();
 
   if (result.exit || (result.approved && !result.feedback)) {
     return null;

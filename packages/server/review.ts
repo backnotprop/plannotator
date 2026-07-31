@@ -61,7 +61,7 @@ import {
 import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, markJobReviewFailed } from "@plannotator/shared/agent-jobs";
 import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { getRepoInfo } from "./repo";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient, type ServerReadyOptions } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -112,6 +112,7 @@ import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
+import { takePresentation } from "@plannotator/shared/presenter";
 import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "./review-skill-loader";
 import {
@@ -127,7 +128,17 @@ export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export { type DiffType, type DiffOption, type GitContext, type WorktreeInfo } from "./vcs";
 export { type PRMetadata } from "./pr";
-export { handleServerReady as handleReviewServerReady } from "./shared-handlers";
+export function handleReviewServerReady(
+  url: string,
+  isRemote: boolean,
+  port: number,
+  options: ServerReadyOptions = {},
+): Promise<void> {
+  return handleServerReady(url, isRemote, port, {
+    ...options,
+    kind: "review",
+  });
+}
 
 // --- Types ---
 
@@ -163,7 +174,7 @@ export interface ReviewServerOptions {
   /** Custom base URL for share links (default: https://share.plannotator.ai) */
   shareBaseUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
-  onReady?: (url: string, isRemote: boolean, port: number) => void;
+  onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
   /** PR metadata when reviewing a pull request (PR mode) */
@@ -198,7 +209,7 @@ export interface ReviewServerResult {
     exit?: boolean;
   }>;
   /** Stop the server */
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 // --- Server Implementation ---
@@ -2895,10 +2906,46 @@ export async function startReviewServer(
   serverUrl = `http://localhost:${port}`;
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
+  let stopPromise: Promise<void> | undefined;
+  const stop = () => {
+    if (stopPromise) return stopPromise;
+    const presentation = takePresentation(serverUrl);
+    stopPromise = (async () => {
+      process.removeListener("exit", exitHandler);
+      try {
+        try {
+          agentJobs.killAll();
+        } finally {
+          aiRuntime?.dispose();
+        }
+      } finally {
+        try {
+          await server.stop(true);
+        } finally {
+          try {
+            await presentation?.dismiss();
+          } finally {
+            // Invoke cleanup callback (e.g., remove temp worktree)
+            if (options.onCleanup) {
+              try {
+                await options.onCleanup();
+              } catch { /* best effort */ }
+            }
+          }
+        }
+      }
+    })();
+    return stopPromise;
+  };
 
   // Notify caller that server is ready
   if (onReady) {
-    onReady(serverUrl, isRemote, port);
+    try {
+      await onReady(serverUrl, isRemote, port);
+    } catch (error) {
+      await stop();
+      throw error;
+    }
   }
 
   return {
@@ -2906,18 +2953,6 @@ export async function startReviewServer(
     url: serverUrl,
     isRemote,
     waitForDecision: () => decisionPromise,
-    stop: () => {
-      process.removeListener("exit", exitHandler);
-      agentJobs.killAll();
-      aiRuntime?.dispose();
-      server.stop();
-      // Invoke cleanup callback (e.g., remove temp worktree)
-      if (options.onCleanup) {
-        try {
-          const result = options.onCleanup();
-          if (result instanceof Promise) result.catch(() => {});
-        } catch { /* best effort */ }
-      }
-    },
+    stop,
   };
 }

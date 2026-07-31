@@ -66,8 +66,8 @@ const server = await startReviewServer({
   rawPatch,
   gitRef: displayRef,
   htmlContent,
-  onReady: (url, isRemote, port) => {
-    handleReviewServerReady(url, isRemote, port);
+  onReady: async (url, isRemote, port) => {
+    await handleReviewServerReady(url, isRemote, port);
     console.error(`Code review at ${url}`);
     if (isRemote) {
       console.error(`(Remote mode detected — if no browser opens automatically, use the URL above)`);
@@ -82,7 +82,7 @@ const result = await server.waitForDecision();
 await Bun.sleep(500);
 
 // Cleanup
-server.stop();
+await server.stop();
 
 // Output the feedback as JSON
 console.log(

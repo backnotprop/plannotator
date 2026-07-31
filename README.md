@@ -363,6 +363,7 @@ implementation architecture.
 | `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local, unset for SSH auto-detection |
 | `PLANNOTATOR_PORT` | Fixed port (default: random locally, `19432` remote) |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in |
+| `PLANNOTATOR_PRESENTER` | Executable implementing the one-request JSON presenter protocol; overrides `config.json` and may run outside Herdr |
 | `PLANNOTATOR_AI` | `disabled` to disable Ask AI, Review Agents, and Guided Review; the annotate agent terminal is separate |
 | `PLANNOTATOR_SHARE` | `disabled` to turn off URL sharing |
 | `PLANNOTATOR_SHARE_URL` | Custom base URL for share links (self-hosted portal) |
@@ -377,6 +378,24 @@ All Plannotator data lives in a single directory — `~/.plannotator` by default
 ```bash
 export PLANNOTATOR_DATA_DIR=~/.local/share/plannotator
 ```
+
+Host integrations can persist an external presenter in
+`~/.plannotator/config.json`:
+
+```json
+{
+  "presenter": {
+    "command": "/absolute/path/to/presenter",
+    "when": "herdr"
+  }
+}
+```
+
+The command is executed directly without a shell. `when` defaults to
+`"herdr"`, so the presenter is selected only when `HERDR_ENV=1`; use
+`"always"` to enable it everywhere. An explicitly set
+`PLANNOTATOR_PRESENTER` takes priority, and an empty value disables the
+configured presenter for that invocation.
 
 ---
 

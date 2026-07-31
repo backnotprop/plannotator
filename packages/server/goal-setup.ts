@@ -22,17 +22,29 @@ import {
   handleImage,
   handleServerReady,
   handleUpload,
+  type ServerReadyOptions,
 } from "./shared-handlers";
 import { detectGitUser, getServerConfig, saveConfig } from "./config";
 import { isWSL } from "./browser";
+import { takePresentation } from "@plannotator/shared/presenter";
 
-export { handleServerReady as handleGoalSetupServerReady } from "./shared-handlers";
+export function handleGoalSetupServerReady(
+  url: string,
+  isRemote: boolean,
+  port: number,
+  options: ServerReadyOptions = {},
+): Promise<void> {
+  return handleServerReady(url, isRemote, port, {
+    ...options,
+    kind: "goal-setup",
+  });
+}
 
 export interface GoalSetupServerOptions {
   bundle: GoalSetupBundle;
   htmlContent: string;
   origin?: Origin;
-  onReady?: (url: string, isRemote: boolean, port: number) => void;
+  onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
 }
 
 export interface GoalSetupServerResult {
@@ -43,7 +55,7 @@ export interface GoalSetupServerResult {
     result?: GoalSetupResult;
     exit?: boolean;
   }>;
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 function coerceAnswers(body: unknown): GoalSetupQuestionAnswer[] {
@@ -205,13 +217,34 @@ export async function startGoalSetupServer(
 
   const port = server.port!;
   const serverUrl = `http://localhost:${port}`;
-  onReady?.(serverUrl, isRemote, port);
+  let stopPromise: Promise<void> | undefined;
+  const stop = () => {
+    if (stopPromise) return stopPromise;
+    const presentation = takePresentation(serverUrl);
+    stopPromise = (async () => {
+      try {
+        await server.stop(true);
+      } finally {
+        await presentation?.dismiss();
+      }
+    })();
+    return stopPromise;
+  };
+
+  if (onReady) {
+    try {
+      await onReady(serverUrl, isRemote, port);
+    } catch (error) {
+      await stop();
+      throw error;
+    }
+  }
 
   return {
     port,
     url: serverUrl,
     isRemote,
     waitForDecision: () => decisionPromise,
-    stop: () => server.stop(),
+    stop,
   };
 }

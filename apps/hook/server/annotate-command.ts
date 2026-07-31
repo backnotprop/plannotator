@@ -9,7 +9,7 @@ import {
 export interface CompleteAnnotateCommandOptions {
   waitForDecision: () => Promise<AnnotateOutcome>;
   settleAfterDecision: () => Promise<void>;
-  stopServer: () => void;
+  stopServer: () => void | Promise<void>;
   requireApproval: boolean;
   resultFile?: string;
   writeResultFile?: (
@@ -44,20 +44,24 @@ export async function completeAnnotateCommand({
   logError = (message) => console.error(message),
 }: CompleteAnnotateCommandOptions): Promise<void> {
   const result = await waitForDecision();
-  await settleAfterDecision();
-  stopServer();
 
   if (requireApproval || resultFile) {
+    // Publish before cleanup: the reviewer's autosaved draft is already gone
+    // by the time we get here, so their completed decision must reach at
+    // least one channel before anything else can abort the run. A rejected
+    // stopServer() must not leave the process exiting without a record —
+    // under --require-approval that would masquerade as "the reviewer did
+    // not approve" instead of the documented environment-failure exit 2.
+    let exitCode: number;
     const serialized = serializeStrictAnnotateResult(result);
     try {
-      // stdout first: the reviewer's autosaved draft is already gone by the
-      // time we get here, so their completed decision must reach at least one
-      // channel before a result-file publication failure can abort the run.
-      // Result-file publication is best-effort on top of that record.
+      // stdout first; result-file publication is best-effort on top of that
+      // record.
       await outputWriter(`${serialized}\n`);
       if (resultFile) {
         await writeResultFile(resultFile, serialized);
       }
+      exitCode = annotateOutcomeExitCode(result, requireApproval);
     } catch (error) {
       // The result file was not published (or stdout itself was unwritable):
       // an environment error, not a reviewer outcome. Exit 2 — fail-closed, but
@@ -65,13 +69,25 @@ export async function completeAnnotateCommand({
       // The stdout decision record has already been emitted unless stdout was
       // the thing that failed.
       logError(error instanceof Error ? error.message : String(error));
-      exit(STRICT_GATE_ERROR_EXIT_CODE);
-      return;
+      exitCode = STRICT_GATE_ERROR_EXIT_CODE;
     }
-    exit(annotateOutcomeExitCode(result, requireApproval));
+    try {
+      await settleAfterDecision();
+      await stopServer();
+    } catch (error) {
+      // Cleanup failed after the decision record was published: also an
+      // environment error, never a reviewer outcome. Exit 1 stays reserved
+      // for "the gate ran and the reviewer did not approve", and only exit 0
+      // may report approval, so a failed teardown routes to exit 2.
+      logError(error instanceof Error ? error.message : String(error));
+      exitCode = STRICT_GATE_ERROR_EXIT_CODE;
+    }
+    exit(exitCode);
     return;
   }
 
+  await settleAfterDecision();
+  await stopServer();
   emitLegacyOutcome(result);
   exit(0);
 }
