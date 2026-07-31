@@ -36,6 +36,11 @@ import {
   type ReviewGitRuntime,
 } from "./review-core";
 
+const unavailableFileMethods = {
+  async getFileInfo() { return null; },
+  async readLink() { return null; },
+};
+
 describe("splitPorcelainRename", () => {
   test("splits a plain rename on the top-level separator", () => {
     expect(splitPorcelainRename("old.txt -> new.txt")).toEqual(["old.txt", "new.txt"]);
@@ -220,6 +225,7 @@ describe("review-core", () => {
   test("remote-default discovery requests bounded noninteractive execution", async () => {
     const calls: Array<{ args: string[]; options: unknown }> = [];
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args, options) {
         calls.push({ args, options });
         return { stdout: "", stderr: "origin is absent", exitCode: 2 };
@@ -548,6 +554,7 @@ describe("review-core", () => {
   test("does not mark unchanged oversized rename or mode-only stubs as binary", async () => {
     const objectId = "a".repeat(40);
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args, options) {
         if (args[0] === "diff" && args.includes("--raw")) {
           return {
@@ -623,6 +630,7 @@ describe("review-core", () => {
     let individualSizeCalls = 0;
     let batchCalls = 0;
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args, options) {
         if (args[0] === "diff" && args.includes("--raw")) {
           return {
@@ -672,6 +680,7 @@ describe("review-core", () => {
     const oldObjectId = "a".repeat(40);
     const newObjectId = "b".repeat(40);
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args, options) {
         if (args[0] === "diff" && args.includes("--raw")) {
           return {
@@ -767,6 +776,7 @@ describe("review-core", () => {
 
   test("ordinary working-tree diffs keep tracked changes when an untracked file cannot be read", async () => {
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         if (args[0] === "rev-parse") {
           return { stdout: "/repo\n", stderr: "", exitCode: 0 };
@@ -800,6 +810,7 @@ describe("review-core", () => {
 
   test("ordinary working-tree diffs keep tracked changes when untracked discovery fails", async () => {
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         if (args[0] === "rev-parse") {
           return { stdout: "/repo\n", stderr: "", exitCode: 0 };
@@ -1055,7 +1066,7 @@ describe("review-core", () => {
   test("file-content expansion uses runtime filesystem capabilities", async () => {
     const inspectedPaths: Array<[string, string]> = [];
     const readPaths: string[] = [];
-    const runtime = {
+    const runtime: ReviewGitRuntime = {
       async runGit(args: string[]) {
         if (args[0] === "rev-parse") {
           return { stdout: "/virtual/repo\n", stderr: "", exitCode: 0 };
@@ -1069,7 +1080,8 @@ describe("review-core", () => {
         readPaths.push(path);
         return path === "/virtual/repo/generated.ts" ? "runtime content\n" : null;
       },
-      async getFileInfo(basePath: string, path: string) {
+      async getFileInfo(basePath: string | undefined, path: string) {
+        if (!basePath) return null;
         inspectedPaths.push([basePath, path]);
         return {
           path: "/virtual/repo/generated.ts",
@@ -1077,14 +1089,12 @@ describe("review-core", () => {
           mtimeMs: 1,
           isFile: true,
           isSymbolicLink: false,
+          isExecutable: false,
         };
       },
       async readLink() {
         return null;
       },
-    } as ReviewGitRuntime & {
-      getFileInfo(basePath: string, path: string): Promise<unknown>;
-      readLink(path: string): Promise<string | null>;
     };
 
     await expect(getFileContentsForDiff(

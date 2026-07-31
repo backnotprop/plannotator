@@ -177,12 +177,12 @@ export interface ReviewGitRuntime {
   ) => Promise<GitCommandResult>;
   readTextFile: (path: string) => Promise<string | null>;
   /** Resolve and stat one file relative to a repository root or other base path. */
-  getFileInfo?: (
+  getFileInfo: (
     basePath: string | undefined,
     path: string,
   ) => Promise<ReviewFileInfo | null>;
   /** Read a symlink payload without following its target. */
-  readLink?: (path: string) => Promise<string | null>;
+  readLink: (path: string) => Promise<string | null>;
 }
 
 function quoteGitSshPath(path: string): string {
@@ -820,7 +820,7 @@ async function getWorkingTreeFileInfo(
   root: string | undefined,
   path: string | null,
 ): Promise<ReviewFileInfo | null> {
-  if (!path || !runtime.getFileInfo) return null;
+  if (!path) return null;
   try {
     const fileInfo = await runtime.getFileInfo(root, path);
     return fileInfo?.isFile || fileInfo?.isSymbolicLink ? fileInfo : null;
@@ -1069,9 +1069,7 @@ async function getUntrackedFileDiffs(
       // enter Git's diff machinery or the server's buffered stdout.
       let fileInfo: ReviewFileInfo | null = null;
       try {
-        fileInfo = runtime.getFileInfo
-          ? await runtime.getFileInfo(rootCwd, file)
-          : null;
+        fileInfo = await runtime.getFileInfo(rootCwd, file);
       } catch {
         // Preserve the existing best-effort/strict behavior below: Git reports
         // the authoritative read error for files that disappear mid-snapshot.
@@ -1628,10 +1626,6 @@ async function appendUntrackedFingerprint(
   if (untracked.length > 0) {
     const baseDir = await resolveRepoToplevel(runtime, cwd);
     for (const path of untracked) {
-      if (!runtime.getFileInfo) {
-        parts.push("unreadable");
-        continue;
-      }
       try {
         const fileInfo = await runtime.getFileInfo(baseDir, path);
         if (!fileInfo) {
@@ -1641,7 +1635,7 @@ async function appendUntrackedFingerprint(
         if (fileInfo.isSymbolicLink) {
           // Hash the link payload Git records without following it into a
           // potentially huge target file.
-          const link = runtime.readLink ? await runtime.readLink(fileInfo.path) : null;
+          const link = await runtime.readLink(fileInfo.path);
           parts.push(link != null ? hashFingerprintPart(`symlink:${link}`) : "unreadable");
           continue;
         }
@@ -1811,14 +1805,13 @@ export async function getFileContentsForDiff(
     // path and hunk expansion silently returns null. (The `git show ref:path`
     // sibling is immune: ref paths are root-relative regardless of cwd.)
     const baseDir = await resolveRepoToplevel(runtime, cwd);
-    if (!runtime.getFileInfo) return null;
     try {
       const fileInfo = await runtime.getFileInfo(baseDir, path);
       if (!fileInfo) return null;
       // Git stores the link destination as the blob contents. Reading the link
       // itself preserves expansion without following an arbitrarily large
       // target.
-      if (fileInfo.isSymbolicLink) return runtime.readLink?.(fileInfo.path) ?? null;
+      if (fileInfo.isSymbolicLink) return await runtime.readLink(fileInfo.path);
       if (!fileInfo.isFile || fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
       return runtime.readTextFile(fileInfo.path);
     } catch {

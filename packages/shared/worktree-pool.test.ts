@@ -6,6 +6,8 @@ import { createWorktreePool } from "./worktree-pool";
 function fakeRuntime(): { runtime: ReviewGitRuntime; commands: string[][] } {
   const commands: string[][] = [];
   const runtime: ReviewGitRuntime = {
+    async getFileInfo() { return null; },
+    async readLink() { return null; },
     async runGit(args) {
       commands.push(args);
       return { stdout: "", stderr: "", exitCode: 0 };
@@ -293,6 +295,8 @@ describe("worktree-pool seeded warmup", () => {
     // if creations ran concurrently instead of through the serialization chain.
     const commands: string[][] = [];
     const runtime: ReviewGitRuntime = {
+      async getFileInfo() { return null; },
+      async readLink() { return null; },
       async runGit(args) {
         await Bun.sleep(1);
         commands.push(args);

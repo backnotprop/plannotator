@@ -26,6 +26,12 @@ function git(cwd: string, args: string[]): string {
 
 function makeRuntime(baseCwd: string): ReviewGitRuntime {
   return {
+    async getFileInfo() {
+      return null;
+    },
+    async readLink() {
+      return null;
+    },
     async runGit(args: string[], options?: { cwd?: string }) {
       const result = spawnSync("git", args, {
         cwd: options?.cwd ?? baseCwd,

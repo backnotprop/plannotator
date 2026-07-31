@@ -11,6 +11,11 @@ function result(stdout = "", stderr = "", exitCode = 0): GitCommandResult {
   return { stdout, stderr, exitCode };
 }
 
+const unavailableFileMethods = {
+  async getFileInfo() { return null; },
+  async readLink() { return null; },
+};
+
 const metadata: PRMetadata = {
   platform: "github",
   host: "github.com",
@@ -31,6 +36,7 @@ describe("runPRFullStackDiff", () => {
   test("uses origin default branch when it is available", async () => {
     const calls: string[][] = [];
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         calls.push(args);
         if (args[0] === "show-ref" && args[3] === "refs/remotes/origin/main") {
@@ -67,6 +73,7 @@ describe("runPRFullStackDiff", () => {
 
   test("falls back to a local default branch", async () => {
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         if (args[0] === "show-ref" && args[3] === "refs/remotes/origin/main") {
           return result("", "", 1);
@@ -97,6 +104,7 @@ describe("runPRFullStackDiff", () => {
 
   test("returns an error when no default branch ref exists locally", async () => {
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit() {
         return result("", "", 1);
       },
@@ -117,6 +125,7 @@ describe("runPRFullStackDiff", () => {
     const oldObjectId = "a".repeat(40);
     const newObjectId = "b".repeat(40);
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         calls.push(args);
         if (args[0] === "show-ref") return result();
@@ -171,6 +180,7 @@ describe("runPRLayerLocalDiff", () => {
     return {
       calls,
       runtime: {
+        ...unavailableFileMethods,
         async runGit(args) {
           calls.push(args);
           if (args[0] === "cat-file") {
@@ -293,6 +303,7 @@ describe("runPRLayerLocalDiff", () => {
   test("omits oversized layer objects before rendering their patch", async () => {
     const calls: string[][] = [];
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         calls.push(args);
         if (args[0] === "cat-file" && args[1] === "-t") return result();

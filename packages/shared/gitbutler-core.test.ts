@@ -90,6 +90,12 @@ function createRuntime(options: {
   let patch = "diff --git a/file.txt b/file.txt\n-old\n+new\n";
 
   const runtime: ReviewGitButlerRuntime = {
+    async getFileInfo() {
+      return null;
+    },
+    async readLink() {
+      return null;
+    },
     async runGit(args: string[], commandOptions?: GitCommandOptions): Promise<GitCommandResult> {
       gitCalls.push(args);
       const commandArgs = args[0] === "--no-optional-locks" ? args.slice(1) : args;
