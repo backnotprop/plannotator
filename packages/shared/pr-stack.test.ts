@@ -57,7 +57,6 @@ describe("runPRFullStackDiff", () => {
     });
     expect(calls.at(-1)).toEqual([
       "diff",
-      "--no-textconv",
       "--no-ext-diff",
       "--src-prefix=a/",
       "--dst-prefix=b/",
@@ -210,7 +209,6 @@ describe("runPRLayerLocalDiff", () => {
     expect(diff.patch).toBe("diff --git a/x.ts b/x.ts\n");
     expect(calls.at(-1)).toEqual([
       "diff",
-      "--no-textconv",
       "--no-ext-diff",
       "--find-renames",
       "-l100000",

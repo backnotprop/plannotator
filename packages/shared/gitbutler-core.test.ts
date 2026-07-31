@@ -378,7 +378,6 @@ describe("GitButler diffs and expansion", () => {
     ));
     expect(fixture.gitCalls).toContainEqual([
       "diff",
-      "--no-textconv",
       "--no-ext-diff",
       "-w",
       "--src-prefix=a/",
@@ -418,7 +417,6 @@ describe("GitButler diffs and expansion", () => {
     ]);
     expect(fixture.gitCalls).toContainEqual([
       "diff",
-      "--no-textconv",
       "--no-ext-diff",
       "--src-prefix=a/",
       "--dst-prefix=b/",
@@ -508,7 +506,6 @@ describe("GitButler diffs and expansion", () => {
     expect(result.label).toBe("Branch: feature/top lane (committed changes)");
     expect(fixture.gitCalls).toContainEqual([
       "diff",
-      "--no-textconv",
       "--no-ext-diff",
       "--src-prefix=a/",
       "--dst-prefix=b/",

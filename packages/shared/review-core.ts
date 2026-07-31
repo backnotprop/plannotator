@@ -778,6 +778,10 @@ function isNullObjectId(objectId: string): boolean {
   return NULL_OBJECT_ID.test(objectId);
 }
 
+function isGitlink(entry: RawDiffEntry): boolean {
+  return entry.oldMode === "160000" || entry.newMode === "160000";
+}
+
 async function getGitObjectSizes(
   runtime: ReviewGitRuntime,
   objectIds: string[],
@@ -874,7 +878,10 @@ function buildOversizedTrackedStub(entry: OversizedTrackedDiffEntry): string {
   lines.push(
     `index ${oldId}..${newId}${entry.oldMode === entry.newMode ? ` ${entry.newMode}` : ""}`,
   );
-  lines.push(`Binary files ${oldToken} and ${newToken} differ`, "");
+  if (entry.oldObjectId !== entry.newObjectId) {
+    lines.push(`Binary files ${oldToken} and ${newToken} differ`);
+  }
+  lines.push("");
   return lines.join("\n");
 }
 
@@ -899,21 +906,23 @@ async function buildBoundedTrackedDiff(
 ): Promise<BoundedTrackedDiff> {
   const diffIndex = args.indexOf("diff");
   if (diffIndex === -1) throw new Error("Expected a git diff command");
-  const safeArgs = args.includes("--no-textconv")
-    ? args
-    : [...args.slice(0, diffIndex + 1), "--no-textconv", ...args.slice(diffIndex + 1)];
+  // Textconv is disabled only for the machine-readable preflight. The rendered
+  // diff retains Git's normal textconv behavior for sub-threshold paths, while
+  // every oversized path is excluded before that rendered invocation begins.
+  const rawFlags = args.includes("--no-textconv") ? [] : ["--no-textconv"];
   const rawArgs = [
-    ...safeArgs.slice(0, diffIndex + 1),
+    ...args.slice(0, diffIndex + 1),
+    ...rawFlags,
     "--raw",
     "-z",
     "--no-abbrev",
-    ...safeArgs.slice(diffIndex + 1),
+    ...args.slice(diffIndex + 1),
   ];
   const rawResult = assertGitSuccess(await runtime.runGit(rawArgs, { cwd }), rawArgs);
   const entries = parseRawDiffEntries(rawResult.stdout);
   if (entries.length === 0) {
     return {
-      patch: assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout,
+      patch: assertGitSuccess(await runtime.runGit(args, { cwd }), args).stdout,
       fingerprintMetadata: [],
     };
   }
@@ -921,12 +930,14 @@ async function buildBoundedTrackedDiff(
   const root = await resolveRepoToplevel(runtime, cwd);
   const oversized: OversizedTrackedDiffEntry[] = [];
   const fingerprintMetadata: string[] = [];
+  const nonGitlinks = entries.filter((entry) => !isGitlink(entry));
   const objectSizes = await getGitObjectSizes(
     runtime,
-    entries.flatMap((entry) => [entry.oldObjectId, entry.newObjectId]),
+    nonGitlinks.flatMap((entry) => [entry.oldObjectId, entry.newObjectId]),
     cwd,
   );
   for (const entry of entries) {
+    if (isGitlink(entry)) continue;
     const oldSize = isNullObjectId(entry.oldObjectId)
       ? null
       : objectSizes.get(entry.oldObjectId) ?? Number.POSITIVE_INFINITY;
@@ -964,7 +975,7 @@ async function buildBoundedTrackedDiff(
 
   if (oversized.length === 0) {
     return {
-      patch: assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout,
+      patch: assertGitSuccess(await runtime.runGit(args, { cwd }), args).stdout,
       fingerprintMetadata,
     };
   }
@@ -975,7 +986,7 @@ async function buildBoundedTrackedDiff(
       ? [`:(top,exclude,literal)${entry.newPath}`]
       : []),
   ]);
-  const patchArgs = [...safeArgs, "--", ...exclusions];
+  const patchArgs = [...args, "--", ...exclusions];
   const boundedPatch = assertGitSuccess(await runtime.runGit(patchArgs, { cwd }), patchArgs).stdout;
   return {
     patch: boundedPatch + oversized.map(buildOversizedTrackedStub).join(""),

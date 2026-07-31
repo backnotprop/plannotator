@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -437,9 +438,156 @@ describe("review-core", () => {
     git(repoDir, ["add", "."]);
     const renamed = await runGitDiff(runtime, "staged", "main");
     expect(renamed.patch.length).toBeLessThan(2_000);
-    expect(renamed.patch).toContain("Binary files");
+    expect(renamed.patch).not.toContain("Binary files");
     expect(listPatchFiles(renamed.patch).map((file) => file.path)).toContain(renamedTo);
   }, 20_000);
+
+  test("keeps gitlink pointers as normal subproject diffs and fingerprints them", async () => {
+    const superproject = initRepo();
+    const submoduleSource = makeTempDir("plannotator-review-core-submodule-");
+    git(submoduleSource, ["init"]);
+    git(submoduleSource, ["config", "user.email", "submodule@example.com"]);
+    git(submoduleSource, ["config", "user.name", "Submodule"]);
+    writeFileSync(join(submoduleSource, "module.txt"), "first\n", "utf-8");
+    git(submoduleSource, ["add", "module.txt"]);
+    git(submoduleSource, ["commit", "-m", "first"]);
+    const first = git(submoduleSource, ["rev-parse", "HEAD"]);
+
+    git(superproject, [
+      "-c",
+      "protocol.file.allow=always",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "submodule",
+      "add",
+      submoduleSource,
+      "deps/module",
+    ]);
+    git(superproject, ["commit", "-m", "add submodule"]);
+
+    writeFileSync(join(submoduleSource, "module.txt"), "second\n", "utf-8");
+    git(submoduleSource, ["add", "module.txt"]);
+    git(submoduleSource, ["commit", "-m", "second"]);
+    const second = git(submoduleSource, ["rev-parse", "HEAD"]);
+    git(superproject, [
+      "-C",
+      "deps/module",
+      "-c",
+      "protocol.file.allow=always",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "fetch",
+      "origin",
+    ]);
+    git(superproject, ["-C", "deps/module", "-c", "core.hooksPath=/dev/null", "checkout", second]);
+    git(superproject, ["add", "deps/module"]);
+
+    const runtime = makeRuntime(superproject);
+    const staged = await runGitDiff(runtime, "staged", "main");
+    expect(staged.patch).toContain(`-Subproject commit ${first}`);
+    expect(staged.patch).toContain(`+Subproject commit ${second}`);
+    expect(staged.patch).not.toContain("Binary files");
+    const firstFingerprint = await getGitDiffFingerprint(runtime, "staged", "main");
+
+    writeFileSync(join(submoduleSource, "module.txt"), "third\n", "utf-8");
+    git(submoduleSource, ["add", "module.txt"]);
+    git(submoduleSource, ["commit", "-m", "third"]);
+    const third = git(submoduleSource, ["rev-parse", "HEAD"]);
+    git(superproject, [
+      "-C",
+      "deps/module",
+      "-c",
+      "protocol.file.allow=always",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "fetch",
+      "origin",
+    ]);
+    git(superproject, ["-C", "deps/module", "-c", "core.hooksPath=/dev/null", "checkout", third]);
+    git(superproject, ["add", "deps/module"]);
+
+    const secondFingerprint = await getGitDiffFingerprint(runtime, "staged", "main");
+    expect(secondFingerprint).not.toBe(firstFingerprint);
+  }, 20_000);
+
+  test("preserves small textconv output while excluding oversized textconv paths", async () => {
+    const repoDir = initRepo();
+    const textconv = join(repoDir, "textconv.sh");
+    writeFileSync(
+      textconv,
+      ["#!/bin/sh", "printf 'rendered:'", 'cat "$1"', ""].join("\n"),
+      "utf-8",
+    );
+    chmodSync(textconv, 0o755);
+    writeFileSync(join(repoDir, ".gitattributes"), "*.txt diff=rendered\n", "utf-8");
+    writeFileSync(join(repoDir, "small.txt"), "small before\n", "utf-8");
+    writeFileSync(
+      join(repoDir, "large.txt"),
+      "a".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1),
+      "utf-8",
+    );
+    git(repoDir, ["add", ".gitattributes", "small.txt", "large.txt"]);
+    git(repoDir, ["commit", "-m", "configure textconv"]);
+    git(repoDir, ["config", "diff.rendered.textconv", textconv]);
+
+    writeFileSync(join(repoDir, "small.txt"), "small after\n", "utf-8");
+    writeFileSync(
+      join(repoDir, "large.txt"),
+      "b".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1),
+      "utf-8",
+    );
+
+    const result = await runGitDiff(makeRuntime(repoDir), "uncommitted", "main");
+
+    expect(result.patch).toContain("+rendered:small after");
+    expect(result.patch).toContain("Binary files");
+    expect(result.patch).not.toContain("bbbbbbbbbb");
+    expect(result.patch.length).toBeLessThan(4_000);
+  }, 20_000);
+
+  test("does not mark unchanged oversized rename or mode-only stubs as binary", async () => {
+    const objectId = "a".repeat(40);
+    const runtime: ReviewGitRuntime = {
+      async runGit(args, options) {
+        if (args[0] === "diff" && args.includes("--raw")) {
+          return {
+            stdout: [
+              `:100644 100644 ${objectId} ${objectId} R100`,
+              "old-large.txt",
+              "new-large.txt",
+              `:100644 100755 ${objectId} ${objectId} M`,
+              "mode-large.txt",
+              "",
+            ].join("\0"),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (args[0] === "cat-file" && args.some((arg) => arg.startsWith("--batch-check"))) {
+          const input = (options as { stdin?: string } | undefined)?.stdin ?? "";
+          return {
+            stdout: input.trim().split("\n").map((id) =>
+              `${id} blob ${MAX_REVIEW_FILE_CONTENT_BYTES + 1}`,
+            ).join("\n"),
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        if (args[0] === "rev-parse") return { stdout: "/repo\n", stderr: "", exitCode: 0 };
+        if (args[0] === "diff") return { stdout: "", stderr: "", exitCode: 0 };
+        throw new Error(`Unexpected git command: ${args.join(" ")}`);
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    const result = await runGitDiff(runtime, "staged", "main", "/repo");
+
+    expect(result.patch).toContain("rename from old-large.txt");
+    expect(result.patch).toContain("old mode 100644\nnew mode 100755");
+    expect(result.patch).not.toContain("Binary files");
+  });
 
   test("fingerprinting oversized tracked worktree files uses metadata without hashing them", async () => {
     const repoDir = initRepo();
