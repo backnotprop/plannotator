@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -74,7 +76,7 @@ function git(cwd: string, args: string[]): string {
 
 function makeRuntime(baseCwd: string): ReviewGitRuntime {
   return {
-    async runGit(args: string[], options?: { cwd?: string }) {
+    async runGit(args: string[], options?: { cwd?: string; stdin?: string }) {
       const result = spawnSync("git", args, {
         cwd: options?.cwd ?? baseCwd,
         encoding: "utf-8",
@@ -93,6 +95,31 @@ function makeRuntime(baseCwd: string): ReviewGitRuntime {
       try {
         const fullPath = path.startsWith("/") ? path : resolvePath(baseCwd, path);
         return readFileSync(fullPath, "utf-8");
+      } catch {
+        return null;
+      }
+    },
+
+    async getFileInfo(basePath, path) {
+      const fullPath = resolvePath(basePath ?? baseCwd, path);
+      try {
+        const fileStat = lstatSync(fullPath);
+        return {
+          path: fullPath,
+          size: fileStat.size,
+          mtimeMs: fileStat.mtimeMs,
+          isFile: fileStat.isFile(),
+          isSymbolicLink: fileStat.isSymbolicLink(),
+          isExecutable: (fileStat.mode & 0o111) !== 0,
+        };
+      } catch {
+        return null;
+      }
+    },
+
+    async readLink(path: string) {
+      try {
+        return readlinkSync(path);
       } catch {
         return null;
       }
@@ -875,6 +902,51 @@ describe("review-core", () => {
     );
     expect(newFileContents.oldContent).toBeNull();
     expect(newFileContents.newContent).toBe("brand new\n");
+  });
+
+  test("file-content expansion uses runtime filesystem capabilities", async () => {
+    const inspectedPaths: Array<[string, string]> = [];
+    const readPaths: string[] = [];
+    const runtime = {
+      async runGit(args: string[]) {
+        if (args[0] === "rev-parse") {
+          return { stdout: "/virtual/repo\n", stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "cat-file") {
+          return { stdout: "", stderr: "missing", exitCode: 1 };
+        }
+        throw new Error(`Unexpected git command: ${args.join(" ")}`);
+      },
+      async readTextFile(path: string) {
+        readPaths.push(path);
+        return path === "/virtual/repo/generated.ts" ? "runtime content\n" : null;
+      },
+      async getFileInfo(basePath: string, path: string) {
+        inspectedPaths.push([basePath, path]);
+        return {
+          path: "/virtual/repo/generated.ts",
+          size: 16,
+          mtimeMs: 1,
+          isFile: true,
+          isSymbolicLink: false,
+        };
+      },
+      async readLink() {
+        return null;
+      },
+    } as ReviewGitRuntime & {
+      getFileInfo(basePath: string, path: string): Promise<unknown>;
+      readLink(path: string): Promise<string | null>;
+    };
+
+    await expect(getFileContentsForDiff(
+      runtime,
+      "uncommitted",
+      "main",
+      "generated.ts",
+    )).resolves.toEqual({ oldContent: null, newContent: "runtime content\n" });
+    expect(inspectedPaths).toEqual([["/virtual/repo", "generated.ts"]]);
+    expect(readPaths).toEqual(["/virtual/repo/generated.ts"]);
   });
 
   test("file content lookup refuses oversized working-tree files", async () => {

@@ -5,8 +5,6 @@
  * self-contained while review diff logic remains sourced from one module.
  */
 
-import { lstat, readlink } from "node:fs/promises";
-import { resolve as resolvePath } from "node:path";
 import {
   formatDiffMetadataPathToken,
   formatPatchPathToken,
@@ -162,12 +160,29 @@ export interface PreparedGitCommand {
   isolateProcessGroup: boolean;
 }
 
+/** Filesystem metadata resolved by the host runtime, never by browser-safe core code. */
+export interface ReviewFileInfo {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  isFile: boolean;
+  isSymbolicLink: boolean;
+  isExecutable: boolean;
+}
+
 export interface ReviewGitRuntime {
   runGit: (
     args: string[],
     options?: GitCommandOptions,
   ) => Promise<GitCommandResult>;
   readTextFile: (path: string) => Promise<string | null>;
+  /** Resolve and stat one file relative to a repository root or other base path. */
+  getFileInfo?: (
+    basePath: string | undefined,
+    path: string,
+  ) => Promise<ReviewFileInfo | null>;
+  /** Read a symlink payload without following its target. */
+  readLink?: (path: string) => Promise<string | null>;
 }
 
 function quoteGitSshPath(path: string): string {
@@ -797,15 +812,14 @@ async function getGitObjectSizes(
 }
 
 async function getWorkingTreeFileInfo(
+  runtime: ReviewGitRuntime,
   root: string | undefined,
   path: string | null,
-): Promise<{ size: number; fullPath: string; mtimeMs: number } | null> {
-  if (!root || !path) return null;
-  const fullPath = resolvePath(root, path);
+): Promise<ReviewFileInfo | null> {
+  if (!path || !runtime.getFileInfo) return null;
   try {
-    const fileStat = await lstat(fullPath);
-    if (!fileStat.isFile() && !fileStat.isSymbolicLink()) return null;
-    return { size: fileStat.size, fullPath, mtimeMs: fileStat.mtimeMs };
+    const fileInfo = await runtime.getFileInfo(root, path);
+    return fileInfo?.isFile || fileInfo?.isSymbolicLink ? fileInfo : null;
   } catch {
     return null;
   }
@@ -814,11 +828,11 @@ async function getWorkingTreeFileInfo(
 async function hashOversizedWorkingTreeFile(
   runtime: ReviewGitRuntime,
   path: string,
-  file: { size: number; fullPath: string; mtimeMs: number },
+  file: ReviewFileInfo,
   cwd?: string,
 ): Promise<string> {
   const result = await runtime.runGit(
-    ["hash-object", "--no-filters", "--", file.fullPath],
+    ["hash-object", "--no-filters", "--", file.path],
     { cwd },
   );
   if (result.exitCode === 0 && /^[0-9a-f]{40,64}$/i.test(result.stdout.trim())) {
@@ -920,7 +934,7 @@ async function buildBoundedTrackedDiff(
       ? null
       : objectSizes.get(entry.newObjectId) ?? Number.POSITIVE_INFINITY;
     const workingTreeInfo = isNullObjectId(entry.newObjectId)
-      ? await getWorkingTreeFileInfo(root, entry.newPath)
+      ? await getWorkingTreeFileInfo(runtime, root, entry.newPath)
       : null;
     const newSize = newObjectSize ?? workingTreeInfo?.size ?? null;
     if (oldSize === null && newSize === null) continue;
@@ -1042,22 +1056,25 @@ async function getUntrackedFileDiffs(
       // Avoid asking Git to inspect arbitrarily large untracked payloads. They
       // remain visible in the review as binary additions, but their bytes never
       // enter Git's diff machinery or the server's buffered stdout.
+      let fileInfo: ReviewFileInfo | null = null;
       try {
-        const fileStat = await lstat(resolvePath(rootCwd ?? "", file));
-        if (fileStat.isFile() && fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) {
-          const mode = (fileStat.mode & 0o111) !== 0 ? "100755" : "100644";
-          const oldToken = formatPatchPathToken("a", file);
-          const newToken = formatPatchPathToken("b", file);
-          return [
-            `diff --git ${oldToken} ${newToken}`,
-            `new file mode ${mode}`,
-            `Binary files /dev/null and ${newToken} differ`,
-            "",
-          ].join("\n");
-        }
+        fileInfo = runtime.getFileInfo
+          ? await runtime.getFileInfo(rootCwd, file)
+          : null;
       } catch {
         // Preserve the existing best-effort/strict behavior below: Git reports
         // the authoritative read error for files that disappear mid-snapshot.
+      }
+      if (fileInfo?.isFile && fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES) {
+        const mode = fileInfo.isExecutable ? "100755" : "100644";
+        const oldToken = formatPatchPathToken("a", file);
+        const newToken = formatPatchPathToken("b", file);
+        return [
+          `diff --git ${oldToken} ${newToken}`,
+          `new file mode ${mode}`,
+          `Binary files /dev/null and ${newToken} differ`,
+          "",
+        ].join("\n");
       }
 
       const diffResult = await runtime.runGit(
@@ -1166,8 +1183,7 @@ function assertGitSuccess(
 }
 
 // LOCKSTEP: packages/review-editor/App.tsx's activeWorktreePath memo
-// hand-parses worktree: diffTypes with a COPY of this list (this module
-// can't enter the browser bundle — node:path import above). Adding a
+// hand-parses worktree: diffTypes with a COPY of this list. Adding a
 // subtype here without updating that copy makes the client derive a
 // different worktreePath than the server stamped on guide/tour jobs,
 // silently breaking their context matching. Real fix (cleanup PR):
@@ -1546,6 +1562,7 @@ type ReadOnlyGitRunner = (
 
 async function appendDiffFingerprint(
   runReadOnlyGit: ReadOnlyGitRunner,
+  runtime: ReviewGitRuntime,
   parts: string[],
   whitespaceArgs: string[],
   args: string[],
@@ -1555,6 +1572,8 @@ async function appendDiffFingerprint(
       {
         runGit: (diffArgs, options) => runReadOnlyGit(diffArgs, options),
         readTextFile: async () => null,
+        getFileInfo: runtime.getFileInfo,
+        readLink: runtime.readLink,
       },
       ["diff", "--no-ext-diff", ...whitespaceArgs, ...args],
       undefined,
@@ -1598,32 +1617,39 @@ async function appendUntrackedFingerprint(
   if (untracked.length > 0) {
     const baseDir = await resolveRepoToplevel(runtime, cwd);
     for (const path of untracked) {
-      const fullPath = baseDir ? resolvePath(baseDir, path) : path;
-      try {
-        const fileStat = await lstat(fullPath);
-        if (fileStat.isSymbolicLink()) {
-          // Hash the link payload Git records without following it into a
-          // potentially huge target file.
-          parts.push(hashFingerprintPart(`symlink:${await readlink(fullPath)}`));
-          continue;
-        }
-        if (!fileStat.isFile()) {
-          parts.push(`non-file:${fileStat.size}:${fileStat.mtimeMs}`);
-          continue;
-        }
-        if (fileStat.size > MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES) {
-          // A metadata fingerprint avoids decoding a multi-GB binary into a JS
-          // string every five seconds. Size/mtime changes still invalidate the
-          // review, while small files retain content-accurate detection.
-          parts.push(`large:${fileStat.size}:${fileStat.mtimeMs}`);
-          continue;
-        }
-      } catch {
+      if (!runtime.getFileInfo) {
         parts.push("unreadable");
         continue;
       }
-      const content = await runtime.readTextFile(fullPath);
-      parts.push(content != null ? hashFingerprintPart(content) : "unreadable");
+      try {
+        const fileInfo = await runtime.getFileInfo(baseDir, path);
+        if (!fileInfo) {
+          parts.push("unreadable");
+          continue;
+        }
+        if (fileInfo.isSymbolicLink) {
+          // Hash the link payload Git records without following it into a
+          // potentially huge target file.
+          const link = runtime.readLink ? await runtime.readLink(fileInfo.path) : null;
+          parts.push(link != null ? hashFingerprintPart(`symlink:${link}`) : "unreadable");
+          continue;
+        }
+        if (!fileInfo.isFile) {
+          parts.push(`non-file:${fileInfo.size}:${fileInfo.mtimeMs}`);
+          continue;
+        }
+        if (fileInfo.size > MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES) {
+          // A metadata fingerprint avoids decoding a multi-GB binary into a JS
+          // string every five seconds. Size/mtime changes still invalidate the
+          // review, while small files retain content-accurate detection.
+          parts.push(`large:${fileInfo.size}:${fileInfo.mtimeMs}`);
+          continue;
+        }
+        const content = await runtime.readTextFile(fileInfo.path);
+        parts.push(content != null ? hashFingerprintPart(content) : "unreadable");
+      } catch {
+        parts.push("unreadable");
+      }
     }
   }
   return true;
@@ -1675,7 +1701,7 @@ export async function getGitDiffFingerprint(
     const parts = ["git", effectiveDiffType, headSha];
 
     const hashDiffOutput = (args: string[]): Promise<boolean> =>
-      appendDiffFingerprint(runReadOnlyGit, parts, wFlag, args);
+      appendDiffFingerprint(runReadOnlyGit, runtime, parts, wFlag, args);
 
     // Untracked files: porcelain `??` lines capture existence; hash their
     // contents too so editing a freshly-created (untracked) file is detected.
@@ -1774,18 +1800,19 @@ export async function getFileContentsForDiff(
     // path and hunk expansion silently returns null. (The `git show ref:path`
     // sibling is immune: ref paths are root-relative regardless of cwd.)
     const baseDir = await resolveRepoToplevel(runtime, cwd);
-    const fullPath = baseDir ? resolvePath(baseDir, path) : path;
+    if (!runtime.getFileInfo) return null;
     try {
-      const fileStat = await lstat(fullPath);
+      const fileInfo = await runtime.getFileInfo(baseDir, path);
+      if (!fileInfo) return null;
       // Git stores the link destination as the blob contents. Reading the link
       // itself preserves expansion without following an arbitrarily large
       // target.
-      if (fileStat.isSymbolicLink()) return await readlink(fullPath);
-      if (!fileStat.isFile() || fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+      if (fileInfo.isSymbolicLink) return runtime.readLink?.(fileInfo.path) ?? null;
+      if (!fileInfo.isFile || fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+      return runtime.readTextFile(fileInfo.path);
     } catch {
       return null;
     }
-    return runtime.readTextFile(fullPath);
   }
 
   // commit:<sha> — old side is the first parent (null on a root commit, which
