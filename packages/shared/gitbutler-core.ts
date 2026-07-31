@@ -16,6 +16,7 @@ import {
   type GitContext,
   type GitDiffOptions,
   type ReviewGitRuntime,
+  BIG_FILE_DIFF_GUARD,
   getEmptyTreeSha,
   getWorkingTreeDiffFromBase,
   hashFingerprintPart,
@@ -587,6 +588,7 @@ async function diffObjects(
   options?: GitDiffOptions,
 ): Promise<string> {
   const args = [
+    ...BIG_FILE_DIFF_GUARD,
     "diff",
     "--no-ext-diff",
     ...(options?.hideWhitespace ? ["-w"] : []),

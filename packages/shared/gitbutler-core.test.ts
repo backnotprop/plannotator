@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { GitCommandOptions, GitCommandResult } from "./review-core";
+import { BIG_FILE_DIFF_GUARD } from "./review-core";
 import {
   GITBUTLER_WORKSPACE_DIFF,
   GitButlerContractError,
@@ -116,7 +117,7 @@ function createRuntime(options: {
       if (commandArgs[0] === "merge-base") {
         return commandResult(`${MERGE_BASE}\n`);
       }
-      if (commandArgs[0] === "diff") return commandResult(patch);
+      if (commandArgs.includes("diff")) return commandResult(patch);
       if (commandArgs[0] === "status") return commandResult();
       if (commandArgs[0] === "ls-files") return commandResult();
       if (commandArgs[0] === "show") {
@@ -359,6 +360,7 @@ describe("GitButler diffs and expansion", () => {
       result.gitContext,
     ));
     expect(fixture.gitCalls).toContainEqual([
+      ...BIG_FILE_DIFF_GUARD,
       "diff",
       "--no-ext-diff",
       "-w",
@@ -379,7 +381,7 @@ describe("GitButler diffs and expansion", () => {
       patch: "",
       error: "GitButler's reported merge base is missing or is not an ancestor of the workspace HEAD.",
     });
-    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(false);
+    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(false);
   });
 
   test("uses one native merge-base-to-tip range for a committed stack", async () => {
@@ -398,6 +400,7 @@ describe("GitButler diffs and expansion", () => {
       TOP_TIP,
     ]);
     expect(fixture.gitCalls).toContainEqual([
+      ...BIG_FILE_DIFF_GUARD,
       "diff",
       "--no-ext-diff",
       "--src-prefix=a/",
@@ -450,7 +453,7 @@ describe("GitButler diffs and expansion", () => {
       patch: "",
       error: 'GitButler branch "feature/top lane" is conflicted; use the Workspace view until its stack is resolved.',
     });
-    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(false);
+    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(false);
   });
 
   test("fails closed when a stack's bottom-branch anchor moves", async () => {
@@ -487,6 +490,7 @@ describe("GitButler diffs and expansion", () => {
 
     expect(result.label).toBe("Branch: feature/top lane (committed changes)");
     expect(fixture.gitCalls).toContainEqual([
+      ...BIG_FILE_DIFF_GUARD,
       "diff",
       "--no-ext-diff",
       "--src-prefix=a/",
@@ -588,7 +592,7 @@ describe("GitButler diffs and expansion", () => {
       ROOT,
     );
     expect(second).not.toBe(first);
-    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(true);
+    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(true);
   });
 
   test("fingerprints committed selectors from their exact authoritative patch", async () => {
@@ -598,7 +602,7 @@ describe("GitButler diffs and expansion", () => {
       "gitbutler:branch:feature%2Ftop%20lane",
       ROOT,
     );
-    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(true);
+    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(true);
   });
 
   test("pins a committed patch, context, and fingerprint to one status revision across the cache TTL", async () => {
@@ -628,7 +632,7 @@ describe("GitButler diffs and expansion", () => {
       return commandResult(currentStatus);
     };
     fixture.runtime.runGit = async (args, options) => {
-      if (args[0] === "diff" && blockNextDiff) {
+      if (args.includes("diff") && blockNextDiff) {
         blockNextDiff = false;
         markDiffStarted?.();
         await diffGate;

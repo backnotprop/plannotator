@@ -265,6 +265,59 @@ describe("review-core", () => {
     expect(isBinaryPatchFile(result.patch, "large build.bin")).toBe(true);
   });
 
+  test("large tracked text files render as binary in staged and working-tree diffs (#1120)", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    // Pure text (no NUL bytes), so WITHOUT the size guard git would emit the
+    // whole multi-megabyte text patch — the memory blowup #1120 reports once a
+    // large file is staged into (or modified in) the tracked diff.
+    const bigText = "a".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 100);
+    writeFileSync(join(repoDir, "artifact.js"), bigText, "utf-8");
+    git(repoDir, ["add", "artifact.js"]);
+
+    const staged = await runGitDiff(runtime, "staged", "main");
+    expect(staged.patch).toContain("diff --git a/artifact.js b/artifact.js");
+    expect(staged.patch).toContain("Binary files /dev/null and b/artifact.js differ");
+    expect(isBinaryPatchFile(staged.patch, "artifact.js")).toBe(true);
+    // The oversized contents never entered the buffered patch.
+    expect(staged.patch).not.toContain("aaaaaaaaaa");
+    expect(staged.patch.length).toBeLessThan(1024);
+
+    // The same file, seen through the working-tree views (git diff HEAD /
+    // merge-base), is bounded the same way.
+    const uncommitted = await runGitDiff(runtime, "uncommitted", "main");
+    expect(isBinaryPatchFile(uncommitted.patch, "artifact.js")).toBe(true);
+    expect(uncommitted.patch).not.toContain("aaaaaaaaaa");
+    const sinceBase = await runGitDiff(runtime, "since-base", "main");
+    expect(isBinaryPatchFile(sinceBase.patch, "artifact.js")).toBe(true);
+    expect(sinceBase.patch).not.toContain("aaaaaaaaaa");
+  });
+
+  test("freshness fingerprint stays bounded yet still tracks large tracked file edits (#1120)", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    // Grow a committed file past the threshold in the working tree. The
+    // fingerprint hashes the diff output, which the guard collapses to a
+    // content-derived "Binary files ... differ" — bounded, but the blob hash in
+    // the index line still changes with content, so staleness detection holds.
+    writeFileSync(
+      join(repoDir, "tracked.txt"),
+      "a".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 100),
+      "utf-8",
+    );
+    const first = await getGitDiffFingerprint(runtime, "uncommitted", "main");
+    expect(first).not.toBeNull();
+
+    writeFileSync(
+      join(repoDir, "tracked.txt"),
+      "b".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 100),
+      "utf-8",
+    );
+    const second = await getGitDiffFingerprint(runtime, "uncommitted", "main");
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+  });
+
   test("binary patch detection follows rename metadata", () => {
     const patch = [
       'diff --git "a/old name.bin" "b/new name.bin"',
@@ -320,7 +373,7 @@ describe("review-core", () => {
         if (args[0] === "diff" && args.includes("--no-index")) {
           return { stdout: "", stderr: "error: Could not access blocked.txt", exitCode: 128 };
         }
-        if (args[0] === "diff") {
+        if (args.includes("diff")) {
           return { stdout: "tracked patch\n", stderr: "", exitCode: 0 };
         }
         throw new Error(`Unexpected git command: ${args.join(" ")}`);
@@ -347,7 +400,7 @@ describe("review-core", () => {
         if (args[0] === "ls-files") {
           return { stdout: "", stderr: "fatal: cannot read index", exitCode: 128 };
         }
-        if (args[0] === "diff") {
+        if (args.includes("diff")) {
           return { stdout: "tracked patch\n", stderr: "", exitCode: 0 };
         }
         throw new Error(`Unexpected git command: ${args.join(" ")}`);
@@ -546,7 +599,7 @@ describe("review-core", () => {
     // Error is derived from the argv — assert the meaningful parts rather
     // than the exact string so harmless argv reorders (e.g. --end-of-options)
     // don't break it.
-    expect(result.error).toContain("git diff");
+    expect(result.error).toContain("diff --no-ext-diff");
     expect(result.error).toContain("master..HEAD");
   });
 

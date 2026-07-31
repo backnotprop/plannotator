@@ -20,6 +20,17 @@ export const JJ_TRUNK_REVSET = "trunk()";
 /** Maximum regular-file payload accepted for Git diff expansion. */
 export const MAX_REVIEW_FILE_CONTENT_BYTES = 5 * 1024 * 1024;
 
+// Per-invocation `git -c` prefix that makes `git diff` render any blob larger
+// than MAX_REVIEW_FILE_CONTENT_BYTES as "Binary files ... differ" instead of a
+// full text patch. This bounds server memory for large TRACKED files the same
+// way getUntrackedFileDiffs bounds untracked ones: their contents never enter
+// the diff machinery or the server's buffered stdout. It is a no-op for files
+// at or below the threshold (byte-identical diff output), so it only changes
+// behavior for the oversized files it is meant to guard. Passed via `-c`, so it
+// never mutates repo or global git config. `core.bigFileThreshold` takes a raw
+// byte count.
+export const BIG_FILE_DIFF_GUARD = ["-c", `core.bigFileThreshold=${MAX_REVIEW_FILE_CONTENT_BYTES}`];
+
 const MAX_UNTRACKED_DIFF_CONCURRENCY = 4;
 // Fingerprints run every few seconds, so use a deliberately lower read ceiling
 // than one-shot diff generation. Larger files use size + mtime metadata.
@@ -834,6 +845,7 @@ export async function getWorkingTreeDiffFromBase(
   untrackedFailurePolicy: UntrackedFailurePolicy = "best-effort",
 ): Promise<string> {
   const args = [
+    ...BIG_FILE_DIFF_GUARD,
     "diff",
     "--no-ext-diff",
     ...(options?.hideWhitespace ? ["-w"] : []),
@@ -1015,6 +1027,7 @@ export async function runGitDiff(
           .exitCode === 0;
       const baseRef = hasParent ? `${sha}^` : await getEmptyTreeSha(runtime, cwd);
       const commitDiffArgs = [
+        ...BIG_FILE_DIFF_GUARD,
         "diff",
         "--no-ext-diff",
         ...wFlag,
@@ -1063,6 +1076,7 @@ export async function runGitDiff(
 
       case "uncommitted": {
         const trackedDiffArgs = [
+          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1087,6 +1101,7 @@ export async function runGitDiff(
 
       case "staged": {
         const stagedDiffArgs = [
+          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1105,6 +1120,7 @@ export async function runGitDiff(
 
       case "unstaged": {
         const trackedDiffArgs = [
+          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1128,8 +1144,8 @@ export async function runGitDiff(
         );
         const args =
           hasParent.exitCode === 0
-            ? ["diff", "--no-ext-diff", ...wFlag, "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
-            : ["diff", "--no-ext-diff", ...wFlag, "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
+            ? [...BIG_FILE_DIFF_GUARD, "diff", "--no-ext-diff", ...wFlag, "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
+            : [...BIG_FILE_DIFF_GUARD, "diff", "--no-ext-diff", ...wFlag, "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
         const lastCommitDiff = assertGitSuccess(
           await runtime.runGit(args, { cwd }),
           args,
@@ -1145,6 +1161,7 @@ export async function runGitDiff(
         // would redirect diff output to an attacker-chosen path). Same pattern
         // applied wherever user-controlled refs flow into a git argv.
         const branchDiffArgs = [
+          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1170,6 +1187,7 @@ export async function runGitDiff(
         );
         const mergeBase = mergeBaseResult.stdout.trim();
         const mergeBaseDiffArgs = [
+          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1191,6 +1209,7 @@ export async function runGitDiff(
         // Diff from the empty tree to HEAD — shows every tracked file as an addition.
         const emptyTree = await getEmptyTreeSha(runtime, cwd);
         const allDiffArgs = [
+          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1295,7 +1314,7 @@ async function appendDiffFingerprint(
   whitespaceArgs: string[],
   args: string[],
 ): Promise<boolean> {
-  const result = await runReadOnlyGit(["diff", "--no-ext-diff", ...whitespaceArgs, ...args]);
+  const result = await runReadOnlyGit([...BIG_FILE_DIFF_GUARD, "diff", "--no-ext-diff", ...whitespaceArgs, ...args]);
   if (result.exitCode !== 0) return false;
   parts.push(hashFingerprintPart(result.stdout));
   return true;
