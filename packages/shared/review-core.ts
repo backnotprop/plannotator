@@ -20,17 +20,6 @@ export const JJ_TRUNK_REVSET = "trunk()";
 /** Maximum regular-file payload accepted for Git diff expansion. */
 export const MAX_REVIEW_FILE_CONTENT_BYTES = 5 * 1024 * 1024;
 
-// Per-invocation `git -c` prefix that makes `git diff` render any blob larger
-// than MAX_REVIEW_FILE_CONTENT_BYTES as "Binary files ... differ" instead of a
-// full text patch. This bounds server memory for large TRACKED files the same
-// way getUntrackedFileDiffs bounds untracked ones: their contents never enter
-// the diff machinery or the server's buffered stdout. It is a no-op for files
-// at or below the threshold (byte-identical diff output), so it only changes
-// behavior for the oversized files it is meant to guard. Passed via `-c`, so it
-// never mutates repo or global git config. `core.bigFileThreshold` takes a raw
-// byte count.
-export const BIG_FILE_DIFF_GUARD = ["-c", `core.bigFileThreshold=${MAX_REVIEW_FILE_CONTENT_BYTES}`];
-
 const MAX_UNTRACKED_DIFF_CONCURRENCY = 4;
 // Fingerprints run every few seconds, so use a deliberately lower read ceiling
 // than one-shot diff generation. Larger files use size + mtime metadata.
@@ -712,6 +701,210 @@ async function resolveRepoToplevel(
   return trimmed || cwd;
 }
 
+interface RawDiffEntry {
+  oldMode: string;
+  newMode: string;
+  oldObjectId: string;
+  newObjectId: string;
+  status: string;
+  oldPath: string | null;
+  newPath: string | null;
+}
+
+interface OversizedTrackedDiffEntry extends RawDiffEntry {
+  oldObjectId: string;
+  newObjectId: string;
+}
+
+const NULL_OBJECT_ID = /^0+$/;
+
+function parseRawDiffEntries(output: string): RawDiffEntry[] {
+  const fields = output.split("\0");
+  const entries: RawDiffEntry[] = [];
+  let index = 0;
+
+  while (index < fields.length) {
+    const header = fields[index++];
+    if (!header) continue;
+    if (!header.startsWith(":")) {
+      throw new Error("git diff --raw returned an invalid record");
+    }
+
+    const metadata = header.slice(1).split(" ");
+    if (metadata.length !== 5 || !metadata[4]) {
+      throw new Error("git diff --raw returned malformed metadata");
+    }
+    const [oldMode, newMode, oldObjectId, newObjectId, status] = metadata;
+    const renamedOrCopied = status[0] === "R" || status[0] === "C";
+    const oldPath = fields[index++] ?? null;
+    const newPath = renamedOrCopied ? fields[index++] ?? null : oldPath;
+    if (!oldPath || !newPath) {
+      throw new Error("git diff --raw returned a record without a path");
+    }
+
+    entries.push({
+      oldMode,
+      newMode,
+      oldObjectId,
+      newObjectId,
+      status,
+      oldPath: status[0] === "A" ? null : oldPath,
+      newPath: status[0] === "D" ? null : newPath,
+    });
+  }
+
+  return entries;
+}
+
+function isNullObjectId(objectId: string): boolean {
+  return NULL_OBJECT_ID.test(objectId);
+}
+
+async function getGitObjectSize(
+  runtime: ReviewGitRuntime,
+  objectId: string,
+  cwd?: string,
+): Promise<number | null> {
+  if (isNullObjectId(objectId)) return null;
+  const result = await runtime.runGit(["cat-file", "-s", "--", objectId], { cwd });
+  if (result.exitCode !== 0) return Number.POSITIVE_INFINITY;
+  const size = Number(result.stdout.trim());
+  return Number.isFinite(size) && size >= 0 ? size : Number.POSITIVE_INFINITY;
+}
+
+async function getWorkingTreeFileInfo(
+  root: string | undefined,
+  path: string | null,
+): Promise<{ size: number; fullPath: string; mtimeMs: number } | null> {
+  if (!root || !path) return null;
+  const fullPath = resolvePath(root, path);
+  try {
+    const fileStat = await lstat(fullPath);
+    if (!fileStat.isFile() && !fileStat.isSymbolicLink()) return null;
+    return { size: fileStat.size, fullPath, mtimeMs: fileStat.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+async function hashOversizedWorkingTreeFile(
+  runtime: ReviewGitRuntime,
+  path: string,
+  file: { size: number; fullPath: string; mtimeMs: number },
+  cwd?: string,
+): Promise<string> {
+  const result = await runtime.runGit(
+    ["hash-object", "--no-filters", "--", file.fullPath],
+    { cwd },
+  );
+  if (result.exitCode === 0 && /^[0-9a-f]{40,64}$/i.test(result.stdout.trim())) {
+    return result.stdout.trim();
+  }
+  // The patch remains safely omitted even if a concurrently deleted file
+  // cannot be hashed. Retain deterministic stat metadata for freshness.
+  return hashFingerprintPart(`${path}:${file.size}:${file.mtimeMs}`);
+}
+
+function buildOversizedTrackedStub(entry: OversizedTrackedDiffEntry): string {
+  const headerOldToken = formatPatchPathToken("a", entry.oldPath ?? entry.newPath!);
+  const headerNewToken = formatPatchPathToken("b", entry.newPath ?? entry.oldPath!);
+  const oldToken = entry.oldPath ? formatPatchPathToken("a", entry.oldPath) : "/dev/null";
+  const newToken = entry.newPath ? formatPatchPathToken("b", entry.newPath) : "/dev/null";
+  const oldId = isNullObjectId(entry.oldObjectId) ? "000000000000" : entry.oldObjectId.slice(0, 12);
+  const newId = isNullObjectId(entry.newObjectId) ? "000000000000" : entry.newObjectId.slice(0, 12);
+  const lines = [
+    `diff --git ${headerOldToken} ${headerNewToken}`,
+  ];
+
+  if (!entry.oldPath) lines.push(`new file mode ${entry.newMode}`);
+  if (!entry.newPath) lines.push(`deleted file mode ${entry.oldMode}`);
+  if (entry.status[0] === "R") {
+    lines.push("similarity index 100%");
+    lines.push(`rename from ${entry.oldPath}`);
+    lines.push(`rename to ${entry.newPath}`);
+  } else if (entry.status[0] === "C") {
+    lines.push("similarity index 100%");
+    lines.push(`copy from ${entry.oldPath}`);
+    lines.push(`copy to ${entry.newPath}`);
+  }
+  lines.push(`index ${oldId}..${newId} ${entry.newMode}`);
+  lines.push(`Binary files ${oldToken} and ${newToken} differ`, "");
+  return lines.join("\n");
+}
+
+/**
+ * Render a tracked diff without ever asking Git to format an oversized file.
+ *
+ * A raw, no-textconv preflight identifies changed paths and object sizes first.
+ * Every over-limit path is then excluded with a top-level literal pathspec and
+ * represented by a small, parseable binary stub. The stub's object ids retain
+ * a content-sensitive fingerprint without putting file bytes in patch output.
+ */
+export async function runBoundedTrackedDiff(
+  runtime: ReviewGitRuntime,
+  args: string[],
+  cwd?: string,
+): Promise<string> {
+  const diffIndex = args.indexOf("diff");
+  if (diffIndex === -1) throw new Error("Expected a git diff command");
+  const safeArgs = args.includes("--no-textconv")
+    ? args
+    : [...args.slice(0, diffIndex + 1), "--no-textconv", ...args.slice(diffIndex + 1)];
+  const rawArgs = [
+    ...safeArgs.slice(0, diffIndex + 1),
+    "--raw",
+    "-z",
+    "--no-abbrev",
+    ...safeArgs.slice(diffIndex + 1),
+  ];
+  const rawResult = assertGitSuccess(await runtime.runGit(rawArgs, { cwd }), rawArgs);
+  const entries = parseRawDiffEntries(rawResult.stdout);
+  if (entries.length === 0) {
+    return assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout;
+  }
+
+  const root = await resolveRepoToplevel(runtime, cwd);
+  const oversized: OversizedTrackedDiffEntry[] = [];
+  for (const entry of entries) {
+    const [oldSize, newObjectSize] = await Promise.all([
+      getGitObjectSize(runtime, entry.oldObjectId, cwd),
+      getGitObjectSize(runtime, entry.newObjectId, cwd),
+    ]);
+    const workingTreeInfo = isNullObjectId(entry.newObjectId)
+      ? await getWorkingTreeFileInfo(root, entry.newPath)
+      : null;
+    const newSize = newObjectSize ?? workingTreeInfo?.size ?? null;
+    if (oldSize === null && newSize === null) continue;
+    if ((oldSize ?? 0) <= MAX_REVIEW_FILE_CONTENT_BYTES
+      && (newSize ?? 0) <= MAX_REVIEW_FILE_CONTENT_BYTES) {
+      continue;
+    }
+    const workingObjectId = workingTreeInfo && entry.newPath
+      ? await hashOversizedWorkingTreeFile(runtime, entry.newPath, workingTreeInfo, cwd)
+      : null;
+    oversized.push({
+      ...entry,
+      newObjectId: newObjectSize === null && workingObjectId
+        ? workingObjectId
+        : entry.newObjectId,
+    });
+  }
+
+  if (oversized.length === 0) {
+    return assertGitSuccess(await runtime.runGit(safeArgs, { cwd }), safeArgs).stdout;
+  }
+
+  const exclusions = oversized.flatMap((entry) => [
+    ...(entry.oldPath ? [`:(top,exclude,literal)${entry.oldPath}`] : []),
+    ...(entry.newPath && entry.newPath !== entry.oldPath
+      ? [`:(top,exclude,literal)${entry.newPath}`]
+      : []),
+  ]);
+  const patchArgs = [...safeArgs, "--", ...exclusions];
+  const boundedPatch = assertGitSuccess(await runtime.runGit(patchArgs, { cwd }), patchArgs).stdout;
+  return boundedPatch + oversized.map(buildOversizedTrackedStub).join("");
+}
+
 async function getUntrackedFileDiffs(
   runtime: ReviewGitRuntime,
   srcPrefix = "a/",
@@ -845,7 +1038,6 @@ export async function getWorkingTreeDiffFromBase(
   untrackedFailurePolicy: UntrackedFailurePolicy = "best-effort",
 ): Promise<string> {
   const args = [
-    ...BIG_FILE_DIFF_GUARD,
     "diff",
     "--no-ext-diff",
     ...(options?.hideWhitespace ? ["-w"] : []),
@@ -854,7 +1046,7 @@ export async function getWorkingTreeDiffFromBase(
     "--end-of-options",
     base,
   ];
-  const trackedPatch = assertGitSuccess(await runtime.runGit(args, { cwd }), args).stdout;
+  const trackedPatch = await runBoundedTrackedDiff(runtime, args, cwd);
   const untracked = await getUntrackedFileDiffs(
     runtime,
     "a/",
@@ -1027,7 +1219,6 @@ export async function runGitDiff(
           .exitCode === 0;
       const baseRef = hasParent ? `${sha}^` : await getEmptyTreeSha(runtime, cwd);
       const commitDiffArgs = [
-        ...BIG_FILE_DIFF_GUARD,
         "diff",
         "--no-ext-diff",
         ...wFlag,
@@ -1036,7 +1227,7 @@ export async function runGitDiff(
         "--end-of-options",
         `${baseRef}..${sha}`,
       ];
-      patch = assertGitSuccess(await runtime.runGit(commitDiffArgs, { cwd }), commitDiffArgs).stdout;
+      patch = await runBoundedTrackedDiff(runtime, commitDiffArgs, cwd);
       label = subject ? `Commit ${shortSha} — ${subject}` : `Commit ${shortSha}`;
     } else if (effectiveDiffType.startsWith("commit:")) {
       return { patch: "", label: `Error: ${diffType}`, error: "Invalid commit ref" };
@@ -1076,22 +1267,18 @@ export async function runGitDiff(
 
       case "uncommitted": {
         const trackedDiffArgs = [
-          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
-          "HEAD",
           "--src-prefix=a/",
           "--dst-prefix=b/",
+          "HEAD",
         ];
         const hasHead =
           (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd }))
             .exitCode === 0;
         const trackedPatch = hasHead
-          ? assertGitSuccess(
-              await runtime.runGit(trackedDiffArgs, { cwd }),
-              trackedDiffArgs,
-            ).stdout
+          ? await runBoundedTrackedDiff(runtime, trackedDiffArgs, cwd)
           : "";
         const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options);
         patch = removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
@@ -1101,7 +1288,6 @@ export async function runGitDiff(
 
       case "staged": {
         const stagedDiffArgs = [
-          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1109,30 +1295,24 @@ export async function runGitDiff(
           "--src-prefix=a/",
           "--dst-prefix=b/",
         ];
-        const stagedDiff = assertGitSuccess(
-          await runtime.runGit(stagedDiffArgs, { cwd }),
-          stagedDiffArgs,
-        );
-        patch = stagedDiff.stdout;
+        patch = await runBoundedTrackedDiff(runtime, stagedDiffArgs, cwd);
         label = "Staged changes";
         break;
       }
 
       case "unstaged": {
         const trackedDiffArgs = [
-          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
           "--src-prefix=a/",
           "--dst-prefix=b/",
         ];
-        const trackedDiff = assertGitSuccess(
-          await runtime.runGit(trackedDiffArgs, { cwd }),
-          trackedDiffArgs,
-        );
         const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options);
-        patch = removeTrackedDeletions(trackedDiff.stdout, new Set(untracked.paths)) + untracked.diff;
+        patch = removeTrackedDeletions(
+          await runBoundedTrackedDiff(runtime, trackedDiffArgs, cwd),
+          new Set(untracked.paths),
+        ) + untracked.diff;
         label = "Unstaged changes";
         break;
       }
@@ -1144,13 +1324,9 @@ export async function runGitDiff(
         );
         const args =
           hasParent.exitCode === 0
-            ? [...BIG_FILE_DIFF_GUARD, "diff", "--no-ext-diff", ...wFlag, "HEAD~1..HEAD", "--src-prefix=a/", "--dst-prefix=b/"]
-            : [...BIG_FILE_DIFF_GUARD, "diff", "--no-ext-diff", ...wFlag, "--root", "HEAD", "--src-prefix=a/", "--dst-prefix=b/"];
-        const lastCommitDiff = assertGitSuccess(
-          await runtime.runGit(args, { cwd }),
-          args,
-        );
-        patch = lastCommitDiff.stdout;
+            ? ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "HEAD~1..HEAD"]
+            : ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "--root", "HEAD"];
+        patch = await runBoundedTrackedDiff(runtime, args, cwd);
         label = "Last commit";
         break;
       }
@@ -1161,7 +1337,6 @@ export async function runGitDiff(
         // would redirect diff output to an attacker-chosen path). Same pattern
         // applied wherever user-controlled refs flow into a git argv.
         const branchDiffArgs = [
-          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1170,11 +1345,7 @@ export async function runGitDiff(
           "--end-of-options",
           `${defaultBranch}..HEAD`,
         ];
-        const branchDiff = assertGitSuccess(
-          await runtime.runGit(branchDiffArgs, { cwd }),
-          branchDiffArgs,
-        );
-        patch = branchDiff.stdout;
+        patch = await runBoundedTrackedDiff(runtime, branchDiffArgs, cwd);
         label = `Changes vs ${displayRef(defaultBranch)}`;
         break;
       }
@@ -1187,7 +1358,6 @@ export async function runGitDiff(
         );
         const mergeBase = mergeBaseResult.stdout.trim();
         const mergeBaseDiffArgs = [
-          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1196,11 +1366,7 @@ export async function runGitDiff(
           "--end-of-options",
           `${mergeBase}..HEAD`,
         ];
-        const mergeBaseDiff = assertGitSuccess(
-          await runtime.runGit(mergeBaseDiffArgs, { cwd }),
-          mergeBaseDiffArgs,
-        );
-        patch = mergeBaseDiff.stdout;
+        patch = await runBoundedTrackedDiff(runtime, mergeBaseDiffArgs, cwd);
         label = `PR diff vs ${displayRef(defaultBranch)}`;
         break;
       }
@@ -1209,7 +1375,6 @@ export async function runGitDiff(
         // Diff from the empty tree to HEAD — shows every tracked file as an addition.
         const emptyTree = await getEmptyTreeSha(runtime, cwd);
         const allDiffArgs = [
-          ...BIG_FILE_DIFF_GUARD,
           "diff",
           "--no-ext-diff",
           ...wFlag,
@@ -1218,11 +1383,7 @@ export async function runGitDiff(
           "--end-of-options",
           `${emptyTree}..HEAD`,
         ];
-        const allDiff = assertGitSuccess(
-          await runtime.runGit(allDiffArgs, { cwd }),
-          allDiffArgs,
-        );
-        patch = allDiff.stdout;
+        patch = await runBoundedTrackedDiff(runtime, allDiffArgs, cwd);
         label = "All files";
         break;
       }
@@ -1314,10 +1475,19 @@ async function appendDiffFingerprint(
   whitespaceArgs: string[],
   args: string[],
 ): Promise<boolean> {
-  const result = await runReadOnlyGit([...BIG_FILE_DIFF_GUARD, "diff", "--no-ext-diff", ...whitespaceArgs, ...args]);
-  if (result.exitCode !== 0) return false;
-  parts.push(hashFingerprintPart(result.stdout));
-  return true;
+  try {
+    const patch = await runBoundedTrackedDiff(
+      {
+        runGit: (diffArgs) => runReadOnlyGit(diffArgs),
+        readTextFile: async () => null,
+      },
+      ["diff", "--no-ext-diff", ...whitespaceArgs, ...args],
+    );
+    parts.push(hashFingerprintPart(patch));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function appendUntrackedFingerprint(

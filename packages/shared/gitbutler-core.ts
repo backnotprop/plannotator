@@ -6,6 +6,7 @@
  * and authoritative Git object-to-object diffs.
  */
 
+import { lstat, readlink } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import {
@@ -16,10 +17,11 @@ import {
   type GitContext,
   type GitDiffOptions,
   type ReviewGitRuntime,
-  BIG_FILE_DIFF_GUARD,
   getEmptyTreeSha,
   getWorkingTreeDiffFromBase,
   hashFingerprintPart,
+  MAX_REVIEW_FILE_CONTENT_BYTES,
+  runBoundedTrackedDiff,
   validateFilePath,
 } from "./review-core";
 
@@ -588,7 +590,6 @@ async function diffObjects(
   options?: GitDiffOptions,
 ): Promise<string> {
   const args = [
-    ...BIG_FILE_DIFF_GUARD,
     "diff",
     "--no-ext-diff",
     ...(options?.hideWhitespace ? ["-w"] : []),
@@ -597,13 +598,14 @@ async function diffObjects(
     "--end-of-options",
     `${base}..${tip}`,
   ];
-  const result = await runtime.runGit(args, { cwd });
-  if (result.exitCode !== 0) {
+  try {
+    return await runBoundedTrackedDiff(runtime, args, cwd);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     throw new GitButlerContractError(
-      `Git failed while building the GitButler diff${result.stderr.trim() ? `: ${result.stderr.trim()}` : "."}`,
+      `Git failed while building the GitButler diff: ${message}`,
     );
   }
-  return result.stdout;
 }
 
 function errorResult(diffType: DiffType, error: unknown): DiffResult {
@@ -693,8 +695,27 @@ async function gitShow(
   path: string,
   cwd: string,
 ): Promise<string | null> {
-  const result = await runtime.runGit(["show", "--end-of-options", `${ref}:${path}`], { cwd });
+  const object = `${ref}:${path}`;
+  const size = await runtime.runGit(["cat-file", "-s", "--", object], { cwd });
+  if (size.exitCode !== 0 || Number(size.stdout.trim()) > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+  const result = await runtime.runGit(["show", "--end-of-options", object], { cwd });
   return result.exitCode === 0 ? result.stdout : null;
+}
+
+async function readWorkingTreeFile(
+  runtime: ReviewGitButlerRuntime,
+  root: string,
+  path: string,
+): Promise<string | null> {
+  const fullPath = resolve(root, path);
+  try {
+    const fileStat = await lstat(fullPath);
+    if (fileStat.isSymbolicLink()) return await readlink(fullPath);
+    if (!fileStat.isFile() || fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+  } catch {
+    return null;
+  }
+  return runtime.readTextFile(fullPath);
 }
 
 /** Resolve full old/new file content for expandable GitButler diffs. */
@@ -719,7 +740,7 @@ export async function getGitButlerFileContentsForDiff(
     await validateWorkspaceMergeBase(runtime, status.mergeBase.commitId, root);
     return {
       oldContent: await gitShow(runtime, status.mergeBase.commitId, oldFilePath, root),
-      newContent: await runtime.readTextFile(resolve(root, filePath)),
+      newContent: await readWorkingTreeFile(runtime, root, filePath),
     };
   }
 

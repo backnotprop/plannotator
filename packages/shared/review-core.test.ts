@@ -78,6 +78,7 @@ function makeRuntime(baseCwd: string): ReviewGitRuntime {
       const result = spawnSync("git", args, {
         cwd: options?.cwd ?? baseCwd,
         encoding: "utf-8",
+        maxBuffer: MAX_REVIEW_FILE_CONTENT_BYTES * 4,
       });
 
       return {
@@ -293,30 +294,124 @@ describe("review-core", () => {
     expect(sinceBase.patch).not.toContain("aaaaaaaaaa");
   });
 
-  test("freshness fingerprint stays bounded yet still tracks large tracked file edits (#1120)", async () => {
+  test("equal-sized tracked worktree edits stay bounded with textconv and change the fingerprint", async () => {
     const repoDir = initRepo();
-    const runtime = makeRuntime(repoDir);
-    // Grow a committed file past the threshold in the working tree. The
-    // fingerprint hashes the diff output, which the guard collapses to a
-    // content-derived "Binary files ... differ" — bounded, but the blob hash in
-    // the index line still changes with content, so staleness detection holds.
+    writeFileSync(join(repoDir, ".gitattributes"), "tracked.txt diff=force-text\n", "utf-8");
+    git(repoDir, ["add", ".gitattributes"]);
+    git(repoDir, ["commit", "-m", "configure textconv"]);
+    git(repoDir, ["config", "diff.force-text.textconv", "cat"]);
+
+    const largeSize = MAX_REVIEW_FILE_CONTENT_BYTES + 1;
     writeFileSync(
       join(repoDir, "tracked.txt"),
-      "a".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 100),
+      "a".repeat(largeSize),
       "utf-8",
     );
+    git(repoDir, ["add", "tracked.txt"]);
+    git(repoDir, ["commit", "-m", "add large tracked text"]);
+
+    writeFileSync(join(repoDir, "tracked.txt"), "b".repeat(largeSize), "utf-8");
+    const direct = await runGitDiff(makeRuntime(repoDir), "uncommitted", "main");
+    expect(direct.patch.length).toBeLessThan(2_000);
+    expect(direct.patch).not.toContain("bbbbbbbbbb");
+    expect(direct.patch).toContain("Binary files");
+
+    const baseRuntime = makeRuntime(repoDir);
+    const renderedPatches: string[] = [];
+    const runtime: ReviewGitRuntime = {
+      ...baseRuntime,
+      async runGit(args, options) {
+        const result = await baseRuntime.runGit(args, options);
+        const commandArgs = args[0] === "--no-optional-locks" ? args.slice(1) : args;
+        if (commandArgs[0] === "diff" && !commandArgs.includes("--raw")) {
+          renderedPatches.push(result.stdout);
+        }
+        return result;
+      },
+    };
     const first = await getGitDiffFingerprint(runtime, "uncommitted", "main");
     expect(first).not.toBeNull();
 
-    writeFileSync(
-      join(repoDir, "tracked.txt"),
-      "b".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 100),
-      "utf-8",
-    );
+    writeFileSync(join(repoDir, "tracked.txt"), "c".repeat(largeSize), "utf-8");
     const second = await getGitDiffFingerprint(runtime, "uncommitted", "main");
     expect(second).not.toBeNull();
     expect(second).not.toBe(first);
-  });
+    expect(renderedPatches).toHaveLength(2);
+    for (const patch of renderedPatches) {
+      expect(patch.length).toBeLessThan(2_000);
+      expect(patch).not.toContain("bbbbbbbbbb");
+      expect(patch).not.toContain("cccccccccc");
+    }
+  }, 20_000);
+
+  test("keeps exactly the tracked-file content limit as text and omits one byte over", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    const atLimitText = "x\n".repeat(MAX_REVIEW_FILE_CONTENT_BYTES / 2);
+
+    writeFileSync(join(repoDir, "tracked.txt"), atLimitText, "utf-8");
+    const atLimit = await runGitDiff(runtime, "uncommitted", "main");
+    expect(atLimit.patch.length).toBeGreaterThan(MAX_REVIEW_FILE_CONTENT_BYTES);
+    expect(atLimit.patch).toContain("+x\n+x\n");
+
+    writeFileSync(join(repoDir, "tracked.txt"), `${atLimitText}y`, "utf-8");
+    const overLimit = await runGitDiff(runtime, "uncommitted", "main");
+    expect(overLimit.patch.length).toBeLessThan(2_000);
+    expect(overLimit.patch).not.toContain("yyyyyyyyyy");
+    expect(isBinaryPatchFile(overLimit.patch, "tracked.txt")).toBe(true);
+  }, 20_000);
+
+  test("omits oversized staged adds, deletes, edits, and renames with literal pathspecs", async () => {
+    const repoDir = initRepo();
+    const baseRuntime = makeRuntime(repoDir);
+    const gitCalls: string[][] = [];
+    const runtime: ReviewGitRuntime = {
+      ...baseRuntime,
+      async runGit(args, options) {
+        gitCalls.push(args);
+        return baseRuntime.runGit(args, options);
+      },
+    };
+    const modified = "modify [*]?.txt";
+    const deleted = "delete space [*]?.txt";
+    const renamedFrom = "rename from [*]?.txt";
+    const renamedTo = "rename to [*]?.txt";
+    const added = "add [*]?.txt";
+
+    writeFileSync(join(repoDir, modified), "m".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1), "utf-8");
+    writeFileSync(join(repoDir, deleted), "d".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1), "utf-8");
+    writeFileSync(join(repoDir, renamedFrom), "r".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1), "utf-8");
+    git(repoDir, ["add", "."]);
+    git(repoDir, ["commit", "-m", "add oversized tracked files"]);
+    git(repoDir, ["config", "diff.renames", "false"]);
+
+    writeFileSync(join(repoDir, modified), "n".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1), "utf-8");
+    git(repoDir, ["rm", deleted]);
+    writeFileSync(join(repoDir, added), "z".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1), "utf-8");
+    git(repoDir, ["add", "."]);
+
+    const changed = await runGitDiff(runtime, "staged", "main");
+
+    expect(changed.patch.length).toBeLessThan(8_000);
+    expect(changed.patch).toContain("Binary files");
+    expect(changed.patch).not.toContain("mmmmmmmmmm");
+    expect(changed.patch).not.toContain("nnnnnnnnnn");
+    expect(listPatchFiles(changed.patch).map((file) => file.path)).toEqual(
+      expect.arrayContaining([modified, deleted, added]),
+    );
+    for (const path of [modified, deleted, added]) {
+      expect(gitCalls.some((args) => args.includes(`:(top,exclude,literal)${path}`))).toBe(true);
+    }
+
+    git(repoDir, ["reset", "--hard", "HEAD"]);
+    git(repoDir, ["config", "diff.renames", "true"]);
+    git(repoDir, ["mv", renamedFrom, renamedTo]);
+    git(repoDir, ["add", "."]);
+    const renamed = await runGitDiff(runtime, "staged", "main");
+    expect(renamed.patch.length).toBeLessThan(2_000);
+    expect(renamed.patch).toContain("Binary files");
+    expect(listPatchFiles(renamed.patch).map((file) => file.path)).toContain(renamedTo);
+  }, 20_000);
 
   test("binary patch detection follows rename metadata", () => {
     const patch = [
@@ -367,13 +462,16 @@ describe("review-core", () => {
         if (args[0] === "rev-parse") {
           return { stdout: "/repo\n", stderr: "", exitCode: 0 };
         }
+        if (args[0] === "diff" && args.includes("--raw")) {
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
         if (args[0] === "ls-files") {
           return { stdout: "blocked.txt\n", stderr: "", exitCode: 0 };
         }
         if (args[0] === "diff" && args.includes("--no-index")) {
           return { stdout: "", stderr: "error: Could not access blocked.txt", exitCode: 128 };
         }
-        if (args.includes("diff")) {
+        if (args[0] === "diff") {
           return { stdout: "tracked patch\n", stderr: "", exitCode: 0 };
         }
         throw new Error(`Unexpected git command: ${args.join(" ")}`);
@@ -397,10 +495,13 @@ describe("review-core", () => {
         if (args[0] === "rev-parse") {
           return { stdout: "/repo\n", stderr: "", exitCode: 0 };
         }
+        if (args[0] === "diff" && args.includes("--raw")) {
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
         if (args[0] === "ls-files") {
           return { stdout: "", stderr: "fatal: cannot read index", exitCode: 128 };
         }
-        if (args.includes("diff")) {
+        if (args[0] === "diff") {
           return { stdout: "tracked patch\n", stderr: "", exitCode: 0 };
         }
         throw new Error(`Unexpected git command: ${args.join(" ")}`);
@@ -599,8 +700,9 @@ describe("review-core", () => {
     // Error is derived from the argv — assert the meaningful parts rather
     // than the exact string so harmless argv reorders (e.g. --end-of-options)
     // don't break it.
-    expect(result.error).toContain("diff --no-ext-diff");
+    expect(result.error).toContain("git diff");
     expect(result.error).toContain("master..HEAD");
+    expect(result.error).not.toContain("core.bigFileThreshold");
   });
 
   test("git context lists worktrees and file content lookup returns old/new content", async () => {

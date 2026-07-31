@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { GitCommandOptions, GitCommandResult } from "./review-core";
-import { BIG_FILE_DIFF_GUARD } from "./review-core";
+import { MAX_REVIEW_FILE_CONTENT_BYTES } from "./review-core";
 import {
   GITBUTLER_WORKSPACE_DIFF,
   GitButlerContractError,
@@ -26,6 +26,8 @@ const ROOT = "/repo";
 const MERGE_BASE = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const LOWER_TIP = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const TOP_TIP = "cccccccccccccccccccccccccccccccccccccccc";
+const PATCH_OLD_OBJECT = "d".repeat(40);
+const PATCH_NEW_OBJECT = "e".repeat(40);
 
 function commandResult(
   stdout = "",
@@ -117,7 +119,15 @@ function createRuntime(options: {
       if (commandArgs[0] === "merge-base") {
         return commandResult(`${MERGE_BASE}\n`);
       }
-      if (commandArgs.includes("diff")) return commandResult(patch);
+      if (commandArgs[0] === "cat-file" && commandArgs[1] === "-s") {
+        return commandResult("10\n");
+      }
+      if (commandArgs[0] === "diff" && commandArgs.includes("--raw")) {
+        return commandResult(
+          `:100644 100644 ${PATCH_OLD_OBJECT} ${PATCH_NEW_OBJECT} M\0file.txt\0`,
+        );
+      }
+      if (commandArgs[0] === "diff") return commandResult(patch);
       if (commandArgs[0] === "status") return commandResult();
       if (commandArgs[0] === "ls-files") return commandResult();
       if (commandArgs[0] === "show") {
@@ -360,8 +370,8 @@ describe("GitButler diffs and expansion", () => {
       result.gitContext,
     ));
     expect(fixture.gitCalls).toContainEqual([
-      ...BIG_FILE_DIFF_GUARD,
       "diff",
+      "--no-textconv",
       "--no-ext-diff",
       "-w",
       "--src-prefix=a/",
@@ -381,7 +391,7 @@ describe("GitButler diffs and expansion", () => {
       patch: "",
       error: "GitButler's reported merge base is missing or is not an ancestor of the workspace HEAD.",
     });
-    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(false);
+    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(false);
   });
 
   test("uses one native merge-base-to-tip range for a committed stack", async () => {
@@ -400,8 +410,8 @@ describe("GitButler diffs and expansion", () => {
       TOP_TIP,
     ]);
     expect(fixture.gitCalls).toContainEqual([
-      ...BIG_FILE_DIFF_GUARD,
       "diff",
+      "--no-textconv",
       "--no-ext-diff",
       "--src-prefix=a/",
       "--dst-prefix=b/",
@@ -453,7 +463,7 @@ describe("GitButler diffs and expansion", () => {
       patch: "",
       error: 'GitButler branch "feature/top lane" is conflicted; use the Workspace view until its stack is resolved.',
     });
-    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(false);
+    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(false);
   });
 
   test("fails closed when a stack's bottom-branch anchor moves", async () => {
@@ -490,8 +500,8 @@ describe("GitButler diffs and expansion", () => {
 
     expect(result.label).toBe("Branch: feature/top lane (committed changes)");
     expect(fixture.gitCalls).toContainEqual([
-      ...BIG_FILE_DIFF_GUARD,
       "diff",
+      "--no-textconv",
       "--no-ext-diff",
       "--src-prefix=a/",
       "--dst-prefix=b/",
@@ -546,6 +556,54 @@ describe("GitButler diffs and expansion", () => {
     )).resolves.toMatchObject({ patch });
   });
 
+  test("omits oversized committed object diffs with a content-sensitive binary stub", async () => {
+    const fixture = createRuntime();
+    const originalRunGit = fixture.runtime.runGit.bind(fixture.runtime);
+    const oldObjectId = "d".repeat(40);
+    let newObjectId = "e".repeat(40);
+    let sawRawDiff = false;
+    fixture.setPatch("x".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1));
+    fixture.runtime.runGit = async (args, options) => {
+      const commandArgs = args[0] === "-c" ? args.slice(2) : args;
+      if (commandArgs[0] === "diff" && commandArgs.includes("--raw")) {
+        sawRawDiff = true;
+        return commandResult(
+          `:100644 100644 ${oldObjectId} ${newObjectId} M\0large [*]?.txt\0`,
+        );
+      }
+      if (commandArgs[0] === "cat-file") {
+        return commandResult(`${MAX_REVIEW_FILE_CONTENT_BYTES + 1}\n`);
+      }
+      if (commandArgs[0] === "diff" && commandArgs.some((arg) => arg.startsWith(":(top,exclude,literal)"))) {
+        return commandResult();
+      }
+      return originalRunGit(args, options);
+    };
+
+    const result = await runGitButlerDiff(
+      fixture.runtime,
+      "gitbutler:branch:feature%2Ftop%20lane",
+      ROOT,
+    );
+    expect(result.patch.length).toBeLessThan(2_000);
+    expect(result.patch).toContain("Binary files");
+    expect(result.patch).not.toContain("xxxxxxxxxx");
+    expect(sawRawDiff).toBe(true);
+
+    const first = await getGitButlerDiffFingerprint(
+      fixture.runtime,
+      "gitbutler:branch:feature%2Ftop%20lane",
+      ROOT,
+    );
+    newObjectId = "f".repeat(40);
+    const second = await getGitButlerDiffFingerprint(
+      fixture.runtime,
+      "gitbutler:branch:feature%2Ftop%20lane",
+      ROOT,
+    );
+    expect(second).not.toBe(first);
+  });
+
   test("returns explicit errors when status or a selected target disappears", async () => {
     const failedStatus = createRuntime({ status: commandResult("", "database locked", 1) });
     await expect(runGitButlerDiff(failedStatus.runtime, GITBUTLER_WORKSPACE_DIFF, ROOT)).resolves.toMatchObject({
@@ -578,6 +636,28 @@ describe("GitButler diffs and expansion", () => {
     });
   });
 
+  test("does not expand oversized committed GitButler blobs", async () => {
+    const fixture = createRuntime();
+    const originalRunGit = fixture.runtime.runGit.bind(fixture.runtime);
+    let showCalls = 0;
+    fixture.runtime.runGit = async (args, options) => {
+      if (args[0] === "cat-file" && args[1] === "-s") {
+        return commandResult(`${MAX_REVIEW_FILE_CONTENT_BYTES + 1}\n`);
+      }
+      if (args[0] === "show") showCalls++;
+      return originalRunGit(args, options);
+    };
+
+    await expect(getGitButlerFileContentsForDiff(
+      fixture.runtime,
+      "gitbutler:branch:feature%2Ftop%20lane",
+      "src/new.ts",
+      "src/old.ts",
+      ROOT,
+    )).resolves.toEqual({ oldContent: null, newContent: null });
+    expect(showCalls).toBe(0);
+  });
+
   test("fingerprints the exact visible patch content", async () => {
     const fixture = createRuntime();
     const first = await getGitButlerDiffFingerprint(
@@ -592,7 +672,7 @@ describe("GitButler diffs and expansion", () => {
       ROOT,
     );
     expect(second).not.toBe(first);
-    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(true);
+    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(true);
   });
 
   test("fingerprints committed selectors from their exact authoritative patch", async () => {
@@ -602,7 +682,7 @@ describe("GitButler diffs and expansion", () => {
       "gitbutler:branch:feature%2Ftop%20lane",
       ROOT,
     );
-    expect(fixture.gitCalls.some((args) => args.includes("diff"))).toBe(true);
+    expect(fixture.gitCalls.some((args) => args[0] === "diff")).toBe(true);
   });
 
   test("pins a committed patch, context, and fingerprint to one status revision across the cache TTL", async () => {
@@ -632,7 +712,7 @@ describe("GitButler diffs and expansion", () => {
       return commandResult(currentStatus);
     };
     fixture.runtime.runGit = async (args, options) => {
-      if (args.includes("diff") && blockNextDiff) {
+      if (args[0] === "diff" && blockNextDiff) {
         blockNextDiff = false;
         markDiffStarted?.();
         await diffGate;
