@@ -110,17 +110,17 @@ local-only: it is not stored on a Plannotator server and cannot be recovered
 after purge. `--yes` (or `-y`) skips confirmation for automation, and is
 required when no interactive terminal is available. `--dry-run` previews the
 recognized removal set without changing anything.
-If a broken or unavailable host blocks cleanup, `--skip-hosts` leaves host
-plugin managers and shared host configuration untouched while removing the
-remaining installer-owned components and binary. Remove the skipped host
-integrations manually afterward.
+Host integrations are always part of uninstall. If a broken or unavailable
+host prevents safe cleanup, the command names the blocking plugin manager or
+configuration, gives exact manual cleanup instructions, and stops before
+deleting the binary. Complete that cleanup and rerun uninstall.
 
 The purge removes only known Plannotator entries from the configured data
 directory. Unknown top-level files are preserved rather than guessed at, and
 custom external plan-save paths or project-local integrations are never
-deleted. Malformed host config is treated as a fail-safe error unless
-`--skip-hosts` is explicit. If a host plugin manager is unavailable or a shared
-config cannot be edited safely, the command reports the follow-up and preserves
+deleted. Malformed host config is treated as a fail-safe error. If a host
+plugin manager is unavailable or a shared config cannot be edited safely, the
+command reports the exact manual follow-up and preserves
 the CLI and its Windows PATH entry so you can fix the problem and retry. If
 Windows PATH restoration itself fails, the CLI remains on disk and the output
 gives its full path for retry and manual PATH repair.

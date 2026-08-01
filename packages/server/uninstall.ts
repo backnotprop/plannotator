@@ -169,8 +169,6 @@ export interface UninstallEnvironment {
 export interface UninstallRequest {
   readonly purge: boolean;
   readonly dryRun: boolean;
-  /** Leave host plugin managers and shared host configuration untouched. */
-  readonly skipHosts: boolean;
 }
 
 /** Caller-visible record of completed, planned, preserved, and failed work. */
@@ -202,6 +200,10 @@ type HookCleanupSpec = {
 type HookCleanupPolicy = {
   readonly allowRelocatedBinary: boolean;
   readonly removeFileWhenEmpty: boolean;
+};
+
+type HostCleanupRecovery = {
+  readonly manualCleanup: string;
 };
 
 type PathIdentity = {
@@ -287,14 +289,8 @@ export async function runPlannotatorUninstall(
 
   const paths = resolveOwnedPaths(environment);
 
-  if (request.skipHosts) {
-    state.warnings.push(
-      "Skipped host plugin managers and shared host configuration (--skip-hosts); remove any remaining host integrations manually.",
-    );
-  } else {
-    await removeHostPlugins(request, environment, paths, state);
-    removeHostConfigEntries(request, environment, paths, state);
-  }
+  await removeHostPlugins(request, environment, paths, state);
+  removeHostConfigEntries(request, environment, paths, state);
   removeInstalledFiles(request, environment, paths, state);
   if (dataDirSafetyIssue) {
     state.warnings.push(
@@ -369,6 +365,24 @@ export function formatUninstallResult(result: UninstallResult): string {
   }
 
   return lines.join("\n");
+}
+
+function formatUninstallRetryCommand(request: UninstallRequest): string {
+  return request.purge
+    ? "plannotator uninstall --purge"
+    : "plannotator uninstall";
+}
+
+function reportHostCleanupFailure(
+  summary: string,
+  problem: string,
+  recovery: HostCleanupRecovery,
+  request: UninstallRequest,
+  state: MutableUninstallResult,
+): void {
+  state.errors.push(
+    `${summary}: ${problem}. Manual cleanup: ${recovery.manualCleanup} Then rerun \`${formatUninstallRetryCommand(request)}\`.`,
+  );
 }
 
 function resolveOwnedPaths(environment: UninstallEnvironment) {
@@ -499,9 +513,10 @@ async function removeHostPlugins(
     }
 
     const executable = environment.which(action.command);
+    const manualCommand = [action.command, ...action.args].join(" ");
     if (!executable) {
       state.errors.push(
-        `${action.label} was detected but ${action.command} is unavailable; it was not removed. Use the host's plugin manager manually, or re-run with --skip-hosts to leave host integrations for manual cleanup.`,
+        `${action.label} was detected but ${action.command} is unavailable; it was not removed. Manual cleanup: restore ${action.command} on PATH and run \`${manualCommand}\`. After it succeeds, rerun \`${formatUninstallRetryCommand(request)}\`.`,
       );
       continue;
     }
@@ -511,7 +526,7 @@ async function removeHostPlugins(
       state.removed.push(action.label);
     } else {
       state.errors.push(
-        `${action.label} was not removed automatically (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}); use the host's plugin manager manually, or re-run with --skip-hosts to leave host integrations for manual cleanup.`,
+        `${action.label} was not removed automatically (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}). Manual cleanup: run \`${manualCommand}\` directly and resolve the host error until it succeeds. Then rerun \`${formatUninstallRetryCommand(request)}\`.`,
       );
     }
   }
@@ -536,6 +551,7 @@ function removeHostConfigEntries(
       removeFileWhenEmpty: false,
     },
     "managed Claude Code hooks",
+    `Make ${join(paths.claudeDir, "settings.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.PermissionRequest entries whose matcher is "ExitPlanMode" and hooks.PreToolUse entries whose matcher is "EnterPlanMode", then save the file.`,
     request,
     state,
   );
@@ -550,6 +566,7 @@ function removeHostConfigEntries(
       removeFileWhenEmpty: true,
     },
     "managed Codex Stop hook",
+    `Make ${join(paths.codexDir, "hooks.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.Stop entries, then save the file; delete it only if no other settings remain.`,
     request,
     state,
   );
@@ -664,19 +681,17 @@ function removeInstalledFiles(
     state,
   );
 
-  if (!request.skipHosts) {
-    cleanupRecognizableKiroAgent(
-      join(environment.homeDir, ".kiro", "agents", "plannotator.json"),
+  cleanupRecognizableKiroAgent(
+    join(environment.homeDir, ".kiro", "agents", "plannotator.json"),
+    request,
+    state,
+  );
+  for (const configDir of paths.configDirs) {
+    cleanupRecognizableAmpPlugin(
+      join(configDir, "amp", "plugins", "plannotator.ts"),
       request,
       state,
     );
-    for (const configDir of paths.configDirs) {
-      cleanupRecognizableAmpPlugin(
-        join(configDir, "amp", "plugins", "plannotator.ts"),
-        request,
-        state,
-      );
-    }
   }
 
   for (const cachePath of [
@@ -977,10 +992,18 @@ function cleanupHooksJson(
   platform: NodeJS.Platform,
   policy: HookCleanupPolicy,
   label: string,
+  manualCleanup: string,
   request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
-  const parsed = readJsonRecord(filePath, state);
+  const recovery = { manualCleanup };
+  const parsed = readJsonRecord(
+    filePath,
+    label,
+    recovery,
+    request,
+    state,
+  );
   if (!parsed) return;
 
   const hooks = asRecord(parsed.hooks);
@@ -1047,11 +1070,11 @@ function cleanupHooksJson(
   }
 
   if (policy.removeFileWhenEmpty && Object.keys(parsed).length === 0) {
-    removePath(filePath, request, state);
+    removePath(filePath, request, state, recovery);
     return;
   }
 
-  writeJson(filePath, parsed, label, state);
+  writeJson(filePath, parsed, label, recovery, request, state);
 }
 
 function cleanupCodexConfig(
@@ -1060,11 +1083,20 @@ function cleanupCodexConfig(
   state: MutableUninstallResult,
 ): void {
   if (!existsSync(filePath)) return;
+  const recovery = {
+    manualCleanup: `Make ${filePath} readable and writable. If its only nonblank lines are [features] and hooks = true, delete the file; otherwise leave its custom content in place.`,
+  };
   let content: string;
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    state.errors.push(`Could not inspect ${filePath}: ${formatError(error)}`);
+    reportHostCleanupFailure(
+      `Could not inspect ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
     return;
   }
 
@@ -1078,7 +1110,7 @@ function cleanupCodexConfig(
     /^hooks\s*=\s*true$/.test(meaningfulLines[1]);
 
   if (!isInstallerTemplate) return;
-  removePath(filePath, request, state);
+  removePath(filePath, request, state, recovery);
 }
 
 function cleanupGeminiSettings(
@@ -1088,7 +1120,16 @@ function cleanupGeminiSettings(
   request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
-  const parsed = readJsonRecord(filePath, state);
+  const recovery = {
+    manualCleanup: `Make ${filePath} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.BeforeTool entries whose matcher is "exit_plan_mode", then save the file.`,
+  };
+  const parsed = readJsonRecord(
+    filePath,
+    "managed Gemini hooks",
+    recovery,
+    request,
+    state,
+  );
   if (!parsed) return;
   const wasInstallerTemplate = isGeminiInstallerTemplate(
     parsed,
@@ -1135,7 +1176,7 @@ function cleanupGeminiSettings(
   }
 
   if (wasInstallerTemplate) {
-    removePath(filePath, request, state);
+    removePath(filePath, request, state, recovery);
     return;
   }
 
@@ -1143,7 +1184,14 @@ function cleanupGeminiSettings(
   else hooks.BeforeTool = nextEntries;
   if (Object.keys(hooks).length === 0) delete parsed.hooks;
   else parsed.hooks = hooks;
-  writeJson(filePath, parsed, "managed Gemini hook", state);
+  writeJson(
+    filePath,
+    parsed,
+    "managed Gemini hook",
+    recovery,
+    request,
+    state,
+  );
 }
 
 function cleanupOpenCodeConfig(
@@ -1152,12 +1200,21 @@ function cleanupOpenCodeConfig(
   state: MutableUninstallResult,
 ): void {
   if (!existsSync(filePath)) return;
+  const recovery = {
+    manualCleanup: `Make ${filePath} readable, writable, and valid JSON or JSONC. Remove every plugin array entry for @plannotator/opencode, including versioned entries and tuple entries, then save the file.`,
+  };
 
   let content: string;
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    state.errors.push(`Could not inspect ${filePath}: ${formatError(error)}`);
+    reportHostCleanupFailure(
+      `Could not inspect ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
     return;
   }
 
@@ -1171,6 +1228,9 @@ function cleanupOpenCodeConfig(
     reportMalformedSharedConfig(
       filePath,
       "it is not valid JSON or JSONC",
+      "@plannotator/opencode plugin entries",
+      recovery,
+      request,
       state,
     );
     return;
@@ -1198,6 +1258,8 @@ function cleanupOpenCodeConfig(
     filePath,
     updated,
     "@plannotator/opencode entry",
+    recovery,
+    request,
     state,
   );
 }
@@ -1267,7 +1329,16 @@ function cleanupRecognizableKiroAgent(
   request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
-  const parsed = readJsonRecord(filePath, state);
+  const recovery = {
+    manualCleanup: `Make ${filePath} a readable, writable strict JSON object without changing its intent. If it is the installer-provided Plannotator Kiro agent, delete it; otherwise keep the repaired custom agent at that path.`,
+  };
+  const parsed = readJsonRecord(
+    filePath,
+    "the Plannotator Kiro agent",
+    recovery,
+    request,
+    state,
+  );
   if (!parsed) return;
 
   const prompt = typeof parsed.prompt === "string" ? parsed.prompt : "";
@@ -1279,7 +1350,7 @@ function cleanupRecognizableKiroAgent(
     prompt.includes("Each skill runs a `plannotator` shell command");
 
   if (recognizable) {
-    removePath(filePath, request, state);
+    removePath(filePath, request, state, recovery);
   } else {
     state.preserved.push(`${filePath} (custom or unrecognized Kiro agent)`);
   }
@@ -1291,11 +1362,20 @@ function cleanupRecognizableAmpPlugin(
   state: MutableUninstallResult,
 ): void {
   if (!existsSync(filePath)) return;
+  const recovery = {
+    manualCleanup: `Make ${filePath} readable and writable. If it contains the installer-provided Plannotator Amp plugin, delete it; otherwise keep the custom plugin at that path.`,
+  };
   let content: string;
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    state.errors.push(`Could not inspect ${filePath}: ${formatError(error)}`);
+    reportHostCleanupFailure(
+      `Could not inspect ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
     return;
   }
 
@@ -1305,7 +1385,7 @@ function cleanupRecognizableAmpPlugin(
     content.includes("PLANNOTATOR_ORIGIN");
 
   if (recognizable) {
-    removePath(filePath, request, state);
+    removePath(filePath, request, state, recovery);
   } else {
     state.preserved.push(`${filePath} (custom or unrecognized Amp plugin)`);
   }
@@ -1313,6 +1393,9 @@ function cleanupRecognizableAmpPlugin(
 
 function readJsonRecord(
   filePath: string,
+  integration: string,
+  recovery: HostCleanupRecovery,
+  request: UninstallRequest,
   state: MutableUninstallResult,
 ): JsonRecord | null {
   if (!existsSync(filePath)) return null;
@@ -1320,7 +1403,13 @@ function readJsonRecord(
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    state.errors.push(`Could not inspect ${filePath}: ${formatError(error)}`);
+    reportHostCleanupFailure(
+      `Could not inspect ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
     return null;
   }
 
@@ -1331,6 +1420,9 @@ function readJsonRecord(
       reportMalformedSharedConfig(
         filePath,
         "it is not a JSON object",
+        integration,
+        recovery,
+        request,
         state,
       );
       return null;
@@ -1340,6 +1432,9 @@ function readJsonRecord(
     reportMalformedSharedConfig(
       filePath,
       "it is not strict JSON",
+      integration,
+      recovery,
+      request,
       state,
     );
     return null;
@@ -1349,10 +1444,17 @@ function readJsonRecord(
 function reportMalformedSharedConfig(
   filePath: string,
   reason: string,
+  integration: string,
+  recovery: HostCleanupRecovery,
+  request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
-  state.errors.push(
-    `Preserved ${filePath}: ${reason}, so managed host entries cannot be classified safely. Re-run with --skip-hosts to leave host integrations for manual cleanup.`,
+  reportHostCleanupFailure(
+    `Preserved ${filePath}`,
+    `${reason}, so ${integration} cannot be classified safely`,
+    recovery,
+    request,
+    state,
   );
 }
 
@@ -1360,6 +1462,8 @@ function writeJson(
   filePath: string,
   value: JsonRecord,
   label: string,
+  recovery: HostCleanupRecovery,
+  request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
   try {
@@ -1376,7 +1480,13 @@ function writeJson(
     );
     state.removed.push(`${label} in ${filePath}`);
   } catch (error) {
-    state.errors.push(`Could not update ${filePath}: ${formatError(error)}`);
+    reportHostCleanupFailure(
+      `Could not update ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
   }
 }
 
@@ -1384,13 +1494,21 @@ function writeTextUpdate(
   filePath: string,
   content: string,
   label: string,
+  recovery: HostCleanupRecovery,
+  request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
   try {
     writeFileSync(filePath, content, "utf8");
     state.removed.push(`${label} in ${filePath}`);
   } catch (error) {
-    state.errors.push(`Could not update ${filePath}: ${formatError(error)}`);
+    reportHostCleanupFailure(
+      `Could not update ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
   }
 }
 
@@ -1506,13 +1624,24 @@ function removePath(
   path: string,
   request: UninstallRequest,
   state: MutableUninstallResult,
+  recovery?: HostCleanupRecovery,
 ): void {
   let stat: ReturnType<typeof lstatSync>;
   try {
     stat = lstatSync(path);
   } catch (error) {
     if (isMissingPathError(error)) return;
-    state.errors.push(`Could not inspect ${path}: ${formatError(error)}`);
+    if (recovery) {
+      reportHostCleanupFailure(
+        `Could not inspect ${path}`,
+        formatError(error),
+        recovery,
+        request,
+        state,
+      );
+    } else {
+      state.errors.push(`Could not inspect ${path}: ${formatError(error)}`);
+    }
     return;
   }
 
@@ -1531,7 +1660,17 @@ function removePath(
     }
     state.removed.push(path);
   } catch (error) {
-    state.errors.push(`Could not remove ${path}: ${formatError(error)}`);
+    if (recovery) {
+      reportHostCleanupFailure(
+        `Could not remove ${path}`,
+        formatError(error),
+        recovery,
+        request,
+        state,
+      );
+    } else {
+      state.errors.push(`Could not remove ${path}: ${formatError(error)}`);
+    }
   }
 }
 

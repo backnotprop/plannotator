@@ -340,7 +340,6 @@ if (args[0] === "uninstall") {
     {
       purge: options.purge,
       dryRun: options.dryRun,
-      skipHosts: options.skipHosts,
     },
     environment,
   );
