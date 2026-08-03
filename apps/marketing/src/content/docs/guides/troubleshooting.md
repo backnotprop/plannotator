@@ -57,7 +57,7 @@ Every session also prints its URL on one line to stderr when it starts:
   Plannotator session ready: http://localhost:54321
 ```
 
-and appends it to `~/.plannotator/ready.jsonl`, so `tail -n 1 ~/.plannotator/ready.jsonl` gives you the newest session's URL and port. Both are stable formats, which makes them safe for an agent or a script to read.
+That prefix is a stable format, so an agent or a script can grep the line out of the output it already captures. For a session whose output you no longer have, `plannotator sessions` above is the place to look: it lists every server that is still alive, not merely every one that was started.
 
 ## Where does Plannotator store data?
 
@@ -69,7 +69,6 @@ Plannotator-managed files live under `~/.plannotator/` by default:
 | `history/` | Automatic version history for every plan, organized by project and heading. Powers the plan diff and version browser. |
 | `drafts/` | Auto-saved annotation drafts. If a server crashes mid-review, your in-progress annotations are recovered on the next session. |
 | `sessions/` | Temporary session files for active servers. Cleaned up automatically when a server exits. |
-| `ready.jsonl` | One JSON line per session start (`{url, isRemote, port}`), for recovering a URL after the fact. |
 
 Plan saving is enabled by default. You can change the save directory or disable it entirely in the Plannotator UI settings (gear icon). Functional browser cookies store some UI preferences separately from this directory.
 

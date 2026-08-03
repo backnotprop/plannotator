@@ -7,8 +7,7 @@
  */
 
 import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
@@ -189,30 +188,6 @@ export function writeServerReadyMetadata(readyFile: string, metadata: ServerRead
  * worth saying (port forwarding, a failed browser launch) goes on its own line.
  */
 export const SESSION_READY_LINE_PREFIX = "Plannotator session ready: ";
-
-/** Default side channel path for the session URL. */
-export function getDefaultReadyFilePath(dataDir: string = getPlannotatorDataDir()): string {
-  return join(dataDir, "ready.jsonl");
-}
-
-/**
- * Point `PLANNOTATOR_READY_FILE` at the default file unless a host already set
- * one, and return the resolved path.
- *
- * Host plugins (amp, OpenCode) hand the CLI a private temp file and read the
- * URL back out of it. Claude Code spawns the CLI straight from a hook, so
- * nothing sets the variable and the metadata the server already publishes has
- * nowhere to go — which is why Claude Code was the one host with no way to
- * recover a URL. With a default, `tail -n 1 <dataDir>/ready.jsonl` is the
- * newest session regardless of which host started it.
- */
-export function ensureReadyFileEnv(env: NodeJS.ProcessEnv = process.env): string {
-  const existing = env.PLANNOTATOR_READY_FILE?.trim();
-  if (existing) return existing;
-  const readyFile = getDefaultReadyFilePath();
-  env.PLANNOTATOR_READY_FILE = readyFile;
-  return readyFile;
-}
 
 /** Attempt to open the browser for the session URL. */
 export async function handleServerReady(

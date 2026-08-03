@@ -246,6 +246,11 @@ export function formatUserFacingCliStderrLine(line: string): string | undefined 
   // every start); older binaries put the URL on the following line, which the
   // bare-URL match below still forwards.
   if (/^Plannotator session ready\b/.test(trimmed)) return trimmed;
+  // The browser-launch failure that follows the session-ready line on a
+  // headless box. Without it OpenCode hands the user a URL and never says why
+  // no tab appeared. Anchored on the prefix only, so the em-dash in the real
+  // copy stays out of the pattern.
+  if (/^Could not open a browser automatically\b/.test(trimmed)) return trimmed;
   if (/^https?:\/\/\S+/.test(trimmed)) return trimmed;
   if (/^\(.+annotations added in browser\)$/.test(trimmed)) return trimmed;
   return undefined;

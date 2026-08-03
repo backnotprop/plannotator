@@ -88,7 +88,6 @@ const PURGE_OWNED_TOP_LEVEL = [
   "config.json",
   "install-prefs",
   "review-skills.json",
-  "ready.jsonl",
   "vscode-ipc.json",
   "codex-review-debug.log",
   "codex-review-schema.json",

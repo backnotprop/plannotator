@@ -3,8 +3,6 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  ensureReadyFileEnv,
-  getDefaultReadyFilePath,
   handleSaveNotes,
   handleServerReady,
   SESSION_READY_LINE_PREFIX,
@@ -27,10 +25,19 @@ async function captureStderr(fn: () => Promise<void>): Promise<string> {
   return writes.join("");
 }
 
-/** The session URL must appear exactly once, on the stable one-line prefix. */
+/**
+ * The session URL must appear exactly once, on the stable one-line format.
+ *
+ * The expected line is written out literally rather than interpolated from
+ * `SESSION_READY_LINE_PREFIX`, because interpolating it would assert the
+ * constant against itself: every one of these tests would stay green while
+ * consumers matching the old text (see `formatUserFacingCliStderrLine` in
+ * `apps/opencode-plugin/cli-bridge.ts`) silently stopped forwarding the URL.
+ * The two-space indent and the newlines around the line are part of the format.
+ */
 function expectSingleSessionReadyLine(output: string, url: string): void {
   expect(output.split(url).length - 1).toBe(1);
-  expect(output).toContain(`${SESSION_READY_LINE_PREFIX}${url}\n`);
+  expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);
 }
 
 function saveNotesRequest(body: unknown): Request {
@@ -132,25 +139,13 @@ describe("writeServerReadyMetadata", () => {
   });
 });
 
-describe("ensureReadyFileEnv", () => {
-  test("defaults the side channel to the data directory", () => {
-    const env: NodeJS.ProcessEnv = {};
-    expect(ensureReadyFileEnv(env)).toBe(getDefaultReadyFilePath());
-    expect(env.PLANNOTATOR_READY_FILE).toBe(getDefaultReadyFilePath());
-    expect(getDefaultReadyFilePath("/data")).toBe(join("/data", "ready.jsonl"));
-  });
-
-  // Host plugins hand the CLI a private temp file and read the URL back out of
-  // it; stomping that would point the plugin at the wrong session.
-  test("leaves a host-supplied path alone", () => {
-    const env: NodeJS.ProcessEnv = { PLANNOTATOR_READY_FILE: "/tmp/host-ready.jsonl" };
-    expect(ensureReadyFileEnv(env)).toBe("/tmp/host-ready.jsonl");
-    expect(env.PLANNOTATOR_READY_FILE).toBe("/tmp/host-ready.jsonl");
-  });
-
-  test("treats a blank value as unset", () => {
-    const env: NodeJS.ProcessEnv = { PLANNOTATOR_READY_FILE: "  " };
-    expect(ensureReadyFileEnv(env)).toBe(getDefaultReadyFilePath());
+describe("SESSION_READY_LINE_PREFIX", () => {
+  // Pinned to the literal bytes, because the prefix is a cross-component
+  // contract rather than an implementation detail: `cli-bridge.ts` matches it
+  // with its own hardcoded regex, and the docs quote it as the line agents
+  // grep. Changing it is a breaking change and has to fail here first.
+  test("is the exact text consumers match on", () => {
+    expect(SESSION_READY_LINE_PREFIX).toBe("Plannotator session ready: ");
   });
 });
 
