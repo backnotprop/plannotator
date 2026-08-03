@@ -4,6 +4,7 @@ import { SuggestionBlock } from './SuggestionBlock';
 import { CommentMeta } from './CommentMeta';
 import { CommentActions } from './CommentActions';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
+import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
 interface InlineAnnotationProps {
   metadata: DiffAnnotationMetadata;
@@ -12,6 +13,8 @@ interface InlineAnnotationProps {
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
+  onExplain?: (id: string) => void;
+  explainDisabled?: boolean;
 }
 
 /** Renders a single annotation comment inside the diff view */
@@ -22,6 +25,8 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
   onSelect,
   onEdit,
   onDelete,
+  onExplain,
+  explainDisabled = false,
 }) => {
   const severity = metadata.severity ? SEVERITY_STYLES[metadata.severity] : null;
 
@@ -59,6 +64,10 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
       )}
       <CommentActions
         onEdit={() => onEdit(metadata.annotationId)}
+        onExplain={isAgentGeneratedFinding(metadata) && onExplain
+          ? () => onExplain(metadata.annotationId)
+          : undefined}
+        explainDisabled={explainDisabled}
         copyText={metadata.copyText}
         onDelete={() => onDelete(metadata.annotationId)}
       />

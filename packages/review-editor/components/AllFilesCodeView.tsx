@@ -185,6 +185,7 @@ interface AllFilesCodeViewProps {
   ) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation?: (id: string) => void;
   // Header actions (P3). Mirror AllFilesDiffView's header surface.
   onAddFileCommentForFile?: (filePath: string, text: string) => void;
   viewedFiles?: Set<string>;
@@ -470,6 +471,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onEditAnnotation,
   onSelectAnnotation,
   onDeleteAnnotation,
+  onExplainAnnotation,
   onAddFileCommentForFile,
   viewedFiles,
   onToggleViewed,
@@ -823,7 +825,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // annotation && item.type === 'diff'` (the Diffshub pattern) so file-item
   // annotations (none here) and metadata-less annotations are skipped. Actions
   // route by the OWNING item, not an active-file side channel.
-  const renderAnnotation = useStableCallback(
+  const renderAnnotationContent = useStableCallback(
     (
       annotation:
         | DiffLineAnnotation<DiffAnnotationMetadata>
@@ -852,9 +854,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           onSelect={onSelectAnnotation}
           onEdit={handleEditAnnotation}
           onDelete={onDeleteAnnotation}
+          onExplain={onExplainAnnotation}
+          explainDisabled={isAILoading}
         />
       );
     },
+  );
+  // Pierre memoizes slot portals by renderer identity. Republish them when the
+  // Explain action appears or changes loading state, while keeping callbacks fresh.
+  const renderAnnotation = useCallback(
+    (
+      annotation:
+        | DiffLineAnnotation<DiffAnnotationMetadata>
+        | LineAnnotation<DiffAnnotationMetadata>,
+      item: CodeViewItem<DiffAnnotationMetadata>,
+    ) => renderAnnotationContent(annotation, item),
+    [renderAnnotationContent, onExplainAnnotation, isAILoading],
   );
 
   // Reset to a fresh state when the file set changes (diff switch). CodeView
@@ -2018,7 +2033,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
 
-  const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
+  const renderCustomHeaderContent = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
     if (item.type !== 'diff') return null;
     const filePath = itemIdToFilePath.get(item.id);
     if (filePath == null) return null;
@@ -2090,6 +2105,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onSelect={onSelectAnnotation}
             onEdit={onEditAnnotation}
             onDelete={onDeleteAnnotation}
+            onExplain={onExplainAnnotation}
+            explainDisabled={isAILoading}
             // Re-measure the item when a comment expands/collapses/edits — the
             // custom-header height isn't auto-observed, so without this the
             // content below would overlap until an unrelated refresh.
@@ -2099,6 +2116,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       </div>
     );
   });
+  // File-scoped findings live in the custom-header portal and need the same
+  // availability/loading republish as line annotations.
+  const renderCustomHeader = useCallback(
+    (item: CodeViewItem<DiffAnnotationMetadata>) => renderCustomHeaderContent(item),
+    [renderCustomHeaderContent, onExplainAnnotation, isAILoading],
+  );
 
   // Pass-through allowlist only (CODE_VIEW_DIFF_OPTION_KEYS). hunkSeparators,
   // stickyHeaders, itemMetrics, and the selection callbacks are CodeView-level

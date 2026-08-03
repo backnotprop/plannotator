@@ -69,6 +69,7 @@ export interface ReviewState {
   /** Select AND scroll the diff to a comment (sidebar / findings-list click). */
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation: (id: string) => void;
 
   // PR description prose annotations (comment-only; text-anchored Annotation[],
   // kept separate from the diff CodeAnnotation[] above).

@@ -166,6 +166,7 @@ interface DiffViewerProps {
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation?: (id: string) => void;
   isViewed?: boolean;
   onToggleViewed?: () => void;
   collapsed?: boolean;
@@ -221,6 +222,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onEditAnnotation,
   onSelectAnnotation,
   onDeleteAnnotation,
+  onExplainAnnotation,
   isViewed = false,
   onToggleViewed,
   collapsed = false,
@@ -580,9 +582,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onSelect={onSelectAnnotation}
         onEdit={handleEdit}
         onDelete={onDeleteAnnotation}
+        onExplain={onExplainAnnotation}
+        explainDisabled={isAILoading}
       />
     );
-  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
+  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onExplainAnnotation, isAILoading, onClickAIMarker]);
 
   const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
     toolbarHostRef.current?.handleLineSelectionEnd(range);
@@ -703,6 +707,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           onSelect={onSelectAnnotation}
           onEdit={onEditAnnotation}
           onDelete={onDeleteAnnotation}
+          onExplain={onExplainAnnotation}
+          explainDisabled={isAILoading}
         />
         <div className="p-4" ref={diffContentRef}>
           <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>

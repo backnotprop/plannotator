@@ -143,6 +143,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
             }}
             isActive={focused}
             aiAvailable={state.aiAvailable}
+            onExplainAnnotation={state.aiAvailable ? state.onExplainAnnotation : undefined}
             onAskAIForFile={state.onAskAIForFile}
             isAILoading={state.isAILoading}
             onViewAIResponse={state.onViewAIResponse}

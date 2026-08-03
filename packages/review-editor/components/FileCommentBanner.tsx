@@ -5,6 +5,7 @@ import { CommentMeta } from './CommentMeta';
 import { CommentActions } from './CommentActions';
 import { FileNameChip } from './FileNameChip';
 import { commentCopyText } from '../utils/annotationDisplay';
+import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
 interface FileCommentBannerProps {
   /** File-scoped comments for ONE file (already filtered to scope === 'file'). */
@@ -13,6 +14,8 @@ interface FileCommentBannerProps {
   onSelect: (id: string | null) => void;
   onEdit: (id: string, text: string) => void;
   onDelete: (id: string) => void;
+  onExplain?: (id: string) => void;
+  explainDisabled?: boolean;
   /** Re-measure hook for the virtualized all-files host (see FileCommentCard). */
   onHeightChange?: () => void;
 }
@@ -38,10 +41,12 @@ export const FileCommentCard: React.FC<{
   onSelect: (id: string | null) => void;
   onEdit: (id: string, text: string) => void;
   onDelete: (id: string) => void;
+  onExplain?: (id: string) => void;
+  explainDisabled?: boolean;
   /** Fired after our rendered height changes (expand/collapse/edit) so the
    *  virtualized all-files host can re-measure this item. */
   onHeightChange?: () => void;
-}> = ({ comment, isSelected, onSelect, onEdit, onDelete, onHeightChange }) => {
+}> = ({ comment, isSelected, onSelect, onEdit, onDelete, onExplain, explainDisabled = false, onHeightChange }) => {
   // Default expanded (the comment IS the point of a guided review); the toggle
   // lets a reviewer collapse a long note back to one line to reach the hunks.
   const [collapsed, setCollapsed] = useState(false);
@@ -134,6 +139,10 @@ export const FileCommentCard: React.FC<{
       {!isEditing && (
         <CommentActions
           onEdit={() => { setDraft(comment.text ?? ''); setIsEditing(true); setCollapsed(false); }}
+          onExplain={isAgentGeneratedFinding(comment) && onExplain
+            ? () => onExplain(comment.id)
+            : undefined}
+          explainDisabled={explainDisabled}
           copyText={comment.text ? commentCopyText(comment) : undefined}
           onDelete={() => onDelete(comment.id)}
         />
@@ -154,6 +163,8 @@ export const FileCommentBanner: React.FC<FileCommentBannerProps> = ({
   onSelect,
   onEdit,
   onDelete,
+  onExplain,
+  explainDisabled = false,
   onHeightChange,
 }) => {
   if (comments.length === 0) return null;
@@ -167,6 +178,8 @@ export const FileCommentBanner: React.FC<FileCommentBannerProps> = ({
           onSelect={onSelect}
           onEdit={onEdit}
           onDelete={onDelete}
+          onExplain={onExplain}
+          explainDisabled={explainDisabled}
           onHeightChange={onHeightChange}
         />
       ))}
