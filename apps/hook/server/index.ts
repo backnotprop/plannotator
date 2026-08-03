@@ -96,6 +96,11 @@ import {
   type GoalSetupStage,
 } from "@plannotator/shared/goal-setup";
 import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
+import {
+  annotateInputExists,
+  annotateTokenResolves,
+  resolveAnnotateTargetArg,
+} from "@plannotator/shared/annotate-target";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
@@ -161,6 +166,7 @@ import { completeAnnotateCommand } from "./annotate-command";
 import {
   annotateStartupFailureExitCode,
   assertResultPathAvailable,
+  isStrictAnnotateInvocation,
   resolveResultFilePath,
   STRICT_GATE_ERROR_EXIT_CODE,
 } from "./strict-annotate-result";
@@ -1000,7 +1006,7 @@ if (args[0] === "sessions") {
     );
   }
 
-  const rawFilePath = args[1];
+  let rawFilePath = args[1];
   if (!rawFilePath) {
     exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
   }
@@ -1012,6 +1018,23 @@ if (args[0] === "sessions") {
 
   // Use PLANNOTATOR_CWD if set (original working directory before script cd'd)
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
+
+  // Tolerant target selection: the host slash commands substitute
+  // `$ARGUMENTS` unquoted, so trailing prose lands in argv as extra tokens.
+  // Strict invocations bypass this and keep their exit-code contract — see
+  // resolveAnnotateTargetArg.
+  const annotateTarget = resolveAnnotateTargetArg({
+    raw: rawFilePath,
+    tokens: args.slice(1),
+    strict: isStrictAnnotateInvocation({ requireApproval: requireApprovalFlag, resultFile }),
+    resolves: (token) => annotateTokenResolves(token, projectRoot),
+    inputExists: (input) => annotateInputExists(input, projectRoot),
+  });
+  if (annotateTarget.kind === "error") {
+    exitAnnotateStartupFailure(annotateTarget.message);
+  }
+  rawFilePath = annotateTarget.token;
+  filePath = stripAtPrefix(rawFilePath);
 
   if (resultFile) {
     try {

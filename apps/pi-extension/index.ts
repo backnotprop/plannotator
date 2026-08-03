@@ -92,15 +92,20 @@ function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
 }
 
 async function loadAnnotateCommandModules() {
-	const [annotateArgs, atReference, resolveFile, referenceCommon] = await Promise.all([
+	const [annotateArgs, annotateTarget, atReference, resolveFile, referenceCommon] = await Promise.all([
 		import("./generated/annotate-args.ts"),
+		import("./generated/annotate-target.ts"),
 		import("./generated/at-reference.ts"),
 		import("./generated/resolve-file.ts"),
 		import("./generated/reference-common.ts"),
 	]);
 	return {
 		parseAnnotateArgs: annotateArgs.parseAnnotateArgs,
+		annotateInputExists: annotateTarget.annotateInputExists,
+		annotateTokenResolves: annotateTarget.annotateTokenResolves,
+		resolveAnnotateTargetArg: annotateTarget.resolveAnnotateTargetArg,
 		resolveAtReference: atReference.resolveAtReference,
+		stripAtPrefix: atReference.stripAtPrefix,
 		hasMarkdownFiles: resolveFile.hasMarkdownFiles,
 		resolveUserPath: resolveFile.resolveUserPath,
 		isAnnotatableTextPath: resolveFile.isAnnotatableTextPath,
@@ -636,7 +641,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 				FILE_BROWSER_EXCLUDED,
 				hasMarkdownFiles,
 				parseAnnotateArgs,
+				annotateInputExists,
+				annotateTokenResolves,
+				resolveAnnotateTargetArg,
 				resolveAtReference,
+				stripAtPrefix,
 				resolveUserPath,
 				isAnnotatableTextPath,
 				ANNOTATABLE_DOC_REGEX,
@@ -647,11 +656,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
 			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
+			const parsedAnnotateArgs = parseAnnotateArgs(args ?? "");
+			const { gate, renderMarkdown: renderMarkdownFlag, noJina } = parsedAnnotateArgs;
+			let { filePath, rawFilePath } = parsedAnnotateArgs;
 			if (!filePath) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
 				return;
 			}
+
 			if (!hasPlanBrowserHtml()) {
 				ctx.ui.notify(
 					"Annotation UI not available. Run 'bun run build' in the pi-extension directory.",
@@ -659,6 +671,22 @@ export default function plannotator(pi: ExtensionAPI): void {
 				);
 				return;
 			}
+
+			// Tolerant target selection: the slash command hands us whatever the
+			// user typed, so trailing prose ("the aim doc") used to be fatal. No
+			// `strict` here — Pi writes decisions back through sendUserMessage
+			// and owns no exit-code contract.
+			const annotateTarget = resolveAnnotateTargetArg({
+				raw: rawFilePath,
+				resolves: (token: string) => annotateTokenResolves(token, ctx.cwd),
+				inputExists: (input: string) => annotateInputExists(input, ctx.cwd),
+			});
+			if (annotateTarget.kind === "error") {
+				ctx.ui.notify(annotateTarget.message, "error");
+				return;
+			}
+			rawFilePath = annotateTarget.token;
+			filePath = stripAtPrefix(rawFilePath);
 
 			let markdown: string;
 			let rawHtml: string | undefined;

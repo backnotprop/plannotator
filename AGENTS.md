@@ -270,6 +270,16 @@ User annotates content, provides feedback
 Send Annotations → feedback sent to agent session
 ```
 
+### Tolerant annotate target resolution
+
+The host slash commands invoke the CLI through a bash-substitution prefix (`` !`plannotator annotate $ARGUMENTS` ``), so `$ARGUMENTS` reaches argv unquoted and unparsed and trailing natural language used to be fatal (`/plannotator-annotate the aim doc` → `File not found: the`). Argument resolution is therefore tolerant, in `packages/shared/annotate-target.ts` (`resolveAnnotateTargetArg`) and shared by all three hosts — the Claude Code binary, OpenCode, and Pi — so the behavior and both error messages are identical everywhere. The bang prefix is deliberate (#872) and the skill templates are **not** the place to fix this.
+
+The rule is conservative: every candidate token is resolved and the command proceeds only when **exactly one** resolves to a path, URL, or folder. Two resolving tokens are ambiguous and error naming both — never guess, never pick the first. Nothing resolving errors naming what was tried plus the accepted shapes, which is the message that tells a user their slash-command argument shape was the real problem. Flag-shaped tokens are never candidates. Hosts that receive the remainder pre-joined (OpenCode, Pi) try the un-split string first, so an unquoted path containing spaces still wins over its own tokens.
+
+Two cases deliberately stay with the caller's existing, more specific error: a single unresolvable token (`File not found: typo.md`) and an argument that does exist but isn't annotatable (`File type not supported: .pdf`).
+
+**Tolerance is bypassed for strict invocations** (`--require-approval` / `--result-file` — see `isStrictAnnotateInvocation` in `apps/hook/server/strict-annotate-result.ts`, the same predicate that picks the startup-failure exit code). Those own an exit-code contract: a typo must keep exiting 2, and quietly annotating a later argument because the first one was a typo would let a gate publish `approved` for a document the caller never named.
+
 ### Strict direct annotate results
 
 Direct `plannotator annotate` invocations may add `--require-approval` and/or `--result-file <path>` only with `--gate --json`; both reject `--hook` and are not shared with OpenCode/Pi slash-command parsing. Legacy plaintext, JSON, hook, and exit behavior remains unchanged when neither strict option is present.

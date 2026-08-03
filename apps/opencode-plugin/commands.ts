@@ -27,6 +27,12 @@ import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
+import {
+  annotateInputExists,
+  annotateTokenResolves,
+  resolveAnnotateTargetArg,
+} from "@plannotator/shared/annotate-target";
+import { stripAtPrefix } from "@plannotator/shared/at-reference";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
@@ -218,7 +224,9 @@ export async function handleAnnotateCommand(
   // --json is accepted silently (OpenCode writes to session, not stdout).
   // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
   // `rawFilePath` preserves it for the scoped-package markdown fallback.
-  const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(rawArgs);
+  const parsedAnnotateArgs = parseAnnotateArgs(rawArgs);
+  const { gate, renderMarkdown: renderMarkdownFlag, noJina } = parsedAnnotateArgs;
+  let { filePath, rawFilePath } = parsedAnnotateArgs;
   // @ts-ignore - Event properties contain sessionID
   const sessionId = event.properties?.sessionID;
 
@@ -226,6 +234,25 @@ export async function handleAnnotateCommand(
     client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]" });
     return;
   }
+
+  // Tolerant target selection: the slash command hands us whatever the user
+  // typed, so trailing prose ("the aim doc") used to be fatal. The un-split
+  // string is tried first, so an unquoted path containing spaces still wins
+  // over its own tokens; only then do we sift per token.
+  const agentCwd = directory || process.cwd();
+  // No `strict` here — OpenCode writes decisions back into the session and
+  // owns no exit-code contract.
+  const annotateTarget = resolveAnnotateTargetArg({
+    raw: rawFilePath,
+    resolves: (token) => annotateTokenResolves(token, agentCwd),
+    inputExists: (input) => annotateInputExists(input, agentCwd),
+  });
+  if (annotateTarget.kind === "error") {
+    client.app.log({ level: "error", message: annotateTarget.message });
+    return;
+  }
+  rawFilePath = annotateTarget.token;
+  filePath = stripAtPrefix(rawFilePath);
 
   let markdown: string;
   let rawHtml: string | undefined;
@@ -235,7 +262,6 @@ export async function handleAnnotateCommand(
   let isFolder = false;
   let sourceInfo: string | undefined;
   let sourceConverted = false;
-  const agentCwd = directory || process.cwd();
 
   // --- URL annotation ---
   const isUrl = /^https?:\/\//i.test(filePath);

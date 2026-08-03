@@ -15,9 +15,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  annotateInputExists,
+  annotateTokenResolves,
+  resolveAnnotateTargetArg,
+} from "@plannotator/shared/annotate-target";
+import { parseStrictAnnotateOptions } from "./cli";
+import {
   annotateOutcomeExitCode,
   annotateStartupFailureExitCode,
   assertResultPathAvailable,
+  isStrictAnnotateInvocation,
   resolveResultFilePath,
   serializeStrictAnnotateResult,
   STRICT_GATE_ERROR_EXIT_CODE,
@@ -175,6 +182,151 @@ describe("annotate startup failure exit codes", () => {
         annotateStartupBlock.slice(0, site).lastIndexOf("console.error("),
       );
     }
+  });
+});
+
+describe("tolerant annotate target resolution vs the strict exit-code contract", () => {
+  /**
+   * Replay exactly the wiring `index.ts` uses for the annotate branch:
+   * parse the strict options off argv, ask whether the invocation is strict,
+   * resolve the target, and — when nothing usable came back — pick the
+   * startup-failure exit code from those same strict flags.
+   *
+   * Nothing here spawns the binary: `index.ts` imports the bundled
+   * `../dist/*.html`, which CI's `bun test` never builds. So the contract is
+   * asserted over the real production units in the real order instead.
+   */
+  function annotateInvocation(argv: string[], projectRoot: string) {
+    const parsed = parseStrictAnnotateOptions(argv);
+    const args = parsed.remainingArgs.filter(
+      (arg) => arg !== "--gate" && arg !== "--json",
+    );
+    const rawFilePath = args[1];
+    const decision = resolveAnnotateTargetArg({
+      raw: rawFilePath,
+      tokens: args.slice(1),
+      strict: isStrictAnnotateInvocation(parsed),
+      resolves: (token) => annotateTokenResolves(token, projectRoot),
+      inputExists: (input) => annotateInputExists(input, projectRoot),
+    });
+    return {
+      strict: isStrictAnnotateInvocation(parsed),
+      decision,
+      startupFailureExitCode: annotateStartupFailureExitCode(parsed),
+    };
+  }
+
+  async function projectWithOneDocument(): Promise<string> {
+    const directory = await makeTemporaryDirectory();
+    await writeFile(join(directory, "spec.md"), "# Spec\n", "utf8");
+    return directory;
+  }
+
+  test("a typo under --gate --json --require-approval still exits 2", async () => {
+    const projectRoot = await projectWithOneDocument();
+    const { strict, decision, startupFailureExitCode } = annotateInvocation(
+      ["annotate", "typo.md", "--gate", "--json", "--require-approval"],
+      projectRoot,
+    );
+
+    expect(strict).toBe(true);
+    // Tolerance is bypassed: the target is what was typed, verbatim.
+    expect(decision).toEqual({ kind: "target", token: "typo.md" });
+    // …and it does not resolve, so the startup-failure path is the one taken.
+    expect(annotateTokenResolves("typo.md", projectRoot)).toBe(false);
+    expect(startupFailureExitCode).toBe(STRICT_GATE_ERROR_EXIT_CODE);
+  });
+
+  test("a typo under --gate --json --result-file still exits 2", async () => {
+    const projectRoot = await projectWithOneDocument();
+    const { strict, decision, startupFailureExitCode } = annotateInvocation(
+      [
+        "annotate",
+        "typo.md",
+        "--gate",
+        "--json",
+        "--result-file",
+        join(projectRoot, "result.json"),
+      ],
+      projectRoot,
+    );
+
+    expect(strict).toBe(true);
+    expect(decision).toEqual({ kind: "target", token: "typo.md" });
+    expect(startupFailureExitCode).toBe(STRICT_GATE_ERROR_EXIT_CODE);
+  });
+
+  test("strict never annotates a different argument than the one it was given", async () => {
+    const projectRoot = await projectWithOneDocument();
+    // `spec.md` is real and would win under tolerant resolution. A gate that
+    // silently reviewed it would publish "approved" for a document the caller
+    // never named, so strict must keep failing on `typo.md`.
+    const { decision, startupFailureExitCode } = annotateInvocation(
+      ["annotate", "typo.md", "spec.md", "--gate", "--json", "--require-approval"],
+      projectRoot,
+    );
+
+    expect(decision).toEqual({ kind: "target", token: "typo.md" });
+    expect(startupFailureExitCode).toBe(STRICT_GATE_ERROR_EXIT_CODE);
+  });
+
+  test("strict does not error on ambiguity either — it just uses argv[1]", async () => {
+    const projectRoot = await projectWithOneDocument();
+    await writeFile(join(projectRoot, "notes.md"), "# Notes\n", "utf8");
+    const { decision } = annotateInvocation(
+      ["annotate", "spec.md", "notes.md", "--gate", "--json", "--require-approval"],
+      projectRoot,
+    );
+
+    expect(decision).toEqual({ kind: "target", token: "spec.md" });
+  });
+
+  test("the same argv without a strict flag gets the tolerant behavior", async () => {
+    const projectRoot = await projectWithOneDocument();
+
+    // Prose around a real file resolves to the file.
+    expect(
+      annotateInvocation(
+        ["annotate", "the", "aim", "spec.md", "--gate", "--json"],
+        projectRoot,
+      ),
+    ).toMatchObject({
+      strict: false,
+      decision: { kind: "target", token: "spec.md" },
+      startupFailureExitCode: 1,
+    });
+
+    // Nothing usable errors with the shape hint instead of "File not found: the".
+    const noTarget = annotateInvocation(
+      ["annotate", "the", "aim", "doc"],
+      projectRoot,
+    );
+    expect(noTarget.decision.kind).toBe("error");
+    if (noTarget.decision.kind !== "error") throw new Error("unreachable");
+    expect(noTarget.decision.message).toContain("Tried: the, aim, doc");
+    expect(noTarget.decision.message).toContain("path, URL, or folder");
+  });
+
+  test("index.ts gates tolerant resolution on the strict predicate", () => {
+    // The bypass has to be wired in the annotate startup block itself; a
+    // tolerant path that forgot `strict` would pass every unit test above
+    // and still break the gate contract in production.
+    const source = readFileSync(join(import.meta.dir, "index.ts"), "utf8");
+    const start = source.indexOf('} else if (args[0] === "annotate") {');
+    const end = source.indexOf(
+      '} else if (args[0] === "annotate-last" || args[0] === "last") {',
+      start,
+    );
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+
+    const annotateStartupBlock = source.slice(start, end);
+    const call = annotateStartupBlock.indexOf("resolveAnnotateTargetArg({");
+    expect(call).toBeGreaterThan(-1);
+    const callArgs = annotateStartupBlock.slice(call, call + 600);
+    expect(callArgs).toContain("strict: isStrictAnnotateInvocation({");
+    expect(callArgs).toContain("requireApproval: requireApprovalFlag");
+    expect(callArgs).toContain("resultFile");
   });
 });
 
