@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
-import { Block } from '../../types';
+import type { Block } from '../../types';
 
 interface CodeBlockProps {
   block: Block;
@@ -10,7 +10,7 @@ interface CodeBlockProps {
   isHovered: boolean;
 }
 
-export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave, isHovered }) => {
+export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave }) => {
   const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLElement>(null);

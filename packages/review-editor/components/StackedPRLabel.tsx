@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import { getPlatformLabel } from '@plannotator/shared/pr-types';
 import { buildMinimalStackTree } from '@plannotator/shared/pr-stack';
 import { getItem, setItem } from '@plannotator/ui/utils/storage';
@@ -146,13 +146,16 @@ export function StackedPRLabel({
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          disabled={isSwitchingScope}
-          title={`Stack: comparing vs ${scopeTarget}`}
-          className="text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
-        >
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            disabled={isSwitchingScope}
+            title={`Stack: comparing vs ${scopeTarget}`}
+            className="text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+          />
+        }
+      >
           <svg className="w-[18px] h-[18px] flex-shrink-0" viewBox="0 0 500 400" fill="none" stroke="currentColor" strokeWidth={28} strokeLinejoin="round" strokeLinecap="round">
             <polygon points="250,30 470,160 250,290 30,160" />
             <polyline points="30,220 250,350 470,220" />
@@ -168,15 +171,10 @@ export function StackedPRLabel({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content
-          side="bottom"
-          align="start"
-          sideOffset={6}
-          className="z-50 w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--radix-popover-content-transform-origin)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-        >
+        <Popover.Positioner side="bottom" align="start" sideOffset={6} className="z-50">
+          <Popover.Popup className="w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           {/* Section 1: Stack Tree */}
           <div className="px-3 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
@@ -342,7 +340,8 @@ export function StackedPRLabel({
               </svg>
             </a>
           </div>
-        </Popover.Content>
+          </Popover.Popup>
+        </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
   );

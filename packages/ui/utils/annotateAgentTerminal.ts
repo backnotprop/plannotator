@@ -1,4 +1,4 @@
-import type { AgentTerminalAgent } from "@plannotator/shared/agent-terminal";
+import type { AgentTerminalAgent } from "@plannotator/core/agent-terminal";
 import { storage } from "./storage";
 
 const DEFAULT_AGENT_KEY = "plannotator-annotate-agent-terminal-default";

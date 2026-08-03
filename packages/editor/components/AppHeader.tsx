@@ -344,6 +344,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             onTaterModeChange={onTaterModeChange}
             onIdentityChange={onIdentityChange}
             origin={origin}
+            mode={annotateMode ? 'annotate' : 'plan'}
             onUIPreferencesChange={onUIPreferencesChange}
             externalOpen={mobileSettingsOpen}
             onExternalClose={onCloseSettings}

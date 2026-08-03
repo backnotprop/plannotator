@@ -59,6 +59,8 @@ These are sent during code review (`/plannotator-review`).
 | `approved` | You approve a code review with no feedback | none |
 | `denied` | Appended after your review feedback | none |
 
+The built-in `review.denied` suffix asks the receiving agent to verify only the submitted findings against the code, give each one a verdict with evidence, and discuss the validated findings before changing code. It explicitly tells the agent not to review the rest of the diff or search for additional issues. An override replaces this entire suffix.
+
 ## Template variables
 
 Templates use `{{variable}}` placeholders. Here's what each one contains:
@@ -169,6 +171,22 @@ write). Execute the plan in {{planFilePath}}. {{doneMsg}}
 {{feedback}}
 
 Please address the annotation feedback above.
+```
+
+**Review feedback suffix (default):**
+
+```
+Treat the findings above as unverified review input. Inspect every finding
+against the actual code; do not assume automated feedback is correct. For each
+finding, give a clear verdict (Confirmed / Partly / Not a bug / Intended) with
+concise code evidence. Say whether it was introduced by the current changes,
+was pre-existing, or reflects deliberate scope.
+
+Review only the incoming findings. Do not independently review the rest of the
+diff or search for issues that were not submitted.
+
+Do not change any code until we have discussed the verdicts and validated
+findings.
 ```
 
 ## Example: context anchoring with a Decisions Log

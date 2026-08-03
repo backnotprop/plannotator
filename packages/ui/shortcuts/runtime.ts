@@ -164,7 +164,7 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
 
   useEffect(() => {
     // Pre-parse which actions have double-tap bindings
-    const doubleTapActions: Array<{ actionId: ShortcutActionId<TScope>; keyName: string }> = [];
+    const doubleTapActions: Array<{ actionId: ShortcutActionId<TScope>; keyName: string; preventDefault: boolean }> = [];
     for (const [actionId, shortcut] of Object.entries(scope.shortcuts) as Array<[
       ShortcutActionId<TScope>,
       ShortcutDefinition,
@@ -172,7 +172,7 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
       for (const binding of shortcut.bindings) {
         const keyName = parseDoubleTapBinding(binding);
         if (keyName) {
-          doubleTapActions.push({ actionId, keyName });
+          doubleTapActions.push({ actionId, keyName, preventDefault: shortcut.preventDefault === true });
         }
       }
     }
@@ -181,10 +181,46 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
 
     // Track last keyup timestamp per key
     const lastKeyUp = new Map<string, number>();
+    // A tap only counts when the key went down and came up ALONE. Without this,
+    // any two releases of (say) Shift within the window fire the action: typing
+    // two capitalized words, extending a selection with two Shift+Clicks, or
+    // pressing a Mod+Shift+<key> chord twice. cleanPress marks a press as solo
+    // until any other key or pointer interaction intervenes.
+    const cleanPress = new Map<string, boolean>();
+    const MODIFIER_KEYS = ['Meta', 'Control', 'Alt', 'Shift'];
+
+    const invalidateSequence = () => {
+      cleanPress.clear();
+      lastKeyUp.clear();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      let tracked = false;
+      for (const { keyName } of doubleTapActions) {
+        if (matchesKeyName(event, keyName)) {
+          tracked = true;
+          if (!event.repeat) cleanPress.set(keyName, true);
+        }
+      }
+      // Any non-tracked keydown breaks both the current press and the sequence.
+      if (!tracked) invalidateSequence();
+    };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      for (const { actionId, keyName } of doubleTapActions) {
+      for (const { actionId, keyName, preventDefault } of doubleTapActions) {
         if (!matchesKeyName(event, keyName)) continue;
+
+        // Release with another modifier still held (Mod+Shift+B) or after a
+        // non-solo press: not a tap, and it resets the sequence.
+        const otherModifierHeld = MODIFIER_KEYS.some(
+          (m) => m !== keyName && event.getModifierState(m),
+        );
+        if (otherModifierHeld || cleanPress.get(keyName) !== true) {
+          lastKeyUp.delete(keyName);
+          cleanPress.delete(keyName);
+          continue;
+        }
+        cleanPress.delete(keyName); // release consumes the press
 
         const handler = handlersRef.current[actionId];
         if (!handler) continue;
@@ -195,6 +231,7 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
         const now = Date.now();
         const prev = lastKeyUp.get(keyName) ?? 0;
         if (now - prev < tapWindow) {
+          if (preventDefault) event.preventDefault();
           handle(event);
           lastKeyUp.set(keyName, 0); // reset so triple-tap doesn't re-fire
         } else {
@@ -203,8 +240,15 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
       }
     };
 
+    window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp);
-    return () => window.removeEventListener('keyup', handleKeyUp);
+    // Pointer interaction mid-press (Shift+Click selection) breaks the tap.
+    window.addEventListener('mousedown', invalidateSequence, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('mousedown', invalidateSequence, true);
+    };
   }, [scope, tapWindow]);
 }
 

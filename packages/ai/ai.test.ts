@@ -6,7 +6,7 @@ import {
   registerProviderFactory,
   createProvider,
 } from "./provider.ts";
-import { createAIEndpoints } from "./endpoints.ts";
+import { AI_ENDPOINT_PATHS, createAIEndpoints } from "./endpoints.ts";
 import type {
   AIProvider,
   AISession,
@@ -543,6 +543,12 @@ describe("AI endpoints", () => {
     const endpoints = createAIEndpoints({ registry: reg, sessionManager: sm });
     return { reg, sm, endpoints };
   }
+
+  test("canonical path list matches the runtime endpoint map", () => {
+    const { endpoints } = setup();
+
+    expect([...AI_ENDPOINT_PATHS].sort()).toEqual(Object.keys(endpoints).sort());
+  });
 
   test("capabilities returns available: false when no provider", async () => {
     const { endpoints } = setup();

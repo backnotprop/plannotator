@@ -261,16 +261,20 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </button>
         )}
         <SemanticFileBadge filePath={filePath} />
-        {/* File actions: open in app (when launchable), copy path, copy file
-            diff. canOpen=false in PR review without a local checkout — those
-            files aren't on disk — but copy actions remain. */}
+        {/* File actions: open in app (when the live checkout matches this
+            snapshot), copy path, copy file diff. Copy actions remain when a
+            PR has no checkout or a committed GitButler layer is selected. */}
         {/* Icon-only in the header (the picked app's name shows in the dropdown),
             matching the plan/annotate side. */}
         <OpenInAppButton
           filePath={filePath}
           base={state?.agentCwd ?? null}
           diffText={patch}
-          canOpen={!(state?.prMetadata && !state?.agentCwd) && status !== 'deleted'}
+          canOpen={
+            state?.canUseLiveWorkspaceActions !== false &&
+            !(state?.prMetadata && !state?.agentCwd) &&
+            status !== 'deleted'
+          }
         />
       </div>
     </div>

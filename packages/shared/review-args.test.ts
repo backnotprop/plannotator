@@ -18,6 +18,14 @@ describe("parseReviewArgs", () => {
     });
   });
 
+  test("parses --gitbutler without a PR URL", () => {
+    expect(parseReviewArgs("--gitbutler")).toEqual({
+      prUrl: undefined,
+      vcsType: "gitbutler",
+      useLocal: true,
+    });
+  });
+
   test("parses PR URLs before or after --git", () => {
     expect(parseReviewArgs("--git https://github.com/acme/repo/pull/12")).toEqual({
       prUrl: "https://github.com/acme/repo/pull/12",

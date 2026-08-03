@@ -15,12 +15,91 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { SourceSaveCapability } from '@plannotator/shared/source-save';
+import type { SourceSaveCapability } from '@plannotator/core/source-save';
 import type { Annotation, CodeAnnotation, ImageAttachment } from '../types';
 import { fromShareable, parseShareableImages } from '../utils/sharing';
 import type { ShareableAnnotation } from '../utils/sharing';
 
 const DEBOUNCE_MS = 500;
+
+/**
+ * Transport for persisting annotation/edit drafts. The default reproduces
+ * Plannotator's `/api/draft` server protocol verbatim. A host (e.g. Workspaces)
+ * may override it to persist drafts through its own backend.
+ *
+ * CONTRACT — a host overriding this MUST preserve the 3-party generation
+ * protocol or ghost drafts resurrect:
+ *  - `save` must be best-effort on page close (the default uses `keepalive`
+ *    with a retry-without-keepalive on failure, gated by a generation match).
+ *  - `remove(generation)` is a generation-gated TOMBSTONE: the host's store
+ *    must reject any later `save` whose `draftGeneration` is <= the deleted
+ *    generation (delete-on-submit + tombstoning). The hook pre-increments
+ *    `draftGeneration` and threads `getDraftGeneration()` out to the host,
+ *    which sends it on approve/deny/feedback/exit so the server deletes the
+ *    draft with the right generation. Drop this and a debounced save landing
+ *    after submit re-creates a draft the server just deleted.
+ *  - `load` returns the raw stored body (or null) plus the generation the
+ *    store reports when there is NO draft (the default reads `draftGeneration`
+ *    from the 404 body) so the client can resume past a tombstone.
+ */
+export interface DraftTransport {
+  /** GET the draft. `data` is the raw stored body (null if none). `generation`
+      is the store's reported generation when there is no draft (null otherwise). */
+  load(): Promise<{ data: unknown | null; generation: number | null }>;
+  /** Persist the draft body. `keepalive` requests best-effort delivery on close. */
+  save(body: object, opts: { keepalive: boolean }): Promise<void>;
+  /** Generation-gated tombstone delete. */
+  remove(generation: number, opts: { keepalive: boolean }): Promise<void>;
+}
+
+/**
+ * Default transport — Plannotator's `/api/draft` fetches, moved verbatim.
+ * `save` rejects on failure (the keepalive retry stays in the hook so its
+ * generation-match gate is preserved); `remove` always resolves.
+ */
+const defaultDraftTransport: DraftTransport = {
+  async load() {
+    const res = await fetch('/api/draft');
+    const data = (await res.json().catch(() => null)) as unknown;
+    if (!res.ok) {
+      const generation = readDraftGeneration(
+        (data as MissingDraftData | null)?.draftGeneration,
+      );
+      return { data: null, generation };
+    }
+    return { data, generation: null };
+  },
+  save(body, { keepalive }) {
+    const payload = JSON.stringify(body);
+    const headers = { 'Content-Type': 'application/json' };
+    return fetch('/api/draft', { method: 'POST', headers, body: payload, keepalive }).then(
+      () => {},
+    );
+  },
+  remove(generation, { keepalive }) {
+    return fetch(`/api/draft?generation=${generation}`, { method: 'DELETE', keepalive }).then(
+      () => {},
+      () => {},
+    );
+  },
+};
+
+let draftTransport: DraftTransport = defaultDraftTransport;
+
+/** Read the active draft transport at call time (so a late override is honored). */
+export function getDraftTransport(): DraftTransport {
+  return draftTransport;
+}
+
+/** Override the draft transport. Call once at app startup. */
+export function setDraftTransport(t: DraftTransport): void {
+  draftTransport = t;
+}
+
+/** Reset to the default `/api/draft` transport. Mainly for tests. */
+export function resetDraftTransport(): void {
+  draftTransport = defaultDraftTransport;
+}
 
 type DraftSourceSaveCapability = Extract<SourceSaveCapability, { enabled: true }>;
 
@@ -233,17 +312,12 @@ export function useAnnotationDraft({
   useEffect(() => {
     if (!isApiMode || isSharedSession) return;
 
-    fetch('/api/draft')
-      .then(async res => {
-        const data = await res.json().catch(() => null) as DraftData | LegacyDraftData | MissingDraftData | null;
-        if (!res.ok) {
-          const generation = readDraftGeneration((data as MissingDraftData | null)?.draftGeneration);
-          if (generation !== null) {
-            draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
-          }
-          return null;
+    getDraftTransport().load()
+      .then(({ data, generation }) => {
+        if (generation !== null) {
+          draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
         }
-        return data;
+        return data as DraftData | LegacyDraftData | null;
       })
       .then((data: DraftData | LegacyDraftData | null) => {
         if (!data) {
@@ -335,7 +409,7 @@ export function useAnnotationDraft({
       // explicitly threw away.
       const deletedGeneration = draftGenerationRef.current + 1;
       draftGenerationRef.current = deletedGeneration;
-      fetch(`/api/draft?generation=${deletedGeneration}`, { method: 'DELETE', keepalive }).catch(() => {});
+      getDraftTransport().remove(deletedGeneration, { keepalive }).catch(() => {});
       return;
     }
 
@@ -352,13 +426,14 @@ export function useAnnotationDraft({
       ts: Date.now(),
     };
 
-    const body = JSON.stringify(payload);
-    const headers = { 'Content-Type': 'application/json' };
-    fetch('/api/draft', { method: 'POST', headers, body, keepalive }).catch(() => {
+    // The transport moves the POST behind the seam; the keepalive retry-on-failure
+    // gate stays in the hook verbatim so a host transport that resolves/rejects on
+    // failure still won't resurrect a superseded save.
+    getDraftTransport().save(payload, { keepalive }).catch(() => {
       // Chromium caps keepalive bodies (~64KB); retry without it. Completes
       // fine when the page was only backgrounded, best-effort on close.
       if (keepalive && canPersistRef.current && draftGenerationRef.current === draftGeneration) {
-        fetch('/api/draft', { method: 'POST', headers, body }).catch(() => {});
+        getDraftTransport().save(payload, { keepalive: false }).catch(() => {});
       }
       // Otherwise silent failure — draft is best-effort.
     });
@@ -441,9 +516,7 @@ export function useAnnotationDraft({
     setDraftBanner(null);
     draftDataRef.current = null;
 
-    fetch(`/api/draft?generation=${deletedGeneration}`, { method: 'DELETE' }).catch(() => {
-      // Silent failure
-    });
+    getDraftTransport().remove(deletedGeneration, { keepalive: false }).catch(() => {});
   }, []);
 
   return { draftBanner, restoreDraft, scheduleDraftSave, scheduleDraftSaveAfterSubmitFailure, getDraftGeneration, dismissDraft };

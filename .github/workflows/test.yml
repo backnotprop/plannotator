@@ -31,8 +31,38 @@ jobs:
       - name: Run tests
         run: bun test
 
-      - name: Run file browser DOM tests
+      # The file-browser watcher test is timing-sensitive (a 120ms SSE debounce
+      # asserted with real timers). Run it in its own process — matching the
+      # historical config — so it isn't destabilized by sharing a process with
+      # the rest of the ui suite (heavy load intermittently starves the debounce
+      # timer and the reconnect refetch is missed). See useFileBrowser.test.tsx.
+      - name: Run file-browser DOM test (isolated)
         run: DOM_TESTS=1 bun test packages/ui/hooks/useFileBrowser.test.tsx
+
+      # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
+      # (not the whole ui suite) to keep this process light.
+      - name: Run UI seam-contract + DOM tests
+        run: >-
+          DOM_TESTS=1 bun test
+          packages/ui/markdownEditorFidelity.test.tsx
+          packages/ui/annotationDraftPersistence.test.tsx
+          packages/ui/codeAnnotationDraftPersistence.test.tsx
+          packages/ui/components/html-viewer/srcdoc.test.ts
+          packages/ui/components/InlineMarkdown.resolveLinkedDoc.test.tsx
+          packages/ui/components/MarkdownDiff.frozen.test.tsx
+          packages/ui/components/MarkdownEditor.extensions.test.tsx
+          packages/ui/components/sidebar/FileBrowser.test.ts
+          packages/editor/editableDocumentsHook.test.tsx
+          packages/ui/components/AnnotationPanel.props.test.tsx
+          packages/ui/components/Viewer.consumer.test.tsx
+          packages/ui/components/InlineMarkdown.seam.test.tsx
+          packages/ui/components/ImageThumbnail.seam.test.tsx
+          packages/ui/hooks/useAnnotationHighlighter.test.tsx
+          packages/ui/hooks/annotationRestoreVerify.test.tsx
+          packages/ui/hooks/useAnnotationDraft.seam.test.tsx
+          packages/ui/hooks/useExternalAnnotations.seam.test.tsx
+          packages/ui/hooks/useAIChat.seam.test.tsx
+          packages/ui/hooks/useFileBrowser.seam.test.tsx
 
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an
@@ -48,7 +78,7 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
 
@@ -58,6 +88,9 @@ jobs:
       - name: Generate Pi extension shared copies
         shell: bash
         run: bash apps/pi-extension/vendor.sh
+
+      - name: Run workspace symlink tests
+        run: bun test packages/server/review-workspace.test.ts --test-name-pattern discoverWorkspaceRepoPaths
 
       - name: Build Pi AI runtime smoke
         run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"

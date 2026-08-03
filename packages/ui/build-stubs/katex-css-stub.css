@@ -1,0 +1,7 @@
+/* Build-time stub. The published styles.css build (vite.css.config.ts) aliases
+   katex/dist/katex.min.css to this empty file: Vite's library mode inlines every
+   font a stylesheet references as a base64 data URI, and KaTeX's 60 math fonts
+   (~1.1MB) would balloon the published CSS ~9x. Hosts that render math import
+   KaTeX's stylesheet themselves (bundler import, CDN tag, or self-hosted copy —
+   see HANDOFF.md), which also gets them lazy font loading. Plannotator's own
+   apps import theme.css directly and are untouched by this alias. */

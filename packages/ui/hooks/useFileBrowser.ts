@@ -9,7 +9,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { VaultNode } from "../types";
-import type { WorkspaceStatusPayload } from "@plannotator/shared/workspace-status";
+import type { WorkspaceStatusPayload } from "@plannotator/core/workspace-status-types";
 
 export interface DirState {
   path: string;
@@ -82,6 +82,101 @@ function remapWorkspaceStatusForDir(
   };
 }
 
+/**
+ * File-tree backend. Defaults to Plannotator's HTTP endpoints (generic files,
+ * Obsidian vault, and the SSE live-watch stream) so Plannotator is unchanged. A
+ * host (e.g. Workspaces) calls setFileTreeBackend once at startup to source the
+ * tree from its own transport instead.
+ */
+export interface FileTreeBackend {
+  /** Load a directory tree. Resolves to the same shape the /api/reference/files endpoint returns: a Response whose JSON is { tree, workspaceStatus?, error? }. */
+  loadTree(dirPath: string): Promise<Response>;
+  /** Load an Obsidian vault tree. Resolves to a Response whose JSON is { tree, error? }. */
+  loadVaultTree(vaultPath: string): Promise<Response>;
+  /**
+   * Begin live-watching the given directory paths. `onChange(path)` is invoked
+   * (already debounced/deduped) whenever a watched tree should be re-fetched.
+   * Returns a cleanup function. Returning undefined means no watcher started.
+   */
+  watchTrees(paths: string[], onChange: (path: string) => void): (() => void) | undefined;
+}
+
+const defaultFileTreeBackend: FileTreeBackend = {
+  loadTree(dirPath) {
+    return fetch(`/api/reference/files?dirPath=${encodeURIComponent(dirPath)}`);
+  },
+  loadVaultTree(vaultPath) {
+    return fetch(`/api/reference/obsidian/files?vaultPath=${encodeURIComponent(vaultPath)}`);
+  },
+  watchTrees(paths, onChange) {
+    if (typeof EventSource === "undefined") return undefined;
+
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    const readyPaths = new Set<string>();
+    const params = new URLSearchParams();
+    for (const path of paths) params.append("dirPath", path);
+    const source = new EventSource(`/api/reference/files/stream?${params.toString()}`);
+    const scheduleFetch = (path: string) => {
+      const existing = timers.get(path);
+      if (existing) clearTimeout(existing);
+      timers.set(path, setTimeout(() => {
+        timers.delete(path);
+        onChange(path);
+      }, 120));
+    };
+    const scheduleEventFetch = (dirPath: unknown) => {
+      if (typeof dirPath === "string" && paths.includes(dirPath)) {
+        scheduleFetch(dirPath);
+        return;
+      }
+      for (const path of paths) scheduleFetch(path);
+    };
+    const hasSeenReady = (dirPath: unknown): boolean => {
+      if (typeof dirPath === "string" && paths.includes(dirPath)) {
+        if (readyPaths.has(dirPath)) return true;
+        readyPaths.add(dirPath);
+        return false;
+      }
+
+      const hadAll = paths.every((path) => readyPaths.has(path));
+      for (const path of paths) readyPaths.add(path);
+      return hadAll;
+    };
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { type?: string; dirPath?: string };
+        if (data.type === "ready") {
+          if (hasSeenReady(data.dirPath)) scheduleEventFetch(data.dirPath);
+          return;
+        }
+        if (data.type !== "changed") return;
+        scheduleEventFetch(data.dirPath);
+      } catch {
+        return;
+      }
+    };
+
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      source.close();
+    };
+  },
+};
+
+// Active backend. Defaults to Plannotator's HTTP endpoints so Plannotator is
+// unchanged. A host calls setFileTreeBackend once at startup to override.
+let fileTreeBackend: FileTreeBackend = defaultFileTreeBackend;
+
+/** Override the file-tree backend. Call once at app startup. */
+export function setFileTreeBackend(b: FileTreeBackend): void {
+  fileTreeBackend = b;
+}
+
+/** Reset to the default (HTTP endpoint) backend. Mainly for tests. */
+export function resetFileTreeBackend(): void {
+  fileTreeBackend = defaultFileTreeBackend;
+}
+
 export function useFileBrowser(): UseFileBrowserReturn {
   const [dirs, setDirs] = useState<DirState[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -113,9 +208,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
     });
 
     try {
-      const res = await fetch(
-        `/api/reference/files?dirPath=${encodeURIComponent(dirPath)}`
-      );
+      const res = await fileTreeBackend.loadTree(dirPath);
       const data = await res.json();
 
       if (!res.ok || data.error) {
@@ -220,9 +313,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
     });
 
     try {
-      const res = await fetch(
-        `/api/reference/obsidian/files?vaultPath=${encodeURIComponent(vaultPath)}`
-      );
+      const res = await fileTreeBackend.loadVaultTree(vaultPath);
       const data = await res.json();
 
       if (!res.ok || data.error) {
@@ -287,58 +378,11 @@ export function useFileBrowser(): UseFileBrowserReturn {
   );
 
   useEffect(() => {
-    if (!watchDirsKey || typeof EventSource === "undefined") return;
-
+    if (!watchDirsKey) return;
     const paths = watchDirsKey.split("\n").filter(Boolean);
-    const timers = new Map<string, ReturnType<typeof setTimeout>>();
-    const readyPaths = new Set<string>();
-    const params = new URLSearchParams();
-    for (const path of paths) params.append("dirPath", path);
-    const source = new EventSource(`/api/reference/files/stream?${params.toString()}`);
-    const scheduleFetch = (path: string) => {
-      const existing = timers.get(path);
-      if (existing) clearTimeout(existing);
-      timers.set(path, setTimeout(() => {
-        timers.delete(path);
-        fetchTreeRef.current(path, { quiet: true });
-      }, 120));
-    };
-    const scheduleEventFetch = (dirPath: unknown) => {
-      if (typeof dirPath === "string" && paths.includes(dirPath)) {
-        scheduleFetch(dirPath);
-        return;
-      }
-      for (const path of paths) scheduleFetch(path);
-    };
-    const hasSeenReady = (dirPath: unknown): boolean => {
-      if (typeof dirPath === "string" && paths.includes(dirPath)) {
-        if (readyPaths.has(dirPath)) return true;
-        readyPaths.add(dirPath);
-        return false;
-      }
-
-      const hadAll = paths.every((path) => readyPaths.has(path));
-      for (const path of paths) readyPaths.add(path);
-      return hadAll;
-    };
-    source.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as { type?: string; dirPath?: string };
-        if (data.type === "ready") {
-          if (hasSeenReady(data.dirPath)) scheduleEventFetch(data.dirPath);
-          return;
-        }
-        if (data.type !== "changed") return;
-        scheduleEventFetch(data.dirPath);
-      } catch {
-        return;
-      }
-    };
-
-    return () => {
-      for (const timer of timers.values()) clearTimeout(timer);
-      source.close();
-    };
+    return fileTreeBackend.watchTrees(paths, (path) => {
+      fetchTreeRef.current(path, { quiet: true });
+    });
   }, [watchDirsKey]);
 
   return {

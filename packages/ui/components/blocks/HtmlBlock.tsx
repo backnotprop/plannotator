@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from "react";
-import { isCodeFilePath } from "@plannotator/shared/code-file";
-import { Block } from "../../types";
+import { isCodeFilePath } from "@plannotator/core/code-file";
+import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
 import { getImageSrc } from "../ImageThumbnail";
 

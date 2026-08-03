@@ -10,24 +10,8 @@ import { getPlannotatorDataDir } from "./data-dir";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
-export type DefaultDiffType = 'since-base' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
-export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
-
-export interface DiffOptions {
-  diffStyle?: 'split' | 'unified';
-  overflow?: 'scroll' | 'wrap';
-  diffIndicators?: 'bars' | 'classic' | 'none';
-  lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
-  showLineNumbers?: boolean;
-  showDiffBackground?: boolean;
-  fontFamily?: string;
-  fontSize?: string;
-  tabSize?: number;
-  hideWhitespace?: boolean;
-  expandUnchanged?: boolean;
-  defaultDiffType?: DefaultDiffType;
-  lineBgIntensity?: DiffLineBgIntensity;
-}
+import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions } from '@plannotator/core/config-types';
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -121,6 +105,14 @@ export interface PlannotatorConfig {
    * Set to false to always use plain fetch + Turndown.
    */
   jina?: boolean;
+  /**
+   * Save per-file version history when annotating local files. Powers the
+   * annotate version diff ("what changed since I last looked"). NOTE: this
+   * writes a copy of each annotated file's content under
+   * ~/.plannotator/history/ (or PLANNOTATOR_DATA_DIR). Set to false to keep
+   * annotate sessions fully stateless. Default: true.
+   */
+  annotateHistory?: boolean;
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -253,6 +245,21 @@ export function resolveUseGlimpse(config: PlannotatorConfig): boolean {
  * Priority (highest wins):
  *   --no-jina CLI flag  →  PLANNOTATOR_JINA env var  →  config.jina  →  default true
  */
+/**
+ * Resolve whether annotate mode saves per-file version history.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_ANNOTATE_HISTORY env var  →  config.annotateHistory  →  default true
+ */
+export function resolveAnnotateHistory(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  if (config.annotateHistory !== undefined) return config.annotateHistory;
+  return true;
+}
+
 export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {
   // CLI flag has highest priority
   if (cliNoJina) return false;

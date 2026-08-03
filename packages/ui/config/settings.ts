@@ -9,7 +9,7 @@
  * Add new settings here. Cookie-only settings omit serverKey.
  */
 
-import type { DiffLineBgIntensity } from '@plannotator/shared/config';
+import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 
@@ -301,7 +301,10 @@ export const SETTINGS = {
       }
     },
   },
-} satisfies Record<string, SettingDef<unknown>>;
+  /* SettingDef<any>, not <unknown>: consumers compile this shipped source under
+     their own strictFunctionTypes, where a narrow `toCookie: (v: string) => void`
+     is contravariantly incompatible with `(value: unknown) => void`. */
+} satisfies Record<string, SettingDef<any>>;
 
 export type SettingsMap = typeof SETTINGS;
 export type SettingName = keyof SettingsMap;

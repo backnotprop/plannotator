@@ -13,6 +13,28 @@ import { getOctarineSettings } from '../utils/octarine';
 import { wrapFeedbackForAgent } from '../utils/parser';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
+/** POST body shape sent to the notes endpoint (mirrors what the Notes tab builds today). */
+interface SaveToNotesPayload {
+  obsidian?: object;
+  bear?: object;
+  octarine?: object;
+}
+
+/** Parsed response from the notes endpoint. */
+interface SaveToNotesResult {
+  results?: Record<string, { success?: boolean; error?: string }>;
+}
+
+/** Default save-to-notes wire: today's literal POST to /api/save-notes. */
+async function defaultSaveToNotes(body: SaveToNotesPayload): Promise<SaveToNotesResult> {
+  const res = await fetch('/api/save-notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
 interface ExportModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -33,6 +55,8 @@ interface ExportModalProps {
   markdown?: string;
   isApiMode?: boolean;
   initialTab?: Tab;
+  /** Override the save-to-notes wire. Default: POST /api/save-notes (today's behavior). */
+  onSaveToNotes?: (payload: SaveToNotesPayload) => Promise<SaveToNotesResult>;
 }
 
 type Tab = 'share' | 'annotations' | 'notes';
@@ -56,6 +80,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   markdown,
   isApiMode = false,
   initialTab,
+  onSaveToNotes = defaultSaveToNotes,
 }) => {
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
@@ -147,12 +172,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
 
     try {
-      const res = await fetch('/api/save-notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
+      const data = await onSaveToNotes(body);
       const result = data.results?.[target];
 
       if (result?.success) {

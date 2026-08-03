@@ -14,6 +14,7 @@ import {
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
 import { type DiffType, prepareLocalReviewDiff, detectManagedVcs } from "@plannotator/server/vcs";
+import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
@@ -62,6 +63,7 @@ export async function handleReviewCommand(
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
+  let initialFingerprint: string | undefined;
   let userDiffType: DiffType | WorkspaceDiffType | undefined;
   let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
@@ -114,6 +116,7 @@ export async function handleReviewCommand(
         rawPatch = diffResult.rawPatch;
         gitRef = diffResult.gitRef;
         diffError = diffResult.error;
+        initialFingerprint = diffResult.fingerprint;
       } catch (err) {
         client.app.log({ level: "error", message: err instanceof Error ? err.message : "Failed to prepare local review diff" });
         return;
@@ -124,7 +127,7 @@ export async function handleReviewCommand(
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       if (workspace.repos.length === 0) {
-        client.app.log({ level: "error", message: "Not in a VCS repo and no nested Git/JJ repositories were found." });
+        client.app.log({ level: "error", message: "Not in a VCS repo and no nested Git/JJ/GitButler repositories were found." });
         return;
       }
       rawPatch = workspace.rawPatch;
@@ -142,6 +145,7 @@ export async function handleReviewCommand(
     origin: "opencode",
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
+    initialFingerprint,
     prMetadata,
     workspace,
     agentCwd,
@@ -171,7 +175,7 @@ export async function handleReviewCommand(
       const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
       const targetAgent = result.agentSwitch || "build";
 
-      // Append the triage-first suffix when the reviewer sent annotations to
+      // Append the verification-only suffix when the reviewer sent annotations to
       // act on (PR mode included). Platform PR actions post a status message
       // with no annotations — those go through verbatim, no suffix.
       const message = result.approved
@@ -307,11 +311,16 @@ export async function handleAnnotateCommand(
     }
   }
 
+  // Per-project scoping for the annotate version history — matches the hook
+  // and Pi runtimes, which both pass it (otherwise history lands in the
+  // shared "_unknown" bucket).
+  const annotateProject = (await detectProjectName()) ?? undefined;
   const server = await startServer({
     markdown,
     filePath: absolutePath,
     origin: "opencode",
     mode: annotateMode,
+    project: annotateProject,
     folderPath,
     sourceInfo,
     sourceConverted,
@@ -423,11 +432,13 @@ export async function handleAnnotateLastCommand(
 
   const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
 
+  const lastProject = (await detectProjectName()) ?? undefined;
   const server = await startServer({
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
     mode: "annotate-last",
+    project: lastProject,
     recentMessages: pickerMessages,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),

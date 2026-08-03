@@ -48,11 +48,51 @@ export interface UsePlanDiffReturn {
   fetchVersions: () => Promise<void>;
 }
 
+export interface PlanDiffFetchers {
+  /** Fetch a specific version's plan content. Default → GET /api/plan/version?v=N */
+  fetchVersion?: (version: number) => Promise<{ plan: string; version: number }>;
+  /** Fetch the version list. Default → GET /api/plan/versions */
+  fetchVersions?: () => Promise<{
+    project: string;
+    slug: string;
+    versions: VersionEntry[];
+  }>;
+}
+
+const defaultFetchVersion = async (
+  version: number
+): Promise<{ plan: string; version: number }> => {
+  const res = await fetch(`/api/plan/version?v=${version}`);
+  if (!res.ok) {
+    throw new Error(`Failed to load version ${version}.`);
+  }
+  return (await res.json()) as { plan: string; version: number };
+};
+
+const defaultFetchVersions = async (): Promise<{
+  project: string;
+  slug: string;
+  versions: VersionEntry[];
+}> => {
+  const res = await fetch("/api/plan/versions");
+  if (!res.ok) {
+    throw new Error("Failed to load versions.");
+  }
+  return (await res.json()) as {
+    project: string;
+    slug: string;
+    versions: VersionEntry[];
+  };
+};
+
 export function usePlanDiff(
   currentPlan: string,
   initialPreviousPlan: string | null,
-  versionInfo: VersionInfo | null
+  versionInfo: VersionInfo | null,
+  fetchers?: PlanDiffFetchers
 ): UsePlanDiffReturn {
+  const fetchVersionImpl = fetchers?.fetchVersion ?? defaultFetchVersion;
+  const fetchVersionsImpl = fetchers?.fetchVersions ?? defaultFetchVersions;
   const [diffBasePlan, setDiffBasePlan] = useState<string | null>(
     initialPreviousPlan
   );
@@ -95,12 +135,7 @@ export function usePlanDiff(
       setIsSelectingVersion(true);
       setFetchingVersion(version);
       try {
-        const res = await fetch(`/api/plan/version?v=${version}`);
-        if (!res.ok) {
-          alert(`Failed to load version ${version}.`);
-          return;
-        }
-        const data = (await res.json()) as { plan: string; version: number };
+        const data = await fetchVersionImpl(version);
         setDiffBasePlan(data.plan);
         setDiffBaseVersion(version);
       } catch {
@@ -110,26 +145,20 @@ export function usePlanDiff(
         setFetchingVersion(null);
       }
     },
-    []
+    [fetchVersionImpl]
   );
 
   const fetchVersions = useCallback(async () => {
     setIsLoadingVersions(true);
     try {
-      const res = await fetch("/api/plan/versions");
-      if (!res.ok) return;
-      const data = (await res.json()) as {
-        project: string;
-        slug: string;
-        versions: VersionEntry[];
-      };
+      const data = await fetchVersionsImpl();
       setVersions(data.versions);
     } catch {
       // Failed to fetch versions
     } finally {
       setIsLoadingVersions(false);
     }
-  }, []);
+  }, [fetchVersionsImpl]);
 
   return {
     diffBaseVersion,

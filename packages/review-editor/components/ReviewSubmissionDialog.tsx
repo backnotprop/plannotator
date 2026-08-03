@@ -38,6 +38,8 @@ export interface ReviewSubmission {
   orphans: OrphanedFindings[];
 }
 
+type ReviewPlatform = 'github' | 'gitlab';
+
 interface ReviewSubmissionDialogProps {
   isOpen: boolean;
   action: 'approve' | 'comment';
@@ -92,6 +94,28 @@ function buildFileScopedBody(annotations: CodeAnnotation[]): string {
     else if (scope === 'general' && a.text) parts.push(a.text);
   }
   return parts.join('\n\n');
+}
+
+/**
+ * Build the top-level review body without adding product attribution.
+ * GitHub requires a body for COMMENT reviews, so an inline-only review gets a
+ * neutral pointer. Approvals and GitLab discussions can remain bodyless.
+ */
+export function buildPlatformReviewBody(
+  action: 'approve' | 'comment',
+  platform: ReviewPlatform,
+  generalComment: string | undefined,
+  target: Pick<SubmissionTarget, 'fileComments' | 'fileScopedBody'>,
+): string {
+  const parts: string[] = [];
+  if (generalComment?.trim()) parts.push(generalComment);
+  if (target.fileScopedBody.trim()) parts.push(target.fileScopedBody);
+
+  if (parts.length > 0) return parts.join('\n\n');
+  if (action === 'comment' && platform === 'github' && target.fileComments.length > 0) {
+    return 'See inline comments.';
+  }
+  return '';
 }
 
 export function buildReviewSubmission(

@@ -141,6 +141,8 @@ interface DiffViewerProps {
   status?: import('../types').DiffFileStatus;
   /** Base branch override used for file-content lookups (branch / merge-base modes only). */
   reviewBase?: string;
+  /** Opaque diff snapshot used to reject mutable file-content lookups from another view. */
+  reviewSnapshotId?: string;
   /** Current PR url + diff scope — used to namespace file-comment drafts so they don't leak across in-place PR switches. */
   prUrl?: string;
   prDiffScope?: string;
@@ -194,6 +196,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   oldPath,
   status,
   reviewBase,
+  reviewSnapshotId,
   prUrl,
   prDiffScope,
   isFocused = false,
@@ -315,6 +318,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     const params = new URLSearchParams({ path: filePath });
     if (oldPath) params.set('oldPath', oldPath);
     if (reviewBase) params.set('base', reviewBase);
+    if (reviewSnapshotId) params.set('snapshot', reviewSnapshotId);
     fetch(`/api/file-content?${params}`, { signal: controller.signal })
       .then(res => res.ok ? res.json() : null)
       .then((data: { oldContent: string | null; newContent: string | null } | null) => {
@@ -324,7 +328,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       })
       .catch(() => {}); // Silent fallback — no expansion in demo mode
     return () => controller.abort();
-  }, [filePath, oldPath, reviewBase]);
+  }, [filePath, oldPath, reviewBase, reviewSnapshotId]);
 
   // Re-parse the patch with full file contents so hunk indices are computed
   // against the complete file (isPartial: false), enabling expansion.

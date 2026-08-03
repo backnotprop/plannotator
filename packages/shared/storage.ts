@@ -104,14 +104,8 @@ export function saveFinalSnapshot(
 
 // --- Plan Archive ---
 
-export interface ArchivedPlan {
-  filename: string;
-  title: string;
-  date: string;
-  timestamp: string;  // ISO string from file mtime
-  status: "approved" | "denied" | "unknown";
-  size: number;
-}
+import type { ArchivedPlan } from '@plannotator/core/storage-types';
+export type { ArchivedPlan };
 
 /**
  * Parse an archive filename into metadata.

@@ -925,7 +925,11 @@ export interface GuideSession {
    *  when the reviewer gets around to fixing the JSON. */
   launchChangedFiles: Map<string, string[]>;
   buildCommand(opts: GuideSessionBuildCommandOptions): Promise<GuideSessionBuildCommandResult>;
-  onJobComplete(opts: GuideSessionOnJobCompleteOptions): Promise<{ summary: GuideSessionJobSummary | null }>;
+  onJobComplete(opts: GuideSessionOnJobCompleteOptions): Promise<{
+    summary: GuideSessionJobSummary | null;
+    /** Sanitized provider failure when transport succeeded but the Pi run did not. */
+    error?: string;
+  }>;
   getGuide(jobId: string): (CodeGuideOutput & { reviewed: boolean[] }) | null;
   saveReviewed(jobId: string, reviewed: boolean[]): void;
   getFailedPayload(jobId: string): string | null;
@@ -1191,7 +1195,19 @@ export function createGuideSession(): GuideSession {
         // discipline as the review path's marker ingestion).
         const nonce = extractMarkerNonce(job.prompt ?? "");
         output = nonce && meta.stdout ? parseGuideMarkerOutput(meta.stdout, markerEngine, nonce) : null;
-        if (meta.stdout) rawCandidate = extractMarkerFailedPayload(markerEngine, meta.stdout, nonce);
+        if (meta.stdout) {
+          // A valid guide always wins, even if the stream contains an earlier
+          // transient error. Only classify the structured provider failure
+          // after strict marker parsing has failed.
+          if (!output) {
+            const { providerError } = reduceMarkerStream(meta.stdout, markerEngine);
+            if (providerError) {
+              console.error(`[guide] ${markerEngine.author} provider error for job ${job.id}: ${providerError}`);
+              return { summary: null, error: providerError };
+            }
+          }
+          rawCandidate = extractMarkerFailedPayload(markerEngine, meta.stdout, nonce);
+        }
       } else if (job.engine === "codex" && meta.outputPath) {
         const rawText = await readGuideOutputFile(meta.outputPath);
         output = rawText !== null ? parseGuideOutputText(rawText) : null;

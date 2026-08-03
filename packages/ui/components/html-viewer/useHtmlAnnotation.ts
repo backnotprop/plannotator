@@ -52,7 +52,6 @@ function postToIframe(iframe: HTMLIFrameElement | null, msg: Record<string, unkn
 
 export function useHtmlAnnotation({
   iframeRef,
-  annotations,
   onAddAnnotation,
   onSelectAnnotation,
   selectedAnnotationId,

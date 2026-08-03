@@ -84,7 +84,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   }, [generalInput, onAskGeneral]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       <OverlayScrollArea className="flex-1 min-h-0">
         <div ref={scrollRef} className="p-2 space-y-3">
           {messages.length === 0 && !isCreatingSession && (

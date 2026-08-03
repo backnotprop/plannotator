@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Origin } from '@plannotator/shared/agents';
+import type { Origin } from '@plannotator/core/agents';
 import {
   getAIProviderSettings,
   resolveAIProviderSelection,

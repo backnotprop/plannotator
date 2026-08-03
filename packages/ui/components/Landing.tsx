@@ -1,3 +1,4 @@
+/// <reference path="../globals.d.ts" />
 import React from "react";
 import logoImage from "../plannotator.webp";
 import { ModeToggle } from "./ModeToggle";

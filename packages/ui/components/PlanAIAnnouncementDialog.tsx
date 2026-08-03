@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import type { Origin } from '@plannotator/shared/agents';
-import { AGENT_CONFIG, getAgentAIProviderTypes, getAgentName } from '@plannotator/shared/agents';
+import type { Origin } from '@plannotator/core/agents';
+import { AGENT_CONFIG, getAgentAIProviderTypes, getAgentName } from '@plannotator/core/agents';
 import { SparklesIcon } from './SparklesIcon';
 import { getProviderMeta } from './ProviderIcons';
 

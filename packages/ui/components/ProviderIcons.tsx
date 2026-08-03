@@ -1,3 +1,4 @@
+/// <reference path="../globals.d.ts" />
 import type React from 'react';
 import codexPng from '../assets/icon-codex.png';
 

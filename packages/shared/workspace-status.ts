@@ -3,45 +3,8 @@ import { existsSync, realpathSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
-export type WorkspaceFileStatus =
-	| "modified"
-	| "added"
-	| "deleted"
-	| "renamed"
-	| "copied"
-	| "typechange"
-	| "conflicted"
-	| "untracked";
-
-export interface WorkspaceFileChange {
-	path: string;
-	repoRelativePath: string;
-	oldPath?: string;
-	status: WorkspaceFileStatus;
-	additions: number;
-	deletions: number;
-	staged: boolean;
-	unstaged: boolean;
-}
-
-export interface WorkspaceStatusPayload {
-	available: boolean;
-	rootPath: string;
-	repoRoot?: string;
-	files: Record<string, WorkspaceFileChange>;
-	totals: {
-		files: number;
-		additions: number;
-		deletions: number;
-	};
-	error?: string;
-}
-
-export interface GitRepositoryInfo {
-	repoRoot: string;
-	gitDir: string;
-	gitCommonDir: string;
-}
+import type { WorkspaceFileChange, WorkspaceStatusPayload, GitRepositoryInfo, WorkspaceFileStatus } from '@plannotator/core/workspace-status-types';
+export type { WorkspaceFileChange, WorkspaceStatusPayload, GitRepositoryInfo, WorkspaceFileStatus };
 
 const TEXT_FILE_MAX_BYTES = 2 * 1024 * 1024;
 const GIT_MAX_BUFFER = 20 * 1024 * 1024;

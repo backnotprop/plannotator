@@ -9,6 +9,11 @@
  * No external dependencies.
  */
 
+/**
+ * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
+ * documents may define bare token names like \`--accent\` for themselves, and the
+ * viewer must never depend on — or collide with — the author's namespace.
+ */
 export const ANNOTATION_HIGHLIGHT_CSS = `
 .annotation-highlight {
   border-radius: 2px;
@@ -17,33 +22,33 @@ export const ANNOTATION_HIGHLIGHT_CSS = `
   cursor: pointer;
 }
 .annotation-highlight.deletion {
-  background: oklch(from var(--destructive, #c0392b) l c h / 0.35);
+  background: oklch(from var(--pn-destructive, #c0392b) l c h / 0.35);
   text-decoration: line-through;
-  text-decoration-color: var(--destructive, #c0392b);
+  text-decoration-color: var(--pn-destructive, #c0392b);
   text-decoration-thickness: 2px;
 }
 .annotation-highlight.comment {
   background: oklch(0.70 0.18 60 / 0.3);
-  border-bottom: 2px solid var(--accent, #d97757);
+  border-bottom: 2px solid var(--pn-accent, #d97757);
 }
 .annotation-highlight.focused {
-  background: oklch(from var(--focus-highlight, #4493f8) l c h / 0.45) !important;
-  box-shadow: 0 0 8px oklch(from var(--focus-highlight, #4493f8) l c h / 0.4);
-  border-bottom: 2px solid var(--focus-highlight, #4493f8);
+  background: oklch(from var(--pn-focus-highlight, #4493f8) l c h / 0.45) !important;
+  box-shadow: 0 0 8px oklch(from var(--pn-focus-highlight, #4493f8) l c h / 0.4);
+  border-bottom: 2px solid var(--pn-focus-highlight, #4493f8);
   filter: none;
 }
 .annotation-highlight:hover {
   filter: brightness(1.2);
 }
 .plannotator-pinpoint-hover {
-  outline: 2px solid var(--focus-highlight, #4493f8) !important;
+  outline: 2px solid var(--pn-focus-highlight, #4493f8) !important;
   outline-offset: 1px;
   cursor: crosshair !important;
 }
 /* SVG nodes can't take a CSS outline — stroke their shapes instead. */
 .plannotator-pinpoint-hover rect, .plannotator-pinpoint-hover path,
 .plannotator-pinpoint-hover circle, .plannotator-pinpoint-hover ellipse, .plannotator-pinpoint-hover polygon {
-  stroke: var(--focus-highlight, #4493f8) !important; stroke-width: 2.5px !important;
+  stroke: var(--pn-focus-highlight, #4493f8) !important; stroke-width: 2.5px !important;
 }
 `;
 
@@ -51,15 +56,23 @@ export const BRIDGE_SCRIPT = `(function() {
   var PREFIX = 'plannotator-bridge-';
 
   // --- Theme ---
+  // The author owns this document. Unless it opted in to host theming
+  // (hostTheme), only viewer-namespaced --pn-* properties may be written to its
+  // root, and its class list is never touched.
   window.addEventListener('message', function(e) {
     if (!e.data || e.data.type !== PREFIX + 'theme') return;
     var root = document.documentElement;
-    var tokens = e.data.tokens;
+    var tokens = e.data.tokens || {};
+    var hostTheme = !!e.data.hostTheme;
     for (var key in tokens) {
-      if (tokens.hasOwnProperty(key)) root.style.setProperty(key, tokens[key]);
+      if (!tokens.hasOwnProperty(key)) continue;
+      if (!hostTheme && key.indexOf('--pn-') !== 0) continue;
+      root.style.setProperty(key, tokens[key]);
     }
-    root.classList.remove('light');
-    if (e.data.isLight) root.classList.add('light');
+    if (hostTheme) {
+      root.classList.remove('light');
+      if (e.data.isLight) root.classList.add('light');
+    }
   });
 
   // --- Resize ---
@@ -244,7 +257,7 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!pinpointLabelEl) {
       pinpointLabelEl = document.createElement('div');
       pinpointLabelEl.setAttribute('data-plannotator-pinpoint-label', '');
-      pinpointLabelEl.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;display:none;font:600 11px/1.3 system-ui,-apple-system,sans-serif;padding:2px 7px;border-radius:5px;background:var(--focus-highlight,#4493f8);color:#fff;white-space:nowrap;box-shadow:0 1px 5px rgba(0,0,0,.35);';
+      pinpointLabelEl.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;display:none;font:600 11px/1.3 system-ui,-apple-system,sans-serif;padding:2px 7px;border-radius:5px;background:var(--pn-focus-highlight,#4493f8);color:#fff;white-space:nowrap;box-shadow:0 1px 5px rgba(0,0,0,.35);';
       document.body.appendChild(pinpointLabelEl);
     }
     return pinpointLabelEl;

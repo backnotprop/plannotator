@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import type {
   SemanticDiffBinaryChange,
   SemanticDiffChange,
@@ -69,44 +69,46 @@ export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) 
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className="semantic-file-badge"
-          onMouseEnter={() => {
-            cancelClose();
-            setOpen(true);
-          }}
-          onMouseLeave={scheduleClose}
-          title={`${count} semantic change${count === 1 ? '' : 's'} in this file`}
-          aria-label={`Semantic changes for ${filePath}`}
-        >
-          <span className="semantic-file-badge-label">sem</span>
-          <span className="semantic-file-badge-count">{count}</span>
-        </button>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            className="semantic-file-badge"
+            onMouseEnter={() => {
+              cancelClose();
+              setOpen(true);
+            }}
+            onMouseLeave={scheduleClose}
+            title={`${count} semantic change${count === 1 ? '' : 's'} in this file`}
+            aria-label={`Semantic changes for ${filePath}`}
+          />
+        }
+      >
+        <span className="semantic-file-badge-label">sem</span>
+        <span className="semantic-file-badge-count">{count}</span>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={6}
-          className="semantic-diff-popover shadow-lg z-[100] popover-enter"
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
-        >
-          <div className="semantic-diff-popover-header">
-            <span className="semantic-file-badge-label">sem</span>
-            <span className="semantic-diff-popover-path" title={filePath}>{filePath}</span>
-          </div>
-          <div className="semantic-diff-popover-rows">
-            <SemanticDiffRows
-              changes={changes}
-              binaryChanges={binaryChanges}
-              onOpenChange={openChange}
-              onOpenBinary={openBinary}
-            />
-          </div>
-        </Popover.Content>
+        <Popover.Positioner align="end" sideOffset={6} className="z-[100]">
+          <Popover.Popup
+            className="semantic-diff-popover shadow-lg popover-enter"
+            initialFocus={false}
+            onMouseEnter={cancelClose}
+            onMouseLeave={scheduleClose}
+          >
+            <div className="semantic-diff-popover-header">
+              <span className="semantic-file-badge-label">sem</span>
+              <span className="semantic-diff-popover-path" title={filePath}>{filePath}</span>
+            </div>
+            <div className="semantic-diff-popover-rows">
+              <SemanticDiffRows
+                changes={changes}
+                binaryChanges={binaryChanges}
+                onOpenChange={openChange}
+                onOpenBinary={openBinary}
+              />
+            </div>
+          </Popover.Popup>
+        </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
   );

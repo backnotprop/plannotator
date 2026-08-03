@@ -477,7 +477,7 @@ diffs-container {
 }
 
 .semantic-file-badge:hover,
-.semantic-file-badge[data-state="open"] {
+.semantic-file-badge[data-popup-open] {
   color: var(--foreground);
   background: var(--muted);
 }

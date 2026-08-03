@@ -1,0 +1,14 @@
+/* Fonts are NOT bundled here. The published styles.css ships only theme + component
+   styles; the consuming app loads the fonts (see README). The theme defines the
+   font-family tokens (--font-sans / --font-mono); the app makes those families
+   available. This keeps styles.css small and avoids shipping font binaries.
+   That includes KaTeX: theme.css imports katex's stylesheet for Plannotator's own
+   apps, but the published build aliases it to an empty stub (vite.css.config.ts) —
+   hosts that render math load katex/dist/katex.min.css themselves (see HANDOFF.md). */
+@import "tailwindcss";
+
+@source "./components/**/*.tsx";
+@source "./hooks/**/*.ts";
+@source "./utils/**/*.ts";
+
+@import "./theme.css";

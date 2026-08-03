@@ -17,7 +17,7 @@ import type {
   GoalSetupInterviewBundle,
   GoalSetupQuestion,
   GoalSetupQuestionAnswer,
-} from '@plannotator/shared/goal-setup';
+} from '@plannotator/core/goal-setup';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { CommentPopover } from '../CommentPopover';
 import { Button } from '../core/button';

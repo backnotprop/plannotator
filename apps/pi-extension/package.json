@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.22.0",
+  "version": "0.23.1",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -14,15 +14,24 @@
   "bugs": {
     "url": "https://github.com/backnotprop/plannotator/issues"
   },
-  "keywords": ["pi-package", "plannotator", "plan-review", "ai-agent", "coding-agent"],
+  "keywords": [
+    "pi-package",
+    "plannotator",
+    "plan-review",
+    "ai-agent",
+    "coding-agent"
+  ],
   "pi": {
-    "extensions": ["./"]
+    "extensions": [
+      "./"
+    ]
   },
   "files": [
     "index.ts",
     "assistant-message.ts",
     "current-pi-session.ts",
     "plannotator-browser.ts",
+    "plannotator-browser-runtime.ts",
     "plannotator-events.ts",
     "server.ts",
     "tool-scope.ts",
@@ -43,6 +52,7 @@
     "@pierre/diffs": "1.2.8",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
+    "diff": "^8.0.4",
     "parse5": "^7.3.0",
     "turndown": "^7.2.4"
   },

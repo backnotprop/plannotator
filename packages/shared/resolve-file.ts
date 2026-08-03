@@ -12,6 +12,7 @@
 import { homedir } from "os";
 import { isAbsolute, join, resolve, win32 } from "path";
 import { existsSync, readdirSync, type Dirent } from "fs";
+import { readdir } from "node:fs/promises";
 
 const MARKDOWN_PATH_REGEX = /\.(mdx?|txt)$/i;
 
@@ -44,6 +45,23 @@ const CODE_IGNORED_DIRS = [
 	".venv/",
 	".pytest_cache/",
 ];
+
+const DEFAULT_FILE_BROWSER_MAX_FILES = 5_000;
+
+/**
+ * Return the shared file-traversal budget used by resolution, cache warming,
+ * and file-browser discovery. Invalid or non-positive overrides fall back to
+ * the default.
+ */
+export function getFileBrowserMaxFiles(): number {
+	const value = Number.parseInt(
+		process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES ?? "",
+		10,
+	);
+	return Number.isFinite(value) && value > 0
+		? value
+		: DEFAULT_FILE_BROWSER_MAX_FILES;
+}
 
 export type ResolveResult =
 	| { kind: "found"; path: string }
@@ -194,6 +212,11 @@ function fileExists(filePath: string): boolean {
 	}
 }
 
+type FileWalkState = {
+	visitedFiles: number;
+	readonly limit: number;
+};
+
 /** Recursively walk a directory collecting files matching `fileMatcher`, skipping ignored dirs. */
 function walkFiles(
 	dir: string,
@@ -201,28 +224,48 @@ function walkFiles(
 	results: string[],
 	ignoredDirs: string[],
 	fileMatcher: (name: string) => boolean,
+	state: FileWalkState,
 ): void {
+	if (state.visitedFiles >= state.limit) return;
 	const entries = readdirSync(dir, { withFileTypes: true }) as Dirent[];
 	for (const entry of entries) {
+		if (state.visitedFiles >= state.limit) return;
 		if (entry.isDirectory()) {
 			if (ignoredDirs.some((d) => d === entry.name + "/")) continue;
 			try {
-				walkFiles(join(dir, entry.name), root, results, ignoredDirs, fileMatcher);
+				walkFiles(
+					join(dir, entry.name),
+					root,
+					results,
+					ignoredDirs,
+					fileMatcher,
+					state,
+				);
 			} catch {
 				/* skip dirs we can't read */
 			}
-		} else if (entry.isFile() && fileMatcher(entry.name)) {
-			const relative = join(dir, entry.name)
-				.slice(root.length + 1)
-				.replace(/\\/g, "/");
-			results.push(relative);
+		} else if (entry.isFile()) {
+			state.visitedFiles += 1;
+			if (fileMatcher(entry.name)) {
+				const relative = join(dir, entry.name)
+					.slice(root.length + 1)
+					.replace(/\\/g, "/");
+				results.push(relative);
+			}
 		}
 	}
 }
 
 function walkMarkdownFiles(dir: string, root: string, results: string[], ignoredDirs: string[]): void {
 	try {
-		walkFiles(dir, root, results, ignoredDirs, (name) => /\.(mdx?|txt)$/i.test(name));
+		walkFiles(
+			dir,
+			root,
+			results,
+			ignoredDirs,
+			(name) => /\.(mdx?|txt)$/i.test(name),
+			{ visitedFiles: 0, limit: getFileBrowserMaxFiles() },
+		);
 	} catch {
 		/* fail soft for markdown — preserves existing behavior */
 	}
@@ -240,18 +283,46 @@ function fileListCacheKey(projectRoot: string, kind: string): string {
 	return `${projectRoot}|${kind}`;
 }
 
-function startCodeWalk(projectRoot: string): Promise<string[] | null> {
-	return Promise.resolve().then(() => {
-		try {
-			const results: string[] = [];
-			walkFiles(projectRoot, projectRoot, results, CODE_IGNORED_DIRS, (name) =>
-				CODE_FILE_BASENAME_REGEX.test(name),
-			);
-			return results;
-		} catch {
-			return null;
+async function walkCodeFiles(
+	dir: string,
+	root: string,
+	results: string[],
+	state: FileWalkState,
+): Promise<void> {
+	if (state.visitedFiles >= state.limit) return;
+	const entries = await readdir(dir, { withFileTypes: true });
+	for (const entry of entries) {
+		if (state.visitedFiles >= state.limit) return;
+		if (entry.isDirectory()) {
+			if (CODE_IGNORED_DIRS.some((d) => d === entry.name + "/")) continue;
+			try {
+				await walkCodeFiles(join(dir, entry.name), root, results, state);
+			} catch {
+				/* skip dirs we can't read */
+			}
+		} else if (entry.isFile()) {
+			state.visitedFiles += 1;
+			if (CODE_FILE_BASENAME_REGEX.test(entry.name)) {
+				const relative = join(dir, entry.name)
+					.slice(root.length + 1)
+					.replace(/\\/g, "/");
+				results.push(relative);
+			}
 		}
-	});
+	}
+}
+
+async function startCodeWalk(projectRoot: string): Promise<string[] | null> {
+	try {
+		const results: string[] = [];
+		await walkCodeFiles(projectRoot, projectRoot, results, {
+			visitedFiles: 0,
+			limit: getFileBrowserMaxFiles(),
+		});
+		return results;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -488,7 +559,13 @@ export function hasMarkdownFiles(
 	excludedDirs: string[] = IGNORED_DIRS,
 	extensions: RegExp = /\.mdx?$/i,
 ): boolean {
+	const state: FileWalkState = {
+		visitedFiles: 0,
+		limit: getFileBrowserMaxFiles(),
+	};
+
 	function walk(dir: string): boolean {
+		if (state.visitedFiles >= state.limit) return false;
 		let entries;
 		try {
 			entries = readdirSync(dir, { withFileTypes: true });
@@ -496,11 +573,13 @@ export function hasMarkdownFiles(
 			return false;
 		}
 		for (const entry of entries) {
+			if (state.visitedFiles >= state.limit) return false;
 			if (entry.isDirectory()) {
 				if (excludedDirs.some((d) => d === entry.name + "/")) continue;
 				if (walk(join(dir, entry.name))) return true;
-			} else if (entry.isFile() && extensions.test(entry.name)) {
-				return true;
+			} else if (entry.isFile()) {
+				state.visitedFiles += 1;
+				if (extensions.test(entry.name)) return true;
 			}
 		}
 		return false;

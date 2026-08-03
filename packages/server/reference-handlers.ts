@@ -24,6 +24,7 @@ import {
 	resolveMarkdownFile,
 	resolveUserPath,
 	isWithinProjectRoot,
+	getFileBrowserMaxFiles,
 	warmFileListCache,
 } from "@plannotator/shared/resolve-file";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
@@ -548,7 +549,23 @@ function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange
 	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
-async function walkFileBrowserFiles(dir: string, root: string, files: Set<string>): Promise<void> {
+type FileBrowserWalkState = {
+	files: Set<string>;
+	limit: number;
+	truncated: boolean;
+};
+
+function addFileBrowserFile(state: FileBrowserWalkState, relativePath: string): void {
+	if (state.files.has(relativePath)) return;
+	if (state.files.size >= state.limit) {
+		state.truncated = true;
+		return;
+	}
+	state.files.add(relativePath);
+}
+
+async function walkFileBrowserFiles(dir: string, root: string, state: FileBrowserWalkState): Promise<void> {
+	if (state.truncated) return;
 	let entries;
 	try {
 		entries = await readdir(dir, { withFileTypes: true });
@@ -557,14 +574,15 @@ async function walkFileBrowserFiles(dir: string, root: string, files: Set<string
 	}
 
 	for (const entry of entries) {
+		if (state.truncated) return;
 		const fullPath = join(dir, entry.name);
 		const relativePath = relative(root, fullPath).replace(/\\/g, "/");
 		if (entry.isDirectory()) {
 			if (isFileBrowserExcludedPath(relativePath)) continue;
-			await walkFileBrowserFiles(fullPath, root, files);
+			await walkFileBrowserFiles(fullPath, root, state);
 		} else if (entry.isFile() && FILE_BROWSER_EXTENSIONS.test(entry.name)) {
 			if (isFileBrowserExcludedPath(relativePath)) continue;
-			files.add(relativePath);
+			addFileBrowserFile(state, relativePath);
 		}
 	}
 }
@@ -586,16 +604,30 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 	}
 
 	try {
-		const files = new Set<string>();
-		await walkFileBrowserFiles(resolvedDir, resolvedDir, files);
+		const state: FileBrowserWalkState = {
+			files: new Set<string>(),
+			limit: getFileBrowserMaxFiles(),
+			truncated: false,
+		};
+		// Seed the user's own modified/untracked files BEFORE the bulk walk: the
+		// walk fills the cap in raw readdir order and addFileBrowserFile drops
+		// everything once the cap latches — the one set of files that must never
+		// silently vanish from the browser is the ones the user just touched.
 		const workspaceStatus = filterWorkspaceStatusForDirectory(await getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
 		for (const match of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
-			files.add(match);
+			addFileBrowserFile(state, match);
+			if (state.truncated) break;
 		}
-		const sortedFiles = [...files].sort();
+		await walkFileBrowserFiles(resolvedDir, resolvedDir, state);
+		const sortedFiles = [...state.files].sort();
 
 		const tree = buildFileTree(sortedFiles);
-		return Response.json({ tree, workspaceStatus });
+		return Response.json({
+			tree,
+			workspaceStatus,
+			truncated: state.truncated,
+			fileLimit: state.limit,
+		});
 	} catch {
 		return Response.json(
 			{ error: "Failed to list directory files" },

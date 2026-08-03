@@ -9,7 +9,7 @@ import {
   type AIProviderOption,
 } from '../utils/aiProvider';
 import { useState } from 'react';
-import type { Origin } from '@plannotator/shared/agents';
+import type { Origin } from '@plannotator/core/agents';
 
 interface AIProvider extends AIProviderOption {
   capabilities: Record<string, boolean>;

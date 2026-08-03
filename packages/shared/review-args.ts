@@ -21,6 +21,9 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       case "--git":
         vcsType = "git";
         break;
+      case "--gitbutler":
+        vcsType = "gitbutler";
+        break;
       case "--local":
         useLocal = true;
         break;

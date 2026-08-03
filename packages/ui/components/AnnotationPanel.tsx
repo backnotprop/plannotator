@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Annotation, AnnotationType, Block, type CodeAnnotation, type EditorAnnotation } from '../types';
+import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type EditorAnnotation } from '../types';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
@@ -73,12 +73,18 @@ interface PanelProps {
   /** Committed direct edits to one or more documents. Rendered as pinned cards
     *  above the annotation timeline with expandable unified diffs. */
   directEdits?: DirectEditsPanelItem[] | null;
+  /** Host slot rendered at the foot of each plan-annotation card (e.g. reply/
+    *  resolve UI). The panel stays presentation-only; clicks inside the slot
+    *  do not select the card. Default: nothing rendered. */
+  renderCardFooter?: (annotation: Annotation) => React.ReactNode;
+  /** Hide every mutation affordance (delete/edit buttons on all card kinds).
+    *  Selection and scrolling still work. Default false — today's behavior. */
+  readOnly?: boolean;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
   isOpen,
   annotations,
-  blocks,
   onSelect,
   onDelete,
   onEdit,
@@ -97,6 +103,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   otherFileAnnotations,
   onOtherFileAnnotationsClick,
   directEdits = null,
+  renderCardFooter,
+  readOnly = false,
 }) => {
   const isMobile = useIsMobile();
   const [copiedText, setCopiedText] = useState(false);
@@ -195,6 +203,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   onSelect={() => onSelect(entry.annotation.id)}
                   onDelete={() => onDelete(entry.annotation.id)}
                   onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(entry.annotation.id, updates) : undefined}
+                  readOnly={readOnly}
+                  footer={renderCardFooter?.(entry.annotation)}
                 />
               ) : (
                 <CodeAnnotationCard
@@ -205,6 +215,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   onSelect={() => onSelectCodeAnnotation?.(entry.annotation.id)}
                   onDelete={() => onDeleteCodeAnnotation?.(entry.annotation.id)}
                   onEdit={onEditCodeAnnotation ? (updates: Partial<CodeAnnotation>) => onEditCodeAnnotation(entry.annotation.id, updates) : undefined}
+                  readOnly={readOnly}
                 />
               )
             ))}
@@ -221,7 +232,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   <EditorAnnotationCard
                     key={ann.id}
                     annotation={ann}
-                    onDelete={() => onDeleteEditorAnnotation?.(ann.id)}
+                    onDelete={readOnly ? undefined : () => onDeleteEditorAnnotation?.(ann.id)}
                   />
                 ))}
               </>
@@ -418,7 +429,9 @@ const AnnotationCard: React.FC<{
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<Annotation>) => void;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit }) => {
+  readOnly?: boolean;
+  footer?: React.ReactNode;
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -517,26 +530,28 @@ const AnnotationCard: React.FC<{
         <span className="text-[10px] text-muted-foreground/50 truncate">
           {annotation.author ? `${annotation.author}${isMe ? ' (me)' : ''} · ` : ''}{formatTimestamp(annotation.createdA)}
         </span>
-        <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-          {onEdit && annotation.type !== AnnotationType.DELETION && !isEditing && (
+        {!readOnly && (
+          <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+            {onEdit && annotation.type !== AnnotationType.DELETION && !isEditing && (
+              <button
+                type="button"
+                onClick={handleStartEdit}
+                className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground"
+                title="Edit annotation"
+              >
+                <PencilIcon />
+              </button>
+            )}
             <button
               type="button"
-              onClick={handleStartEdit}
-              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground"
-              title="Edit annotation"
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); onDelete(); }}
+              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-destructive"
+              title="Delete annotation"
             >
-              <PencilIcon />
+              <TrashCardIcon />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); onDelete(); }}
-            className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-destructive"
-            title="Delete annotation"
-          >
-            <TrashCardIcon />
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Global Comment - show text directly */}
@@ -585,6 +600,19 @@ const AnnotationCard: React.FC<{
           ))}
         </div>
       )}
+
+      {/* Host footer slot (reply/resolve UI etc.) — interactions inside it
+          must not toggle card selection. */}
+      {footer != null && footer !== false && (
+        <div
+          data-annotation-card-footer="true"
+          className="mt-2"
+          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          onKeyDown={(e: React.KeyboardEvent) => e.stopPropagation()}
+        >
+          {footer}
+        </div>
+      )}
     </div>
   );
 };
@@ -596,7 +624,8 @@ const CodeAnnotationCard: React.FC<{
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<CodeAnnotation>) => void;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit }) => {
+  readOnly?: boolean;
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -650,26 +679,28 @@ const CodeAnnotationCard: React.FC<{
         <span className="text-[10px] text-muted-foreground/50 truncate">
           {annotation.author ? `${annotation.author}${isMe ? ' (me)' : ''} · ` : ''}{formatTimestamp(annotation.createdAt)}
         </span>
-        <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-          {onEdit && !isEditing && (
+        {!readOnly && (
+          <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+            {onEdit && !isEditing && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+                className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground"
+                title="Edit annotation"
+              >
+                <PencilIcon />
+              </button>
+            )}
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground"
-              title="Edit annotation"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-destructive"
+              title="Delete annotation"
             >
-              <PencilIcon />
+              <TrashCardIcon />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-destructive"
-            title="Delete annotation"
-          >
-            <TrashCardIcon />
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* File / line meta */}

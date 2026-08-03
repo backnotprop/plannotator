@@ -1,20 +1,27 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import {
 	type DiffResult,
 	type DiffType,
 	type GitCommandResult,
+	type GitCommandOptions,
 	type GitContext,
 	type GitDiffOptions,
+	type PreparedGitCommand,
 	type ReviewGitRuntime,
 	getGitContext as getGitContextCore,
+	prepareGitCommand,
 	runGitDiff as runGitDiffCore,
 } from "../generated/review-core.js";
 import {
 	type ReviewJjRuntime,
 } from "../generated/jj-core.js";
 import {
+	type ReviewGitButlerRuntime,
+} from "../generated/gitbutler-core.js";
+import {
 	type VcsSelection,
+	createGitButlerProvider,
 	createGitProvider,
 	createJjProvider,
 	createVcsApi,
@@ -25,17 +32,41 @@ function runCommand(
 	command: string,
 	args: string[],
 	notFoundMessage: string,
-	options?: { cwd?: string; timeoutMs?: number },
+	options?: GitCommandOptions,
+	preparedGitCommand?: PreparedGitCommand,
+	commandEnvironment?: NodeJS.ProcessEnv,
+	isolateProcessGroup = preparedGitCommand?.isolateProcessGroup ?? false,
 ): Promise<GitCommandResult> {
 	return new Promise((resolve) => {
 		const proc = spawn(command, args, {
 			cwd: options?.cwd,
+			detached: isolateProcessGroup,
+			env: preparedGitCommand?.env ?? commandEnvironment,
 			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
 		});
 
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		if (options?.timeoutMs) {
-			timer = setTimeout(() => proc.kill(), options.timeoutMs);
+			timer = setTimeout(() => {
+				if (isolateProcessGroup && proc.pid && process.platform !== "win32") {
+					try {
+						process.kill(-proc.pid, "SIGKILL");
+						return;
+					} catch {
+						// Fall through when the process exited between the timer and signal.
+					}
+				}
+				if (isolateProcessGroup && proc.pid && process.platform === "win32") {
+					const killed = spawnSync(
+						"taskkill.exe",
+						["/pid", String(proc.pid), "/t", "/f"],
+						{ stdio: "ignore", windowsHide: true },
+					);
+					if (killed.status === 0) return;
+				}
+				proc.kill("SIGKILL");
+			}, options.timeoutMs);
 		}
 
 		const stdoutChunks: Buffer[] = [];
@@ -62,9 +93,10 @@ function runCommand(
 export const reviewRuntime: ReviewGitRuntime = {
 	runGit(
 		args: string[],
-		options?: { cwd?: string; timeoutMs?: number },
+		options?: GitCommandOptions,
 	): Promise<GitCommandResult> {
-		return runCommand("git", ["-c", "core.quotePath=false", ...args], "git not found", options);
+		const command = prepareGitCommand(args, options, process.env);
+		return runCommand("git", command.args, "git not found", options, command);
 	},
 
 	async readTextFile(path: string): Promise<string | null> {
@@ -85,14 +117,35 @@ export const jjRuntime: ReviewJjRuntime = {
 	},
 };
 
+/** Node Git + GitButler runtime used by the Pi review server. */
+export const gitButlerRuntime: ReviewGitButlerRuntime = {
+	...reviewRuntime,
+	runBut(
+		args: string[],
+		options?: GitCommandOptions,
+	): Promise<GitCommandResult> {
+		return runCommand(
+			"but",
+			args,
+			"but not found",
+			options,
+			undefined,
+			{ ...process.env, NO_BG_TASKS: "1" },
+			true,
+		);
+	},
+};
+
 const api = createVcsApi([
 	createJjProvider(jjRuntime),
+	createGitButlerProvider(gitButlerRuntime),
 	createGitProvider(reviewRuntime),
 ]);
 
 export const {
 	detectVcs,
 	detectManagedVcs,
+	vcsOwnsDiffType,
 	getVcsContext,
 	detectRemoteDefaultCompareTarget,
 	prepareLocalReviewDiff,

@@ -219,4 +219,35 @@ describe("handleFileBrowserFiles", () => {
 		expect(data.workspaceStatus.totals.files).toBe(0);
 		expect(data.workspaceStatus.files).toEqual({});
 	});
+
+	test("caps large folder walks", async () => {
+		const root = makeTempDir("plannotator-files-cap-");
+		writeTempFile(root, "docs/a.md", "a\n");
+		writeTempFile(root, "docs/b.md", "b\n");
+		writeTempFile(root, "docs/c.md", "c\n");
+		const previousLimit = process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES;
+		process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = "2";
+
+		try {
+			const url = new URL("http://localhost/api/reference/files");
+			url.searchParams.set("dirPath", root);
+			const res = await handleFileBrowserFiles(new Request(url.toString()));
+			const data = await res.json() as {
+				tree: VaultNode[];
+				truncated: boolean;
+				fileLimit: number;
+			};
+
+			expect(res.status).toBe(200);
+			expect(flattenTree(data.tree)).toHaveLength(2);
+			expect(data.truncated).toBe(true);
+			expect(data.fileLimit).toBe(2);
+		} finally {
+			if (previousLimit === undefined) {
+				delete process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES;
+			} else {
+				process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = previousLimit;
+			}
+		}
+	});
 });

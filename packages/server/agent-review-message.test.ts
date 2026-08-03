@@ -70,6 +70,19 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain(patch);
   });
 
+  test("treats the inline GitButler patch as authoritative", () => {
+    const message = buildAgentReviewUserMessage(
+      patch,
+      "gitbutler:branch:feature%2Fapi",
+      { defaultBranch: "abc123" },
+    );
+
+    expect(message).toContain("Review these GitButler changes and provide prioritized findings");
+    expect(message).toContain("the inline diff is authoritative");
+    expect(message).toContain("other stacks or later branch layers");
+    expect(message).toContain(patch);
+  });
+
   test("builds workspace review instructions with prefixed paths and inline patch", () => {
     const message = buildAgentReviewUserMessageForTarget({
       kind: "workspace",
@@ -79,6 +92,7 @@ describe("buildAgentReviewUserMessage", () => {
         repos: [
           { label: "api", cwd: "/tmp/workspace/api", changed: true, vcsType: "git", gitRef: "Uncommitted changes" },
           { label: "web", cwd: "/tmp/workspace/web", changed: true, vcsType: "jj", gitRef: "Uncommitted changes" },
+          { label: "app", cwd: "/tmp/workspace/app", changed: true, vcsType: "gitbutler", gitRef: "GitButler workspace" },
         ],
       },
     });
@@ -94,6 +108,8 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain("- web/ [jj, changed] -> /tmp/workspace/web");
     expect(message).toContain("git -C <child-repo-folder>");
     expect(message).toContain("JJ child repos");
+    expect(message).toContain("GitButler child repos");
+    expect(message).toContain("- app/ [gitbutler, changed] -> /tmp/workspace/app");
     expect(message).toContain(patch);
   });
 

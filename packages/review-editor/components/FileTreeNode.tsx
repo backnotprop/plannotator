@@ -1,5 +1,5 @@
 import React from 'react';
-import * as ContextMenu from '@radix-ui/react-context-menu';
+import { ContextMenu } from '@base-ui/react/context-menu';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
 import { ViewedControl, ChangeTypeLetter, StageControl, AnnotationBadge, DiffCounts, CommittedDot } from './FileRowBits';
 
@@ -147,13 +147,16 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
 
   return (
     <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>
-        <button
-          onClick={() => onSelectFile(node.fileIndex!)}
-          onDoubleClick={() => onDoubleClickFile?.(node.fileIndex!)}
-          className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''}`}
-          style={{ paddingLeft }}
-        >
+      <ContextMenu.Trigger
+        render={
+          <button
+            onClick={() => onSelectFile(node.fileIndex!)}
+            onDoubleClick={() => onDoubleClickFile?.(node.fileIndex!)}
+            className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''}`}
+            style={{ paddingLeft }}
+          />
+        }
+      >
           {/* Leading rail: [view][add][letter] then name — same anatomy as
               the sections view rows. View reveals on hover / when active; the
               stage control (since-base mode only) and letter are always shown.
@@ -178,31 +181,32 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             <AnnotationBadge count={annotationCount} />
           </div>
           <DiffCounts additions={node.file!.additions} deletions={node.file!.deletions} />
-        </button>
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="z-50 min-w-[160px] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0">
+        <ContextMenu.Positioner className="z-50">
+          <ContextMenu.Popup className="min-w-[160px] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           <ContextMenu.Item
-            onSelect={() => navigator.clipboard.writeText(node.path)}
+            onClick={() => navigator.clipboard.writeText(node.path)}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
           >
             Copy path
           </ContextMenu.Item>
           <ContextMenu.Item
-            onSelect={() => navigator.clipboard.writeText(node.name)}
+            onClick={() => navigator.clipboard.writeText(node.name)}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
           >
             Copy filename
           </ContextMenu.Item>
           {repoRoot && (
             <ContextMenu.Item
-              onSelect={() => navigator.clipboard.writeText(`${repoRoot.replace(/\/$/, '')}/${node.path}`)}
+              onClick={() => navigator.clipboard.writeText(`${repoRoot.replace(/\/$/, '')}/${node.path}`)}
               className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
             >
               Copy full path
             </ContextMenu.Item>
           )}
-        </ContextMenu.Content>
+          </ContextMenu.Popup>
+        </ContextMenu.Positioner>
       </ContextMenu.Portal>
     </ContextMenu.Root>
   );

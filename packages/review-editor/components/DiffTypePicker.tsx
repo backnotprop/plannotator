@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Menu } from '@base-ui/react/menu';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import type { DiffOption } from '@plannotator/shared/types';
 
@@ -58,13 +58,16 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
   const activeLabel = active ? displayLabel(active) : 'Select diff';
 
   return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          disabled={isLoading}
-          className="w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-muted rounded text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-wait"
-        >
+    <Menu.Root open={open} onOpenChange={setOpen}>
+      <Menu.Trigger
+        render={
+          <button
+            type="button"
+            disabled={isLoading}
+            className="w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-muted rounded text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-wait"
+          />
+        }
+      >
           <span className="truncate flex-1 text-left">{activeLabel}</span>
           {isLoading ? (
             <svg className="w-3.5 h-3.5 text-muted-foreground animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
@@ -76,22 +79,17 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
           )}
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          side="bottom"
-          align="start"
-          sideOffset={4}
-          className="z-50 min-w-[var(--radix-dropdown-menu-trigger-width)] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 origin-[var(--radix-dropdown-menu-content-transform-origin)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-        >
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
+          <Menu.Popup className="min-w-[var(--anchor-width)] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           {options.map((opt) => {
             const hint = OPTION_HINTS[opt.id];
             const isActive = opt.id === activeDiffType;
             return (
-              <DropdownMenu.Item
+              <Menu.Item
                 key={opt.id}
-                onSelect={() => onSelect(opt.id)}
+                onClick={() => onSelect(opt.id)}
                 className={`flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none data-[highlighted]:bg-muted ${
                   isActive ? 'text-foreground font-medium' : 'text-foreground/80'
                 }`}
@@ -119,11 +117,12 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
                     </span>
                   </Tooltip>
                 )}
-              </DropdownMenu.Item>
+              </Menu.Item>
             );
           })}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 };

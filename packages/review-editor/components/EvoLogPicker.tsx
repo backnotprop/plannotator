@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import type { JjEvoLogEntry } from '@plannotator/shared/types';
 
 interface EvoLogPickerProps {
@@ -43,17 +43,20 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          title={`Compare against evolog entry: ${selectedCommitId}`}
-          className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium overflow-hidden transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
-            isCustom
-              ? 'bg-primary/10 border border-primary/30 text-foreground'
-              : 'bg-muted border border-transparent text-foreground'
-          }`}
-        >
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            disabled={disabled}
+            title={`Compare against evolog entry: ${selectedCommitId}`}
+            className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium overflow-hidden transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
+              isCustom
+                ? 'bg-primary/10 border border-primary/30 text-foreground'
+                : 'bg-muted border border-transparent text-foreground'
+            }`}
+          />
+        }
+      >
           <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
             from
           </span>
@@ -74,15 +77,10 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content
-          side="bottom"
-          align="start"
-          sideOffset={4}
-          className="z-50 w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--radix-popover-content-transform-origin)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-        >
+        <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
+          <Popover.Popup className="w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           <div className="px-3 py-2 border-b border-border/50">
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Evolution history — pick a previous state to compare against
@@ -155,7 +153,8 @@ export const EvoLogPicker: React.FC<EvoLogPickerProps> = ({
               </button>
             </div>
           )}
-        </Popover.Content>
+          </Popover.Popup>
+        </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
   );

@@ -1,5 +1,5 @@
 import React from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import {
   DIFF_STYLE_OPTIONS,
@@ -101,23 +101,22 @@ export const DiffOptionsPopover: React.FC = () => {
 
   return (
     <Popover.Root>
-      <Popover.Trigger asChild>
-        <button
-          className="px-2 py-1 rounded-md text-muted-foreground hover:text-foreground transition-colors flex items-center data-[state=open]:bg-background data-[state=open]:text-foreground data-[state=open]:shadow-sm"
-          title="Diff display options"
-        >
+      <Popover.Trigger
+        render={
+          <button
+            className="px-2 py-1 rounded-md text-muted-foreground hover:text-foreground transition-colors flex items-center data-popup-open:bg-background data-popup-open:text-foreground data-popup-open:shadow-sm"
+            title="Diff display options"
+          />
+        }
+      >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-        </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 w-72 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg overflow-hidden origin-[var(--radix-popover-content-transform-origin)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-        >
+        <Popover.Positioner align="end" sideOffset={6} className="z-50">
+          <Popover.Popup className="w-72 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           <div className="p-2.5 space-y-2">
             <div className="space-y-1.5">
               <div>
@@ -163,7 +162,8 @@ export const DiffOptionsPopover: React.FC = () => {
               />
             </div>
           </div>
-        </Popover.Content>
+          </Popover.Popup>
+        </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
   );

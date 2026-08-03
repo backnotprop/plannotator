@@ -1,4 +1,8 @@
 import { recoverNativeFetchConstructors } from "./fetch-shim";
+import {
+  waitForPlanReviewCloseDelay,
+  waitForPlanReviewDecision,
+} from "@plannotator/shared/plan-review-lifecycle";
 
 export interface EmbeddedPlanReviewInput {
   client: any;
@@ -8,6 +12,7 @@ export interface EmbeddedPlanReviewInput {
   pasteApiUrl?: string;
   htmlContent: string;
   timeoutSeconds: number | null;
+  abortSignal: AbortSignal;
   logReady: (url: string, isRemote: boolean, port: number) => void;
 }
 
@@ -31,6 +36,7 @@ async function loadCommandHandlers() {
 export async function runEmbeddedPlanReview(
   input: EmbeddedPlanReviewInput,
 ): Promise<EmbeddedPlanReviewResult> {
+  input.abortSignal.throwIfAborted();
   const { startPlannotatorServer, handleServerReady } = await loadPlanServer();
   const server = await startPlannotatorServer({
     plan: input.planContent,
@@ -47,27 +53,22 @@ export async function runEmbeddedPlanReview(
   });
 
   const timeoutMs = input.timeoutSeconds === null ? null : input.timeoutSeconds * 1000;
-  const result = timeoutMs === null
-    ? await server.waitForDecision()
-    : await new Promise<Awaited<ReturnType<typeof server.waitForDecision>>>((resolve) => {
-        const timeoutId = setTimeout(
-          () =>
-            resolve({
-              approved: false,
-              feedback: `[Plannotator] No response within ${input.timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
-            }),
-          timeoutMs,
-        );
+  try {
+    const result = await waitForPlanReviewDecision({
+      waitForDecision: server.waitForDecision,
+      timeoutMs,
+      timeoutResult: {
+        approved: false,
+        feedback: `[Plannotator] No response within ${input.timeoutSeconds} seconds. Port released automatically. Please call submit_plan again.`,
+      },
+      signal: input.abortSignal,
+    });
 
-        server.waitForDecision().then((decision) => {
-          clearTimeout(timeoutId);
-          resolve(decision);
-        });
-      });
-
-  await Bun.sleep(1500);
-  server.stop();
-  return result;
+    await waitForPlanReviewCloseDelay(1500, input.abortSignal);
+    return result;
+  } finally {
+    await server.stop();
+  }
 }
 
 export async function handleEmbeddedCommand(

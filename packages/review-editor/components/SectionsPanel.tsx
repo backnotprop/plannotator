@@ -335,7 +335,9 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
       const active = document.activeElement;
       if (
         active instanceof HTMLElement &&
-        active.closest('[role="menu"], [role="dialog"], [role="listbox"], [data-radix-popper-content-wrapper]')
+        // Base UI popups carry ARIA roles directly (Menu.Popup role="menu",
+        // Popover.Popup role="dialog") — no wrapper attribute needed.
+        active.closest('[role="menu"], [role="dialog"], [role="listbox"]')
       ) return;
       if (visualOrder.length === 0) return;
       const navKey = ['j', 'k', 'ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key);

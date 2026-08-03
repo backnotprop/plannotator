@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Canvas } from './Canvas';
 import { Toolbar } from './Toolbar';
 import { renderStroke } from './utils';
-import type { Point, Stroke, Tool, AnnotatorState } from './types';
+import type { Point, AnnotatorState } from './types';
 import { DEFAULT_STATE } from './types';
 
 interface ImageAnnotatorProps {

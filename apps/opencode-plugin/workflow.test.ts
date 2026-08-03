@@ -8,6 +8,7 @@ import {
   shouldModifyPrompts,
   shouldRegisterSubmitPlan,
   shouldRejectSubmitPlanForAgent,
+  shouldStartImplementationForAgent,
 } from "./workflow";
 
 describe("normalizeWorkflowOptions", () => {
@@ -102,6 +103,19 @@ describe("workflow gates", () => {
     expect(shouldRejectSubmitPlanForAgent("build", planAgent)).toBe(true);
     expect(shouldRejectSubmitPlanForAgent(undefined, planAgent)).toBe(true);
     expect(shouldRejectSubmitPlanForAgent("build", allAgents)).toBe(false);
+  });
+
+  test("starts implementation only for non-planning handoff targets", () => {
+    const defaultOptions = normalizeWorkflowOptions({ workflow: "plan-agent" });
+    const customPlannerOptions = normalizeWorkflowOptions({
+      workflow: "plan-agent",
+      planningAgents: ["planner"],
+    });
+
+    expect(shouldStartImplementationForAgent("build", defaultOptions)).toBe(true);
+    expect(shouldStartImplementationForAgent("reviewer", defaultOptions)).toBe(true);
+    expect(shouldStartImplementationForAgent("plan", defaultOptions)).toBe(false);
+    expect(shouldStartImplementationForAgent("planner", customPlannerOptions)).toBe(false);
   });
 });
 

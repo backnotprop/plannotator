@@ -1,5 +1,13 @@
 import { describe, it, expect } from "bun:test";
-import { repairGuideJsonText, validateGuideOutput, parseGuideStreamOutput } from "./guide-review";
+import { readFileSync } from "node:fs";
+import {
+  composeGuideMarkerPrompt,
+  createGuideSession,
+  repairGuideJsonText,
+  validateGuideOutput,
+  parseGuideStreamOutput,
+} from "./guide-review";
+import { markerClose, markerOpen } from "../marker-review";
 
 // Pins the behaviors the PR-993 review rounds fixed. This module previously
 // had NO direct coverage — the repair ladder and validation are pure logic
@@ -7,6 +15,11 @@ import { repairGuideJsonText, validateGuideOutput, parseGuideStreamOutput } from
 // regressions hide.
 
 const FILES = ["src/a.ts", "src/b.ts", "src/c.ts"];
+const PI_FIXTURE_NONCE = "pn0123456789ab";
+const piInsufficientCreditsStdout = readFileSync(
+  new URL("../fixtures/pi-insufficient-credits.ndjson", import.meta.url),
+  "utf8",
+);
 
 function guideJson(sections: unknown, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ title: "T", intent: "I", sections, unplacedFiles: [], ...extra });
@@ -148,5 +161,92 @@ describe("parseGuideStreamOutput", () => {
 
   it("returns null on empty stdout", () => {
     expect(parseGuideStreamOutput("")).toBeNull();
+  });
+});
+
+describe("createGuideSession marker completion", () => {
+  it("surfaces a Pi provider failure instead of classifying exit-0 NDJSON as malformed guide output", async () => {
+    const session = createGuideSession();
+    const result = await session.onJobComplete({
+      job: {
+        id: "pi-insufficient-credits",
+        engine: "pi",
+        prompt: composeGuideMarkerPrompt("Review the changed files.", PI_FIXTURE_NONCE),
+      },
+      meta: { stdout: piInsufficientCreditsStdout },
+      changedFiles: FILES,
+    });
+
+    expect(result).toEqual({ summary: null, error: "Insufficient API credits" });
+    expect(session.failedPayloads.has("pi-insufficient-credits")).toBe(false);
+  });
+
+  it("keeps ordinary malformed Pi output on the strict parse and repair path", async () => {
+    const jobId = "pi-malformed-guide";
+    const stdout = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "I could not format the guide." }],
+        stopReason: "stop",
+      },
+    });
+    const session = createGuideSession();
+
+    const result = await session.onJobComplete({
+      job: {
+        id: jobId,
+        engine: "pi",
+        prompt: composeGuideMarkerPrompt("Review the changed files.", PI_FIXTURE_NONCE),
+      },
+      meta: { stdout },
+      changedFiles: FILES,
+    });
+
+    expect(result).toEqual({ summary: null });
+    expect(session.failedPayloads.has(jobId)).toBe(true);
+    expect(session.getGuide(jobId)).toBeNull();
+  });
+
+  it("preserves a valid marker guide after an earlier transient Pi error event", async () => {
+    const jobId = "pi-recovered-guide";
+    const validGuide = guideJson([
+      {
+        title: "Recovered",
+        overview: "The retry completed.",
+        diffs: [{ file: "src/a.ts", summary: "Updates A." }],
+      },
+    ]);
+    const transientErrorPrefix = piInsufficientCreditsStdout
+      .trimEnd()
+      .split("\n")
+      .slice(0, 5)
+      .join("\n");
+    const successfulMessage = JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{
+          type: "text",
+          text: `${markerOpen(PI_FIXTURE_NONCE)}\n${validGuide}\n${markerClose(PI_FIXTURE_NONCE)}`,
+        }],
+        stopReason: "stop",
+      },
+    });
+    const session = createGuideSession();
+
+    const result = await session.onJobComplete({
+      job: {
+        id: jobId,
+        engine: "pi",
+        prompt: composeGuideMarkerPrompt("Review the changed files.", PI_FIXTURE_NONCE),
+      },
+      meta: { stdout: `${transientErrorPrefix}\n${successfulMessage}\n` },
+      changedFiles: FILES,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.summary?.correctness).toBe("Guide Generated");
+    expect(session.getGuide(jobId)?.sections[0].title).toBe("Recovered");
   });
 });

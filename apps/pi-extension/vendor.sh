@@ -7,7 +7,29 @@ cd "$(dirname "$0")"
 rm -rf generated
 mkdir -p generated generated/ai/providers
 
-for f in feedback-templates prompts review-core diff-paths cli-pagination jj-core vcs-core review-args storage draft project pr-types pr-context-live pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common favicon code-file resolve-file annotate-reference-roots-node config external-annotation agent-jobs agent-terminal worktree worktree-pool html-to-markdown html-assets html-assets-node url-to-markdown tour guide annotate-args at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff source-save source-save-node workspace-status open-in-apps review-profiles commit-avatars commit-history; do
+# Modules that MOVED to @plannotator/core — vendor the real impl from core.
+for f in feedback-templates project favicon code-file external-annotation agent-jobs agent-terminal source-save open-in-apps; do
+  src="../../packages/core/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
+done
+
+# Node-bound shared modules that now import types from @plannotator/core/*-types —
+# vendor from shared, rewrite the bare core specifier to the flat relative path.
+for f in config storage workspace-status; do
+  src="../../packages/shared/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" \
+    | sed "s|from ['\"]@plannotator/core/\\([^'\"]*\\)-types['\"]|from './\\1-types.js'|g" \
+    > "generated/$f.ts"
+done
+
+# Extracted type files those node-bound modules now depend on — vendor from core.
+for f in config-types storage-types workspace-status-types; do
+  src="../../packages/core/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
+done
+
+# Everything else in the original flat list stays sourced from packages/shared.
+for f in prompts review-core diff-paths cli-pagination jj-core gitbutler-core vcs-core review-args draft pr-types pr-context-live pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common resolve-file annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node url-to-markdown tour annotate-args at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff single-flight source-save-node review-profiles guide commit-avatars commit-history port-range; do
   src="../../packages/shared/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done
@@ -56,9 +78,15 @@ for f in guide-review; do
     > "generated/$f.ts"
 done
 
+# Vendor the moved AI context types from core into generated/ai/.
+printf '// @generated — DO NOT EDIT. Source: packages/core/ai-context.ts\n' \
+  | cat - "../../packages/core/ai-context.ts" > "generated/ai/ai-context.ts"
+
 for f in index types provider session-manager endpoints context base-session; do
   src="../../packages/ai/$f.ts"
-  printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" > "generated/ai/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" \
+    | sed "s|from ['\"]@plannotator/core/ai-context['\"]|from './ai-context.js'|g" \
+    > "generated/ai/$f.ts"
 done
 
 for f in claude-agent-sdk codex-app-server opencode-sdk command-path pi-sdk pi-sdk-node pi-events; do

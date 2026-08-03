@@ -5,7 +5,7 @@ import { CopyButton } from './CopyButton';
 import { DiffHunkPreview } from './DiffHunkPreview';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { getItem, setItem } from '@plannotator/ui/utils/storage';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useReviewState } from '../dock/ReviewStateContext';
 import { Avatar } from './Avatar';
@@ -352,12 +352,15 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 
           {/* Filters popover — show/hide categories + per-author toggles */}
           <Popover.Root>
-            <Popover.Trigger asChild>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md bg-muted text-muted-foreground hover:text-foreground transition-colors data-[state=open]:bg-background data-[state=open]:text-foreground data-[state=open]:shadow-sm"
-                title="Filter comments"
-              >
+            <Popover.Trigger
+              render={
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md bg-muted text-muted-foreground hover:text-foreground transition-colors data-popup-open:bg-background data-popup-open:text-foreground data-popup-open:shadow-sm"
+                  title="Filter comments"
+                />
+              }
+            >
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h18M6 12h12M10 19h4" />
                 </svg>
@@ -370,14 +373,10 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                 <svg className="w-2.5 h-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                 </svg>
-              </button>
             </Popover.Trigger>
             <Popover.Portal>
-              <Popover.Content
-                align="start"
-                sideOffset={6}
-                className="z-50 w-56 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--radix-popover-content-transform-origin)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-              >
+              <Popover.Positioner align="start" sideOffset={6} className="z-50">
+                <Popover.Popup className="w-56 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
                 <div className="p-2 space-y-1">
                   <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 px-1">Show</div>
                   {hasBots && (
@@ -426,7 +425,8 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                     </>
                   )}
                 </div>
-              </Popover.Content>
+                </Popover.Popup>
+              </Popover.Positioner>
             </Popover.Portal>
           </Popover.Root>
 

@@ -1,6 +1,7 @@
 import {
   annotationPanelShortcuts,
   annotationToolbarShortcuts,
+  annotateSidebarShortcuts,
   commentPopoverShortcuts,
   createShortcutRegistry,
   createShortcutScopeHook,
@@ -92,6 +93,7 @@ export const planReviewSettingsShortcutRegistry = createShortcutRegistry([
 
 export const annotateSettingsShortcutRegistry = createShortcutRegistry([
   annotateEditorSettingsShortcuts,
+  annotateSidebarShortcuts,
   ...sharedPlanSurfaceShortcuts,
 ] as const);
 

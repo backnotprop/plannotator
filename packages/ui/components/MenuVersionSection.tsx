@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { TextShimmer } from './TextShimmer';
 import type { UpdateInfo } from '../hooks/useUpdateCheck';
-import type { Origin } from '@plannotator/shared/agents';
+import type { Origin } from '@plannotator/core/agents';
 import { isWindows } from '../utils/platform';
 
 const PI_INSTALL_COMMAND = 'pi install npm:@plannotator/pi-extension';

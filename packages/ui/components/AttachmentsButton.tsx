@@ -4,6 +4,7 @@ import { ImageThumbnail, getImageSrc } from './ImageThumbnail';
 import { ImageAnnotator } from './ImageAnnotator';
 import type { ImageAttachment } from '../types';
 import { modKey } from '../utils/platform';
+import { getUploadTransport } from '../utils/upload';
 
 /**
  * Derive a clean, human-readable name from an original filename.
@@ -125,27 +126,26 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   const handleAnnotatorAccept = async (blob: Blob, hasDrawings: boolean, name: string) => {
     setUploading(true);
     try {
-      const formData = new FormData();
       // Use annotated blob if drawings exist, otherwise original file
-      if (annotatorImage) {
-        const fileToUpload = hasDrawings
+      const fileToUpload = annotatorImage
+        ? (hasDrawings
+            ? new File([blob], 'annotated.png', { type: 'image/png' })
+            : annotatorImage.file)
+        : editingImage
+          // Re-editing: always upload the new blob
           ? new File([blob], 'annotated.png', { type: 'image/png' })
-          : annotatorImage.file;
-        formData.append('file', fileToUpload);
-      } else if (editingImage) {
-        // Re-editing: always upload the new blob
-        formData.append('file', new File([blob], 'annotated.png', { type: 'image/png' }));
-      }
+          : null;
 
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (data.path) {
-        // If re-editing, remove old path first
-        if (editingImage) {
-          onRemove(editingImage.path);
+      if (fileToUpload) {
+        const data = await getUploadTransport().upload(fileToUpload);
+        if (data.path) {
+          // If re-editing, remove old path first
+          if (editingImage) {
+            onRemove(editingImage.path);
+          }
+          // Use the name from the annotator (user may have edited it)
+          onAdd({ path: data.path, name });
         }
-        // Use the name from the annotator (user may have edited it)
-        onAdd({ path: data.path, name });
       }
     } catch (err) {
       console.error('Upload failed:', err);

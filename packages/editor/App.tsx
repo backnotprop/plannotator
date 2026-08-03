@@ -48,7 +48,7 @@ import { usePrintMode } from '@plannotator/ui/hooks/usePrintMode';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
-import { ScrollViewportContext } from '@plannotator/ui/hooks/useScrollViewport';
+import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { useIsMobile } from '@plannotator/ui/hooks/useIsMobile';
 import {
@@ -101,7 +101,12 @@ import type { AgentTerminalCapability } from '@plannotator/shared/agent-terminal
 // same env var on the server side so V2/V3 stay paired.
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
-import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from './wideMode';
+import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from '@plannotator/ui/utils/wideMode';
+import {
+  annotateSidebarShortcuts,
+  useAnnotateSidebarShortcuts,
+  useDoubleTapShortcuts,
+} from '@plannotator/ui/shortcuts';
 const USE_DIFF_DEMO =
   import.meta.env.VITE_DIFF_DEMO === '1' ||
   import.meta.env.VITE_DIFF_DEMO === 'true';
@@ -122,6 +127,7 @@ import {
   type AgentTerminalDeliveryRecord,
   type AnnotateFeedbackTarget,
 } from './agentTerminalIntegration';
+import { resolveDocumentAreaClassName } from './documentAreaLayout';
 import {
   buildPlanEditPanelItem,
   buildDirectEditsSection,
@@ -245,6 +251,9 @@ const feedbackLossDescription = (annotationCount: number, hasDirectEdits: boolea
 
 type SourceFileEditWarningAction = 'send-feedback' | 'approve' | 'close';
 
+/** Hint shown following the cursor while hovering a sidebar/panel resize handle. */
+const RESIZE_HANDLE_TOOLTIP = 'Click to close · Drag to resize';
+
 const App: React.FC = () => {
   const [markdown, setMarkdown] = useState(DEMO_PLAN_CONTENT);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -367,6 +376,7 @@ const App: React.FC = () => {
   // card-chromed markdown column. Branch the document-area containers on this.
   const isHtmlSurface = renderAs === 'html';
   const [rawHtml, setRawHtml] = useState('');
+  const [htmlDiffHtml, setHtmlDiffHtml] = useState<string | null>(null);
   const [shareHtml, setShareHtml] = useState('');
   // Session-level force-markdown preference (`--markdown`). When set, folder/linked HTML
   // files are converted instead of rendered raw — threaded into /api/doc as &convert=1.
@@ -447,6 +457,8 @@ const App: React.FC = () => {
     storageKey: 'plannotator-panel-width',
     // Drag the right panel skinny → snap it shut (matches the contents sidebar).
     onSnapClose: () => setIsPanelOpen(false),
+    // Single click on the handle (no drag) collapses it.
+    onClick: () => setIsPanelOpen(false),
     // Render-free drag: write the live width to a :root var the panel reads,
     // so dragging never re-renders this (heavy) App.
     apply: (w) => document.documentElement.style.setProperty('--rpanel-w', `${w}px`),
@@ -456,6 +468,8 @@ const App: React.FC = () => {
     defaultWidth: 240, minWidth: 160, maxWidth: 400, side: 'left',
     // Drag the contents panel skinny → snap it shut (prototype behavior).
     onSnapClose: sidebar.close,
+    // Single click on the handle (no drag) collapses it.
+    onClick: sidebar.close,
     // Render-free drag: write the live width to a :root var the panel reads.
     apply: (w) => document.documentElement.style.setProperty('--toc-w', `${w}px`),
   });
@@ -466,6 +480,8 @@ const App: React.FC = () => {
     maxWidth: 640,
     side: 'left',
     onSnapClose: () => setIsAgentTerminalOpen(false),
+    // Single click on the handle (no drag) collapses it.
+    onClick: () => hideAgentTerminal(),
     apply: (w) => document.documentElement.style.setProperty('--agent-terminal-w', `${w}px`),
   });
   const isResizing = panelResize.isDragging || tocResize.isDragging || agentTerminalResize.isDragging;
@@ -650,8 +666,14 @@ const App: React.FC = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isPlanDiffActive]);
 
-  // Plan diff computation
-  const planDiff = usePlanDiff(markdown, previousPlan, versionInfo);
+  // Plan diff computation. On the HTML surface the diff is rendered as the real
+  // page with inline highlights (htmlDiffHtml) instead of the markdown block diff,
+  // so suppress the markdown diff path there (markdown is empty for HTML).
+  const planDiff = usePlanDiff(
+    markdown,
+    isHtmlSurface ? null : previousPlan,
+    isHtmlSurface ? null : versionInfo,
+  );
   const warnFinishEditingFirst = useCallback((target: 'versions' | 'diff') => {
     toast('Finish editing first', {
       description: target === 'versions'
@@ -816,6 +838,64 @@ const App: React.FC = () => {
     () => !!projectRoot || isFileBrowserEnabled() || isVaultBrowserEnabled(),
     [projectRoot, uiPrefs]
   );
+
+  const canHandleAnnotateSidebarShortcut = useCallback((event: KeyboardEvent) => {
+    if (!annotateMode || archive.archiveMode || goalSetupMode) return false;
+    if (event.defaultPrevented) return false;
+    if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return false;
+    if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
+        showSourceFileEditWarning ||
+        showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return false;
+    if (submitted || isSubmitting || isExiting || isEditingMarkdown) return false;
+
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    return tag !== 'INPUT' && tag !== 'TEXTAREA' && !target?.isContentEditable;
+  }, [
+    annotateMode,
+    archive.archiveMode,
+    goalSetupMode,
+    showExport,
+    showImport,
+    showFeedbackPrompt,
+    showClaudeCodeWarning,
+    showSourceFileEditWarning,
+    showExitWarning,
+    showAgentWarning,
+    showPermissionModeSetup,
+    pendingPasteImage,
+    submitted,
+    isSubmitting,
+    isExiting,
+    isEditingMarkdown,
+  ]);
+
+  useAnnotateSidebarShortcuts({
+    handlers: {
+      toggleContents: {
+        when: canHandleAnnotateSidebarShortcut,
+        handle: () => toggleSidebarTab('toc'),
+      },
+      toggleFiles: {
+        when: (event) => canHandleAnnotateSidebarShortcut(event) && showFilesTab && !archive.archiveMode,
+        handle: () => toggleSidebarTab('files'),
+      },
+    },
+  });
+
+  useDoubleTapShortcuts({
+    scope: annotateSidebarShortcuts,
+    handlers: {
+      toggleAgentTui: {
+        when: (event) =>
+          canHandleAnnotateSidebarShortcut(event) &&
+          annotateSource !== 'message' &&
+          agentTerminalCapability !== null,
+        handle: () => toggleAgentTerminal(),
+      },
+    },
+  });
+
   const fileBrowserDirs = useMemo(() => {
     const projectDirs = projectRoot ? [projectRoot] : [];
     const userDirs = isFileBrowserEnabled()
@@ -2134,7 +2214,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Session-level force-markdown preference (--markdown); threaded into folder/linked
@@ -2158,6 +2238,7 @@ const App: React.FC = () => {
           setRenderAs('html');
           setRawHtml(data.rawHtml);
           setShareHtml(data.shareHtml ?? '');
+          setHtmlDiffHtml(data.diffHtml ?? null);
           setMarkdown('');
         } else if (data.mode === 'annotate-folder') {
           // Folder annotation mode: clear demo content, let user pick a file
@@ -3871,7 +3952,7 @@ const App: React.FC = () => {
         )}
 
         {/* Main Content */}
-        <ScrollViewportContext.Provider value={scrollViewport}>
+        <ScrollViewportProvider viewport={scrollViewport}>
         <div data-print-region="content" className={`flex-1 flex overflow-hidden relative z-0 ${isResizing ? 'select-none' : ''}`}>
           {/* Tater sprites — inside content wrapper so z-0 stacking context applies */}
           {taterMode && <TaterSpriteRunning />}
@@ -3898,6 +3979,8 @@ const App: React.FC = () => {
                   {...agentTerminalResize.handleProps}
                   className="hidden lg:block z-[55]"
                   side="left"
+                  hideHoverTrack
+                  tooltip={RESIZE_HANDLE_TOOLTIP}
                   onCollapse={hideAgentTerminal}
                 />
               )}
@@ -3909,7 +3992,7 @@ const App: React.FC = () => {
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
               hasDiff={planDiff.hasPreviousVersion}
-              showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
+              showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
               showFilesTab={showFilesTab && !archive.archiveMode}
               showMessagesTab={annotateSource === 'message' && recentMessages.length > 1}
               showAgentTerminalTab={showAgentTerminalControls}
@@ -3966,7 +4049,7 @@ const App: React.FC = () => {
                 onFilesFetchAll={() => fileBrowser.fetchAll(fileBrowserDirs)}
                 onFilesRetryVaultDir={(vaultPath) => fileBrowser.addVaultDir(vaultPath)}
                 hasFileAnnotations={hasFileAnnotations}
-                showVersionsTab={versionInfo !== null && versionInfo.totalVersions > 1}
+                showVersionsTab={!isHtmlSurface && versionInfo !== null && versionInfo.totalVersions > 1}
                 versionInfo={versionInfo}
                 versions={planDiff.versions}
                 selectedBaseVersion={planDiff.diffBaseVersion}
@@ -3997,14 +4080,18 @@ const App: React.FC = () => {
                 onSelectMessage={handleSelectMessage}
                 messageAnnotationCounts={activeMessageAnnotationCounts}
               />
-              <ResizeHandle {...tocResize.handleProps} className="hidden lg:block z-[55]" side="left" onCollapse={sidebar.close} />
+              <ResizeHandle {...tocResize.handleProps} className="hidden lg:block z-[55]" side="left" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={sidebar.close} />
             </div>
           )}
 
           {/* Document Area */}
           <OverlayScrollArea
             element="main"
-            className={`flex-1 min-w-0 ${isHtmlSurface ? 'bg-background' : `${gridEnabled ? "bg-grid " : "bg-card "}${canShowCollapsedSidebarTabs ? 'lg:pl-[30px]' : ''}`}`}
+            className={resolveDocumentAreaClassName({
+              isHtmlSurface,
+              gridEnabled,
+              hasCollapsedSidebarTabs: canShowCollapsedSidebarTabs,
+            })}
             data-print-region="document"
             onViewportReady={handleViewportReady}
           >
@@ -4227,9 +4314,9 @@ const App: React.FC = () => {
                 )}
                 {renderAs === 'html' ? (
                   <HtmlViewer
-                    key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                    key={(linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan') + (isPlanDiffActive && htmlDiffHtml ? ':diff' : '')}
                     ref={viewerRef}
-                    rawHtml={rawHtml}
+                    rawHtml={isPlanDiffActive && htmlDiffHtml ? htmlDiffHtml : rawHtml}
                     annotations={viewerAnnotations}
                     onAddAnnotation={handleAddAnnotation}
                     onSelectAnnotation={handleSelectAnnotation}
@@ -4242,6 +4329,9 @@ const App: React.FC = () => {
                     maxWidth={isHtmlSurface ? null : annotateReaderMaxWidth}
                     fullViewport={isHtmlSurface}
                     hideControls={htmlToolsHidden}
+                    diffAvailable={!!htmlDiffHtml}
+                    diffActive={isPlanDiffActive && !!htmlDiffHtml}
+                    onToggleDiff={() => setIsPlanDiffActive((v) => !v)}
                     onAskAI={canUseDocumentAskAI ? handleAskAI : undefined}
                   />
                 ) : isEditingMarkdown ? (
@@ -4329,7 +4419,7 @@ const App: React.FC = () => {
               ancestor (`contents` = no layout box). */}
           <div className="contents group/sidebar">
           {/* Resize Handle */}
-          {isPanelOpen && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAskAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block z-[55]" side="right" onCollapse={() => setIsPanelOpen(false)} />}
+          {isPanelOpen && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAskAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block z-[55]" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsPanelOpen(false)} />}
 
           {/* Annotation Panel */}
           <AnnotationPanel
@@ -4412,7 +4502,7 @@ const App: React.FC = () => {
           )}
           </div>
         </div>
-        </ScrollViewportContext.Provider>
+        </ScrollViewportProvider>
 
         {/* Code File Popout */}
         {codeFilePopout.popoutProps && (

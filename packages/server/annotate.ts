@@ -8,17 +8,19 @@
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" for remote, "0"/"false" for local
- *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
+ *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleFavicon, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
+import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
+import { saveToHistory, getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
+import { htmlDiff } from "@plannotator/shared/html-diff";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
 import {
@@ -30,7 +32,7 @@ import {
 	saveSourceFileAtomic,
 } from "@plannotator/shared/source-save-node";
 import { createExternalAnnotationHandler } from "./external-annotations";
-import { saveConfig, detectGitUser, getServerConfig } from "./config";
+import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAnnotateHistory } from "./config";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
 import { isWithinDirectory } from "@plannotator/shared/html-assets-node";
@@ -91,6 +93,8 @@ export interface AnnotateServerOptions {
   convertHtml?: boolean;
   /** CWD where the optional annotate agent terminal should launch. Defaults to process.cwd(). */
   agentCwd?: string;
+  /** Project name for keying per-file version history (powers the annotate version diff). */
+  project?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void;
 }
@@ -117,9 +121,6 @@ export interface AnnotateServerResult {
 
 // --- Server Implementation ---
 
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 500;
-
 /**
  * Start the Annotate server
  *
@@ -131,9 +132,6 @@ const RETRY_DELAY_MS = 500;
 export async function startAnnotateServer(
   options: AnnotateServerOptions
 ): Promise<AnnotateServerResult> {
-  // Side-channel pre-warm so /api/doc/exists POSTs land on warm cache.
-  void warmFileListCache(process.cwd(), "code");
-
   const {
     markdown,
     filePath,
@@ -152,13 +150,69 @@ export async function startAnnotateServer(
     renderHtml = false,
     convertHtml = false,
     agentCwd,
+    project,
     onReady,
   } = options;
 
   const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
+
+  // Per-file version history → powers the native version diff in annotate mode.
+  // Unlike the plan flow (slug = first-heading + date), annotate keys history by
+  // file path so re-opening the same file groups its versions across edits even
+  // when headings change. Diff content is the markdown, or the raw HTML source
+  // when rendering HTML. Only single local files (not URLs/folders/messages).
+  const annotateProjectName = project ?? "_unknown";
+  let annotateHistory:
+    | {
+        slug: string;
+        diffCurrent: string;
+        previousPlan: string | null;
+        versionInfo: { version: number; totalVersions: number; project: string };
+      }
+    | null = null;
+  {
+    const historyContent = renderHtml && rawHtml ? rawHtml : markdown;
+    const eligible =
+      mode === "annotate" &&
+      !/^https?:\/\//i.test(filePath) &&
+      historyContent.length > 0 &&
+      resolveAnnotateHistory(loadConfig());
+    if (eligible) {
+      const base =
+        (filePath.split(/[\\/]/).pop() || "document")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 60) || "document";
+      const slug = `annotate-${base}-${contentHash(resolvePath(filePath)).slice(0, 8)}`;
+      // History is an enhancement, never a gate: a read-only/full data dir
+      // must degrade to v0.22.0's stateless annotate (no version diff), not
+      // fail the whole session before the UI ever opens.
+      try {
+        const saved = saveToHistory(annotateProjectName, slug, historyContent);
+        const previousPlan =
+          saved.version > 1
+            ? getPlanVersion(annotateProjectName, slug, saved.version - 1)
+            : null;
+        annotateHistory = {
+          slug,
+          diffCurrent: historyContent,
+          previousPlan,
+          versionInfo: {
+            version: saved.version,
+            totalVersions: getVersionCount(annotateProjectName, slug),
+            project: annotateProjectName,
+          },
+        };
+      } catch (error) {
+        console.error(
+          `[plannotator] warning: annotate history unavailable (${error instanceof Error ? error.message : String(error)}); continuing without version diff`,
+        );
+      }
+    }
+  }
   const draftSource =
     mode === "annotate-folder" && folderPath
       ? `folder:${resolvePath(folderPath)}`
@@ -292,14 +346,10 @@ export async function startAnnotateServer(
     resolveDecision = resolve;
   });
 
-  // Start server with retry logic
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
+  const server = await startBunServerOnAvailablePort((port) =>
+    Bun.serve({
         hostname: getServerHostname(),
-        port: configuredPort,
+        port,
         // Bun's default 10s idleTimeout kills AI SSE streams that stall
         // between bytes (e.g. while a permission prompt waits on the user).
         idleTimeout: 0,
@@ -320,6 +370,13 @@ export async function startAnnotateServer(
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
           if (url.pathname === "/api/plan" && req.method === "GET") {
             const displayRawHtml = renderHtml && rawHtml ? htmlAssets.rewriteHtml(rawHtml, filePath) : undefined;
+            // For HTML, render the version diff as the real page with inline
+            // <ins>/<del> highlights (tag-aware htmlDiff), asset-rewritten the
+            // same way as the live page so it renders identically.
+            const diffHtml =
+              renderHtml && rawHtml && annotateHistory?.previousPlan
+                ? htmlAssets.rewriteHtml(htmlDiff(annotateHistory.previousPlan, rawHtml), filePath)
+                : undefined;
             const primarySource = getPrimarySource();
             return Response.json({
               plan: primarySource.plan,
@@ -332,7 +389,15 @@ export async function startAnnotateServer(
               gate,
               renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
+              ...(diffHtml ? { diffHtml } : {}),
               convertHtml,
+              ...(annotateHistory
+                ? {
+                    previousPlan: annotateHistory.previousPlan,
+                    versionInfo: annotateHistory.versionInfo,
+                    diffCurrent: annotateHistory.diffCurrent,
+                  }
+                : {}),
               sharingEnabled,
               shareBaseUrl,
               pasteApiUrl,
@@ -342,6 +407,35 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser),
               agentTerminal: agentTerminal.capability,
               ...(recentMessages ? { recentMessages } : {}),
+            });
+          }
+
+          // API: fetch a specific version of the annotated file (version diff base picker)
+          if (url.pathname === "/api/plan/version" && req.method === "GET") {
+            if (!annotateHistory) {
+              return Response.json({ error: "No version history" }, { status: 404 });
+            }
+            const vParam = url.searchParams.get("v");
+            const v = vParam ? parseInt(vParam, 10) : NaN;
+            if (isNaN(v) || v < 1) {
+              return new Response("Invalid version number", { status: 400 });
+            }
+            const content = getPlanVersion(annotateProjectName, annotateHistory.slug, v);
+            if (content === null) {
+              return Response.json({ error: "Version not found" }, { status: 404 });
+            }
+            return Response.json({ plan: content, version: v });
+          }
+
+          // API: list all stored versions of the annotated file (Version Browser)
+          if (url.pathname === "/api/plan/versions" && req.method === "GET") {
+            if (!annotateHistory) {
+              return Response.json({ project: annotateProjectName, slug: null, versions: [] });
+            }
+            return Response.json({
+              project: annotateProjectName,
+              slug: annotateHistory.slug,
+              versions: listVersions(annotateProjectName, annotateHistory.slug),
             });
           }
 
@@ -542,7 +636,7 @@ export async function startAnnotateServer(
               }
               return handler(req);
             }
-            return Response.json({ error: "Not found" }, { status: 404 });
+            return handleApiNotFound(url.pathname);
           }
 
           // API: Exit annotation session without feedback
@@ -594,7 +688,12 @@ export async function startAnnotateServer(
           }
 
           // Favicon
-          if (url.pathname === "/favicon.svg") return handleFavicon();
+          if (url.pathname === "/favicon.png") return handleFavicon();
+
+          // API 404 guard: unknown /api/* routes should return JSON, not HTML
+          if (url.pathname.startsWith("/api/")) {
+            return handleApiNotFound(url.pathname);
+          }
 
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {
@@ -610,37 +709,15 @@ export async function startAnnotateServer(
             { status: 500, headers: { "Content-Type": "text/plain" } },
           );
         },
-      });
-
-      break; // Success, exit retry loop
-    } catch (err: unknown) {
-      const isAddressInUse =
-        err instanceof Error && err.message.includes("EADDRINUSE");
-
-      if (isAddressInUse && attempt < MAX_RETRIES) {
-        await Bun.sleep(RETRY_DELAY_MS);
-        continue;
-      }
-
-      if (isAddressInUse) {
-        const hint = isRemote
-          ? " (set PLANNOTATOR_PORT to use different port)"
-          : "";
-        throw new Error(
-          `Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`
-        );
-      }
-
-      throw err;
-    }
-  }
-
-  if (!server) {
-    throw new Error("Failed to start server");
-  }
+    }),
+  );
 
   const port = server.port!;
   const serverUrl = `http://localhost:${port}`;
+
+  // The cache warm must never gate the listening socket. Its async filesystem
+  // walk yields between directories while requests remain serviceable.
+  void warmFileListCache(process.cwd(), "code");
 
   // Notify caller that server is ready
   if (onReady) {

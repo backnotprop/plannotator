@@ -92,7 +92,7 @@ export const GuideDiffSection: React.FC<GuideDiffSectionProps> = ({ diffRef, isF
           container, so each diff gets a bounded box sized to its patch (small
           diffs render at natural height, tall ones cap and scroll internally). */}
       <div
-        key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}`}
+        key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`}
         style={{ height: diffHeight }}
         className="rounded-lg border border-border/40 overflow-hidden"
       >
@@ -102,6 +102,7 @@ export const GuideDiffSection: React.FC<GuideDiffSectionProps> = ({ diffRef, isF
           oldPath={file.oldPath}
           status={file.status}
           reviewBase={state.reviewBase}
+          reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
           prUrl={state.prMetadata?.url}
           prDiffScope={state.prDiffScope}
           isFocused={isFocused}

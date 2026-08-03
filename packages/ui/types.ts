@@ -159,6 +159,14 @@ export interface CodeAnnotation {
   commitSha?: string;
   /** The commit's one-line subject, captured for readable export labels. */
   commitSubject?: string;
+  /** GitButler target that supplied this annotation's line coordinates. */
+  gitButlerDiffType?: string;
+  /** Human-readable GitButler target label captured with the annotation. */
+  gitButlerDiffLabel?: string;
+  /** GitButler merge base active when the annotation was created. */
+  gitButlerBase?: string;
+  /** Exact server snapshot that supplied the GitButler line coordinates. */
+  gitButlerSnapshotId?: string;
 }
 
 /** Token-level metadata passed from selection to annotation creation. */
@@ -249,11 +257,11 @@ export interface VaultNode {
   children?: VaultNode[];
 }
 
-export type { EditorAnnotation } from '@plannotator/shared/types';
+export type { EditorAnnotation } from '@plannotator/core/types';
 
 export type {
   ExternalAnnotationEvent,
-} from '@plannotator/shared/external-annotation';
+} from '@plannotator/core/external-annotation';
 
 export type {
   AgentJobInfo,
@@ -261,4 +269,4 @@ export type {
   AgentJobStatus,
   AgentCapability,
   AgentCapabilities,
-} from '@plannotator/shared/agent-jobs';
+} from '@plannotator/core/agent-jobs';

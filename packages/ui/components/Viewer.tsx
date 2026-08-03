@@ -1,8 +1,8 @@
 import React, { useRef, useState, useEffect, useMemo, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import hljs from 'highlight.js';
-import { Block, Annotation, AnnotationType, EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
-import { Frontmatter, computeListIndices, groupBlocks } from '../utils/parser';
+import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
+import { computeListIndices, groupBlocks, type Frontmatter } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { BlockRenderer } from './BlockRenderer';
 import { CodeBlock } from './blocks/CodeBlock';
@@ -11,7 +11,6 @@ import { TableToolbar } from './blocks/TableToolbar';
 import { TablePopout } from './blocks/TablePopout';
 import { CodePathValidationContext } from './CodePathValidationContext';
 import { useValidatedCodePaths } from '../hooks/useValidatedCodePaths';
-import { ListMarker } from './ListMarker';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
 
@@ -33,13 +32,12 @@ class ToolbarErrorBoundary extends React.Component<
   }
 }
 
-import { CommentPopover, type CommentAskAIContext, type CommentAskAIHandler } from './CommentPopover';
+import { CommentPopover, type CommentAskAIHandler } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
 import { GraphvizBlock } from './GraphvizBlock';
 import { MermaidBlock } from './MermaidBlock';
-import { getImageSrc } from './ImageThumbnail';
 import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
@@ -75,6 +73,9 @@ interface ViewerProps {
    *  so out-of-tree relative references (e.g. `../foo.ts` in a linked doc)
    *  resolve against the doc's own directory rather than only cwd. */
   codePathBaseDir?: string;
+  /** Opt out of `/api/doc/exists` code-path validation (host without that
+   *  endpoint). Default undefined for Plannotator => validation stays on. */
+  disableCodePathValidation?: boolean;
   linkedDocInfo?: LinkedDocBadgeInfo | null;
   // Plan diff props
   planDiffStats?: { additions: number; deletions: number; modifications: number } | null;
@@ -109,6 +110,15 @@ interface ViewerProps {
   onToggleCheckbox?: (blockId: string, checked: boolean) => void;
   checkboxOverrides?: Map<string, boolean>;
   onAskAI?: CommentAskAIHandler;
+  /** Whether comment popovers offer image attachments. Hosts without an
+   *  uploadTransport pass false so the attach affordance never dead-ends.
+   *  Default true — today's behavior. */
+  allowImages?: boolean;
+  /** View-only mode: suppresses every annotation-creation entry point
+   *  (selection toolbar, comment popovers, quick labels, pinpoint, global
+   *  comment, attachments, checkbox toggles). Existing annotations still
+   *  render and remain selectable. Default false — today's behavior. */
+  readOnly?: boolean;
 }
 
 export interface ViewerHandle {
@@ -178,6 +188,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   linkedDocInfo,
   imageBaseDir,
   codePathBaseDir,
+  disableCodePathValidation,
   copyLabel,
   actionsLabelMode = 'full',
   archiveInfo,
@@ -187,6 +198,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onToggleCheckbox,
   checkboxOverrides,
   onAskAI,
+  allowImages = true,
+  readOnly = false,
 }, ref) => {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -203,6 +216,28 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
   };
   const containerRef = useRef<HTMLDivElement>(null);
+  // The badge cluster (repo chips / diff badge) is absolutely positioned in the
+  // card's top padding. One row fits; a second row (diff badge) or mobile
+  // wrapping outgrows the padding and lands on the document's first heading.
+  // Measure the cluster and insert exactly the clearance it needs (0 when it fits).
+  const docBadgesRef = useRef<HTMLDivElement | null>(null);
+  const [badgeClearance, setBadgeClearance] = useState(0);
+  useEffect(() => {
+    const el = docBadgesRef.current;
+    const article = containerRef.current;
+    if (!el || !article) { setBadgeClearance(0); return; }
+    const measure = () => {
+      const pad = parseFloat(getComputedStyle(article).paddingTop) || 0;
+      const overflow = el.offsetTop + el.offsetHeight - pad;
+      setBadgeClearance(overflow > 1 ? overflow + 4 : 0);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, [repoInfo, hasPreviousVersion, showDemoBadge, linkedDocInfo, archiveInfo, sourceInfo, planDiffStats, openInAppPath]);
+
   // Per-doc heading slug map with dedup — computed once per blocks array so
   // anchor ids stay stable across re-renders and duplicate heading texts get
   // `-1`/`-2`/... suffixes rather than colliding on the same id.
@@ -212,7 +247,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const [isCodeBlockToolbarExiting, setIsCodeBlockToolbarExiting] = useState(false);
   const [hoveredTable, setHoveredTable] = useState<{ block: Block; element: HTMLElement } | null>(null);
   const [isTableToolbarExiting, setIsTableToolbarExiting] = useState(false);
-  const tableHoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const tableHoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [popoutTable, setPopoutTable] = useState<Block | null>(null);
   // Viewer-specific comment popover state (global comments + code blocks)
   const [viewerCommentPopover, setViewerCommentPopover] = useState<{
@@ -228,7 +263,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     anchorEl: HTMLElement;
     codeBlock: { block: Block; element: HTMLElement };
   } | null>(null);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickySentinelRef = useRef<HTMLDivElement>(null);
   const lastAutoScrolledHashRef = useRef<string | null>(null);
   const [isStuck, setIsStuck] = useState(false);
@@ -257,6 +292,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onSelectAnnotation,
     selectedAnnotationId,
     mode,
+    enabled: !readOnly,
   });
 
   // Refs for code block annotation path
@@ -293,7 +329,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     containerRef,
     highlighterRef,
     inputMethod,
-    enabled: !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false),
+    enabled: !readOnly && !toolbarState && !hookCommentPopover && !viewerCommentPopover && !hookQuickLabelPicker && !codeBlockQuickLabelPicker && !(isPlanDiffActive ?? false),
     onCodeBlockClick: handlePinpointCodeBlockClick,
   });
 
@@ -529,7 +565,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     setViewerCommentPopover(null);
   }, []);
 
-  const codePathValidation = useValidatedCodePaths(markdown, codePathBaseDir);
+  const codePathValidation = useValidatedCodePaths(markdown, codePathBaseDir, disableCodePathValidation);
 
   return (
     <CodePathValidationContext.Provider value={codePathValidation}>
@@ -543,7 +579,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       >
         {/* Repo info + plan diff badge + demo badge + linked doc badge + archive badge - top left */}
         {(repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || openInAppPath) && (
-          <div data-print-hide className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}>
+          <div ref={docBadgesRef} data-print-hide className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}>
             <DocBadges
               layout="column"
               repoInfo={repoInfo}
@@ -559,6 +595,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             />
           </div>
         )}
+
+        {/* Clearance so document content starts below the (absolute) badge cluster
+            when it outgrows the card's top padding — see the measuring effect above. */}
+        {badgeClearance > 0 && <div data-print-hide style={{ height: badgeClearance }} aria-hidden="true" />}
 
         {/* Sentinel for sticky detection */}
         {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
@@ -582,7 +622,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           )}
 
           {/* Attachments button */}
-          {onAddGlobalAttachment && onRemoveGlobalAttachment && (
+          {!readOnly && onAddGlobalAttachment && onRemoveGlobalAttachment && (
             <AttachmentsButton
               images={globalAttachments}
               onAdd={onAddGlobalAttachment}
@@ -593,6 +633,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           )}
 
           {/* <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span> button */}
+          {!readOnly && (
           <button
             ref={globalCommentButtonRef}
             onClick={() => {
@@ -611,6 +652,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             {actionsLabelMode === 'full' && <span>Global comment</span>}
             {actionsLabelMode === 'short' && <span>Comment</span>}
           </button>
+          )}
 
           {/* Copy plan/file button */}
           <button
@@ -653,7 +695,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                       orderedIndex={indices[i]}
                       onOpenLinkedDoc={onOpenLinkedDoc}
                       onOpenCodeFile={onOpenCodeFile}
-                      onToggleCheckbox={onToggleCheckbox}
+                      onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
                       checkboxOverrides={checkboxOverrides}
                       githubRepo={repoInfo?.display}
                       headingAnchorId={headingSlugMap.get(block.id)}
@@ -728,7 +770,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               isHovered={inputMethod !== 'pinpoint' && hoveredCodeBlock?.block.id === group.block.id}
             />
           ) : (
-            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
+            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={readOnly ? undefined : onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
           )
         )}
 
@@ -845,6 +887,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               initialText={hookCommentPopover.initialText}
               onSubmit={hookCommentSubmit}
               onClose={hookCommentClose}
+              allowImages={allowImages}
               onAskAI={onAskAI}
               askAIContext={{
                 kind: 'selection',
@@ -862,6 +905,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             initialText={viewerCommentPopover.initialText}
             onSubmit={handleViewerCommentSubmit}
             onClose={handleViewerCommentClose}
+            allowImages={allowImages}
             onAskAI={onAskAI}
             askAIContext={{
               kind: viewerCommentPopover.isGlobal ? 'general' : 'selection',

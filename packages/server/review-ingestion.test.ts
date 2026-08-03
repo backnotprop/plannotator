@@ -7,10 +7,36 @@ import { parseClaudeStreamOutput, transformClaudeFindings, CLAUDE_REVIEW_SCHEMA_
 import { transformReviewFindings, CODEX_REVIEW_SCHEMA, type CodexFinding } from "./codex-review";
 import { classifyFindingPlacement } from "@plannotator/shared/external-annotation";
 import {
+  getAgentJobAnnotationContext,
   markJobReviewFailed,
   REVIEW_OUTPUT_FAILED,
   type AgentJobInfo,
 } from "@plannotator/shared/agent-jobs";
+
+describe("launch-time diff attribution", () => {
+  test("stamps GitButler findings with the selector and exact launch snapshot", () => {
+    expect(getAgentJobAnnotationContext({
+      mode: "gitbutler:branch:feature%2Fapi",
+      base: "abc123",
+      label: "Branch: feature/api (committed changes)",
+      snapshotId: "snapshot-a",
+    })).toEqual({
+      gitButlerDiffType: "gitbutler:branch:feature%2Fapi",
+      gitButlerBase: "abc123",
+      gitButlerDiffLabel: "Branch: feature/api (committed changes)",
+      gitButlerSnapshotId: "snapshot-a",
+    });
+  });
+
+  test("stamps historical commit findings without affecting ordinary working-tree reviews", () => {
+    expect(getAgentJobAnnotationContext({
+      mode: "commit:0123456789abcdef",
+    })).toEqual({
+      commitSha: "0123456789abcdef",
+    });
+    expect(getAgentJobAnnotationContext({ mode: "uncommitted", base: "main" })).toEqual({});
+  });
+});
 
 describe("completion semantics — empty/unparseable output fails the job", () => {
   // Guards the fix: a provider that exits 0 with nothing/garbage must fail the

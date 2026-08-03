@@ -9,6 +9,7 @@ export { imageAnnotatorShortcuts, useImageAnnotatorShortcuts } from './plan-revi
 export { inputMethodShortcuts } from './plan-review/inputMethod.shortcuts';
 export { viewerShortcuts, useViewerShortcuts } from './plan-review/viewer.shortcuts';
 export { goalSetupShortcuts, useGoalSetupShortcuts } from './plan-review/goalSetup.shortcuts';
+export { annotateSidebarShortcuts, useAnnotateSidebarShortcuts } from './plan-review/sidebar.shortcuts';
 
 // code-review scopes
 export { reviewAnnotationToolbarShortcuts, useReviewAnnotationToolbarShortcuts } from './code-review/annotationToolbar.shortcuts';

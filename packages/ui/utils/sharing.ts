@@ -8,9 +8,9 @@
  * Inspired by textarea.my's approach.
  */
 
-import { Annotation, AnnotationType, type ImageAttachment } from '../types';
-import { compress, decompress } from '@plannotator/shared/compress';
-import { encrypt, decrypt } from '@plannotator/shared/crypto';
+import { AnnotationType, type Annotation, type ImageAttachment } from '../types';
+import { compress, decompress } from '@plannotator/core/compress';
+import { encrypt, decrypt } from '@plannotator/core/crypto';
 
 // Image in shareable format: plain string (old) or [path, name] tuple (new)
 type ShareableImage = string | [string, string];
@@ -298,7 +298,6 @@ export async function createShortShareUrl(
     }
     // Service unavailable — expected for self-hosted setups without a paste backend.
     // The caller is responsible for falling back to hash-based sharing silently.
-    console.debug('[sharing] Short URL service unavailable, using hash-based sharing:', e);
     return null;
   }
 }

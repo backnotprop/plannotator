@@ -1,0 +1,53 @@
+{
+  // Consumer-surface strict gate. External consumers (Workspaces) compile the
+  // shipped TS source with THEIR compiler options — typically strict: true —
+  // and skipLibCheck does not exempt .ts files. This config type-checks the
+  // supported-import surface (see HANDOFF.md "Supported imports") plus its
+  // transitive graph under full strict, mirroring a standalone Vite consumer.
+  // If this fails, a consumer's `tsc --noEmit` fails the same way.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true
+  },
+  "files": [
+    "configure.ts",
+    "types.ts",
+    "utils/parser.ts",
+    "components/BlockRenderer.tsx",
+    "components/InlineMarkdown.tsx",
+    "components/Viewer.tsx",
+    "components/MarkdownEditor.tsx",
+    "components/MarkdownDiff.tsx",
+    "components/CommentPopover.tsx",
+    "components/AnnotationPanel.tsx",
+    "components/ThemeProvider.tsx",
+    "test-consumer/theme-modes.tsx",
+    "components/ImageThumbnail.tsx",
+    "components/AttachmentsButton.tsx",
+    "components/TableOfContents.tsx",
+    "components/ResizeHandle.tsx",
+    "hooks/useAnnotationHighlighter.ts",
+    "hooks/useAnnotationDraft.ts",
+    "hooks/useCodeAnnotationDraft.ts",
+    "hooks/useExternalAnnotations.ts",
+    "hooks/useFileBrowser.ts",
+    "hooks/useResizablePanel.ts",
+    "hooks/useActiveSection.ts",
+    "hooks/useScrollViewport.ts",
+    "utils/annotationHelpers.ts",
+    "config/index.ts"
+  ]
+}

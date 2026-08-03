@@ -1,3 +1,4 @@
+/// <reference path="../globals.d.ts" />
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { TextShimmer } from './TextShimmer';

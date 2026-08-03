@@ -14,7 +14,8 @@ type EditorAnnotationVariant = 'plan' | 'code-review';
 
 interface EditorAnnotationCardProps {
   annotation: EditorAnnotation;
-  onDelete: () => void;
+  /** Omit to render the card read-only (no delete affordance). */
+  onDelete?: () => void;
   variant?: EditorAnnotationVariant;
 }
 
@@ -38,15 +39,17 @@ export const EditorAnnotationCard: React.FC<EditorAnnotationCardProps> = ({ anno
         <span className="text-[10px] font-mono text-muted-foreground/50 truncate" title={annotation.filePath}>
           {annotation.filePath}:{lineRange}
         </span>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="ml-auto relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-destructive"
-          title="Delete annotation"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        {onDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="ml-auto relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 hover:text-destructive"
+            title="Delete annotation"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Selected text */}

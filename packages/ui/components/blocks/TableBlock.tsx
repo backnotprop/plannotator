@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Block } from '../../types';
+import type { Block } from '../../types';
 import { InlineMarkdown } from '../InlineMarkdown';
 
 interface TableBlockProps {

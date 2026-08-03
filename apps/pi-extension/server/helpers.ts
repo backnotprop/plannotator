@@ -1,6 +1,6 @@
 /**
  * Core HTTP helpers for Pi extension servers.
- * parseBody, json, html, send, toWebRequest
+ * parseBody, json, handleApiNotFound, html, send, toWebRequest
  */
 
 import type { IncomingMessage } from "node:http";
@@ -29,6 +29,14 @@ export function json(
 ): void {
 	res.writeHead(status, { "Content-Type": "application/json" });
 	res.end(JSON.stringify(data));
+}
+
+/** Return the shared JSON response for an unmatched API route. */
+export function handleApiNotFound(
+	res: import("node:http").ServerResponse,
+	path: string,
+): void {
+	json(res, { error: "Not found", path }, 404);
 }
 
 export function html(

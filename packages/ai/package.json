@@ -17,5 +17,7 @@
     "./providers/opencode-sdk": "./providers/opencode-sdk.ts",
     "./providers/pi-sdk-node": "./providers/pi-sdk-node.ts"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@plannotator/core": "workspace:*"
+  }
 }

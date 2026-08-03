@@ -17,6 +17,26 @@ import type { AIContext, AIMessage, CreateSessionOptions } from "./types.ts";
 import type { ProviderRegistry } from "./provider.ts";
 import type { SessionManager } from "./session-manager.ts";
 
+/** Canonical paths handled by the shared AI endpoint runtime. */
+export const AI_ENDPOINT_PATHS = [
+  "/api/ai/capabilities",
+  "/api/ai/session",
+  "/api/ai/query",
+  "/api/ai/abort",
+  "/api/ai/permission",
+  "/api/ai/sessions",
+] as const;
+
+/** A path handled by the shared AI endpoint runtime. */
+export type AIEndpointPath = (typeof AI_ENDPOINT_PATHS)[number];
+
+const AI_ENDPOINT_PATH_SET: ReadonlySet<string> = new Set(AI_ENDPOINT_PATHS);
+
+/** Return whether a request path is a known shared AI endpoint. */
+export function isAIEndpointPath(path: string): path is AIEndpointPath {
+  return AI_ENDPOINT_PATH_SET.has(path);
+}
+
 // ---------------------------------------------------------------------------
 // Types for request/response
 // ---------------------------------------------------------------------------

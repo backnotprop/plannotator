@@ -9,6 +9,8 @@ describe("isFileBrowserExcludedPath", () => {
 		expect(isFileBrowserExcludedPath("docs/node_modules/pkg/readme.md")).toBe(true);
 		expect(isFileBrowserExcludedPath("docs/dist")).toBe(true);
 		expect(isFileBrowserExcludedPath("docs/dist/generated.md")).toBe(true);
+		expect(isFileBrowserExcludedPath(".claude/worktrees/session/plan.md")).toBe(true);
+		expect(isFileBrowserExcludedPath("packages/app/.agents/skills/review/SKILL.md")).toBe(true);
 	});
 
 	test("matches exact path segments only", () => {
