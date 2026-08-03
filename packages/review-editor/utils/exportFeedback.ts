@@ -29,6 +29,8 @@ export interface FeedbackDiffContext {
   worktreePath?: string | null;
   /** Subject of the active commit when mode is `commit:<sha>` — header readability only. */
   commitSubject?: string;
+  /** Exact server snapshot for providers whose line anchors can outlive a refresh. */
+  snapshotId?: string;
 }
 
 /** The sha when a `commit:<sha>` diff is (or was) the anchor, else undefined.
@@ -45,6 +47,20 @@ function describeDiff(ctx: FeedbackDiffContext): string {
   if (commitSha) {
     const subject = ctx.commitSubject ? ` — ${ctx.commitSubject}` : '';
     return `Commit \`${commitSha.slice(0, 7)}\`${subject} (diff vs its parent)${worktreePath ? ` _(worktree: ${worktreePath})_` : ''}`;
+  }
+  if (mode === 'gitbutler:workspace') {
+    label = 'GitButler workspace (all applied changes)';
+    return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;
+  }
+  for (const [prefix, kind] of [
+    ['gitbutler:stack:', 'stack'],
+    ['gitbutler:branch:', 'branch'],
+  ] as const) {
+    if (!mode.startsWith(prefix)) continue;
+    let target = mode.slice(prefix.length);
+    try { target = decodeURIComponent(target); } catch { /* keep encoded fallback */ }
+    label = `GitButler ${kind} \`${target}\` (committed changes)`;
+    return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;
   }
   switch (mode) {
     case "uncommitted":  label = "Uncommitted changes"; break;
@@ -95,7 +111,18 @@ function commitMismatchNote(ann: CodeAnnotation, currentCommitSha?: string): str
   return '';
 }
 
-function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel = '###', currentCommitSha?: string): string {
+function gitButlerMismatchNote(ann: CodeAnnotation, current?: FeedbackDiffContext): string {
+  if (!ann.gitButlerDiffType) return '';
+  const sameSnapshot = !ann.gitButlerSnapshotId || ann.gitButlerSnapshotId === current?.snapshotId;
+  if (ann.gitButlerDiffType === current?.mode && ann.gitButlerBase === current.base && sameSnapshot) return '';
+  const source = ann.gitButlerDiffLabel ?? describeDiff({
+    mode: ann.gitButlerDiffType,
+    base: ann.gitButlerBase,
+  });
+  return `_Made on ${source} — anchored to that GitButler diff, not the diff above._\n`;
+}
+
+function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel = '###', currentDiff?: FeedbackDiffContext): string {
   let output = '';
 
   const sorted = [...fileAnnotations].sort((a, b) => {
@@ -113,7 +140,8 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
 
     if (scope === 'file') {
       output += `${headingLevel} File Comment\n`;
-      output += commitMismatchNote(ann, currentCommitSha);
+      output += commitMismatchNote(ann, commitShaFromMode(currentDiff?.mode));
+      output += gitButlerMismatchNote(ann, currentDiff);
       if (ann.text) {
         output += `${prefix}${ann.text}\n`;
       } else if (prefix) {
@@ -133,7 +161,8 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
       ? ` — \`\`${ann.tokenText.replace(/`/g, '\\`')}\`\`${ann.charStart != null ? ` (chars ${ann.charStart}-${ann.charEnd})` : ''}`
       : '';
     output += `${headingLevel} ${lineRange} (${ann.side})${tokenSuffix}\n`;
-    output += commitMismatchNote(ann, currentCommitSha);
+    output += commitMismatchNote(ann, commitShaFromMode(currentDiff?.mode));
+    output += gitButlerMismatchNote(ann, currentDiff);
 
     if (ann.text) {
       output += `${prefix}${ann.text}\n`;
@@ -179,12 +208,12 @@ function groupByFile(annotations: CodeAnnotation[]): Map<string, CodeAnnotation[
   return grouped;
 }
 
-function renderFileGroups(grouped: Map<string, CodeAnnotation[]>, headingLevel: string, currentCommitSha?: string): string {
+function renderFileGroups(grouped: Map<string, CodeAnnotation[]>, headingLevel: string, currentDiff?: FeedbackDiffContext): string {
   const annotationHeading = headingLevel + '#';
   let output = '';
   for (const [filePath, fileAnnotations] of grouped) {
     output += `${headingLevel} ${filePath}\n\n`;
-    output += formatFileAnnotations(fileAnnotations, annotationHeading, currentCommitSha);
+    output += formatFileAnnotations(fileAnnotations, annotationHeading, currentDiff);
   }
   return output;
 }
@@ -195,19 +224,19 @@ function scopeDisplayLabel(scope: string): string {
   return scope;
 }
 
-function renderScopedGroups(annotations: CodeAnnotation[], headingLevel: string, currentCommitSha?: string): string {
+function renderScopedGroups(annotations: CodeAnnotation[], headingLevel: string, currentDiff?: FeedbackDiffContext): string {
   const scopes = new Set(annotations.map(a => a.diffScope).filter(Boolean));
-  if (scopes.size <= 1) return renderFileGroups(groupByFile(annotations), headingLevel, currentCommitSha);
+  if (scopes.size <= 1) return renderFileGroups(groupByFile(annotations), headingLevel, currentDiff);
 
   let output = '';
   for (const scope of scopes) {
     const scopeAnns = annotations.filter(a => a.diffScope === scope);
     output += `${headingLevel} ${scopeDisplayLabel(scope)}\n\n`;
-    output += renderFileGroups(groupByFile(scopeAnns), headingLevel + '#', currentCommitSha);
+    output += renderFileGroups(groupByFile(scopeAnns), headingLevel + '#', currentDiff);
   }
   const unscopedAnns = annotations.filter(a => !a.diffScope);
   if (unscopedAnns.length > 0) {
-    output += renderFileGroups(groupByFile(unscopedAnns), headingLevel, currentCommitSha);
+    output += renderFileGroups(groupByFile(unscopedAnns), headingLevel, currentDiff);
   }
   return output;
 }
@@ -246,7 +275,7 @@ export function exportReviewFeedback(
         `${prMeta.url}\n\n`
       : `# Code Review Feedback\n\n${diffContext ? `**Diff:** ${describeDiff(diffContext)}\n\n` : ''}`;
 
-    output += renderScopedGroups(placed, '##', commitShaFromMode(diffContext?.mode));
+    output += renderScopedGroups(placed, '##', diffContext);
     output += generalSection;
     return output;
   }

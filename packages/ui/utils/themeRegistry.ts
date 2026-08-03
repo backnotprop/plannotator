@@ -1,3 +1,5 @@
+import type { Mode } from '../components/themeModes';
+
 export interface ThemeColors {
   primary: string;
   secondary: string;
@@ -565,3 +567,33 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
 ];
+
+/** Return the explicit mode a palette cannot render, if any. */
+export function getUnsupportedMode(themeId: string): 'light' | 'dark' | null {
+  const theme = BUILT_IN_THEMES.find(({ id }) => id === themeId);
+  if (theme?.modeSupport === 'dark-only') return 'light';
+  if (theme?.modeSupport === 'light-only') return 'dark';
+  return null;
+}
+
+/** Return whether a palette can honor a mode choice without coercion. */
+export function isThemeModeAvailable(themeId: string, mode: Mode): boolean {
+  return mode === 'system' || getUnsupportedMode(themeId) !== mode;
+}
+
+/** Keep System intact while coercing an unsupported explicit mode. */
+export function normalizeThemeMode(themeId: string, mode: Mode): Mode {
+  const unsupportedMode = getUnsupportedMode(themeId);
+  if (mode === 'system' || mode !== unsupportedMode) return mode;
+  return unsupportedMode === 'light' ? 'dark' : 'light';
+}
+
+/** Resolve the mode a palette actually renders. */
+export function resolveThemeMode(
+  themeId: string,
+  preferredMode: 'light' | 'dark',
+): 'light' | 'dark' {
+  const unsupportedMode = getUnsupportedMode(themeId);
+  if (preferredMode !== unsupportedMode) return preferredMode;
+  return unsupportedMode === 'light' ? 'dark' : 'light';
+}

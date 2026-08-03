@@ -22,6 +22,15 @@ import {
   getJjFileContentsForDiff,
   runJjDiff,
 } from "./jj-core";
+import {
+  type ReviewGitButlerRuntime,
+  detectGitButlerWorkspace,
+  getGitButlerContext,
+  getGitButlerDiffFingerprint,
+  getGitButlerFileContentsForDiff,
+  parseGitButlerDiffType,
+  runGitButlerDiff,
+} from "./gitbutler-core";
 
 export type {
   DiffOption,
@@ -71,11 +80,12 @@ export interface VcsProvider {
   detectRemoteDefaultCompareTarget?(cwd?: string): Promise<string | null>;
 }
 
-export type VcsSelection = "auto" | "git" | "jj" | "p4";
+export type VcsSelection = "auto" | "git" | "gitbutler" | "jj" | "p4";
 
 export interface VcsApi {
   detectVcs(cwd?: string): Promise<VcsProvider>;
   detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null>;
+  vcsOwnsDiffType(vcsType: Exclude<VcsSelection, "auto">, diffType: string): boolean;
   getVcsContext(cwd?: string, vcsType?: VcsSelection): Promise<GitContext>;
   detectRemoteDefaultCompareTarget(cwd?: string, vcsType?: VcsSelection): Promise<string | null>;
   prepareLocalReviewDiff(options: PrepareLocalReviewDiffOptions): Promise<PreparedLocalReviewDiff>;
@@ -122,6 +132,8 @@ export interface PreparedLocalReviewDiff {
   rawPatch: string;
   gitRef: string;
   error?: string;
+  /** Provider freshness token captured atomically with the initial patch. */
+  fingerprint?: string;
 }
 
 const GIT_DIFF_TYPES = new Set(["since-base", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
@@ -262,11 +274,44 @@ export function createJjProvider(runtime: ReviewJjRuntime): VcsProvider {
   };
 }
 
+/** Create the provider for an actively checked-out GitButler workspace. */
+export function createGitButlerProvider(runtime: ReviewGitButlerRuntime): VcsProvider {
+  return {
+    id: "gitbutler",
+
+    async detect(cwd?: string): Promise<boolean> {
+      return (await detectGitButlerWorkspace(runtime, cwd)) !== null;
+    },
+
+    getRoot(cwd?: string): Promise<string | null> {
+      return detectGitButlerWorkspace(runtime, cwd);
+    },
+
+    ownsDiffType(diffType: string): boolean {
+      return parseGitButlerDiffType(diffType) !== null;
+    },
+
+    getContext(cwd?: string): Promise<GitContext> {
+      return getGitButlerContext(runtime, cwd);
+    },
+
+    runDiff(diffType: DiffType, _defaultBranch: string, cwd?: string, options?: GitDiffOptions): Promise<DiffResult> {
+      return runGitButlerDiff(runtime, diffType, cwd, options);
+    },
+
+    getFileContents(diffType, _defaultBranch, filePath, oldPath?, cwd?) {
+      return getGitButlerFileContentsForDiff(runtime, diffType, filePath, oldPath, cwd);
+    },
+
+    getDiffFingerprint(diffType, _defaultBranch, cwd?, options?) {
+      return getGitButlerDiffFingerprint(runtime, diffType, cwd, options);
+    },
+  };
+}
+
 export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
   const providerList = [...providers];
   const defaultProvider = providerList.find((provider) => provider.id === "git") ?? providerList[0];
-  const vcsCache = new Map<string, VcsProvider>();
-  const managedVcsCache = new Map<string, VcsProvider>();
 
   if (!defaultProvider) {
     throw new Error("createVcsApi requires at least one provider");
@@ -296,10 +341,6 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
   }
 
   async function detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null> {
-    const key = `${vcsType ?? "auto"}:${cwd ?? process.cwd()}`;
-    const cached = managedVcsCache.get(key);
-    if (cached) return cached;
-
     if (vcsType && vcsType !== "auto") {
       const provider = getProviderById(vcsType);
       let detected = false;
@@ -308,25 +349,19 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       } catch {
         detected = false;
       }
-      const result = detected ? provider : null;
-      if (result) managedVcsCache.set(key, result);
-      return result;
+      return detected ? provider : null;
     }
 
     const candidates = await collectDetectedProviders(cwd);
-    const detected = selectNearestProvider(candidates, cwd);
-    if (detected) managedVcsCache.set(key, detected);
-    return detected;
+    return selectNearestProvider(candidates, cwd);
   }
 
   async function detectVcs(cwd?: string): Promise<VcsProvider> {
-    const key = cwd ?? process.cwd();
-    const cached = vcsCache.get(key);
-    if (cached) return cached;
-
-    const detected = (await detectManagedVcs(cwd)) ?? defaultProvider;
-    vcsCache.set(key, detected);
-    return detected;
+    // OpenCode and Pi keep this module alive across review sessions. Always
+    // re-detect at the session boundary so `but setup`/`but teardown`, JJ
+    // colocating, or nested-repo changes cannot leave a stale provider with
+    // the wrong staging semantics cached for this cwd.
+    return (await detectManagedVcs(cwd)) ?? defaultProvider;
   }
 
   function getProviderForDiffType(diffType: string): VcsProvider | null {
@@ -346,6 +381,8 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     switch (id) {
       case "git":
         return "Git";
+      case "gitbutler":
+        return "GitButler";
       case "jj":
         return "JJ";
       case "p4":
@@ -402,7 +439,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     requestedBase: string | undefined,
     ownsRequestedDiffType: boolean,
   ): string {
-    if (gitContext.vcsType === "jj") {
+    if (gitContext.vcsType === "jj" || gitContext.vcsType === "gitbutler") {
       if (diffType === "jj-line" && ownsRequestedDiffType && requestedBase) {
         return requestedBase;
       }
@@ -414,6 +451,10 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
   return {
     detectVcs,
     detectManagedVcs,
+
+    vcsOwnsDiffType(vcsType: Exclude<VcsSelection, "auto">, diffType: string): boolean {
+      return getProviderById(vcsType)?.ownsDiffType(diffType) ?? false;
+    },
 
     async getVcsContext(cwd?: string, vcsType?: VcsSelection): Promise<GitContext> {
       return (await getContextWithProvider(cwd, vcsType)).gitContext;
@@ -438,14 +479,16 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       const result = await provider.runDiff(diffType, base, gitContext.cwd ?? options.cwd, {
         hideWhitespace: options.hideWhitespace,
       });
+      const effectiveContext = result.gitContext ?? gitContext;
 
       return {
-        gitContext,
+        gitContext: effectiveContext,
         diffType,
-        base,
+        base: result.gitContext?.defaultBranch ?? base,
         rawPatch: result.patch,
         gitRef: result.label,
         error: result.error,
+        fingerprint: result.fingerprint,
       };
     },
 

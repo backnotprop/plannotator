@@ -26,6 +26,36 @@ export interface AgentJobDiffContext {
   mode: string;
   base?: string;
   worktreePath?: string | null;
+  /** Human-readable label captured with provider-specific selectors. */
+  label?: string;
+  /** Exact server snapshot that supplied the reviewed line coordinates. */
+  snapshotId?: string;
+}
+
+export interface AgentJobAnnotationContext {
+  commitSha?: string;
+  gitButlerDiffType?: string;
+  gitButlerDiffLabel?: string;
+  gitButlerBase?: string;
+  gitButlerSnapshotId?: string;
+}
+
+/** Stamp completed review findings with the diff snapshot the agent reviewed. */
+export function getAgentJobAnnotationContext(
+  diffContext?: AgentJobDiffContext,
+): AgentJobAnnotationContext {
+  if (!diffContext) return {};
+  if (diffContext.mode.startsWith("commit:")) {
+    const commitSha = diffContext.mode.slice("commit:".length);
+    return commitSha ? { commitSha } : {};
+  }
+  if (!diffContext.mode.startsWith("gitbutler:")) return {};
+  return {
+    gitButlerDiffType: diffContext.mode,
+    ...(diffContext.label ? { gitButlerDiffLabel: diffContext.label } : {}),
+    ...(diffContext.base ? { gitButlerBase: diffContext.base } : {}),
+    ...(diffContext.snapshotId ? { gitButlerSnapshotId: diffContext.snapshotId } : {}),
+  };
 }
 
 export interface AgentJobInfo {

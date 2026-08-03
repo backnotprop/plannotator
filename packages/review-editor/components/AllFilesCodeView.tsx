@@ -160,6 +160,7 @@ interface AllFilesCodeViewProps {
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
+  reviewSnapshotId?: string;
   // Annotation / toolbar wiring (P2). Mirrors AllFilesDiffView's surface so the
   // toolbar opens against the file CodeView reports for a selection.
   onLineSelection: (range: SelectedLineRange | null) => void;
@@ -411,6 +412,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   scrollTargetAnnotation,
   pendingSelection,
   reviewBase,
+  reviewSnapshotId,
   onLineSelection,
   onAddAnnotationForFile,
   onEditAnnotation,
@@ -583,8 +585,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // instance, so an order change must remount to re-seed in the new order.
     // defaultCollapsed is part of the key: CodeView seeds item collapsed state
     // once per instance, so a seed change must remount to take effect.
-    () => `${fileOrder ?? 'tree'}:${defaultCollapsed ? 'c' : 'e'}:${prUrl ?? ''}:${prDiffScope ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
-    [files, patchHashes, prUrl, prDiffScope, fileOrder, defaultCollapsed],
+    () => `${fileOrder ?? 'tree'}:${defaultCollapsed ? 'c' : 'e'}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
+    [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, defaultCollapsed],
   );
 
   // Visual-order list of file paths (for [/] stepping). Derived from items so it
@@ -961,6 +963,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // identity (which would otherwise churn the CodeView options object).
   const reviewBaseRef = useRef(reviewBase);
   reviewBaseRef.current = reviewBase;
+  const reviewSnapshotIdRef = useRef(reviewSnapshotId);
+  reviewSnapshotIdRef.current = reviewSnapshotId;
   const itemIdToFileRef = useRef(itemIdToFile);
   itemIdToFileRef.current = itemIdToFile;
   const fileSetKeyRef = useRef(fileSetKey);
@@ -1057,6 +1061,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (file.oldPath) params.set('oldPath', file.oldPath);
     const base = reviewBaseRef.current;
     if (base) params.set('base', base);
+    const snapshot = reviewSnapshotIdRef.current;
+    if (snapshot) params.set('snapshot', snapshot);
 
     fetch(`/api/file-content?${params}`, { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : null))

@@ -9,7 +9,7 @@ import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.js";
-import { FAVICON_SVG } from "../generated/favicon.js";
+import { FAVICON_PNG_BYTES } from "../generated/favicon.js";
 
 import { json, parseBody, send, toWebRequest } from "./helpers";
 import {
@@ -229,8 +229,8 @@ export function readDraftGenerationFromBody(body: unknown): number | undefined {
 export { readDraftGenerationFromUrl };
 
 export function handleFavicon(res: Res): void {
-	send(res, FAVICON_SVG, 200, {
-		"Content-Type": "image/svg+xml",
+	send(res, Buffer.from(FAVICON_PNG_BYTES), 200, {
+		"Content-Type": "image/png",
 		"Cache-Control": "public, max-age=86400",
 	});
 }

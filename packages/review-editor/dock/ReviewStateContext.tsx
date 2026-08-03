@@ -46,6 +46,8 @@ export interface ReviewState {
   /** Agent working directory — base for resolving repo-relative diff paths to
    *  absolute (e.g. for the Open-in-app control). */
   agentCwd?: string | null;
+  /** Whether live-working-tree actions match the snapshot currently shown. */
+  canUseLiveWorkspaceActions?: boolean;
 
   // Annotations
   allAnnotations: CodeAnnotation[];

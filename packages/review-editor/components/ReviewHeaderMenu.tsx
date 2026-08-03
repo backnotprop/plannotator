@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import {
   ActionMenu,
   ActionMenuDivider,
@@ -6,6 +6,8 @@ import {
   ActionMenuSectionLabel,
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { THEME_MODES } from '@plannotator/ui/components/themeModes';
+import { isThemeModeAvailable } from '@plannotator/ui/utils/themeRegistry';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
@@ -44,15 +46,13 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
   origin,
   isWSL = false,
 }) => {
-  const { theme, resolvedMode, setTheme } = useTheme();
-  const activeTheme = useMemo<'light' | 'dark'>(() => {
-    return theme === 'system' ? resolvedMode : theme;
-  }, [resolvedMode, theme]);
+  const { theme, setTheme, colorTheme } = useTheme();
 
   const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
 
   return (
     <ActionMenu
+      panelWidth="wide"
       renderTrigger={({ isOpen, toggleMenu }) => (
         <button
           onClick={() => {
@@ -87,23 +87,30 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           <div className="px-3 py-2 space-y-1.5">
             <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
-              {(['light', 'dark'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => {
-                    closeMenu();
-                    setTheme(mode);
-                  }}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                    activeTheme === mode
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {mode === 'light' ? <SunIcon /> : <MoonIcon />}
-                  <span className="capitalize">{mode}</span>
-                </button>
-              ))}
+              {THEME_MODES.map(({ id, label, Icon }) => {
+                const available = isThemeModeAvailable(colorTheme, id);
+                return (
+                  <button
+                    key={id}
+                    disabled={!available}
+                    title={available ? undefined : 'Not supported by the current color theme'}
+                    onClick={() => {
+                      closeMenu();
+                      setTheme(id);
+                    }}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                      !available
+                        ? 'cursor-not-allowed text-muted-foreground opacity-40'
+                        : theme === id
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Icon />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -210,19 +217,6 @@ const SettingsIcon = () => (
 const ExportIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-  </svg>
-);
-
-const SunIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25M12 18.75V21M3 12h2.25M18.75 12H21M5.636 5.636l1.591 1.591M16.773 16.773l1.591 1.591M5.636 18.364l1.591-1.591M16.773 7.227l1.591-1.591" />
-    <circle cx="12" cy="12" r="3.25" />
-  </svg>
-);
-
-const MoonIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3c-.18.57-.21 1.19-.21 1.82A8 8 0 0019.18 13c.63 0 1.25-.03 1.82-.21z" />
   </svg>
 );
 

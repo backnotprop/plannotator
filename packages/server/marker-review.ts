@@ -218,6 +218,9 @@ export interface MarkerEngine {
   buildArgv: (prompt: string, model?: string, cwd?: string, opts?: MarkerBuildOptions) => string[];
   /** Pull readable text out of one parsed stream event, or null if none. */
   extractText: (event: MarkerStreamEvent) => string | null;
+  /** Update the stream's provider failure: undefined = unrelated event,
+   *  null = successful terminal assistant outcome, string = safe failure. */
+  extractError?: (event: MarkerStreamEvent) => string | null | undefined;
   /** Argv (after the binary) for model discovery, e.g. ["models"]. */
   modelsArgv: string[];
   /** Parse the model-discovery stdout into a catalog. */
@@ -515,6 +518,87 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
+const MAX_PROVIDER_ERROR_CHARS = 500;
+
+/**
+ * Project a provider-owned diagnostic into a single bounded, redaction-safe
+ * line suitable for AgentJobInfo.error and server logs. The raw NDJSON record
+ * is never surfaced: it may be large and can contain provider metadata.
+ */
+function sanitizeProviderError(message: unknown, fallback: string): string {
+  if (typeof message !== "string") return fallback;
+
+  let withoutControls = "";
+  for (const char of stripAnsi(message)) {
+    const code = char.charCodeAt(0);
+    withoutControls += code < 32 || code === 127 ? " " : char;
+  }
+
+  const collapsed = withoutControls.replace(/\s+/g, " ").trim();
+  if (!collapsed) return fallback;
+
+  const redacted = collapsed
+    .replace(
+      /\b((?:api[-_ ]?key|access[-_ ]?token|authorization|client[-_ ]?secret)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|(?:Bearer\s+)?[^\s,;]+)/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [REDACTED]")
+    .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, "[REDACTED]");
+
+  if (redacted.length <= MAX_PROVIDER_ERROR_CHARS) return redacted;
+  return redacted.slice(0, MAX_PROVIDER_ERROR_CHARS - 1).trimEnd() + "…";
+}
+
+/** Read Pi's final assistant-message outcome contract without trusting it. */
+function piAssistantError(message: unknown): string | null | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  if (Reflect.get(message, "role") !== "assistant") return undefined;
+
+  const stopReason = Reflect.get(message, "stopReason");
+  if (stopReason !== "error" && stopReason !== "aborted") {
+    return stopReason === "stop" || stopReason === "length" || stopReason === "toolUse"
+      ? null
+      : undefined;
+  }
+
+  const fallback = stopReason === "aborted" ? "Pi request aborted" : "Pi request failed";
+  return sanitizeProviderError(Reflect.get(message, "errorMessage"), fallback);
+}
+
+/**
+ * Extract Pi's exit-0 in-run failure from its documented JSON event stream.
+ * The same AssistantMessage is repeated across message_update, message_end,
+ * turn_end, and agent_end; accepting each location makes the completed buffer
+ * robust to a truncated final event without inspecting arbitrary output text.
+ */
+function piExtractError(event: MarkerStreamEvent): string | null | undefined {
+  switch (event.type) {
+    case "message_update": {
+      const assistantEvent = event.assistantMessageEvent;
+      if (!assistantEvent || typeof assistantEvent !== "object") return undefined;
+      if (Reflect.get(assistantEvent, "type") !== "error") return undefined;
+      const nested = piAssistantError(Reflect.get(assistantEvent, "error"));
+      if (typeof nested === "string") return nested;
+      const reason = Reflect.get(assistantEvent, "reason");
+      return reason === "aborted" ? "Pi request aborted" : "Pi request failed";
+    }
+    case "message_end":
+    case "turn_end":
+      return piAssistantError(event.message);
+    case "agent_end": {
+      const messages = event.messages;
+      if (!Array.isArray(messages)) return undefined;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const error = piAssistantError(messages[i]);
+        if (error !== undefined) return error;
+      }
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Parse `pi --list-models` output into a model catalog. Unlike Cursor/OpenCode,
  * Pi prints a HUMAN TABLE (`provider  model  context  max-out  thinking  images`),
@@ -610,12 +694,12 @@ function piFormatLogEvent(event: MarkerStreamEvent): string | null {
  * SEMANTICS NOTE (do not "fix" this later): `pi --mode json` exits 0 even when
  * the agent's own run errored or was aborted — the text-mode stopReason check
  * in Pi's print-mode is gated on `mode === "text"`, so JSON mode never sets a
- * non-zero exit for an in-run failure. This is fine for us: the marker
- * pipeline is already fail-closed (a missing/invalid marker block fails the
- * job regardless of exit code), so a silently-errored Pi run still surfaces as
- * a failed Plannotator job. Exit 1 here means Pi itself crashed or was
- * misconfigured (bad model, no auth, extension load failure), which is a
- * separate, correctly-surfaced failure mode.
+ * non-zero exit for an in-run failure. The marker pipeline is fail-closed;
+ * when marker parsing fails, the shared stream reducer preserves Pi's
+ * structured assistant error instead of misclassifying it as malformed marker
+ * output. Exit 1 here means Pi itself crashed or was misconfigured (bad model,
+ * no auth, extension load failure), which is a separate, correctly-surfaced
+ * failure mode.
  */
 function piBuildArgv(prompt: string, model?: string, cwd?: string, opts?: MarkerBuildOptions): string[] {
   void cwd; // no cwd flag exists — spawn cwd is authoritative (see comment above)
@@ -847,6 +931,7 @@ const PI_ENGINE: MarkerEngine = {
   author: "Pi",
   buildArgv: piBuildArgv,
   extractText: piExtractText,
+  extractError: piExtractError,
   modelsArgv: ["--list-models"],
   parseModels: piParseModels,
   formatLogEvent: piFormatLogEvent,
@@ -880,6 +965,8 @@ export interface MarkerStreamReduction {
   canonicalText: string;
   /** Number of NDJSON records that parsed successfully. */
   recordCount: number;
+  /** Last structured, sanitized provider failure found in the stream. */
+  providerError: string | null;
 }
 
 /**
@@ -895,8 +982,9 @@ export interface MarkerStreamReduction {
 export function reduceMarkerStream(stdout: string, engine: MarkerEngine): MarkerStreamReduction {
   let canonicalText = "";
   let recordCount = 0;
+  let providerError: string | null = null;
 
-  if (!stdout) return { canonicalText, recordCount };
+  if (!stdout) return { canonicalText, recordCount, providerError };
 
   for (const rawLine of stdout.split("\n")) {
     const line = rawLine.trim();
@@ -912,9 +1000,12 @@ export function reduceMarkerStream(stdout: string, engine: MarkerEngine): Marker
 
     const text = engine.extractText(event);
     if (text) canonicalText += text;
+
+    const error = engine.extractError?.(event);
+    if (error !== undefined) providerError = error;
   }
 
-  return { canonicalText, recordCount };
+  return { canonicalText, recordCount, providerError };
 }
 
 // ---------------------------------------------------------------------------

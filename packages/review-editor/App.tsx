@@ -943,7 +943,32 @@ const ReviewApp: React.FC = () => {
     if (!sha) return null;
     return { sha, subject: commitInfo?.sha === sha ? commitInfo.subject : undefined };
   }, [activeDiffBase, commitInfo]);
-  const { withPRContext } = useAnnotationFactory(prMetadata, prStackInfo ? prDiffScope : undefined, activeCommitContext);
+  const activeGitButlerContext = useMemo(() => {
+    if (!activeDiffBase.startsWith('gitbutler:')) return null;
+    return {
+      diffType: activeDiffBase,
+      label: diffData?.gitRef,
+      base: committedBase ?? undefined,
+      snapshotId,
+    };
+  }, [activeDiffBase, diffData?.gitRef, committedBase, snapshotId]);
+  const canUseLiveWorkspaceActions = !activeDiffBase.startsWith('gitbutler:stack:') &&
+    !activeDiffBase.startsWith('gitbutler:branch:');
+  const visibleEditorAnnotations = useMemo(
+    () => canUseLiveWorkspaceActions ? editorAnnotations : [],
+    [canUseLiveWorkspaceActions, editorAnnotations],
+  );
+  useEffect(() => {
+    if (canUseLiveWorkspaceActions) return;
+    codeNav.clear();
+    dockApi?.getPanel(REVIEW_CODE_NAV_PANEL_ID)?.api.close();
+  }, [canUseLiveWorkspaceActions, codeNav.clear, dockApi]);
+  const { withPRContext } = useAnnotationFactory(
+    prMetadata,
+    prStackInfo ? prDiffScope : undefined,
+    activeCommitContext,
+    activeGitButlerContext,
+  );
 
   // Context rule shared by both auto-open effects below (and mirrored by
   // GuideScreen's matchesContext): a job stamped with a PR url only belongs
@@ -1739,36 +1764,29 @@ const ReviewApp: React.FC = () => {
           setSelectedBase(data.base);
           setCommittedBase(data.base);
         }
-        // Merge only the per-cwd fields so the sidebar reflects the worktree
-        // we're now in. Keep the original `worktrees` list (already filtered to
-        // exclude the server's startup cwd — replacing it with the new context's
-        // list would duplicate the "Main repo" entry) and `availableBranches`
-        // (shared across worktrees of the same repo).
-        //
-        // IMPORTANT: we deliberately do NOT overwrite `currentBranch`. The
-        // WorktreePicker's top "launch" row uses it as a label, and that row
-        // represents the cwd plannotator was launched in — not whichever
-        // worktree is currently active. Freezing `currentBranch` at its
-        // initial-load value keeps that label truthful. `defaultBranch` and
-        // `diffOptions` update because they describe the active diff, which
-        // other UI (empty-state text, diff-type picker) should see fresh.
-        if (data.gitContext) {
-          setGitContext((prev) => {
-            if (!prev) return data.gitContext!;
-            return {
-              ...prev,
-              defaultBranch: data.gitContext!.defaultBranch,
-              diffOptions: data.gitContext!.diffOptions,
-              compareTarget: data.gitContext!.compareTarget,
-              jjEvologs: data.gitContext!.jjEvologs,
-              // HEAD differs per worktree, so refresh the commit-baseline picker.
-              recentCommits: data.gitContext!.recentCommits,
-            };
-          });
-        }
         setActiveFileIndex(0);
         setPendingSelection(null);
         resetStagedFiles();
+      }
+      // Merge only the refreshable/per-cwd fields. This runs for in-place
+      // staleness refreshes too: GitButler stacks and branches can change while
+      // the visible patch stays identical, so preserving the active file must
+      // not preserve a stale picker. Keep the original `worktrees`,
+      // `availableBranches`, and `currentBranch`: the latter labels the launch
+      // cwd in WorktreePicker rather than the currently-selected worktree.
+      if (data.gitContext) {
+        setGitContext((prev) => {
+          if (!prev) return data.gitContext!;
+          return {
+            ...prev,
+            defaultBranch: data.gitContext!.defaultBranch,
+            diffOptions: data.gitContext!.diffOptions,
+            compareTarget: data.gitContext!.compareTarget,
+            jjEvologs: data.gitContext!.jjEvologs,
+            // HEAD differs per worktree, so refresh the commit-baseline picker.
+            recentCommits: data.gitContext!.recentCommits,
+          };
+        });
       }
       setDiffError(data.error || null);
       return true;
@@ -2173,8 +2191,9 @@ const ReviewApp: React.FC = () => {
             base: committedBase ?? undefined,
             worktreePath: activeWorktreePath,
             commitSubject: activeCommitContext?.subject,
+            snapshotId,
           },
-    [prMetadata, activeDiffBase, committedBase, activeWorktreePath, activeCommitContext],
+    [prMetadata, activeDiffBase, committedBase, activeWorktreePath, activeCommitContext, snapshotId],
   );
 
   const prReviewScopeLabel = useMemo(() => {
@@ -2218,6 +2237,7 @@ const ReviewApp: React.FC = () => {
     prReviewScope: prReviewScopeLabel,
     prDiffScope,
     agentCwd,
+    canUseLiveWorkspaceActions,
     allAnnotations,
     externalAnnotations,
     selectedAnnotationId,
@@ -2295,14 +2315,14 @@ const ReviewApp: React.FC = () => {
     onSemanticDiffLoadSuccess: handleSemanticDiffLoadSuccess,
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
-    onCodeNavRequest: handleCodeNavRequest,
+    onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
     codeNavResult: codeNav.result,
     codeNavIsLoading: codeNav.isLoading,
     codeNavActiveSymbol: codeNav.activeSymbol,
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, diffStyle, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions,
     allAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -2348,8 +2368,8 @@ const ReviewApp: React.FC = () => {
     if (allAnnotations.length > 0) {
       parts.push(exportReviewFeedback(allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel));
     }
-    if (editorAnnotations.length > 0) {
-      parts.push(exportEditorAnnotations(editorAnnotations).trim());
+    if (visibleEditorAnnotations.length > 0) {
+      parts.push(exportEditorAnnotations(visibleEditorAnnotations).trim());
     }
     const prose = buildProseFeedback(visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body);
     if (prose) parts.push(prose);
@@ -2357,9 +2377,9 @@ const ReviewApp: React.FC = () => {
     return parts.length > 0
       ? parts.join('\n\n')
       : exportReviewFeedback([], prMetadata, feedbackDiffContext, prReviewScopeLabel);
-  }, [allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel, editorAnnotations, visibleDescriptionAnnotations, prContext?.body, visibleCommentAnnotations]);
+  }, [allAnnotations, prMetadata, feedbackDiffContext, prReviewScopeLabel, visibleEditorAnnotations, visibleDescriptionAnnotations, prContext?.body, visibleCommentAnnotations]);
 
-  const totalAnnotationCount = allAnnotations.length + editorAnnotations.length + visibleDescriptionAnnotations.length + visibleCommentAnnotations.length;
+  const totalAnnotationCount = allAnnotations.length + visibleEditorAnnotations.length + visibleDescriptionAnnotations.length + visibleCommentAnnotations.length;
 
   // Copy the same full feedback the agent gets (code + editor + PR description +
   // PR comment notes), not just code annotations. Defined after feedbackMarkdown
@@ -2563,14 +2583,14 @@ const ReviewApp: React.FC = () => {
       title: prMetadata.title,
       repo: getDisplayRepo(prMetadata),
     } : undefined;
-    const plan = buildReviewSubmission(allAnnotations, editorAnnotations, prMetadata?.url, diffPaths, prMeta);
+    const plan = buildReviewSubmission(allAnnotations, visibleEditorAnnotations, prMetadata?.url, diffPaths, prMeta);
     // PR description/comment notes aren't line-anchored, so they can't post as
     // inline review comments — seed them into the review body instead (quoted),
     // where the user can edit before submitting. Also means a review with only
     // prose notes still has something to post.
     setPlatformGeneralComment(buildProseFeedback(visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body));
     setPlatformCommentDialog({ action, plan });
-  }, [allAnnotations, editorAnnotations, files, prMetadata, visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body]);
+  }, [allAnnotations, visibleEditorAnnotations, files, prMetadata, visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body]);
 
   // Double-tap Option/Alt to toggle review destination (PR mode only)
   useEffect(() => {
@@ -3373,6 +3393,9 @@ const ReviewApp: React.FC = () => {
                           {activeDiffBase === 'jj-line' && `No changes in your line of work vs ${selectedBase || gitContext?.defaultBranch || '@-'}.`}
                           {activeDiffBase === 'jj-evolog' && `No changes since evolution ${selectedBase ? selectedBase.slice(0, 8) : 'previous'} — the change looks the same as before.`}
                           {activeDiffBase === 'jj-all' && "No files at the current jj change."}
+                          {activeDiffBase === 'gitbutler:workspace' && "No applied GitButler workspace changes."}
+                          {activeDiffBase.startsWith('gitbutler:stack:') && "No committed changes in this GitButler stack."}
+                          {activeDiffBase.startsWith('gitbutler:branch:') && "No committed changes in this GitButler branch."}
                           {activeDiffBase === 'branch' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'merge-base' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'all' && `No tracked files${activeWorktreePath ? ' in this worktree' : ' in this repository'}.`}
@@ -3406,7 +3429,7 @@ const ReviewApp: React.FC = () => {
                 onDeleteAnnotation={handleDeleteAnnotation}
                 feedbackMarkdown={feedbackMarkdown}
                 width={panelResize.width}
-                editorAnnotations={editorAnnotations}
+                editorAnnotations={visibleEditorAnnotations}
                 onDeleteEditorAnnotation={deleteEditorAnnotation}
                 descriptionAnnotations={visibleDescriptionAnnotations}
                 selectedDescriptionAnnotationId={selectedDescriptionAnnotationId}

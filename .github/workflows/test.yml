@@ -78,7 +78,7 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
 
@@ -88,6 +88,9 @@ jobs:
       - name: Generate Pi extension shared copies
         shell: bash
         run: bash apps/pi-extension/vendor.sh
+
+      - name: Run workspace symlink tests
+        run: bun test packages/server/review-workspace.test.ts --test-name-pattern discoverWorkspaceRepoPaths
 
       - name: Build Pi AI runtime smoke
         run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"

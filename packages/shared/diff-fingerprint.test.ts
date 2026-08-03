@@ -88,6 +88,19 @@ describe("getGitDiffFingerprint", () => {
     expect(after).not.toBe(before!);
   });
 
+  test("since-base: tracks visible working-tree and untracked content", async () => {
+    const before = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    writeFileSync(join(repo, "a.txt"), "since-base edit\n");
+    const trackedEdit = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    expect(trackedEdit).not.toBe(before!);
+    writeFileSync(join(repo, "since-base-new.txt"), "new\n");
+    const untrackedCreated = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    expect(untrackedCreated).not.toBe(trackedEdit!);
+    writeFileSync(join(repo, "since-base-new.txt"), "newer\n");
+    const untrackedEdited = await getGitDiffFingerprint(runtime, "since-base", "main", repo);
+    expect(untrackedEdited).not.toBe(untrackedCreated!);
+  });
+
   test("last-commit: stable across working-tree edits, changes on commit", async () => {
     const before = await getGitDiffFingerprint(runtime, "last-commit", "main", repo);
     writeFileSync(join(repo, "a.txt"), "working tree noise\n");

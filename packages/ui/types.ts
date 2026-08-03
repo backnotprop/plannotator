@@ -159,6 +159,14 @@ export interface CodeAnnotation {
   commitSha?: string;
   /** The commit's one-line subject, captured for readable export labels. */
   commitSubject?: string;
+  /** GitButler target that supplied this annotation's line coordinates. */
+  gitButlerDiffType?: string;
+  /** Human-readable GitButler target label captured with the annotation. */
+  gitButlerDiffLabel?: string;
+  /** GitButler merge base active when the annotation was created. */
+  gitButlerBase?: string;
+  /** Exact server snapshot that supplied the GitButler line coordinates. */
+  gitButlerSnapshotId?: string;
 }
 
 /** Token-level metadata passed from selection to annotation creation. */

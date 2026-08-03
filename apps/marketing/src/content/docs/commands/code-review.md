@@ -35,7 +35,7 @@ User runs /plannotator-review
         ↓
 Agent runs: plannotator review
         ↓
-git diff captures changes
+the detected VCS provider captures changes
         ↓
 Review server starts, opens browser with diff viewer
         ↓
@@ -97,6 +97,24 @@ In a jj workspace, the diff type picker shows jj-native options instead of git m
 - **All** - all local changes not yet on the remote
 - **Evolution** - amendment history for the current change (requires 2+ evolog entries)
 
+### GitButler diff modes
+
+Plannotator automatically recognizes an active GitButler workspace when the checked-out ref is `gitbutler/workspace` (or the legacy `gitbutler/integration` ref) and the repository has GitButler's local target-ref configuration. GitButler CLI **0.21.0 or newer** must be available as `but` on `PATH`. Use `--gitbutler` to require this provider explicitly, or `--git` to inspect the repository through Plannotator's ordinary Git provider instead.
+
+The picker keeps GitButler's different change models separate:
+
+- **Workspace** - every applied committed change plus all assigned, unassigned, and untracked working-tree changes, compared with GitButler's reported merge base. This is the default.
+- **Stack** - committed changes for a complete multi-branch stack, from the workspace merge base through the stack tip.
+- **Branch** - committed changes introduced by one branch layer in a stack.
+
+Stack and branch views are intentionally **committed-only**. GitButler currently has no authoritative one-shot diff that combines a stack's committed history with its assigned working-tree hunks; composing those independent hunks can produce an invalid patch when stacked branches edit the same lines. Assigned and unassigned changes remain visible in the Workspace view.
+
+GitButler assignment is also not Git's staging index: a change can be assigned per hunk to one of several lanes. Plannotator therefore keeps assignment read-only and does not show Git stage/unstage controls in a GitButler review. Git-status sections, the commit rail, and base-fetch controls remain Git-only. Nested multi-repository reviews support the aggregate Workspace view but not GitButler stack or branch drill-down.
+
+The rendered patch and expanded file contents are authoritative for Stack and Branch views. Plannotator disables “Open in editor,” code navigation, semantic diff, and VS Code editor annotations there because those features resolve against the live combined GitButler workspace rather than the selected committed layer. Agent filesystem tools can still see later branch layers or other applied stacks, so review prompts explicitly preserve the on-screen patch as the source of truth.
+
+The standalone GitButler CLI installer supports macOS and Linux. On Windows, install GitButler Desktop and make `but.exe` available on `PATH`. GitButler edit mode (`gitbutler/edit`) is not treated as a virtual-branch workspace.
+
 ## The diff viewer
 
 The review UI shows your changes in a familiar diff format:
@@ -154,7 +172,7 @@ The review agents (Claude, Codex, Code Tour, Guided Review) shell out to externa
 - **Send Feedback** formats your annotations and sends them to the agent
 - **Approve** sends a review-approval prompt to the agent. By default this says no changes were requested, and you can override it in `~/.plannotator/config.json`.
 
-After submission, the agent receives your feedback and can act on it, whether that's fixing issues, explaining decisions, or making the requested changes.
+After submission, the agent receives your feedback. By default, Plannotator tells it to verify each submitted finding against the code, discuss its verdicts before changing code, and not review the rest of the diff for additional issues. You can replace this suffix with `prompts.review.denied` in `~/.plannotator/config.json`.
 
 ### Customizing the approval prompt
 

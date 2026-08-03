@@ -34,6 +34,7 @@
     "components/CommentPopover.tsx",
     "components/AnnotationPanel.tsx",
     "components/ThemeProvider.tsx",
+    "test-consumer/theme-modes.tsx",
     "components/ImageThumbnail.tsx",
     "components/AttachmentsButton.tsx",
     "components/TableOfContents.tsx",

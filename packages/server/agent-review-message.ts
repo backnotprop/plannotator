@@ -62,6 +62,7 @@ export function buildWorkspacePromptContextLines(
     "If any repository is marked failed, treat this as a partial workspace review and say so.",
     "For Git child repos, inspect with `git -C <child-repo-folder> ...` from the workspace root.",
     "For JJ child repos, treat the inline diff and prefixed files as authoritative review context.",
+    "For GitButler child repos, treat the inline diff and prefixed files as authoritative; ordinary Git commands can include other applied stacks.",
   ];
 
   if (options.includeReportingInstruction) {
@@ -158,8 +159,11 @@ export function buildAgentReviewUserMessage(
     return `Review ${instruction.target}. ${instruction.inspect} Provide prioritized, actionable findings.`;
   }
 
+  const gitButlerContext = diffType.startsWith("gitbutler:")
+    ? `${contextOnly ? "GitButler changes" : "Review these GitButler changes and provide prioritized findings"}: the inline diff is authoritative. The checked-out workspace may include other stacks or later branch layers, so do not replace this patch with an ordinary \`git diff\`.`
+    : null;
   return [
-    contextOnly ? "Code changes:" : "Review the following code changes and provide prioritized findings.",
+    gitButlerContext ?? (contextOnly ? "Code changes:" : "Review the following code changes and provide prioritized findings."),
     "",
     "```diff",
     patch,

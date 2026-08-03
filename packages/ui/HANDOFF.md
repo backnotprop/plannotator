@@ -194,6 +194,7 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `components/CommentPopover` | Anchor capture + comment entry. Ask-AI UI renders only if you pass `onAskAI`. |
 | `components/AnnotationPanel` | Renders from your annotation state; no fetches of its own. |
 | `components/ThemeProvider` | Color-mode context. |
+| `theme-modes` (`THEME_MODES`, `Mode`) | The supported Light/Dark/System catalog and mode type. `Mode` also remains exported from `components/ThemeProvider` for compatibility with existing consumers. |
 | `components/ImageThumbnail` / `getImageSrc` | Routes through `imageSrcResolver`. |
 | `components/AttachmentsButton` | Routes through `uploadTransport`. |
 | Seam-backed hooks: `useAnnotationHighlighter`, `useAnnotationDraft`, `useCodeAnnotationDraft`, `useExternalAnnotations`, `useFileBrowser` | Their network access goes through the seams in the catalog above. |

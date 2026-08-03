@@ -63,6 +63,7 @@ export async function handleReviewCommand(
   let rawPatch: string;
   let gitRef: string;
   let diffError: string | undefined;
+  let initialFingerprint: string | undefined;
   let userDiffType: DiffType | WorkspaceDiffType | undefined;
   let gitContext: Awaited<ReturnType<typeof prepareLocalReviewDiff>>["gitContext"] | undefined;
   let prMetadata: Awaited<ReturnType<typeof fetchPR>>["metadata"] | undefined;
@@ -115,6 +116,7 @@ export async function handleReviewCommand(
         rawPatch = diffResult.rawPatch;
         gitRef = diffResult.gitRef;
         diffError = diffResult.error;
+        initialFingerprint = diffResult.fingerprint;
       } catch (err) {
         client.app.log({ level: "error", message: err instanceof Error ? err.message : "Failed to prepare local review diff" });
         return;
@@ -125,7 +127,7 @@ export async function handleReviewCommand(
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       if (workspace.repos.length === 0) {
-        client.app.log({ level: "error", message: "Not in a VCS repo and no nested Git/JJ repositories were found." });
+        client.app.log({ level: "error", message: "Not in a VCS repo and no nested Git/JJ/GitButler repositories were found." });
         return;
       }
       rawPatch = workspace.rawPatch;
@@ -143,6 +145,7 @@ export async function handleReviewCommand(
     origin: "opencode",
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
+    initialFingerprint,
     prMetadata,
     workspace,
     agentCwd,
@@ -172,7 +175,7 @@ export async function handleReviewCommand(
       const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
       const targetAgent = result.agentSwitch || "build";
 
-      // Append the triage-first suffix when the reviewer sent annotations to
+      // Append the verification-only suffix when the reviewer sent annotations to
       // act on (PR mode included). Platform PR actions post a status message
       // with no annotations — those go through verbatim, no suffix.
       const message = result.approved

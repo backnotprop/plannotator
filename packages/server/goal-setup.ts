@@ -15,7 +15,7 @@ import {
   type GoalSetupQuestionAnswer,
   type GoalSetupResult,
 } from "@plannotator/shared/goal-setup";
-import { isRemoteSession, getServerHostname, getServerPort } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
 import { getRepoInfo } from "./repo";
 import {
   handleFavicon,
@@ -45,9 +45,6 @@ export interface GoalSetupServerResult {
   }>;
   stop: () => void;
 }
-
-const MAX_RETRIES = 5;
-const RETRY_DELAY_MS = 500;
 
 function coerceAnswers(body: unknown): GoalSetupQuestionAnswer[] {
   if (!body || typeof body !== "object") return [];
@@ -80,7 +77,6 @@ export async function startGoalSetupServer(
 ): Promise<GoalSetupServerResult> {
   const { bundle, htmlContent, origin = "claude-code", onReady } = options;
   const isRemote = isRemoteSession();
-  const configuredPort = getServerPort();
   const wslFlag = await isWSL();
   const repoInfo = await getRepoInfo();
   const gitUser = detectGitUser();
@@ -103,13 +99,10 @@ export async function startGoalSetupServer(
     resolveDecision(result);
   };
 
-  let server: ReturnType<typeof Bun.serve> | null = null;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      server = Bun.serve({
+  const server = await startBunServerOnAvailablePort((port) =>
+    Bun.serve({
         hostname: getServerHostname(),
-        port: configuredPort,
+        port,
         // Bun's default 10s idleTimeout kills long-running requests.
         idleTimeout: 0,
 
@@ -193,7 +186,7 @@ export async function startGoalSetupServer(
             return Response.json({ ok: true });
           }
 
-          if (url.pathname === "/favicon.svg") return handleFavicon();
+          if (url.pathname === "/favicon.png") return handleFavicon();
 
           return new Response(htmlContent, {
             headers: { "Content-Type": "text/html" },
@@ -207,34 +200,8 @@ export async function startGoalSetupServer(
             { status: 500, headers: { "Content-Type": "text/plain" } }
           );
         },
-      });
-
-      break;
-    } catch (err: unknown) {
-      const isAddressInUse =
-        err instanceof Error && err.message.includes("EADDRINUSE");
-
-      if (isAddressInUse && attempt < MAX_RETRIES) {
-        await Bun.sleep(RETRY_DELAY_MS);
-        continue;
-      }
-
-      if (isAddressInUse) {
-        const hint = isRemote
-          ? " (set PLANNOTATOR_PORT to use different port)"
-          : "";
-        throw new Error(
-          `Port ${configuredPort} in use after ${MAX_RETRIES} retries${hint}`
-        );
-      }
-
-      throw err;
-    }
-  }
-
-  if (!server) {
-    throw new Error("Failed to start goal setup server");
-  }
+    }),
+  );
 
   const port = server.port!;
   const serverUrl = `http://localhost:${port}`;

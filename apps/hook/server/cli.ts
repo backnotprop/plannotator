@@ -32,7 +32,7 @@ export function formatTopLevelHelp(): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [PR_URL]",
     "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]",
     "  plannotator annotate-last [--stdin] [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
@@ -57,12 +57,13 @@ export function formatTopLevelHelp(): string {
 const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git] [--local | --no-local] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--local | --no-local] [PR_URL]",
     "",
-    "Review local VCS changes (git/jj) or a GitHub/GitLab pull request in the browser.",
+    "Review local VCS changes or a GitHub/GitLab pull request in the browser.",
     "",
     "Options:",
     "  --git         Force git as the VCS (skip auto-detection)",
+    "  --gitbutler   Force GitButler as the VCS (requires but 0.21.0+)",
     "  --local       For PR review, prepare a local checkout for full file access (default)",
     "  --no-local    For PR review, skip the local checkout (diff only)",
     "  PR_URL        GitHub PR or GitLab MR URL to review",
@@ -70,6 +71,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Examples:",
     "  plannotator review",
     "  plannotator review --git",
+    "  plannotator review --gitbutler",
     "  plannotator review https://github.com/owner/repo/pull/123",
   ].join("\n"),
   annotate: [

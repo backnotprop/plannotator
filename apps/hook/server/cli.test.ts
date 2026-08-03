@@ -25,7 +25,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator --help");
     expect(output).toContain("plannotator --version, -v");
     expect(output).toContain("plannotator [--browser <name>]");
-    expect(output).toContain("plannotator review [--git] [PR_URL]");
+    expect(output).toContain("plannotator review [--git | --gitbutler] [PR_URL]");
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
@@ -56,6 +56,7 @@ describe("CLI subcommand help", () => {
   test("does not treat a real review invocation as help", () => {
     expect(isSubcommandHelpInvocation(["review"])).toBeNull();
     expect(isSubcommandHelpInvocation(["review", "--git"])).toBeNull();
+    expect(isSubcommandHelpInvocation(["review", "--gitbutler"])).toBeNull();
     expect(
       isSubcommandHelpInvocation([
         "review",
@@ -94,8 +95,9 @@ describe("CLI subcommand help", () => {
 
   test("renders subcommand-specific usage", () => {
     expect(formatSubcommandHelp("review")).toContain(
-      "plannotator review [--git]",
+      "plannotator review [--git | --gitbutler]",
     );
+    expect(formatSubcommandHelp("review")).toContain("--gitbutler");
     expect(formatSubcommandHelp("review")).toContain("PR_URL");
     expect(formatSubcommandHelp("annotate")).toContain("--no-jina");
     expect(formatSubcommandHelp("sessions")).toContain("--open [N]");

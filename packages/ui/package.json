@@ -18,6 +18,7 @@
     "./shortcuts": "./shortcuts/index.ts",
     "./config": "./config/index.ts",
     "./configure": "./configure.ts",
+    "./theme-modes": "./components/themeModes.tsx",
     "./types": "./types.ts",
     "./theme": "./theme.css",
     "./styles.css": "./styles.css"

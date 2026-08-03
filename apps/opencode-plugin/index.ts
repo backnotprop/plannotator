@@ -44,6 +44,7 @@ import {
   shouldModifyPrompts,
   shouldRegisterSubmitPlan,
   shouldRejectSubmitPlanForAgent,
+  shouldStartImplementationForAgent,
   type RuntimeMode,
   type PlannotatorOpenCodeOptions,
 } from "./workflow";
@@ -215,6 +216,7 @@ type EmbeddedRuntimeModule = {
     pasteApiUrl?: string;
     htmlContent: string;
     timeoutSeconds: number | null;
+    abortSignal: AbortSignal;
     logReady: (url: string, isRemote: boolean, port: number) => void;
   }) => Promise<OpenCodePlanReviewResult>;
   handleEmbeddedCommand: (
@@ -241,6 +243,7 @@ async function importEmbeddedRuntime(): Promise<EmbeddedRuntimeModule> {
   return await import(sourceSpecifier) as EmbeddedRuntimeModule;
 }
 
+/** Run one OpenCode plan review in the configured runtime. */
 async function runPlanReview(input: {
   client: any;
   runtime: RuntimeMode;
@@ -250,9 +253,11 @@ async function runPlanReview(input: {
   pasteApiUrl?: string;
   htmlContent: string;
   timeoutSeconds: number | null;
+  abortSignal: AbortSignal;
   cwd?: string;
   bridge: OpenCodeBridgeContext;
 }): Promise<OpenCodePlanReviewResult> {
+  input.abortSignal.throwIfAborted();
   if (input.runtime === "embedded" && !hasEmbeddedRuntime()) {
     throw new Error(getEmbeddedRuntimeError());
   }
@@ -268,9 +273,11 @@ async function runPlanReview(input: {
         pasteApiUrl: input.pasteApiUrl,
         htmlContent: input.htmlContent,
         timeoutSeconds: input.timeoutSeconds,
+        abortSignal: input.abortSignal,
         logReady: (url) => logPlannotatorReady(input.client, "plan review", url),
       });
     } catch (error) {
+      input.abortSignal.throwIfAborted();
       if (input.runtime === "embedded") throw error;
       try {
         void input.client.app.log({
@@ -286,6 +293,7 @@ async function runPlanReview(input: {
     planContent: input.planContent,
     cwd: input.cwd,
     timeoutSeconds: input.timeoutSeconds,
+    abortSignal: input.abortSignal,
     bridge: input.bridge,
   });
 }
@@ -599,12 +607,14 @@ Do NOT proceed with implementation until your plan is approved.`);
         },
 
         async execute(args, context) {
-          const invokingAgent = (context as { agent?: string }).agent;
+          const invokingAgent = context.agent;
           if (shouldRejectSubmitPlanForAgent(invokingAgent, workflowOptions)) {
             return `Plannotator is configured for plan-agent mode. submit_plan can only be called by: ${workflowOptions.planningAgents.join(", ")}.
 
 Use /plannotator-last or /plannotator-annotate for manual review, or set workflow to all-agents to allow broader submit_plan access.`;
           }
+
+          context.abort.throwIfAborted();
 
           if (!args.edits || args.edits.length === 0) {
             return "Error: No edits provided. Pass at least one edit with start and content.";
@@ -659,10 +669,12 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
               pasteApiUrl: getPasteApiUrl(),
               htmlContent: getPlanHtml(),
               timeoutSeconds,
+              abortSignal: context.abort,
               cwd: ctx.directory,
               bridge: await getBridgeContext(),
             });
           } catch (error) {
+            context.abort.throwIfAborted();
             return `[Plannotator] Failed to open plan review: ${error instanceof Error ? error.message : String(error)}`;
           }
 
@@ -672,6 +684,8 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
 
             const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
             const targetAgent = result.agentSwitch || 'build';
+            const shouldStartImplementation = shouldSwitchAgent
+              && shouldStartImplementationForAgent(targetAgent, workflowOptions);
 
             if (shouldSwitchAgent) {
               try {
@@ -680,7 +694,12 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
                   body: {
                     agent: targetAgent,
                     noReply: true,
-                    parts: [{ type: "text", text: "Proceed with implementation" }],
+                    parts: [{
+                      type: "text",
+                      text: shouldStartImplementation
+                        ? "Proceed with implementation"
+                        : "Plan approved. Plan mode remains active; no implementation has been requested.",
+                    }],
                   },
                 });
               } catch {
@@ -693,7 +712,7 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
                 planFilePath: backingPath,
                 doneMsg: result.savedPath ? `Saved to: ${result.savedPath}` : "",
                 feedback: result.feedback,
-                proceedSuffix: shouldSwitchAgent
+                proceedSuffix: shouldStartImplementation
                   ? "\n\nProceed with implementation, incorporating these notes where applicable."
                   : "",
               });

@@ -13,7 +13,7 @@ All Plannotator environment variables and their defaults.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
-| `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. When not set, local sessions use a random port; remote sessions default to `19432`. |
+| `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port or inclusive range such as `19432-19463`. A range uses the first available port. When not set, local sessions use a random port; remote sessions default to `19432`. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser to open the UI in. macOS: app name or path. Linux/Windows: executable path. Can also be a script. Takes priority over `BROWSER`. Also settable per-invocation with `--browser`. |
 | `BROWSER` | (none) | Standard env var for specifying a browser. VS Code sets this automatically in devcontainers. Used as fallback when `PLANNOTATOR_BROWSER` is not set. |
 | `PLANNOTATOR_ORIGIN` | auto-detect | Explicit agent-origin override. Valid values: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `pi`, `gemini-cli`, `kiro-cli`. Invalid values silently fall through to env-based detection. |
@@ -89,9 +89,11 @@ If either is present, Plannotator enables remote mode automatically when `PLANNO
 
 ## Port resolution order
 
-1. `PLANNOTATOR_PORT` environment variable (if valid integer 0-65535; `0` means random)
+1. `PLANNOTATOR_PORT` environment variable: one integer from `0` to `65535` (`0` means random), or an inclusive range such as `19432-19463`
 2. `19432` if in remote mode
 3. `0` (random) if in local mode
+
+For a range, Plannotator tries each port from lowest to highest and binds the first available one.
 
 ## Custom browser examples
 

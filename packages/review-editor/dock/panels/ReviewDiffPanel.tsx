@@ -65,13 +65,14 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
   // patch, and Pierre briefly reconciles old-patch + new-content → "trailing
   // context mismatch" warnings in the console.
   return (
-    <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}`} className="h-full relative">
+    <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full relative">
       <DiffViewer
         patch={file.patch}
         filePath={file.path}
         oldPath={file.oldPath}
         status={file.status}
         reviewBase={state.reviewBase}
+        reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
         prUrl={state.prMetadata?.url}
         prDiffScope={state.prDiffScope}
         isFocused={isFocusedFile}
