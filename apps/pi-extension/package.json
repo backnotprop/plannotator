@@ -52,7 +52,7 @@
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",
-    "@pierre/diffs": "1.2.8",
+    "@pierre/diffs": "1.2.12",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",

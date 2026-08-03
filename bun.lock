@@ -7,7 +7,7 @@
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.92",
         "@opencode-ai/sdk": "^1.3.0",
-        "@pierre/diffs": "1.2.8",
+        "@pierre/diffs": "1.2.12",
         "diff": "^8.0.4",
         "dockview-react": "^5.2.0",
         "dompurify": "^3.3.3",
@@ -63,7 +63,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.24.1",
+      "version": "0.25.1",
       "dependencies": {
         "@opencode-ai/plugin": "^1.1.10",
       },
@@ -85,10 +85,10 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.24.1",
+      "version": "0.25.1",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.64",
-        "@pierre/diffs": "1.2.8",
+        "@pierre/diffs": "1.2.12",
         "@plannotator/webtui": "0.1.0",
         "chokidar": "^5.0.0",
         "diff": "^8.0.4",
@@ -128,7 +128,7 @@
       "name": "@plannotator/review",
       "version": "0.0.1",
       "dependencies": {
-        "@pierre/diffs": "1.2.8",
+        "@pierre/diffs": "1.2.12",
         "@plannotator/review-editor": "workspace:*",
         "@plannotator/server": "workspace:*",
         "@plannotator/ui": "workspace:*",
@@ -148,7 +148,7 @@
     },
     "apps/vscode-extension": {
       "name": "plannotator-webview",
-      "version": "0.16.7",
+      "version": "0.16.8",
       "devDependencies": {
         "@types/bun": "latest",
         "@types/vscode": "^1.85.0",
@@ -205,7 +205,7 @@
         "@base-ui/react": "^1.6.0",
         "@fontsource-variable/geist-mono": "5.2.7",
         "@fontsource-variable/inter": "^5.2.8",
-        "@pierre/diffs": "1.2.8",
+        "@pierre/diffs": "1.2.12",
         "@plannotator/shared": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "highlight.js": "^11.11.1",
@@ -224,9 +224,9 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.24.1",
+      "version": "0.25.1",
       "dependencies": {
-        "@pierre/diffs": "1.2.8",
+        "@pierre/diffs": "1.2.12",
         "@plannotator/ai": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/webtui": "0.1.0",
@@ -272,7 +272,7 @@
         "@fontsource-variable/inter": "^5.2.8",
         "@lezer/common": "^1.5.2",
         "@lezer/highlight": "^1.2.3",
-        "@pierre/diffs": "1.2.8",
+        "@pierre/diffs": "1.2.12",
         "@plannotator/atomic-editor": "^0.8.0",
         "@plannotator/core": "workspace:*",
         "@plannotator/markdown-editor": "^0.4.0",
@@ -793,9 +793,11 @@
 
     "@oven/bun-windows-x64-baseline": ["@oven/bun-windows-x64-baseline@1.3.14", "", { "os": "win32", "cpu": "x64" }, "sha512-uIjLUC1S9DWgICzuoMba7vurBJnBruE4S5CxnvmZkdqWVXRzx1Rgu636HoH+k0qeaQCFh3jeG3JQ1y6fRHv0sw=="],
 
-    "@pierre/diffs": ["@pierre/diffs@1.2.8", "", { "dependencies": { "@pierre/theme": "1.0.3", "@shikijs/transformers": "^3.0.0", "diff": "8.0.3", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" } }, "sha512-HVaWzZ1cW5GDKodivaPCN1hU05DGvoLiG/uvVBNZODD+qY2NTr36KYgATGhb79Vr8OCKNG3qATTWJEwbkMGfzA=="],
+    "@pierre/diffs": ["@pierre/diffs@1.2.12", "", { "dependencies": { "@pierre/theme": "1.1.0", "@pierre/theming": "0.0.2", "@shikijs/transformers": "^3.0.0 || ^4.0.0", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" } }, "sha512-pY/gmgWL03WnagqCyCnBi3QtRXUv4hCIY6FYqd5b1ZGaoI6a4Bsji8j+yRl2RfzPh/8Hf19rCl1GE80G6a1cLQ=="],
 
-    "@pierre/theme": ["@pierre/theme@1.0.3", "", {}, "sha512-sWHv11TMoqKxKDgTIk5VbhQjdPhs8DCcBxbjh3mRlS3YOM/OcrWoGX6MM8eBGn9cUu3M46Py0JnxsG2nJaFTuA=="],
+    "@pierre/theme": ["@pierre/theme@1.1.0", "", {}, "sha512-GC2OWTAfTIIWWYhPCygwG8t2EtePQkRfON4MI2rwIkJylmiyqIttJID2dCL8sUD8cNdEvYkEyfEHHKMeCiDLoQ=="],
+
+    "@pierre/theming": ["@pierre/theming@0.0.2", "", { "peerDependencies": { "@pierre/theme": "^1.1.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-QM1M4stXfnzfaE8I8YbjXSApV8c+2dBsXJj8eYg9WTpBR/cTmCZIcfGnN4p13iRrYu2Br/R/OJfEL7uR8Qjctw=="],
 
     "@plannotator/ai": ["@plannotator/ai@workspace:packages/ai"],
 
@@ -2627,7 +2629,7 @@
 
     "@opencode-ai/plugin/zod": ["zod@4.1.8", "", {}, "sha512-5R1P+WwQqmmMIEACyzSvo4JXHY5WiAFHRMg+zBZKgKS+Q1viRa0C1hmUKtHltoIFKtIdki3pRxkmpP74jnNYHQ=="],
 
-    "@pierre/diffs/diff": ["diff@8.0.3", "", {}, "sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ=="],
+    "@pierre/diffs/diff": ["diff@9.0.0", "", {}, "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="],
 
     "@plannotator/hooks/@types/node": ["@types/node@22.19.20", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-6tELRwSDYWW9EdZhbeZmYGZ1/7Djkt+Ah3/ScEYT9cDord7UJzasR/4D3VONg9tQI5CDp+/CZC1AXj2pCFOvpw=="],
 
