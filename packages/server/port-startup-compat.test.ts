@@ -9,7 +9,6 @@ const envKeys = [
   "PLANNOTATOR_REMOTE",
   "PLANNOTATOR_DATA_DIR",
   "PLANNOTATOR_SKIP_BROWSER_OPEN",
-  "__CFBundleIdentifier",
 ] as const;
 const environment = createTestEnvironment(envKeys, "plannotator-port-compat-");
 
@@ -20,7 +19,6 @@ describe("Bun startup port compatibility", () => {
     environment.reset();
     process.env.PLANNOTATOR_REMOTE = "0";
     process.env.PLANNOTATOR_DATA_DIR = environment.makeTempDir();
-    process.env.__CFBundleIdentifier = "com.apple.Terminal";
     let ready: { url: string; isRemote: boolean; port: number } | undefined;
 
     const server = await startPlannotatorServer({

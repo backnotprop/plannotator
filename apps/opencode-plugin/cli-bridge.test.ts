@@ -158,6 +158,13 @@ describe("OpenCode CLI bridge helpers", () => {
     expect(formatUserFacingCliStderrLine("  (1.2 KB - plan only, annotations added in browser)")).toBe(
       "(1.2 KB - plan only, annotations added in browser)",
     );
+    // The session URL line every session prints, plus its remote follow-up.
+    expect(formatUserFacingCliStderrLine("  Plannotator session ready: http://localhost:54321")).toBe(
+      "Plannotator session ready: http://localhost:54321",
+    );
+    expect(formatUserFacingCliStderrLine("  Open it on your local machine (forward port 19432 if needed).")).toBe(
+      "Open it on your local machine (forward port 19432 if needed).",
+    );
     expect(formatUserFacingCliStderrLine("Fetching: https://example.com")).toBeUndefined();
   });
 

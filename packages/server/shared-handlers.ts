@@ -7,7 +7,8 @@
  */
 
 import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
@@ -180,8 +181,37 @@ export function writeServerReadyMetadata(readyFile: string, metadata: ServerRead
   appendFileSync(readyFile, `${JSON.stringify(metadata)}\n`, "utf8");
 }
 
-export function isCodexDesktopHost(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.__CFBundleIdentifier === "com.openai.codex";
+/**
+ * Stable prefix of the session URL line written to stderr on every start.
+ *
+ * The format is a contract: one line, this prefix, then the URL last. Agents
+ * grep it to recover a session they did not start themselves, so anything else
+ * worth saying (port forwarding, a failed browser launch) goes on its own line.
+ */
+export const SESSION_READY_LINE_PREFIX = "Plannotator session ready: ";
+
+/** Default side channel path for the session URL. */
+export function getDefaultReadyFilePath(dataDir: string = getPlannotatorDataDir()): string {
+  return join(dataDir, "ready.jsonl");
+}
+
+/**
+ * Point `PLANNOTATOR_READY_FILE` at the default file unless a host already set
+ * one, and return the resolved path.
+ *
+ * Host plugins (amp, OpenCode) hand the CLI a private temp file and read the
+ * URL back out of it. Claude Code spawns the CLI straight from a hook, so
+ * nothing sets the variable and the metadata the server already publishes has
+ * nowhere to go — which is why Claude Code was the one host with no way to
+ * recover a URL. With a default, `tail -n 1 <dataDir>/ready.jsonl` is the
+ * newest session regardless of which host started it.
+ */
+export function ensureReadyFileEnv(env: NodeJS.ProcessEnv = process.env): string {
+  const existing = env.PLANNOTATOR_READY_FILE?.trim();
+  if (existing) return existing;
+  const readyFile = getDefaultReadyFilePath();
+  env.PLANNOTATOR_READY_FILE = readyFile;
+  return readyFile;
 }
 
 /** Attempt to open the browser for the session URL. */
@@ -201,30 +231,34 @@ export async function handleServerReady(
     }
   }
 
-  // A remote/SSH session can't pop a browser on the user's machine, so the
-  // session URL must be visible in the terminal — independently of whether URL
-  // sharing is enabled. The share link (gated on sharing) is an extra; this
-  // reachable URL is the lifeline. Without it, a sharing-disabled remote user
-  // saw no URL at all and the agent hung waiting on the review.
+  // One line, every session, URL last — the format agents grep to recover a
+  // session, so it cannot be conditional. Printing it only for remote sessions,
+  // the Codex desktop host, or a failed browser launch was the bug: a local
+  // session whose browser opened fine printed nothing, so a closed tab left
+  // neither the user nor the agent a way back. The URL appears exactly once
+  // here; the branches below only add context.
+  process.stderr.write(`\n  ${SESSION_READY_LINE_PREFIX}${url}\n`);
+
+  // A remote/SSH session can't pop a browser on the user's machine, so say what
+  // to do with the URL — independently of whether URL sharing is enabled. The
+  // share link (gated on sharing) is an extra; this reachable URL is the
+  // lifeline.
   if (isRemote) {
-    process.stderr.write(
-      `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
-    );
-  } else if (isCodexDesktopHost()) {
-    process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);
+    process.stderr.write(`  Open it on your local machine (forward port ${port} if needed).\n`);
   }
+  process.stderr.write("\n");
 
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
   if (skipBrowserOpen) return;
 
   const opened = await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
 
-  // Local fallback lifeline: if the browser couldn't be opened (headless box,
-  // devcontainer with no display, broken open/xdg-open), the user otherwise has
-  // no URL and the agent hangs at waitForDecision. Remote already printed the
-  // URL above; only cover the local case here to avoid a double print.
+  // The URL is already out; all that's left is to say the automatic launch
+  // failed (headless box, devcontainer with no display, broken open/xdg-open)
+  // so nobody waits on a tab that will never appear. Remote never attempts a
+  // local launch, so it isn't a failure worth reporting there.
   if (!opened && !isRemote) {
-    process.stderr.write(`\n  Plannotator session ready — open in your browser:\n  ${url}\n\n`);
+    process.stderr.write("  Could not open a browser automatically — open the URL above.\n\n");
   }
 }
 

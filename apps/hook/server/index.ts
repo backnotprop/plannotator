@@ -74,6 +74,7 @@
 import {
   startPlannotatorServer,
   handleServerReady,
+  ensureReadyFileEnv,
 } from "@plannotator/server";
 import {
   startReviewServer,
@@ -182,6 +183,12 @@ const planHtmlContent = planHtml as unknown as string;
 // @ts-ignore - Bun import attribute for text
 import reviewHtml from "../dist/review.html" with { type: "text" };
 const reviewHtmlContent = reviewHtml as unknown as string;
+
+// Publish the session URL to the ready-file side channel even when no host
+// plugin asked for it. amp and OpenCode spawn this CLI and hand it their own
+// temp file; Claude Code spawns it straight from a hook, so without a default
+// the URL the server already publishes lands nowhere.
+ensureReadyFileEnv();
 
 // Check for subcommand
 const rawArgs = process.argv.slice(2);
