@@ -23,8 +23,9 @@ import {
  *
  * Lifecycle contract with Pierre's CodeView (v1.3.1):
  * - `item.edit = true` + version bump + updateItem starts a session (needs an
- *   EditProvider factory above the CodeView; ours declines until the lazy
- *   editor chunk has loaded).
+ *   EditProvider factory above the CodeView; startEdit awaits the lazy editor
+ *   chunk BEFORE flipping edit on, because the React wrapper throws if the
+ *   factory returns undefined).
  * - The editor MUTATES `item.fileDiff` in place per keystroke. We deep-clone
  *   the pristine metadata before starting and republish it when the session
  *   ends, so the diff view always returns to the exact pre-edit state.
@@ -45,6 +46,11 @@ interface ActiveEditSession {
   /** The fileSetKey generation the session belongs to. */
   generation: string;
   dirty: boolean;
+  /** The FileContents delivered with the most recent change event. Its
+   * `contents` getter closes over the session's TextDocument (which stays
+   * readable after Pierre's editor cleanup), so a dirty session torn down by
+   * a CodeView remount can still recover its final text from here. */
+  latestContents: { contents: string } | null;
   /** Set by Cancel: the completion callback must not create suggestions. */
   suppressSuggestions: boolean;
   /** Set by our explicit complete/cancel paths (restore already scheduled). */
@@ -87,19 +93,25 @@ export interface EditSessionApi {
   cancelEdit: () => void;
   /** If this item is being edited, finish the session first (collapse paths). */
   finishIfEditing: (itemId: string) => void;
-  /** Called by the fileSetKey reset effect: the old items are gone. */
+  /** Called by the fileSetKey reset effect (post-commit, so prompting is
+   * safe): the old items are gone. A dirty session prompts to keep its edits
+   * as suggestions; a clean one is dropped silently. */
   handleFileSetChange: () => void;
   /** CodeView prop: fires per document change while a session is active. */
-  onItemEditChange: (item: CodeViewItem<DiffAnnotationMetadata>) => void;
+  onItemEditChange: (
+    item: CodeViewItem<DiffAnnotationMetadata>,
+    file?: { contents: string },
+  ) => void;
   /** CodeView prop: fires once when a session with changes ends. */
   onItemEditComplete: (
     item: CodeViewItem<DiffAnnotationMetadata>,
     file: { contents: string },
   ) => void;
   /** EditProvider factory. Returns undefined until the lazy editor chunk has
-   * loaded — CodeView's documented decline-and-retry contract, which
-   * upstream's React `CreateEditor` type does not yet model (hence the cast
-   * where this is produced). */
+   * loaded — a defensive guard the wired flow never hits (startEdit awaits
+   * the chunk before any item enters edit mode; the React wrapper would
+   * throw on an undefined return). Upstream's React `CreateEditor` type does
+   * not model the undefined return, hence the cast where this is produced. */
   createEditor: CreateEditor<DiffAnnotationMetadata>;
   /** Editor construction options (markers wired via onAttach). Structural
    * subset of Pierre's EditorOptions so the generic variance stays out of
@@ -110,6 +122,30 @@ export interface EditSessionApi {
 export interface EditSessionEditorOptions {
   enabledSelectionAction: boolean;
   onAttach: (editor: unknown) => void;
+}
+
+/**
+ * Derive the suggestions a torn-down dirty session would have produced from
+ * its last observed document contents. Pierre delivers a FileContents whose
+ * `contents` getter closes over the session's TextDocument on every change
+ * event; the document stays readable after editor cleanup, so the read is
+ * deliberately lazy — one string build at recovery time instead of one per
+ * keystroke. Returns [] when nothing was captured, the document can no
+ * longer be read, or the edits net out to no change.
+ */
+export function recoverDirtySessionHunks(session: {
+  preEditContent: string;
+  latestContents: { contents: string } | null;
+}): SuggestionHunk[] {
+  const latest = session.latestContents;
+  if (!latest) return [];
+  let edited: string;
+  try {
+    edited = String(latest.contents);
+  } catch {
+    return [];
+  }
+  return deriveSuggestionHunks(session.preEditContent, edited);
 }
 
 export function useEditSession(params: UseEditSessionParams): EditSessionApi {
@@ -193,13 +229,27 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
   });
 
   const handleFileSetChange = useStableCallback(() => {
-    // The CodeView holding the session remounted (diff switch / refresh). The
-    // old items are unreachable; Pierre tore the editor down without a
-    // completion callback. Drop the session — in-progress edits are discarded
-    // (documented v1 behavior; refresh is always user-initiated).
-    if (sessionRef.current) {
+    // The CodeView holding the session remounted (diff switch / refresh, or a
+    // sort-order / collapse-default change — fileSetKey covers all of them).
+    // The old items are unreachable and Pierre tore the editor down without a
+    // completion callback, so the session cannot continue. A clean session is
+    // dropped silently; a DIRTY session must never be silently discarded —
+    // recover its last-known contents and prompt (the same pattern as the
+    // dirty file-switch path in startEdit; this runs from a post-commit
+    // effect, so a synchronous confirm is safe here).
+    const session = sessionRef.current;
+    if (session) {
       sessionRef.current = null;
       setEditing(null);
+      if (session.dirty && !session.ending && !session.suppressSuggestions) {
+        const hunks = recoverDirtySessionHunks(session);
+        if (hunks.length > 0) {
+          const keep = window.confirm(
+            `The file view changed and ended your edit session on ${session.filePath}. Keep your changes there as suggestions?`,
+          );
+          if (keep) onAddSuggestionsRef.current?.(session.filePath, hunks);
+        }
+      }
     }
     // A fresh diff may make previously-unavailable files editable again.
     editUnavailableRef.current.clear();
@@ -332,6 +382,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
         preEditContent: (item.fileDiff.additionLines ?? []).join(''),
         generation,
         dirty: false,
+        latestContents: null,
         suppressSuggestions: false,
         ending: false,
         seq: 0,
@@ -344,10 +395,19 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     })();
   });
 
-  const onItemEditChange = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
-    const session = sessionRef.current;
-    if (session && session.itemId === item.id) session.dirty = true;
-  });
+  const onItemEditChange = useStableCallback(
+    (item: CodeViewItem<DiffAnnotationMetadata>, file?: { contents: string }) => {
+      const session = sessionRef.current;
+      if (session && session.itemId === item.id) {
+        session.dirty = true;
+        // Keep the FileContents object, not a copy: its `contents` getter is
+        // lazy, so holding it costs nothing per keystroke and the document
+        // stays readable even after an unrouted teardown (see
+        // recoverDirtySessionHunks).
+        if (file) session.latestContents = file;
+      }
+    },
+  );
 
   const onItemEditComplete = useStableCallback(
     (item: CodeViewItem<DiffAnnotationMetadata>, file: { contents: string }) => {
@@ -375,16 +435,20 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
   );
 
   // Cast rationale: our factory returns undefined before the lazy chunk has
-  // loaded. That is CodeView's documented "decline the attach; retry on later
-  // render passes" contract, but upstream's React `CreateEditor` type does
-  // not model the undefined return yet.
+  // loaded — a guard the wired flow never hits (startEdit awaits the chunk
+  // before flipping edit on; the React wrapper throws on an undefined
+  // return). Upstream's React `CreateEditor` type does not model the
+  // undefined return, hence the cast.
   const createEditor = useStableCallback((options: PierreEditorOptions) =>
     createPierreEditor(options),
   ) as unknown as CreateEditor<DiffAnnotationMetadata>;
 
   // Editor construction options. Markers surface the file's existing line
-  // annotations during the session; onAttach re-fires across virtualization
-  // re-attaches, which is exactly when markers need re-applying.
+  // annotations during the session. Upstream delivers onAttach ONCE per
+  // editor (an attachState.delivered guard) — it does not re-fire across
+  // virtualization re-attaches — so this is a one-shot projection; the
+  // retry loop below only covers the text document initializing after the
+  // callback fires.
   const editorOptions = useMemo<EditSessionEditorOptions>(
     () => ({
       enabledSelectionAction: false,

@@ -272,8 +272,9 @@ interface AllFilesCodeViewProps {
    * dock panel passes this — Guided Review surfaces deliberately do NOT (the
    * GuideViewportManager evicts CodeViews beyond ~8 mounted, which would
    * destroy an active editor's state; scoping edit mode to this surface is the
-   * simple safe v1 choice). When absent/false, no edit UI renders and the
-   * editor module is never loaded. */
+   * simple safe v1 choice). When absent/false, no edit UI renders and no
+   * editor is ever constructed (code-split hosts also never fetch the editor
+   * chunk; the single-file build inlines it, functionally inert). */
   enableEditSuggestions?: boolean;
   /** Sink for suggestions derived from a completed edit session. Required for
    * edit mode to activate. */
@@ -903,9 +904,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     pendingToolbarRange.current = null;
     visibleFileRef.current = null;
     // An edit session cannot survive the CodeView remount (Pierre tears the
-    // editor down without a completion callback). Drop the session state; the
-    // remounted items are already pristine. In-progress edits are discarded —
-    // acceptable because every diff refresh/switch is user-initiated.
+    // editor down without a completion callback), and fileSetKey also changes
+    // on sort-order / collapse-default flips, not just diff switches. The
+    // session controller drops a clean session silently; a dirty one prompts
+    // to keep its recovered edits as suggestions (this effect runs
+    // post-commit, so the synchronous confirm inside is safe).
     editSession.handleFileSetChange();
     setFileCommentAnchor(null);
     fileCommentButtonRefs.current.clear();
