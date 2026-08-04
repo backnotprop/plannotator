@@ -47,7 +47,7 @@ type EmbeddedRuntimeModule = {
     pasteApiUrl?: string;
     htmlContent: string;
     timeoutSeconds: number | null;
-    abortSignal: AbortSignal;
+    abortSignal?: AbortSignal;
     logReady: (url: string, isRemote: boolean, port: number) => void;
   }) => Promise<OpenCodePlanReviewResult>;
 };
@@ -174,12 +174,10 @@ const serverPlugin = Plugin.define({
           const directory = session.location.directory;
           const bridge = await getBridgeContext(getAgents);
           const client = createV2Client(getAgents);
-          const abortSignal = new AbortController().signal;
           const result = await executeSubmitPlan({
             edits: getPlanEdits(input),
             invokingAgent: toolContext.agent,
             sessionId: toolContext.sessionID,
-            abortSignal,
             directory,
             workflowOptions,
           }, {
@@ -191,7 +189,6 @@ const serverPlugin = Plugin.define({
               shareBaseUrl: bridge.shareBaseUrl,
               pasteApiUrl: bridge.pasteApiUrl,
               timeoutSeconds: getPlanTimeoutSeconds(),
-              abortSignal,
               directory,
               bridge,
             }),
@@ -300,7 +297,7 @@ async function runPlanReview(input: {
   shareBaseUrl?: string;
   pasteApiUrl?: string;
   timeoutSeconds: number | null;
-  abortSignal: AbortSignal;
+  abortSignal?: AbortSignal;
   directory: string;
   bridge: OpenCodeBridgeContext;
 }): Promise<OpenCodePlanReviewResult> {

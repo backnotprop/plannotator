@@ -33,7 +33,7 @@ export interface SubmitPlanInvocation {
   edits: PlanEdit[] | undefined;
   invokingAgent?: string;
   sessionId: string;
-  abortSignal: AbortSignal;
+  abortSignal?: AbortSignal;
   directory: string;
   workflowOptions: NormalizedWorkflowOptions;
 }
@@ -41,7 +41,7 @@ export interface SubmitPlanInvocation {
 export interface SubmitPlanHost {
   reviewPlan(input: {
     planContent: string;
-    abortSignal: AbortSignal;
+    abortSignal?: AbortSignal;
   }): Promise<SubmitPlanReviewResult>;
   resolveTargetAgent(input: {
     requestedAgent?: string;
@@ -65,7 +65,7 @@ export async function executeSubmitPlan(
 Use /plannotator-last or /plannotator-annotate for manual review, or set workflow to all-agents to allow broader submit_plan access.`;
   }
 
-  invocation.abortSignal.throwIfAborted();
+  invocation.abortSignal?.throwIfAborted();
 
   if (!invocation.edits || invocation.edits.length === 0) {
     return "Error: No edits provided. Pass at least one edit with start and content.";
@@ -104,7 +104,7 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
       abortSignal: invocation.abortSignal,
     });
   } catch (error) {
-    invocation.abortSignal.throwIfAborted();
+    invocation.abortSignal?.throwIfAborted();
     return `[Plannotator] Failed to open plan review: ${error instanceof Error ? error.message : String(error)}`;
   }
 

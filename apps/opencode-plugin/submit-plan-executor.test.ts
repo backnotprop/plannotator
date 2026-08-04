@@ -23,7 +23,7 @@ function prepareDataDir(): void {
 }
 
 describe("executeSubmitPlan", () => {
-  test("persists denied plans and returns numbered revision context", async () => {
+  test("supports hosts without cancellation signals", async () => {
     prepareDataDir();
     const reviewPlan = mock(async () => ({ approved: false, feedback: "Add tests" }));
 
@@ -31,7 +31,6 @@ describe("executeSubmitPlan", () => {
       edits: [{ start: 1, content: "# Plan\n\nShip it" }],
       invokingAgent: "plan",
       sessionId: "session-1",
-      abortSignal: new AbortController().signal,
       directory: "/workspace/example",
       workflowOptions: normalizeWorkflowOptions(undefined),
     }, {
@@ -45,6 +44,10 @@ describe("executeSubmitPlan", () => {
     expect(result).toContain("Add tests");
     expect(result).toContain("1| # Plan\n2| \n3| Ship it");
     expect(reviewPlan).toHaveBeenCalledTimes(1);
+    expect(reviewPlan).toHaveBeenCalledWith({
+      planContent: "# Plan\n\nShip it",
+      abortSignal: undefined,
+    });
   });
 
   test("cleans up approved plans and sends implementation handoff", async () => {

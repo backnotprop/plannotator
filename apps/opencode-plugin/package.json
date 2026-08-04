@@ -22,6 +22,7 @@
     "ai-agent",
     "coding-agent"
   ],
+  "//": "OpenCode 1 loads main, while OpenCode 2 loads exports[.]. Do not add ./server: OpenCode 1 checks it before main and would load the V2 adapter.",
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/server.js"
