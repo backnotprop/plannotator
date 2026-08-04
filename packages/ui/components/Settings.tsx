@@ -379,6 +379,21 @@ const ReviewDisplayTab: React.FC = () => {
 
   return (
     <>
+      {/* Experimental: edit code to author suggestions */}
+      <div className="space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Experimental
+        </div>
+        <ToggleSwitch
+          checked={editSuggestions}
+          onChange={(v) => configStore.set('editSuggestions', v)}
+          label="Edit Code to Suggest"
+          description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
+        />
+      </div>
+
+      <div className="border-t border-border" />
+
       {/* Font Family */}
       <div className="space-y-2">
         <div>
@@ -535,18 +550,6 @@ const ReviewDisplayTab: React.FC = () => {
 
       <div className="border-t border-border" />
 
-      {/* Experimental: edit code to author suggestions */}
-      <div className="space-y-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Experimental
-        </div>
-        <ToggleSwitch
-          checked={editSuggestions}
-          onChange={(v) => configStore.set('editSuggestions', v)}
-          label="Edit Code to Suggest"
-          description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
-        />
-      </div>
 
     </>
   );
@@ -831,7 +834,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     }
     if (mode === 'review') {
       t.push({ id: 'git', label: 'Git' });
-      t.push({ id: 'display', label: 'Display' });
+      t.push({ id: 'display', label: 'Editor' });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
         t.push({ id: 'ai', label: 'AI' });
