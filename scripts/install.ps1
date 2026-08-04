@@ -13,7 +13,8 @@ param(
     [switch]$NoMinimal,
     [switch]$SkipCodex,
     [switch]$SkipGemini,
-    [switch]$SkipKiro
+    [switch]$SkipKiro,
+    [switch]$SkipOpencode
 )
 
 $ErrorActionPreference = "Stop"
@@ -317,6 +318,7 @@ if ($SkipAttestation)   { $verifyAttestationResolved = $false }
 $skipCodexResolved = $false;  $skipCodexSource = ""
 $skipGeminiResolved = $false; $skipGeminiSource = ""
 $skipKiroResolved = $false;   $skipKiroSource = ""
+$skipOpencodeResolved = $false; $skipOpencodeSource = ""
 if ($cfg -and $cfg.skipInstall) {
     if ($cfg.skipInstall.codex -is [bool] -and $cfg.skipInstall.codex) {
         $skipCodexResolved = $true; $skipCodexSource = "config skipInstall.codex"
@@ -326,6 +328,9 @@ if ($cfg -and $cfg.skipInstall) {
     }
     if ($cfg.skipInstall.kiro -is [bool] -and $cfg.skipInstall.kiro) {
         $skipKiroResolved = $true; $skipKiroSource = "config skipInstall.kiro"
+    }
+    if ($cfg.skipInstall.opencode -is [bool] -and $cfg.skipInstall.opencode) {
+        $skipOpencodeResolved = $true; $skipOpencodeSource = "config skipInstall.opencode"
     }
 }
 if ($env:PLANNOTATOR_SKIP_CODEX_INSTALL -match '^(1|true|yes)$') {
@@ -343,9 +348,15 @@ if ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(1|true|yes)$') {
 } elseif ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(0|false|no)$') {
     $skipKiroResolved = $false; $skipKiroSource = ""
 }
+if ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(1|true|yes)$') {
+    $skipOpencodeResolved = $true; $skipOpencodeSource = "PLANNOTATOR_SKIP_OPENCODE_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(0|false|no)$') {
+    $skipOpencodeResolved = $false; $skipOpencodeSource = ""
+}
 if ($SkipCodex)  { $skipCodexResolved = $true;  $skipCodexSource = "-SkipCodex" }
 if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini" }
 if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
+if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
 
 # Pre-flight: if verification is requested, reject tags older than the first
 # attested release before we download anything. Uses PowerShell's [version]
@@ -419,38 +430,102 @@ if ($verifyAttestationResolved) {
         # api.github.com is world-readable for public repos, so fetch the
         # Sigstore bundle anonymously and hand it to gh via --bundle. This
         # drops the gh-login requirement; gh's own authenticated fetch is
-        # only used as a fallback when the public fetch fails. Single
+        # only used as a fallback when the public fetch fails. Single fetch
         # attempt, deliberately never retried: the unauthenticated API
         # allows 60 requests/hour per IP.
         $bundleFile = $null
+        $bundleFallbackReason = ""
         try {
             $attUrl = "https://api.github.com/repos/$repo/attestations/sha256:$actualChecksum"
-            $attResp = Invoke-RestMethod -Uri $attUrl -UseBasicParsing -TimeoutSec 30
-            # The response is { attestations: [ { bundle: {...}, ... } ] }.
+            # Raw text via Invoke-WebRequest, NOT Invoke-RestMethod: the
+            # bundle is extracted below as a byte-exact substring of the
+            # response, never round-tripped through PowerShell's JSON
+            # parser. ConvertFrom-Json coerces date-shaped strings into
+            # DateTime objects and ConvertTo-Json re-serializes them
+            # differently across PowerShell 5.1 and 7, which could corrupt
+            # a bundle field and turn into a false verification failure.
+            $attResp = Invoke-WebRequest -Uri $attUrl -UseBasicParsing -TimeoutSec 30
+            $attRaw = if ($attResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($attResp.Content) } else { [string]$attResp.Content }
+            # The response is { "attestations": [ { "bundle": {...} } ] }.
             # gh --bundle expects the bundle values themselves, one JSON
             # document per line (the JSONL format `gh attestation download`
-            # writes). -Depth 100 because ConvertTo-Json's default depth (2)
-            # would truncate the nested bundle; WriteAllText writes UTF-8
-            # without a BOM so gh's JSON parser accepts the first line.
-            $bundles = @($attResp.attestations | ForEach-Object { $_.bundle } | Where-Object { $_ })
+            # writes). Scan for each `"bundle":` key and copy its balanced
+            # object verbatim; the scanner is string-literal aware so
+            # braces inside JSON strings cannot derail the depth count.
+            $bundles = @()
+            $searchFrom = 0
+            while ($true) {
+                $keyIdx = $attRaw.IndexOf('"bundle"', $searchFrom)
+                if ($keyIdx -lt 0) { break }
+                $searchFrom = $keyIdx + 8
+                $i = $keyIdx + 8
+                while ($i -lt $attRaw.Length -and [char]::IsWhiteSpace($attRaw[$i])) { $i++ }
+                if ($i -ge $attRaw.Length -or $attRaw[$i] -ne ':') { continue }
+                $i++
+                while ($i -lt $attRaw.Length -and [char]::IsWhiteSpace($attRaw[$i])) { $i++ }
+                if ($i -ge $attRaw.Length -or $attRaw[$i] -ne '{') { continue }
+                $depth = 0
+                $inString = $false
+                $escaped = $false
+                $start = $i
+                for (; $i -lt $attRaw.Length; $i++) {
+                    $ch = $attRaw[$i]
+                    if ($escaped) { $escaped = $false; continue }
+                    if ($inString) {
+                        if ($ch -eq '\') { $escaped = $true }
+                        elseif ($ch -eq '"') { $inString = $false }
+                        continue
+                    }
+                    if ($ch -eq '"') { $inString = $true; continue }
+                    if ($ch -eq '{') { $depth++; continue }
+                    if ($ch -eq '}') {
+                        $depth--
+                        if ($depth -eq 0) {
+                            $bundles += $attRaw.Substring($start, $i - $start + 1)
+                            $searchFrom = $i + 1
+                            break
+                        }
+                    }
+                }
+            }
             if ($bundles.Count -gt 0) {
+                # WriteAllText writes UTF-8 without a BOM so gh's JSON
+                # parser accepts the first line.
                 $bundleFile = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-bundle-$([System.Guid]::NewGuid().ToString('N')).jsonl"
-                $bundleText = ($bundles | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }) -join "`n"
-                [System.IO.File]::WriteAllText($bundleFile, $bundleText + "`n")
+                [System.IO.File]::WriteAllText($bundleFile, (($bundles -join "`n") + "`n"))
+            } else {
+                $bundleFallbackReason = "Could not extract a bundle from the attestations API response"
             }
         } catch {
             $bundleFile = $null
+            $bundleFallbackReason = "Could not fetch the attestation bundle from the public API"
         }
         # Constrain verification to the exact tag + signing workflow - see
         # install.sh comment for rationale.
+        $usedBundle = $false
         if ($bundleFile) {
+            $usedBundle = $true
             $verifyOutput = & gh attestation verify $tmpFile `
                 --bundle $bundleFile `
                 --repo $repo `
                 --source-ref "refs/tags/$latestTag" `
                 --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                # H1: a --bundle failure is not necessarily a provenance
+                # failure (an older gh rejects the flag outright, a corrupt
+                # bundle fails parsing, etc.). Retry once through the exact
+                # authenticated path before classifying anything; only the
+                # retry's verdict is reported. A real provenance failure
+                # fails again here, so nothing bad ever slips through.
+                Write-Host "Bundle-based verification did not complete; retrying via gh's authenticated fetch."
+                $usedBundle = $false
+                $verifyOutput = & gh attestation verify $tmpFile `
+                    --repo $repo `
+                    --source-ref "refs/tags/$latestTag" `
+                    --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1
+            }
         } else {
-            Write-Host "Could not fetch the attestation bundle from the public API; falling back to gh's authenticated fetch."
+            Write-Host "$bundleFallbackReason; falling back to gh's authenticated fetch."
             $verifyOutput = & gh attestation verify $tmpFile `
                 --repo $repo `
                 --source-ref "refs/tags/$latestTag" `
@@ -459,7 +534,7 @@ if ($verifyAttestationResolved) {
         $verifyExitCode = $LASTEXITCODE
         if ($bundleFile) { Remove-Item $bundleFile -Force -ErrorAction SilentlyContinue }
         if ($verifyExitCode -eq 0) {
-            if ($bundleFile) {
+            if ($usedBundle) {
                 Write-Host "Verified build provenance (SLSA, credential-free via the public attestations API)"
             } else {
                 Write-Host "Verified build provenance (SLSA)"
@@ -484,9 +559,11 @@ if ($verifyAttestationResolved) {
                 # this is a connectivity failure, not a provenance failure.
                 Write-Error "Could not initialize the Sigstore trust root (TUF). Provenance verification needs network access on every run; the trusted root is fetched per-run, never cached. This is a connectivity failure, NOT evidence of a bad binary. Refusing to install unverified; retry with network access or pass -SkipAttestation."
             } elseif ($verifyText -match "gh auth login") {
-                # Only reachable on the authenticated fallback: the public
-                # bundle fetch failed AND gh has no login to fetch it itself.
-                Write-Error "The public attestation bundle fetch failed and gh is not logged in, so the authenticated fallback could not run. Retry with network access to api.github.com, run 'gh auth login', or pass -SkipAttestation."
+                # Only reachable on the authenticated path: the bundle path
+                # was unavailable or did not complete AND gh has no login to
+                # fetch the attestation itself. Environment problem, not a
+                # provenance failure.
+                Write-Error "The credential-free bundle path did not complete and gh is not logged in, so the authenticated fallback could not run. Retry with network access to api.github.com, run 'gh auth login', or pass -SkipAttestation."
             } else {
                 Write-Error "Attestation verification failed! The binary's SHA256 matched, but no valid signed provenance was found for $repo. Refusing to install."
             }
@@ -596,13 +673,26 @@ $kiroAvailable = [bool](Get-Command kiro-cli -ErrorAction SilentlyContinue) -or 
 
 if ($codexAvailable -and $skipCodexResolved) {
     # HONEST three-state reporting (#1178): detected-but-skipped is its own
-    # state, never conflated with "not detected". Nothing under the Codex
-    # home is created, updated, or removed on this run.
+    # state, never conflated with "not detected". The Windows installer
+    # never writes the Codex home (hooks are experimental upstream); the
+    # skip suppresses the manual setup instructions and this run neither
+    # creates, updates, nor removes anything under the Codex home. The
+    # existing-integration note only fires when hooks.json actually
+    # references plannotator (M4) - mere existence of the file proves
+    # nothing, since it may hold only the user's own hooks.
     Write-Host ""
     Write-Host "Codex: detected, skipped ($skipCodexSource)."
-    if (Test-Path (Join-Path $codexDir "hooks.json")) {
-        Write-Host "An existing Codex integration at $codexDir\hooks.json was left untouched."
+    Write-Host "The Windows installer only prints manual Codex setup instructions; they"
+    Write-Host "were suppressed."
+    $codexHooksProbe = Join-Path $codexDir "hooks.json"
+    if (Test-Path $codexHooksProbe) {
+        $codexHooksContent = Get-Content -Path $codexHooksProbe -Raw -ErrorAction SilentlyContinue
+        if ($codexHooksContent -match "plannotator") {
+            Write-Host "Your existing Codex Stop hook at $codexDir\hooks.json is unaffected."
+        }
     }
+    Write-Host "Note: the shared agent skills in ~/.agents/skills serve multiple agents"
+    Write-Host "(Codex among them) and are still installed."
 } elseif ($codexAvailable) {
     $codexExePath = "$installDir\plannotator.exe"
     Write-Host ""
@@ -619,9 +709,13 @@ if ($codexAvailable -and $skipCodexResolved) {
     Write-Host "     $codexExePath"
 }
 
-# Clear OpenCode plugin cache
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\node_modules\@plannotator" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\packages\@plannotator" -ErrorAction SilentlyContinue
+# Clear OpenCode plugin cache. An OpenCode opt-out (#1178) leaves OpenCode's
+# own cache directory alone; the Bun package cache is a shared cache, not
+# OpenCode's home, and is always cleared.
+if (-not $skipOpencodeResolved) {
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\node_modules\@plannotator" -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\packages\@plannotator" -ErrorAction SilentlyContinue
+}
 Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -ErrorAction SilentlyContinue
 
 # Clear Pi jiti cache to force fresh download on next run
@@ -992,10 +1086,11 @@ try {
                 Write-Host "Installed Kiro skills to $kiroSkillsDir\ and agent to $kiroAgentsDir\plannotator.json"
             }
 
-            # OpenCode command stubs -> ~/.config/opencode/commands (always).
-            # The plugin intercepts execution; these stubs just register the
-            # slash commands in OpenCode.
-            if (Test-Path "apps\opencode-plugin\commands") {
+            # OpenCode command stubs -> ~/.config/opencode/commands (always,
+            # unless opted out via -SkipOpencode: #1178). The plugin
+            # intercepts execution; these stubs just register the slash
+            # commands in OpenCode.
+            if ((-not $skipOpencodeResolved) -and (Test-Path "apps\opencode-plugin\commands")) {
                 $opencodeCommandsDir = "$env:USERPROFILE\.config\opencode\commands"
                 $opencodeCmds = Get-ChildItem "apps\opencode-plugin\commands\*.md" -ErrorAction SilentlyContinue
                 if ($opencodeCmds) {
@@ -1061,8 +1156,9 @@ foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro
     }
 }
 # The /plannotator-archive OpenCode command was removed too - sweep the stub.
+# An OpenCode opt-out suspends the sweep: skip means do-not-write, never remove.
 $staleOpencodeArchive = "$env:USERPROFILE\.config\opencode\commands\plannotator-archive.md"
-if (Test-Path $staleOpencodeArchive) {
+if ((-not $skipOpencodeResolved) -and (Test-Path $staleOpencodeArchive)) {
     Write-Host "Removing stale plannotator-archive command $staleOpencodeArchive"
     Remove-Item -Force $staleOpencodeArchive -ErrorAction SilentlyContinue
 }
@@ -1206,11 +1302,17 @@ Write-Host "=========================================="
 Write-Host "  OPENCODE USERS"
 Write-Host "=========================================="
 Write-Host ""
-Write-Host "Add the plugin to your opencode.json:"
-Write-Host ""
-Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
-Write-Host ""
-Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
+if ($skipOpencodeResolved) {
+    Write-Host "OpenCode: integration skipped ($skipOpencodeSource)."
+    Write-Host "No command stubs were written and OpenCode's plugin cache was left alone."
+    Write-Host "Re-run without the opt-out to install the command stubs."
+} else {
+    Write-Host "Add the plugin to your opencode.json:"
+    Write-Host ""
+    Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
+    Write-Host ""
+    Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
+}
 Write-Host ""
 Write-Host "=========================================="
 Write-Host "  PI USERS"

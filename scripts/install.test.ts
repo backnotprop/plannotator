@@ -8,7 +8,17 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const scriptsDir = import.meta.dir;
@@ -347,20 +357,29 @@ describe("install.sh", () => {
 
   test("per-agent skip opt-outs: flags, env vars, config keys, precedence (#1178)", () => {
     // Flags exist for Codex plus the two integrations where the mechanism
-    // generalizes identically (detect -> write): Gemini and Kiro.
-    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)"]) {
+    // generalizes identically (detect -> write): Gemini and Kiro. OpenCode
+    // gets a plain do-not-write switch (no detection leg).
+    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-opencode)"]) {
       expect(script).toContain(flag);
     }
     // Env vars follow the existing PLANNOTATOR_SKIP_*_INSTALL naming.
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
-    // Config layer: nested skipInstall block, guarded on the parent key so a
-    // stray "codex": true elsewhere can't opt anyone out by itself.
-    expect(script).toContain('grep -q \'"skipInstall"\'');
-    expect(script).toContain('"codex"[[:space:]]*:[[:space:]]*true');
-    expect(script).toContain('"gemini"[[:space:]]*:[[:space:]]*true');
-    expect(script).toContain('"kiro"[[:space:]]*:[[:space:]]*true');
+    expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
+    // Config layer (M2): the skipInstall OBJECT is extracted first (awk,
+    // character-indexed so single-line JSON works too) and per-agent keys
+    // are matched only inside it - a "codex": true under some OTHER key can
+    // never opt anyone out, and an explicit false inside skipInstall is a
+    // veto rather than being ignored.
+    expect(script).toContain('index(buf, "\\"skipInstall\\"")');
+    expect(script).toContain("_skip_install_block");
+    expect(script).toContain('"\\"$_agent\\"[[:space:]]*:[[:space:]]*true"');
+    expect(script).toContain('"\\"$_agent\\"[[:space:]]*:[[:space:]]*false"');
+    expect(script).toContain("continue # explicit false is a veto, never a skip");
+    expect(script).toContain("for _agent in codex gemini kiro opencode; do");
+    // The old whole-file grep form is gone.
+    expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
     // then env-var case, then flag check — mirroring verifyAttestation.
     const configIdx = script.indexOf('skip_codex_source="config skipInstall.codex"');
@@ -582,14 +601,17 @@ describe("install.ps1", () => {
     expect(script).toContain("[switch]$SkipCodex");
     expect(script).toContain("[switch]$SkipGemini");
     expect(script).toContain("[switch]$SkipKiro");
+    expect(script).toContain("[switch]$SkipOpencode");
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer parses the real nested JSON (strict boolean check, like
     // verifyAttestation).
     expect(script).toContain("$cfg.skipInstall.codex -is [bool]");
     expect(script).toContain("$cfg.skipInstall.gemini -is [bool]");
     expect(script).toContain("$cfg.skipInstall.kiro -is [bool]");
+    expect(script).toContain("$cfg.skipInstall.opencode -is [bool]");
     // Precedence by textual layering (later assignment wins): config, then
     // env var, then switch.
     const configIdx = script.indexOf('$skipCodexSource = "config skipInstall.codex"');
@@ -602,10 +624,17 @@ describe("install.ps1", () => {
 
   test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
     // Three distinct Codex states (ps1 never writes the Codex home; the
-    // installed state prints manual instructions instead).
+    // installed state prints manual instructions instead, and the skip
+    // wording says exactly that - M4).
     expect(script).toContain('Codex: detected, skipped ($skipCodexSource)."');
     expect(script).toContain('Write-Host "Codex detected."');
-    expect(script).toContain("An existing Codex integration at $codexDir\\hooks.json was left untouched.");
+    expect(script).toContain("The Windows installer only prints manual Codex setup instructions");
+    // M4: the existing-hook note requires plannotator CONTENT in hooks.json,
+    // never mere file existence (the file may hold only the user's own
+    // hooks), and its wording matches what this platform actually does.
+    expect(script).toContain('$codexHooksContent -match "plannotator"');
+    expect(script).toContain("Your existing Codex Stop hook at $codexDir\\hooks.json is unaffected.");
+    expect(script).not.toContain("An existing Codex integration at $codexDir\\hooks.json was left untouched.");
     expect(script).toContain('Gemini: detected, skipped ($skipGeminiSource)."');
     expect(script).toContain("Kiro was detected, but the integration was skipped");
     // Skip suspends even plannotator's own cleanup inside the skipped
@@ -816,15 +845,25 @@ describe("install.cmd", () => {
     expect(script).toContain('if /i "%~1"=="--skip-codex"');
     expect(script).toContain('if /i "%~1"=="--skip-gemini"');
     expect(script).toContain('if /i "%~1"=="--skip-kiro"');
+    expect(script).toContain('if /i "%~1"=="--skip-opencode"');
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
-    // Config layer: nested skipInstall block, guarded on the parent key so a
-    // stray "codex": true elsewhere can't opt anyone out by itself.
-    expect(script).toContain('findstr /c:"\\"skipInstall\\""');
+    expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
+    // Config layer (M2): the REAL JSON is parsed by PowerShell (strict
+    // boolean check, matching install.ps1) instead of a line-oblivious
+    // findstr - so a "codex": true under some OTHER key can never opt
+    // anyone out and an explicit false inside skipInstall is honored.
+    expect(script).toContain("$c.skipInstall.$k");
+    expect(script).toContain("@('codex','gemini','kiro','opencode')");
+    expect(script).toContain("$v -is [bool] -and $v");
+    expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
     expect(script).toContain("skipInstall.gemini");
     expect(script).toContain("skipInstall.kiro");
+    expect(script).toContain("skipInstall.opencode");
+    // The old whole-file findstr form is gone.
+    expect(script).not.toContain('findstr /r /c:"\\"codex\\"');
     // Precedence by textual layering (later assignment wins): config, then
     // env var, then flag.
     const configIdx = script.indexOf('set "SKIP_CODEX_SOURCE=config skipInstall.codex"');
@@ -837,10 +876,17 @@ describe("install.cmd", () => {
 
   test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
     // Three distinct Codex states (cmd never writes the Codex home; the
-    // installed state prints manual instructions instead).
+    // installed state prints manual instructions instead, and the skip
+    // wording says exactly that - M4).
     expect(script).toContain("Codex: detected, skipped ^(!SKIP_CODEX_SOURCE!^).");
     expect(script).toContain("echo Codex detected.");
-    expect(script).toContain("An existing Codex integration at !CODEX_DIR!\\hooks.json was left untouched.");
+    expect(script).toContain("The Windows installer only prints manual Codex setup instructions");
+    // M4: the existing-hook note requires plannotator CONTENT in hooks.json,
+    // never mere file existence, and its wording matches what this platform
+    // actually does.
+    expect(script).toContain('findstr /c:"plannotator" "!CODEX_DIR!\\hooks.json"');
+    expect(script).toContain("Your existing Codex Stop hook at !CODEX_DIR!\\hooks.json is unaffected.");
+    expect(script).not.toContain("An existing Codex integration at !CODEX_DIR!\\hooks.json was left untouched.");
     expect(script).toContain("Gemini: detected, skipped ^(!SKIP_GEMINI_SOURCE!^).");
     expect(script).toContain("Kiro was detected, but the integration was skipped");
     // Skip suspends even plannotator's own cleanup inside the skipped
@@ -1596,10 +1642,48 @@ describe("install shared behavior", () => {
     }
 
     // JSONL extraction: the API returns { attestations: [ { bundle } ] } and
-    // gh --bundle expects one bundle JSON document per line.
+    // gh --bundle expects one bundle JSON document per line. sh extracts via
+    // node with python3 and jq fallbacks (M3); with no extractor at all the
+    // message names that cause instead of blaming a fetch that never ran.
     expect(sh).toContain("p.attestations");
-    expect(ps).toContain("ConvertTo-Json -Depth 100 -Compress");
-    expect(cmdScript).toContain("ConvertTo-Json -Depth 100 -Compress");
+    expect(sh).toContain("python3 -c");
+    expect(sh).toContain("jq -c '.attestations[]?.bundle | select(. != null)'");
+    expect(sh).toContain("No JSON extractor found");
+    // The Windows scripts extract each bundle as a byte-exact substring of
+    // the raw response (string-literal-aware brace scan), never a
+    // ConvertFrom-Json/ConvertTo-Json round trip - PowerShell's DateTime
+    // coercion re-serializes date-shaped strings differently across PS
+    // 5.1/7 and could corrupt a bundle field (M7 guard).
+    expect(ps).toContain("$attRaw.IndexOf('\"bundle\"', $searchFrom)");
+    expect(ps).not.toContain("| ConvertTo-Json");
+    expect(cmdScript).toContain("$raw.IndexOf('\"bundle\"', $searchFrom)");
+    expect(cmdScript).not.toContain("| ConvertTo-Json");
+
+    // H1: a failure of the --bundle invocation is retried once through the
+    // exact authenticated path before ANY classification, so a gh that
+    // cannot handle --bundle (or a corrupted bundle) never gets reported as
+    // "no valid signed provenance". All three scripts share the message.
+    for (const [name, script] of [["install.sh", sh], ["install.ps1", ps], ["install.cmd", cmdScript]] as const) {
+      expect(script, `${name} must retry the authenticated path on bundle-verify failure`).toContain(
+        "Bundle-based verification did not complete; retrying via gh's authenticated fetch.",
+      );
+    }
+
+    // M5 (sh): the bundle lives inside a private mktemp -d directory - no
+    // rename-into-place of a predictable sibling path - cleaned with one
+    // rm -rf, and a mktemp failure degrades to the fallback instead of
+    // aborting under set -e.
+    expect(sh).toContain("attestation_bundle_dir=$(mktemp -d 2>/dev/null) || attestation_bundle_dir=\"\"");
+    expect(sh).toContain('rm -rf "$attestation_bundle_dir"');
+    expect(sh).not.toContain('mv "$_att_tmp"');
+
+    // Failure-classification precedence is aligned across scripts: TUF wins
+    // over auth. cmd runs the auth findstr FIRST so the TUF assignment
+    // lands last; sh's case statement lists TUF first.
+    const cmdAuthProbe = cmdScript.indexOf('findstr /c:"gh auth login" "!GH_OUTPUT!"');
+    const cmdTufProbe = cmdScript.indexOf('findstr /c:"Sigstore verifiers" "!GH_OUTPUT!"');
+    expect(cmdAuthProbe).toBeGreaterThan(0);
+    expect(cmdTufProbe).toBeGreaterThan(cmdAuthProbe);
 
     // Both gh invocations (bundle + fallback) stay fully constrained in every
     // installer: at least two --signer-workflow flags pinning release.yml
@@ -1665,5 +1749,288 @@ describe("PlannotatorConfig schema", () => {
     expect(match![1]).toContain("codex?: boolean");
     expect(match![1]).toContain("gemini?: boolean");
     expect(match![1]).toContain("kiro?: boolean");
+    expect(match![1]).toContain("opencode?: boolean");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Functional tests (POSIX): run install.sh against a sandbox HOME with a
+// stubbed curl/gh/git PATH. No network, no real agent CLI reachable. These
+// pin the behaviors a source scan cannot: the H1 authenticated retry after a
+// --bundle failure, the fail-closed abort (deleting the exit would leave all
+// source-scan tests green while an unverified binary installs), and the M2
+// skipInstall config scoping.
+// ---------------------------------------------------------------------------
+
+const FAKE_BINARY = "fake plannotator binary\n";
+const FAKE_BINARY_SHA256 = createHash("sha256").update(FAKE_BINARY).digest("hex");
+const ATTESTATION_FIXTURE = join(scriptsDir, "fixtures", "attestations-response.json");
+
+type GhBehavior = "reject-bundle" | "fail-all" | "pass-all";
+
+function setupInstallSandbox(opts: {
+  gh: GhBehavior;
+  codexHome?: boolean;
+  plannotatorConfig?: string;
+}) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-install-test-"));
+  const home = join(root, "home");
+  const stub = join(root, "stub-bin");
+  mkdirSync(home, { recursive: true });
+  mkdirSync(join(home, "tmp"), { recursive: true });
+  mkdirSync(stub, { recursive: true });
+
+  // Stub curl: serves the fake binary, its checksum, and the captured real
+  // attestations response. Anything else fails, so a test can never reach
+  // the network.
+  writeFileSync(
+    join(stub, "curl"),
+    `#!/bin/bash
+out=""
+url=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  case "$a" in
+    http*) url="$a" ;;
+  esac
+  prev="$a"
+done
+case "$url" in
+  *".sha256") printf '%s  plannotator\\n' "$STUB_CHECKSUM" ;;
+  */releases/download/*) printf 'fake plannotator binary\\n' > "$out" ;;
+  */attestations/sha256:*) cat "$STUB_ATT_JSON" ;;
+  *) exit 22 ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+
+  // Stub gh with selectable behavior.
+  const ghBody =
+    opts.gh === "reject-bundle"
+      ? `case "$*" in
+  *"--bundle"*) echo "unknown flag: --bundle" >&2; exit 1 ;;
+  *) exit 0 ;;
+esac`
+      : opts.gh === "fail-all"
+        ? `echo "some gh verify error" >&2
+exit 1`
+        : "exit 0";
+  writeFileSync(join(stub, "gh"), `#!/bin/bash\n${ghBody}\n`, { mode: 0o755 });
+
+  // Stub git that fails instantly on clone, so the skills checkout never
+  // reaches the network and the run terminates deterministically right
+  // after the agent-integration blocks whose output the tests assert on.
+  writeFileSync(join(stub, "git"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
+
+  // Real node for the bundle extraction.
+  const nodeBin = Bun.which("node");
+  if (nodeBin) symlinkSync(nodeBin, join(stub, "node"));
+
+  if (opts.codexHome) {
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex", "config.toml"), 'model = "gpt-5"\n');
+  }
+  if (opts.plannotatorConfig) {
+    mkdirSync(join(home, ".plannotator"), { recursive: true });
+    writeFileSync(join(home, ".plannotator", "config.json"), opts.plannotatorConfig);
+  }
+  return { home, stub };
+}
+
+function runInstallSh(sandbox: { home: string; stub: string }, args: string[]) {
+  const r = Bun.spawnSync(
+    ["bash", join(scriptsDir, "install.sh"), ...args],
+    {
+      env: {
+        HOME: sandbox.home,
+        TMPDIR: join(sandbox.home, "tmp"),
+        PATH: `${sandbox.stub}:/usr/bin:/bin`,
+        STUB_CHECKSUM: FAKE_BINARY_SHA256,
+        STUB_ATT_JSON: ATTESTATION_FIXTURE,
+        PLANNOTATOR_SKIP_SEM_INSTALL: "1",
+        PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  return {
+    code: r.exitCode,
+    out: r.stdout.toString() + r.stderr.toString(),
+  };
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh functional (stubbed PATH, sandbox HOME)",
+  () => {
+    test("H1: a gh that rejects --bundle falls back to the authenticated path, never a provenance false alarm", () => {
+      const sandbox = setupInstallSandbox({ gh: "reject-bundle" });
+      const { code, out } = runInstallSh(sandbox, [
+        "--version", "v99.9.9", "--verify-attestation", "--minimal", "--non-interactive",
+      ]);
+      expect(out).toContain(
+        "Bundle-based verification did not complete; retrying via gh's authenticated fetch.",
+      );
+      // The retry's authenticated verify succeeded, so the install completes
+      // with the plain (non-credential-free) success line...
+      expect(out).toContain("verified build provenance (SLSA)");
+      expect(out).not.toContain("credential-free via the public attestations API");
+      // ...and the loud provenance-failure diagnosis must NOT appear.
+      expect(out).not.toContain("no valid signed provenance");
+      expect(out).not.toContain("Attestation verification failed!");
+      expect(code).toBe(0);
+      expect(existsSync(join(sandbox.home, ".local", "bin", "plannotator"))).toBe(true);
+    });
+
+    test("fail-closed: a real verification failure aborts with exit 1 and installs nothing", () => {
+      // The reviewer proved that deleting the exit after the provenance
+      // message left every source-scan test green while an unverified
+      // binary installed. This pins the abort behaviorally.
+      const sandbox = setupInstallSandbox({ gh: "fail-all" });
+      const { code, out } = runInstallSh(sandbox, [
+        "--version", "v99.9.9", "--verify-attestation", "--minimal", "--non-interactive",
+      ]);
+      expect(out).toContain("Attestation verification failed!");
+      expect(code).toBe(1);
+      expect(existsSync(join(sandbox.home, ".local", "bin", "plannotator"))).toBe(false);
+    });
+
+    test("M2: a foreign \"codex\": true outside skipInstall (plus explicit false inside) does NOT skip", () => {
+      const sandbox = setupInstallSandbox({
+        gh: "pass-all",
+        codexHome: true,
+        plannotatorConfig: '{"skipInstall":{"codex":false},"somethingElse":{"codex":true}}\n',
+      });
+      const { out } = runInstallSh(sandbox, [
+        "--version", "v99.9.9", "--non-interactive", "--no-extras",
+      ]);
+      expect(out).not.toContain("detected, skipped");
+      expect(out).toContain("Created Codex hooks at");
+      expect(existsSync(join(sandbox.home, ".codex", "hooks.json"))).toBe(true);
+    });
+
+    test("M2: skipInstall.codex true skips, names the config as the source, and writes nothing to the Codex home", () => {
+      const sandbox = setupInstallSandbox({
+        gh: "pass-all",
+        codexHome: true,
+        plannotatorConfig: '{ "skipInstall": { "codex": true } }\n',
+      });
+      const { out } = runInstallSh(sandbox, [
+        "--version", "v99.9.9", "--non-interactive", "--no-extras",
+      ]);
+      expect(out).toContain("Codex: detected, skipped (config skipInstall.codex).");
+      expect(out).not.toContain("Created Codex hooks at");
+      expect(existsSync(join(sandbox.home, ".codex", "hooks.json"))).toBe(false);
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// M7: the Windows installers' bundle extraction, exercised under PowerShell
+// against the captured REAL attestations response (scripts/fixtures/). The
+// scanner must emit each attestations[].bundle as a byte-exact substring of
+// the raw response - proving there is no ConvertFrom-Json/ConvertTo-Json
+// round trip whose DateTime coercion could corrupt a bundle field. Skipped
+// when no PowerShell is available on the host (runs on Windows CI and any
+// machine with pwsh installed).
+// ---------------------------------------------------------------------------
+
+const pwshBin = Bun.which("pwsh") ?? Bun.which("powershell");
+
+function extractPs1ScannerRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf("$bundles = @()");
+  const end = ps.indexOf("if ($bundles.Count -gt 0) {");
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the bundle scanner region in install.ps1");
+  }
+  return ps.slice(start, end);
+}
+
+function extractCmdScannerRegion(): string {
+  // install.cmd emits its fetch helper as `>> "!ATT_PS1_FILE!" echo <line>`
+  // lines; reconstructing them yields exactly the PowerShell the installer
+  // runs. The scanner region is the part between the $bundles init and the
+  // bundle-count check.
+  const cmd = readScript("install.cmd");
+  const lines = cmd
+    .split("\n")
+    .filter((l) => /^>>? +"!ATT_PS1_FILE!" echo /.test(l))
+    .map((l) => l.replace(/^>>? +"!ATT_PS1_FILE!" echo ?/, ""));
+  const script = lines.join("\n");
+  const start = script.indexOf("$bundles = @()");
+  const end = script.indexOf("if ($bundles.Count -eq 0)");
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the bundle scanner region in install.cmd's generated fetcher");
+  }
+  return script.slice(start, end);
+}
+
+function runScanner(scannerBody: string, rawJson: string): string[] {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-scanner-test-"));
+  const inputPath = join(dir, "input.json");
+  writeFileSync(inputPath, rawJson);
+  // Both scanner variants read the raw response text; ps1 calls it $attRaw,
+  // the cmd-generated helper calls it $raw. Alias both.
+  const driver = [
+    "param([string]$FixturePath)",
+    "$raw = [System.IO.File]::ReadAllText($FixturePath)",
+    "$attRaw = $raw",
+    scannerBody,
+    'foreach ($b in $bundles) { [Console]::Out.WriteLine($b) }',
+  ].join("\n");
+  const driverPath = join(dir, "driver.ps1");
+  writeFileSync(driverPath, driver);
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath, inputPath], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (r.exitCode !== 0) {
+    throw new Error(`scanner driver failed: ${r.stderr.toString()}`);
+  }
+  return r.stdout.toString().split("\n").filter((l) => l.length > 0);
+}
+
+describe.skipIf(!pwshBin)("attestation bundle scanner under PowerShell (M7)", () => {
+  const fixtureRaw = readFileSync(ATTESTATION_FIXTURE, "utf-8");
+  const fixture = JSON.parse(fixtureRaw);
+  const scanners: Array<[string, string]> = [
+    ["install.ps1 inline scanner", extractPs1ScannerRegion()],
+    ["install.cmd generated fetcher scanner", extractCmdScannerRegion()],
+  ];
+
+  for (const [name, body] of scanners) {
+    test(`${name}: byte-stable extraction of the real attestations response`, () => {
+      const lines = runScanner(body, fixtureRaw);
+      expect(lines.length).toBe(fixture.attestations.length);
+      for (let i = 0; i < lines.length; i++) {
+        // Byte-stability by construction: every emitted bundle is a literal
+        // substring of the API response.
+        expect(fixtureRaw).toContain(lines[i]);
+        // And it is the RIGHT substring: parsing it yields exactly the
+        // bundle object the response carried.
+        expect(JSON.parse(lines[i])).toEqual(fixture.attestations[i].bundle);
+      }
+    });
+
+    test(`${name}: date-shaped strings survive untouched (DateTime coercion guard)`, () => {
+      // A ConvertFrom-Json/ConvertTo-Json round trip would parse this into
+      // a DateTime and re-serialize it in a different format (varies across
+      // PS 5.1/7). The scanner must reproduce the exact bytes.
+      const synthetic = '{"attestations":[{"bundle_url":"https://x.test/a","bundle":{"ts":"2026-01-02T03:04:05.000Z","integratedTime":"1785415430"}}]}';
+      const lines = runScanner(body, synthetic);
+      expect(lines).toEqual(['{"ts":"2026-01-02T03:04:05.000Z","integratedTime":"1785415430"}']);
+    });
+
+    test(`${name}: braces and escaped quotes inside string values do not derail the depth scan`, () => {
+      const bundle = { weird: 'a}b{c"}{', nested: { deep: "{{{}}}" } };
+      const synthetic = JSON.stringify({ attestations: [{ bundle }] });
+      const lines = runScanner(body, synthetic);
+      expect(lines.length).toBe(1);
+      expect(JSON.parse(lines[0])).toEqual(bundle);
+      expect(synthetic).toContain(lines[0]);
+    });
+  }
 });

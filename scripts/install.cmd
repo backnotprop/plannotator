@@ -29,6 +29,7 @@ REM > default off) happens after _CONFIG_DIR is known.
 set "SKIP_CODEX_FLAG=0"
 set "SKIP_GEMINI_FLAG=0"
 set "SKIP_KIRO_FLAG=0"
+set "SKIP_OPENCODE_FLAG=0"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -145,6 +146,11 @@ if /i "%~1"=="--skip-kiro" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--skip-opencode" (
+    set "SKIP_OPENCODE_FLAG=1"
+    shift
+    goto parse_args
+)
 REM Reject any other dash-prefixed token as an unknown option, so a typoed
 REM flag like --verify-attesttion fails fast instead of being interpreted as
 REM a version tag (which would 404 on releases/download/v--verify-attesttion/...).
@@ -159,7 +165,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-opencode] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -376,35 +382,43 @@ if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
 
 REM Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
 REM as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >
-REM default (off). The config read mirrors the crude verifyAttestation findstr
-REM above: the file must contain "skipInstall" AND the per-agent boolean.
-REM Each resolved skip remembers its source so the detected-but-skipped
-REM report can name what the user set.
+REM default (off). The config layer parses the REAL JSON with PowerShell
+REM (M2): findstr is line-oblivious, so a "codex": true under some OTHER key
+REM would have opted users out, and an explicit false inside skipInstall
+REM would have been ignored. PowerShell reads the actual skipInstall object
+REM (strict boolean check, matching install.ps1) and emits one agent name
+REM per enabled skip; the config path travels via an env var so nothing is
+REM re-parsed as code. Each resolved skip remembers its source so the
+REM detected-but-skipped report can name what the user set.
 set "SKIP_CODEX=0"
 set "SKIP_CODEX_SOURCE="
 set "SKIP_GEMINI=0"
 set "SKIP_GEMINI_SOURCE="
 set "SKIP_KIRO=0"
 set "SKIP_KIRO_SOURCE="
+set "SKIP_OPENCODE=0"
+set "SKIP_OPENCODE_SOURCE="
 if exist "!_CONFIG_DIR!\config.json" (
-    findstr /c:"\"skipInstall\"" "!_CONFIG_DIR!\config.json" >nul 2>&1
-    if !ERRORLEVEL! equ 0 (
-        findstr /r /c:"\"codex\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
-        if !ERRORLEVEL! equ 0 (
+    set "PLN_CONFIG_JSON=!_CONFIG_DIR!\config.json"
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','opencode')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
+        if /i "%%K"=="codex" (
             set "SKIP_CODEX=1"
             set "SKIP_CODEX_SOURCE=config skipInstall.codex"
         )
-        findstr /r /c:"\"gemini\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
-        if !ERRORLEVEL! equ 0 (
+        if /i "%%K"=="gemini" (
             set "SKIP_GEMINI=1"
             set "SKIP_GEMINI_SOURCE=config skipInstall.gemini"
         )
-        findstr /r /c:"\"kiro\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
-        if !ERRORLEVEL! equ 0 (
+        if /i "%%K"=="kiro" (
             set "SKIP_KIRO=1"
             set "SKIP_KIRO_SOURCE=config skipInstall.kiro"
         )
+        if /i "%%K"=="opencode" (
+            set "SKIP_OPENCODE=1"
+            set "SKIP_OPENCODE_SOURCE=config skipInstall.opencode"
+        )
     )
+    set "PLN_CONFIG_JSON="
 )
 for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_CODEX_INSTALL!"=="%%V" (
     set "SKIP_CODEX=1"
@@ -430,6 +444,14 @@ for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_KIRO_INSTALL!"=="%%V" (
     set "SKIP_KIRO=0"
     set "SKIP_KIRO_SOURCE="
 )
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_OPENCODE_INSTALL!"=="%%V" (
+    set "SKIP_OPENCODE=1"
+    set "SKIP_OPENCODE_SOURCE=PLANNOTATOR_SKIP_OPENCODE_INSTALL"
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_OPENCODE_INSTALL!"=="%%V" (
+    set "SKIP_OPENCODE=0"
+    set "SKIP_OPENCODE_SOURCE="
+)
 if "!SKIP_CODEX_FLAG!"=="1" (
     set "SKIP_CODEX=1"
     set "SKIP_CODEX_SOURCE=--skip-codex"
@@ -441,6 +463,10 @@ if "!SKIP_GEMINI_FLAG!"=="1" (
 if "!SKIP_KIRO_FLAG!"=="1" (
     set "SKIP_KIRO=1"
     set "SKIP_KIRO_SOURCE=--skip-kiro"
+)
+if "!SKIP_OPENCODE_FLAG!"=="1" (
+    set "SKIP_OPENCODE=1"
+    set "SKIP_OPENCODE_SOURCE=--skip-opencode"
 )
 
 REM Pre-flight: reject verification requests for tags older than the first
@@ -570,29 +596,58 @@ if "!VERIFY_ATTESTATION!"=="1" (
         REM api.github.com is world-readable for public repos, so fetch the
         REM Sigstore bundle anonymously and hand it to gh via --bundle. This
         REM drops the gh-login requirement; gh's own authenticated fetch is
-        REM only used as a fallback when the public fetch fails. Single
+        REM only used as a fallback when the public fetch fails. Single fetch
         REM attempt, deliberately never retried: the unauthenticated API
         REM allows 60 requests/hour per IP. The response is
         REM { "attestations": [ { "bundle": {...} } ] }; gh --bundle expects
         REM the bundle values one JSON document per line (the JSONL format
         REM `gh attestation download` writes). PowerShell does the fetch and
-        REM extraction; values pass via $env: so nothing is re-parsed as code.
-        REM WriteAllText writes UTF-8 without a BOM so gh accepts line one.
+        REM the extraction via a generated helper script (see
+        REM :WriteAttestationFetcher) that copies each bundle as a byte-exact
+        REM substring of the response, never a ConvertFrom-Json round trip
+        REM whose DateTime coercion could corrupt a bundle field. Values
+        REM pass via $env: so nothing is re-parsed as code. Exit codes:
+        REM 0 = bundle written, 2 = fetch failed, 3 = no bundle extracted.
         set "ATT_BUNDLE_FILE=%TEMP%\plannotator-bundle-%RANDOM%.jsonl"
+        set "ATT_PS1=%TEMP%\plannotator-attfetch-%RANDOM%.ps1"
         set "ATT_DIGEST=!ACTUAL_CHECKSUM!"
         set "ATT_BUNDLE_OK=0"
-        powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri ('https://api.github.com/repos/' + $env:REPO + '/attestations/sha256:' + $env:ATT_DIGEST) -UseBasicParsing -TimeoutSec 30; $b = @($r.attestations | ForEach-Object { $_.bundle } | Where-Object { $_ }); if ($b.Count -eq 0) { exit 1 }; $t = ($b | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }) -join [char]10; [System.IO.File]::WriteAllText($env:ATT_BUNDLE_FILE, $t + [char]10); exit 0 } catch { exit 1 }"
-        if !ERRORLEVEL! equ 0 if exist "!ATT_BUNDLE_FILE!" set "ATT_BUNDLE_OK=1"
+        set "ATT_FALLBACK_REASON=Could not fetch the attestation bundle from the public API"
+        call :WriteAttestationFetcher "!ATT_PS1!"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!ATT_PS1!"
+        if !ERRORLEVEL! equ 0 (
+            if exist "!ATT_BUNDLE_FILE!" set "ATT_BUNDLE_OK=1"
+        ) else if !ERRORLEVEL! equ 3 (
+            set "ATT_FALLBACK_REASON=Could not extract a bundle from the attestations API response"
+        )
+        del "!ATT_PS1!" >nul 2>&1
         set "GH_OUTPUT=%TEMP%\plannotator-gh-%RANDOM%.txt"
+        set "ATT_USED_BUNDLE=0"
         if "!ATT_BUNDLE_OK!"=="1" (
+            set "ATT_USED_BUNDLE=1"
             gh attestation verify "!TEMP_FILE!" ^
                 --bundle "!ATT_BUNDLE_FILE!" ^
                 --repo "!REPO!" ^
                 --source-ref "refs/tags/!TAG!" ^
                 --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" ^
                 > "!GH_OUTPUT!" 2>&1
+            if !ERRORLEVEL! neq 0 (
+                REM H1: a --bundle failure is not necessarily a provenance
+                REM failure - an older gh rejects the flag outright, a corrupt
+                REM bundle fails parsing, etc. Retry once through the exact
+                REM authenticated path before classifying anything; only the
+                REM retry's verdict is reported. A real provenance failure
+                REM fails again here, so nothing bad ever slips through.
+                echo Bundle-based verification did not complete; retrying via gh's authenticated fetch.
+                set "ATT_USED_BUNDLE=0"
+                gh attestation verify "!TEMP_FILE!" ^
+                    --repo "!REPO!" ^
+                    --source-ref "refs/tags/!TAG!" ^
+                    --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" ^
+                    > "!GH_OUTPUT!" 2>&1
+            )
         ) else (
-            echo Could not fetch the attestation bundle from the public API; falling back to gh's authenticated fetch.
+            echo !ATT_FALLBACK_REASON!; falling back to gh's authenticated fetch.
             gh attestation verify "!TEMP_FILE!" ^
                 --repo "!REPO!" ^
                 --source-ref "refs/tags/!TAG!" ^
@@ -605,12 +660,14 @@ if "!VERIFY_ATTESTATION!"=="1" (
             REM conflated with a provenance failure. "Sigstore verifiers"
             REM means gh could not initialize the TUF trust root, which is
             REM fetched on EVERY run (never cached); "gh auth login" is only
-            REM reachable on the authenticated fallback.
+            REM reachable on the authenticated path. Precedence: TUF wins
+            REM over auth (the auth findstr runs first so the TUF assignment
+            REM lands last, matching install.sh / install.ps1).
             set "VERIFY_FAIL_KIND=provenance"
-            findstr /c:"Sigstore verifiers" "!GH_OUTPUT!" >nul 2>&1
-            if !ERRORLEVEL! equ 0 set "VERIFY_FAIL_KIND=tuf"
             findstr /c:"gh auth login" "!GH_OUTPUT!" >nul 2>&1
             if !ERRORLEVEL! equ 0 set "VERIFY_FAIL_KIND=auth"
+            findstr /c:"Sigstore verifiers" "!GH_OUTPUT!" >nul 2>&1
+            if !ERRORLEVEL! equ 0 set "VERIFY_FAIL_KIND=tuf"
             del "!GH_OUTPUT!"
             if exist "!ATT_BUNDLE_FILE!" del "!ATT_BUNDLE_FILE!"
             if "!VERIFY_FAIL_KIND!"=="tuf" (
@@ -621,8 +678,8 @@ if "!VERIFY_ATTESTATION!"=="1" (
                 echo retry with network access or pass --skip-attestation. >&2
             )
             if "!VERIFY_FAIL_KIND!"=="auth" (
-                echo The public attestation bundle fetch failed and gh is not logged >&2
-                echo in, so the authenticated fallback could not run. Retry with >&2
+                echo The credential-free bundle path did not complete and gh is not >&2
+                echo logged in, so the authenticated fallback could not run. Retry with >&2
                 echo network access to api.github.com, run 'gh auth login', or pass >&2
                 echo --skip-attestation. >&2
             )
@@ -635,7 +692,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
             exit /b 1
         )
         del "!GH_OUTPUT!"
-        if "!ATT_BUNDLE_OK!"=="1" (
+        if "!ATT_USED_BUNDLE!"=="1" (
             echo [OK] verified build provenance ^(SLSA, credential-free via the public attestations API^)
         ) else (
             echo [OK] verified build provenance ^(SLSA^)
@@ -747,9 +804,17 @@ REM Codex home entirely untouched (no writes, no cleanup, no removal).
 if "!CODEX_AVAILABLE!"=="1" if "!SKIP_CODEX!"=="1" (
     echo.
     echo Codex: detected, skipped ^(!SKIP_CODEX_SOURCE!^).
+    echo The Windows installer only prints manual Codex setup instructions; they
+    echo were suppressed.
+    REM M4: the existing-integration note only fires when hooks.json actually
+    REM references plannotator - mere existence proves nothing, since the
+    REM file may hold only the user's own hooks.
     if exist "!CODEX_DIR!\hooks.json" (
-        echo An existing Codex integration at !CODEX_DIR!\hooks.json was left untouched.
+        findstr /c:"plannotator" "!CODEX_DIR!\hooks.json" >nul 2>&1
+        if !ERRORLEVEL! equ 0 echo Your existing Codex Stop hook at !CODEX_DIR!\hooks.json is unaffected.
     )
+    echo Note: the shared agent skills in %USERPROFILE%\.agents\skills serve multiple
+    echo agents ^(Codex among them^) and are still installed.
 )
 if "!CODEX_AVAILABLE!"=="1" if "!SKIP_CODEX!"=="0" (
     echo.
@@ -767,9 +832,14 @@ if "!CODEX_AVAILABLE!"=="1" if "!SKIP_CODEX!"=="0" (
     echo.
 )
 
-REM Clear any cached OpenCode plugin to force fresh download on next run
-if exist "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" >nul 2>&1
-if exist "%USERPROFILE%\.cache\opencode\packages\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\packages\@plannotator" >nul 2>&1
+REM Clear any cached OpenCode plugin to force fresh download on next run.
+REM An OpenCode opt-out (#1178) leaves OpenCode's own cache directory alone;
+REM the Bun package cache is a shared cache, not OpenCode's home, and is
+REM always cleared.
+if "!SKIP_OPENCODE!"=="0" (
+    if exist "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\node_modules\@plannotator" >nul 2>&1
+    if exist "%USERPROFILE%\.cache\opencode\packages\@plannotator" rmdir /s /q "%USERPROFILE%\.cache\opencode\packages\@plannotator" >nul 2>&1
+)
 if exist "%USERPROFILE%\.bun\install\cache\@plannotator" rmdir /s /q "%USERPROFILE%\.bun\install\cache\@plannotator" >nul 2>&1
 
 REM ----------------------------------------------------------------------
@@ -983,8 +1053,9 @@ if !ERRORLEVEL! equ 0 (
         echo Tag !TAG! predates the core/extra skill layout - skipping core skill install
     )
 
-    REM OpenCode command stubs -> always (plugin intercepts execution).
-    if exist "apps\opencode-plugin\commands" (
+    REM OpenCode command stubs -> always (plugin intercepts execution),
+    REM unless opted out via --skip-opencode (#1178).
+    if "!SKIP_OPENCODE!"=="0" if exist "apps\opencode-plugin\commands" (
         if not exist "!OPENCODE_COMMANDS_DIR!" mkdir "!OPENCODE_COMMANDS_DIR!"
         xcopy /y /q "apps\opencode-plugin\commands\*.md" "!OPENCODE_COMMANDS_DIR!\" >nul 2>&1
         echo Installed OpenCode commands to !OPENCODE_COMMANDS_DIR!\
@@ -1063,7 +1134,8 @@ for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do 
 )
 
 REM The /plannotator-archive OpenCode command was removed too - sweep the stub.
-if exist "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" (
+REM An OpenCode opt-out suspends the sweep: skip means do-not-write, never remove.
+if "!SKIP_OPENCODE!"=="0" if exist "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" (
     del /q "!OPENCODE_COMMANDS_DIR!\plannotator-archive.md" >nul 2>&1
     echo Removed stale plannotator-archive command from !OPENCODE_COMMANDS_DIR!
 )
@@ -1200,6 +1272,13 @@ echo }
 
     REM Gemini slash commands (plannotator-*.toml) are copied from the sparse
     REM checkout in the git-gated skills/commands block above, not written here.
+)
+
+if "!SKIP_OPENCODE!"=="1" (
+    echo.
+    echo OpenCode: integration skipped ^(!SKIP_OPENCODE_SOURCE!^).
+    echo No command stubs were written and OpenCode's plugin cache was left alone.
+    echo Re-run without the opt-out to install the command stubs.
 )
 
 echo.
@@ -1414,6 +1493,67 @@ if !ERRORLEVEL! equ 0 (
 if exist "!SEM_ARCHIVE!" del "!SEM_ARCHIVE!"
 if exist "!SEM_CHECKSUMS!" del "!SEM_CHECKSUMS!"
 if exist "!SEM_EXTRACT!" rmdir /s /q "!SEM_EXTRACT!"
+goto :eof
+
+REM ======================================================================
+REM Generate the attestation-fetch helper script (%1 = output .ps1 path).
+REM PowerShell fetches the public attestations endpoint and copies each
+REM attestations[].bundle object into ATT_BUNDLE_FILE as a byte-exact
+REM substring of the response (JSONL, one bundle per line) - deliberately
+REM NOT a ConvertFrom-Json/ConvertTo-Json round trip, whose DateTime
+REM coercion re-serializes date-shaped strings differently across
+REM PowerShell 5.1/7 and could corrupt a bundle field. Emitted as a file
+REM (not -Command) because the scanner needs control flow that cannot be
+REM safely embedded in a cmd one-liner. Inputs via env: REPO, ATT_DIGEST,
+REM ATT_BUNDLE_FILE. Exit codes: 0 ok, 2 fetch failed, 3 nothing extracted.
+REM ======================================================================
+:WriteAttestationFetcher
+set "ATT_PS1_FILE=%~1"
+>  "!ATT_PS1_FILE!" echo $ErrorActionPreference = 'Stop'
+>> "!ATT_PS1_FILE!" echo try {
+>> "!ATT_PS1_FILE!" echo     $resp = Invoke-WebRequest -Uri ('https://api.github.com/repos/' + $env:REPO + '/attestations/sha256:' + $env:ATT_DIGEST) -UseBasicParsing -TimeoutSec 30
+>> "!ATT_PS1_FILE!" echo     $raw = if ($resp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($resp.Content) } else { [string]$resp.Content }
+>> "!ATT_PS1_FILE!" echo } catch { exit 2 }
+>> "!ATT_PS1_FILE!" echo $bundles = @()
+>> "!ATT_PS1_FILE!" echo $searchFrom = 0
+>> "!ATT_PS1_FILE!" echo while ($true) {
+>> "!ATT_PS1_FILE!" echo     $keyIdx = $raw.IndexOf('"bundle"', $searchFrom)
+>> "!ATT_PS1_FILE!" echo     if ($keyIdx -lt 0) { break }
+>> "!ATT_PS1_FILE!" echo     $searchFrom = $keyIdx + 8
+>> "!ATT_PS1_FILE!" echo     $i = $keyIdx + 8
+>> "!ATT_PS1_FILE!" echo     while ($i -lt $raw.Length -and [char]::IsWhiteSpace($raw[$i])) { $i++ }
+>> "!ATT_PS1_FILE!" echo     if ($i -ge $raw.Length -or $raw[$i] -ne ':') { continue }
+>> "!ATT_PS1_FILE!" echo     $i++
+>> "!ATT_PS1_FILE!" echo     while ($i -lt $raw.Length -and [char]::IsWhiteSpace($raw[$i])) { $i++ }
+>> "!ATT_PS1_FILE!" echo     if ($i -ge $raw.Length -or $raw[$i] -ne '{') { continue }
+>> "!ATT_PS1_FILE!" echo     $depth = 0
+>> "!ATT_PS1_FILE!" echo     $inString = $false
+>> "!ATT_PS1_FILE!" echo     $escaped = $false
+>> "!ATT_PS1_FILE!" echo     $start = $i
+>> "!ATT_PS1_FILE!" echo     for (; $i -lt $raw.Length; $i++) {
+>> "!ATT_PS1_FILE!" echo         $ch = $raw[$i]
+>> "!ATT_PS1_FILE!" echo         if ($escaped) { $escaped = $false; continue }
+>> "!ATT_PS1_FILE!" echo         if ($inString) {
+>> "!ATT_PS1_FILE!" echo             if ($ch -eq '\') { $escaped = $true }
+>> "!ATT_PS1_FILE!" echo             elseif ($ch -eq '"') { $inString = $false }
+>> "!ATT_PS1_FILE!" echo             continue
+>> "!ATT_PS1_FILE!" echo         }
+>> "!ATT_PS1_FILE!" echo         if ($ch -eq '"') { $inString = $true; continue }
+>> "!ATT_PS1_FILE!" echo         if ($ch -eq '{') { $depth++; continue }
+>> "!ATT_PS1_FILE!" echo         if ($ch -eq '}') {
+>> "!ATT_PS1_FILE!" echo             $depth--
+>> "!ATT_PS1_FILE!" echo             if ($depth -eq 0) {
+>> "!ATT_PS1_FILE!" echo                 $bundles += $raw.Substring($start, $i - $start + 1)
+>> "!ATT_PS1_FILE!" echo                 $searchFrom = $i + 1
+>> "!ATT_PS1_FILE!" echo                 break
+>> "!ATT_PS1_FILE!" echo             }
+>> "!ATT_PS1_FILE!" echo         }
+>> "!ATT_PS1_FILE!" echo     }
+>> "!ATT_PS1_FILE!" echo }
+>> "!ATT_PS1_FILE!" echo if ($bundles.Count -eq 0) { exit 3 }
+>> "!ATT_PS1_FILE!" echo try { [System.IO.File]::WriteAllText($env:ATT_BUNDLE_FILE, (($bundles -join [char]10) + [char]10)) } catch { exit 3 }
+>> "!ATT_PS1_FILE!" echo exit 0
+set "ATT_PS1_FILE="
 goto :eof
 
 REM ======================================================================

@@ -393,7 +393,7 @@ To verify on install:
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
 ```
 
-Requires `gh` installed and authenticated. Can also be set persistently in `~/.plannotator/config.json`:
+Requires the `gh` CLI, but no login: the installer fetches the attestation bundle from GitHub's public attestations API and verifies it with `gh attestation verify --bundle` (the extraction needs node, python3, or jq on PATH; gh's authenticated fetch is the fallback). Can also be set persistently in `~/.plannotator/config.json`:
 
 ```json
 { "verifyAttestation": true }

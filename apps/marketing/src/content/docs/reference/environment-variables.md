@@ -71,9 +71,13 @@ When running your own paste service binary, these variables configure it:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_VERIFY_ATTESTATION` | off | Set to `1` or `true` to have the install script run `gh attestation verify` on the downloaded binary. Requires `gh` CLI installed and authenticated. Can also be set via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. |
+| `PLANNOTATOR_VERIFY_ATTESTATION` | off | Set to `1` or `true` to have the install script run `gh attestation verify` on the downloaded binary. Requires the `gh` CLI but no login: the attestation bundle is fetched from GitHub's public attestations API and verified with `--bundle` (extraction needs node, python3, or jq on macOS/Linux); gh's authenticated fetch is the fallback. Can also be set via `~/.plannotator/config.json` (`{ "verifyAttestation": true }`) or per-invocation via `--verify-attestation`. |
 | `PLANNOTATOR_MINIMAL` | off | Set to `1` / `true` / `yes` to install **only** the `plannotator` binary — no sem sidecar, agent-terminal runtime, skills, hooks, slash commands, or per-agent config. Equivalent to passing `--minimal` (aliased `--binary-only`); pass `--no-minimal` to override. Read by the install scripts only, not the runtime binary. |
 | `PLANNOTATOR_SKIP_SEM_INSTALL` | off | Set to `1` / `true` to skip installing the optional `sem` semantic-diff sidecar used by code review. Read by the install scripts only. |
+| `PLANNOTATOR_SKIP_CODEX_INSTALL` | off | Set to `1` / `true` to skip writing the Codex integration (`hooks.json` / `config.toml` under `CODEX_HOME`) even when Codex is detected. The installer reports "detected, skipped" honestly and never removes an existing integration. Also via `~/.plannotator/config.json` (`{ "skipInstall": { "codex": true } }`) or the `--skip-codex` flag (flag wins over env var, which wins over config). Read by the install scripts only. |
+| `PLANNOTATOR_SKIP_GEMINI_INSTALL` | off | Same opt-out for the Gemini CLI integration (`~/.gemini` policy, settings hook, commands). Config key `skipInstall.gemini`; flag `--skip-gemini`. Read by the install scripts only. |
+| `PLANNOTATOR_SKIP_KIRO_INSTALL` | off | Same opt-out for the Kiro CLI integration (`~/.kiro` skills and agent). Config key `skipInstall.kiro`; flag `--skip-kiro`. Read by the install scripts only. |
+| `PLANNOTATOR_SKIP_OPENCODE_INSTALL` | off | Do-not-write switch for the OpenCode integration (command stubs, plugin cache clear). Config key `skipInstall.opencode`; flag `--skip-opencode`. Read by the install scripts only. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Custom Claude Code config directory. The install script places hooks here instead of the default location. |
 
 ## Remote mode behavior

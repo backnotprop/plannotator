@@ -83,6 +83,27 @@ For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the envir
 
 </details>
 
+<details>
+<summary><strong>Skipping individual agent integrations</strong></summary>
+
+Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex
+```
+
+PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode`. Windows CMD: same `--skip-*` flags as bash.
+
+For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`) or persist the choice in `~/.plannotator/config.json`:
+
+```json
+{ "skipInstall": { "codex": true } }
+```
+
+Precedence: flag over environment variable over config file.
+
+</details>
+
 ## Uninstall
 
 `plannotator uninstall` removes recognized installed components while
