@@ -850,10 +850,10 @@ diffs-container {
   background: var(--code-bg);
 }
 
-/* GitHub-style suggestion block */
+/* GitHub-style suggestion block. The colored header is the sole identity
+   marker; no left accent bar on the card body. */
 .suggestion-block {
   border: 1px solid oklch(from var(--success) l c h / 0.3);
-  border-left: 3px solid var(--success);
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
@@ -898,7 +898,6 @@ diffs-container {
 
 .light .suggestion-block {
   border-color: oklch(from var(--success) l c h / 0.3);
-  border-left-color: var(--success);
 }
 
 .light .suggestion-block-header {

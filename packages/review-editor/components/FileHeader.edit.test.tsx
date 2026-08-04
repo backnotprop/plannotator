@@ -68,6 +68,36 @@ describe.if(hasDom)('FileHeader edit affordance (DOM)', () => {
     expect(el.querySelector('[data-testid="edit-session-badge"]')).toBeNull();
   });
 
+  test('Edit entry renders at the far right of the action row, after other buttons', async () => {
+    const el = await mount(
+      <FileHeader
+        {...baseProps}
+        onEditFile={() => {}}
+        onToggleViewed={() => {}}
+        onFileComment={() => {}}
+      />,
+    );
+    const editBtn = el.querySelector<HTMLButtonElement>('[data-testid="edit-session-start"]');
+    expect(editBtn).not.toBeNull();
+    const buttons = Array.from(el.querySelectorAll('button'));
+    // Viewed and Comment precede Edit; only the OpenInApp file-actions
+    // dropdown may follow it (Edit sits adjacent to the dropdown/chevron).
+    const viewedBtn = buttons.find((b) => b.title.includes('viewed'));
+    const commentBtn = buttons.find((b) => b.title === 'Add file-scoped comment');
+    expect(viewedBtn).not.toBeUndefined();
+    expect(commentBtn).not.toBeUndefined();
+    for (const btn of [viewedBtn!, commentBtn!]) {
+      expect(
+        btn.compareDocumentPosition(editBtn!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    const after = buttons.slice(buttons.indexOf(editBtn!) + 1);
+    for (const btn of after) {
+      const label = btn.getAttribute('aria-label') ?? btn.title;
+      expect(/open in|file actions|choose app/i.test(label)).toBe(true);
+    }
+  });
+
   test('disabled reason blocks entry and surfaces as tooltip', async () => {
     let started = 0;
     const el = await mount(
