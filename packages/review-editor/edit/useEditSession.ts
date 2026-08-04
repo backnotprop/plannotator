@@ -12,7 +12,6 @@ import { cloneFileDiff } from './cloneDiff';
 import { mapEditedRangeToPristine, selectionToLineRange } from './selectionAnchor';
 import { buildSelectionActionElement } from './selectionActionPopover';
 import {
-  buildEditorMarkers,
   createPierreEditor,
   loadPierreEdit,
   type PierreEditorInstance,
@@ -558,19 +557,11 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     createPierreEditor(options),
   ) as unknown as CreateEditor<DiffAnnotationMetadata>;
 
-  /** Re-project the session file's annotations into editor markers. Called
-   * after an annotation is added mid-session so the new comment shows up
-   * inside the editor immediately. Best-effort chrome — never throws. */
-  const refreshMarkers = useStableCallback(() => {
-    const session = sessionRef.current;
-    const editor = session?.editor;
-    if (!session || !editor) return;
-    try {
-      editor.setMarkers(buildEditorMarkers(annotationsRef.current ?? [], session.filePath));
-    } catch {
-      // The document may not be initialized (or already torn down) — skip.
-    }
-  });
+  /** Marker projection is intentionally disabled: wavy underlines read as
+   * errors in every editor's visual language, which misrepresents comments.
+   * Annotations render in their normal slots below the code instead. Kept as
+   * a no-op so callers need no knowledge of the decision. */
+  const refreshMarkers = useStableCallback(() => {});
 
   /** Collapse the current editor selection to its end (post-submit cleanup;
    * see EditSessionApi.collapseSelection). Best-effort, never throws. */
@@ -647,25 +638,9 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
       onAttach: (editor: unknown) => {
         const session = sessionRef.current;
         if (!session) return;
-        // Stash the instance for mid-session marker refreshes (new comments).
+        // Stash the instance for selection collapse after annotation submit.
         session.editor = editor as PierreEditorInstance;
-        const markers = buildEditorMarkers(annotationsRef.current ?? [], session.filePath);
-        if (markers.length === 0) return;
-        // Markers are best-effort chrome; never let them break the session.
-        // setMarkers throws until the editor's text document is initialized,
-        // which can be after onAttach — retry across a few frames.
-        const itemId = session.itemId;
-        let attempts = 0;
-        const apply = () => {
-          if (sessionRef.current?.itemId !== itemId) return;
-          try {
-            (editor as PierreEditorInstance).setMarkers(markers);
-          } catch {
-            attempts += 1;
-            if (attempts < 10) requestAnimationFrame(apply);
-          }
-        };
-        requestAnimationFrame(apply);
+        // Annotation markers are intentionally not projected; see refreshMarkers.
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
