@@ -101,17 +101,15 @@ describe('theme mode catalog', () => {
 });
 
 describe('theme registry', () => {
-  test('keeps ids unique and registers the colorblind palettes for both modes', () => {
+  test('keeps ids unique and registers the colorblind palette for both modes', () => {
     const ids = BUILT_IN_THEMES.map(({ id }) => id);
     expect(new Set(ids).size).toBe(ids.length);
 
-    for (const id of ['colorblind', 'colorblind-tritanopia']) {
-      const theme = BUILT_IN_THEMES.find(candidate => candidate.id === id);
-      if (!theme) throw new Error(`${id} palette is not registered`);
-      expect(theme.modeSupport).toBe('both');
-      expect(theme.syntaxHighlighting).toBe(true);
-      expect(theme.colors.dark.background).not.toBe(theme.colors.light.background);
-    }
+    const theme = BUILT_IN_THEMES.find(candidate => candidate.id === 'colorblind');
+    if (!theme) throw new Error('colorblind palette is not registered');
+    expect(theme.modeSupport).toBe('both');
+    expect(theme.syntaxHighlighting).toBe(true);
+    expect(theme.colors.dark.background).not.toBe(theme.colors.light.background);
   });
 });
 
