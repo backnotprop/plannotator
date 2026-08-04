@@ -124,8 +124,8 @@ describe("OpenCode V2 server plugin", () => {
     const planningEvent = {
       agent: "plan",
       system: [
-        { type: "text" as const, text: "Base system prompt" },
-        { type: "text" as const, text: "Earlier plugin prompt" },
+        { type: "text" as const, text: "Base system prompt", metadata: { source: "base" } },
+        { type: "text" as const, text: "Earlier plugin prompt", cache: { type: "ephemeral" } },
       ],
       messages: [],
       tools: {
@@ -136,10 +136,14 @@ describe("OpenCode V2 server plugin", () => {
     };
     await hook?.(planningEvent);
 
-    expect(planningEvent.system).toHaveLength(1);
-    expect(planningEvent.system[0]?.text).toStartWith(
-      "Base system prompt\n\nEarlier plugin prompt\n\n## Plannotator",
-    );
+    expect(planningEvent.system).toHaveLength(3);
+    expect(planningEvent.system.slice(0, 2).map((part) => part.text)).toEqual([
+      "Base system prompt",
+      "Earlier plugin prompt",
+    ]);
+    expect(planningEvent.system[2]?.text).toStartWith("## Plannotator");
+    expect(planningEvent.system[0]?.metadata).toEqual({ source: "base" });
+    expect(planningEvent.system[1]?.cache).toEqual({ type: "ephemeral" });
     expect(planningEvent.tools.plan_exit.description).toContain("Use submit_plan instead");
     expect(planningEvent.tools.todowrite.description).toContain("use submit_plan instead");
 

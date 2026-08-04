@@ -73,6 +73,35 @@ jobs:
           packages/editor/App.archiveReadOnly.test.tsx
           packages/editor/actionsLabelMode.test.ts
 
+  opencode-v2:
+    name: OpenCode 2 installed package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install OpenCode 2
+        run: npm install --global @opencode-ai/cli@0.0.0-next-16770
+
+      - name: Build OpenCode plugin assets
+        run: bun run build:review && bun run build:hook && bun run build:opencode
+
+      - name: Pack OpenCode plugin
+        working-directory: apps/opencode-plugin
+        run: npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+
+      - name: Run installed-package smoke
+        run: >-
+          bun run --cwd apps/opencode-plugin smoke:v2 --
+          "$(command -v opencode2)"
+          "$RUNNER_TEMP/plannotator-opencode-0.25.1.tgz"
+
   uninstall-windows:
     # Run the filesystem and path logic under real Windows path semantics.
     # The tests inject temporary homes and process boundaries, so this job

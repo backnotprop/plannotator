@@ -57,7 +57,6 @@ const serverPlugin = Plugin.define({
   setup: async (ctx) => {
     const workflowOptions = normalizeWorkflowOptions(ctx.options as PlannotatorOpenCodeOptions);
     let cachedAgents: OpenCodeBridgeAgent[] | undefined;
-    const loggedUrls = new Set<string>();
 
     const getAgents = async (): Promise<OpenCodeBridgeAgent[]> => {
       if (cachedAgents) return cachedAgents;
@@ -73,18 +72,6 @@ const serverPlugin = Plugin.define({
         cachedAgents = [];
       }
       return cachedAgents;
-    };
-
-    const client: V2Client = {
-      app: {
-        agents: async () => ({ data: await getAgents() }),
-        log: ({ message }) => {
-          const url = /https?:\/\/\S+/.exec(message)?.[0];
-          if (url && loggedUrls.has(url)) return;
-          if (url) loggedUrls.add(url);
-          console.error(message);
-        },
-      },
     };
 
     if (shouldModifyPrompts(workflowOptions)) {
@@ -127,9 +114,8 @@ const serverPlugin = Plugin.define({
             improvementHookContent: hook?.content ?? null,
           });
           if (improveContext) additions.push(improveContext);
-          replaceSystemParts(
+          replacePlanningSystemParts(
             event.system,
-            stripConflictingPlanModeRules(event.system.map((part) => part.text)),
             additions,
           );
           return;
@@ -141,7 +127,7 @@ const serverPlugin = Plugin.define({
           workflowOptions,
         )) return;
 
-        replaceSystemParts(event.system, event.system.map((part) => part.text), [getGenericPlanReminder()]);
+        event.system.push({ type: "text", text: getGenericPlanReminder() });
       });
     }
 
@@ -187,6 +173,7 @@ const serverPlugin = Plugin.define({
           const session = await ctx.session.get({ sessionID: toolContext.sessionID });
           const directory = session.location.directory;
           const bridge = await getBridgeContext(getAgents);
+          const client = createV2Client(getAgents);
           const abortSignal = new AbortController().signal;
           const result = await executeSubmitPlan({
             edits: getPlanEdits(input),
@@ -245,6 +232,23 @@ function getPlanTimeoutSeconds(): number | null {
     return DEFAULT_PLAN_TIMEOUT_SECONDS;
   }
   return parsed === 0 ? null : parsed;
+}
+
+function createV2Client(
+  getAgents: () => Promise<OpenCodeBridgeAgent[]>,
+): V2Client {
+  const loggedUrls = new Set<string>();
+  return {
+    app: {
+      agents: async () => ({ data: await getAgents() }),
+      log: ({ message }) => {
+        const url = /https?:\/\/\S+/.exec(message)?.[0];
+        if (url && loggedUrls.has(url)) return;
+        if (url) loggedUrls.add(url);
+        console.error(message);
+      },
+    },
+  };
 }
 
 function allowSubagents(): boolean {
@@ -335,15 +339,19 @@ async function runPlanReview(input: {
   });
 }
 
-function replaceSystemParts(
+function replacePlanningSystemParts(
   system: Array<{ type: "text"; text: string; [key: string]: unknown }>,
-  existing: string[],
   additions: string[],
 ): void {
-  const text = [...existing, ...additions].filter(Boolean).join("\n\n");
-  const first = system[0] ?? { type: "text" as const, text: "" };
+  const existing = system.flatMap((part) => {
+    const text = stripConflictingPlanModeRules([part.text])[0];
+    return text ? [{ ...part, text }] : [];
+  });
   system.length = 0;
-  system.push({ ...first, type: "text", text });
+  system.push(
+    ...existing,
+    ...additions.filter(Boolean).map((text) => ({ type: "text" as const, text })),
+  );
 }
 
 function replaceStrictPlanReminder(messages: unknown[]): void {
