@@ -11,6 +11,7 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileHeader } from './FileHeader';
+import { EditSessionHud } from './EditSessionHud';
 // Relative import: the ui package exposes './config' (no ./config/settings
 // subpath), and the registry itself is not re-exported from the barrel.
 import { SETTINGS } from '../../ui/config/settings';
@@ -115,20 +116,51 @@ describe.if(hasDom)('FileHeader edit affordance (DOM)', () => {
     expect(started).toBe(0);
   });
 
-  test('editing state swaps to Suggest/Discard session controls', async () => {
+  test('editing state hides the entry button and renders NO session controls (the HUD owns them)', async () => {
+    const el = await mount(<FileHeader {...baseProps} onEditFile={() => {}} isEditing />);
+    expect(el.querySelector('[data-testid="edit-session-start"]')).toBeNull();
+    expect(el.querySelector('[data-testid="edit-session-badge"]')).toBeNull();
+    expect(el.querySelector('[data-testid="edit-session-complete"]')).toBeNull();
+    expect(el.querySelector('[data-testid="edit-session-cancel"]')).toBeNull();
+  });
+});
+
+describe.if(hasDom)('EditSessionHud (DOM)', () => {
+  function makeStore(initial: number) {
+    let count = initial;
+    const listeners = new Set<() => void>();
+    return {
+      store: {
+        subscribe: (cb: () => void) => {
+          listeners.add(cb);
+          return () => listeners.delete(cb);
+        },
+        getSnapshot: () => count,
+      },
+      set(next: number) {
+        count = next;
+        listeners.forEach((cb) => cb());
+      },
+    };
+  }
+
+  test('renders session controls, dirty indicator, and the experimental label', async () => {
     let completed = 0;
     let cancelled = 0;
+    const { store, set } = makeStore(0);
     const el = await mount(
-      <FileHeader
-        {...baseProps}
-        onEditFile={() => {}}
-        isEditing
-        onCompleteEdit={() => completed++}
-        onCancelEdit={() => cancelled++}
-      />,
+      <EditSessionHud onComplete={() => completed++} onCancel={() => cancelled++} dirtyStore={store} />,
     );
-    expect(el.querySelector('[data-testid="edit-session-start"]')).toBeNull();
+    expect(el.querySelector('[data-testid="edit-session-hud"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="edit-session-badge"]')).not.toBeNull();
+    expect(el.textContent).toContain('Experimental');
+    expect(el.querySelector('[data-testid="edit-session-dirty"]')!.textContent).toBe('No changes yet');
+
+    await act(async () => set(1));
+    expect(el.querySelector('[data-testid="edit-session-dirty"]')!.textContent).toBe('1 change');
+    await act(async () => set(3));
+    expect(el.querySelector('[data-testid="edit-session-dirty"]')!.textContent).toBe('3 changes');
+
     const complete = el.querySelector<HTMLButtonElement>('[data-testid="edit-session-complete"]');
     const cancel = el.querySelector<HTMLButtonElement>('[data-testid="edit-session-cancel"]');
     expect(complete).not.toBeNull();

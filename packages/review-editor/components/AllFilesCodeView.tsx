@@ -31,6 +31,7 @@ import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../uti
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
+import { EditSessionHud } from './EditSessionHud';
 import { FileCommentBanner } from './FileCommentBanner';
 import { annotationMatchesPrScope, isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { useEditSession } from '../edit/useEditSession';
@@ -2116,8 +2117,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onEditFile={editEnabled ? () => editSession.startEdit(item.id) : undefined}
         isEditing={isEditingThis}
         editDisabledReason={editDisabledReason}
-        onCompleteEdit={editEnabled ? editSession.completeEdit : undefined}
-        onCancelEdit={editEnabled ? editSession.cancelEdit : undefined}
         isViewed={viewedFiles?.has(filePath)}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         isStaged={stagedFiles?.has(filePath)}
@@ -2160,6 +2159,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
         />
+        {/* EXPERIMENTAL edit-session HUD: session controls + state in a slim
+            strip below the header, above the file content. Appears/disappears
+            with session start/end, which both go through a version-bumped
+            updateItem, so the slot height is re-measured on each transition. */}
+        {isEditingThis && (
+          <EditSessionHud
+            onComplete={editSession.completeEdit}
+            onCancel={editSession.cancelEdit}
+            dirtyStore={editSession.dirtyStore}
+          />
+        )}
         {/* File-scoped comments live in the header (below the path), shown only
             when the file is expanded. They ride the sticky header — fine for a
             short guide note; long ones scroll within the banner. */}

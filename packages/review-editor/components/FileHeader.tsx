@@ -31,14 +31,12 @@ interface FileHeaderProps {
   /** EXPERIMENTAL edit-to-suggestion mode: enter edit mode on this file.
    * Absent = the feature is off and no edit UI renders. */
   onEditFile?: () => void;
-  /** This file currently hosts the active edit session. */
+  /** This file currently hosts the active edit session. Suppresses the Edit
+   * entry button; the session controls live in the EditSessionHud strip the
+   * owner renders below this header, never here. */
   isEditing?: boolean;
   /** When set, the Edit button is disabled with this tooltip. */
   editDisabledReason?: string | null;
-  /** Finish the session — net changes become suggestion annotations. */
-  onCompleteEdit?: () => void;
-  /** Discard the session — no annotations, pristine diff restored. */
-  onCancelEdit?: () => void;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -118,8 +116,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   onEditFile,
   isEditing = false,
   editDisabledReason,
-  onCompleteEdit,
-  onCancelEdit,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -203,47 +199,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
       </div>
       <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
-        {/* EXPERIMENTAL edit-to-suggestion controls. While editing, the pair
-            of session controls replaces the entry button. */}
-        {onEditFile && isEditing && (
-          <>
-            <span className="text-xs px-1.5 py-0.5 rounded bg-warning/15 text-warning font-medium whitespace-nowrap" data-testid="edit-session-badge">
-              Editing
-            </span>
-            {onCompleteEdit && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCompleteEdit();
-                }}
-                className="text-xs rounded transition-colors flex items-center gap-1 px-2 py-1 bg-primary/15 text-primary hover:bg-primary/25"
-                title="Finish editing — net changes become a suggestion"
-                data-testid="edit-session-complete"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                {!isVeryTight && <span>Suggest</span>}
-              </button>
-            )}
-            {onCancelEdit && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCancelEdit();
-                }}
-                className="text-xs rounded transition-colors flex items-center gap-1 px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted"
-                title="Discard edits and restore the diff"
-                data-testid="edit-session-cancel"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                {!isVeryTight && <span>Discard</span>}
-              </button>
-            )}
-          </>
-        )}
         {onToggleViewed && (
           <button
             onClick={onToggleViewed}

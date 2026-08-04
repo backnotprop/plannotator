@@ -72,6 +72,19 @@ interface UseEditSessionParams {
   refreshItem: (itemId: string) => void;
 }
 
+/**
+ * External store for the active session's net change count (suggestion hunks
+ * the session would produce right now). The HUD lives inside Pierre's
+ * memoized header slot portal, which only republishes on updateItem — never
+ * on parent state changes — so the count is delivered as a subscribable the
+ * HUD reads via useSyncExternalStore, letting it re-render itself while the
+ * user types without touching the item.
+ */
+export interface EditSessionDirtyStore {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => number;
+}
+
 export interface EditSessionApi {
   /** Item id currently in an edit session, or null. */
   editingItemId: string | null;
@@ -93,6 +106,8 @@ export interface EditSessionApi {
   cancelEdit: () => void;
   /** If this item is being edited, finish the session first (collapse paths). */
   finishIfEditing: (itemId: string) => void;
+  /** Net change count of the active session for the HUD (debounced). */
+  dirtyStore: EditSessionDirtyStore;
   /** Called by the fileSetKey reset effect (post-commit, so prompting is
    * safe): the old items are gone. A dirty session prompts to keep its edits
    * as suggestions; a clean one is dropped silently. */
@@ -168,6 +183,36 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
   const onAddSuggestionsRef = useRef(onAddSuggestions);
   onAddSuggestionsRef.current = onAddSuggestions;
 
+  // --- Dirty-count store (see EditSessionDirtyStore) ------------------------
+  const changeCountRef = useRef(0);
+  const changeListenersRef = useRef(new Set<() => void>());
+  const changeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const publishChangeCount = (count: number) => {
+    if (changeCountRef.current === count) return;
+    changeCountRef.current = count;
+    for (const listener of changeListenersRef.current) listener();
+  };
+
+  const resetChangeCount = () => {
+    if (changeTimerRef.current != null) {
+      clearTimeout(changeTimerRef.current);
+      changeTimerRef.current = null;
+    }
+    publishChangeCount(0);
+  };
+
+  const dirtyStore = useMemo<EditSessionDirtyStore>(
+    () => ({
+      subscribe: (listener) => {
+        changeListenersRef.current.add(listener);
+        return () => changeListenersRef.current.delete(listener);
+      },
+      getSnapshot: () => changeCountRef.current,
+    }),
+    [],
+  );
+
   const setEditing = (itemId: string | null) => {
     // Ref first: header slots republish synchronously on the very next
     // updateItem, before React commits the state update.
@@ -219,6 +264,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     writeRestore(session);
     sessionRef.current = null;
     setEditingItemId(null);
+    resetChangeCount();
   });
 
   const completeEdit = useStableCallback(() => endSession(false));
@@ -241,6 +287,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     if (session) {
       sessionRef.current = null;
       setEditing(null);
+      resetChangeCount();
       if (session.dirty && !session.ending && !session.suppressSuggestions) {
         const hunks = recoverDirtySessionHunks(session);
         if (hunks.length > 0) {
@@ -387,6 +434,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
         ending: false,
         seq: 0,
       };
+      resetChangeCount();
       setEditing(itemId);
       item.collapsed = false;
       item.edit = true;
@@ -405,6 +453,16 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
         // stays readable even after an unrouted teardown (see
         // recoverDirtySessionHunks).
         if (file) session.latestContents = file;
+        // Refresh the HUD's net change count on a short debounce: the count is
+        // a full-content line diff, so once per pause rather than per
+        // keystroke. Guarded against the session ending before the timer fires.
+        if (changeTimerRef.current != null) clearTimeout(changeTimerRef.current);
+        changeTimerRef.current = setTimeout(() => {
+          changeTimerRef.current = null;
+          const live = sessionRef.current;
+          if (!live || live.itemId !== item.id) return;
+          publishChangeCount(recoverDirtySessionHunks(live).length);
+        }, 250);
       }
     },
   );
@@ -429,6 +487,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
         sessionRef.current = null;
         editingItemIdRef.current = null;
         setEditingItemId(null);
+        resetChangeCount();
         setTimeout(() => writeRestore(session), 0);
       }
     },
@@ -482,6 +541,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     editingItemId,
     editingItemIdRef,
     editUnavailableRef,
+    dirtyStore,
     startEdit,
     completeEdit,
     cancelEdit,
