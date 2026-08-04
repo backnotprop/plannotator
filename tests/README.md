@@ -2,6 +2,20 @@
 
 This directory contains manual testing scripts for Plannotator.
 
+## Plan UI Load Benchmark
+
+Build the plan app, then measure cold browser loads through the Chrome DevTools Protocol:
+
+```bash
+bun run build:review
+bun run build:hook
+bun run bench:plan-load
+```
+
+The benchmark starts an isolated headless Chrome profile and a minimal local server that serves the built plan HTML plus a representative Pi `/api/plan` response. Each run uses a fresh page with an empty HTTP cache. It reports time until the plan controls and rendered content are usable, navigation timings, JavaScript/task duration, long tasks, document-transfer bytes, and heap usage. Browser version and an HTML SHA-256 make comparisons attributable to a specific environment and artifact.
+
+Use `--json` for machine-readable output or `--html <path>` to compare another build. Set `CHROME_PATH` or pass `--chrome <path>` when Chrome or Chromium is not in a standard location.
+
 ## Manual Browser UI Smokes (`tests/manual/local/`)
 
 These are local-only scripts for launching Plannotator UI flows with fixture data so you can manually verify them in a browser. They are not automated CI tests.
