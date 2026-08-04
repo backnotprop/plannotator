@@ -6,6 +6,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 class CdpClient {
   constructor(url, commandTimeoutMs) {
@@ -89,9 +90,10 @@ try {
 
 const html = fs.readFileSync(htmlPath);
 const htmlSha256 = createHash("sha256").update(html).digest("hex");
+const servedHtml = options.gzip ? gzipSync(html) : html;
 const server = http.createServer((request, response) => {
   if (request.url === "/") {
-    send(response, "text/html; charset=utf-8", html);
+    send(response, "text/html; charset=utf-8", servedHtml, options.gzip ? { "Content-Encoding": "gzip" } : undefined);
     return;
   }
   if (request.url?.startsWith("/api/plan")) {
@@ -116,6 +118,8 @@ try {
     "--disable-gpu",
     "--no-first-run",
     "--no-default-browser-check",
+    "--window-size=1280,900",
+    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
     `--remote-debugging-port=${debugPort}`,
     `--user-data-dir=${profileDir}`,
     "about:blank",
@@ -164,7 +168,11 @@ try {
     protocolVersion: version["Protocol-Version"],
     htmlPath,
     htmlBytes: html.length,
+    servedHtmlBytes: servedHtml.length,
     htmlSha256,
+    contentEncoding: options.gzip ? "gzip" : "identity",
+    viewport: "1280x900",
+    network: "external hosts blocked",
     cache: "cleared before each run",
     results,
   };
@@ -192,6 +200,7 @@ function parseArgs(args) {
     else if (arg === "--timeout") parsed.timeout = positiveInteger(args[++index], "--timeout");
     else if (arg === "--html") parsed.html = requiredValue(args[++index], "--html");
     else if (arg === "--chrome") parsed.chrome = requiredValue(args[++index], "--chrome");
+    else if (arg === "--gzip") parsed.gzip = true;
     else if (arg === "--json") parsed.json = true;
     else if (arg === "--help" || arg === "-h") {
       console.log(`Usage: node tests/bench-plan-load.mjs [options]
@@ -201,6 +210,7 @@ Options:
   --timeout <ms>       Per-navigation and CDP timeout (default: 30000)
   --html <path>        Built plan HTML (default: apps/hook/dist/index.html)
   --chrome <path>      Chrome/Chromium executable (or set CHROME_PATH)
+  --gzip               Serve the plan HTML with gzip content encoding
   --json               Print machine-readable results`);
       process.exit(0);
     } else throw new Error(`Unknown option: ${arg}`);
@@ -233,10 +243,11 @@ function planResponse() {
   };
 }
 
-function send(response, contentType, body) {
+function send(response, contentType, body, headers = {}) {
   response.writeHead(200, {
     "Content-Type": contentType,
     "Content-Length": body.length,
+    ...headers,
   });
   response.end(body);
 }
@@ -259,7 +270,9 @@ async function waitUntilUsable(page, timeoutMs) {
   while (Date.now() < deadline) {
     const ready = await evaluate(page, `document.readyState === "complete"
       && document.body?.innerText.includes("Browser load benchmark")
-      && document.body?.innerText.includes("Approve")`);
+      && Array.from(document.querySelectorAll("button")).some((button) =>
+        !button.disabled && /^(Approve(?:\\s|$)|OK$)/.test(button.innerText.trim())
+      )`);
     if (ready) return;
     await delay(25);
   }
@@ -293,8 +306,8 @@ function toResult(run, wallMs, snapshot, metrics) {
 function printResults(report) {
   console.log(`Chrome: ${report.chrome} | CDP: ${report.protocolVersion}`);
   console.log(`Plan UI: ${report.htmlPath}`);
-  console.log(`HTML: ${(report.htmlBytes / 1024 / 1024).toFixed(2)} MiB | sha256: ${report.htmlSha256}`);
-  console.log(`Cache: ${report.cache}`);
+  console.log(`HTML: ${(report.htmlBytes / 1024 / 1024).toFixed(2)} MiB | served: ${(report.servedHtmlBytes / 1024 / 1024).toFixed(2)} MiB (${report.contentEncoding}) | sha256: ${report.htmlSha256}`);
+  console.log(`Viewport: ${report.viewport} | Network: ${report.network} | Cache: ${report.cache}`);
   console.table(report.results);
   const average = (key) => round(report.results.reduce((total, result) => total + result[key], 0) / report.results.length);
   console.log(`Average usable: ${average("usableMs")}ms | script: ${average("scriptMs")}ms | long tasks: ${average("longTaskTotalMs")}ms`);

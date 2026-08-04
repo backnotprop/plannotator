@@ -12,9 +12,9 @@ bun run build:hook
 bun run bench:plan-load
 ```
 
-The benchmark starts an isolated headless Chrome profile and a minimal local server that serves the built plan HTML plus a representative Pi `/api/plan` response. Each run uses a fresh page with an empty HTTP cache. It reports time until the plan controls and rendered content are usable, navigation timings, JavaScript/task duration, long tasks, document-transfer bytes, and heap usage. Browser version and an HTML SHA-256 make comparisons attributable to a specific environment and artifact.
+The benchmark requires Node.js 22 or newer. It starts an isolated headless Chrome profile with a fixed 1280x900 viewport and a minimal local server that serves the built plan HTML plus a representative Pi `/api/plan` response. External network access is blocked so update checks and network conditions cannot affect results. Each run uses a fresh page with an empty HTTP cache. It reports time until the plan controls and rendered content are usable, navigation timings, JavaScript/task duration, long tasks, document-transfer bytes, and heap usage. Browser version and an HTML SHA-256 make comparisons attributable to a specific environment and artifact.
 
-Use `--json` for machine-readable output or `--html <path>` to compare another build. Set `CHROME_PATH` or pass `--chrome <path>` when Chrome or Chromium is not in a standard location.
+Use `--json` for machine-readable output, `--html <path>` to compare another build, or `--gzip` to serve the HTML with gzip content encoding. Set `CHROME_PATH` or pass `--chrome <path>` when Chrome or Chromium is not in a standard location. `usableMs` is sampled every 25ms, and heap measurements can vary with garbage collection timing.
 
 ## Manual Browser UI Smokes (`tests/manual/local/`)
 
