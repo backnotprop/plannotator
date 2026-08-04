@@ -2525,10 +2525,12 @@ const ReviewApp: React.FC = () => {
     if (await copyTextToClipboard(feedbackMarkdown)) {
       setCopyFeedback('Feedback copied!');
       setTimeout(() => setCopyFeedback(null), 2000);
+      toast.success('Feedback copied');
     } else {
       console.error('Failed to copy');
       setCopyFeedback('Failed to copy');
       setTimeout(() => setCopyFeedback(null), 2000);
+      toast.error('Failed to copy');
     }
   }, [totalAnnotationCount, feedbackMarkdown]);
 
@@ -2843,13 +2845,11 @@ const ReviewApp: React.FC = () => {
   ]);
 
   // Cmd/Ctrl+Shift+Y keyboard shortcut to copy feedback, mirroring the
-  // Copy Feedback button in the header and the review sidebar.
+  // Copy Feedback button in the header.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'y' || !(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'y' || isTypingTarget(e.target)) return;
 
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (platformCommentDialog || showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
 
       e.preventDefault();
