@@ -331,7 +331,15 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
     if (enableKeyboardNav === false) return;
     const handler = (e: KeyboardEvent) => {
       if (searchQuery.trim()) return; // search results own the panel
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // composedPath()[0] pierces shadow DOM (same guard as AllFilesCodeView):
+      // window-level e.target retargets to the shadow HOST, so keystrokes in
+      // the Pierre editor's contenteditable (edit sessions) would otherwise
+      // read as non-editable and Home/End/arrows would switch files mid-edit.
+      const origin = (e.composedPath?.()[0] ?? e.target) as HTMLElement | null;
+      if (
+        origin &&
+        (origin.tagName === 'INPUT' || origin.tagName === 'TEXTAREA' || origin.isContentEditable)
+      ) return;
       const active = document.activeElement;
       if (
         active instanceof HTMLElement &&
