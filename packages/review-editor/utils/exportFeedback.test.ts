@@ -224,6 +224,36 @@ describe("exportReviewFeedback", () => {
     expect(result).not.toContain("**Replaces:**");
   });
 
+  it("emits a Highlighted text block for an edit-session selection comment", () => {
+    const result = exportReviewFeedback([
+      ann({ text: "Rename this", selectedText: "const widget = make();" }),
+    ]);
+    expect(result).toContain("Rename this\n");
+    expect(result).toContain("**Highlighted text:**\n```\nconst widget = make();\n```");
+    // A plain comment must never masquerade as a replacement.
+    expect(result).not.toContain("**Replaces:**");
+    expect(result).not.toContain("approximate");
+  });
+
+  it("labels an approximate anchor when the selection overlapped in-session edits", () => {
+    const result = exportReviewFeedback([
+      ann({
+        text: "Not sure about this",
+        selectedText: "const edited = true;",
+        selectedTextFromEdits: true,
+      }),
+    ]);
+    const note = result.indexOf("in-progress edits");
+    const highlighted = result.indexOf("**Highlighted text:**\n```\nconst edited = true;\n```");
+    expect(note).toBeGreaterThan(-1);
+    expect(highlighted).toBeGreaterThan(note);
+  });
+
+  it("omits the Highlighted text block when there is no selectedText", () => {
+    const result = exportReviewFeedback([ann()]);
+    expect(result).not.toContain("**Highlighted text:**");
+  });
+
   it("emits Replaces for file-scoped suggestions too", () => {
     const result = exportReviewFeedback([
       ann({ scope: "file", suggestedCode: "const x = 1;", originalCode: "let x = 1;" }),

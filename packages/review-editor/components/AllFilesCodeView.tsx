@@ -35,6 +35,7 @@ import { EditSessionHud } from './EditSessionHud';
 import { FileCommentBanner } from './FileCommentBanner';
 import { annotationMatchesPrScope, isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { useEditSession } from '../edit/useEditSession';
+import type { EditSelectionAnnotationRequest, EditSelectionComment } from '../edit/useEditSession';
 import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import { InlineAnnotation } from './InlineAnnotation';
@@ -280,6 +281,10 @@ interface AllFilesCodeViewProps {
   /** Sink for suggestions derived from a completed edit session. Required for
    * edit mode to activate. */
   onAddSuggestionsForFile?: (filePath: string, hunks: SuggestionHunk[]) => void;
+  /** Sink for a comment authored through the edit session's Selection Action
+   * ("Make annotation"): a line-scoped comment anchored to PRISTINE new-side
+   * lines snapshotted at selection time (see edit/selectionAnchor.ts). */
+  onAddEditorCommentForFile?: (filePath: string, comment: EditSelectionComment) => void;
 }
 
 // Diffshub-style stable path-based id allocation. Plannotator's file list is
@@ -531,6 +536,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   allowScrollChaining = false,
   enableEditSuggestions = false,
   onAddSuggestionsForFile,
+  onAddEditorCommentForFile,
 }) => {
   const mountCollapsedRef = useRef(mountCollapsed);
   const seedCollapsed = mountCollapsedRef.current ?? defaultCollapsed;
@@ -911,6 +917,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // to keep its recovered edits as suggestions (this effect runs
     // post-commit, so the synchronous confirm inside is safe).
     editSession.handleFileSetChange();
+    // A pending editor-selection comment entry is anchored to the OLD diff's
+    // pristine coordinates — stale once the file set changes.
+    setSelectionAnnotationRequest(null);
     setFileCommentAnchor(null);
     fileCommentButtonRefs.current.clear();
     // Resync the header-refresh snapshots to the current props so the post-
@@ -1107,6 +1116,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // pristine FileDiffMetadata is deep-cloned before the session and restored
   // (via version bump + updateItem) when it ends. See useEditSession.
   const editEnabled = enableEditSuggestions && onAddSuggestionsForFile != null;
+  // A pending "Make annotation" request from the edit session's Selection
+  // Action popover. The Pierre popover (shadow DOM) only snapshots the
+  // selection; the actual comment entry is the app's own CommentPopover,
+  // anchored at the snapshotted rect — focusing an input inside the editor's
+  // popover would blur the editor, collapse the selection, and tear the
+  // popover down mid-typing, so entry deliberately lives OUTSIDE the editor.
+  const [selectionAnnotationRequest, setSelectionAnnotationRequest] =
+    useState<EditSelectionAnnotationRequest | null>(null);
   const editSession = useEditSession({
     enabled: editEnabled,
     viewerRef,
@@ -1116,8 +1133,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     reviewSnapshotIdRef,
     annotationsRef,
     onAddSuggestions: onAddSuggestionsForFile,
+    onSelectionAnnotation: onAddEditorCommentForFile ? setSelectionAnnotationRequest : undefined,
     refreshItem,
   });
+
+  // Surface a mid-session comment inside the editor as a marker as soon as it
+  // lands in the annotations prop. Stable callback; no-op outside a session.
+  const refreshEditSessionMarkers = editSession.refreshMarkers;
+  useEffect(() => {
+    refreshEditSessionMarkers();
+  }, [annotations, refreshEditSessionMarkers]);
 
   // Augmentation APPLIES are deferred to scroll-idle. updateItem() mutates
   // item layout — the full-content parse counts collapsed-context regions the
@@ -2389,6 +2414,36 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}
+        />
+      )}
+
+      {/* Comment entry for the edit session's "Make annotation" action. The
+          anchor rect and the pristine line range were snapshotted at click
+          time, so this stays valid even if the editor selection has since
+          collapsed or the session has ended (pristine coordinates are
+          session-invariant). */}
+      {selectionAnnotationRequest && onAddEditorCommentForFile && (
+        <CommentPopover
+          key={`edit-selection:${selectionAnnotationRequest.filePath}:${selectionAnnotationRequest.lineStart}-${selectionAnnotationRequest.lineEnd}`}
+          anchorRect={selectionAnnotationRequest.anchorRect}
+          contextText={selectionAnnotationRequest.selectedText.replace(/\s+/g, ' ').trim()}
+          isGlobal={false}
+          allowImages={false}
+          onSubmit={(text) => {
+            onAddEditorCommentForFile(selectionAnnotationRequest.filePath, {
+              lineStart: selectionAnnotationRequest.lineStart,
+              lineEnd: selectionAnnotationRequest.lineEnd,
+              exact: selectionAnnotationRequest.exact,
+              selectedText: selectionAnnotationRequest.selectedText,
+              text,
+            });
+            // The editor kept its ranged selection while the entry was open;
+            // collapse it so the Selection Action popover does not re-open
+            // over the just-annotated lines.
+            editSession.collapseSelection();
+            setSelectionAnnotationRequest(null);
+          }}
+          onClose={() => setSelectionAnnotationRequest(null)}
         />
       )}
     </div>

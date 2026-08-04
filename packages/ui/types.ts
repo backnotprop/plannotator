@@ -165,6 +165,15 @@ export interface CodeAnnotation {
   charStart?: number; // Character offset within lineStart (token-level selection)
   charEnd?: number; // Character offset within lineEnd (token-level selection)
   tokenText?: string; // Selected token/span text (token-level selection)
+  /** Exact text highlighted when the comment was created inside an edit
+   *  session (captured from the editor selection). Exported alongside the
+   *  comment so the agent sees what was highlighted even when it differs
+   *  from the anchored diff lines. */
+  selectedText?: string;
+  /** True when the edit-session selection overlapped in-session edits: the
+   *  line anchor maps to the pristine lines those edits replace, so it is
+   *  approximate and the export labels it as such. */
+  selectedTextFromEdits?: boolean;
   createdAt: number;
   author?: string;
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API

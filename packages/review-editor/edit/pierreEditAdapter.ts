@@ -28,6 +28,11 @@ export type PierreEditorInstance = InstanceType<EditModule['Editor']>;
 export type PierreEditorOptions = NonNullable<ConstructorParameters<EditModule['Editor']>[0]>;
 /** Pierre's `Marker` type, re-derived structurally (it has no export path). */
 export type PierreEditorMarker = Parameters<PierreEditorInstance['setMarkers']>[0][number];
+/** Pierre's `SelectionActionContext`, re-derived structurally from the
+ * `renderSelectionAction` editor option (it has no public export path). */
+export type PierreSelectionActionContext = Parameters<
+  NonNullable<PierreEditorOptions['renderSelectionAction']>
+>[0];
 
 let modulePromise: Promise<EditModule> | null = null;
 let loadedModule: EditModule | null = null;

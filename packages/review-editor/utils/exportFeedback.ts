@@ -171,10 +171,28 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     if (ann.reasoning) {
       output += `\n**Reasoning:** ${ann.reasoning}\n`;
     }
+    output += formatSelectedTextBlock(ann);
     output += formatSuggestionBlocks(ann);
     output += '\n';
   }
 
+  return output;
+}
+
+/**
+ * The highlighted-text payload for a comment created inside an edit session:
+ * the exact text the reviewer had selected in the editor. When the selection
+ * overlapped the reviewer's own in-progress edits, the line anchor points at
+ * the pristine lines that region replaces (approximate), and the note says so
+ * — otherwise the anchored lines and the highlighted text are the same code.
+ */
+function formatSelectedTextBlock(ann: CodeAnnotation): string {
+  if (!ann.selectedText) return '';
+  let output = '';
+  if (ann.selectedTextFromEdits) {
+    output += `_The highlighted text below includes the reviewer's in-progress edits; the line range above anchors to the current file lines that region replaces (approximate)._\n`;
+  }
+  output += `\n**Highlighted text:**\n\`\`\`\n${ann.selectedText}\n\`\`\`\n`;
   return output;
 }
 

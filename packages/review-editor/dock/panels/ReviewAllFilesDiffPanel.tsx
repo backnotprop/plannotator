@@ -79,6 +79,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       // evicts CodeViews, which would destroy an active editor session).
       enableEditSuggestions={state.editSuggestionsEnabled}
       onAddSuggestionsForFile={state.onAddSuggestionsForFile}
+      onAddEditorCommentForFile={state.onAddEditorCommentForFile}
     />
   );
 };

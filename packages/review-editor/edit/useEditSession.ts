@@ -9,12 +9,15 @@ import type { DiffFile } from '../types';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { deriveSuggestionHunks, type SuggestionHunk } from './deriveSuggestions';
 import { cloneFileDiff } from './cloneDiff';
+import { mapEditedRangeToPristine, selectionToLineRange } from './selectionAnchor';
+import { buildSelectionActionElement } from './selectionActionPopover';
 import {
   buildEditorMarkers,
   createPierreEditor,
   loadPierreEdit,
   type PierreEditorInstance,
   type PierreEditorOptions,
+  type PierreSelectionActionContext,
 } from './pierreEditAdapter';
 
 /**
@@ -57,6 +60,41 @@ interface ActiveEditSession {
   ending: boolean;
   /** Monotonic per-session counter for fresh restore cacheKeys. */
   seq: number;
+  /** The attached editor instance (marker refresh target), set by onAttach. */
+  editor: PierreEditorInstance | null;
+}
+
+/**
+ * A "Make annotation" request emitted from the edit-session Selection Action
+ * popover. Everything is snapshotted at click time: `lineStart`/`lineEnd` are
+ * PRISTINE (pre-edit, new-side) line numbers — the coordinates the rendered
+ * diff and the feedback export anchor to — mapped from the edited-buffer
+ * selection via `mapEditedRangeToPristine` (see selectionAnchor.ts for the
+ * anchoring rules). Pristine coordinates are session-invariant, so the anchor
+ * stays correct whether the session later completes or is discarded.
+ */
+export interface EditSelectionAnnotationRequest {
+  filePath: string;
+  /** 1-based pristine new-side line range the annotation anchors to. */
+  lineStart: number;
+  lineEnd: number;
+  /** False when the selection overlapped in-session edits (anchor maps to the
+   * pristine lines those edits replace — approximate, and labeled as such). */
+  exact: boolean;
+  /** The exact text highlighted in the editor when the request was made. */
+  selectedText: string;
+  /** Viewport rect of the popover action, for anchoring the comment entry. */
+  anchorRect: DOMRect;
+}
+
+/** The submitted comment for an EditSelectionAnnotationRequest: the request's
+ * snapshotted anchor plus the reviewer's comment text. */
+export interface EditSelectionComment {
+  lineStart: number;
+  lineEnd: number;
+  exact: boolean;
+  selectedText: string;
+  text: string;
 }
 
 interface UseEditSessionParams {
@@ -68,6 +106,10 @@ interface UseEditSessionParams {
   reviewSnapshotIdRef: React.RefObject<string | undefined>;
   annotationsRef: React.RefObject<CodeAnnotation[]>;
   onAddSuggestions?: (filePath: string, hunks: SuggestionHunk[]) => void;
+  /** Sink for "Make annotation" requests from the editor's Selection Action
+   * popover. When absent the popover renders no action (defensive; the wired
+   * flow always provides it). */
+  onSelectionAnnotation?: (request: EditSelectionAnnotationRequest) => void;
   /** Republish one item's slots (version bump + updateItem). */
   refreshItem: (itemId: string) => void;
 }
@@ -112,6 +154,15 @@ export interface EditSessionApi {
    * safe): the old items are gone. A dirty session prompts to keep its edits
    * as suggestions; a clean one is dropped silently. */
   handleFileSetChange: () => void;
+  /** Re-project the file's current annotations into editor markers so a
+   * comment created mid-session becomes visible inside the editor. No-op
+   * outside a session; markers are best-effort chrome (never throws). */
+  refreshMarkers: () => void;
+  /** Collapse the editor selection to its end. Called after the app-side
+   * comment entry submits: the editor keeps its selection while the entry is
+   * open (useful context), but once the annotation exists the still-ranged
+   * selection would re-open the Selection Action popover over it. */
+  collapseSelection: () => void;
   /** CodeView prop: fires per document change while a session is active. */
   onItemEditChange: (
     item: CodeViewItem<DiffAnnotationMetadata>,
@@ -136,6 +187,7 @@ export interface EditSessionApi {
 
 export interface EditSessionEditorOptions {
   enabledSelectionAction: boolean;
+  renderSelectionAction: (context: PierreSelectionActionContext) => HTMLElement;
   onAttach: (editor: unknown) => void;
 }
 
@@ -173,6 +225,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     reviewSnapshotIdRef,
     annotationsRef,
     onAddSuggestions,
+    onSelectionAnnotation,
     refreshItem,
   } = params;
 
@@ -182,6 +235,8 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
   const sessionRef = useRef<ActiveEditSession | null>(null);
   const onAddSuggestionsRef = useRef(onAddSuggestions);
   onAddSuggestionsRef.current = onAddSuggestions;
+  const onSelectionAnnotationRef = useRef(onSelectionAnnotation);
+  onSelectionAnnotationRef.current = onSelectionAnnotation;
 
   // --- Dirty-count store (see EditSessionDirtyStore) ------------------------
   const changeCountRef = useRef(0);
@@ -433,6 +488,7 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
         suppressSuggestions: false,
         ending: false,
         seq: 0,
+        editor: null,
       };
       resetChangeCount();
       setEditing(itemId);
@@ -502,18 +558,97 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     createPierreEditor(options),
   ) as unknown as CreateEditor<DiffAnnotationMetadata>;
 
+  /** Re-project the session file's annotations into editor markers. Called
+   * after an annotation is added mid-session so the new comment shows up
+   * inside the editor immediately. Best-effort chrome — never throws. */
+  const refreshMarkers = useStableCallback(() => {
+    const session = sessionRef.current;
+    const editor = session?.editor;
+    if (!session || !editor) return;
+    try {
+      editor.setMarkers(buildEditorMarkers(annotationsRef.current ?? [], session.filePath));
+    } catch {
+      // The document may not be initialized (or already torn down) — skip.
+    }
+  });
+
+  /** Collapse the current editor selection to its end (post-submit cleanup;
+   * see EditSessionApi.collapseSelection). Best-effort, never throws. */
+  const collapseSelection = useStableCallback(() => {
+    const editor = sessionRef.current?.editor;
+    if (!editor) return;
+    try {
+      const sel = editor.getState().selections?.at(-1);
+      if (!sel) return;
+      editor.setSelections([{ start: sel.end, end: sel.end, direction: 'none' }]);
+    } catch {
+      // Cosmetic cleanup only; the session must never break over it.
+    }
+  });
+
+  /** The Selection Action popover's "Make annotation" click. Everything is
+   * snapshotted synchronously — the popover is torn down as soon as the
+   * editor selection collapses (which focusing the app-side comment entry
+   * causes), so nothing here may defer reading the selection. */
+  const handleMakeAnnotation = useStableCallback(
+    (context: PierreSelectionActionContext, anchorRect: DOMRect) => {
+      const session = sessionRef.current;
+      const sink = onSelectionAnnotationRef.current;
+      if (!session || !sink) return;
+      let selectedText = '';
+      try {
+        selectedText = context.getSelectionText();
+      } catch {
+        // Fall through with empty text; the anchor range still stands.
+      }
+      // The text document is the authoritative edited content at click time
+      // (latestContents lags by one change-event dispatch at most, but the
+      // document read is direct and always current).
+      let edited: string;
+      try {
+        edited = context.textDocument.getText();
+      } catch {
+        try {
+          edited = session.latestContents ? String(session.latestContents.contents) : session.preEditContent;
+        } catch {
+          edited = session.preEditContent;
+        }
+      }
+      const { lineStart, lineEnd } = selectionToLineRange(context.selection);
+      const anchor = mapEditedRangeToPristine(session.preEditContent, edited, lineStart, lineEnd);
+      sink({
+        filePath: session.filePath,
+        lineStart: anchor.lineStart,
+        lineEnd: anchor.lineEnd,
+        exact: anchor.exact,
+        selectedText,
+        anchorRect,
+      });
+      try {
+        context.close();
+      } catch {
+        // Popover teardown is Pierre's job; a failure here is cosmetic.
+      }
+    },
+  );
+
   // Editor construction options. Markers surface the file's existing line
   // annotations during the session. Upstream delivers onAttach ONCE per
   // editor (an attachState.delivered guard) — it does not re-fire across
   // virtualization re-attaches — so this is a one-shot projection; the
   // retry loop below only covers the text document initializing after the
-  // callback fires.
+  // callback fires. The Selection Action popover (a plain DOM node rendered
+  // into the editor's shadow DOM) carries the "Make annotation" action.
   const editorOptions = useMemo<EditSessionEditorOptions>(
     () => ({
-      enabledSelectionAction: false,
+      enabledSelectionAction: true,
+      renderSelectionAction: (context: PierreSelectionActionContext) =>
+        buildSelectionActionElement((anchorRect) => handleMakeAnnotation(context, anchorRect)),
       onAttach: (editor: unknown) => {
         const session = sessionRef.current;
         if (!session) return;
+        // Stash the instance for mid-session marker refreshes (new comments).
+        session.editor = editor as PierreEditorInstance;
         const markers = buildEditorMarkers(annotationsRef.current ?? [], session.filePath);
         if (markers.length === 0) return;
         // Markers are best-effort chrome; never let them break the session.
@@ -547,6 +682,8 @@ export function useEditSession(params: UseEditSessionParams): EditSessionApi {
     cancelEdit,
     finishIfEditing,
     handleFileSetChange,
+    refreshMarkers,
+    collapseSelection,
     onItemEditChange,
     onItemEditComplete,
     createEditor,
