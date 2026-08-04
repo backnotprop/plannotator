@@ -8,6 +8,8 @@ export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: strin
   'aurora-x': { dark: 'aurora-x', light: null },
   'ayu-dark': { dark: 'ayu-dark', light: null },
   'catppuccin': { dark: 'catppuccin-mocha', light: 'catppuccin-latte' },
+  'colorblind': { dark: 'pierre-dark-protanopia-deuteranopia', light: 'pierre-light-protanopia-deuteranopia' },
+  'colorblind-tritanopia': { dark: 'pierre-dark-tritanopia', light: 'pierre-light-tritanopia' },
   'dark-plus': { dark: 'dark-plus', light: 'light-plus' },
   'dracula': { dark: 'dracula', light: null },
   'everforest': { dark: 'everforest-dark', light: 'everforest-light' },
