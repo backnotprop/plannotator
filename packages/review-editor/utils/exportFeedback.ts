@@ -148,9 +148,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
       } else if (prefix) {
         output += `${prefix.trimEnd()}\n`;
       }
-      if (ann.suggestedCode) {
-        output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
-      }
+      output += formatSuggestionBlocks(ann);
       output += '\n';
       continue;
     }
@@ -173,12 +171,32 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     if (ann.reasoning) {
       output += `\n**Reasoning:** ${ann.reasoning}\n`;
     }
-    if (ann.suggestedCode) {
-      output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
-    }
+    output += formatSuggestionBlocks(ann);
     output += '\n';
   }
 
+  return output;
+}
+
+/**
+ * The suggestion payload for one annotation: an optional "Replaces:" block
+ * (the exact current lines the suggestion swaps out — the applying agent
+ * must verify these against the file before applying, and skip with a note
+ * if they no longer match) followed by the "Suggested code:" block. Both
+ * SuggestionModal-authored and edit-session-derived suggestions carry
+ * `originalCode`, so both sources export through this one format. A
+ * deletion-only suggestion (no suggestedCode; the annotation text describes
+ * the removal) still emits its "Replaces:" block so the anchor stays
+ * verifiable.
+ */
+function formatSuggestionBlocks(ann: CodeAnnotation): string {
+  let output = '';
+  if ((ann.suggestedCode || ann.text) && ann.originalCode) {
+    output += `\n**Replaces:**\n\`\`\`\n${ann.originalCode}\n\`\`\`\n`;
+  }
+  if (ann.suggestedCode) {
+    output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+  }
   return output;
 }
 

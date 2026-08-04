@@ -184,6 +184,56 @@ describe("exportReviewFeedback", () => {
     expect(result).toContain("const x = 1;");
   });
 
+  it("emits a Replaces block before Suggested code when originalCode is present", () => {
+    const result = exportReviewFeedback([
+      ann({ suggestedCode: "const x = 1;", originalCode: "let x = 1;" }),
+    ]);
+    const replaces = result.indexOf("**Replaces:**\n```\nlet x = 1;\n```");
+    const suggested = result.indexOf("**Suggested code:**\n```\nconst x = 1;\n```");
+    expect(replaces).toBeGreaterThan(-1);
+    expect(suggested).toBeGreaterThan(replaces);
+  });
+
+  it("pairs Replaces with the matching Suggested code per annotation", () => {
+    const result = exportReviewFeedback([
+      ann({ lineStart: 2, lineEnd: 2, suggestedCode: "two'", originalCode: "two" }),
+      ann({ lineStart: 8, lineEnd: 9, suggestedCode: "eight'\nnine'", originalCode: "eight\nnine" }),
+    ]);
+    expect(result).toContain(
+      "**Replaces:**\n```\ntwo\n```\n\n**Suggested code:**\n```\ntwo'\n```",
+    );
+    expect(result).toContain(
+      "**Replaces:**\n```\neight\nnine\n```\n\n**Suggested code:**\n```\neight'\nnine'\n```",
+    );
+  });
+
+  it("emits Replaces without Suggested code for a deletion-only suggestion", () => {
+    // The edit-session derivation for a fully-emptied file produces text +
+    // originalCode with no suggestedCode; the anchor must still export.
+    const result = exportReviewFeedback([
+      ann({ text: "Suggested change: remove these lines.", originalCode: "one\ntwo" }),
+    ]);
+    expect(result).toContain("**Replaces:**\n```\none\ntwo\n```");
+    expect(result).not.toContain("**Suggested code:**");
+  });
+
+  it("omits Replaces when the annotation has no originalCode", () => {
+    const result = exportReviewFeedback([
+      ann({ suggestedCode: "const x = 1;" }),
+    ]);
+    expect(result).not.toContain("**Replaces:**");
+  });
+
+  it("emits Replaces for file-scoped suggestions too", () => {
+    const result = exportReviewFeedback([
+      ann({ scope: "file", suggestedCode: "const x = 1;", originalCode: "let x = 1;" }),
+    ]);
+    const replaces = result.indexOf("**Replaces:**\n```\nlet x = 1;\n```");
+    const suggested = result.indexOf("**Suggested code:**");
+    expect(replaces).toBeGreaterThan(-1);
+    expect(suggested).toBeGreaterThan(replaces);
+  });
+
   it("includes side indicator", () => {
     const result = exportReviewFeedback([
       ann({ side: "old", lineStart: 3, lineEnd: 3 }),
