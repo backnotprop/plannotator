@@ -303,6 +303,22 @@ export const SETTINGS = {
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
   },
+  /** Experimental: author suggestions by editing code in place in the review
+   *  all-files view. Cookie-only (no server sync) while the feature is
+   *  experimental — default OFF, and when off no edit UI renders and the
+   *  editor module is never imported. */
+  editSuggestions: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-experimental-edit-suggestions');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) =>
+      storage.setItem('plannotator-experimental-edit-suggestions', String(v)),
+    serverKey: undefined,
+    fromServer: undefined,
+    toServer: undefined,
+  },
   conventionalComments: {
     defaultValue: false as boolean,
     fromCookie: () => {
