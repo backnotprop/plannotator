@@ -31,6 +31,7 @@ import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
+import type { SuggestionHunk } from './edit/deriveSuggestions';
 import { useAIChat } from './hooks/useAIChat';
 import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
@@ -246,6 +247,8 @@ const ReviewApp: React.FC = () => {
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
   const diffTabSize = useConfigValue('diffTabSize');
+  // EXPERIMENTAL: edit code in place to author suggestions (default OFF).
+  const editSuggestionsEnabled = useConfigValue('editSuggestions');
   // Global plan-look preference; surfaced here only by the shared 0.20.0
   // look-and-feel announcement (the grid/clean chooser applies to plan review).
   const gridEnabled = useConfigValue('gridEnabled');
@@ -1489,6 +1492,36 @@ const ReviewApp: React.FC = () => {
     setPendingSelection(null);
   }, [pendingSelection, identity, withPRContext]);
 
+  // Sink for the experimental edit-to-suggestion flow: a completed edit
+  // session delivers one hunk per contiguous changed region, each becoming a
+  // normal suggestion annotation (same shape SuggestionModal produces —
+  // type 'comment' carrying suggestedCode/originalCode) so it flows through
+  // rendering, sidebar, and feedback export unchanged. The browser never
+  // writes files; the agent applies these suggestions.
+  const handleAddSuggestionsForFile = useCallback((filePath: string, hunks: SuggestionHunk[]) => {
+    if (hunks.length === 0) return;
+    const now = Date.now();
+    setAnnotations(prev => [
+      ...prev,
+      ...hunks.map((hunk) => withPRContext({
+        id: generateId(),
+        type: 'comment' as CodeAnnotationType,
+        scope: 'line' as const,
+        filePath,
+        lineStart: hunk.lineStart,
+        lineEnd: hunk.lineEnd,
+        side: 'new' as const,
+        // A fully-emptied file derives an empty suggestion; the export
+        // template skips falsy suggestedCode, so describe it in text instead.
+        text: hunk.suggestedCode === '' ? 'Suggested change: remove these lines.' : undefined,
+        suggestedCode: hunk.suggestedCode === '' ? undefined : hunk.suggestedCode,
+        originalCode: hunk.originalCode === '' ? undefined : hunk.originalCode,
+        createdAt: now,
+        author: identity,
+      })),
+    ]);
+  }, [identity, withPRContext]);
+
   const handleAddAnnotation = useCallback((
     type: CodeAnnotationType,
     text?: string,
@@ -2376,6 +2409,8 @@ const ReviewApp: React.FC = () => {
     onLineSelection: handleLineSelection,
     onAddAnnotation: handleAddAnnotation,
     onAddAnnotationForFile: handleAddAnnotationForFile,
+    editSuggestionsEnabled,
+    onAddSuggestionsForFile: handleAddSuggestionsForFile,
     onAddFileComment: handleAddFileComment,
     onAddFileCommentForFile: handleAddFileCommentForFile,
     onEditAnnotation: handleEditAnnotation,
@@ -2474,6 +2509,7 @@ const ReviewApp: React.FC = () => {
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffAvailable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
+    editSuggestionsEnabled, handleAddSuggestionsForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);
 

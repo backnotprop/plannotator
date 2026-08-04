@@ -74,6 +74,11 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       getAIHistoryForFile={state.getAIHistoryForFile}
       defaultCollapsed={!!commitInfo}
       leadingContent={leadingContent}
+      // EXPERIMENTAL edit-to-suggestion mode. This plain all-files panel is
+      // the ONLY surface that opts in (Guided Review's viewport manager
+      // evicts CodeViews, which would destroy an active editor session).
+      enableEditSuggestions={state.editSuggestionsEnabled}
+      onAddSuggestionsForFile={state.onAddSuggestionsForFile}
     />
   );
 };
