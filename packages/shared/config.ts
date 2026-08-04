@@ -100,6 +100,22 @@ export interface PlannotatorConfig {
    */
   verifyAttestation?: boolean;
   /**
+   * Per-agent installer integration opt-outs. Read by
+   * scripts/install.sh|ps1|cmd on every run (not by any runtime code).
+   * When an agent's flag is true, the installer does not write that agent's
+   * integration even when the agent is detected, reports the detected state
+   * honestly ("detected, skipped"), and never removes an integration a
+   * previous install already wired. Overridden by the
+   * PLANNOTATOR_SKIP_CODEX_INSTALL / PLANNOTATOR_SKIP_GEMINI_INSTALL /
+   * PLANNOTATOR_SKIP_KIRO_INSTALL env vars, which are in turn overridden by
+   * the --skip-codex / --skip-gemini / --skip-kiro flags. Default: all off.
+   */
+  skipInstall?: {
+    codex?: boolean;
+    gemini?: boolean;
+    kiro?: boolean;
+  };
+  /**
    * Enable Jina Reader for URL-to-markdown conversion during annotation.
    * When true (default), `plannotator annotate <url>` routes through
    * r.jina.ai for better JS-rendered page support and reader-mode extraction.

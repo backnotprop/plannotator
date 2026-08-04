@@ -22,6 +22,13 @@ REM Binary-only mode. Installs just plannotator.exe and no persistent state
 REM elsewhere. Set by --minimal (1) / --no-minimal (0); -1 = neither flag given
 REM (fall through to the PLANNOTATOR_MINIMAL env var, resolved after :args_done).
 set "MINIMAL_FLAG=-1"
+REM Per-agent integration opt-outs (#1178). Skip means do-not-write: a skipped
+REM agent's home is neither written to nor cleaned up, and detected-but-skipped
+REM is reported honestly. Resolution (flag > env var > config skipInstall.<agent>
+REM > default off) happens after _CONFIG_DIR is known.
+set "SKIP_CODEX_FLAG=0"
+set "SKIP_GEMINI_FLAG=0"
+set "SKIP_KIRO_FLAG=0"
 
 :parse_args
 if "%~1"=="" goto args_done
@@ -123,6 +130,21 @@ if /i "%~1"=="--no-minimal" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--skip-codex" (
+    set "SKIP_CODEX_FLAG=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--skip-gemini" (
+    set "SKIP_GEMINI_FLAG=1"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--skip-kiro" (
+    set "SKIP_KIRO_FLAG=1"
+    shift
+    goto parse_args
+)
 REM Reject any other dash-prefixed token as an unknown option, so a typoed
 REM flag like --verify-attesttion fails fast instead of being interpreted as
 REM a version tag (which would 404 on releases/download/v--verify-attesttion/...).
@@ -137,7 +159,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -352,6 +374,75 @@ REM Layer 1: CLI flag (overrides everything).
 if "!VERIFY_ATTESTATION_FLAG!"=="1" set "VERIFY_ATTESTATION=1"
 if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
 
+REM Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
+REM as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >
+REM default (off). The config read mirrors the crude verifyAttestation findstr
+REM above: the file must contain "skipInstall" AND the per-agent boolean.
+REM Each resolved skip remembers its source so the detected-but-skipped
+REM report can name what the user set.
+set "SKIP_CODEX=0"
+set "SKIP_CODEX_SOURCE="
+set "SKIP_GEMINI=0"
+set "SKIP_GEMINI_SOURCE="
+set "SKIP_KIRO=0"
+set "SKIP_KIRO_SOURCE="
+if exist "!_CONFIG_DIR!\config.json" (
+    findstr /c:"\"skipInstall\"" "!_CONFIG_DIR!\config.json" >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        findstr /r /c:"\"codex\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            set "SKIP_CODEX=1"
+            set "SKIP_CODEX_SOURCE=config skipInstall.codex"
+        )
+        findstr /r /c:"\"gemini\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            set "SKIP_GEMINI=1"
+            set "SKIP_GEMINI_SOURCE=config skipInstall.gemini"
+        )
+        findstr /r /c:"\"kiro\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
+        if !ERRORLEVEL! equ 0 (
+            set "SKIP_KIRO=1"
+            set "SKIP_KIRO_SOURCE=config skipInstall.kiro"
+        )
+    )
+)
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_CODEX_INSTALL!"=="%%V" (
+    set "SKIP_CODEX=1"
+    set "SKIP_CODEX_SOURCE=PLANNOTATOR_SKIP_CODEX_INSTALL"
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_CODEX_INSTALL!"=="%%V" (
+    set "SKIP_CODEX=0"
+    set "SKIP_CODEX_SOURCE="
+)
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_GEMINI_INSTALL!"=="%%V" (
+    set "SKIP_GEMINI=1"
+    set "SKIP_GEMINI_SOURCE=PLANNOTATOR_SKIP_GEMINI_INSTALL"
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_GEMINI_INSTALL!"=="%%V" (
+    set "SKIP_GEMINI=0"
+    set "SKIP_GEMINI_SOURCE="
+)
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_KIRO_INSTALL!"=="%%V" (
+    set "SKIP_KIRO=1"
+    set "SKIP_KIRO_SOURCE=PLANNOTATOR_SKIP_KIRO_INSTALL"
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_KIRO_INSTALL!"=="%%V" (
+    set "SKIP_KIRO=0"
+    set "SKIP_KIRO_SOURCE="
+)
+if "!SKIP_CODEX_FLAG!"=="1" (
+    set "SKIP_CODEX=1"
+    set "SKIP_CODEX_SOURCE=--skip-codex"
+)
+if "!SKIP_GEMINI_FLAG!"=="1" (
+    set "SKIP_GEMINI=1"
+    set "SKIP_GEMINI_SOURCE=--skip-gemini"
+)
+if "!SKIP_KIRO_FLAG!"=="1" (
+    set "SKIP_KIRO=1"
+    set "SKIP_KIRO_SOURCE=--skip-kiro"
+)
+
 REM Pre-flight: reject verification requests for tags older than the first
 REM attested release BEFORE downloading. Critical security point: the version
 REM comparison uses $env:TAG_NUM / $env:MIN_NUM instead of interpolating
@@ -475,27 +566,86 @@ if "!VERIFY_ATTESTATION!"=="1" (
         REM the specific signing workflow file (--signer-workflow) - not
         REM just "built somewhere in this repo". See install.sh for full
         REM rationale.
+        REM Credential-free path first (#1178): the attestations endpoint on
+        REM api.github.com is world-readable for public repos, so fetch the
+        REM Sigstore bundle anonymously and hand it to gh via --bundle. This
+        REM drops the gh-login requirement; gh's own authenticated fetch is
+        REM only used as a fallback when the public fetch fails. Single
+        REM attempt, deliberately never retried: the unauthenticated API
+        REM allows 60 requests/hour per IP. The response is
+        REM { "attestations": [ { "bundle": {...} } ] }; gh --bundle expects
+        REM the bundle values one JSON document per line (the JSONL format
+        REM `gh attestation download` writes). PowerShell does the fetch and
+        REM extraction; values pass via $env: so nothing is re-parsed as code.
+        REM WriteAllText writes UTF-8 without a BOM so gh accepts line one.
+        set "ATT_BUNDLE_FILE=%TEMP%\plannotator-bundle-%RANDOM%.jsonl"
+        set "ATT_DIGEST=!ACTUAL_CHECKSUM!"
+        set "ATT_BUNDLE_OK=0"
+        powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri ('https://api.github.com/repos/' + $env:REPO + '/attestations/sha256:' + $env:ATT_DIGEST) -UseBasicParsing -TimeoutSec 30; $b = @($r.attestations | ForEach-Object { $_.bundle } | Where-Object { $_ }); if ($b.Count -eq 0) { exit 1 }; $t = ($b | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }) -join [char]10; [System.IO.File]::WriteAllText($env:ATT_BUNDLE_FILE, $t + [char]10); exit 0 } catch { exit 1 }"
+        if !ERRORLEVEL! equ 0 if exist "!ATT_BUNDLE_FILE!" set "ATT_BUNDLE_OK=1"
         set "GH_OUTPUT=%TEMP%\plannotator-gh-%RANDOM%.txt"
-        gh attestation verify "!TEMP_FILE!" ^
-            --repo "!REPO!" ^
-            --source-ref "refs/tags/!TAG!" ^
-            --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" ^
-            > "!GH_OUTPUT!" 2>&1
+        if "!ATT_BUNDLE_OK!"=="1" (
+            gh attestation verify "!TEMP_FILE!" ^
+                --bundle "!ATT_BUNDLE_FILE!" ^
+                --repo "!REPO!" ^
+                --source-ref "refs/tags/!TAG!" ^
+                --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" ^
+                > "!GH_OUTPUT!" 2>&1
+        ) else (
+            echo Could not fetch the attestation bundle from the public API; falling back to gh's authenticated fetch.
+            gh attestation verify "!TEMP_FILE!" ^
+                --repo "!REPO!" ^
+                --source-ref "refs/tags/!TAG!" ^
+                --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" ^
+                > "!GH_OUTPUT!" 2>&1
+        )
         if !ERRORLEVEL! neq 0 (
             type "!GH_OUTPUT!" >&2
+            REM Classify the failure so connectivity problems are never
+            REM conflated with a provenance failure. "Sigstore verifiers"
+            REM means gh could not initialize the TUF trust root, which is
+            REM fetched on EVERY run (never cached); "gh auth login" is only
+            REM reachable on the authenticated fallback.
+            set "VERIFY_FAIL_KIND=provenance"
+            findstr /c:"Sigstore verifiers" "!GH_OUTPUT!" >nul 2>&1
+            if !ERRORLEVEL! equ 0 set "VERIFY_FAIL_KIND=tuf"
+            findstr /c:"gh auth login" "!GH_OUTPUT!" >nul 2>&1
+            if !ERRORLEVEL! equ 0 set "VERIFY_FAIL_KIND=auth"
             del "!GH_OUTPUT!"
-            echo Attestation verification failed! >&2
-            echo The binary's SHA256 matched, but no valid signed provenance was found >&2
-            echo for !REPO!. Refusing to install. >&2
+            if exist "!ATT_BUNDLE_FILE!" del "!ATT_BUNDLE_FILE!"
+            if "!VERIFY_FAIL_KIND!"=="tuf" (
+                echo Could not initialize the Sigstore trust root ^(TUF^). Provenance >&2
+                echo verification needs network access on every run; the trusted root >&2
+                echo is fetched per-run, never cached. This is a connectivity failure, >&2
+                echo NOT evidence of a bad binary. Refusing to install unverified; >&2
+                echo retry with network access or pass --skip-attestation. >&2
+            )
+            if "!VERIFY_FAIL_KIND!"=="auth" (
+                echo The public attestation bundle fetch failed and gh is not logged >&2
+                echo in, so the authenticated fallback could not run. Retry with >&2
+                echo network access to api.github.com, run 'gh auth login', or pass >&2
+                echo --skip-attestation. >&2
+            )
+            if "!VERIFY_FAIL_KIND!"=="provenance" (
+                echo Attestation verification failed! >&2
+                echo The binary's SHA256 matched, but no valid signed provenance was found >&2
+                echo for !REPO!. Refusing to install. >&2
+            )
             del "!TEMP_FILE!"
             exit /b 1
         )
         del "!GH_OUTPUT!"
-        echo [OK] verified build provenance ^(SLSA^)
+        if "!ATT_BUNDLE_OK!"=="1" (
+            echo [OK] verified build provenance ^(SLSA, credential-free via the public attestations API^)
+        ) else (
+            echo [OK] verified build provenance ^(SLSA^)
+        )
+        if exist "!ATT_BUNDLE_FILE!" del "!ATT_BUNDLE_FILE!"
     ) else (
         echo verifyAttestation is enabled but gh CLI was not found. >&2
-        echo Install https://cli.github.com ^(and run 'gh auth login'^), >&2
-        echo or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
+        echo Install https://cli.github.com ^(no login is needed when the public >&2
+        echo attestation bundle fetch succeeds^), or unset >&2
+        echo PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
         echo from %USERPROFILE%\.plannotator\config.json / pass --skip-attestation. >&2
         del "!TEMP_FILE!"
         exit /b 1
@@ -591,7 +741,17 @@ set "KIRO_AVAILABLE=0"
 where kiro-cli >nul 2>&1
 if !ERRORLEVEL! equ 0 set "KIRO_AVAILABLE=1"
 if exist "%USERPROFILE%\.kiro" set "KIRO_AVAILABLE=1"
-if "!CODEX_AVAILABLE!"=="1" (
+REM HONEST three-state reporting (#1178): detected-but-skipped is its own
+REM state, never conflated with "not detected". A Codex opt-out leaves the
+REM Codex home entirely untouched (no writes, no cleanup, no removal).
+if "!CODEX_AVAILABLE!"=="1" if "!SKIP_CODEX!"=="1" (
+    echo.
+    echo Codex: detected, skipped ^(!SKIP_CODEX_SOURCE!^).
+    if exist "!CODEX_DIR!\hooks.json" (
+        echo An existing Codex integration at !CODEX_DIR!\hooks.json was left untouched.
+    )
+)
+if "!CODEX_AVAILABLE!"=="1" if "!SKIP_CODEX!"=="0" (
     echo.
     echo Codex detected.
     echo Codex plan review hooks are experimental on Windows. To try them manually:
@@ -830,15 +990,17 @@ if !ERRORLEVEL! equ 0 (
         echo Installed OpenCode commands to !OPENCODE_COMMANDS_DIR!\
     )
 
-    REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native format).
-    if exist "%USERPROFILE%\.gemini" if exist "apps\gemini\commands" (
+    REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native
+    REM format) and not opted out (#1178).
+    if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" if exist "apps\gemini\commands" (
         if not exist "!GEMINI_COMMANDS_DIR!" mkdir "!GEMINI_COMMANDS_DIR!"
         xcopy /y /q "apps\gemini\commands\*.toml" "!GEMINI_COMMANDS_DIR!\" >nul 2>&1
         echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
     )
 
-    REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected.
-    if "!KIRO_AVAILABLE!"=="1" if exist "apps\kiro-cli\skills" (
+    REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected
+    REM and not opted out (#1178: a Kiro opt-out leaves ~/.kiro untouched).
+    if "!KIRO_AVAILABLE!"=="1" if "!SKIP_KIRO!"=="0" if exist "apps\kiro-cli\skills" (
         if not exist "!KIRO_SKILLS_DIR!" mkdir "!KIRO_SKILLS_DIR!"
         REM Kiro-specific skills with origin baked in come from apps\kiro-cli\skills.
         for %%S in (plannotator-review plannotator-annotate) do (
@@ -891,7 +1053,10 @@ for %%C in (plannotator-review plannotator-annotate plannotator-last) do (
 REM plannotator-archive no longer ships as a skill. Remove any stale installed
 REM copy from every skill scope so upgraders don't keep a dead skill around.
 for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do (
-    if exist "%%~D\plannotator-archive" (
+    REM A Kiro opt-out leaves ~/.kiro entirely untouched - including this sweep.
+    set "SCOPE_OK=1"
+    if /i "%%~D"=="!KIRO_SKILLS_DIR!" if "!SKIP_KIRO!"=="1" set "SCOPE_OK=0"
+    if "!SCOPE_OK!"=="1" if exist "%%~D\plannotator-archive" (
         rmdir /s /q "%%~D\plannotator-archive" >nul 2>&1
         echo Removed stale plannotator-archive skill from %%~D\plannotator-archive
     )
@@ -907,7 +1072,9 @@ REM Codex no longer hosts core skills (they live in %%USERPROFILE%%\.agents\skil
 REM Core skills are removed only once their replacement exists; the stale
 REM shared-agent extras were never Codex's and are removed unconditionally.
 for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal) do (
-    if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
+    REM A Codex opt-out leaves the Codex home entirely untouched - including
+    REM this stale-skill cleanup. Skip means do-not-write, never remove.
+    if "!SKIP_CODEX!"=="0" if exist "!STALE_CODEX_SKILLS_DIR!\%%S" (
         set "OK_REMOVE=1"
         if "%%S"=="plannotator-review" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
         if "%%S"=="plannotator-annotate" if not exist "!AGENTS_SKILLS_DIR!\%%S" set "OK_REMOVE=0"
@@ -960,7 +1127,17 @@ if !ERRORLEVEL! equ 0 (
 )
 
 REM --- Gemini CLI support (only if Gemini is installed) ---
-if exist "%USERPROFILE%\.gemini" (
+REM HONEST three-state reporting (#1178): detected-but-skipped is its own
+REM state. A Gemini opt-out leaves ~/.gemini entirely untouched.
+if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="1" (
+    echo.
+    echo Gemini: detected, skipped ^(!SKIP_GEMINI_SOURCE!^).
+    if exist "%USERPROFILE%\.gemini\settings.json" (
+        findstr /c:"plannotator" "%USERPROFILE%\.gemini\settings.json" >nul 2>&1
+        if !ERRORLEVEL! equ 0 echo An existing Gemini integration at %USERPROFILE%\.gemini\settings.json was left untouched.
+    )
+)
+if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" (
     REM Install policy file
     if not exist "%USERPROFILE%\.gemini\policies" mkdir "%USERPROFILE%\.gemini\policies"
     (
@@ -1031,9 +1208,15 @@ echo   KIRO CLI USERS
 echo ==========================================
 echo.
 if "!KIRO_AVAILABLE!"=="1" (
-    echo Kiro skills are installed to %USERPROFILE%\.kiro\skills\
-    echo The Plannotator agent is installed to %USERPROFILE%\.kiro\agents\plannotator.json
-    echo Launch it: kiro-cli chat --agent plannotator
+    if "!SKIP_KIRO!"=="1" (
+        echo Kiro was detected, but the integration was skipped ^(!SKIP_KIRO_SOURCE!^).
+        echo No files under %USERPROFILE%\.kiro were written or removed. Re-run
+        echo without the opt-out to add Kiro skills.
+    ) else (
+        echo Kiro skills are installed to %USERPROFILE%\.kiro\skills\
+        echo The Plannotator agent is installed to %USERPROFILE%\.kiro\agents\plannotator.json
+        echo Launch it: kiro-cli chat --agent plannotator
+    )
 ) else (
     echo Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills.
 )

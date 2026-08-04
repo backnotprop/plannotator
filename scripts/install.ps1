@@ -10,7 +10,10 @@ param(
     [switch]$Reconfigure,
     [Alias("BinaryOnly")]
     [switch]$Minimal,
-    [switch]$NoMinimal
+    [switch]$NoMinimal,
+    [switch]$SkipCodex,
+    [switch]$SkipGemini,
+    [switch]$SkipKiro
 )
 
 $ErrorActionPreference = "Stop"
@@ -274,6 +277,7 @@ function Install-AgentTerminalRuntime {
 }
 
 $configPath = Join-Path $configDir "config.json"
+$cfg = $null
 if (Test-Path $configPath) {
     try {
         $cfg = Get-Content $configPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -303,6 +307,45 @@ if ($envVerify) {
 # script (lines ~13-16), so at most one of these branches can fire.
 if ($VerifyAttestation) { $verifyAttestationResolved = $true }
 if ($SkipAttestation)   { $verifyAttestationResolved = $false }
+
+# Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
+# as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >
+# default (off). Skip means do-not-write: a skipped agent's home is neither
+# written to nor cleaned up, and detected-but-skipped is reported honestly
+# as its own state. Each resolved skip remembers its source so the report
+# can name what the user set.
+$skipCodexResolved = $false;  $skipCodexSource = ""
+$skipGeminiResolved = $false; $skipGeminiSource = ""
+$skipKiroResolved = $false;   $skipKiroSource = ""
+if ($cfg -and $cfg.skipInstall) {
+    if ($cfg.skipInstall.codex -is [bool] -and $cfg.skipInstall.codex) {
+        $skipCodexResolved = $true; $skipCodexSource = "config skipInstall.codex"
+    }
+    if ($cfg.skipInstall.gemini -is [bool] -and $cfg.skipInstall.gemini) {
+        $skipGeminiResolved = $true; $skipGeminiSource = "config skipInstall.gemini"
+    }
+    if ($cfg.skipInstall.kiro -is [bool] -and $cfg.skipInstall.kiro) {
+        $skipKiroResolved = $true; $skipKiroSource = "config skipInstall.kiro"
+    }
+}
+if ($env:PLANNOTATOR_SKIP_CODEX_INSTALL -match '^(1|true|yes)$') {
+    $skipCodexResolved = $true; $skipCodexSource = "PLANNOTATOR_SKIP_CODEX_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_CODEX_INSTALL -match '^(0|false|no)$') {
+    $skipCodexResolved = $false; $skipCodexSource = ""
+}
+if ($env:PLANNOTATOR_SKIP_GEMINI_INSTALL -match '^(1|true|yes)$') {
+    $skipGeminiResolved = $true; $skipGeminiSource = "PLANNOTATOR_SKIP_GEMINI_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_GEMINI_INSTALL -match '^(0|false|no)$') {
+    $skipGeminiResolved = $false; $skipGeminiSource = ""
+}
+if ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(1|true|yes)$') {
+    $skipKiroResolved = $true; $skipKiroSource = "PLANNOTATOR_SKIP_KIRO_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(0|false|no)$') {
+    $skipKiroResolved = $false; $skipKiroSource = ""
+}
+if ($SkipCodex)  { $skipCodexResolved = $true;  $skipCodexSource = "-SkipCodex" }
+if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini" }
+if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
 
 # Pre-flight: if verification is requested, reject tags older than the first
 # attested release before we download anything. Uses PowerShell's [version]
@@ -372,14 +415,55 @@ if ($verifyAttestationResolved) {
     # MIN_ATTESTED_VERSION pre-flight already rejected older tags. At this
     # point we know the tag is attested and gh should find a bundle.
     if (Get-Command gh -ErrorAction SilentlyContinue) {
+        # Credential-free path first (#1178): the attestations endpoint on
+        # api.github.com is world-readable for public repos, so fetch the
+        # Sigstore bundle anonymously and hand it to gh via --bundle. This
+        # drops the gh-login requirement; gh's own authenticated fetch is
+        # only used as a fallback when the public fetch fails. Single
+        # attempt, deliberately never retried: the unauthenticated API
+        # allows 60 requests/hour per IP.
+        $bundleFile = $null
+        try {
+            $attUrl = "https://api.github.com/repos/$repo/attestations/sha256:$actualChecksum"
+            $attResp = Invoke-RestMethod -Uri $attUrl -UseBasicParsing -TimeoutSec 30
+            # The response is { attestations: [ { bundle: {...}, ... } ] }.
+            # gh --bundle expects the bundle values themselves, one JSON
+            # document per line (the JSONL format `gh attestation download`
+            # writes). -Depth 100 because ConvertTo-Json's default depth (2)
+            # would truncate the nested bundle; WriteAllText writes UTF-8
+            # without a BOM so gh's JSON parser accepts the first line.
+            $bundles = @($attResp.attestations | ForEach-Object { $_.bundle } | Where-Object { $_ })
+            if ($bundles.Count -gt 0) {
+                $bundleFile = Join-Path ([System.IO.Path]::GetTempPath()) "plannotator-bundle-$([System.Guid]::NewGuid().ToString('N')).jsonl"
+                $bundleText = ($bundles | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }) -join "`n"
+                [System.IO.File]::WriteAllText($bundleFile, $bundleText + "`n")
+            }
+        } catch {
+            $bundleFile = $null
+        }
         # Constrain verification to the exact tag + signing workflow - see
         # install.sh comment for rationale.
-        $verifyOutput = & gh attestation verify $tmpFile `
-            --repo $repo `
-            --source-ref "refs/tags/$latestTag" `
-            --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Verified build provenance (SLSA)"
+        if ($bundleFile) {
+            $verifyOutput = & gh attestation verify $tmpFile `
+                --bundle $bundleFile `
+                --repo $repo `
+                --source-ref "refs/tags/$latestTag" `
+                --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1
+        } else {
+            Write-Host "Could not fetch the attestation bundle from the public API; falling back to gh's authenticated fetch."
+            $verifyOutput = & gh attestation verify $tmpFile `
+                --repo $repo `
+                --source-ref "refs/tags/$latestTag" `
+                --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1
+        }
+        $verifyExitCode = $LASTEXITCODE
+        if ($bundleFile) { Remove-Item $bundleFile -Force -ErrorAction SilentlyContinue }
+        if ($verifyExitCode -eq 0) {
+            if ($bundleFile) {
+                Write-Host "Verified build provenance (SLSA, credential-free via the public attestations API)"
+            } else {
+                Write-Host "Verified build provenance (SLSA)"
+            }
         } else {
             # Write to stderr directly - Write-Host goes to PowerShell's
             # Information stream, which is silently dropped when callers
@@ -391,13 +475,25 @@ if ($verifyAttestationResolved) {
             # on the array and yields the useless literal "System.Object[]".
             # Out-String normalizes the array back into a single formatted
             # string so the actual gh diagnostic is visible.
-            [Console]::Error.WriteLine(($verifyOutput | Out-String).TrimEnd())
+            $verifyText = ($verifyOutput | Out-String).TrimEnd()
+            [Console]::Error.WriteLine($verifyText)
             Remove-Item $tmpFile -Force
-            Write-Error "Attestation verification failed! The binary's SHA256 matched, but no valid signed provenance was found for $repo. Refusing to install."
+            if ($verifyText -match "Sigstore verifiers") {
+                # gh could not initialize the Sigstore trusted root. The TUF
+                # root is fetched on EVERY run (not embedded, not cached), so
+                # this is a connectivity failure, not a provenance failure.
+                Write-Error "Could not initialize the Sigstore trust root (TUF). Provenance verification needs network access on every run; the trusted root is fetched per-run, never cached. This is a connectivity failure, NOT evidence of a bad binary. Refusing to install unverified; retry with network access or pass -SkipAttestation."
+            } elseif ($verifyText -match "gh auth login") {
+                # Only reachable on the authenticated fallback: the public
+                # bundle fetch failed AND gh has no login to fetch it itself.
+                Write-Error "The public attestation bundle fetch failed and gh is not logged in, so the authenticated fallback could not run. Retry with network access to api.github.com, run 'gh auth login', or pass -SkipAttestation."
+            } else {
+                Write-Error "Attestation verification failed! The binary's SHA256 matched, but no valid signed provenance was found for $repo. Refusing to install."
+            }
         }
     } else {
         Remove-Item $tmpFile -Force
-        Write-Error "verifyAttestation is enabled but gh CLI was not found. Install https://cli.github.com (and run 'gh auth login'), or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from $configPath / pass -SkipAttestation."
+        Write-Error "verifyAttestation is enabled but gh CLI was not found. Install https://cli.github.com (no login is needed when the public attestation bundle fetch succeeds), or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from $configPath / pass -SkipAttestation."
     }
 } else {
     Write-Host "SHA256 verified. For build provenance verification, see"
@@ -498,7 +594,16 @@ $codexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue) -or $c
 # Kiro is auto-detected like Codex/Gemini: PATH executable or an existing ~/.kiro.
 $kiroAvailable = [bool](Get-Command kiro-cli -ErrorAction SilentlyContinue) -or (Test-Path "$env:USERPROFILE\.kiro")
 
-if ($codexAvailable) {
+if ($codexAvailable -and $skipCodexResolved) {
+    # HONEST three-state reporting (#1178): detected-but-skipped is its own
+    # state, never conflated with "not detected". Nothing under the Codex
+    # home is created, updated, or removed on this run.
+    Write-Host ""
+    Write-Host "Codex: detected, skipped ($skipCodexSource)."
+    if (Test-Path (Join-Path $codexDir "hooks.json")) {
+        Write-Host "An existing Codex integration at $codexDir\hooks.json was left untouched."
+    }
+} elseif ($codexAvailable) {
     $codexExePath = "$installDir\plannotator.exe"
     Write-Host ""
     Write-Host "Codex detected."
@@ -868,7 +973,8 @@ try {
             }
 
             # Kiro: hand-maintained skills (origin baked in) + two extras.
-            if ($kiroAvailable -and (Test-Path "apps\kiro-cli\skills")) {
+            # A Kiro opt-out (#1178) leaves ~/.kiro entirely untouched.
+            if ($kiroAvailable -and -not $skipKiroResolved -and (Test-Path "apps\kiro-cli\skills")) {
                 $kiroSkillsDir = "$env:USERPROFILE\.kiro\skills"
                 New-Item -ItemType Directory -Force -Path $kiroSkillsDir | Out-Null
                 # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
@@ -900,8 +1006,9 @@ try {
             }
 
             # Gemini TOML commands -> ~/.gemini/commands (only when ~/.gemini exists).
-            # These are Gemini's native command format.
-            if ((Test-Path "$env:USERPROFILE\.gemini") -and (Test-Path "apps\gemini\commands")) {
+            # These are Gemini's native command format. A Gemini opt-out
+            # (#1178) leaves ~/.gemini entirely untouched.
+            if ((Test-Path "$env:USERPROFILE\.gemini") -and -not $skipGeminiResolved -and (Test-Path "apps\gemini\commands")) {
                 $geminiCommandsDir = "$env:USERPROFILE\.gemini\commands"
                 $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
                 if ($geminiCmds) {
@@ -945,6 +1052,8 @@ foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-la
 # plannotator-archive no longer ships as a skill. Remove any stale installed
 # copy from every skill scope so upgraders don't keep a dead skill around.
 foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro\skills")) {
+    # A Kiro opt-out leaves ~/.kiro entirely untouched - including this sweep.
+    if ($skipKiroResolved -and ($scope -eq "$env:USERPROFILE\.kiro\skills")) { continue }
     $staleArchivePath = Join-Path $scope "plannotator-archive"
     if (Test-Path $staleArchivePath) {
         Write-Host "Removing stale plannotator-archive skill $staleArchivePath"
@@ -962,6 +1071,9 @@ if (Test-Path $staleOpencodeArchive) {
 # Core skills are removed only once their replacement exists; the stale
 # shared-agent extras were never Codex's and are removed unconditionally.
 foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal")) {
+    # A Codex opt-out leaves the Codex home entirely untouched - including
+    # this stale-skill cleanup. Skip means do-not-write, never remove.
+    if ($skipCodexResolved) { continue }
     $staleSkillPath = Join-Path $staleCodexSkillsDir $skill
     if (Test-Path $staleSkillPath) {
         $isCore = $skill -in @("plannotator-review", "plannotator-annotate", "plannotator-last")
@@ -1005,7 +1117,19 @@ Update-PiExtensionIfPresent
 
 # --- Gemini CLI support (only if Gemini is installed) ---
 $geminiDir = "$env:USERPROFILE\.gemini"
-if (Test-Path $geminiDir) {
+if ((Test-Path $geminiDir) -and $skipGeminiResolved) {
+    # HONEST three-state reporting (#1178): detected-but-skipped is its own
+    # state. Nothing under ~/.gemini is created, updated, or removed.
+    Write-Host ""
+    Write-Host "Gemini: detected, skipped ($skipGeminiSource)."
+    $geminiSettingsProbe = "$geminiDir\settings.json"
+    if (Test-Path $geminiSettingsProbe) {
+        $geminiProbeContent = Get-Content -Path $geminiSettingsProbe -Raw -ErrorAction SilentlyContinue
+        if ($geminiProbeContent -match '"plannotator"') {
+            Write-Host "An existing Gemini integration at $geminiSettingsProbe was left untouched."
+        }
+    }
+} elseif (Test-Path $geminiDir) {
     # Install policy file
     $geminiPoliciesDir = "$geminiDir\policies"
     New-Item -ItemType Directory -Force -Path $geminiPoliciesDir | Out-Null
@@ -1100,7 +1224,11 @@ Write-Host "=========================================="
 Write-Host "  KIRO CLI USERS"
 Write-Host "=========================================="
 Write-Host ""
-if ($kiroAvailable) {
+if ($kiroAvailable -and $skipKiroResolved) {
+    Write-Host "Kiro was detected, but the integration was skipped ($skipKiroSource)."
+    Write-Host "No files under $env:USERPROFILE\.kiro were written or removed. Re-run"
+    Write-Host "without the opt-out to add Kiro skills."
+} elseif ($kiroAvailable) {
     Write-Host "Kiro skills are installed to $env:USERPROFILE\.kiro\skills\"
     Write-Host "The Plannotator agent is installed to $env:USERPROFILE\.kiro\agents\plannotator.json"
     Write-Host "Launch it: kiro-cli chat --agent plannotator"

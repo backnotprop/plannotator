@@ -344,6 +344,61 @@ describe("install.sh", () => {
     const calls = script.match(/^\s*print_path_advice$/gm) ?? [];
     expect(calls.length).toBe(2);
   });
+
+  test("per-agent skip opt-outs: flags, env vars, config keys, precedence (#1178)", () => {
+    // Flags exist for Codex plus the two integrations where the mechanism
+    // generalizes identically (detect -> write): Gemini and Kiro.
+    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)"]) {
+      expect(script).toContain(flag);
+    }
+    // Env vars follow the existing PLANNOTATOR_SKIP_*_INSTALL naming.
+    expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    // Config layer: nested skipInstall block, guarded on the parent key so a
+    // stray "codex": true elsewhere can't opt anyone out by itself.
+    expect(script).toContain('grep -q \'"skipInstall"\'');
+    expect(script).toContain('"codex"[[:space:]]*:[[:space:]]*true');
+    expect(script).toContain('"gemini"[[:space:]]*:[[:space:]]*true');
+    expect(script).toContain('"kiro"[[:space:]]*:[[:space:]]*true');
+    // Precedence by textual layering (later assignment wins): config grep,
+    // then env-var case, then flag check — mirroring verifyAttestation.
+    const configIdx = script.indexOf('skip_codex_source="config skipInstall.codex"');
+    const envIdx = script.indexOf('skip_codex_source="PLANNOTATOR_SKIP_CODEX_INSTALL"');
+    const flagIdx = script.indexOf('skip_codex_source="--skip-codex"');
+    expect(configIdx).toBeGreaterThan(0);
+    expect(envIdx).toBeGreaterThan(configIdx);
+    expect(flagIdx).toBeGreaterThan(envIdx);
+    // The env var can also force-disable a config-enabled skip (env > config).
+    expect(script).toContain('case "${PLANNOTATOR_SKIP_CODEX_INSTALL:-}" in');
+  });
+
+  test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
+    // Three distinct Codex states, never conflated: detected-skipped vs not
+    // detected vs installed.
+    expect(script).toContain('Codex: detected, skipped (${skip_codex_source}).');
+    expect(script).toContain("Codex was not detected.");
+    expect(script).toContain("Codex was detected, but the integration was skipped");
+    // When a previous install wired Codex, the skip run says it left the
+    // existing integration alone.
+    expect(script).toContain("An existing Codex integration at ${CODEX_DIR}/hooks.json was left untouched.");
+    // Same honest reporting for the mirrored opt-outs.
+    expect(script).toContain('Gemini: detected, skipped (${skip_gemini_source}).');
+    expect(script).toContain("Kiro was detected, but the integration was skipped");
+    // Skip means do-not-write, never remove: even plannotator's own
+    // stale-skill cleanup in the skipped agent's home is suspended.
+    expect(script).toContain('if [ "$skip_codex" -eq 1 ]; then\n        continue');
+    expect(script).toContain('[ "$scope" = "$KIRO_SKILLS_DIR" ] && [ "$skip_kiro" -eq 1 ]');
+    // The skip branch must not gain any removal command.
+    const skipBlock = script.slice(
+      script.indexOf('if [ "$codex_available" -eq 1 ] && [ "$skip_codex" -eq 1 ]; then'),
+      script.indexOf('elif [ "$codex_available" -eq 1 ]; then'),
+    );
+    expect(skipBlock.length).toBeGreaterThan(0);
+    expect(skipBlock).not.toContain("rm ");
+    expect(skipBlock).not.toContain("mkdir");
+    expect(skipBlock).not.toContain("cat >");
+  });
 });
 
 describe("install.ps1", () => {
@@ -521,6 +576,45 @@ describe("install.ps1", () => {
     // The gate exits rather than falling through.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
     expect(gateBody).toContain("exit 0");
+  });
+
+  test("per-agent skip opt-outs: switches, env vars, config keys, precedence (#1178)", () => {
+    expect(script).toContain("[switch]$SkipCodex");
+    expect(script).toContain("[switch]$SkipGemini");
+    expect(script).toContain("[switch]$SkipKiro");
+    expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    // Config layer parses the real nested JSON (strict boolean check, like
+    // verifyAttestation).
+    expect(script).toContain("$cfg.skipInstall.codex -is [bool]");
+    expect(script).toContain("$cfg.skipInstall.gemini -is [bool]");
+    expect(script).toContain("$cfg.skipInstall.kiro -is [bool]");
+    // Precedence by textual layering (later assignment wins): config, then
+    // env var, then switch.
+    const configIdx = script.indexOf('$skipCodexSource = "config skipInstall.codex"');
+    const envIdx = script.indexOf('$skipCodexSource = "PLANNOTATOR_SKIP_CODEX_INSTALL"');
+    const flagIdx = script.indexOf('$skipCodexSource = "-SkipCodex"');
+    expect(configIdx).toBeGreaterThan(0);
+    expect(envIdx).toBeGreaterThan(configIdx);
+    expect(flagIdx).toBeGreaterThan(envIdx);
+  });
+
+  test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
+    // Three distinct Codex states (ps1 never writes the Codex home; the
+    // installed state prints manual instructions instead).
+    expect(script).toContain('Codex: detected, skipped ($skipCodexSource)."');
+    expect(script).toContain('Write-Host "Codex detected."');
+    expect(script).toContain("An existing Codex integration at $codexDir\\hooks.json was left untouched.");
+    expect(script).toContain('Gemini: detected, skipped ($skipGeminiSource)."');
+    expect(script).toContain("Kiro was detected, but the integration was skipped");
+    // Skip suspends even plannotator's own cleanup inside the skipped
+    // agent's home (do-not-write, never remove).
+    expect(script).toContain("if ($skipCodexResolved) { continue }");
+    expect(script).toContain('if ($skipKiroResolved -and ($scope -eq "$env:USERPROFILE\\.kiro\\skills")) { continue }');
+    // Gated install sites for the mirrored opt-outs.
+    expect(script).toContain("-not $skipKiroResolved");
+    expect(script).toContain("-not $skipGeminiResolved");
   });
 });
 
@@ -716,6 +810,46 @@ describe("install.cmd", () => {
     expect(gateBody).toContain("exit /b 0");
     // :PrintPathAdvice is defined as a subroutine.
     expect(printPathAdvice).toBeGreaterThan(0);
+  });
+
+  test("per-agent skip opt-outs: flags, env vars, config keys, precedence (#1178)", () => {
+    expect(script).toContain('if /i "%~1"=="--skip-codex"');
+    expect(script).toContain('if /i "%~1"=="--skip-gemini"');
+    expect(script).toContain('if /i "%~1"=="--skip-kiro"');
+    expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    // Config layer: nested skipInstall block, guarded on the parent key so a
+    // stray "codex": true elsewhere can't opt anyone out by itself.
+    expect(script).toContain('findstr /c:"\\"skipInstall\\""');
+    expect(script).toContain("skipInstall.codex");
+    expect(script).toContain("skipInstall.gemini");
+    expect(script).toContain("skipInstall.kiro");
+    // Precedence by textual layering (later assignment wins): config, then
+    // env var, then flag.
+    const configIdx = script.indexOf('set "SKIP_CODEX_SOURCE=config skipInstall.codex"');
+    const envIdx = script.indexOf('set "SKIP_CODEX_SOURCE=PLANNOTATOR_SKIP_CODEX_INSTALL"');
+    const flagIdx = script.indexOf('set "SKIP_CODEX_SOURCE=--skip-codex"');
+    expect(configIdx).toBeGreaterThan(0);
+    expect(envIdx).toBeGreaterThan(configIdx);
+    expect(flagIdx).toBeGreaterThan(envIdx);
+  });
+
+  test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
+    // Three distinct Codex states (cmd never writes the Codex home; the
+    // installed state prints manual instructions instead).
+    expect(script).toContain("Codex: detected, skipped ^(!SKIP_CODEX_SOURCE!^).");
+    expect(script).toContain("echo Codex detected.");
+    expect(script).toContain("An existing Codex integration at !CODEX_DIR!\\hooks.json was left untouched.");
+    expect(script).toContain("Gemini: detected, skipped ^(!SKIP_GEMINI_SOURCE!^).");
+    expect(script).toContain("Kiro was detected, but the integration was skipped");
+    // Skip suspends even plannotator's own cleanup inside the skipped
+    // agent's home (do-not-write, never remove).
+    expect(script).toContain('if "!SKIP_CODEX!"=="0" if exist "!STALE_CODEX_SKILLS_DIR!\\%%S"');
+    expect(script).toContain('if /i "%%~D"=="!KIRO_SKILLS_DIR!" if "!SKIP_KIRO!"=="1" set "SCOPE_OK=0"');
+    // Gated install sites for the mirrored opt-outs.
+    expect(script).toContain('if "!KIRO_AVAILABLE!"=="1" if "!SKIP_KIRO!"=="0" if exist "apps\\kiro-cli\\skills"');
+    expect(script).toContain('if exist "%USERPROFILE%\\.gemini" if "!SKIP_GEMINI!"=="0"');
   });
 });
 
@@ -1429,6 +1563,56 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain('if defined TOKEN_RESIDUE set "GH_TOKEN_VAL="');
   });
 
+  test("attestation verify prefers the public bundle endpoint, single attempt, authenticated fallback (#1178)", () => {
+    // The attestations endpoint on api.github.com is world-readable for
+    // public repos: fetch the Sigstore bundle anonymously and verify with
+    // `gh attestation verify --bundle`, so provenance checking works with no
+    // gh login. gh's authenticated fetch stays as the fallback when the
+    // public fetch fails; verification itself is never silently skipped.
+    const cmdScript = readScript("install.cmd");
+
+    for (const [name, script] of [["install.sh", sh], ["install.ps1", ps], ["install.cmd", cmdScript]] as const) {
+      // The public endpoint is used...
+      expect(script, `${name} should fetch the public attestations endpoint`).toContain("/attestations/sha256:");
+      // ...exactly once — the unauthenticated API allows 60 requests/hour
+      // per IP, so a retry loop is deliberately forbidden.
+      const fetches = script.split("/attestations/sha256:").length - 1;
+      expect(fetches, `${name} must fetch the bundle exactly once (no retry loop)`).toBe(1);
+      // The bundle is handed to gh, and the credentialed path remains as
+      // fallback (both --bundle and a bundle-less gh invocation exist).
+      expect(script, `${name} should verify with --bundle`).toContain("--bundle");
+      expect(script, `${name} should keep the authenticated fallback`).toContain(
+        "falling back to gh's authenticated fetch",
+      );
+      // Distinct failure classes: TUF trust-root unreachable is worded as
+      // connectivity (the root is fetched per-run), never conflated with a
+      // real provenance failure — and both fail closed.
+      expect(script, `${name} should classify TUF trust-root failures`).toContain("Sigstore verifiers");
+      expect(script, `${name} should word TUF failures as connectivity`).toContain(
+        "This is a connectivity failure",
+      );
+      expect(script, `${name} should classify fallback auth failures`).toContain("gh auth login");
+      expect(script, `${name} must keep the loud provenance failure`).toContain("Refusing to install");
+    }
+
+    // JSONL extraction: the API returns { attestations: [ { bundle } ] } and
+    // gh --bundle expects one bundle JSON document per line.
+    expect(sh).toContain("p.attestations");
+    expect(ps).toContain("ConvertTo-Json -Depth 100 -Compress");
+    expect(cmdScript).toContain("ConvertTo-Json -Depth 100 -Compress");
+
+    // Both gh invocations (bundle + fallback) stay fully constrained in every
+    // installer: at least two --signer-workflow flags pinning release.yml
+    // must exist (one per invocation), so neither path loosened the policy.
+    for (const [name, script] of [["install.sh", sh], ["install.ps1", ps], ["install.cmd", cmdScript]] as const) {
+      const pinned = script.split(
+        '--signer-workflow "backnotprop/plannotator/.github/workflows/release.yml"',
+      ).length - 1;
+      expect(pinned, `${name}: both verify invocations must pin the signer workflow`)
+        .toBeGreaterThanOrEqual(2);
+    }
+  });
+
   test("install.ps1 git calls run under a scoped Continue preference", () => {
     // On PowerShell < 7.2 (and profiles restoring the old behavior),
     // redirecting a native command's stderr under
@@ -1466,5 +1650,20 @@ describe("PlannotatorConfig schema", () => {
     );
     expect(match).toBeTruthy();
     expect(match![1]).toContain("verifyAttestation?: boolean");
+  });
+
+  test("exports skipInstall per-agent opt-outs (#1178)", () => {
+    const configTs = readFileSync(
+      join(scriptsDir, "..", "packages", "shared", "config.ts"),
+      "utf-8",
+    );
+    const match = configTs.match(
+      /export interface PlannotatorConfig \{([\s\S]*?)\n\}/
+    );
+    expect(match).toBeTruthy();
+    expect(match![1]).toContain("skipInstall?: {");
+    expect(match![1]).toContain("codex?: boolean");
+    expect(match![1]).toContain("gemini?: boolean");
+    expect(match![1]).toContain("kiro?: boolean");
   });
 });
