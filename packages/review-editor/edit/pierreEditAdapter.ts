@@ -38,10 +38,12 @@ export function isPierreEditLoaded(): boolean {
 }
 
 /**
- * Load the editor chunk. Idempotent; called when the user first enters edit
- * mode. CodeView's `createEditor` factory contract allows returning undefined
- * to decline an attach (it retries on later render passes), so a factory
- * backed by this loader is safe to install before the module has loaded.
+ * Load the editor chunk. Idempotent; the session controller awaits this
+ * BEFORE flipping any item into edit mode, so the factory below never runs
+ * unloaded in practice. That ordering matters: the core CodeView treats a
+ * null factory return as "decline the attach", but the React wrapper's shim
+ * THROWS on an undefined return ("EditProvider.createEditor must return an
+ * editor instance"), so an unloaded factory is not a graceful retry path.
  */
 export async function loadPierreEdit(): Promise<void> {
   if (!modulePromise) {
@@ -55,8 +57,11 @@ export async function loadPierreEdit(): Promise<void> {
 
 /**
  * Synchronous editor factory for Pierre's `EditProvider`. Returns undefined
- * until `loadPierreEdit()` has resolved — CodeView treats that as "decline
- * and retry", which is exactly the lazy-load behavior we want.
+ * until `loadPierreEdit()` has resolved. This is a defensive guard, not a
+ * documented retry contract: the React CodeView wrapper throws on an
+ * undefined return, which would fail that attach. The session controller
+ * awaits `loadPierreEdit()` before any item enters edit mode, so the guard
+ * is unreachable in the wired flow.
  */
 export function createPierreEditor(options: PierreEditorOptions): PierreEditorInstance | undefined {
   if (!loadedModule) return undefined;
@@ -75,15 +80,23 @@ export function __resetPierreEditForTests(): void {
  * session. Marker ranges are zero-based LSP-shaped positions; annotations are
  * 1-based file line numbers. Only new-side line annotations map (the editor
  * document IS the new side).
+ *
+ * The range must have real width: upstream's overlay renderer skips
+ * zero-width blocks (`#renderSelectionBlock` returns on width 0), so a
+ * collapsed `start === end` range never paints. Ending at character 0 of the
+ * line AFTER the last annotated line covers every annotated line in full
+ * (the exclusive-end LSP convention); the editor's TextDocument clamps an
+ * end past the last line back to end-of-document.
  */
 export function buildEditorMarkers(annotations: CodeAnnotation[], filePath: string): PierreEditorMarker[] {
   const markers: PierreEditorMarker[] = [];
   for (const ann of annotations) {
     if (ann.filePath !== filePath || (ann.scope ?? 'line') !== 'line' || ann.side !== 'new') continue;
     const message = ann.text || (ann.suggestedCode ? 'Suggested change' : 'Comment');
+    const startLine = Math.max(0, ann.lineStart - 1);
     markers.push({
-      start: { line: Math.max(0, ann.lineStart - 1), character: 0 },
-      end: { line: Math.max(0, ann.lineEnd - 1), character: 0 },
+      start: { line: startLine, character: 0 },
+      end: { line: Math.max(ann.lineEnd, startLine + 1), character: 0 },
       severity: ann.severity === 'important' || ann.type === 'concern' ? 'warning' : 'info',
       message,
       source: ann.source || ann.author || 'plannotator',

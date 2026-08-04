@@ -305,8 +305,11 @@ export const SETTINGS = {
   },
   /** Experimental: author suggestions by editing code in place in the review
    *  all-files view. Cookie-only (no server sync) while the feature is
-   *  experimental — default OFF, and when off no edit UI renders and the
-   *  editor module is never imported. */
+   *  experimental — default OFF, and when off no edit UI renders and no
+   *  editor is ever constructed. (In code-split hosts the editor chunk is
+   *  never fetched; Plannotator's single-file production build inlines all
+   *  dynamic imports, so there the module namespace exists at page load —
+   *  audited free of top-level side effects — but stays inert.) */
   editSuggestions: {
     defaultValue: false as boolean,
     fromCookie: () => {
