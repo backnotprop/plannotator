@@ -44,6 +44,15 @@ interface RawRegion {
   suggestedLines: string[];
 }
 
+/** A hunk under construction: line arrays instead of joined strings so the
+ * collision pass can merge and fold before the final join. */
+interface PendingHunk {
+  lineStart: number;
+  lineEnd: number;
+  origLines: string[];
+  suggLines: string[];
+}
+
 /**
  * Diff the pre-edit content against the edited content and return one
  * SuggestionHunk per contiguous changed region.
@@ -56,8 +65,28 @@ interface RawRegion {
  *   reviewer's diff shows what the lines currently are) and — except when the
  *   whole file was emptied — non-empty `suggestedCode` (the export template
  *   skips falsy suggestedCode, so a bare deletion must carry its kept
- *   neighbor). Anchoring prefers the preceding line; at file start it uses the
- *   following line instead.
+ *   neighbor).
+ *
+ * Anchor collision resolution (hunks MUST never overlap — an agent applying
+ * them against original line numbers would otherwise drop or duplicate code):
+ * regions are emitted left to right, and each expansion checks its neighbors
+ * BEFORE claiming an anchor line.
+ * - Backward (the preceding line) is preferred, but only when that line is not
+ *   already claimed by the previously emitted hunk.
+ * - Otherwise the following line is used. A forward anchor is always an
+ *   unchanged line (diffLines separates regions by at least one unchanged
+ *   line), and later regions see it as claimed, so they can never take it.
+ * - When both directions are unavailable (previous hunk claims the preceding
+ *   line AND the region runs to end of file), the region merges into the
+ *   previous hunk as one spanning suggestion.
+ * - A region spanning the whole file (emptied file, insert into empty file)
+ *   stays unanchored: suggestedCode may be '' and the caller is responsible
+ *   for describing the deletion in text.
+ *
+ * The emission order makes overlap structurally impossible; a defensive fold
+ * at the end enforces the invariant (`lineStart > previous lineEnd`) anyway,
+ * merging any violating hunk into its predecessor rather than ever returning
+ * overlapping ranges.
  */
 export function deriveSuggestionHunks(preEditContent: string, editedContent: string): SuggestionHunk[] {
   const original = normalize(preEditContent);
@@ -91,53 +120,111 @@ export function deriveSuggestionHunks(preEditContent: string, editedContent: str
   }
   if (current) regions.push(current);
 
-  return regions.map((region) => {
-    let { start } = region;
-    const orig = [...region.originalLines];
-    const sugg = [...region.suggestedLines];
-    let end = start + orig.length - 1;
+  const lineCount = originalLines.length;
+  const hunks: PendingHunk[] = [];
+  const prevEnd = () => (hunks.length > 0 ? hunks[hunks.length - 1].lineEnd : 0);
 
-    if (orig.length === 0) {
-      // Pure insertion before line `start`. Anchor to the preceding line when
-      // one exists; at file start anchor to the (current) first line instead.
-      if (start > 1) {
-        const anchor = originalLines[start - 2];
-        orig.unshift(anchor);
-        sugg.unshift(anchor);
-        start -= 1;
-        end = start;
-      } else if (originalLines.length > 0) {
-        const anchor = originalLines[0];
-        orig.push(anchor);
-        sugg.push(anchor);
-        end = start;
-      } else {
-        // Inserting into an empty file: nothing to anchor to.
-        end = start;
-      }
-    } else if (sugg.length === 0) {
-      // Pure deletion. Keep one unchanged neighbor so suggestedCode stays
-      // non-empty (the feedback export skips falsy suggestedCode).
-      if (start > 1) {
-        const anchor = originalLines[start - 2];
-        orig.unshift(anchor);
-        sugg.push(anchor);
-        start -= 1;
-      } else if (end < originalLines.length) {
-        const anchor = originalLines[end];
-        orig.push(anchor);
-        sugg.push(anchor);
-        end += 1;
-      }
-      // else: the whole file was emptied — suggestedCode stays '' and the
-      // caller is responsible for describing the deletion in text.
+  for (const region of regions) {
+    const rawStart = region.start;
+    // Last original line the region occupies; rawStart - 1 for pure inserts
+    // (they occupy no original lines).
+    const rawEnd = rawStart + region.originalLines.length - 1;
+    const isInsert = region.originalLines.length === 0;
+    const isDelete = !isInsert && region.suggestedLines.length === 0;
+
+    if (!isInsert && !isDelete) {
+      // Modification: never expands, and raw regions never overlap.
+      hunks.push({
+        lineStart: rawStart,
+        lineEnd: rawEnd,
+        origLines: [...region.originalLines],
+        suggLines: [...region.suggestedLines],
+      });
+      continue;
     }
 
-    return {
-      lineStart: start,
-      lineEnd: end,
-      originalCode: orig.join('\n'),
-      suggestedCode: sugg.join('\n'),
-    };
-  });
+    const backwardLine = rawStart - 1;
+    const canBackward = backwardLine >= 1 && backwardLine > prevEnd();
+    // For an insert this is the line the new lines go before; for a delete the
+    // first kept line after the removed run. Both are unchanged lines.
+    const forwardLine = rawEnd + 1;
+    const canForward = forwardLine <= lineCount;
+
+    if (canBackward) {
+      const anchor = originalLines[backwardLine - 1];
+      hunks.push(
+        isInsert
+          ? {
+              lineStart: backwardLine,
+              lineEnd: backwardLine,
+              origLines: [anchor],
+              suggLines: [anchor, ...region.suggestedLines],
+            }
+          : {
+              lineStart: backwardLine,
+              lineEnd: rawEnd,
+              origLines: [anchor, ...region.originalLines],
+              suggLines: [anchor],
+            },
+      );
+    } else if (canForward) {
+      const anchor = originalLines[forwardLine - 1];
+      hunks.push(
+        isInsert
+          ? {
+              lineStart: forwardLine,
+              lineEnd: forwardLine,
+              origLines: [anchor],
+              suggLines: [...region.suggestedLines, anchor],
+            }
+          : {
+              lineStart: rawStart,
+              lineEnd: forwardLine,
+              origLines: [...region.originalLines, anchor],
+              suggLines: [anchor],
+            },
+      );
+    } else if (hunks.length > 0 && prevEnd() === rawStart - 1) {
+      // Both anchor directions are taken (previous hunk claims the preceding
+      // line; the region runs to end of file): merge into the previous hunk
+      // as one spanning suggestion. Contiguity is guaranteed — backward is
+      // only blocked when the previous hunk ends exactly one line before.
+      const prev = hunks[hunks.length - 1];
+      prev.lineEnd = Math.max(prev.lineEnd, rawEnd);
+      prev.origLines.push(...region.originalLines);
+      prev.suggLines.push(...region.suggestedLines);
+    } else {
+      // Region spans the whole file (emptied file / insert into empty file):
+      // nothing to anchor to.
+      hunks.push({
+        lineStart: rawStart,
+        lineEnd: Math.max(rawEnd, rawStart),
+        origLines: [...region.originalLines],
+        suggLines: [...region.suggestedLines],
+      });
+    }
+  }
+
+  // Hard invariant: hunks are disjoint and ascending. The emission above makes
+  // a violation impossible; if one ever appears, fold the offender into its
+  // predecessor (originalCode recomputed from the source lines so the anchor
+  // stays truthful) rather than emitting overlapping ranges.
+  const folded: PendingHunk[] = [];
+  for (const hunk of hunks) {
+    const prev = folded[folded.length - 1];
+    if (prev && hunk.lineStart <= prev.lineEnd) {
+      prev.lineEnd = Math.max(prev.lineEnd, hunk.lineEnd);
+      prev.origLines = originalLines.slice(prev.lineStart - 1, prev.lineEnd);
+      prev.suggLines = [...prev.suggLines, ...hunk.suggLines];
+      continue;
+    }
+    folded.push(hunk);
+  }
+
+  return folded.map((hunk) => ({
+    lineStart: hunk.lineStart,
+    lineEnd: hunk.lineEnd,
+    originalCode: hunk.origLines.join('\n'),
+    suggestedCode: hunk.suggLines.join('\n'),
+  }));
 }
