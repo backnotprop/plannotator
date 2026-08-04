@@ -41,7 +41,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "0.0.0-next-16770"
+    "@opencode-ai/plugin": "0.0.0-next-16775"
   },
   "devDependencies": {
     "@plannotator/server": "workspace:*",

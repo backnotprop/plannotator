@@ -1,7 +1,20 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
-import serverPlugin from "./server";
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const originalAllowSubagents = process.env.PLANNOTATOR_ALLOW_SUBAGENTS;
+const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+const testDataDir = mkdtempSync(path.join(tmpdir(), "plannotator-v2-server-test-"));
+process.env.PLANNOTATOR_DATA_DIR = testDataDir;
+
+const { default: serverPlugin } = await import("./server");
+
+afterAll(() => {
+  if (originalDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+  rmSync(testDataDir, { recursive: true, force: true });
+});
 
 afterEach(() => {
   if (originalAllowSubagents === undefined) delete process.env.PLANNOTATOR_ALLOW_SUBAGENTS;

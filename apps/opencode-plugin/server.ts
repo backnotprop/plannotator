@@ -200,7 +200,7 @@ const serverPlugin = Plugin.define({
                 console.error(`[Plannotator] Configured OpenCode agent "${targetAgent}" is not available; approving the plan without switching agents.`);
                 return undefined;
               }
-              // next-16770 exposes no session-agent switch operation to plugins.
+              // The current OpenCode 2 API exposes no session-agent switch operation to plugins.
               console.error("[Plannotator] OpenCode 2 does not currently expose agent switching to plugins; approving the plan without switching agents.");
               return undefined;
             },

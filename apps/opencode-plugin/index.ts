@@ -542,7 +542,7 @@ Do NOT proceed with implementation until your plan is approved.`);
             directory: ctx.directory,
             workflowOptions,
           }, {
-            reviewPlan: async ({ planContent, abortSignal }) => await runPlanReview({
+            reviewPlan: async ({ planContent }) => await runPlanReview({
               client: ctx.client,
               runtime: workflowOptions.runtime,
               planContent,
@@ -551,7 +551,7 @@ Do NOT proceed with implementation until your plan is approved.`);
               pasteApiUrl: getPasteApiUrl(),
               htmlContent: getPlanHtml(),
               timeoutSeconds: getPlanTimeoutSeconds(),
-              abortSignal,
+              abortSignal: context.abort,
               cwd: ctx.directory,
               bridge: await getBridgeContext(),
             }),
