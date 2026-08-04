@@ -455,7 +455,9 @@ if ($verifyAttestationResolved) {
             $bundles = @()
             $searchFrom = 0
             while ($true) {
-                $keyIdx = $attRaw.IndexOf('"bundle"', $searchFrom)
+                # Ordinal comparison: culture-sensitive IndexOf can mismatch
+                # under exotic locales; byte-literal key search must not.
+                $keyIdx = $attRaw.IndexOf('"bundle"', $searchFrom, [System.StringComparison]::Ordinal)
                 if ($keyIdx -lt 0) { break }
                 $searchFrom = $keyIdx + 8
                 $i = $keyIdx + 8

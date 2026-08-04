@@ -200,6 +200,63 @@ REM See scripts/install.sh for the full explanation - this constant is
 REM bumped once at the first attested release via the release skill.
 set "MIN_ATTESTED_VERSION=v0.17.2"
 
+REM Attestation-bundle fetch helper, passed to PowerShell via -EncodedCommand
+REM so NO script file ever touches %%TEMP%% (a %%RANDOM%%-named .ps1 would be a
+REM predictable-path code-execution vector). Inputs travel via env vars
+REM (REPO, ATT_DIGEST, ATT_BUNDLE_FILE); exit codes: 0 = bundle written,
+REM 2 = fetch failed, 3 = nothing extracted. The blob decodes to EXACTLY the
+REM script below (UTF-16LE base64). scripts/install.test.ts decodes the blob,
+REM asserts it matches these REM PS: lines byte for byte, and executes its
+REM scanner against a captured real attestations response - so the blob
+REM cannot silently drift from what is documented here. Regenerate after
+REM editing the REM PS: lines:
+REM   [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+REM PS: $ErrorActionPreference = 'Stop'
+REM PS: try {
+REM PS:     $resp = Invoke-WebRequest -Uri ('https://api.github.com/repos/' + $env:REPO + '/attestations/sha256:' + $env:ATT_DIGEST) -UseBasicParsing -TimeoutSec 30
+REM PS:     $raw = if ($resp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($resp.Content) } else { [string]$resp.Content }
+REM PS: } catch { exit 2 }
+REM PS: $bundles = @()
+REM PS: $searchFrom = 0
+REM PS: while ($true) {
+REM PS:     $keyIdx = $raw.IndexOf('"bundle"', $searchFrom, [System.StringComparison]::Ordinal)
+REM PS:     if ($keyIdx -lt 0) { break }
+REM PS:     $searchFrom = $keyIdx + 8
+REM PS:     $i = $keyIdx + 8
+REM PS:     while ($i -lt $raw.Length -and [char]::IsWhiteSpace($raw[$i])) { $i++ }
+REM PS:     if ($i -ge $raw.Length -or $raw[$i] -ne ':') { continue }
+REM PS:     $i++
+REM PS:     while ($i -lt $raw.Length -and [char]::IsWhiteSpace($raw[$i])) { $i++ }
+REM PS:     if ($i -ge $raw.Length -or $raw[$i] -ne '{') { continue }
+REM PS:     $depth = 0
+REM PS:     $inString = $false
+REM PS:     $escaped = $false
+REM PS:     $start = $i
+REM PS:     for (; $i -lt $raw.Length; $i++) {
+REM PS:         $ch = $raw[$i]
+REM PS:         if ($escaped) { $escaped = $false; continue }
+REM PS:         if ($inString) {
+REM PS:             if ($ch -eq '\') { $escaped = $true }
+REM PS:             elseif ($ch -eq '"') { $inString = $false }
+REM PS:             continue
+REM PS:         }
+REM PS:         if ($ch -eq '"') { $inString = $true; continue }
+REM PS:         if ($ch -eq '{') { $depth++; continue }
+REM PS:         if ($ch -eq '}') {
+REM PS:             $depth--
+REM PS:             if ($depth -eq 0) {
+REM PS:                 $bundles += $raw.Substring($start, $i - $start + 1)
+REM PS:                 $searchFrom = $i + 1
+REM PS:                 break
+REM PS:             }
+REM PS:         }
+REM PS:     }
+REM PS: }
+REM PS: if ($bundles.Count -eq 0) { exit 3 }
+REM PS: try { [System.IO.File]::WriteAllText($env:ATT_BUNDLE_FILE, (($bundles -join [char]10) + [char]10)) } catch { exit 3 }
+REM PS: exit 0
+set "ATT_FETCH_B64=JABFAHIAcgBvAHIAQQBjAHQAaQBvAG4AUAByAGUAZgBlAHIAZQBuAGMAZQAgAD0AIAAnAFMAdABvAHAAJwAKAHQAcgB5ACAAewAKACAAIAAgACAAJAByAGUAcwBwACAAPQAgAEkAbgB2AG8AawBlAC0AVwBlAGIAUgBlAHEAdQBlAHMAdAAgAC0AVQByAGkAIAAoACcAaAB0AHQAcABzADoALwAvAGEAcABpAC4AZwBpAHQAaAB1AGIALgBjAG8AbQAvAHIAZQBwAG8AcwAvACcAIAArACAAJABlAG4AdgA6AFIARQBQAE8AIAArACAAJwAvAGEAdAB0AGUAcwB0AGEAdABpAG8AbgBzAC8AcwBoAGEAMgA1ADYAOgAnACAAKwAgACQAZQBuAHYAOgBBAFQAVABfAEQASQBHAEUAUwBUACkAIAAtAFUAcwBlAEIAYQBzAGkAYwBQAGEAcgBzAGkAbgBnACAALQBUAGkAbQBlAG8AdQB0AFMAZQBjACAAMwAwAAoAIAAgACAAIAAkAHIAYQB3ACAAPQAgAGkAZgAgACgAJAByAGUAcwBwAC4AQwBvAG4AdABlAG4AdAAgAC0AaQBzACAAWwBiAHkAdABlAFsAXQBdACkAIAB7ACAAWwBTAHkAcwB0AGUAbQAuAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAAuAEcAZQB0AFMAdAByAGkAbgBnACgAJAByAGUAcwBwAC4AQwBvAG4AdABlAG4AdAApACAAfQAgAGUAbABzAGUAIAB7ACAAWwBzAHQAcgBpAG4AZwBdACQAcgBlAHMAcAAuAEMAbwBuAHQAZQBuAHQAIAB9AAoAfQAgAGMAYQB0AGMAaAAgAHsAIABlAHgAaQB0ACAAMgAgAH0ACgAkAGIAdQBuAGQAbABlAHMAIAA9ACAAQAAoACkACgAkAHMAZQBhAHIAYwBoAEYAcgBvAG0AIAA9ACAAMAAKAHcAaABpAGwAZQAgACgAJAB0AHIAdQBlACkAIAB7AAoAIAAgACAAIAAkAGsAZQB5AEkAZAB4ACAAPQAgACQAcgBhAHcALgBJAG4AZABlAHgATwBmACgAJwAiAGIAdQBuAGQAbABlACIAJwAsACAAJABzAGUAYQByAGMAaABGAHIAbwBtACwAIABbAFMAeQBzAHQAZQBtAC4AUwB0AHIAaQBuAGcAQwBvAG0AcABhAHIAaQBzAG8AbgBdADoAOgBPAHIAZABpAG4AYQBsACkACgAgACAAIAAgAGkAZgAgACgAJABrAGUAeQBJAGQAeAAgAC0AbAB0ACAAMAApACAAewAgAGIAcgBlAGEAawAgAH0ACgAgACAAIAAgACQAcwBlAGEAcgBjAGgARgByAG8AbQAgAD0AIAAkAGsAZQB5AEkAZAB4ACAAKwAgADgACgAgACAAIAAgACQAaQAgAD0AIAAkAGsAZQB5AEkAZAB4ACAAKwAgADgACgAgACAAIAAgAHcAaABpAGwAZQAgACgAJABpACAALQBsAHQAIAAkAHIAYQB3AC4ATABlAG4AZwB0AGgAIAAtAGEAbgBkACAAWwBjAGgAYQByAF0AOgA6AEkAcwBXAGgAaQB0AGUAUwBwAGEAYwBlACgAJAByAGEAdwBbACQAaQBdACkAKQAgAHsAIAAkAGkAKwArACAAfQAKACAAIAAgACAAaQBmACAAKAAkAGkAIAAtAGcAZQAgACQAcgBhAHcALgBMAGUAbgBnAHQAaAAgAC0AbwByACAAJAByAGEAdwBbACQAaQBdACAALQBuAGUAIAAnADoAJwApACAAewAgAGMAbwBuAHQAaQBuAHUAZQAgAH0ACgAgACAAIAAgACQAaQArACsACgAgACAAIAAgAHcAaABpAGwAZQAgACgAJABpACAALQBsAHQAIAAkAHIAYQB3AC4ATABlAG4AZwB0AGgAIAAtAGEAbgBkACAAWwBjAGgAYQByAF0AOgA6AEkAcwBXAGgAaQB0AGUAUwBwAGEAYwBlACgAJAByAGEAdwBbACQAaQBdACkAKQAgAHsAIAAkAGkAKwArACAAfQAKACAAIAAgACAAaQBmACAAKAAkAGkAIAAtAGcAZQAgACQAcgBhAHcALgBMAGUAbgBnAHQAaAAgAC0AbwByACAAJAByAGEAdwBbACQAaQBdACAALQBuAGUAIAAnAHsAJwApACAAewAgAGMAbwBuAHQAaQBuAHUAZQAgAH0ACgAgACAAIAAgACQAZABlAHAAdABoACAAPQAgADAACgAgACAAIAAgACQAaQBuAFMAdAByAGkAbgBnACAAPQAgACQAZgBhAGwAcwBlAAoAIAAgACAAIAAkAGUAcwBjAGEAcABlAGQAIAA9ACAAJABmAGEAbABzAGUACgAgACAAIAAgACQAcwB0AGEAcgB0ACAAPQAgACQAaQAKACAAIAAgACAAZgBvAHIAIAAoADsAIAAkAGkAIAAtAGwAdAAgACQAcgBhAHcALgBMAGUAbgBnAHQAaAA7ACAAJABpACsAKwApACAAewAKACAAIAAgACAAIAAgACAAIAAkAGMAaAAgAD0AIAAkAHIAYQB3AFsAJABpAF0ACgAgACAAIAAgACAAIAAgACAAaQBmACAAKAAkAGUAcwBjAGEAcABlAGQAKQAgAHsAIAAkAGUAcwBjAGEAcABlAGQAIAA9ACAAJABmAGEAbABzAGUAOwAgAGMAbwBuAHQAaQBuAHUAZQAgAH0ACgAgACAAIAAgACAAIAAgACAAaQBmACAAKAAkAGkAbgBTAHQAcgBpAG4AZwApACAAewAKACAAIAAgACAAIAAgACAAIAAgACAAIAAgAGkAZgAgACgAJABjAGgAIAAtAGUAcQAgACcAXAAnACkAIAB7ACAAJABlAHMAYwBhAHAAZQBkACAAPQAgACQAdAByAHUAZQAgAH0ACgAgACAAIAAgACAAIAAgACAAIAAgACAAIABlAGwAcwBlAGkAZgAgACgAJABjAGgAIAAtAGUAcQAgACcAIgAnACkAIAB7ACAAJABpAG4AUwB0AHIAaQBuAGcAIAA9ACAAJABmAGEAbABzAGUAIAB9AAoAIAAgACAAIAAgACAAIAAgACAAIAAgACAAYwBvAG4AdABpAG4AdQBlAAoAIAAgACAAIAAgACAAIAAgAH0ACgAgACAAIAAgACAAIAAgACAAaQBmACAAKAAkAGMAaAAgAC0AZQBxACAAJwAiACcAKQAgAHsAIAAkAGkAbgBTAHQAcgBpAG4AZwAgAD0AIAAkAHQAcgB1AGUAOwAgAGMAbwBuAHQAaQBuAHUAZQAgAH0ACgAgACAAIAAgACAAIAAgACAAaQBmACAAKAAkAGMAaAAgAC0AZQBxACAAJwB7ACcAKQAgAHsAIAAkAGQAZQBwAHQAaAArACsAOwAgAGMAbwBuAHQAaQBuAHUAZQAgAH0ACgAgACAAIAAgACAAIAAgACAAaQBmACAAKAAkAGMAaAAgAC0AZQBxACAAJwB9ACcAKQAgAHsACgAgACAAIAAgACAAIAAgACAAIAAgACAAIAAkAGQAZQBwAHQAaAAtAC0ACgAgACAAIAAgACAAIAAgACAAIAAgACAAIABpAGYAIAAoACQAZABlAHAAdABoACAALQBlAHEAIAAwACkAIAB7AAoAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAkAGIAdQBuAGQAbABlAHMAIAArAD0AIAAkAHIAYQB3AC4AUwB1AGIAcwB0AHIAaQBuAGcAKAAkAHMAdABhAHIAdAAsACAAJABpACAALQAgACQAcwB0AGEAcgB0ACAAKwAgADEAKQAKACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAJABzAGUAYQByAGMAaABGAHIAbwBtACAAPQAgACQAaQAgACsAIAAxAAoAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIABiAHIAZQBhAGsACgAgACAAIAAgACAAIAAgACAAIAAgACAAIAB9AAoAIAAgACAAIAAgACAAIAAgAH0ACgAgACAAIAAgAH0ACgB9AAoAaQBmACAAKAAkAGIAdQBuAGQAbABlAHMALgBDAG8AdQBuAHQAIAAtAGUAcQAgADAAKQAgAHsAIABlAHgAaQB0ACAAMwAgAH0ACgB0AHIAeQAgAHsAIABbAFMAeQBzAHQAZQBtAC4ASQBPAC4ARgBpAGwAZQBdADoAOgBXAHIAaQB0AGUAQQBsAGwAVABlAHgAdAAoACQAZQBuAHYAOgBBAFQAVABfAEIAVQBOAEQATABFAF8ARgBJAEwARQAsACAAKAAoACQAYgB1AG4AZABsAGUAcwAgAC0AagBvAGkAbgAgAFsAYwBoAGEAcgBdADEAMAApACAAKwAgAFsAYwBoAGEAcgBdADEAMAApACkAIAB9ACAAYwBhAHQAYwBoACAAewAgAGUAeABpAHQAIAAzACAAfQAKAGUAeABpAHQAIAAwAAoA"
+
 REM Detect architecture. Native ARM64 Windows binaries are built from
 REM bun-windows-arm64 (stable since Bun v1.3.10), so ARM64 hosts get a
 REM native binary - no Windows x86-64 emulation tax. PROCESSOR_ARCHITECTURE
@@ -602,25 +659,27 @@ if "!VERIFY_ATTESTATION!"=="1" (
         REM { "attestations": [ { "bundle": {...} } ] }; gh --bundle expects
         REM the bundle values one JSON document per line (the JSONL format
         REM `gh attestation download` writes). PowerShell does the fetch and
-        REM the extraction via a generated helper script (see
-        REM :WriteAttestationFetcher) that copies each bundle as a byte-exact
-        REM substring of the response, never a ConvertFrom-Json round trip
-        REM whose DateTime coercion could corrupt a bundle field. Values
-        REM pass via $env: so nothing is re-parsed as code. Exit codes:
-        REM 0 = bundle written, 2 = fetch failed, 3 = no bundle extracted.
+        REM the extraction via the ATT_FETCH_B64 -EncodedCommand payload
+        REM (documented and drift-guarded where it is defined, near the top
+        REM of this file): each bundle is copied as a byte-exact substring of
+        REM the response, never a ConvertFrom-Json round trip whose DateTime
+        REM coercion could corrupt a bundle field. Values pass via $env: so
+        REM nothing is re-parsed as code, and no helper file ever exists on
+        REM disk. Exit codes: 0 = bundle written, 2 = fetch failed, 3 = no
+        REM bundle extracted.
         set "ATT_BUNDLE_FILE=%TEMP%\plannotator-bundle-%RANDOM%.jsonl"
-        set "ATT_PS1=%TEMP%\plannotator-attfetch-%RANDOM%.ps1"
         set "ATT_DIGEST=!ACTUAL_CHECKSUM!"
         set "ATT_BUNDLE_OK=0"
+        REM NOTE: the ATT_FALLBACK_REASON literals below are assigned inside
+        REM parenthesized blocks - they must stay free of unescaped cmd
+        REM metacharacters, parentheses above all, or the block parse breaks.
         set "ATT_FALLBACK_REASON=Could not fetch the attestation bundle from the public API"
-        call :WriteAttestationFetcher "!ATT_PS1!"
-        powershell -NoProfile -ExecutionPolicy Bypass -File "!ATT_PS1!"
+        powershell -NoProfile -EncodedCommand !ATT_FETCH_B64!
         if !ERRORLEVEL! equ 0 (
             if exist "!ATT_BUNDLE_FILE!" set "ATT_BUNDLE_OK=1"
         ) else if !ERRORLEVEL! equ 3 (
             set "ATT_FALLBACK_REASON=Could not extract a bundle from the attestations API response"
         )
-        del "!ATT_PS1!" >nul 2>&1
         set "GH_OUTPUT=%TEMP%\plannotator-gh-%RANDOM%.txt"
         set "ATT_USED_BUNDLE=0"
         if "!ATT_BUNDLE_OK!"=="1" (
@@ -1493,67 +1552,6 @@ if !ERRORLEVEL! equ 0 (
 if exist "!SEM_ARCHIVE!" del "!SEM_ARCHIVE!"
 if exist "!SEM_CHECKSUMS!" del "!SEM_CHECKSUMS!"
 if exist "!SEM_EXTRACT!" rmdir /s /q "!SEM_EXTRACT!"
-goto :eof
-
-REM ======================================================================
-REM Generate the attestation-fetch helper script (%1 = output .ps1 path).
-REM PowerShell fetches the public attestations endpoint and copies each
-REM attestations[].bundle object into ATT_BUNDLE_FILE as a byte-exact
-REM substring of the response (JSONL, one bundle per line) - deliberately
-REM NOT a ConvertFrom-Json/ConvertTo-Json round trip, whose DateTime
-REM coercion re-serializes date-shaped strings differently across
-REM PowerShell 5.1/7 and could corrupt a bundle field. Emitted as a file
-REM (not -Command) because the scanner needs control flow that cannot be
-REM safely embedded in a cmd one-liner. Inputs via env: REPO, ATT_DIGEST,
-REM ATT_BUNDLE_FILE. Exit codes: 0 ok, 2 fetch failed, 3 nothing extracted.
-REM ======================================================================
-:WriteAttestationFetcher
-set "ATT_PS1_FILE=%~1"
->  "!ATT_PS1_FILE!" echo $ErrorActionPreference = 'Stop'
->> "!ATT_PS1_FILE!" echo try {
->> "!ATT_PS1_FILE!" echo     $resp = Invoke-WebRequest -Uri ('https://api.github.com/repos/' + $env:REPO + '/attestations/sha256:' + $env:ATT_DIGEST) -UseBasicParsing -TimeoutSec 30
->> "!ATT_PS1_FILE!" echo     $raw = if ($resp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($resp.Content) } else { [string]$resp.Content }
->> "!ATT_PS1_FILE!" echo } catch { exit 2 }
->> "!ATT_PS1_FILE!" echo $bundles = @()
->> "!ATT_PS1_FILE!" echo $searchFrom = 0
->> "!ATT_PS1_FILE!" echo while ($true) {
->> "!ATT_PS1_FILE!" echo     $keyIdx = $raw.IndexOf('"bundle"', $searchFrom)
->> "!ATT_PS1_FILE!" echo     if ($keyIdx -lt 0) { break }
->> "!ATT_PS1_FILE!" echo     $searchFrom = $keyIdx + 8
->> "!ATT_PS1_FILE!" echo     $i = $keyIdx + 8
->> "!ATT_PS1_FILE!" echo     while ($i -lt $raw.Length -and [char]::IsWhiteSpace($raw[$i])) { $i++ }
->> "!ATT_PS1_FILE!" echo     if ($i -ge $raw.Length -or $raw[$i] -ne ':') { continue }
->> "!ATT_PS1_FILE!" echo     $i++
->> "!ATT_PS1_FILE!" echo     while ($i -lt $raw.Length -and [char]::IsWhiteSpace($raw[$i])) { $i++ }
->> "!ATT_PS1_FILE!" echo     if ($i -ge $raw.Length -or $raw[$i] -ne '{') { continue }
->> "!ATT_PS1_FILE!" echo     $depth = 0
->> "!ATT_PS1_FILE!" echo     $inString = $false
->> "!ATT_PS1_FILE!" echo     $escaped = $false
->> "!ATT_PS1_FILE!" echo     $start = $i
->> "!ATT_PS1_FILE!" echo     for (; $i -lt $raw.Length; $i++) {
->> "!ATT_PS1_FILE!" echo         $ch = $raw[$i]
->> "!ATT_PS1_FILE!" echo         if ($escaped) { $escaped = $false; continue }
->> "!ATT_PS1_FILE!" echo         if ($inString) {
->> "!ATT_PS1_FILE!" echo             if ($ch -eq '\') { $escaped = $true }
->> "!ATT_PS1_FILE!" echo             elseif ($ch -eq '"') { $inString = $false }
->> "!ATT_PS1_FILE!" echo             continue
->> "!ATT_PS1_FILE!" echo         }
->> "!ATT_PS1_FILE!" echo         if ($ch -eq '"') { $inString = $true; continue }
->> "!ATT_PS1_FILE!" echo         if ($ch -eq '{') { $depth++; continue }
->> "!ATT_PS1_FILE!" echo         if ($ch -eq '}') {
->> "!ATT_PS1_FILE!" echo             $depth--
->> "!ATT_PS1_FILE!" echo             if ($depth -eq 0) {
->> "!ATT_PS1_FILE!" echo                 $bundles += $raw.Substring($start, $i - $start + 1)
->> "!ATT_PS1_FILE!" echo                 $searchFrom = $i + 1
->> "!ATT_PS1_FILE!" echo                 break
->> "!ATT_PS1_FILE!" echo             }
->> "!ATT_PS1_FILE!" echo         }
->> "!ATT_PS1_FILE!" echo     }
->> "!ATT_PS1_FILE!" echo }
->> "!ATT_PS1_FILE!" echo if ($bundles.Count -eq 0) { exit 3 }
->> "!ATT_PS1_FILE!" echo try { [System.IO.File]::WriteAllText($env:ATT_BUNDLE_FILE, (($bundles -join [char]10) + [char]10)) } catch { exit 3 }
->> "!ATT_PS1_FILE!" echo exit 0
-set "ATT_PS1_FILE="
 goto :eof
 
 REM ======================================================================

@@ -466,15 +466,25 @@ if [ -f "$_config_dir/config.json" ]; then
     _skip_install_block=$(awk '
         { buf = buf $0 "\n" }
         END {
-            i = index(buf, "\"skipInstall\"")
-            if (i == 0) exit
-            rest = substr(buf, i)
-            j = index(rest, "{")
-            if (j == 0) exit
-            rest = substr(rest, j)
-            k = index(rest, "}")
-            if (k == 0) exit
-            print substr(rest, 1, k)
+            # Token check: the key must be followed by optional whitespace,
+            # a colon, and the object brace - so a STRING VALUE that merely
+            # contains "skipInstall" cannot anchor the extraction. Non-token
+            # occurrences are skipped and the scan continues.
+            pos = 1
+            while (1) {
+                i = index(substr(buf, pos), "\"skipInstall\"")
+                if (i == 0) exit
+                i = pos + i - 1
+                rest = substr(buf, i + 13)
+                if (match(rest, /^[ \t\r\n]*:[ \t\r\n]*\{/) != 0) {
+                    rest = substr(rest, RLENGTH)
+                    k = index(rest, "}")
+                    if (k == 0) exit
+                    print substr(rest, 1, k)
+                    exit
+                }
+                pos = i + 13
+            }
         }' "$_config_dir/config.json" 2>/dev/null) || _skip_install_block=""
 fi
 if [ -n "$_skip_install_block" ]; then

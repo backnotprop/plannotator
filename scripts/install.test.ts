@@ -372,7 +372,11 @@ describe("install.sh", () => {
     // are matched only inside it - a "codex": true under some OTHER key can
     // never opt anyone out, and an explicit false inside skipInstall is a
     // veto rather than being ignored.
-    expect(script).toContain('index(buf, "\\"skipInstall\\"")');
+    expect(script).toContain('index(substr(buf, pos), "\\"skipInstall\\"")');
+    // Token check: a string VALUE containing "skipInstall" cannot anchor the
+    // extraction - the key must be followed by optional whitespace, a colon,
+    // and the object brace.
+    expect(script).toContain("match(rest, /^[ \\t\\r\\n]*:[ \\t\\r\\n]*\\{/)");
     expect(script).toContain("_skip_install_block");
     expect(script).toContain('"\\"$_agent\\"[[:space:]]*:[[:space:]]*true"');
     expect(script).toContain('"\\"$_agent\\"[[:space:]]*:[[:space:]]*false"');
@@ -1654,10 +1658,18 @@ describe("install shared behavior", () => {
     // ConvertFrom-Json/ConvertTo-Json round trip - PowerShell's DateTime
     // coercion re-serializes date-shaped strings differently across PS
     // 5.1/7 and could corrupt a bundle field (M7 guard).
-    expect(ps).toContain("$attRaw.IndexOf('\"bundle\"', $searchFrom)");
+    // Ordinal comparison so a culture-sensitive IndexOf can never mismatch
+    // the byte-literal key under exotic locales.
+    expect(ps).toContain("$attRaw.IndexOf('\"bundle\"', $searchFrom, [System.StringComparison]::Ordinal)");
     expect(ps).not.toContain("| ConvertTo-Json");
-    expect(cmdScript).toContain("$raw.IndexOf('\"bundle\"', $searchFrom)");
+    expect(cmdScript).toContain("$raw.IndexOf('\"bundle\"', $searchFrom, [System.StringComparison]::Ordinal)");
     expect(cmdScript).not.toContain("| ConvertTo-Json");
+    // The cmd fetcher runs via -EncodedCommand: NO helper file ever exists
+    // on disk (a %RANDOM%-named .ps1 under %TEMP% would be a
+    // predictable-path code-execution vector).
+    expect(cmdScript).toContain("powershell -NoProfile -EncodedCommand !ATT_FETCH_B64!");
+    expect(cmdScript).not.toContain("plannotator-attfetch");
+    expect(cmdScript).not.toContain('-ExecutionPolicy Bypass -File');
 
     // H1: a failure of the --bundle invocation is retried once through the
     // exact authenticated path before ANY classification, so a gh that
@@ -1887,12 +1899,19 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     test("fail-closed: a real verification failure aborts with exit 1 and installs nothing", () => {
       // The reviewer proved that deleting the exit after the provenance
       // message left every source-scan test green while an unverified
-      // binary installed. This pins the abort behaviorally.
+      // binary installed. This pins the abort behaviorally, and it pins it
+      // DISCRIMINATINGLY: with the `exit 1` deleted, execution continues
+      // past the message and a later mv of the already-removed temp file
+      // appends its own error after "Refusing to install." - so asserting
+      // the output ENDS with the refusal catches the mutation, where a
+      // bare nonzero-exit-code check would not (the incidental mv failure
+      // also exits nonzero). Mutation-verified during review round two.
       const sandbox = setupInstallSandbox({ gh: "fail-all" });
       const { code, out } = runInstallSh(sandbox, [
         "--version", "v99.9.9", "--verify-attestation", "--minimal", "--non-interactive",
       ]);
       expect(out).toContain("Attestation verification failed!");
+      expect(out.trimEnd().endsWith("Refusing to install.")).toBe(true);
       expect(code).toBe(1);
       expect(existsSync(join(sandbox.home, ".local", "bin", "plannotator"))).toBe(false);
     });
@@ -1949,21 +1968,22 @@ function extractPs1ScannerRegion(): string {
   return ps.slice(start, end);
 }
 
-function extractCmdScannerRegion(): string {
-  // install.cmd emits its fetch helper as `>> "!ATT_PS1_FILE!" echo <line>`
-  // lines; reconstructing them yields exactly the PowerShell the installer
-  // runs. The scanner region is the part between the $bundles init and the
-  // bundle-count check.
+function decodeCmdFetcherBlob(): string {
+  // install.cmd carries its fetch helper as a base64(UTF-16LE) blob run via
+  // `powershell -EncodedCommand` so no helper file ever exists on disk.
+  // Decoding it yields exactly the PowerShell the installer runs.
   const cmd = readScript("install.cmd");
-  const lines = cmd
-    .split("\n")
-    .filter((l) => /^>>? +"!ATT_PS1_FILE!" echo /.test(l))
-    .map((l) => l.replace(/^>>? +"!ATT_PS1_FILE!" echo ?/, ""));
-  const script = lines.join("\n");
+  const m = cmd.match(/^set "ATT_FETCH_B64=([A-Za-z0-9+/=]+)"$/m);
+  if (!m) throw new Error("could not locate the ATT_FETCH_B64 blob in install.cmd");
+  return Buffer.from(m[1], "base64").toString("utf16le");
+}
+
+function extractCmdScannerRegion(): string {
+  const script = decodeCmdFetcherBlob();
   const start = script.indexOf("$bundles = @()");
   const end = script.indexOf("if ($bundles.Count -eq 0)");
   if (start < 0 || end < 0 || end <= start) {
-    throw new Error("could not locate the bundle scanner region in install.cmd's generated fetcher");
+    throw new Error("could not locate the bundle scanner region in install.cmd's encoded fetcher");
   }
   return script.slice(start, end);
 }
@@ -1992,6 +2012,49 @@ function runScanner(scannerBody: string, rawJson: string): string[] {
   }
   return r.stdout.toString().split("\n").filter((l) => l.length > 0);
 }
+
+describe("install.cmd encoded fetcher blob", () => {
+  test("decodes to exactly the documented REM PS: plaintext (no PowerShell needed)", () => {
+    // The -EncodedCommand payload is opaque to a human reader; the REM PS:
+    // lines directly above it are the documentation. This drift guard makes
+    // them one thing: the blob must decode byte-for-byte to those lines.
+    const cmd = readScript("install.cmd");
+    const remLines = cmd
+      .split("\n")
+      .filter((l) => l.startsWith("REM PS: "))
+      .map((l) => l.slice("REM PS: ".length));
+    expect(remLines.length).toBeGreaterThan(20);
+    const documented = remLines.join("\n") + "\n";
+    expect(decodeCmdFetcherBlob()).toBe(documented);
+  });
+
+  test("decoded fetcher keeps the security-relevant shape", () => {
+    const decoded = decodeCmdFetcherBlob();
+    // Inputs travel via env vars, never string interpolation.
+    expect(decoded).toContain("$env:REPO");
+    expect(decoded).toContain("$env:ATT_DIGEST");
+    expect(decoded).toContain("$env:ATT_BUNDLE_FILE");
+    // Byte-exact substring extraction, no JSON round trip.
+    expect(decoded).toContain("[System.StringComparison]::Ordinal");
+    expect(decoded).not.toContain("ConvertFrom-Json");
+    expect(decoded).not.toContain("ConvertTo-Json");
+    // Distinct exit codes for fetch failure vs empty extraction.
+    expect(decoded).toContain("exit 2");
+    expect(decoded).toContain("exit 3");
+  });
+});
+
+test("PowerShell scanner coverage must not silently vanish on CI", () => {
+  // The M7 scanner tests skip when no PowerShell is on the host, which is
+  // fine for contributor laptops - but a CI image change dropping pwsh
+  // must fail loudly instead of quietly shrinking coverage.
+  if (process.env.CI) {
+    expect(
+      pwshBin,
+      "CI has no pwsh/powershell on PATH; the attestation scanner tests would silently skip. Restore PowerShell in the CI image.",
+    ).toBeTruthy();
+  }
+});
 
 describe.skipIf(!pwshBin)("attestation bundle scanner under PowerShell (M7)", () => {
   const fixtureRaw = readFileSync(ATTESTATION_FIXTURE, "utf-8");
