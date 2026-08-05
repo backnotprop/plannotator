@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'apps/marketing/**'
+      - 'scripts/install.sh'
+      - 'scripts/install.ps1'
+      - 'scripts/install.cmd'
       - 'apps/portal/**'
       - 'apps/paste-service/**'
       - 'apps/waitlist-service/**'
@@ -20,6 +23,7 @@ on:
         options:
           - all
           - marketing
+          - install-scripts
           - portal
           - paste
           - waitlist
@@ -32,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       marketing: ${{ steps.changes.outputs.marketing }}
+      scripts: ${{ steps.changes.outputs.scripts }}
       portal: ${{ steps.changes.outputs.portal }}
       paste: ${{ steps.changes.outputs.paste }}
       waitlist: ${{ steps.changes.outputs.waitlist }}
@@ -46,6 +51,11 @@ jobs:
               echo "marketing=true" >> $GITHUB_OUTPUT
             else
               echo "marketing=false" >> $GITHUB_OUTPUT
+            fi
+            if [[ "${{ inputs.target }}" == "all" || "${{ inputs.target }}" == "install-scripts" ]]; then
+              echo "scripts=true" >> $GITHUB_OUTPUT
+            else
+              echo "scripts=false" >> $GITHUB_OUTPUT
             fi
             if [[ "${{ inputs.target }}" == "all" || "${{ inputs.target }}" == "portal" ]]; then
               echo "portal=true" >> $GITHUB_OUTPUT
@@ -67,6 +77,7 @@ jobs:
             git fetch origin ${{ github.event.before }} --depth=1 2>/dev/null || true
 
             MARKETING_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^(apps/marketing/|packages/)' || true)
+            SCRIPTS_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^scripts/install\.(sh|ps1|cmd)$' || true)
             PORTAL_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^(apps/portal/|packages/)' || true)
             PASTE_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^apps/paste-service/' || true)
             WAITLIST_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^apps/waitlist-service/' || true)
@@ -75,6 +86,12 @@ jobs:
               echo "marketing=true" >> $GITHUB_OUTPUT
             else
               echo "marketing=false" >> $GITHUB_OUTPUT
+            fi
+
+            if [[ -n "$SCRIPTS_CHANGED" ]]; then
+              echo "scripts=true" >> $GITHUB_OUTPUT
+            else
+              echo "scripts=false" >> $GITHUB_OUTPUT
             fi
 
             if [[ -n "$PORTAL_CHANGED" ]]; then
@@ -133,6 +150,41 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id E284ON0A27O2H6 \
             --paths "/*"
+
+  # The /install.sh, /install.ps1, and /install.cmd paths on plannotator.ai are
+  # served from the dedicated plannotator-install-scripts bucket, NOT the
+  # marketing bucket (the marketing build also carries copies via symlinks, but
+  # the CloudFront behavior for these paths reads the dedicated bucket). Before
+  # this job existed the bucket was synced by hand and went stale between
+  # releases: v0.26.0 shipped while the site still served the July 31 scripts.
+  deploy-install-scripts:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.scripts == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Upload install scripts
+        run: |
+          aws s3 cp scripts/install.sh s3://plannotator-install-scripts/install.sh --content-type "text/x-shellscript; charset=utf-8"
+          aws s3 cp scripts/install.ps1 s3://plannotator-install-scripts/install.ps1 --content-type "text/plain; charset=utf-8"
+          aws s3 cp scripts/install.cmd s3://plannotator-install-scripts/install.cmd --content-type "text/plain; charset=utf-8"
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id E284ON0A27O2H6 \
+            --paths "/install.sh" "/install.ps1" "/install.cmd"
 
   deploy-portal:
     needs: detect-changes
