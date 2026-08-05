@@ -106,10 +106,12 @@ jobs:
         run: npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
 
       - name: Run installed-package smoke
+        # Glob the tarball so this job survives version bumps; npm pack wrote
+        # exactly one plannotator-opencode-*.tgz into RUNNER_TEMP above.
         run: >-
           bun run --cwd apps/opencode-plugin smoke:v2 --
           "$(command -v opencode2)"
-          "$RUNNER_TEMP/plannotator-opencode-0.25.1.tgz"
+          "$RUNNER_TEMP"/plannotator-opencode-*.tgz
 
   uninstall-windows:
     # Run the filesystem and path logic under real Windows path semantics.
