@@ -15,6 +15,7 @@ interface FileCommentBannerProps {
   onEdit: (id: string, text: string) => void;
   onDelete: (id: string) => void;
   onExplain?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   explainDisabled?: boolean;
   /** Re-measure hook for the virtualized all-files host (see FileCommentCard). */
   onHeightChange?: () => void;
@@ -42,11 +43,12 @@ export const FileCommentCard: React.FC<{
   onEdit: (id: string, text: string) => void;
   onDelete: (id: string) => void;
   onExplain?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   explainDisabled?: boolean;
   /** Fired after our rendered height changes (expand/collapse/edit) so the
    *  virtualized all-files host can re-measure this item. */
   onHeightChange?: () => void;
-}> = ({ comment, isSelected, onSelect, onEdit, onDelete, onExplain, explainDisabled = false, onHeightChange }) => {
+}> = ({ comment, isSelected, onSelect, onEdit, onDelete, onExplain, agentFindingSources, explainDisabled = false, onHeightChange }) => {
   // Default expanded (the comment IS the point of a guided review); the toggle
   // lets a reviewer collapse a long note back to one line to reach the hunks.
   const [collapsed, setCollapsed] = useState(false);
@@ -139,7 +141,7 @@ export const FileCommentCard: React.FC<{
       {!isEditing && (
         <CommentActions
           onEdit={() => { setDraft(comment.text ?? ''); setIsEditing(true); setCollapsed(false); }}
-          onExplain={isAgentGeneratedFinding(comment) && onExplain
+          onExplain={isAgentGeneratedFinding(comment, agentFindingSources) && onExplain
             ? () => onExplain(comment.id)
             : undefined}
           explainDisabled={explainDisabled}
@@ -164,6 +166,7 @@ export const FileCommentBanner: React.FC<FileCommentBannerProps> = ({
   onEdit,
   onDelete,
   onExplain,
+  agentFindingSources,
   explainDisabled = false,
   onHeightChange,
 }) => {
@@ -179,6 +182,7 @@ export const FileCommentBanner: React.FC<FileCommentBannerProps> = ({
           onEdit={onEdit}
           onDelete={onDelete}
           onExplain={onExplain}
+          agentFindingSources={agentFindingSources}
           explainDisabled={explainDisabled}
           onHeightChange={onHeightChange}
         />

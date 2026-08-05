@@ -186,6 +186,7 @@ interface AllFilesCodeViewProps {
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
   onExplainAnnotation?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   // Header actions (P3). Mirror AllFilesDiffView's header surface.
   onAddFileCommentForFile?: (filePath: string, text: string) => void;
   viewedFiles?: Set<string>;
@@ -472,6 +473,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onSelectAnnotation,
   onDeleteAnnotation,
   onExplainAnnotation,
+  agentFindingSources,
   onAddFileCommentForFile,
   viewedFiles,
   onToggleViewed,
@@ -509,6 +511,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   getAIHistoryForFile,
   allowScrollChaining = false,
 }) => {
+  const explainAvailable = Boolean(onExplainAnnotation);
   const mountCollapsedRef = useRef(mountCollapsed);
   const seedCollapsed = mountCollapsedRef.current ?? defaultCollapsed;
 
@@ -855,6 +858,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           onEdit={handleEditAnnotation}
           onDelete={onDeleteAnnotation}
           onExplain={onExplainAnnotation}
+          agentFindingSources={agentFindingSources}
           explainDisabled={isAILoading}
         />
       );
@@ -869,7 +873,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         | LineAnnotation<DiffAnnotationMetadata>,
       item: CodeViewItem<DiffAnnotationMetadata>,
     ) => renderAnnotationContent(annotation, item),
-    [renderAnnotationContent, onExplainAnnotation, isAILoading],
+    [renderAnnotationContent, explainAvailable, agentFindingSources, isAILoading],
   );
 
   // Reset to a fresh state when the file set changes (diff switch). CodeView
@@ -2106,6 +2110,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onEdit={onEditAnnotation}
             onDelete={onDeleteAnnotation}
             onExplain={onExplainAnnotation}
+            agentFindingSources={agentFindingSources}
             explainDisabled={isAILoading}
             // Re-measure the item when a comment expands/collapses/edits — the
             // custom-header height isn't auto-observed, so without this the
@@ -2120,7 +2125,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // availability/loading republish as line annotations.
   const renderCustomHeader = useCallback(
     (item: CodeViewItem<DiffAnnotationMetadata>) => renderCustomHeaderContent(item),
-    [renderCustomHeaderContent, onExplainAnnotation, isAILoading],
+    [renderCustomHeaderContent, explainAvailable, agentFindingSources, isAILoading],
   );
 
   // Pass-through allowlist only (CODE_VIEW_DIFF_OPTION_KEYS). hunkSeparators,

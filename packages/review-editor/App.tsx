@@ -466,6 +466,11 @@ const ReviewApp: React.FC = () => {
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
   const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
+  const agentFindingSourcesKey = agentJobs.jobs.map((job) => job.source).sort().join('\0');
+  const agentFindingSources = useMemo(
+    () => new Set(agentFindingSourcesKey ? agentFindingSourcesKey.split('\0') : []),
+    [agentFindingSourcesKey],
+  );
 
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
@@ -818,18 +823,6 @@ const ReviewApp: React.FC = () => {
     handleAskAIForFile(file.path, question);
   }, [activeFileIndex, files, handleAskAIForFile]);
 
-  const handleExplainAnnotation = useCallback((id: string) => {
-    if (!aiAvailable || isAILoading) return;
-    const annotation = allAnnotationsRef.current.find((item) => item.id === id);
-    if (!annotation || !isAgentGeneratedFinding(annotation)) return;
-
-    const file = annotation.filePath
-      ? files.find((item) => item.path === annotation.filePath)
-      : undefined;
-    reviewSidebar.open('ai');
-    void askAI(buildExplainFindingRequest(annotation, file?.patch));
-  }, [aiAvailable, askAI, files, isAILoading]);
-
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
     if (questionId) {
@@ -1036,6 +1029,19 @@ const ReviewApp: React.FC = () => {
     if (!sha) return null;
     return { sha, subject: commitInfo?.sha === sha ? commitInfo.subject : undefined };
   }, [activeDiffBase, commitInfo]);
+  const handleExplainAnnotation = useCallback((id: string) => {
+    if (!aiAvailable || isAILoading) return;
+    const annotation = allAnnotationsRef.current.find((item) => item.id === id);
+    if (!annotation || !isAgentGeneratedFinding(annotation, agentFindingSources)) return;
+
+    const file = annotation.filePath
+      ? files.find((item) => item.path === annotation.filePath)
+      : undefined;
+    reviewSidebar.open('ai');
+    void askAI(buildExplainFindingRequest(annotation, file?.patch, {
+      activeCommitSha: activeCommitContext?.sha,
+    }));
+  }, [activeCommitContext?.sha, agentFindingSources, aiAvailable, askAI, files, isAILoading]);
   const activeGitButlerContext = useMemo(() => {
     if (!activeDiffBase.startsWith('gitbutler:')) return null;
     return {
@@ -2400,6 +2406,7 @@ const ReviewApp: React.FC = () => {
     onNavigateToAnnotation: handleNavigateToAnnotation,
     onDeleteAnnotation: handleDeleteAnnotation,
     onExplainAnnotation: handleExplainAnnotation,
+    agentFindingSources,
     descriptionAnnotations: visibleDescriptionAnnotations,
     selectedDescriptionAnnotationId,
     onAddDescriptionAnnotation: handleAddDescriptionAnnotation,
@@ -3612,6 +3619,7 @@ const ReviewApp: React.FC = () => {
                 onNavigateToAnnotation={handleNavigateToAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
                 onExplainAnnotation={aiAvailable ? handleExplainAnnotation : undefined}
+                agentFindingSources={agentFindingSources}
                 feedbackMarkdown={feedbackMarkdown}
                 width={panelResize.width}
                 editorAnnotations={visibleEditorAnnotations}

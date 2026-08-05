@@ -110,6 +110,7 @@ function view(overrides: Partial<React.ComponentProps<typeof AllFilesCodeView>> 
       onEditAnnotation={() => {}}
       onSelectAnnotation={() => {}}
       onDeleteAnnotation={() => {}}
+      agentFindingSources={new Set()}
       {...overrides}
     />
   );

@@ -70,6 +70,7 @@ export interface ReviewState {
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
   onExplainAnnotation: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
 
   // PR description prose annotations (comment-only; text-anchored Annotation[],
   // kept separate from the diff CodeAnnotation[] above).

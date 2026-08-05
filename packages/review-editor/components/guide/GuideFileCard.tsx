@@ -116,6 +116,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
             onSelectAnnotation={state.onSelectAnnotation}
             onDeleteAnnotation={state.onDeleteAnnotation}
             onAddFileCommentForFile={state.onAddFileCommentForFile}
+            agentFindingSources={state.agentFindingSources}
             viewedFiles={state.viewedFiles}
             onToggleViewed={state.onToggleViewed}
             stagedFiles={state.stagedFiles}

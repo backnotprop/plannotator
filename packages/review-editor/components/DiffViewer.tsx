@@ -167,6 +167,7 @@ interface DiffViewerProps {
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
   onExplainAnnotation?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   isViewed?: boolean;
   onToggleViewed?: () => void;
   collapsed?: boolean;
@@ -223,6 +224,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onSelectAnnotation,
   onDeleteAnnotation,
   onExplainAnnotation,
+  agentFindingSources,
   isViewed = false,
   onToggleViewed,
   collapsed = false,
@@ -583,6 +585,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onEdit={handleEdit}
         onDelete={onDeleteAnnotation}
         onExplain={onExplainAnnotation}
+        agentFindingSources={agentFindingSources}
         explainDisabled={isAILoading}
       />
     );
@@ -708,6 +711,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           onEdit={onEditAnnotation}
           onDelete={onDeleteAnnotation}
           onExplain={onExplainAnnotation}
+          agentFindingSources={agentFindingSources}
           explainDisabled={isAILoading}
         />
         <div className="p-4" ref={diffContentRef}>

@@ -14,6 +14,7 @@ interface InlineAnnotationProps {
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onExplain?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   explainDisabled?: boolean;
 }
 
@@ -26,6 +27,7 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
   onEdit,
   onDelete,
   onExplain,
+  agentFindingSources,
   explainDisabled = false,
 }) => {
   const severity = metadata.severity ? SEVERITY_STYLES[metadata.severity] : null;
@@ -64,7 +66,7 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
       )}
       <CommentActions
         onEdit={() => onEdit(metadata.annotationId)}
-        onExplain={isAgentGeneratedFinding(metadata) && onExplain
+        onExplain={isAgentGeneratedFinding(metadata, agentFindingSources) && onExplain
           ? () => onExplain(metadata.annotationId)
           : undefined}
         explainDisabled={explainDisabled}

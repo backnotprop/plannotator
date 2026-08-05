@@ -72,6 +72,7 @@ function makeState(overrides: Partial<ReviewState> = {}): ReviewState {
   return {
     files: [],
     guideRevealFile: null,
+    agentFindingSources: new Set(),
     allFilesActiveSearchMatch: null,
     aiMessages: [],
     onClickAIMarker: () => {},

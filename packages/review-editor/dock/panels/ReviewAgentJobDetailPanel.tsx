@@ -11,6 +11,7 @@ import { LiveLogViewer } from '../../components/LiveLogViewer';
 import { ScrollFade } from '../../components/ScrollFade';
 import { exportReviewFeedback } from '../../utils/exportFeedback';
 import { annotationScope, commentCopyText } from '../../utils/annotationDisplay';
+import { isAgentGeneratedFinding } from '../../utils/explainFinding';
 
 // ---------------------------------------------------------------------------
 // Panel
@@ -230,7 +231,9 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
                     annotation={ann}
                     dismissed={dismissed}
                     onClick={handleAnnotationClick}
-                    onExplain={state.aiAvailable ? state.onExplainAnnotation : undefined}
+                    onExplain={state.aiAvailable && isAgentGeneratedFinding(ann, state.agentFindingSources)
+                      ? state.onExplainAnnotation
+                      : undefined}
                     explainDisabled={state.isAILoading}
                   />
                 ))}
@@ -507,7 +510,7 @@ function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explain
   const severity = ann.severity ? SEVERITY_STYLES[ann.severity] : null;
   return (
     <div
-      className={`group group/finding w-full text-left px-3 py-2.5 rounded bg-card border transition-all duration-150 shadow-[0_1px_3px_rgba(0,0,0,0.06)] ${
+      className={`group w-full text-left px-3 py-2.5 rounded bg-card border transition-all duration-150 shadow-[0_1px_3px_rgba(0,0,0,0.06)] ${
         dismissed ? 'opacity-30 cursor-default border-border/20' : 'border-border/40 hover:shadow-[0_2px_6px_rgba(0,0,0,0.08)] cursor-pointer'
       }`}
       onClick={() => !dismissed && onClick(ann)}

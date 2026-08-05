@@ -96,6 +96,7 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         onSelectAnnotation={state.onSelectAnnotation}
         onDeleteAnnotation={state.onDeleteAnnotation}
         onExplainAnnotation={state.aiAvailable ? state.onExplainAnnotation : undefined}
+        agentFindingSources={state.agentFindingSources}
         isViewed={state.viewedFiles.has(file.path)}
         onToggleViewed={() => state.onToggleViewed(file.path)}
         isStaged={state.stagedFiles.has(file.path)}
