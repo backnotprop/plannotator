@@ -16,13 +16,17 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
   const containerRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLElement>(null);
 
-  // Highlight code block on mount and when content/language changes
+  // Highlight code block on mount and when content/language changes.
+  // Skip highlighting for language-less fences so highlight.js doesn't
+  // auto-detect a language and color plain text.
   useEffect(() => {
     if (codeRef.current) {
       // Reset any previous highlighting
       codeRef.current.removeAttribute('data-highlighted');
       codeRef.current.className = `hljs font-mono${block.language ? ` language-${block.language}` : ''}`;
-      hljs.highlightElement(codeRef.current);
+      if (block.language) {
+        hljs.highlightElement(codeRef.current);
+      }
     }
   }, [block.content, block.language]);
 

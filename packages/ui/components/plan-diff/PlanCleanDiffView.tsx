@@ -700,7 +700,11 @@ const SimpleCodeBlock: React.FC<{ block: Block }> = ({ block }) => {
     if (codeRef.current) {
       codeRef.current.removeAttribute("data-highlighted");
       codeRef.current.className = `hljs font-mono${block.language ? ` language-${block.language}` : ""}`;
-      hljs.highlightElement(codeRef.current);
+      // Skip highlighting language-less fences so highlight.js doesn't
+      // auto-detect a language and color plain text.
+      if (block.language) {
+        hljs.highlightElement(codeRef.current);
+      }
     }
   }, [block.content, block.language]);
 

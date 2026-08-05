@@ -630,7 +630,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           const block = blocks.find(b => b.id === codeEl.closest('[data-block-id]')?.getAttribute('data-block-id'));
           codeEl.removeAttribute('data-highlighted');
           codeEl.className = `hljs font-mono${block?.language ? ` language-${block.language}` : ''}`;
-          hljs.highlightElement(codeEl);
+          // Skip highlighting language-less fences so highlight.js doesn't
+          // auto-detect a language and color plain text.
+          if (block?.language) {
+            hljs.highlightElement(codeEl);
+          }
         }
       });
 
