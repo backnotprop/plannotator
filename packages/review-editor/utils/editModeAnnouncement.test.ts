@@ -35,7 +35,7 @@ describe('Edit Mode announcement persistence', () => {
 
     markEditModeAnnouncementSeen();
 
-    expect(stored.get(SEEN_KEY)).toBe('1');
+    expect(stored.get(SEEN_KEY)).toBe('3');
     expect(needsEditModeAnnouncement()).toBe(false);
   });
 
@@ -48,7 +48,7 @@ describe('Edit Mode announcement persistence', () => {
     enableEditSuggestionsFromAnnouncement();
 
     expect(stored.get(SETTING_KEY)).toBe('true');
-    expect(stored.get(SEEN_KEY)).toBe('1');
+    expect(stored.get(SEEN_KEY)).toBe('3');
     expect(needsEditModeAnnouncement()).toBe(false);
   });
 });

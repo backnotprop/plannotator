@@ -70,8 +70,10 @@ describe('EditModeAnnouncementDialog', () => {
     expect(dialog?.textContent).toContain('never writes to your files on disk');
     expect(dialog?.textContent).toContain('One file at a time');
     expect(dialog?.textContent).toContain('Settings → Editor → Edit Code to Suggest');
-    expect(buttonWithText('Turn it on')).toBeTruthy();
-    expect(buttonWithText('Keep it off')).toBeTruthy();
+    const enableSwitch = document.querySelector('[role="switch"]');
+    expect(enableSwitch).not.toBeNull();
+    expect(enableSwitch?.getAttribute('aria-checked')).toBe('false');
+    expect(buttonWithText('Done')).toBeTruthy();
   });
 
   test.skipIf(!hasDom)('renders the bundled demo recording by default', async () => {
@@ -108,30 +110,53 @@ describe('EditModeAnnouncementDialog', () => {
     expect(document.querySelector('[data-edit-mode-demo-placeholder]')).toBeNull();
   });
 
-  test.skipIf(!hasDom)('"Turn it on" fires onEnable and never onDismiss', async () => {
+  test.skipIf(!hasDom)('Done with the switch untouched dismisses without enabling', async () => {
     const onEnable = mock(() => {});
     const onDismiss = mock(() => {});
     await mountDialog({ onEnable, onDismiss });
 
-    expect(document.activeElement?.textContent).toContain('Turn it on');
+    // The focused default action must be the consent-neutral one: pressing it
+    // blind keeps the feature off.
+    expect(document.activeElement?.textContent).toContain('Done');
 
-    await act(async () => buttonWithText('Turn it on').click());
+    await act(async () => buttonWithText('Done').click());
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onEnable).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-edit-mode-announcement-dialog]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('flipping the switch then Done fires onEnable and never onDismiss', async () => {
+    const onEnable = mock(() => {});
+    const onDismiss = mock(() => {});
+    await mountDialog({ onEnable, onDismiss });
+
+    const enableSwitch = document.querySelector<HTMLButtonElement>('[role="switch"]');
+    expect(enableSwitch).not.toBeNull();
+    await act(async () => enableSwitch!.click());
+    expect(enableSwitch!.getAttribute('aria-checked')).toBe('true');
+
+    await act(async () => buttonWithText('Done').click());
 
     expect(onEnable).toHaveBeenCalledTimes(1);
     expect(onDismiss).not.toHaveBeenCalled();
     expect(document.querySelector('[data-edit-mode-announcement-dialog]')).toBeNull();
   });
 
-  test.skipIf(!hasDom)('"Keep it off" dismisses without enabling', async () => {
+  test.skipIf(!hasDom)('the switch is a toggle: on then off again ends with a plain dismissal', async () => {
     const onEnable = mock(() => {});
     const onDismiss = mock(() => {});
     await mountDialog({ onEnable, onDismiss });
 
-    await act(async () => buttonWithText('Keep it off').click());
+    const enableSwitch = document.querySelector<HTMLButtonElement>('[role="switch"]');
+    await act(async () => enableSwitch!.click());
+    await act(async () => enableSwitch!.click());
+    expect(enableSwitch!.getAttribute('aria-checked')).toBe('false');
+
+    await act(async () => buttonWithText('Done').click());
 
     expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(onEnable).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-edit-mode-announcement-dialog]')).toBeNull();
   });
 
   test.skipIf(!hasDom)('Escape dismisses the dialog and restores prior focus', async () => {

@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Ban, MessageSquarePlus, Pencil, Send } from 'lucide-react';
+import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import { EDIT_MODE_DEMO_POSTER_SRC, EDIT_MODE_DEMO_VIDEO_SRC } from './editModeDemoMedia';
 
 /**
@@ -127,6 +128,7 @@ export function EditModeAnnouncementDialog({
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onDismissRef = useRef(onDismiss);
+  const [enableChoice, setEnableChoice] = useState(false);
 
   useEffect(() => {
     onDismissRef.current = onDismiss;
@@ -135,6 +137,8 @@ export function EditModeAnnouncementDialog({
   useEffect(() => {
     if (!isOpen) return;
 
+    // A reopened dialog must not remember a previously flipped switch.
+    setEnableChoice(false);
     previousFocusRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
@@ -198,8 +202,8 @@ export function EditModeAnnouncementDialog({
             className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted-foreground"
           >
             A new way to give review feedback: make the change you want to see, right in the
-            diff. It is experimental and off by default. Turn it on now or keep it off, and
-            nothing else changes.
+            diff. It is experimental and off by default. Turn it on with the switch below, or
+            leave it off, and nothing else changes.
           </p>
         </header>
 
@@ -251,21 +255,41 @@ export function EditModeAnnouncementDialog({
           <p className="text-xs text-muted-foreground">
             Change this anytime in Settings → Editor → Edit Code to Suggest.
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="min-h-10 rounded-lg border border-border px-4 text-sm font-medium text-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
-            >
-              Keep it off
-            </button>
+          {/* The enable decision is an explicit switch, deliberately separate from the
+              dismiss action: a primary "Turn it on" button reads as a generic continue
+              and gets clicked blind. Done applies whatever the switch says; with the
+              switch untouched it is a plain dismissal. */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-3.5 py-2">
+              <span id="edit-mode-enable-label">
+                <TextShimmer className="text-sm font-medium" duration={2.5} spread={1.5}>
+                  Enable Edit Mode
+                </TextShimmer>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-labelledby="edit-mode-enable-label"
+                aria-checked={enableChoice}
+                onClick={() => setEnableChoice((value) => !value)}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card ${
+                  enableChoice ? 'bg-primary' : 'bg-muted'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                    enableChoice ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
             <button
               ref={primaryActionRef}
               type="button"
-              onClick={onEnable}
+              onClick={() => (enableChoice ? onEnable() : onDismiss())}
               className="min-h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             >
-              Turn it on
+              Done
             </button>
           </div>
         </footer>

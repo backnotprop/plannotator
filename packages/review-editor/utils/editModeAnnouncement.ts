@@ -8,7 +8,9 @@ import { configStore } from '@plannotator/ui/config';
  */
 const STORAGE_KEY = 'plannotator-edit-mode-announcement-seen';
 // Bump to re-show the announcement after a meaningful revision.
-const CURRENT_VERSION = '1';
+// '3': shimmer label on the enable switch. '2': footer redesigned from a Turn it on / Keep it off button pair to an
+// explicit enable switch plus a neutral Done (pre-release, so nobody re-sees).
+const CURRENT_VERSION = '3';
 
 export function needsEditModeAnnouncement(): boolean {
   return storage.getItem(STORAGE_KEY) !== CURRENT_VERSION;
