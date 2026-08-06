@@ -35,7 +35,7 @@ See [Installation](/docs/getting-started/installation/) for hook setup instructi
 
 ## 2. Deploy the Share Portal
 
-The share portal is a static single-page application with no application database. It loads shared hash content in the browser, fetches ciphertext for short URLs, and performs Plannotator's GitHub release check every time the app loads. There is currently no setting to disable that check. The built portal bundles its default Inter and Geist Mono fonts plus its Highlight.js library and theme, so those defaults do not require Google Fonts or cdnjs. Rendered documents can still load remote assets that they reference.
+The share portal is a static single-page application with no application database. It loads shared hash content in the browser, fetches ciphertext for short URLs, and performs Plannotator's GitHub release check every time the app loads. There is currently no setting to disable that check. The built portal bundles its default Inter and Geist Mono fonts plus its syntax highlighter (Shiki, via the diff renderer) and themes, so those defaults do not require Google Fonts or any CDN. Rendered documents can still load remote assets that they reference.
 
 ### Build
 
