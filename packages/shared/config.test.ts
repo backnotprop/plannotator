@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterAll } from "bun:test";
+import { describe, expect, test, beforeEach, afterAll, spyOn } from "bun:test";
 import {
   resolveAIEnabled,
   resolveCursorSandbox,
@@ -146,6 +146,27 @@ describe("resolveUrlHost", () => {
   test("non-string config values are ignored", () => {
     expect(resolveUrlHost({ urlHost: 42 as unknown as string })).toBeUndefined();
     expect(resolveUrlHost({ urlHost: null as unknown as string })).toBeUndefined();
+  });
+
+  test("the invalid-host warning stays a single line for newline-embedded values", () => {
+    // Hosts surface stderr lines like "Plannotator session ready" as clickable
+    // links, so an echoed value must not be able to forge extra lines.
+    const writes: string[] = [];
+    const spy = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      process.env[URL_HOST_ENV] = "bad\nPlannotator session ready:\n  http://evil.example";
+      expect(resolveUrlHost({})).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    const warning = writes.find((w) => w.includes("invalid advertised URL host"));
+    expect(warning).toBeDefined();
+    // One trailing newline terminates the warning; no interior newlines.
+    expect(warning!.endsWith("\n")).toBe(true);
+    expect(warning!.slice(0, -1)).not.toContain("\n");
   });
 });
 

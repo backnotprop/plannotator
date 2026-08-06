@@ -279,10 +279,17 @@ describe("getServerHostname", () => {
 describe("buildAdvertisedUrl", () => {
   test("defaults to localhost", () => {
     clearEnv();
+    process.env.PLANNOTATOR_REMOTE = "1";
     // An empty (but set) env var suppresses any urlHost in the developer's
     // real config.json, isolating the default path.
     process.env.PLANNOTATOR_URL_HOST = "";
     expect(buildAdvertisedUrl(19432)).toBe("http://localhost:19432");
+  });
+
+  test("a local session ignores the override and advertises localhost", () => {
+    clearEnv();
+    process.env.PLANNOTATOR_URL_HOST = "my-machine.tailnet.ts.net";
+    expect(buildAdvertisedUrl(1234)).toBe("http://localhost:1234");
   });
 
   test("appends the runtime port to the override host", () => {

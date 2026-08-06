@@ -162,17 +162,23 @@ let warnedLocalUrlHost = false;
  * Compose the URL advertised to the user for a bound port (issue #657).
  * Display-only: the PLANNOTATOR_URL_HOST / urlHost override changes what is
  * printed and opened, never which interface the server listens on
- * (getServerHostname). Same-machine subprocesses must not use this — they get
- * a loopback URL so a tailnet-only hostname can't break local agent jobs.
+ * (getServerHostname). Remote sessions only: a local session binds loopback,
+ * so honoring the override would advertise (and auto-open) a URL nothing is
+ * listening on — the override is ignored with a once-per-process warning.
+ * Same-machine subprocesses must not use this — they get a loopback URL so a
+ * tailnet-only hostname can't break local agent jobs.
  */
 export function buildAdvertisedUrl(port: number): string {
   const host = resolveUrlHost(loadConfig());
   if (host === undefined) return `http://localhost:${port}`;
-  if (!isRemoteSession() && !warnedLocalUrlHost) {
-    warnedLocalUrlHost = true;
-    process.stderr.write(
-      `[plannotator] Warning: an advertised URL host is set but this is a local session (server binds loopback), so http://${host}:${port} will not be reachable from other devices. Set PLANNOTATOR_REMOTE=1 to bind beyond localhost.\n`,
-    );
+  if (!isRemoteSession()) {
+    if (!warnedLocalUrlHost) {
+      warnedLocalUrlHost = true;
+      process.stderr.write(
+        `[plannotator] Warning: advertised URL host ${JSON.stringify(host)} ignored — this is a local session, so the server binds loopback and only localhost is reachable. Set PLANNOTATOR_REMOTE=1 to use the override.\n`,
+      );
+    }
+    return `http://localhost:${port}`;
   }
   return `http://${host}:${port}`;
 }

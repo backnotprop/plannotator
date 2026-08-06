@@ -35,9 +35,9 @@ export PLANNOTATOR_REMOTE=1
 export PLANNOTATOR_URL_HOST=my-machine.tailnet.ts.net
 ```
 
-Plannotator then advertises `http://my-machine.tailnet.ts.net:<port>` (the port is chosen at runtime and always appended), so you can open review sessions straight from a phone or another computer. The setting is host-only and strictly display-only — it never changes which interface the server binds; remote mode (`PLANNOTATOR_REMOTE=1`) is what makes the server reachable beyond localhost. It can also be set persistently via `~/.plannotator/config.json` (`{ "urlHost": "my-machine.tailnet.ts.net" }`); the env var takes precedence.
+Plannotator then advertises `http://my-machine.tailnet.ts.net:<port>` (the port is chosen at runtime and always appended), so you can open review sessions straight from a phone or another computer. The setting is host-only and strictly display-only — it never changes which interface the server binds; remote mode (`PLANNOTATOR_REMOTE=1`) is what makes the server reachable beyond localhost, and a local session ignores the override entirely (localhost is advertised, with a warning). It can also be set persistently via `~/.plannotator/config.json` (`{ "urlHost": "my-machine.tailnet.ts.net" }`); the env var takes precedence.
 
-Note that the session is served over plain `http`, so browser features that require a secure context — such as creating short share links from the UI — are unavailable from other devices unless you put the session behind HTTPS (e.g. `tailscale serve`). The core review, annotate, and approve flows work over plain `http`.
+Note that the session is served over plain `http`, so some in-app features that require a secure context (such as creating short share links from the UI) are unavailable from other devices unless you put the session behind HTTPS (e.g. `tailscale serve`). The core review, annotate, and approve flows work over plain `http`.
 
 ## VS Code Remote / devcontainers
 
