@@ -72,7 +72,7 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
-import { isRemoteSession } from "./server/network.ts";
+import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 
@@ -163,9 +163,12 @@ function safeNotify(
  * after-turn notify inside openBrowserForServer fires too late to render.
  */
 function sessionOpenedMessage(label: string, url: string): string {
-	return isRemoteSession()
-		? `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`
-		: `${label}. You can keep chatting while it runs.`;
+	if (!isRemoteSession()) return `${label}. You can keep chatting while it runs.`;
+	// With an advertised-URL host override the link is directly reachable
+	// (e.g. over a tailnet), so the port-forwarding advice would be wrong.
+	return isUrlHostOverridden()
+		? `${label} — open ${url} on your device. You can keep chatting while it runs.`
+		: `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`;
 }
 
 function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown, origin?: PiSessionIdentity): void {

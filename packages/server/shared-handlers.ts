@@ -9,6 +9,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
+import { isUrlHostOverridden } from "./remote";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
 import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
@@ -207,8 +208,12 @@ export async function handleServerReady(
   // reachable URL is the lifeline. Without it, a sharing-disabled remote user
   // saw no URL at all and the agent hung waiting on the review.
   if (isRemote) {
+    // With an advertised-URL host override the link is directly reachable
+    // (e.g. over a tailnet), so the port-forwarding advice would be wrong.
     process.stderr.write(
-      `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
+      isUrlHostOverridden()
+        ? `\n  Plannotator session ready — open on your device:\n  ${url}\n\n`
+        : `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
     );
   } else if (isCodexDesktopHost()) {
     process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);

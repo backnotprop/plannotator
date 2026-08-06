@@ -14,7 +14,7 @@
 
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -592,7 +592,7 @@ export async function startPlannotatorServer(
   );
 
   const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
+  const serverUrl = buildAdvertisedUrl(port);
   let stopPromise: Promise<void> | undefined;
   const stop = () => {
     stopPromise ??= (async () => {

@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import type { Server } from "node:http";
 import { release } from "node:os";
 import { delimiter, join } from "node:path";
-import { loadConfig, resolveUseGlimpse } from "../generated/config.ts";
+import { loadConfig, resolveUrlHost, resolveUseGlimpse } from "../generated/config.ts";
 import { parsePortSelection } from "../generated/port-range.ts";
 
 const DEFAULT_REMOTE_PORT = 19432;
@@ -114,6 +114,33 @@ export function getServerPort(): {
 
 export function getServerHostname(): string {
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+/** True when the advertised-URL host is overridden away from localhost. */
+export function isUrlHostOverridden(): boolean {
+	return resolveUrlHost(loadConfig()) !== undefined;
+}
+
+let warnedLocalUrlHost = false;
+
+/**
+ * Compose the URL advertised to the user for a bound port (issue #657).
+ * Display-only: the PLANNOTATOR_URL_HOST / urlHost override changes what is
+ * printed and opened, never which interface the server listens on
+ * (getServerHostname). Same-machine subprocesses must not use this — they get
+ * a loopback URL so a tailnet-only hostname can't break local agent jobs.
+ * Mirrors packages/server/remote.ts — keep the two behaviorally identical.
+ */
+export function buildAdvertisedUrl(port: number): string {
+	const host = resolveUrlHost(loadConfig());
+	if (host === undefined) return `http://localhost:${port}`;
+	if (!isRemoteSession() && !warnedLocalUrlHost) {
+		warnedLocalUrlHost = true;
+		process.stderr.write(
+			`[plannotator] Warning: an advertised URL host is set but this is a local session (server binds loopback), so http://${host}:${port} will not be reachable from other devices. Set PLANNOTATOR_REMOTE=1 to bind beyond localhost.\n`,
+		);
+	}
+	return `http://${host}:${port}`;
 }
 
 const MAX_RETRIES = 5;

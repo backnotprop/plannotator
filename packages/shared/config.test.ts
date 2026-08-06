@@ -7,6 +7,8 @@ import {
   resolveGuideHistory,
   resolveUseJina,
   resolveTodoProviderEnabled,
+  resolveUrlHost,
+  isValidUrlHost,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
@@ -59,6 +61,91 @@ describe("resolveTodoProviderEnabled", () => {
       process.env[TODO_ENV] = v;
       expect(resolveTodoProviderEnabled({ todoProvider: "off" })).toBe(true);
     }
+  });
+});
+
+const URL_HOST_ENV = "PLANNOTATOR_URL_HOST";
+const originalUrlHostEnv = process.env[URL_HOST_ENV];
+
+describe("isValidUrlHost", () => {
+  test("accepts bare hostnames, IPv4, and bracketed IPv6", () => {
+    for (const host of [
+      "localhost",
+      "my-machine",
+      "my-machine.tailnet.ts.net",
+      "raspberrypi.local",
+      "100.101.102.103",
+      "[fd7a::1]",
+      "[::1]",
+      "[::ffff:100.101.102.103]",
+    ]) {
+      expect(isValidUrlHost(host)).toBe(true);
+    }
+  });
+
+  test("rejects schemes, paths, ports, credentials, query, fragment, whitespace", () => {
+    for (const host of [
+      "http://my-machine",
+      "https://my-machine.ts.net",
+      "my-machine/path",
+      "my-machine:8080",
+      "user@my-machine",
+      "my-machine?x=1",
+      "my-machine#frag",
+      "my machine",
+      "fd7a::1", // unbracketed IPv6 reads as ":" outside brackets
+      "-leading-hyphen",
+      ".leading.dot",
+      "trailing-hyphen-",
+      "",
+    ]) {
+      expect(isValidUrlHost(host)).toBe(false);
+    }
+  });
+});
+
+describe("resolveUrlHost", () => {
+  beforeEach(() => {
+    delete process.env[URL_HOST_ENV];
+  });
+  afterAll(() => {
+    if (originalUrlHostEnv === undefined) delete process.env[URL_HOST_ENV];
+    else process.env[URL_HOST_ENV] = originalUrlHostEnv;
+  });
+
+  test("defaults to undefined (localhost) with no env var and no config key", () => {
+    expect(resolveUrlHost({})).toBeUndefined();
+  });
+
+  test("config.urlHost is honored when the env var is unset", () => {
+    expect(resolveUrlHost({ urlHost: "my-machine.tailnet.ts.net" })).toBe("my-machine.tailnet.ts.net");
+  });
+
+  test("env wins over the config key", () => {
+    process.env[URL_HOST_ENV] = "env-host";
+    expect(resolveUrlHost({ urlHost: "config-host" })).toBe("env-host");
+  });
+
+  test("an empty (but set) env var suppresses the config key", () => {
+    process.env[URL_HOST_ENV] = "";
+    expect(resolveUrlHost({ urlHost: "config-host" })).toBeUndefined();
+  });
+
+  test("values are trimmed", () => {
+    process.env[URL_HOST_ENV] = "  my-machine  ";
+    expect(resolveUrlHost({})).toBe("my-machine");
+  });
+
+  test("invalid values fall back to undefined (localhost) instead of throwing", () => {
+    for (const v of ["http://my-machine", "my-machine:8080", "a@b", "a b", "host/path"]) {
+      process.env[URL_HOST_ENV] = v;
+      expect(resolveUrlHost({})).toBeUndefined();
+    }
+  });
+
+  test("non-string config values are ignored", () => {
+    expect(resolveUrlHost({ urlHost: 42 as unknown as string })).toBeUndefined();
+    expect(resolveUrlHost({ urlHost: null as unknown as string })).toBeUndefined();
   });
 });
 

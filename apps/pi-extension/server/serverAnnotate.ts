@@ -33,7 +33,7 @@ import {
 import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
-import { isRemoteSession, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
 
 import { getRepoInfo } from "./project.ts";
@@ -850,7 +850,7 @@ export async function startAnnotateServer(options: {
 	return {
 		port,
 		portSource,
-		url: `http://localhost:${port}`,
+		url: buildAdvertisedUrl(port),
 		waitForDecision: () => decisionPromise,
 		stop: () => {
 			// try/finally: a throwing dispose must never leave the listener bound.

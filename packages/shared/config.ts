@@ -179,6 +179,15 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
+   * Display-only hostname for advertised session URLs (issue #657). Lets a
+   * remote-mode user hand out a reachable link (e.g. a Tailscale MagicDNS
+   * name or tailnet IP) instead of localhost. Host only — the port is chosen
+   * at runtime and always appended. Never affects which interface the server
+   * binds; that stays governed by PLANNOTATOR_REMOTE. Mirrors the
+   * PLANNOTATOR_URL_HOST env var, which takes precedence.
+   */
+  urlHost?: string;
+  /**
    * Mirror the approved plan checklist into an editable todo provider during
    * execution (issue #484). "auto" (default) syncs whenever a provider is
    * detected — currently pi-todos. Detection checks the configured todo
@@ -376,6 +385,49 @@ export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
   if (envVal !== undefined) return envVal !== "disabled";
   if (config.share !== undefined) return config.share !== "disabled";
   return true;
+}
+
+// Bare hostname or IPv4: letters/digits/dots/hyphens, no leading/trailing
+// dot or hyphen. Covers MagicDNS names ("my-machine.tailnet.ts.net").
+const URL_HOST_HOSTNAME_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
+// Bracketed IPv6 literal, e.g. [fd7a::1]; dots allow IPv4-mapped forms.
+const URL_HOST_IPV6_RE = /^\[[0-9A-Fa-f:.]+\]$/;
+
+/**
+ * Validate a display host for advertised URLs. Host only: anything carrying a
+ * scheme, path, query, credentials, whitespace, or a port (":" outside IPv6
+ * brackets — the runtime-chosen port is always appended) is rejected.
+ */
+export function isValidUrlHost(host: string): boolean {
+  return URL_HOST_HOSTNAME_RE.test(host) || URL_HOST_IPV6_RE.test(host);
+}
+
+let warnedInvalidUrlHost = false;
+
+/**
+ * Resolve the display-only hostname used in advertised session URLs.
+ * Returns undefined when unset (callers advertise localhost).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_URL_HOST env var  →  config.urlHost  →  undefined
+ *
+ * An invalid value warns once on stderr and falls back to localhost — a
+ * display setting must never crash a server launch.
+ */
+export function resolveUrlHost(config: PlannotatorConfig): string | undefined {
+  const envVal = process.env.PLANNOTATOR_URL_HOST;
+  const raw = envVal !== undefined ? envVal : config.urlHost;
+  if (typeof raw !== "string") return undefined;
+  const host = raw.trim();
+  if (host === "") return undefined;
+  if (isValidUrlHost(host)) return host;
+  if (!warnedInvalidUrlHost) {
+    warnedInvalidUrlHost = true;
+    process.stderr.write(
+      `[plannotator] Warning: invalid advertised URL host "${host}" — expected a bare hostname, IPv4, or bracketed IPv6 (no scheme, port, or path); using localhost\n`,
+    );
+  }
+  return undefined;
 }
 
 /**

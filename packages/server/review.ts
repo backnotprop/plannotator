@@ -9,7 +9,7 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, vcsOwnsDiffType, gitRuntime } from "./vcs";
 import { basename } from "node:path";
@@ -659,8 +659,12 @@ export async function startReviewServer(
     return avatarUrl ? { ...info, avatarUrl } : info;
   };
 
-  // Agent jobs — background process manager (late-binds serverUrl via getter)
+  // Agent jobs — background process manager (late-binds serverUrl via getter).
+  // Spawned jobs run on this machine, so their API URL is pinned to loopback
+  // and never inherits the advertised-URL host override (a tailnet-only
+  // hostname must not break local agent jobs).
   let serverUrl = "";
+  let agentApiUrl = "";
   const resolveAgentCwd = (): string => {
     if (workspace) return workspace.root;
     if (options.worktreePool && prMetadata) {
@@ -827,7 +831,7 @@ export async function startReviewServer(
 
   const agentJobs = createAgentJobHandler({
     mode: "review",
-    getServerUrl: () => serverUrl,
+    getServerUrl: () => agentApiUrl,
     getCwd: resolveAgentCwd,
 
     async buildCommand(provider, config) {
@@ -2896,7 +2900,8 @@ export async function startReviewServer(
   );
 
   const port = server.port!;
-  serverUrl = `http://localhost:${port}`;
+  serverUrl = buildAdvertisedUrl(port);
+  agentApiUrl = `http://127.0.0.1:${port}`;
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 

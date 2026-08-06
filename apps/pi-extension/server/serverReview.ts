@@ -90,7 +90,7 @@ import {
 import { handleApiNotFound, html, json, parseBody, requestUrl, send } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
-import { isRemoteSession, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
 import { resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
@@ -683,8 +683,12 @@ export async function startReviewServer(options: {
 		);
 	}
 
-	// Agent jobs — background process manager (late-binds serverUrl via getter)
+	// Agent jobs — background process manager (late-binds serverUrl via getter).
+	// Spawned jobs run on this machine, so their API URL is pinned to loopback
+	// and never inherits the advertised-URL host override (a tailnet-only
+	// hostname must not break local agent jobs).
 	let serverUrl = "";
+	let agentApiUrl = "";
 	function resolveAgentCwd(): string {
 		if (workspace) return workspace.root;
 		if (options.worktreePool && prMeta) {
@@ -880,7 +884,7 @@ export async function startReviewServer(options: {
 
 	const agentJobs = createAgentJobHandler({
 		mode: "review",
-		getServerUrl: () => serverUrl,
+		getServerUrl: () => agentApiUrl,
 		getCwd: resolveAgentCwd,
 
 		async buildCommand(provider, config) {
@@ -2743,7 +2747,8 @@ export async function startReviewServer(options: {
 	});
 
 	const { port, portSource } = await listenOnPort(server);
-	serverUrl = `http://localhost:${port}`;
+	serverUrl = buildAdvertisedUrl(port);
+	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();
 	process.once("exit", exitHandler);
 

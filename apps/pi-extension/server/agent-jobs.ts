@@ -75,6 +75,12 @@ export function whichCmd(cmd: string): boolean {
 
 export interface AgentJobHandlerOptions {
 	mode: "plan" | "review" | "annotate";
+	/**
+	 * Returns the server's base URL for spawned subprocesses (e.g.,
+	 * "http://127.0.0.1:12345"). Late-bound. Jobs run on the same machine, so
+	 * this must stay loopback-reachable regardless of any advertised-URL host
+	 * override.
+	 */
 	getServerUrl: () => string;
 	getCwd: () => string;
 	/** Build the command server-side for a given provider. */

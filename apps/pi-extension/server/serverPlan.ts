@@ -37,7 +37,7 @@ import {
 	saveToObsidian,
 	saveToOctarine,
 } from "./integrations.ts";
-import { listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, listenOnPort } from "./network.ts";
 
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveSharingEnabled } from "../generated/config.ts";
 import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
@@ -467,7 +467,7 @@ export async function startPlanReviewServer(options: {
 		reviewId,
 		port,
 		portSource,
-		url: `http://localhost:${port}`,
+		url: buildAdvertisedUrl(port),
 		waitForDecision: () => decisionPromise,
 		onDecision: (listener) => {
 			decisionListeners.add(listener);
