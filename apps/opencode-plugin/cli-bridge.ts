@@ -239,11 +239,18 @@ function logCliWarnings(client: OpenCodeClient, stderr: string): void {
 export function formatUserFacingCliStderrLine(line: string): string | undefined {
   const trimmed = line.trim();
   if (!trimmed) return undefined;
-  if (/^Open this link on your local machine to\b/.test(trimmed)) return trimmed;
-  // Current binary phrasing ("Plannotator session ready — open on your local
-  // machine (forward port N if needed):"); the older "Open this link" match is
-  // kept for users running an older plannotator binary.
+  // "Open this link ..." is the share-link header; "Open it ..." is the remote
+  // follow-up to the session-ready line below.
+  if (/^Open (?:this link|it) on your local machine\b/.test(trimmed)) return trimmed;
+  // Current binary phrasing ("Plannotator session ready: <url>", one line on
+  // every start); older binaries put the URL on the following line, which the
+  // bare-URL match below still forwards.
   if (/^Plannotator session ready\b/.test(trimmed)) return trimmed;
+  // The browser-launch failure that follows the session-ready line on a
+  // headless box. Without it OpenCode hands the user a URL and never says why
+  // no tab appeared. Anchored on the prefix only, so the em-dash in the real
+  // copy stays out of the pattern.
+  if (/^Could not open a browser automatically\b/.test(trimmed)) return trimmed;
   if (/^https?:\/\/\S+/.test(trimmed)) return trimmed;
   if (/^\(.+annotations added in browser\)$/.test(trimmed)) return trimmed;
   return undefined;

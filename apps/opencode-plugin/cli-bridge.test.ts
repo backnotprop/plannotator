@@ -13,6 +13,7 @@ import {
   getRecentAssistantMessages,
   injectSessionPrompt,
 } from "./cli-bridge";
+import { SESSION_READY_LINE_PREFIX } from "@plannotator/server";
 import { getReviewApprovedPrompt, getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 import { OpenCodePromptDeliveryError } from "./prompt-delivery-error";
 
@@ -158,7 +159,32 @@ describe("OpenCode CLI bridge helpers", () => {
     expect(formatUserFacingCliStderrLine("  (1.2 KB - plan only, annotations added in browser)")).toBe(
       "(1.2 KB - plan only, annotations added in browser)",
     );
+    // The session URL line every session prints, plus its remote follow-up.
+    expect(formatUserFacingCliStderrLine("  Plannotator session ready: http://localhost:54321")).toBe(
+      "Plannotator session ready: http://localhost:54321",
+    );
+    expect(formatUserFacingCliStderrLine("  Open it on your local machine (forward port 19432 if needed).")).toBe(
+      "Open it on your local machine (forward port 19432 if needed).",
+    );
+    // Regression: this line was dropped, so a user on a headless box got the
+    // URL but no explanation for the tab that never appeared. The em-dash is
+    // part of the real product copy.
+    expect(
+      formatUserFacingCliStderrLine("  Could not open a browser automatically — open the URL above."),
+    ).toBe("Could not open a browser automatically — open the URL above.");
     expect(formatUserFacingCliStderrLine("Fetching: https://example.com")).toBeUndefined();
+  });
+
+  // The filters above match hardcoded text, so nothing in this file notices if
+  // the server changes what it emits. Build the line from the server's own
+  // exported constant and push it through the real filter: if the two drift
+  // apart, OpenCode users lose the URL, and this is the test that says so.
+  test("forwards a session-ready line built from the server's own prefix constant", () => {
+    const url = "http://localhost:54321";
+    // Byte-for-byte what handleServerReady writes, indent included.
+    const emitted = `  ${SESSION_READY_LINE_PREFIX}${url}`;
+
+    expect(formatUserFacingCliStderrLine(emitted)).toBe(`${SESSION_READY_LINE_PREFIX}${url}`);
   });
 
   test("resolves Windows CLI commands to an executable without shell mode", () => {

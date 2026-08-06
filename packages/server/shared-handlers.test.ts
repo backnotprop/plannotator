@@ -5,9 +5,40 @@ import { tmpdir } from "node:os";
 import {
   handleSaveNotes,
   handleServerReady,
-  isCodexDesktopHost,
+  SESSION_READY_LINE_PREFIX,
   writeServerReadyMetadata,
 } from "./shared-handlers";
+
+/** Run `fn` with stderr captured, so assertions see it and the test log doesn't. */
+async function captureStderr(fn: () => Promise<void>): Promise<string> {
+  const writes: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+    writes.push(String(chunk));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    (process.stderr as { write: unknown }).write = original;
+  }
+  return writes.join("");
+}
+
+/**
+ * The session URL must appear exactly once, on the stable one-line format.
+ *
+ * The expected line is written out literally rather than interpolated from
+ * `SESSION_READY_LINE_PREFIX`, because interpolating it would assert the
+ * constant against itself: every one of these tests would stay green while
+ * consumers matching the old text (see `formatUserFacingCliStderrLine` in
+ * `apps/opencode-plugin/cli-bridge.ts`) silently stopped forwarding the URL.
+ * The two-space indent and the newlines around the line are part of the format.
+ */
+function expectSingleSessionReadyLine(output: string, url: string): void {
+  expect(output.split(url).length - 1).toBe(1);
+  expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);
+}
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -108,125 +139,106 @@ describe("writeServerReadyMetadata", () => {
   });
 });
 
-describe("handleServerReady", () => {
-  test("detects the Codex Desktop app host", () => {
-    expect(isCodexDesktopHost({ __CFBundleIdentifier: "com.openai.codex" })).toBe(true);
-    expect(isCodexDesktopHost({ __CFBundleIdentifier: "com.apple.Terminal" })).toBe(false);
+describe("SESSION_READY_LINE_PREFIX", () => {
+  // Pinned to the literal bytes, because the prefix is a cross-component
+  // contract rather than an implementation detail: `cli-bridge.ts` matches it
+  // with its own hardcoded regex, and the docs quote it as the line agents
+  // grep. Changing it is a breaking change and has to fail here first.
+  test("is the exact text consumers match on", () => {
+    expect(SESSION_READY_LINE_PREFIX).toBe("Plannotator session ready: ");
   });
+});
 
+describe("handleServerReady", () => {
   test("does not open a browser when host-plugin mode handles it", async () => {
     let opened = false;
-    const originalBundleIdentifier = process.env.__CFBundleIdentifier;
-    process.env.__CFBundleIdentifier = "com.apple.Terminal";
 
-    try {
+    await captureStderr(async () => {
       await handleServerReady("http://localhost:12345", false, 12345, {
         skipBrowserOpen: true,
         openBrowser: async () => {
           opened = true;
         },
       });
-    } finally {
-      if (originalBundleIdentifier === undefined) {
-        delete process.env.__CFBundleIdentifier;
-      } else {
-        process.env.__CFBundleIdentifier = originalBundleIdentifier;
-      }
-    }
+    });
 
     expect(opened).toBe(false);
   });
 
-  // Regression: a remote session must surface a reachable URL in the terminal
-  // regardless of URL sharing — otherwise a sharing-disabled remote user is left
-  // with no URL and the agent hangs waiting on the review.
-  test("prints the reachable URL to stderr for a remote session", async () => {
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    try {
-      await handleServerReady("http://localhost:19432", true, 19432, {
-        skipBrowserOpen: true,
-      });
-    } finally {
-      (process.stderr as { write: unknown }).write = original;
-    }
-    expect(writes.join("")).toContain("http://localhost:19432");
-  });
-
-  test("does not print the URL for a local session when the browser opens", async () => {
-    const writes: string[] = [];
+  // Regression (upstream #1134): the URL used to be printed only when the
+  // session was remote, when the Codex desktop host was detected, or when the
+  // browser failed to open. A local session whose browser opened fine printed
+  // nothing, so a closed tab left neither the user nor the agent driving the
+  // session with any way back to it.
+  test("prints the stable URL line for a local session when the browser opens", async () => {
     let opened = "";
-    const original = process.stderr.write.bind(process.stderr);
-    const originalBundleIdentifier = process.env.__CFBundleIdentifier;
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    process.env.__CFBundleIdentifier = "com.apple.Terminal";
-    try {
+
+    const output = await captureStderr(async () => {
       await handleServerReady("http://localhost:3000", false, 3000, {
         openBrowser: async (u: string) => {
           opened = u;
           return true;
         },
       });
-    } finally {
-      (process.stderr as { write: unknown }).write = original;
-      if (originalBundleIdentifier === undefined) {
-        delete process.env.__CFBundleIdentifier;
-      } else {
-        process.env.__CFBundleIdentifier = originalBundleIdentifier;
-      }
-    }
-    expect(writes.join("")).not.toContain("http://localhost:3000");
+    });
+
+    expectSingleSessionReadyLine(output, "http://localhost:3000");
     expect(opened).toBe("http://localhost:3000");
   });
 
-  test("prints the URL for a local Codex Desktop session even when the browser opens", async () => {
-    const writes: string[] = [];
-    const originalWrite = process.stderr.write.bind(process.stderr);
-    const originalBundleIdentifier = process.env.__CFBundleIdentifier;
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    process.env.__CFBundleIdentifier = "com.openai.codex";
-    try {
-      await handleServerReady("http://localhost:3000", false, 3000, {
-        openBrowser: async () => true,
+  // The URL is greppable, so it has to be on one line and it has to be the same
+  // line in every mode — including the modes that add their own context.
+  test("prints the reachable URL once for a remote session, with forwarding context", async () => {
+    const output = await captureStderr(async () => {
+      await handleServerReady("http://localhost:19432", true, 19432, {
+        skipBrowserOpen: true,
       });
-    } finally {
-      (process.stderr as { write: unknown }).write = originalWrite;
-      if (originalBundleIdentifier === undefined) {
-        delete process.env.__CFBundleIdentifier;
-      } else {
-        process.env.__CFBundleIdentifier = originalBundleIdentifier;
-      }
-    }
-    expect(writes.join("")).toContain("http://localhost:3000");
+    });
+
+    expectSingleSessionReadyLine(output, "http://localhost:19432");
+    expect(output).toContain("forward port 19432");
   });
 
   // Regression: a local session whose browser can't be opened (headless box,
-  // devcontainer with no display) must still surface the URL, or the agent
-  // hangs at waitForDecision with the user having no link to visit.
-  test("prints the URL for a local session when the browser fails to open", async () => {
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    try {
+  // devcontainer with no display) must say so, or the user waits on a tab that
+  // never appears — but the URL still prints exactly once.
+  test("prints the URL once and reports the failure when the browser won't open", async () => {
+    const output = await captureStderr(async () => {
       await handleServerReady("http://localhost:4000", false, 4000, {
         openBrowser: async () => false,
       });
+    });
+
+    expectSingleSessionReadyLine(output, "http://localhost:4000");
+    expect(output).toContain("Could not open a browser automatically");
+  });
+
+  test("publishes ready metadata to the PLANNOTATOR_READY_FILE side channel", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-ready-env-"));
+    const readyFile = join(dir, "ready.jsonl");
+    const original = process.env.PLANNOTATOR_READY_FILE;
+    process.env.PLANNOTATOR_READY_FILE = readyFile;
+
+    try {
+      await captureStderr(async () => {
+        await handleServerReady("http://localhost:5000", false, 5000, {
+          openBrowser: async () => true,
+        });
+      });
+
+      const [line] = readFileSync(readyFile, "utf8").trim().split(/\r?\n/);
+      expect(JSON.parse(line)).toEqual({
+        url: "http://localhost:5000",
+        isRemote: false,
+        port: 5000,
+      });
     } finally {
-      (process.stderr as { write: unknown }).write = original;
+      if (original === undefined) {
+        delete process.env.PLANNOTATOR_READY_FILE;
+      } else {
+        process.env.PLANNOTATOR_READY_FILE = original;
+      }
+      rmSync(dir, { recursive: true, force: true });
     }
-    expect(writes.join("")).toContain("http://localhost:4000");
   });
 });
