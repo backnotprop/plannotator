@@ -238,6 +238,13 @@ export function usePierreTheme(options?: { fontFamily?: string; fontSize?: strin
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
           }
+          /* Pierre's own horizontal scrollbar sits at the bottom of each
+             file's content, which is off-screen on any diff taller than the
+             panel (#1048). DiffHScrollbar replaces it, pinned to the file
+             header, so suppress this one. Height only — the vertical width
+             is already 0 upstream. */
+          [data-code] { scrollbar-width: none !important; }
+          [data-code]::-webkit-scrollbar { height: 0 !important; }
           .pn-token-hover {
             text-decoration: underline;
             text-decoration-color: ${primary || 'oklch(0.70 0.20 280)'};
