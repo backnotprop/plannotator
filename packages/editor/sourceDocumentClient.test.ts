@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { fetchSourceDocumentSnapshot, probeSourceSave } from './sourceDocumentClient';
+import {
+  fetchHtmlDocumentSnapshot,
+  fetchSourceDocumentSnapshot,
+  probeSourceSave,
+} from './sourceDocumentClient';
 
 const originalFetch = globalThis.fetch;
 
@@ -101,5 +105,33 @@ describe('source document client', () => {
 
     mockFetch(new Error('network'));
     expect(await fetchSourceDocumentSnapshot('/repo/docs/a.md')).toEqual({ status: 'unavailable' });
+  });
+
+  test('fetches a rendered html snapshot without requiring source-save support', async () => {
+    mockFetch(Response.json({
+      rawHtml: '<main>after</main>',
+      filepath: '/repo/docs/a.html',
+      renderAs: 'html',
+      sourceSave: { enabled: false, reason: 'html-render' },
+    }));
+
+    expect(await fetchHtmlDocumentSnapshot('/repo/docs/a.html')).toEqual({
+      status: 'ok',
+      snapshot: {
+        rawHtml: '<main>after</main>',
+        filepath: '/repo/docs/a.html',
+      },
+    });
+  });
+
+  test('keeps the current html available when refresh cannot load a valid snapshot', async () => {
+    mockFetch(new Response('missing', { status: 404 }));
+    expect(await fetchHtmlDocumentSnapshot('/repo/docs/missing.html')).toEqual({ status: 'missing' });
+
+    mockFetch(Response.json({ markdown: '# Not HTML', renderAs: 'markdown' }));
+    expect(await fetchHtmlDocumentSnapshot('/repo/docs/a.html')).toEqual({ status: 'unavailable' });
+
+    mockFetch(new Error('network'));
+    expect(await fetchHtmlDocumentSnapshot('/repo/docs/a.html')).toEqual({ status: 'unavailable' });
   });
 });

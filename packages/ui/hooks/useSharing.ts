@@ -8,7 +8,7 @@
  * - Tracking whether current session is from a shared link
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Annotation, type ImageAttachment } from '../types';
 import {
   type SharePayload,
@@ -104,6 +104,7 @@ export function useSharing(
   setRawHtml?: (h: string) => void,
   setShareHtml?: (h: string) => void,
   setRenderAs?: (m: 'markdown' | 'html') => void,
+  contentRevision = 0,
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
@@ -115,6 +116,18 @@ export function useSharing(
   const [pendingSharedAnnotations, setPendingSharedAnnotations] = useState<Annotation[] | null>(null);
   const [sharedGlobalAttachments, setSharedGlobalAttachments] = useState<ImageAttachment[] | null>(null);
   const [shareLoadError, setShareLoadError] = useState('');
+  const shareRequestContext = useMemo(() => ({}), [
+    markdown,
+    annotations,
+    globalAttachments,
+    shareBaseUrl,
+    pasteApiUrl,
+    rawHtml,
+    resolveRawHtmlForShare,
+    contentRevision,
+  ]);
+  const latestShareRequestContextRef = useRef(shareRequestContext);
+  latestShareRequestContextRef.current = shareRequestContext;
 
   const clearPendingSharedAnnotations = useCallback(() => {
     setPendingSharedAnnotations(null);
@@ -257,16 +270,19 @@ export function useSharing(
 
   // Generate share URL when markdown or annotations change
   const refreshShareUrl = useCallback(async () => {
+    const requestContext = shareRequestContext;
     try {
       const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl, rawHtml);
+      if (latestShareRequestContextRef.current !== requestContext) return;
       setShareUrl(url ?? '');
       setShareUrlSize(url ? formatUrlSize(url) : '');
     } catch (e) {
+      if (latestShareRequestContextRef.current !== requestContext) return;
       console.error('Failed to generate share URL:', e);
       setShareUrl('');
       setShareUrlSize('');
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, rawHtml]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, rawHtml, shareRequestContext]);
 
   // Auto-refresh share URL when dependencies change
   useEffect(() => {
@@ -280,9 +296,10 @@ export function useSharing(
   useEffect(() => {
     if (isSharedSession) { isSharedRef.current = true; return; }
     if (isSharedRef.current) { isSharedRef.current = false; return; }
+    setIsGeneratingShortUrl(false);
     setShortShareUrl('');
     setShortUrlError('');
-  }, [markdown, annotations, globalAttachments, rawHtml, isSharedSession]);
+  }, [markdown, annotations, globalAttachments, rawHtml, isSharedSession, contentRevision]);
 
   /**
    * Generate a short URL via the paste service.
@@ -295,6 +312,7 @@ export function useSharing(
 
     setIsGeneratingShortUrl(true);
     setShortUrlError('');
+    const requestContext = shareRequestContext;
 
     try {
       const htmlForShare = rawHtml
@@ -308,6 +326,8 @@ export function useSharing(
         htmlForShare,
       );
 
+      if (latestShareRequestContextRef.current !== requestContext) return null;
+
       if (result) {
         setShortShareUrl(result.shortUrl);
         return result.shortUrl;
@@ -317,13 +337,14 @@ export function useSharing(
         return null;
       }
     } catch (e) {
+      if (latestShareRequestContextRef.current !== requestContext) return null;
       setShortShareUrl('');
       setShortUrlError(e instanceof Error ? e.message : 'Failed to generate short URL');
       return null;
     } finally {
-      setIsGeneratingShortUrl(false);
+      if (latestShareRequestContextRef.current === requestContext) setIsGeneratingShortUrl(false);
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare, shareRequestContext]);
 
   // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {

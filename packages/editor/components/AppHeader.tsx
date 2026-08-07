@@ -9,6 +9,7 @@ import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import type { CallbackConfig } from '@plannotator/ui/utils/callback';
 import type { UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
+import { HtmlSurfaceActions } from './HtmlSurfaceActions';
 
 interface AppHeaderProps {
   /** HTML annotate surface: show a Hide/Show annotation-tools toggle in the header,
@@ -16,6 +17,9 @@ interface AppHeaderProps {
   htmlSurface?: boolean;
   htmlToolsHidden?: boolean;
   onToggleHtmlTools?: () => void;
+  canRefreshHtml?: boolean;
+  isRefreshingHtml?: boolean;
+  onRefreshHtml?: () => void;
   // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
@@ -97,6 +101,9 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   htmlSurface,
   htmlToolsHidden,
   onToggleHtmlTools,
+  canRefreshHtml,
+  isRefreshingHtml,
+  onRefreshHtml,
   isApiMode,
   annotateMode,
   archiveMode,
@@ -167,14 +174,13 @@ export const AppHeader = React.memo<AppHeaderProps>(({
       <div className="flex items-center gap-2">
         <AppHeaderLogo />
         {htmlSurface && onToggleHtmlTools && (
-          <button
-            type="button"
-            onClick={onToggleHtmlTools}
-            className="ml-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-1.5 py-1 rounded cursor-pointer"
-            title={htmlToolsHidden ? 'Show annotation tools' : 'Hide annotation tools'}
-          >
-            {htmlToolsHidden ? 'Show tools' : 'Hide tools'}
-          </button>
+          <HtmlSurfaceActions
+            canRefresh={!!canRefreshHtml && !!onRefreshHtml}
+            isRefreshing={!!isRefreshingHtml}
+            toolsHidden={!!htmlToolsHidden}
+            onRefresh={() => onRefreshHtml?.()}
+            onToggleTools={onToggleHtmlTools}
+          />
         )}
       </div>
 

@@ -163,7 +163,10 @@ import {
 import {
   validateSavedFileChanges,
 } from './savedFileChangeValidation';
-import { fetchSourceDocumentSnapshot, probeSourceSave } from './sourceDocumentClient';
+import {
+  fetchSourceDocumentSnapshot,
+  probeSourceSave,
+} from './sourceDocumentClient';
 import { reconcileSourceDocuments, type SourceDocumentReconcileEvent } from './sourceDocumentReconciliation';
 import {
   buildSourceWatchSubscription,
@@ -171,6 +174,7 @@ import {
   pathIsInsideDir,
 } from './sourceDocumentPaths';
 import { pickRestoredSingleFileDraftToDisplay } from './draftRestoreSelection';
+import { useHtmlRefresh } from './hooks/useHtmlRefresh';
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -824,6 +828,7 @@ const App: React.FC = () => {
   const activeDiffPreviousPlan = linkedDocHook.isActive ? linkedDocHook.diffPreviousPlan : previousPlan;
   const activeDiffVersionInfo = linkedDocHook.isActive ? linkedDocHook.diffVersionInfo : versionInfo;
   const activeDocFilepath = linkedDocHook.isActive ? linkedDocHook.filepath : null;
+  const activeHtmlPath = linkedDocHook.filepath ?? sourceFilePath ?? null;
 
   // Per-document version fetchers: only needed while a document with its own
   // diff baseline is active (folder annotate) — usePlanDiff's bare-endpoint
@@ -923,6 +928,27 @@ const App: React.FC = () => {
     setMarkdown, setAnnotations, setSelectedAnnotationId, setSubmitted,
   });
   const documentReadOnly = archive.archiveMode;
+  const applyRefreshedHtml = useCallback((nextRawHtml: string) => {
+    setRawHtml(nextRawHtml);
+    setShareHtml('');
+    setHtmlDiffHtml(null);
+    setIsPlanDiffActive(false);
+    if (!linkedDocHook.isActive) {
+      setPreviousPlan(null);
+      setVersionInfo(null);
+    }
+  }, [linkedDocHook.isActive]);
+  const htmlRefresh = useHtmlRefresh({
+    enabled: isApiMode && annotateMode && isHtmlSurface && !documentReadOnly,
+    activePath: activeHtmlPath,
+    onSnapshot: applyRefreshedHtml,
+  });
+  const htmlShareContext = useMemo(
+    () => ({ activePath: activeHtmlPath, reloadGeneration: htmlRefresh.reloadGeneration }),
+    [activeHtmlPath, htmlRefresh.reloadGeneration],
+  );
+  const latestHtmlShareContextRef = useRef(htmlShareContext);
+  latestHtmlShareContextRef.current = htmlShareContext;
 
   const canUseWideMode = useMemo(() => canUseAnnotateWideMode({
     archiveMode: archive.archiveMode,
@@ -1475,7 +1501,7 @@ const App: React.FC = () => {
     if (!isApiMode) return rawHtml;
 
     const params = new URLSearchParams();
-    const activePath = linkedDocHook.filepath ?? sourceFilePath;
+    const { activePath } = htmlShareContext;
     if (activePath) params.set('path', activePath);
     const query = params.toString();
     const res = await fetch(`/api/share-html${query ? `?${query}` : ''}`);
@@ -1483,9 +1509,12 @@ const App: React.FC = () => {
     if (!res.ok || data.error || typeof data.shareHtml !== 'string') {
       throw new Error(data.error || 'Failed to prepare HTML for sharing');
     }
+    if (latestHtmlShareContextRef.current !== htmlShareContext) {
+      throw new Error('HTML changed while preparing the share link');
+    }
     setShareHtml(data.shareHtml);
     return data.shareHtml;
-  }, [isApiMode, linkedDocHook.filepath, rawHtml, renderAs, shareHtml, sourceFilePath]);
+  }, [htmlShareContext, isApiMode, rawHtml, renderAs, shareHtml]);
 
   // URL-based sharing
   const {
@@ -1521,6 +1550,7 @@ const App: React.FC = () => {
     setRawHtml,
     setShareHtml,
     setRenderAs,
+    htmlRefresh.reloadGeneration,
   );
 
   useEffect(() => {
@@ -4102,6 +4132,9 @@ const App: React.FC = () => {
           htmlSurface={isHtmlSurface}
           htmlToolsHidden={htmlToolsHidden}
           onToggleHtmlTools={() => setHtmlToolsHidden((v) => !v)}
+          canRefreshHtml={htmlRefresh.canRefresh}
+          isRefreshingHtml={htmlRefresh.isRefreshing}
+          onRefreshHtml={htmlRefresh.refresh}
           isApiMode={isApiMode}
           annotateMode={annotateMode}
           archiveMode={archive.archiveMode}
@@ -4591,7 +4624,7 @@ const App: React.FC = () => {
                 )}
                 {renderAs === 'html' ? (
                   <HtmlViewer
-                    key={(linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan') + (isPlanDiffActive && htmlDiffHtml ? ':diff' : '')}
+                    key={`${linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}${isPlanDiffActive && htmlDiffHtml ? ':diff' : ''}:reload-${htmlRefresh.reloadGeneration}`}
                     ref={viewerRef}
                     rawHtml={isPlanDiffActive && htmlDiffHtml ? htmlDiffHtml : rawHtml}
                     annotations={viewerAnnotations}
@@ -4614,6 +4647,7 @@ const App: React.FC = () => {
                     diffActive={isPlanDiffActive && !!htmlDiffHtml}
                     onToggleDiff={() => setIsPlanDiffActive((v) => !v)}
                     onAskAI={canUseDocumentAskAI ? handleAskAI : undefined}
+                    onAnnotationRestoreComplete={htmlRefresh.reportAnnotationRestore}
                     readOnly={documentReadOnly}
                   />
                 ) : isEditingMarkdown ? (

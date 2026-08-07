@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AnnotationType } from '../../types';
 
 const hasDom = typeof document !== 'undefined';
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
@@ -11,6 +12,72 @@ afterEach(() => {
 });
 
 describe.if(hasDom)('HtmlViewer Vim HUD bridge', () => {
+  test('reports annotations that no longer match after the iframe reloads', async () => {
+    if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const reports: string[][] = [];
+
+    await act(async () => {
+      root.render(
+        <htmlViewerModule.HtmlViewer
+          rawHtml="<html><body><p>Updated document</p></body></html>"
+          annotations={[
+            {
+              id: 'still-here',
+              blockId: '',
+              startOffset: 0,
+              endOffset: 10,
+              type: AnnotationType.COMMENT,
+              originalText: 'Updated',
+              createdA: 1,
+            },
+            {
+              id: 'removed-text',
+              blockId: '',
+              startOffset: 0,
+              endOffset: 7,
+              type: AnnotationType.COMMENT,
+              originalText: 'Removed',
+              createdA: 2,
+            },
+          ]}
+          onAddAnnotation={() => {}}
+          onSelectAnnotation={() => {}}
+          selectedAnnotationId={null}
+          mode="selection"
+          inputMethod="drag"
+          onAnnotationRestoreComplete={(missingIds) => reports.push(missingIds)}
+        />,
+      );
+    });
+
+    const iframe = host.querySelector<HTMLIFrameElement>('iframe');
+    if (!iframe?.contentWindow) throw new Error('HTML iframe missing');
+    const dispatchBridgeMessage = (data: Record<string, unknown>) => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: iframe.contentWindow,
+        data,
+      }));
+    };
+
+    act(() => dispatchBridgeMessage({ type: 'plannotator-bridge-ready' }));
+    act(() => dispatchBridgeMessage({
+      type: 'plannotator-bridge-mark-applied',
+      id: 'still-here',
+      success: true,
+    }));
+    act(() => dispatchBridgeMessage({
+      type: 'plannotator-bridge-mark-applied',
+      id: 'removed-text',
+      success: false,
+    }));
+
+    expect(reports).toEqual([['removed-text']]);
+    act(() => root.unmount());
+  });
+
   test('copies only validated Vim text from the focused sandbox', async () => {
     if (!htmlViewerModule) {
       throw new Error('DOM test environment is not registered');

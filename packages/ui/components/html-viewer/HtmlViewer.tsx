@@ -60,6 +60,20 @@ function isBridgeReadyMessage(value: unknown): boolean {
     && value.type === `${PREFIX}ready`;
 }
 
+interface MarkAppliedMessage {
+  id: string;
+  success: boolean;
+}
+
+function parseMarkAppliedMessage(value: unknown): MarkAppliedMessage | null {
+  return isRecord(value)
+    && value.type === `${PREFIX}mark-applied`
+    && typeof value.id === "string"
+    && typeof value.success === "boolean"
+    ? { id: value.id, success: value.success }
+    : null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -160,6 +174,8 @@ export interface HtmlViewerProps {
   /** Toggle the diff-highlighted view on/off. */
   onToggleDiff?: () => void;
   onAskAI?: CommentAskAIHandler;
+  /** Reports annotations whose text anchors could not be restored in a fresh iframe. */
+  onAnnotationRestoreComplete?: (missingIds: string[]) => void;
   /** Disable every annotation mutation entry point while preserving reading and navigation. */
   readOnly?: boolean;
   /** Accessible iframe title. */
@@ -194,6 +210,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       diffActive,
       onToggleDiff,
       onAskAI,
+      onAnnotationRestoreComplete,
       readOnly = false,
       title = "HTML Plan Viewer",
     },
@@ -211,6 +228,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [vimHudCommand, setVimHudCommand] = useState<VimHudCommand | null>(null);
     const [vimHelpOpen, setVimHelpOpen] = useState(false);
     const vimHudSequenceRef = useRef(0);
+    const annotationRestorePendingRef = useRef<Set<string>>(new Set());
+    const annotationRestoreMissingRef = useRef<Set<string>>(new Set());
     const vimHudActive = !readOnly && vimModeEnabled && vimHudEnabled;
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
@@ -256,6 +275,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           setVimHelpOpen(false);
           return;
         }
+        const markApplied = parseMarkAppliedMessage(e.data);
+        if (markApplied && annotationRestorePendingRef.current.has(markApplied.id)) {
+          annotationRestorePendingRef.current.delete(markApplied.id);
+          if (!markApplied.success) annotationRestoreMissingRef.current.add(markApplied.id);
+          if (annotationRestorePendingRef.current.size === 0) {
+            onAnnotationRestoreComplete?.([...annotationRestoreMissingRef.current]);
+          }
+          return;
+        }
         const vimCopy = parseVimBridgeCopy(e.data);
         if (vimCopy !== null) {
           const iframe = iframeRef.current;
@@ -293,7 +321,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       }
       window.addEventListener("message", handler);
       return () => window.removeEventListener("message", handler);
-    }, [readOnly, vimHudActive, vimModeEnabled]);
+    }, [onAnnotationRestoreComplete, readOnly, vimHudActive, vimModeEnabled]);
 
     useEffect(() => {
       if (vimHudActive) return;
@@ -336,9 +364,18 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
-      if (annotations.length > 0) {
-        hook.applyAnnotations(annotations);
+      const restorableAnnotations = annotations.filter(
+        (annotation) => annotation.type !== AnnotationType.GLOBAL_COMMENT,
+      );
+      annotationRestorePendingRef.current = new Set(
+        restorableAnnotations.map((annotation) => annotation.id),
+      );
+      annotationRestoreMissingRef.current = new Set();
+      if (restorableAnnotations.length === 0) {
+        onAnnotationRestoreComplete?.([]);
+        return;
       }
+      hook.applyAnnotations(restorableAnnotations);
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Tell the bridge the current input method (drag vs pinpoint). Re-posts on

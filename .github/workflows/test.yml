@@ -99,6 +99,8 @@ jobs:
           packages/editor/planDiffAutoExit.test.tsx
           packages/editor/App.archiveReadOnly.test.tsx
           packages/editor/App.htmlHideTools.test.tsx
+          packages/editor/components/HtmlSurfaceActions.test.tsx
+          packages/ui/hooks/useSharing.contentRevision.test.tsx
           packages/editor/actionsLabelMode.test.ts
 
   opencode-v2:

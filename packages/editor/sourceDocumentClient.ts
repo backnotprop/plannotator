@@ -9,6 +9,8 @@ export type SourceSaveProbeResult =
 
 interface SourceDocumentResponse {
   markdown?: string;
+  rawHtml?: string;
+  filepath?: string;
   sourceSave?: SourceSaveCapability;
   renderAs?: 'markdown' | 'html';
 }
@@ -25,6 +27,16 @@ export interface SourceDocumentSnapshot {
 
 export type SourceDocumentSnapshotResult =
   | { status: 'ok'; snapshot: SourceDocumentSnapshot }
+  | { status: 'missing' }
+  | { status: 'unavailable' };
+
+export interface HtmlDocumentSnapshot {
+  rawHtml: string;
+  filepath: string;
+}
+
+export type HtmlDocumentSnapshotResult =
+  | { status: 'ok'; snapshot: HtmlDocumentSnapshot }
   | { status: 'missing' }
   | { status: 'unavailable' };
 
@@ -61,4 +73,15 @@ export async function fetchSourceDocumentSnapshot(path: string): Promise<SourceD
   }
   if (renderAs === 'html' || typeof markdown !== 'string' || !sourceSave?.enabled) return { status: 'unavailable' };
   return { status: 'ok', snapshot: { markdown, sourceSave } };
+}
+
+export async function fetchHtmlDocumentSnapshot(path: string): Promise<HtmlDocumentSnapshotResult> {
+  const result = await fetchSourceDocument(path);
+  if (result.status !== 'ok') return { status: result.status };
+
+  const { filepath, rawHtml, renderAs } = result.data;
+  if (renderAs !== 'html' || typeof rawHtml !== 'string' || typeof filepath !== 'string') {
+    return { status: 'unavailable' };
+  }
+  return { status: 'ok', snapshot: { rawHtml, filepath } };
 }
