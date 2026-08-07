@@ -448,7 +448,7 @@ export async function buildGuideCodexCommand(options: {
     "exec",
     "--output-schema", schemaPath,
     "-o", outputPath,
-    "--full-auto", "--ephemeral",
+    "--approve-for-me", "--ephemeral",
     "-C", cwd,
     prompt,
   ];
