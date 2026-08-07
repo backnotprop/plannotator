@@ -2248,6 +2248,12 @@ test("PowerShell scanner coverage must not silently vanish on CI", () => {
   }
 });
 
+// Each of these tests spawns PowerShell. The first spawn in the process pays
+// pwsh's cold start (assembly load + JIT), which on a loaded CI runner exceeds
+// bun's 5s default and fails whichever test happens to run first - a flake with
+// no relation to the code under test. Warm spawns finish in ~300ms.
+const PWSH_SCANNER_TIMEOUT_MS = 60_000;
+
 describe.skipIf(!pwshBin)("attestation bundle scanner under PowerShell (M7)", () => {
   const fixtureRaw = readFileSync(ATTESTATION_FIXTURE, "utf-8");
   const fixture = JSON.parse(fixtureRaw);
@@ -2268,7 +2274,7 @@ describe.skipIf(!pwshBin)("attestation bundle scanner under PowerShell (M7)", ()
         // bundle object the response carried.
         expect(JSON.parse(lines[i])).toEqual(fixture.attestations[i].bundle);
       }
-    });
+    }, PWSH_SCANNER_TIMEOUT_MS);
 
     test(`${name}: date-shaped strings survive untouched (DateTime coercion guard)`, () => {
       // A ConvertFrom-Json/ConvertTo-Json round trip would parse this into
@@ -2277,7 +2283,7 @@ describe.skipIf(!pwshBin)("attestation bundle scanner under PowerShell (M7)", ()
       const synthetic = '{"attestations":[{"bundle_url":"https://x.test/a","bundle":{"ts":"2026-01-02T03:04:05.000Z","integratedTime":"1785415430"}}]}';
       const lines = runScanner(body, synthetic);
       expect(lines).toEqual(['{"ts":"2026-01-02T03:04:05.000Z","integratedTime":"1785415430"}']);
-    });
+    }, PWSH_SCANNER_TIMEOUT_MS);
 
     test(`${name}: braces and escaped quotes inside string values do not derail the depth scan`, () => {
       const bundle = { weird: 'a}b{c"}{', nested: { deep: "{{{}}}" } };
@@ -2286,6 +2292,6 @@ describe.skipIf(!pwshBin)("attestation bundle scanner under PowerShell (M7)", ()
       expect(lines.length).toBe(1);
       expect(JSON.parse(lines[0])).toEqual(bundle);
       expect(synthetic).toContain(lines[0]);
-    });
+    }, PWSH_SCANNER_TIMEOUT_MS);
   }
 });
