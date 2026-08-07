@@ -438,6 +438,11 @@ const App: React.FC = () => {
   // Hide the floating HTML annotation controls (toolstrip + action cluster) so the
   // user can read the rendered page unobstructed. Selections/annotations are unaffected.
   const [htmlToolsHidden, setHtmlToolsHidden] = useState(false);
+  // Every overlay the document surface paints over a rendered HTML page — the
+  // toolstrip and the collapsed sidebar tab flags — drops out together, so the
+  // page really gets the whole viewport. The header's "Show tools" button stays
+  // put, and Mod+B still opens the sidebar, so neither can be locked away.
+  const htmlChromeHidden = isHtmlSurface && htmlToolsHidden;
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -4258,7 +4263,7 @@ const App: React.FC = () => {
             </div>
           )}
           {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
-          {wideModeType === null && !sidebar.isOpen && !goalSetupMode && !isAgentTerminalOpen && (
+          {wideModeType === null && !sidebar.isOpen && !goalSetupMode && !isAgentTerminalOpen && !htmlChromeHidden && (
             <SidebarTabs
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
@@ -4407,7 +4412,7 @@ const App: React.FC = () => {
                   comment/markup mode). Hidden during plan diff, and on HTML surfaces
                   when the header's "Hide tools" toggle is on (leaving the rendered HTML
                   free of overlay controls). On HTML it floats top-left over the doc. */}
-              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && !isEditingMarkdown && !(isHtmlSurface && htmlToolsHidden) && (
+              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && !isEditingMarkdown && !htmlChromeHidden && (
                 <div
                   data-print-hide
                   className={isHtmlSurface

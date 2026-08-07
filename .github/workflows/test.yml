@@ -98,6 +98,7 @@ jobs:
           packages/ui/components/DocBadges.test.tsx
           packages/editor/planDiffAutoExit.test.tsx
           packages/editor/App.archiveReadOnly.test.tsx
+          packages/editor/App.htmlHideTools.test.tsx
           packages/editor/actionsLabelMode.test.ts
 
   opencode-v2:
