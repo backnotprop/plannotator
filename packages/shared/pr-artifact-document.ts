@@ -8,6 +8,9 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const AUTH_CACHE_MS = 5 * 60 * 1000;
 const PRIVATE_IPV4_RE = /^(?:127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/;
 const PRIVATE_IPV6_RE = /^\[(?:::1|::ffff:|fe80:|fc|fd)/i;
+const GITLAB_UPLOAD_RE = /^\/uploads\/([^/]+)\/(.+)$/;
+/** Provider sign-in entry points. Landing here means our credentials were not accepted. */
+const SIGN_IN_PATH_RE = /^\/(?:users\/(?:sign_in|auth)|login|session|oauth\/authorize)(?:\/|$)/;
 
 interface ProviderAuthCacheEntry {
   readonly expiresAt: number;
@@ -141,6 +144,33 @@ function isGitLabArtifactHost(url: URL, metadata: Extract<PRMetadata, { platform
     || url.pathname.startsWith(`${projectPath}/-/blob/`);
 }
 
+function gitlabProjectPath(metadata: Extract<PRMetadata, { platform: 'gitlab' }>): string {
+  return metadata.projectPath.replace(/^\/+|\/+$/g, '');
+}
+
+/**
+ * GitLab serves `/uploads/<secret>/<file>` from a Rails web route that only honors
+ * session cookies — a `PRIVATE-TOKEN` request is redirected to the sign-in page, so the
+ * link is unreadable from a CLI. The uploads REST API serves the same bytes for a token,
+ * so route upload links through it.
+ */
+function gitlabUploadApiUrl(
+  url: URL,
+  metadata: Extract<PRMetadata, { platform: 'gitlab' }>,
+): URL | null {
+  const projectPath = gitlabProjectPath(metadata);
+  const projectPrefix = `/${projectPath}`;
+  const uploadPath = url.pathname.startsWith(`${projectPrefix}/uploads/`)
+    ? url.pathname.slice(projectPrefix.length)
+    : url.pathname;
+  const match = GITLAB_UPLOAD_RE.exec(uploadPath);
+  if (match === null) return null;
+  const [, secret, filename] = match;
+  return new URL(
+    `${url.origin}/api/v4/projects/${encodeURIComponent(projectPath)}/uploads/${secret}/${filename}${url.search}`,
+  );
+}
+
 function isProviderArtifactUrl(url: URL, metadata: PRMetadata): boolean {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
   return metadata.platform === 'github'
@@ -169,6 +199,9 @@ function providerContentUrl(url: URL, metadata: PRMetadata): URL {
     }
     return url;
   }
+
+  const uploadUrl = gitlabUploadApiUrl(url, metadata);
+  if (uploadUrl !== null) return uploadUrl;
 
   const blobMarker = '/-/blob/';
   if (url.pathname.includes(blobMarker)) {
@@ -318,6 +351,36 @@ async function readBytesWithLimit(response: Response, maxBytes: number): Promise
   return content;
 }
 
+/**
+ * The GitLab uploads API answers every file with `application/octet-stream`. Responses are
+ * served with `nosniff`, so an unrefined type would stop images and video from rendering.
+ */
+const EXTENSION_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  avif: 'image/avif',
+  css: 'text/css',
+  gif: 'image/gif',
+  html: 'text/html',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  js: 'text/javascript',
+  json: 'application/json',
+  md: 'text/markdown',
+  mov: 'video/quicktime',
+  mp4: 'video/mp4',
+  pdf: 'application/pdf',
+  png: 'image/png',
+  svg: 'image/svg+xml',
+  txt: 'text/plain',
+  webm: 'video/webm',
+  webp: 'image/webp',
+};
+
+function refineOpaqueContentType(contentType: string, url: URL): string {
+  if (contentType !== 'application/octet-stream') return contentType;
+  const extension = url.pathname.split('.').pop()?.toLowerCase() ?? '';
+  return EXTENSION_CONTENT_TYPES[extension] ?? contentType;
+}
+
 function isValidRangeHeader(range: string | undefined): range is string {
   return range !== undefined && /^bytes=\d*-\d*$/.test(range);
 }
@@ -401,6 +464,17 @@ async function fetchArtifactContent(
         if (!mayFollowProviderRedirect(currentUrl, nextUrl)) {
           throw new PRArtifactDocumentError('Artifact document redirected to a blocked address', 403);
         }
+        // A sign-in hop returns HTTP 200 with a login/SSO page. Following it would render
+        // that page as the artifact, so fail loudly instead.
+        if (SIGN_IN_PATH_RE.test(nextUrl.pathname)) {
+          const loginHint = metadata.platform === 'github'
+            ? `gh auth login --hostname ${metadata.host}`
+            : `glab auth login --hostname ${metadata.host}`;
+          throw new PRArtifactDocumentError(
+            `Artifact host requires authentication — run \`${loginHint}\``,
+            401,
+          );
+        }
         currentUrl = nextUrl;
         continue;
       }
@@ -408,8 +482,10 @@ async function fetchArtifactContent(
         await response.body?.cancel();
         throw new PRArtifactDocumentError(`Artifact host returned HTTP ${response.status}`, 502);
       }
-      const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim()
-        || 'text/plain';
+      const contentType = refineOpaqueContentType(
+        response.headers.get('content-type')?.split(';', 1)[0]?.trim() || 'text/plain',
+        currentUrl,
+      );
       const shouldRewriteCss = contentType === 'text/css' && options.sourceUrl !== undefined;
       let content = await readBytesWithLimit(
         response,

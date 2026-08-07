@@ -41,6 +41,20 @@ const github: GithubPRMetadata = {
   url: 'https://github.com/acme/widgets/pull/1',
 };
 
+const gitlabMetadata: GitlabMRMetadata = {
+  platform: 'gitlab',
+  host: 'gitlab.example.com',
+  projectPath: 'acme/widgets',
+  iid: 7,
+  title: 'Artifacts',
+  author: 'reviewer',
+  baseBranch: 'main',
+  headBranch: 'feature',
+  baseSha: 'base',
+  headSha: 'head',
+  url: 'https://gitlab.example.com/acme/widgets/-/merge_requests/7',
+};
+
 describe('isPRArtifactDocumentUrlAllowed', () => {
   test('allows referenced GitHub uploads and raw files from the active repository', () => {
     expect(isPRArtifactDocumentUrlAllowed(
@@ -252,6 +266,96 @@ describe('fetchPRArtifactDocument', () => {
       expect(result.content).toBe('# Review');
       expect(receivedToken).toBe('test-token');
       expect(commands).toEqual(['glab config get token --host gitlab.example.com']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetches GitLab uploads through the token-readable uploads API', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = async (input) => {
+      requestedUrls.push(String(input));
+      return new Response('# Review', { headers: { 'content-type': 'text/markdown' } });
+    };
+    try {
+      for (const rawUrl of [
+        'https://gitlab.example.com/uploads/hash/review.md',
+        'https://gitlab.example.com/acme/widgets/uploads/hash/review.md',
+      ]) {
+        const result = await fetchPRArtifactDocument(
+          runtime,
+          gitlabMetadata,
+          {
+            ...context,
+            body: '[a](/uploads/hash/review.md)\n[b](/acme/widgets/uploads/hash/review.md)',
+          },
+          rawUrl,
+        );
+        expect(result.content).toBe('# Review');
+      }
+      expect(requestedUrls).toEqual([
+        'https://gitlab.example.com/api/v4/projects/acme%2Fwidgets/uploads/hash/review.md',
+        'https://gitlab.example.com/api/v4/projects/acme%2Fwidgets/uploads/hash/review.md',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('refines the opaque content type the GitLab uploads API returns', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(Uint8Array.from([137, 80, 78, 71]), {
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+    try {
+      const result = await fetchPRArtifactContent(
+        runtime,
+        gitlabMetadata,
+        { ...context, body: '![shot](/uploads/hash/screenshot.png)' },
+        'https://gitlab.example.com/uploads/hash/screenshot.png',
+      );
+      expect(result.contentType).toBe('image/png');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fails loudly instead of rendering a provider sign-in page', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: '', stderr: '', exitCode: 1 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      return String(input).includes('/api/v4/')
+        ? new Response(null, {
+          status: 302,
+          headers: { location: 'https://gitlab.example.com/users/auth/saml' },
+        })
+        : new Response('<form action="/users/auth/saml">', {
+          headers: { 'content-type': 'text/html' },
+        });
+    };
+    try {
+      const promise = fetchPRArtifactDocument(
+        runtime,
+        gitlabMetadata,
+        { ...context, body: '[review](/uploads/hash/review.md)' },
+        'https://gitlab.example.com/uploads/hash/review.md',
+      );
+      await expect(promise).rejects.toThrow(/requires authentication/);
     } finally {
       globalThis.fetch = originalFetch;
     }
