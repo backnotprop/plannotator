@@ -54,3 +54,7 @@ export function stripConflictingPlanModeRules(systemEntries: string[]): string[]
     )
     .filter(Boolean);
 }
+
+export function composeSystemPrompt(system: string[], additions: string[]): string[] {
+  return [system.concat(additions).filter(Boolean).join("\n\n")];
+}
