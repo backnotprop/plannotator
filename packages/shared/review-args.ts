@@ -3,6 +3,7 @@ import { stripWrappingQuotes } from "./resolve-file";
 
 export interface ParsedReviewArgs {
   prUrl?: string;
+  patchFile?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
 }
@@ -15,6 +16,18 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   let vcsType: VcsSelection | undefined;
   let useLocal = true;
   const positional: string[] = [];
+
+  const patchFileIndex = tokens.indexOf("--patch-file");
+  const patchFile = patchFileIndex === -1 ? undefined : tokens[patchFileIndex + 1];
+  if (patchFileIndex !== -1) {
+    if (!patchFile || patchFile.startsWith("--")) {
+      throw new Error("--patch-file requires a path or -");
+    }
+    if (tokens.lastIndexOf("--patch-file") !== patchFileIndex) {
+      throw new Error("--patch-file may only be specified once");
+    }
+    tokens.splice(patchFileIndex, 2);
+  }
 
   for (const token of tokens) {
     switch (token) {
@@ -39,6 +52,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   const target = positional[0];
   return {
     prUrl: target && isReviewUrl(target) ? target : undefined,
+    patchFile,
     vcsType,
     useLocal,
   };

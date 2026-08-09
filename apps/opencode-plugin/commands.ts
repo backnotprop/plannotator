@@ -67,6 +67,10 @@ export async function handleReviewCommand(
 
   // @ts-ignore - Event properties contain arguments
   const reviewArgs = parseReviewArgs(event.properties?.arguments || "");
+  if (reviewArgs.patchFile) {
+    client.app.log({ level: "error", message: "--patch-file is only supported by the direct plannotator review CLI" });
+    return;
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
 
