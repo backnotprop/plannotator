@@ -321,6 +321,7 @@ const ToolstripButton: React.FC<{
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      aria-pressed={active}
       className={`relative flex items-center h-7 rounded-md overflow-hidden ${colorClass}`}
       style={{ width: currentWidth, transition }}
     >

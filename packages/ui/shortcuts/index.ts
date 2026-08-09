@@ -2,6 +2,7 @@ export * from './core';
 export * from './runtime';
 
 // plan-review scopes
+export { annotationModeShortcuts, useAnnotationModeShortcuts } from './plan-review/annotationMode.shortcuts';
 export { annotationToolbarShortcuts, useAnnotationToolbarShortcuts } from './plan-review/annotationToolbar.shortcuts';
 export { annotationPanelShortcuts, useAnnotationPanelShortcuts } from './plan-review/annotationPanel.shortcuts';
 export { commentPopoverShortcuts } from './plan-review/commentPopover.shortcuts';

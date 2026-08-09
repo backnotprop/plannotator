@@ -117,6 +117,7 @@ import { modKey } from '@plannotator/ui/utils/platform';
 import {
   annotateSidebarShortcuts,
   useAnnotateSidebarShortcuts,
+  useAnnotationModeShortcuts,
   useDocumentViewShortcuts,
   useDoubleTapShortcuts,
 } from '@plannotator/ui/shortcuts';
@@ -2654,6 +2655,39 @@ const App: React.FC = () => {
   // Alt/Option key: hold to temporarily switch, double-tap to toggle
   useInputMethodSwitch(effectiveInputMethod, handleInputMethodChange);
 
+  // Gates both the toolstrip's own render and its shortcuts, so a mode can never
+  // change with no visible pill to report it.
+  const toolstripVisible = useMemo(
+    () =>
+      !goalSetupMode && !isPlanDiffActive && !archive.archiveMode && !isEditingMarkdown && !htmlChromeHidden
+      && (!isCompactTouchLayout || !(annotateSource === 'folder' && !markdown && !linkedDocHook.isActive)),
+    [
+      annotateSource,
+      archive.archiveMode,
+      goalSetupMode,
+      htmlChromeHidden,
+      isCompactTouchLayout,
+      isEditingMarkdown,
+      isPlanDiffActive,
+      linkedDocHook.isActive,
+      markdown,
+    ],
+  );
+
+  const canHandleAnnotationModeShortcut = useCallback(
+    (event: KeyboardEvent) => toolstripVisible && canHandleDocumentChromeShortcut(event),
+    [canHandleDocumentChromeShortcut, toolstripVisible],
+  );
+
+  useAnnotationModeShortcuts({
+    handlers: {
+      selectMarkupMode: { when: canHandleAnnotationModeShortcut, handle: () => handleEditorModeChange('selection') },
+      selectCommentMode: { when: canHandleAnnotationModeShortcut, handle: () => handleEditorModeChange('comment') },
+      selectRedlineMode: { when: canHandleAnnotationModeShortcut, handle: () => handleEditorModeChange('redline') },
+      selectQuickLabelMode: { when: canHandleAnnotationModeShortcut, handle: () => handleEditorModeChange('quickLabel') },
+    },
+  });
+
   // Check if we're in API mode (served from Bun hook server)
   // Skip if we loaded from a shared URL
   useEffect(() => {
@@ -5083,8 +5117,7 @@ const App: React.FC = () => {
                   comment/markup mode). Hidden during plan diff, and on HTML surfaces
                   when the header's "Hide tools" toggle is on (leaving the rendered HTML
                   free of overlay controls). On HTML it floats top-left over the doc. */}
-              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && !isEditingMarkdown && !htmlChromeHidden &&
-                (!isCompactTouchLayout || !(annotateSource === 'folder' && !markdown && !linkedDocHook.isActive)) && (
+              {toolstripVisible && (
                 <div
                   data-print-hide
                   className={isHtmlSurface

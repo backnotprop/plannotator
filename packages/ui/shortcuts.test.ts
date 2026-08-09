@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { annotateSettingsShortcutRegistry, planEditorShortcuts, planReviewSettingsShortcutRegistry } from '../editor/shortcuts';
 import { reviewSettingsShortcutRegistry } from '../review-editor/shortcuts';
 import {
+  annotationModeShortcuts,
   createShortcutRegistry,
   defineShortcutScope,
   dispatchShortcutEvent,
@@ -129,6 +130,40 @@ describe('shortcuts', () => {
         .map(entry => `${entry.scopeId}.${entry.actionId}`);
       expect(claimants).toEqual(['document-view.toggleFocusMode']);
     }
+  });
+
+  // The mode switcher renders on both plan surfaces, so the scope has to reach
+  // both registries — and each digit has to stay a single claimant, since the
+  // dispatcher has no cross-scope arbitration.
+  it('binds annotation mode once on every plan surface', () => {
+    const expected = {
+      selectMarkupMode: ['Shift+1'],
+      selectCommentMode: ['Shift+2'],
+      selectRedlineMode: ['Shift+3'],
+      selectQuickLabelMode: ['Shift+4'],
+    };
+
+    for (const registry of [planReviewSettingsShortcutRegistry, annotateSettingsShortcutRegistry]) {
+      for (const [actionId, bindings] of Object.entries(expected)) {
+        expect(getShortcut(registry, 'annotation-mode', actionId)?.bindings).toEqual(bindings);
+
+        const claimants = listRegistryShortcuts(registry)
+          .filter(entry => entry.bindings.includes(bindings[0]))
+          .map(entry => `${entry.scopeId}.${entry.actionId}`);
+        expect(claimants).toEqual([`annotation-mode.${actionId}`]);
+      }
+    }
+  });
+
+  // The quick-label picker claims bare digits. Holding Shift has to steer the
+  // keystroke to the mode switcher instead of firing both.
+  it('does not fire the bare-digit label picker while Shift is held', () => {
+    const shiftedDigit = {
+      key: '!', code: 'Digit1', ctrlKey: false, metaKey: false, shiftKey: true, altKey: false,
+    } as KeyboardEvent;
+
+    expect(matchesShortcutBinding(shiftedDigit, '1-0')).toBe(false);
+    expect(matchesShortcutBinding(shiftedDigit, 'Shift+1')).toBe(true);
   });
 
   it('matches normalized runtime bindings', () => {
@@ -311,5 +346,52 @@ describe('shortcuts', () => {
 
     expect(handled).toBe(false);
     expect(preventDefaultCalls).toBe(0);
+  });
+
+  it('switches annotation mode on Shift+1-4 across keyboard layouts', () => {
+    const calls: string[] = [];
+    const handlers = {
+      selectMarkupMode: () => calls.push('selection'),
+      selectCommentMode: () => calls.push('comment'),
+      selectRedlineMode: () => calls.push('redline'),
+      selectQuickLabelMode: () => calls.push('quickLabel'),
+    };
+
+    let preventDefaultCalls = 0;
+    const preventDefault = () => {
+      preventDefaultCalls += 1;
+    };
+
+    // Shift+2 reports '@' on a US layout, so matching has to fall back to event.code.
+    const shiftedDigit = {
+      key: '@', code: 'Digit2', ctrlKey: false, metaKey: false, shiftKey: true, altKey: false, preventDefault,
+    } as unknown as KeyboardEvent;
+    expect(dispatchShortcutEvent(annotationModeShortcuts, handlers, shiftedDigit)).toBe(true);
+
+    const plainDigit = {
+      key: '3', code: 'Digit3', ctrlKey: false, metaKey: false, shiftKey: true, altKey: false, preventDefault,
+    } as unknown as KeyboardEvent;
+    expect(dispatchShortcutEvent(annotationModeShortcuts, handlers, plainDigit)).toBe(true);
+
+    expect(calls).toEqual(['comment', 'redline']);
+    expect(preventDefaultCalls).toBe(2);
+  });
+
+  it('leaves annotation mode alone when Alt is held', () => {
+    // AltGr sends Ctrl+Alt; the binding declares no Alt, so it must not fire.
+    const altGrEvent = {
+      key: '1', code: 'Digit1', ctrlKey: false, metaKey: false, shiftKey: true, altKey: true,
+      preventDefault: () => {
+        throw new Error('should not run');
+      },
+    } as unknown as KeyboardEvent;
+
+    const handled = dispatchShortcutEvent(annotationModeShortcuts, {
+      selectMarkupMode: () => {
+        throw new Error('should not run');
+      },
+    }, altGrEvent);
+
+    expect(handled).toBe(false);
   });
 });
