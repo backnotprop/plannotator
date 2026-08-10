@@ -510,8 +510,22 @@ interface Annotation {
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API
   diffContext?: 'added' | 'removed' | 'modified'; // Set when annotation created in plan diff view
   htmlAnchor?: HtmlElementAnchor; // Raw-HTML pinpoint: serialized element anchor for reliable restoration
+  htmlAdditionalTargets?: HtmlAnnotationTarget[]; // Raw-HTML shift-click multi-select: extra elements this one comment covers
   startMeta?: { parentTagName; parentIndex; textOffset };
   endMeta?: { parentTagName; parentIndex; textOffset };
+}
+
+interface HtmlElementAnchor {
+  selector: string; // verified-unique CSS selector built in the viewer bridge
+  tagName: string;
+  text?: string; // normalized text snapshot; weak selectors fail closed against it
+  point?: { x: number; y: number }; // normalized (0..1) selected point inside the element's rect, used by placed markers to reproject against the element's current geometry
+}
+
+interface HtmlAnnotationTarget {
+  label?: string; // semantic label from the pinpoint hover cascade (e.g. "Button")
+  text: string; // capped element text, or an element description when text-less
+  anchor?: HtmlElementAnchor; // absent when anchoring failed closed
 }
 
 interface Block {
@@ -550,6 +564,10 @@ interface Block {
 **Redline mode:** User selects text → auto-creates DELETION annotation
 
 Text highlighting uses `web-highlighter` library. Code blocks use manual `<mark>` wrapping (web-highlighter can't select inside `<pre>`).
+
+**Raw-HTML annotate:** the sandboxed viewer never mutates the visited page's DOM. Committed annotations render as numbered placed comment markers plus overlay-projected highlight rectangles inside a shadow-rooted fixed overlay host: the durable anchor data (element selector, text snapshot, normalized selected point) is persisted, and the markers/highlights are disposable projections re-resolved from it on every reconcile. Shift-click multi-select joins additional elements to one comment (`htmlAdditionalTargets`).
+
+Known limitation: printing a raw-HTML annotate session prints highlight stripes from a best-effort absolute-coordinate layer and is degraded inside the iframe (pre-existing); element-only targets (SVG anchors, multi-select additional element targets) have no print representation.
 
 ## Keyboard Shortcuts
 
@@ -606,6 +624,8 @@ type ShareableAnnotation =
 2. Find text positions in rendered DOM via text search
 3. Apply `<mark>` highlights
 4. Clear hash from URL (prevents re-parse on refresh)
+
+Known limitation: share links intentionally do not carry HTML element anchors or additional multi-select targets. Restore on the raw-HTML surface is text-search based; this is the contract asserted by `sharing.multiTarget.test.ts`.
 
 ## Settings Persistence
 
