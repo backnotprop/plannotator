@@ -373,7 +373,7 @@ describe.if(hasDom)('ordered saved-annotation sync (placed-marker numbering)', (
     } as Annotation;
   }
 
-  test('on bridge ready, the ordered collection syncs as index+1 numbers (globals excluded)', async () => {
+  test('on bridge ready, the ordered collection syncs export-matching numbers (globals occupy slots)', async () => {
     const { AnnotationType } = await import('../../types');
     const annotations = [
       ann('global-1', 5, AnnotationType.GLOBAL_COMMENT),
@@ -386,10 +386,14 @@ describe.if(hasDom)('ordered saved-annotation sync (placed-marker numbering)', (
       (m) => m.type === 'plannotator-bridge-sync-annotations',
     );
     expect(syncs.length).toBeGreaterThanOrEqual(1);
-    // Ordered by createdA (the panel's order), numbered index+1, no globals.
+    // Numbered against the FULL createdA-sorted list INCLUDING globals — the
+    // same ordering exportAnnotations numbers the feedback with — so on-page
+    // numbers match the `## N.` sections the agent reads. The global (oldest,
+    // number 1) has no page location and ships no entry: the on-page numbers
+    // start at 2, leaving the gap where the global sits.
     expect(syncs.at(-1)!.annotations).toEqual([
-      { id: 'ann-early', number: 1 },
-      { id: 'ann-late', number: 2 },
+      { id: 'ann-early', number: 2 },
+      { id: 'ann-late', number: 3 },
     ]);
   });
 

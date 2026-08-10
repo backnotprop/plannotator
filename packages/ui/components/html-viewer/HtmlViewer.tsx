@@ -37,6 +37,7 @@ import {
   distanceToRect,
   type ComposerYieldState,
 } from "./composerYield";
+import { buildSyncNumbering } from "./annotationNumbering";
 import { useHtmlAnnotation } from "./useHtmlAnnotation";
 import {
   THEME_TOKENS,
@@ -47,12 +48,6 @@ import {
 } from "./srcdoc";
 
 const PREFIX = "plannotator-bridge-";
-
-// Mirror of the bridge's MAX_SYNC_ANNOTATIONS: the bridge truncates the
-// synced numbering list at this bound, so the sender truncates AFTER the
-// stable sort too — the first 512 numbers then agree on both sides instead
-// of the bridge silently dropping an arbitrary tail.
-const MAX_SYNC_ANNOTATIONS = 512;
 
 function readThemeTokens(): Record<string, string> {
   const style = getComputedStyle(document.documentElement);
@@ -443,20 +438,16 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       }
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Placed-marker numbering is parent-authoritative: sync the ORDERED
-    // saved-annotation collection (the panel's createdA order, index + 1,
-    // global comments excluded — they have no page location) so every marker
-    // shows its annotation's display number, and renumbers on delete. The
-    // bridge's own registration order is only a pre-sync fallback.
+    // Placed-marker numbering is parent-authoritative and matches the
+    // numbers exportAnnotations writes into the submitted feedback: the full
+    // createdA-sorted list INCLUDING globals is numbered index + 1, and
+    // globals then ship no entry (no page location) — see buildSyncNumbering
+    // for the contract. Renumbers on delete; the bridge's own registration
+    // order is only a pre-sync fallback.
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
-      const ordered = annotations
-        .filter((ann) => ann.type !== AnnotationType.GLOBAL_COMMENT)
-        .sort((a, b) => a.createdA - b.createdA)
-        .slice(0, MAX_SYNC_ANNOTATIONS)
-        .map((ann, index) => ({ id: ann.id, number: index + 1 }));
       iframeRef.current?.contentWindow?.postMessage(
-        { type: `${PREFIX}sync-annotations`, annotations: ordered },
+        { type: `${PREFIX}sync-annotations`, annotations: buildSyncNumbering(annotations) },
         "*",
       );
     }, [iframeReadyVersion, annotations]);
