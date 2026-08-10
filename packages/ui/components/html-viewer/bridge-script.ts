@@ -336,6 +336,10 @@ export const BRIDGE_SCRIPT = `(function() {
     var text = capSelectionText(sel.toString().trim());
     if (!text) return false;
 
+    // A draft now owns the surface: kill the click-to-select hover
+    // affordance, including any hit test already scheduled.
+    clearHoverHighlight();
+
     var rect = range.getBoundingClientRect();
     pendingRange = range;
     pendingSelection = {
@@ -575,7 +579,7 @@ export const BRIDGE_SCRIPT = `(function() {
     else if (type === PREFIX + 'set-input-method') {
       currentInputMethod = e.data.method === 'pinpoint' ? 'pinpoint' : 'drag';
       if (currentInputMethod === 'pinpoint') {
-        setHoverHighlight(null); // pinpoint owns clicks; drop the select affordance
+        clearHoverHighlight(); // pinpoint owns clicks; drop the select affordance (and any pending hit test)
         if (document.body) document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
       } else {
         if (document.body) document.body.removeAttribute('data-plannotator-pinpoint-cursor');
@@ -1097,8 +1101,8 @@ export const BRIDGE_SCRIPT = `(function() {
       // pending selection owns the surface.
       if (!pendingPinEl && !pendingSelection && renderedCommittedRects.length) {
         scheduleHoverHitTest(e.clientX, e.clientY);
-      } else if (hoverHighlightId) {
-        setHoverHighlight(null);
+      } else {
+        clearHoverHighlight();
       }
       return;
     }
@@ -1507,8 +1511,12 @@ export const BRIDGE_SCRIPT = `(function() {
   var deadSearchBudget = MAX_DEAD_SEARCHES_PER_PASS;
   var deadSearchSkipped = false;
 
-  function beginDeadSearchPass() {
-    deadSearchBudget = MAX_DEAD_SEARCHES_PER_PASS;
+  // budget: dead searches this pass may run. Per-frame reconcile passes use
+  // the default (they repeat, so skipped targets get follow-up frames);
+  // user-initiated one-shot passes (print, scroll-to) pass Infinity — they
+  // have no follow-up, and the backoff + generation gates still bound them.
+  function beginDeadSearchPass(budget) {
+    deadSearchBudget = typeof budget === 'number' ? budget : MAX_DEAD_SEARCHES_PER_PASS;
     deadSearchSkipped = false;
   }
 
@@ -1984,13 +1992,29 @@ export const BRIDGE_SCRIPT = `(function() {
     hoverHitRaf = requestAnimationFrame(function() {
       hoverHitRaf = 0;
       if (!hoverHitPos) return;
+      // Only drag mode without an open draft may paint the affordance: a
+      // mode switch or draft opening between schedule and frame must not
+      // resurrect a stale hover (flushQueuedHighlights re-applies whatever
+      // hoverHighlightId holds on every render).
+      if (currentInputMethod === 'pinpoint' || pendingPinEl || pendingSelection) return;
       setHoverHighlight(committedHighlightIdAtCached(hoverHitPos.x, hoverHitPos.y));
     });
   }
 
-  document.addEventListener('mouseleave', function() {
+  // Full teardown for every "hover must die" transition (pinpoint switch,
+  // draft open, pointer leave): cancels the pending rAF and clears the
+  // tracked position so a scheduled hit test cannot re-apply the class.
+  function clearHoverHighlight() {
+    if (hoverHitRaf) {
+      cancelAnimationFrame(hoverHitRaf);
+      hoverHitRaf = 0;
+    }
     hoverHitPos = null;
     setHoverHighlight(null);
+  }
+
+  document.addEventListener('mouseleave', function() {
+    clearHoverHighlight();
   });
 
   function makeMarkerButton(annId) {
@@ -2222,7 +2246,7 @@ export const BRIDGE_SCRIPT = `(function() {
   function scrollToAnnotation(id) {
     var record = findAnnRecord(id);
     if (!record) return;
-    beginDeadSearchPass();
+    beginDeadSearchPass(Infinity); // user-initiated one-shot: never budget-starved
     refreshRecordTargets(record);
     var scrollEl = null;
     for (var i = 0; i < record.targets.length && !scrollEl; i++) {
@@ -4153,7 +4177,9 @@ export const BRIDGE_SCRIPT = `(function() {
       layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;';
       var sx = window.scrollX || 0;
       var sy = window.scrollY || 0;
-      beginDeadSearchPass();
+      // User-initiated one-shot: printing has no follow-up pass, so a budget
+      // here would silently print fewer highlights with 3+ dead targets.
+      beginDeadSearchPass(Infinity);
       for (var recordIndex = 0; recordIndex < annRecords.length; recordIndex++) {
         var record = annRecords[recordIndex];
         refreshRecordTargets(record);

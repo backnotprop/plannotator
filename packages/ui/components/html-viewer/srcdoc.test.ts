@@ -2908,6 +2908,107 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  test("switching to pinpoint before a scheduled hover hit test fires leaves no stale hover (1)", async () => {
+    document.body.innerHTML = "<p>Hover race text</p>";
+    const originalGetClientRects = Range.prototype.getClientRects;
+    await withLayout(async () => {
+      (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = () => [
+        rectOf(100, 100, 200, 20),
+      ];
+      try {
+        postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+        postBridge({
+          type: "plannotator-bridge-find-and-mark",
+          id: "race-ann",
+          originalText: "Hover race text",
+          annotationType: "comment",
+        });
+        await flushOverlay();
+        const painted = visibleHighlights("pn-hl-comment").filter(
+          (hl) => hl.getAttribute("data-annotation-id") === "race-ann",
+        );
+        expect(painted.length).toBeGreaterThan(0);
+
+        // Schedule a hover hit test, then switch to pinpoint BEFORE the rAF
+        // fires: the pending callback must not re-apply the class, and no
+        // later re-render may resurrect it from stale hover state.
+        document.dispatchEvent(new MouseEvent("mousemove", {
+          bubbles: true,
+          clientX: 150,
+          clientY: 110,
+        }));
+        postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+        await flushOverlay();
+        expect(painted[0]!.classList.contains("pn-hl-hover")).toBe(false);
+        // Pinpoint-mode mousemoves skip the hover-clearing branch, so a
+        // re-render is where stale state would resurface — it must not.
+        postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+        await flushOverlay();
+        expect(painted[0]!.classList.contains("pn-hl-hover")).toBe(false);
+      } finally {
+        (Range.prototype as { getClientRects: typeof originalGetClientRects }).getClientRects =
+          originalGetClientRects;
+      }
+    });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
+  test("print passes are never budget-starved: every dead-but-recoverable target re-searches (3)", async () => {
+    document.body.innerHTML = [0, 1, 2]
+      .map((i) => `<p>Print recover text ${i}</p>`)
+      .join("");
+    for (let i = 0; i < 3; i++) {
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id: `print-recover-${i}`,
+        originalText: `Print recover text ${i}`,
+        annotationType: "comment",
+      });
+    }
+    await flushOverlay();
+
+    // Recreate identical content: every range dies, but the text is still
+    // findable (dead-but-recoverable).
+    document.body.innerHTML = [0, 1, 2]
+      .map((i) => `<p>Print recover text ${i}</p>`)
+      .join("");
+
+    const originalGetClientRects = Range.prototype.getClientRects;
+    const originalCreateTreeWalker = document.createTreeWalker.bind(document);
+    let sweeps = 0;
+    (document as { createTreeWalker: typeof document.createTreeWalker }).createTreeWalker = ((
+      ...args: Parameters<typeof document.createTreeWalker>
+    ) => {
+      sweeps += 1;
+      return originalCreateTreeWalker(...args);
+    }) as typeof document.createTreeWalker;
+    await withLayout(async () => {
+      (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = () => [
+        rectOf(10, 20, 100, 20),
+      ];
+      try {
+        // Printing is a user-initiated one-shot with no follow-up pass: the
+        // 2-search reconcile budget must not apply, or a page with 3+ dead
+        // targets silently prints fewer highlights.
+        window.dispatchEvent(new Event("beforeprint"));
+        expect(sweeps).toBe(3);
+        const layer = document.querySelector<HTMLElement>("[data-plannotator-print-layer]");
+        if (!layer) throw new Error("print layer missing");
+        expect(layer.childNodes.length).toBe(3);
+        window.dispatchEvent(new Event("afterprint"));
+      } finally {
+        (Range.prototype as { getClientRects: typeof originalGetClientRects }).getClientRects =
+          originalGetClientRects;
+        (document as { createTreeWalker: typeof document.createTreeWalker }).createTreeWalker =
+          originalCreateTreeWalker;
+      }
+    });
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
   test("printing re-projects committed highlights into a paginating absolute layer (M4)", async () => {
     document.body.innerHTML = "<p>Printable highlight text</p>";
     const originalGetClientRects = Range.prototype.getClientRects;
