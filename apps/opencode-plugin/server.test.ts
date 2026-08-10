@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import serverPlugin from "./server";
+import serverPlugin, {
+  pushComposedSystemReminder,
+  replacePlanningSystemParts,
+} from "./server";
 
 const originalAllowSubagents = process.env.PLANNOTATOR_ALLOW_SUBAGENTS;
 
@@ -136,13 +139,18 @@ describe("OpenCode V2 server plugin", () => {
     };
     await hook?.(planningEvent);
 
-    expect(planningEvent.system.slice(0, 2).map((part) => part.text)).toEqual([
-      "Base system prompt",
-      "Earlier plugin prompt",
-    ]);
-    expect(planningEvent.system.some((part) => part.text.startsWith("## Plannotator"))).toBe(true);
-    expect(planningEvent.system[0]?.metadata).toEqual({ source: "base" });
-    expect(planningEvent.system[1]?.cache).toEqual({ type: "ephemeral" });
+    // #1114: the planning path emits ONE composed system part (multi-part
+    // system arrays corrupt Qwen3.x Jinja chat templates). Existing text
+    // survives, in order, ahead of the planning prompt.
+    expect(planningEvent.system.length).toBe(1);
+    const composedText = planningEvent.system[0]!.text;
+    expect(composedText).toContain("Base system prompt");
+    expect(composedText).toContain("Earlier plugin prompt");
+    expect(composedText).toContain("## Plannotator");
+    expect(composedText.indexOf("Base system prompt"))
+      .toBeLessThan(composedText.indexOf("Earlier plugin prompt"));
+    expect(composedText.indexOf("Earlier plugin prompt"))
+      .toBeLessThan(composedText.indexOf("## Plannotator"));
     expect(planningEvent.tools.plan_exit.description).toContain("Use submit_plan instead");
     expect(planningEvent.tools.todowrite.description).toContain("use submit_plan instead");
 
@@ -190,5 +198,68 @@ describe("OpenCode V2 server plugin", () => {
 
     await testContext.getSessionContextHook()?.(event);
     expect(event.tools.submit_plan).toBeUndefined();
+  });
+
+  test("generic reminder composes into the existing part instead of pushing a second one", async () => {
+    process.env.PLANNOTATOR_ALLOW_SUBAGENTS = "1";
+    const testContext = createContext(
+      { workflow: "all-agents" },
+      [{ id: "helper", mode: "primary", hidden: false }],
+    );
+    await serverPlugin.setup(testContext.context as never);
+    const event = {
+      agent: "helper",
+      system: [{ type: "text" as const, text: "Base system prompt" }],
+      messages: [],
+      tools: {
+        submit_plan: { description: "Submit", input: {} },
+      },
+    };
+
+    await testContext.getSessionContextHook()?.(event);
+    // #1114: a second system part corrupts Qwen3.x Jinja templates.
+    expect(event.system.length).toBe(1);
+    expect(event.system[0]!.text).toContain("Base system prompt");
+    expect(event.system[0]!.text).toContain("## Plan Submission");
+    expect(event.system[0]!.text.indexOf("Base system prompt"))
+      .toBeLessThan(event.system[0]!.text.indexOf("## Plan Submission"));
+  });
+});
+
+describe("system part consolidation (#1114 regression class)", () => {
+  // The bug class flagged in #1114's review: truncating the system array
+  // BEFORE composing silently drops the host's entire system prompt. These
+  // fail if either helper is reordered to `system.length = 0` first.
+
+  test("replacePlanningSystemParts composes existing text before truncating", () => {
+    const system = [
+      { type: "text" as const, text: "Host base rules" },
+      { type: "text" as const, text: "STRICTLY FORBIDDEN: ANY file edits.\nKeep plans concise." },
+    ];
+    replacePlanningSystemParts(system, ["## Plannotator planning prompt"]);
+    expect(system.length).toBe(1);
+    const text = system[0]!.text;
+    // Pre-existing prompt text survives the consolidation (compose ran first).
+    expect(text).toContain("Host base rules");
+    expect(text).toContain("Keep plans concise.");
+    expect(text).toContain("## Plannotator planning prompt");
+    expect(text.indexOf("Host base rules")).toBeLessThan(text.indexOf("Keep plans concise."));
+    expect(text.indexOf("Keep plans concise.")).toBeLessThan(text.indexOf("## Plannotator planning prompt"));
+    // Conflicting plan-mode rules are still stripped.
+    expect(text).not.toContain("STRICTLY FORBIDDEN");
+  });
+
+  test("pushComposedSystemReminder keeps prior parts' text before the reminder", () => {
+    const system = [
+      { type: "text" as const, text: "Host base rules" },
+      { type: "text" as const, text: "Second host part" },
+    ];
+    pushComposedSystemReminder(system, "## Plan Submission reminder");
+    expect(system.length).toBe(1);
+    const text = system[0]!.text;
+    expect(text).toContain("Host base rules");
+    expect(text).toContain("Second host part");
+    expect(text.endsWith("## Plan Submission reminder")).toBe(true);
+    expect(text.indexOf("Host base rules")).toBeLessThan(text.indexOf("Second host part"));
   });
 });
