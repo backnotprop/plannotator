@@ -158,8 +158,12 @@ describe.if(hasDom)("HTML annotate chrome (minimal-first render + persistence)",
   test("hiding tools removes the collapsed sidebar tab flags, showing tools restores them", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
-    // Simulate a returning user who previously showed tools.
-    memory.set("plannotator-html-chrome", JSON.stringify({ toolsHidden: false, sidebarOpen: false }));
+    // Simulate a returning user who previously showed tools (fresh stamp —
+    // untimestamped records are expired by design, see preferenceTtl.ts).
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: false, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
     await mountHtmlAnnotate("Hide tools");
 
     const strip = sidebarTabs();
@@ -198,15 +202,25 @@ describe.if(hasDom)("HTML annotate chrome (minimal-first render + persistence)",
       removeItem: (key) => void memory.delete(key),
     });
     seedAnnouncementsSeen();
-    const remembered = JSON.stringify({ toolsHidden: false, sidebarOpen: true });
-    memory.set("plannotator-html-chrome", remembered);
+    const rememberedState = { toolsHidden: false, sidebarOpen: true, panelOpen: false };
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ ...rememberedState, savedAt: Date.now() }),
+    );
     await mountHtmlAnnotate("Hide tools");
     await settle();
 
+    // Writes re-stamp savedAt, so compare the semantic fields, not bytes: no
+    // write may ever carry chrome values other than the remembered ones,
+    // because this session never changes any chrome.
+    const semantic = (raw: string) => {
+      const { toolsHidden, sidebarOpen, panelOpen } = JSON.parse(raw);
+      return { toolsHidden, sidebarOpen, panelOpen };
+    };
     for (const write of chromeWrites) {
-      expect(JSON.parse(write)).toEqual(JSON.parse(remembered));
+      expect(semantic(write)).toEqual(rememberedState);
     }
-    expect(memory.get("plannotator-html-chrome")).toBe(remembered);
+    expect(semantic(memory.get("plannotator-html-chrome")!)).toEqual(rememberedState);
   });
 
   test("a 'user showed tools' state persists across a fresh mount", async () => {
@@ -229,7 +243,10 @@ describe.if(hasDom)("HTML annotate chrome (minimal-first render + persistence)",
   test("a 'user re-hid everything' state persists across a fresh mount", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
-    memory.set("plannotator-html-chrome", JSON.stringify({ toolsHidden: false, sidebarOpen: false }));
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: false, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
     await mountHtmlAnnotate("Hide tools");
 
     const hide = findButton("Hide tools");
