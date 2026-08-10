@@ -355,6 +355,9 @@ type SystemPart = { type: "text"; text: string; [key: string]: unknown };
  * Order matters: the existing texts are read and composed BEFORE the array is
  * truncated. Reordering to `system.length = 0` first silently drops the
  * host's entire system prompt (the bug class flagged in #1114's review).
+ *
+ * Accepted trade-off: consolidation flattens per-part metadata (e.g.
+ * third-party cache hints) — template integrity beats part-level caching.
  */
 export function replacePlanningSystemParts(
   system: SystemPart[],
