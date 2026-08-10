@@ -186,6 +186,25 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     );
   }
 
+  /** find-and-mark renders through the rAF-coalesced overlay scheduler (a
+   * batch restore renders once instead of once per annotation); happy-dom's
+   * requestAnimationFrame is setImmediate-backed, so yielding one macrotask
+   * turn (the suite's standard flush) settles the pending overlay render. */
+  const flushOverlay = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  /** Failed dead-target searches also carry a wall-clock backoff (300ms
+   * doubling to a 5s cap) on top of the generation gate. Tests asserting
+   * legitimate recovery after a new generation jump the bridge's monotonic
+   * clock (performance.now) past the cap instead of sleeping. */
+  let monotonicOffsetMs = 0;
+  beforeAll(() => {
+    const realNow = performance.now.bind(performance);
+    performance.now = () => realNow() + monotonicOffsetMs;
+  });
+  function advancePastDeadSearchBackoff() {
+    monotonicOffsetMs += 6000;
+  }
+
   // --- Annotation overlay helpers -------------------------------------------
   // Committed annotation visuals live in a shadow-rooted overlay host on the
   // root element; nothing annotation-related is written into the page's DOM.
@@ -951,6 +970,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor,
     });
+    await flushOverlay();
     expect(markersFor("pin-restore").length).toBe(1);
     expect(
       visibleHighlights("pn-hl-comment").some(
@@ -985,6 +1005,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: "#hero", tagName: "div" },
     });
+    await flushOverlay();
     const driftMarkers = markersFor("pin-badge");
     expect(driftMarkers.length).toBe(1);
     expect(markerNumber(driftMarkers[0]!)).toBe("1");
@@ -1002,6 +1023,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: anchor.selector, tagName: "p" },
     });
+    await flushOverlay();
     expect(markersFor("pin-no-snapshot").length).toBe(1);
     const fallbackScroll = collectScrollTargets(() => {
       postBridge({ type: "plannotator-bridge-scroll-to", id: "pin-no-snapshot" });
@@ -1020,6 +1042,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: anchor.selector, tagName: "p", text: "Stale snapshot" },
     });
+    await flushOverlay();
     expect(markersFor("pin-stale").length).toBe(1);
     const staleScroll = collectScrollTargets(() => {
       postBridge({ type: "plannotator-bridge-scroll-to", id: "pin-stale" });
@@ -1082,7 +1105,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("behavioral-attribute anchors never bypass the text check", () => {
+  test("behavioral-attribute anchors never bypass the text check", async () => {
     // Regenerated page: the button kept its role but its meaning flipped; the
     // annotated text moved into a sibling paragraph. The role anchor must NOT
     // resolve (role names behavior, not content) — the annotation follows the
@@ -1098,6 +1121,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: 'button[role="button"]', tagName: "button", text: "Save draft" },
     });
+    await flushOverlay();
     expect(markersFor("role-anchor").length).toBe(1);
     const roleScroll = collectScrollTargets(() => {
       postBridge({ type: "plannotator-bridge-scroll-to", id: "role-anchor" });
@@ -1117,6 +1141,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: 'div[data-testid="stats"]', tagName: "div", text: "Old numbers" },
     });
+    await flushOverlay();
     expect(markersFor("data-anchor").length).toBe(1);
     const dataScroll = collectScrollTargets(() => {
       postBridge({ type: "plannotator-bridge-scroll-to", id: "data-anchor" });
@@ -1126,7 +1151,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("data-test-id/data-cy/data-qa are author-controlled identity attrs", () => {
+  test("data-test-id/data-cy/data-qa are author-controlled identity attrs", async () => {
     // Same trust class as data-testid: the anchor resolves without a text
     // check even after the element's content drifted completely.
     document.body.innerHTML = '<div data-cy="metrics">Fresh content</div>';
@@ -1137,6 +1162,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: 'div[data-cy="metrics"]', tagName: "div", text: "Stale content gone from the page" },
     });
+    await flushOverlay();
     expect(markersFor("cy-anchor").length).toBe(1);
     expect(document.querySelector("[data-bind-id]")).toBeNull();
     postBridge({ type: "plannotator-bridge-clear-marks" });
@@ -1382,6 +1408,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor,
     });
+    await flushOverlay();
     expect(markersFor("identity-pin").length).toBe(1);
     expect(document.querySelector("[data-bind-id]")).toBeNull();
     postBridge({ type: "plannotator-bridge-clear-marks" });
@@ -1440,6 +1467,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector, tagName: "span", text: "" },
       });
+      await flushOverlay();
     }
     expect(visibleMarkers().length).toBe(0);
     expect(document.querySelector("[data-bind-id]")).toBeNull();
@@ -1475,6 +1503,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: "#pin-me", tagName: "p" },
     });
+    await flushOverlay();
     const realMarker = markersFor("badge-owner")[0];
     if (!realMarker) throw new Error("real marker missing");
     const collected: Array<Record<string, unknown>> = [];
@@ -1646,6 +1675,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: "#hero", tagName: "div" },
     });
+    await flushOverlay();
     const numbers = visibleMarkers().map((b) => markerNumber(b));
     expect(numbers).toContain("2");
     expect(numbers.filter((n) => n === "1").length).toBeGreaterThanOrEqual(2);
@@ -1895,6 +1925,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         { selector: "p.gamma", tagName: "p", text: "Stale snapshot" },
       ],
     });
+    await flushOverlay();
 
     // Primary restored as an anchored element marker + overlay highlight;
     // beta restored as a marker sharing the SAME number; gamma failed closed
@@ -1961,17 +1992,17 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
   }) as DOMRect;
 
   /** Enable "layout" in happy-dom: give the body a real rect. */
-  function withLayout(run: () => void) {
+  async function withLayout(run: () => void | Promise<void>) {
     const originalBodyRect = document.body.getBoundingClientRect;
     document.body.getBoundingClientRect = () => rectOf(0, 0, 1024, 768);
     try {
-      run();
+      await run();
     } finally {
       document.body.getBoundingClientRect = originalBodyRect;
     }
   }
 
-  test("annotation overlay is layout-neutral: page DOM untouched, host outside body, pointer-transparent", () => {
+  test("annotation overlay is layout-neutral: page DOM untouched, host outside body, pointer-transparent", async () => {
     document.body.innerHTML = [
       '<div id="hero"><p class="intro">Anchor target text</p><p>Second paragraph</p></div>',
     ].join("");
@@ -1984,12 +2015,14 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: "#hero", tagName: "div" },
     });
+    await flushOverlay();
     postBridge({
       type: "plannotator-bridge-find-and-mark",
       id: "neutral-b",
       originalText: "Second paragraph",
       annotationType: "deletion",
     });
+    await flushOverlay();
     postBridge({
       type: "plannotator-bridge-sync-annotations",
       annotations: [{ id: "neutral-a", number: 1 }, { id: "neutral-b", number: 2 }],
@@ -2019,10 +2052,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("marker reprojects the stored relative point against fresh geometry (no stored pixels)", () => {
+  test("marker reprojects the stored relative point against fresh geometry (no stored pixels)", async () => {
     document.body.innerHTML = '<div id="geo">Geo target</div>';
     const geo = document.querySelector<HTMLElement>("#geo")!;
-    withLayout(() => {
+    await withLayout(async () => {
       geo.getBoundingClientRect = () => rectOf(100, 50, 200, 100);
       postBridge({
         type: "plannotator-bridge-find-and-mark",
@@ -2031,6 +2064,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector: "#geo", tagName: "div", point: { x: 0.25, y: 0.5 } },
       });
+      await flushOverlay();
       const first = markersFor("geo-ann");
       expect(first.length).toBe(1);
       expect(first[0]!.style.left).toBe("150px");
@@ -2092,7 +2126,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.dispatchEvent(new Event("animationend", { bubbles: true }));
   }
 
-  test("unresolved targets omit their markers instead of guessing", () => {
+  test("unresolved targets omit their markers instead of guessing", async () => {
     document.body.innerHTML = '<div data-testid="vanishing">Now you see me</div>';
     postBridge({
       type: "plannotator-bridge-find-and-mark",
@@ -2101,6 +2135,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: 'div[data-testid="vanishing"]', tagName: "div" },
     });
+    await flushOverlay();
     expect(markersFor("vanish-ann").length).toBe(1);
 
     // The page rerenders without the element: the anchor no longer resolves,
@@ -2110,8 +2145,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
     expect(markersFor("vanish-ann").length).toBe(0);
     // The annotation record survives (it stays reachable via the panel), so
-    // a page that brings the element back re-resolves and re-renders it.
+    // a page that brings the element back re-resolves and re-renders it
+    // (once BOTH a new generation and the failure backoff have passed).
     document.body.innerHTML = '<div data-testid="vanishing">Back again</div>';
+    advancePastDeadSearchBackoff();
     bumpDomGeneration();
     postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
     expect(markersFor("vanish-ann").length).toBe(1);
@@ -2120,10 +2157,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("targets scrolled or clipped out of the viewport omit their markers", () => {
+  test("targets scrolled or clipped out of the viewport omit their markers", async () => {
     document.body.innerHTML = '<div id="offscreen">Off screen</div>';
     const el = document.querySelector<HTMLElement>("#offscreen")!;
-    withLayout(() => {
+    await withLayout(async () => {
       el.getBoundingClientRect = () => rectOf(100, -500, 200, 100); // above viewport
       postBridge({
         type: "plannotator-bridge-find-and-mark",
@@ -2132,6 +2169,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector: "#offscreen", tagName: "div" },
       });
+      await flushOverlay();
       expect(markersFor("off-ann").length).toBe(0);
 
       el.getBoundingClientRect = () => rectOf(100, 2000, 200, 100); // below viewport
@@ -2146,11 +2184,11 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("edge clamping keeps the full marker reachable; visually detached clamps are omitted", () => {
+  test("edge clamping keeps the full marker reachable; visually detached clamps are omitted", async () => {
     document.body.innerHTML = '<div id="edge">Edge</div><div id="sliver">S</div>';
     const edge = document.querySelector<HTMLElement>("#edge")!;
     const sliver = document.querySelector<HTMLElement>("#sliver")!;
-    withLayout(() => {
+    await withLayout(async () => {
       // A point at the exact left edge clamps to the 29px inset and stays
       // associated with its (40px-wide) target.
       edge.getBoundingClientRect = () => rectOf(0, 40, 40, 40);
@@ -2161,6 +2199,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector: "#edge", tagName: "div", point: { x: 0, y: 0.5 } },
       });
+      await flushOverlay();
       const clamped = markersFor("edge-ann");
       expect(clamped.length).toBe(1);
       expect(clamped[0]!.style.left).toBe("29px");
@@ -2180,6 +2219,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector: "#sliver", tagName: "div" },
       });
+      await flushOverlay();
       const sliverMarkers = markersFor("sliver-ann");
       expect(sliverMarkers.length).toBe(1);
       expect(sliverMarkers[0]!.style.left).toBe("29px");
@@ -2189,14 +2229,14 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("coincident markers spread horizontally and deterministically", () => {
+  test("coincident markers spread horizontally and deterministically", async () => {
     document.body.innerHTML = [
       '<div data-testid="co-a">A</div>',
       '<div data-testid="co-b">B</div>',
     ].join("");
     const a = document.querySelector<HTMLElement>('div[data-testid="co-a"]')!;
     const b = document.querySelector<HTMLElement>('div[data-testid="co-b"]')!;
-    withLayout(() => {
+    await withLayout(async () => {
       a.getBoundingClientRect = () => rectOf(100, 100, 50, 50);
       b.getBoundingClientRect = () => rectOf(100, 100, 50, 50);
       for (const [id, selector] of [["co-1", 'div[data-testid="co-a"]'], ["co-2", 'div[data-testid="co-b"]']] as const) {
@@ -2207,6 +2247,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           annotationType: "comment",
           anchor: { selector, tagName: "div" },
         });
+        await flushOverlay();
       }
       // Same rounded point (125,125): the group spreads by 12.5px steps,
       // centered on the shared point, ordered by comment number.
@@ -2227,7 +2268,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("parent-synced numbering overrides registration order and renumbers markers", () => {
+  test("parent-synced numbering overrides registration order and renumbers markers", async () => {
     document.body.innerHTML = [
       '<div data-testid="n-a">A</div>',
       '<div data-testid="n-b">B</div>',
@@ -2240,6 +2281,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector, tagName: "div" },
       });
+      await flushOverlay();
     }
     // Pre-sync fallback: registration order.
     expect(markerNumber(markersFor("n-1")[0]!)).toBe("1");
@@ -2259,7 +2301,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("malformed sync payloads are ignored or skipped at the bridge boundary", () => {
+  test("malformed sync payloads are ignored or skipped at the bridge boundary", async () => {
     document.body.innerHTML = [
       '<div data-testid="m-a">A</div>',
       '<div data-testid="m-b">B</div>',
@@ -2272,6 +2314,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector, tagName: "div" },
       });
+      await flushOverlay();
     }
     postBridge({
       type: "plannotator-bridge-sync-annotations",
@@ -2306,7 +2349,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("focus highlight covers EVERY rect of a multi-paragraph selection (partial-blue regression)", () => {
+  test("focus highlight covers EVERY rect of a multi-paragraph selection (partial-blue regression)", async () => {
     document.body.innerHTML = "<p>Alpha beta gamma delta</p>";
     const originalGetClientRects = Range.prototype.getClientRects;
     const originalBodyRect = document.body.getBoundingClientRect;
@@ -2325,6 +2368,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         originalText: "Alpha beta gamma delta",
         annotationType: "comment",
       });
+      await flushOverlay();
       // Persistent comment highlight paints both rects.
       const commentRects = visibleHighlights("pn-hl-comment").filter(
         (el) => el.getAttribute("data-annotation-id") === "focus-multi",
@@ -2371,7 +2415,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("hit-testing for new selections yields placed markers to reach the page beneath", () => {
+  test("hit-testing for new selections yields placed markers to reach the page beneath", async () => {
     document.body.innerHTML = '<p id="beneath">Beneath text</p><div data-testid="hit">H</div>';
     postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
     // Materialize the overlay host + a marker.
@@ -2382,6 +2426,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: 'div[data-testid="hit"]', tagName: "div" },
     });
+    await flushOverlay();
     const host = overlayHost();
     if (!host) throw new Error("overlay host missing");
     const beneath = document.querySelector<HTMLElement>("#beneath")!;
@@ -2419,14 +2464,14 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
   // --- Fix-round regressions: clipping, visibility, search gating, print,
   // --- click-to-select, containment, dedup, numbering, marker anchoring ----
 
-  test("highlight rects are clip-tested against inner scroll containers (M1)", () => {
+  test("highlight rects are clip-tested against inner scroll containers (M1)", async () => {
     document.body.innerHTML =
       '<div id="scroller"><p id="clipped-p">Clipped highlight text</p></div>';
     const scroller = document.querySelector<HTMLElement>("#scroller")!;
     const clippedP = document.querySelector<HTMLElement>("#clipped-p")!;
     scroller.style.overflow = "hidden";
     const originalGetClientRects = Range.prototype.getClientRects;
-    withLayout(() => {
+    await withLayout(async () => {
       scroller.getBoundingClientRect = () => rectOf(0, 0, 200, 100);
       clippedP.getBoundingClientRect = () => rectOf(0, 50, 200, 120);
       (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = () => [
@@ -2441,6 +2486,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           originalText: "Clipped highlight text",
           annotationType: "comment",
         });
+        await flushOverlay();
         const painted = visibleHighlights("pn-hl-comment")
           .filter((el) => el.getAttribute("data-annotation-id") === "clip-hl")
           .map((el) => ({ top: el.style.top, height: el.style.height }))
@@ -2465,10 +2511,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("style-hidden targets are unresolved-for-display (M2 visibility gate)", () => {
+  test("style-hidden targets are unresolved-for-display (M2 visibility gate)", async () => {
     document.body.innerHTML = '<div id="slide">Slide content</div>';
     const slide = document.querySelector<HTMLElement>("#slide")!;
-    withLayout(() => {
+    await withLayout(async () => {
       slide.getBoundingClientRect = () => rectOf(100, 100, 200, 100);
       postBridge({
         type: "plannotator-bridge-find-and-mark",
@@ -2477,6 +2523,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector: "#slide", tagName: "div" },
       });
+      await flushOverlay();
       expect(markersFor("vis-ann").length).toBe(1);
 
       // visibility:hidden keeps a full-size rect — the marker must not
@@ -2503,7 +2550,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("dead-target re-search is generation-gated, never per-render (M3)", () => {
+  test("dead-target re-search is generation-gated, never per-render (M3)", async () => {
     document.body.innerHTML = "<p>Ephemeral searchable text</p>";
     postBridge({
       type: "plannotator-bridge-find-and-mark",
@@ -2511,6 +2558,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       originalText: "Ephemeral searchable text",
       annotationType: "comment",
     });
+    await flushOverlay();
     expect(
       visibleHighlights("pn-hl-comment").some(
         (el) => el.getAttribute("data-annotation-id") === "gen-ann",
@@ -2538,7 +2586,9 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       }
       expect(sweeps).toBe(0);
 
-      // A text-capable invalidation unlocks exactly one more search…
+      // A text-capable invalidation (plus an elapsed failure backoff)
+      // unlocks exactly one more search…
+      advancePastDeadSearchBackoff();
       bumpDomGeneration();
       postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
       expect(sweeps).toBeGreaterThan(0);
@@ -2551,8 +2601,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         originalCreateTreeWalker;
     }
 
-    // The text returning re-resolves after the next invalidation.
+    // The text returning re-resolves after the next invalidation (and an
+    // elapsed backoff).
     document.body.innerHTML = "<p>Ephemeral searchable text</p>";
+    advancePastDeadSearchBackoff();
     bumpDomGeneration();
     postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
     expect(
@@ -2565,10 +2617,301 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("printing re-projects committed highlights into a paginating absolute layer (M4)", () => {
+  test("mutation-heavy pages: failed re-searches back off on the wall clock and are budgeted per pass (A)", async () => {
+    // A page that mutates every frame advances domGeneration every frame, so
+    // the generation gate alone would re-run the whole-document sweep per
+    // frame forever for permanently unresolvable targets. Failed searches
+    // must (1) run at most 2 per reconcile pass and (2) back off on the
+    // wall clock even across generation bumps.
+    document.body.innerHTML = [0, 1, 2, 3]
+      .map((i) => `<p>Backoff text ${i}</p>`)
+      .join("");
+    for (let i = 0; i < 4; i++) {
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id: `boff-${i}`,
+        originalText: `Backoff text ${i}`,
+        annotationType: "comment",
+      });
+    }
+    await flushOverlay();
+
+    // Every target's text disappears: all four ranges are dead.
+    document.body.innerHTML = "<p>Rewritten content</p>";
+
+    const originalCreateTreeWalker = document.createTreeWalker.bind(document);
+    let sweeps = 0;
+    (document as { createTreeWalker: typeof document.createTreeWalker }).createTreeWalker = ((
+      ...args: Parameters<typeof document.createTreeWalker>
+    ) => {
+      sweeps += 1;
+      return originalCreateTreeWalker(...args);
+    }) as typeof document.createTreeWalker;
+    try {
+      // Pass 1: only the per-pass budget (2) may search, even though all
+      // four targets are eligible.
+      bumpDomGeneration();
+      postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+      expect(sweeps).toBe(2);
+      // The skipped-but-eligible targets get a scheduled follow-up pass.
+      await flushOverlay();
+      expect(sweeps).toBe(4);
+      // No eligible targets remain: no further passes run searches.
+      await flushOverlay();
+      postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+      expect(sweeps).toBe(4);
+
+      // Mutation-heavy page: generation bumps every "frame". The wall-clock
+      // backoff must keep every failed target locked regardless.
+      for (let i = 0; i < 5; i++) {
+        bumpDomGeneration();
+        postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+        await flushOverlay();
+      }
+      expect(sweeps).toBe(4);
+
+      // Once the backoff elapses AND the generation has advanced, searching
+      // resumes (still budgeted per pass).
+      advancePastDeadSearchBackoff();
+      bumpDomGeneration();
+      postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+      expect(sweeps).toBe(6);
+      await flushOverlay();
+      expect(sweeps).toBe(8);
+    } finally {
+      (document as { createTreeWalker: typeof document.createTreeWalker }).createTreeWalker =
+        originalCreateTreeWalker;
+    }
+
+    // A successful search resets the backoff: the text returning re-resolves
+    // on the next unlocked pass.
+    document.body.innerHTML = [0, 1, 2, 3]
+      .map((i) => `<p>Backoff text ${i}</p>`)
+      .join("");
+    advancePastDeadSearchBackoff();
+    bumpDomGeneration();
+    postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+    await flushOverlay();
+    expect(committedRanges("boff-0").length).toBe(1);
+    expect(committedRanges("boff-3").length).toBe(1);
+
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
+  test("offscreen targets are culled before style/clip reads (B1)", async () => {
+    document.body.innerHTML = '<div id="cull-el">Cull element</div><p>Cull range text</p>';
+    const el = document.querySelector<HTMLElement>("#cull-el")!;
+    await withLayout(async () => {
+      // Element target far below the viewport (beyond the cull margin).
+      el.getBoundingClientRect = () => rectOf(100, 2000, 200, 100);
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id: "cull-el-ann",
+        originalText: "Text that exists nowhere on this page",
+        annotationType: "comment",
+        anchor: { selector: "#cull-el", tagName: "div" },
+      });
+      await flushOverlay();
+      expect(markersFor("cull-el-ann").length).toBe(0);
+
+      // A re-render of the culled element does none of the per-target style
+      // work (targetStyleHidden / clipBoundsFor both read computed styles).
+      const realGetComputedStyle = window.getComputedStyle.bind(window);
+      let styleReads = 0;
+      (window as { getComputedStyle: typeof window.getComputedStyle }).getComputedStyle = ((
+        ...args: Parameters<typeof window.getComputedStyle>
+      ) => {
+        styleReads += 1;
+        return realGetComputedStyle(...args);
+      }) as typeof window.getComputedStyle;
+      try {
+        postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+        expect(markersFor("cull-el-ann").length).toBe(0);
+        expect(styleReads).toBe(0);
+      } finally {
+        (window as { getComputedStyle: typeof window.getComputedStyle }).getComputedStyle =
+          realGetComputedStyle;
+      }
+
+      // Scrolled back into view, the marker renders again.
+      el.getBoundingClientRect = () => rectOf(100, 300, 200, 100);
+      postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+      expect(markersFor("cull-el-ann").length).toBe(1);
+      postBridge({ type: "plannotator-bridge-remove-mark", id: "cull-el-ann" });
+
+      // Range targets cull on the range's bounding rect BEFORE collecting
+      // client rects (the per-rect clip/containment work never runs).
+      const originalGetClientRects = Range.prototype.getClientRects;
+      const originalRangeBounds = Range.prototype.getBoundingClientRect;
+      let rectCollections = 0;
+      (Range.prototype as unknown as { getBoundingClientRect: () => DOMRect })
+        .getBoundingClientRect = () => rectOf(10, 2000, 100, 20);
+      (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = (() => {
+        rectCollections += 1;
+        return [rectOf(10, 2000, 100, 20)];
+      }) as unknown as typeof Range.prototype.getClientRects;
+      try {
+        postBridge({
+          type: "plannotator-bridge-find-and-mark",
+          id: "cull-range-ann",
+          originalText: "Cull range text",
+          annotationType: "comment",
+        });
+        await flushOverlay();
+        expect(rectCollections).toBe(0);
+        expect(
+          visibleHighlights("pn-hl-comment").some(
+            (hl) => hl.getAttribute("data-annotation-id") === "cull-range-ann",
+          ),
+        ).toBe(false);
+      } finally {
+        (Range.prototype as { getClientRects: typeof originalGetClientRects }).getClientRects =
+          originalGetClientRects;
+        (Range.prototype as { getBoundingClientRect: typeof originalRangeBounds })
+          .getBoundingClientRect = originalRangeBounds;
+      }
+    });
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
+  test("batch restore renders the overlay once, not once per annotation (B3)", async () => {
+    document.body.innerHTML =
+      '<div id="b3-0">A</div><div id="b3-1">B</div><div id="b3-2">C</div>';
+    const counts = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      const target = document.querySelector<HTMLElement>(`#b3-${i}`)!;
+      const rect = rectOf(50 + i * 100, 100, 50, 50);
+      target.getBoundingClientRect = () => {
+        counts[i] += 1;
+        return rect;
+      };
+    }
+    await withLayout(async () => {
+      for (let i = 0; i < 3; i++) {
+        postBridge({
+          type: "plannotator-bridge-find-and-mark",
+          id: `b3-ann-${i}`,
+          originalText: "Text that exists nowhere on this page",
+          annotationType: "comment",
+          anchor: { selector: `#b3-${i}`, tagName: "div" },
+        });
+      }
+      // The projection is deferred: no render (no geometry reads) ran yet.
+      expect(counts).toEqual([0, 0, 0]);
+      await flushOverlay();
+      // ONE coalesced pass rendered the whole batch: each target's geometry
+      // was read exactly once (the old synchronous per-restore render read
+      // the first target three times: [3, 2, 1]).
+      expect(counts).toEqual([1, 1, 1]);
+      expect(visibleMarkers().length).toBe(3);
+    });
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
+  test("page mutations schedule no reconcile when the overlay has zero work (B4)", async () => {
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.innerHTML = "<p>B4 idle text</p>";
+    await flushOverlay(); // drain anything pending before counting
+
+    const realRaf = window.requestAnimationFrame.bind(window);
+    let scheduled = 0;
+    (window as { requestAnimationFrame: typeof window.requestAnimationFrame })
+      .requestAnimationFrame = ((cb: FrameRequestCallback) => {
+        scheduled += 1;
+        return realRaf(cb);
+      }) as typeof window.requestAnimationFrame;
+    try {
+      // Zero records, no draft, pinpoint inactive: a page mutation bumps the
+      // generation but must not schedule the reconcile frame.
+      deliverPageMutations([{
+        type: "characterData",
+        target: document.body,
+      } as Partial<MutationRecord>]);
+      expect(scheduled).toBe(0);
+
+      // With a committed record, the same mutation schedules the reconcile.
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id: "b4-ann",
+        originalText: "B4 idle text",
+        annotationType: "comment",
+      });
+      await flushOverlay();
+      const before = scheduled;
+      deliverPageMutations([{
+        type: "characterData",
+        target: document.body,
+      } as Partial<MutationRecord>]);
+      expect(scheduled).toBeGreaterThan(before);
+      await flushOverlay();
+    } finally {
+      (window as { requestAnimationFrame: typeof window.requestAnimationFrame })
+        .requestAnimationFrame = realRaf;
+    }
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
+  test("hovering a committed highlight brightens its overlay rects without touching the page (D)", async () => {
+    document.body.innerHTML = "<p>Hover affordance text</p>";
+    const pageSnapshot = document.body.innerHTML;
+    const originalGetClientRects = Range.prototype.getClientRects;
+    await withLayout(async () => {
+      (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = () => [
+        rectOf(100, 100, 200, 20),
+      ];
+      try {
+        postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+        postBridge({
+          type: "plannotator-bridge-find-and-mark",
+          id: "hover-ann",
+          originalText: "Hover affordance text",
+          annotationType: "comment",
+        });
+        await flushOverlay();
+        const painted = visibleHighlights("pn-hl-comment").filter(
+          (hl) => hl.getAttribute("data-annotation-id") === "hover-ann",
+        );
+        expect(painted.length).toBeGreaterThan(0);
+        expect(painted[0]!.classList.contains("pn-hl-hover")).toBe(false);
+
+        // Pointer over the painted rect: the hover class lands on the rect
+        // divs inside the shadow root; the page DOM stays byte-identical.
+        document.dispatchEvent(new MouseEvent("mousemove", {
+          bubbles: true,
+          clientX: 150,
+          clientY: 110,
+        }));
+        await flushOverlay();
+        expect(painted[0]!.classList.contains("pn-hl-hover")).toBe(true);
+        expect(document.body.innerHTML).toBe(pageSnapshot);
+
+        // Pointer off the rect clears the affordance.
+        document.dispatchEvent(new MouseEvent("mousemove", {
+          bubbles: true,
+          clientX: 600,
+          clientY: 500,
+        }));
+        await flushOverlay();
+        expect(painted[0]!.classList.contains("pn-hl-hover")).toBe(false);
+      } finally {
+        (Range.prototype as { getClientRects: typeof originalGetClientRects }).getClientRects =
+          originalGetClientRects;
+      }
+    });
+    postBridge({ type: "plannotator-bridge-clear-marks" });
+    document.body.replaceChildren();
+  });
+
+  test("printing re-projects committed highlights into a paginating absolute layer (M4)", async () => {
     document.body.innerHTML = "<p>Printable highlight text</p>";
     const originalGetClientRects = Range.prototype.getClientRects;
-    withLayout(() => {
+    await withLayout(async () => {
       (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = () => [
         rectOf(10, 20, 100, 20),
       ];
@@ -2579,6 +2922,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           originalText: "Printable highlight text",
           annotationType: "comment",
         });
+        await flushOverlay();
         window.dispatchEvent(new Event("beforeprint"));
         const layer = document.querySelector<HTMLElement>(
           "[data-plannotator-print-layer]",
@@ -2641,12 +2985,14 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         originalText: "big highlight target",
         annotationType: "comment",
       });
+      await flushOverlay();
       postBridge({
         type: "plannotator-bridge-find-and-mark",
         id: "click-small",
         originalText: "small nested note",
         annotationType: "comment",
       });
+      await flushOverlay();
 
       // Inside both rects: the smallest highlight wins the overlap.
       const overlapping = await collectMessages(
@@ -2688,14 +3034,14 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("fixed-position targets ignore static overflow clippers (m3)", () => {
+  test("fixed-position targets ignore static overflow clippers (m3)", async () => {
     document.body.innerHTML =
       '<div id="wrap"><div id="fixed-el">Pinned banner</div></div>';
     const wrap = document.querySelector<HTMLElement>("#wrap")!;
     const fixedEl = document.querySelector<HTMLElement>("#fixed-el")!;
     wrap.style.overflow = "hidden";
     fixedEl.style.position = "fixed";
-    withLayout(() => {
+    await withLayout(async () => {
       wrap.getBoundingClientRect = () => rectOf(0, 0, 100, 50);
       // Fully visible in the viewport but entirely outside the static
       // clipper's box: overflow clipping does not apply to a fixed target
@@ -2708,6 +3054,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector: "#fixed-el", tagName: "div" },
       });
+      await flushOverlay();
       expect(markersFor("fixed-ann").length).toBe(1);
 
       // Same geometry with static positioning: the clipper applies and the
@@ -2728,13 +3075,13 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("markers omit when the target scrolls out of its clip container (omission preserved)", () => {
+  test("markers omit when the target scrolls out of its clip container (omission preserved)", async () => {
     document.body.innerHTML =
       '<div id="clipwrap"><div id="clipped-el">Clipped away</div></div>';
     const clipwrap = document.querySelector<HTMLElement>("#clipwrap")!;
     const clippedEl = document.querySelector<HTMLElement>("#clipped-el")!;
     clipwrap.style.overflow = "hidden";
-    withLayout(() => {
+    await withLayout(async () => {
       clipwrap.getBoundingClientRect = () => rectOf(0, 0, 200, 100);
       clippedEl.getBoundingClientRect = () => rectOf(0, 150, 200, 50); // scrolled past the edge
       postBridge({
@@ -2744,6 +3091,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         annotationType: "comment",
         anchor: { selector: "#clipped-el", tagName: "div" },
       });
+      await flushOverlay();
       expect(markersFor("clip-omit").length).toBe(0);
 
       clippedEl.getBoundingClientRect = () => rectOf(0, 20, 200, 50); // scrolled back in
@@ -2754,10 +3102,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("border boxes that duplicate line rects are dropped (m7 containment filter)", () => {
+  test("border boxes that duplicate line rects are dropped (m7 containment filter)", async () => {
     document.body.innerHTML = "<p>Redline paragraph text</p>";
     const originalGetClientRects = Range.prototype.getClientRects;
-    withLayout(() => {
+    await withLayout(async () => {
       // Range.getClientRects() returns BOTH the contained element's border
       // box AND its line boxes; painting all three double-paints the
       // translucent fill and duplicates the strike line.
@@ -2773,6 +3121,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           originalText: "Redline paragraph text",
           annotationType: "deletion",
         });
+        await flushOverlay();
         const painted = visibleHighlights("pn-hl-deletion").filter(
           (el) => el.getAttribute("data-annotation-id") === "redline-ann",
         );
@@ -2787,7 +3136,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("anchors re-resolving to one element render one marker (m10 refresh dedup)", () => {
+  test("anchors re-resolving to one element render one marker (m10 refresh dedup)", async () => {
     document.body.innerHTML =
       '<div id="m10-a">First</div><div data-testid="m10-b">Second</div>';
     postBridge({
@@ -2798,6 +3147,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       anchor: { selector: "#m10-a", tagName: "div" },
       additionalAnchors: [{ selector: 'div[data-testid="m10-b"]', tagName: "div" }],
     });
+    await flushOverlay();
     expect(markersFor("dedup-ann").length).toBe(2);
 
     // The page rerenders so BOTH anchors resolve to the same element: only
@@ -2811,7 +3161,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("clear-marks clears synced numbering (m11)", () => {
+  test("clear-marks clears synced numbering (m11)", async () => {
     document.body.innerHTML = '<div id="renum">Target</div>';
     postBridge({
       type: "plannotator-bridge-find-and-mark",
@@ -2820,6 +3170,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: "#renum", tagName: "div" },
     });
+    await flushOverlay();
     postBridge({
       type: "plannotator-bridge-sync-annotations",
       annotations: [{ id: "renum-ann", number: 7 }],
@@ -2836,16 +3187,17 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: "#renum", tagName: "div" },
     });
+    await flushOverlay();
     expect(markerNumber(markersFor("renum-ann")[0]!)).toBe("1");
 
     postBridge({ type: "plannotator-bridge-clear-marks" });
     document.body.replaceChildren();
   });
 
-  test("marker anchors to the TRUE last client rect past the paint cap (m12)", () => {
+  test("marker anchors to the TRUE last client rect past the paint cap (m12)", async () => {
     document.body.innerHTML = "<p>Long wrapped selection</p>";
     const originalGetClientRects = Range.prototype.getClientRects;
-    withLayout(() => {
+    await withLayout(async () => {
       const rects: DOMRect[] = [];
       for (let i = 0; i < 60; i++) rects.push(rectOf(10, 10 + i * 5, 100, 5));
       (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = () =>
@@ -2857,6 +3209,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           originalText: "Long wrapped selection",
           annotationType: "comment",
         });
+        await flushOverlay();
         // Painting caps at 48 rects…
         const painted = visibleHighlights("pn-hl-comment").filter(
           (el) => el.getAttribute("data-annotation-id") === "long-ann",
@@ -2877,7 +3230,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("pinpoint hover over a placed marker advertises the marker, not the element beneath (m6)", () => {
+  test("pinpoint hover over a placed marker advertises the marker, not the element beneath (m6)", async () => {
     document.body.innerHTML = '<p id="under">Beneath paragraph</p><div id="m6-t">Marked</div>';
     postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
     postBridge({
@@ -2887,6 +3240,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       annotationType: "comment",
       anchor: { selector: "#m6-t", tagName: "div" },
     });
+    await flushOverlay();
     postBridge({
       type: "plannotator-bridge-sync-annotations",
       annotations: [{ id: "hover-ann", number: 3 }],
@@ -2929,10 +3283,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("rect collection is capped at 48 with the containment filter, marker at the true tail (perf bound)", () => {
+  test("rect collection is capped at 48 with the containment filter, marker at the true tail (perf bound)", async () => {
     document.body.innerHTML = "<p>Huge wrapped selection</p>";
     const originalGetClientRects = Range.prototype.getClientRects;
-    withLayout(() => {
+    await withLayout(async () => {
       // 60 rects: index 0 is a border box strictly containing lines 1..10;
       // only the first 48 may ever be materialized (a huge selection can
       // yield thousands of rects per reconcile frame), the containment
@@ -2949,6 +3303,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           originalText: "Huge wrapped selection",
           annotationType: "comment",
         });
+        await flushOverlay();
         const painted = visibleHighlights("pn-hl-comment").filter(
           (el) => el.getAttribute("data-annotation-id") === "huge-ann",
         );
@@ -2969,7 +3324,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("the page observer watches documentElement; body swaps unlock re-search (M3 scope)", () => {
+  test("the page observer watches documentElement; body swaps unlock re-search (M3 scope)", async () => {
     const observer = capturedObservers[0];
     if (!observer) throw new Error("bridge page observer was not captured");
     // Scope: a body-scoped observer sees NO record when the page swaps the
@@ -2987,6 +3342,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       originalText: "Body swap text",
       annotationType: "comment",
     });
+    await flushOverlay();
     expect(
       visibleHighlights("pn-hl-comment").some(
         (el) => el.getAttribute("data-annotation-id") === "swap-ann",
@@ -3037,8 +3393,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     }
 
     // The text returns inside the (new) body — inside the documentElement
-    // observer's subtree — and the next real record unlocks re-search.
+    // observer's subtree — and the next real record (after the failure
+    // backoff) unlocks re-search.
     document.body.innerHTML = "<p>Body swap text</p>";
+    advancePastDeadSearchBackoff();
     deliverPageMutations([{
       type: "childList",
       target: document.documentElement,
@@ -3056,7 +3414,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
-  test("dedup keeps the VISIBLE marker when a hidden sibling target shares the element (5b)", () => {
+  test("dedup keeps the VISIBLE marker when a hidden sibling target shares the element (5b)", async () => {
     document.body.innerHTML =
       '<div id="m10-a">First</div><div data-testid="m10-b">Second</div>';
     postBridge({
@@ -3069,6 +3427,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
         { selector: 'div[data-testid="m10-b"]', tagName: "div", point: { x: 0.75, y: 0.5 } },
       ],
     });
+    await flushOverlay();
     // Both anchors re-resolve to ONE merged element inside a clipper that
     // hides the FIRST target's point but not the second's: dedup must run
     // among PLACED markers, keeping the visible one — not consume the
@@ -3078,7 +3437,7 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     const wrap = document.querySelector<HTMLElement>("#m10-wrap")!;
     const merged = document.querySelector<HTMLElement>("#m10-a")!;
     wrap.style.overflow = "hidden";
-    withLayout(() => {
+    await withLayout(async () => {
       wrap.getBoundingClientRect = () => rectOf(100, 0, 100, 100);
       merged.getBoundingClientRect = () => rectOf(0, 0, 200, 50);
       bumpDomGeneration();

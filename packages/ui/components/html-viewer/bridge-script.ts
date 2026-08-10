@@ -575,6 +575,7 @@ export const BRIDGE_SCRIPT = `(function() {
     else if (type === PREFIX + 'set-input-method') {
       currentInputMethod = e.data.method === 'pinpoint' ? 'pinpoint' : 'drag';
       if (currentInputMethod === 'pinpoint') {
+        setHoverHighlight(null); // pinpoint owns clicks; drop the select affordance
         if (document.body) document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
       } else {
         if (document.body) document.body.removeAttribute('data-plannotator-pinpoint-cursor');
@@ -1089,7 +1090,18 @@ export const BRIDGE_SCRIPT = `(function() {
   var lastPointer = null;
   document.addEventListener('mousemove', function(e) {
     lastPointer = { x: e.clientX, y: e.clientY };
-    if (currentInputMethod !== 'pinpoint') return;
+    updateDragYield(e);
+    if (currentInputMethod !== 'pinpoint') {
+      // Click-to-select hover affordance (drag mode owns highlight clicks):
+      // cheap cached-rect hit test, rAF-throttled, cleared while a draft or
+      // pending selection owns the surface.
+      if (!pendingPinEl && !pendingSelection && renderedCommittedRects.length) {
+        scheduleHoverHitTest(e.clientX, e.clientY);
+      } else if (hoverHighlightId) {
+        setHoverHighlight(null);
+      }
+      return;
+    }
     if (vimEnabled && vimPhase !== 'inactive') return;
     // Hit-test at the pointer (e.target only backstops engines without
     // elementFromPoint) so the same code path serves the scroll re-hit-test.
@@ -1118,6 +1130,11 @@ export const BRIDGE_SCRIPT = `(function() {
       // the last-position cache must never answer the next probe.
       invalidatePointerHitCache();
       renderAnnotationOverlay();
+      // Scroll under a stationary pointer moves the committed rects: re-run
+      // the cached-rect hover test so the affordance tracks reality.
+      if (currentInputMethod !== 'pinpoint' && lastPointer && !pendingPinEl && !pendingSelection) {
+        setHoverHighlight(committedHighlightIdAtCached(lastPointer.x, lastPointer.y));
+      }
       positionMultiTargetBoxes();
       if (pendingPinEl && pendingPinEl.isConnected) {
         positionPinpointBox(pendingPinEl);
@@ -1157,6 +1174,7 @@ export const BRIDGE_SCRIPT = `(function() {
     '.pn-hl-deletion { background: oklch(from var(--pn-destructive, #c0392b) l c h / 0.28); background-image: linear-gradient(to bottom, transparent calc(50% - 1px), var(--pn-destructive, #c0392b) calc(50% - 1px), var(--pn-destructive, #c0392b) calc(50% + 1px), transparent calc(50% + 1px)); }',
     '.pn-hl-focus { background: oklch(from var(--pn-focus-highlight, #4493f8) l c h / 0.35); box-shadow: 0 0 8px oklch(from var(--pn-focus-highlight, #4493f8) l c h / 0.4); }',
     '.pn-hl-draft { background: oklch(from var(--pn-focus-highlight, #4493f8) l c h / 0.22); }',
+    '.pn-hl-hover { filter: brightness(1.25) saturate(1.1); }',
     '.pn-marker { position: fixed; width: 25px; height: 25px; border: 0; padding: 0; margin: 0; background: transparent; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center; animation: pn-marker-in 0.2s ease-out both; }',
     '.pn-marker[data-selected="true"] { transform: translate(-50%, -50%) scale(1.08); }',
     '.pn-marker-icon { pointer-events: none; display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; filter: drop-shadow(0 1px 3px rgba(0,0,0,.3)); }',
@@ -1223,15 +1241,60 @@ export const BRIDGE_SCRIPT = `(function() {
   // Hit-test yielding: marker buttons accept pointer input, so a bare
   // elementFromPoint over one would resolve overlay chrome instead of the
   // page. Temporarily disable marker hit targets so probes reach beneath.
+  // Restores (never clears) the attribute: the drag-selection yield below
+  // holds the same attribute across events and must survive a probe.
   function withMarkersYielded(fn) {
     if (!overlayHostEl || !overlayHostEl.isConnected) return fn();
+    var alreadyYielded = overlayHostEl.hasAttribute('data-pn-hittest');
     overlayHostEl.setAttribute('data-pn-hittest', '');
     try {
       return fn();
     } finally {
-      overlayHostEl.removeAttribute('data-pn-hittest');
+      if (!alreadyYielded) overlayHostEl.removeAttribute('data-pn-hittest');
     }
   }
+
+  // Drag-selection marker yield: while a text drag is in progress in drag
+  // mode, placed markers drop pointer input (the same data-pn-hittest CSS the
+  // hit-test yield uses) so a 25px bubble sitting over the text cannot
+  // capture the selection mid-drag. Armed only by a >4px move with the
+  // primary button held from a non-overlay mousedown, so marker clicks
+  // (mousedown ON the marker) and plain click-to-select (no drag) are
+  // untouched; disarmed on mouseup or when the button is seen released.
+  var dragYieldStart = null;
+  var dragYieldActive = false;
+  function endDragYield() {
+    dragYieldStart = null;
+    if (dragYieldActive) {
+      dragYieldActive = false;
+      if (overlayHostEl) overlayHostEl.removeAttribute('data-pn-hittest');
+    }
+  }
+  function updateDragYield(e) {
+    if (!dragYieldStart) return;
+    if (typeof e.buttons === 'number' && !(e.buttons & 1)) {
+      endDragYield(); // missed mouseup (released outside the iframe)
+      return;
+    }
+    if (
+      !dragYieldActive
+      && (Math.abs(e.clientX - dragYieldStart.x) > 4 || Math.abs(e.clientY - dragYieldStart.y) > 4)
+    ) {
+      dragYieldActive = true;
+      if (overlayHostEl && overlayHostEl.isConnected) {
+        overlayHostEl.setAttribute('data-pn-hittest', '');
+      }
+    }
+  }
+  document.addEventListener('mousedown', function(e) {
+    if (currentInputMethod === 'pinpoint') return;
+    if (e.button !== 0) return;
+    if (isViewerOverlayNode(e.target)) return;
+    dragYieldStart = { x: e.clientX, y: e.clientY };
+  }, true);
+  document.addEventListener('mouseup', function() {
+    endDragYield();
+  }, true);
 
   // One record per committed annotation. Its targets are live projections;
   // its params are the durable data they re-resolve from after mutations.
@@ -1401,7 +1464,12 @@ export const BRIDGE_SCRIPT = `(function() {
       }
     }
     if (!record.targets.length) removeAnnRecord(id);
-    renderAnnotationOverlay();
+    // rAF-coalesced render (B3): restoring N annotations posts N
+    // find-and-mark messages, and a synchronous render here made a batch
+    // restore O(N^2) full overlay passes. The searches above stay
+    // synchronous (the mark-applied reply depends on them); only the
+    // projection is deferred, and one frame renders the whole batch.
+    schedulePinpointReconcile();
     return found;
   }
 
@@ -1415,30 +1483,86 @@ export const BRIDGE_SCRIPT = `(function() {
   // never unlock a re-search — geometry changes, text doesn't.
   var domGeneration = 1;
 
+  function monotonicNow() {
+    return typeof performance !== 'undefined' && performance.now
+      ? performance.now()
+      : Date.now();
+  }
+
+  // Wall-clock backoff ON TOP of the generation gate: a page that mutates
+  // styles/text once per frame advances domGeneration every frame, so the
+  // generation gate alone would re-run the whole-document text search (or
+  // anchor re-resolution) per frame forever for a permanently unresolvable
+  // target. After each FAILED search a target waits for BOTH a new
+  // generation AND its backoff (300ms, doubling to a 5s cap, reset on any
+  // success) before it may search again.
+  var DEAD_SEARCH_BACKOFF_MS = 300;
+  var DEAD_SEARCH_BACKOFF_MAX_MS = 5000;
+  // Per-reconcile-pass budget: at most this many dead-target searches run in
+  // one pass, so many stale targets can never stack whole-document scans
+  // into a single frame. When eligible targets are skipped for budget, a
+  // follow-up pass is scheduled; each failure's >=300ms backoff then hands
+  // the next pass's budget to different targets (round-robin by backoff).
+  var MAX_DEAD_SEARCHES_PER_PASS = 2;
+  var deadSearchBudget = MAX_DEAD_SEARCHES_PER_PASS;
+  var deadSearchSkipped = false;
+
+  function beginDeadSearchPass() {
+    deadSearchBudget = MAX_DEAD_SEARCHES_PER_PASS;
+    deadSearchSkipped = false;
+  }
+
+  function deadSearchAllowed(target) {
+    if (target.failedGeneration === domGeneration) return false;
+    if (target.searchBackoffUntil && monotonicNow() < target.searchBackoffUntil) return false;
+    if (deadSearchBudget <= 0) {
+      deadSearchSkipped = true;
+      return false;
+    }
+    return true;
+  }
+
+  function noteDeadSearchResult(target, found) {
+    deadSearchBudget -= 1;
+    if (found) {
+      target.failedGeneration = 0;
+      target.searchBackoffMs = 0;
+      target.searchBackoffUntil = 0;
+    } else {
+      target.failedGeneration = domGeneration;
+      target.searchBackoffMs = target.searchBackoffMs
+        ? Math.min(target.searchBackoffMs * 2, DEAD_SEARCH_BACKOFF_MAX_MS)
+        : DEAD_SEARCH_BACKOFF_MS;
+      target.searchBackoffUntil = monotonicNow() + target.searchBackoffMs;
+    }
+  }
+
   // Re-resolve stale live targets from durable data. Element targets
   // re-acquire through their anchor; range targets re-run the text search
   // (anchor-scoped first). Unresolvable targets stay hidden — never guessed
-  // — and cache the generation of their last failed search so they retry
-  // only after the document could actually have changed.
+  // — and each failed search is gated by the generation of its last attempt
+  // PLUS the wall-clock backoff and per-pass budget above, so they retry
+  // only after the document could actually have changed, and never per
+  // frame.
   function refreshRecordTargets(record) {
     for (var i = 0; i < record.targets.length; i++) {
       var target = record.targets[i];
       if (target.kind === 'element') {
         if ((!target.element || !target.element.isConnected) && target.anchor) {
-          if (target.failedGeneration === domGeneration) continue;
+          if (!deadSearchAllowed(target)) continue;
           target.element = resolveAnchorElement(target.anchor);
-          target.failedGeneration = target.element ? 0 : domGeneration;
+          noteDeadSearchResult(target, !!target.element);
         }
       } else if (!rangeAlive(target.range)) {
         target.range = null;
         if (target.text) {
-          if (target.failedGeneration === domGeneration) continue;
+          if (!deadSearchAllowed(target)) continue;
           var scopeEl = record.params && record.params.anchor
             ? resolveAnchorElement(record.params.anchor)
             : null;
           target.range = (scopeEl && findTextRange(target.text, scopeEl))
             || findTextRange(target.text, null);
-          target.failedGeneration = target.range ? 0 : domGeneration;
+          noteDeadSearchResult(target, !!target.range);
         }
       }
     }
@@ -1559,6 +1683,22 @@ export const BRIDGE_SCRIPT = `(function() {
     var bottom = Math.min(rectBottom(rect), bounds.bottom);
     if (right <= left || bottom <= top) return null;
     return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
+  }
+
+  // Early viewport cull (small margin): a target wholly outside the viewport
+  // paints nothing and places no marker, so the per-frame style/clip reads it
+  // would otherwise cost (getComputedStyle, the clip-chain ancestor walk,
+  // client-rect collection) are skipped outright. Never applies without
+  // layout (headless DOM tests report every rect as 0x0 at the origin).
+  var VIEWPORT_CULL_MARGIN = 64;
+  function rectOutsideViewport(rect) {
+    if (!rect || !layoutActive()) return false;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    return rectBottom(rect) < -VIEWPORT_CULL_MARGIN
+      || rect.top > vh + VIEWPORT_CULL_MARGIN
+      || rectRight(rect) < -VIEWPORT_CULL_MARGIN
+      || rect.left > vw + VIEWPORT_CULL_MARGIN;
   }
 
   // Intersect a target rect with its clip chain for MARKER projection. May
@@ -1746,29 +1886,112 @@ export const BRIDGE_SCRIPT = `(function() {
 
   var highlightPool = [];
   var highlightUsed = 0;
+  // Read/write batching: the render pass QUEUES highlight rects while it
+  // reads geometry, then flushes every pool write at once. Interleaving a
+  // style write between one record's writes and the next record's
+  // getBoundingClientRect would force a synchronous layout per record.
+  var queuedHighlights = [];
+  // Cached viewport rects of the committed highlights currently painted,
+  // rebuilt on every flush. The hover affordance hit-tests the pointer
+  // against THIS cache — never against live range geometry per mousemove.
+  var renderedCommittedRects = [];
   function takeHighlightRect(className, rect, annId) {
-    var div = highlightPool[highlightUsed];
-    if (!div) {
-      div = document.createElement('div');
-      overlayNodes.add(div);
-      highlightPool.push(div);
-      highlightsLayerEl.appendChild(div);
+    queuedHighlights.push({ className: className, rect: rect, annId: annId || '' });
+  }
+  function flushQueuedHighlights() {
+    highlightUsed = 0;
+    renderedCommittedRects.length = 0;
+    for (var q = 0; q < queuedHighlights.length; q++) {
+      var item = queuedHighlights[q];
+      var div = highlightPool[highlightUsed];
+      if (!div) {
+        div = document.createElement('div');
+        overlayNodes.add(div);
+        highlightPool.push(div);
+        highlightsLayerEl.appendChild(div);
+      }
+      highlightUsed += 1;
+      var hoverClass = item.annId && item.annId === hoverHighlightId ? ' pn-hl-hover' : '';
+      div.className = 'pn-hl ' + item.className + hoverClass;
+      if (item.annId) {
+        div.setAttribute('data-annotation-id', item.annId);
+        renderedCommittedRects.push({
+          id: item.annId,
+          left: item.rect.left,
+          top: item.rect.top,
+          right: rectRight(item.rect),
+          bottom: rectBottom(item.rect)
+        });
+      } else {
+        div.removeAttribute('data-annotation-id');
+      }
+      div.style.display = 'block';
+      div.style.left = item.rect.left + 'px';
+      div.style.top = item.rect.top + 'px';
+      div.style.width = (item.rect.width || 0) + 'px';
+      div.style.height = (item.rect.height || 0) + 'px';
     }
-    highlightUsed += 1;
-    div.className = 'pn-hl ' + className;
-    if (annId) div.setAttribute('data-annotation-id', annId);
-    else div.removeAttribute('data-annotation-id');
-    div.style.display = 'block';
-    div.style.left = rect.left + 'px';
-    div.style.top = rect.top + 'px';
-    div.style.width = (rect.width || 0) + 'px';
-    div.style.height = (rect.height || 0) + 'px';
+    queuedHighlights.length = 0;
+    hideUnusedHighlights();
   }
   function hideUnusedHighlights() {
     for (var i = highlightUsed; i < highlightPool.length; i++) {
       highlightPool[i].style.display = 'none';
     }
   }
+
+  // --- Hover affordance for click-to-select ---
+  // Pre-overlay, inline marks carried cursor:pointer + hover styling; overlay
+  // rects are pointer-transparent, so hovering is detected by hit-testing the
+  // rAF-throttled pointer against the CACHED rendered rects (bounding-box
+  // checks only — no geometry reads) and toggling a class on that
+  // annotation's rect divs inside the shadow root. Shadow-root writes are
+  // unobserved by the page mutation observer, so no reconcile feedback loop,
+  // and the rects stay pointer-events: none throughout.
+  var hoverHighlightId = null;
+  var hoverHitRaf = 0;
+  var hoverHitPos = null;
+
+  function committedHighlightIdAtCached(x, y) {
+    var best = null;
+    for (var i = 0; i < renderedCommittedRects.length; i++) {
+      var r = renderedCommittedRects[i];
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+      var area = (r.right - r.left) * (r.bottom - r.top);
+      if (area <= 0) continue;
+      // Smallest rect wins on overlap, matching the click hit-test.
+      if (!best || area <= best.area) best = { id: r.id, area: area };
+    }
+    return best ? best.id : null;
+  }
+
+  function setHoverHighlight(id) {
+    if (id === hoverHighlightId) return;
+    hoverHighlightId = id;
+    for (var i = 0; i < highlightUsed; i++) {
+      var div = highlightPool[i];
+      if (hoverHighlightId && div.getAttribute('data-annotation-id') === hoverHighlightId) {
+        div.classList.add('pn-hl-hover');
+      } else {
+        div.classList.remove('pn-hl-hover');
+      }
+    }
+  }
+
+  function scheduleHoverHitTest(x, y) {
+    hoverHitPos = { x: x, y: y };
+    if (hoverHitRaf) return;
+    hoverHitRaf = requestAnimationFrame(function() {
+      hoverHitRaf = 0;
+      if (!hoverHitPos) return;
+      setHoverHighlight(committedHighlightIdAtCached(hoverHitPos.x, hoverHitPos.y));
+    });
+  }
+
+  document.addEventListener('mouseleave', function() {
+    hoverHitPos = null;
+    setHoverHighlight(null);
+  });
 
   function makeMarkerButton(annId) {
     var btn = document.createElement('button');
@@ -1849,7 +2072,8 @@ export const BRIDGE_SCRIPT = `(function() {
     var hasDraftRange = !!(pendingSelection && pendingRange);
     if (!annRecords.length && !hasDraftRange && !overlayHostEl) return;
     ensureOverlayHost();
-    highlightUsed = 0;
+    beginDeadSearchPass();
+    queuedHighlights.length = 0;
     var markers = [];
     // Fallback numbering by first-seen registration order — used only until
     // the parent's ordered sync arrives. Numbering NEVER derives from target
@@ -1884,6 +2108,12 @@ export const BRIDGE_SCRIPT = `(function() {
             continue;
           }
           var rect = el.getBoundingClientRect();
+          if (rectOutsideViewport(rect)) {
+            // Entirely off-viewport: the marker would be omitted and any
+            // focus rect invisible — skip the style/clip reads outright.
+            markers.push({ key: markerKey, id: record.id, number: number, hidden: true });
+            continue;
+          }
           var zeroSize = layoutActive() && !(rect.width || 0) && !(rect.height || 0);
           var styleHidden = !zeroSize && targetStyleHidden(el);
           var point = target.point || { x: 0.5, y: 0.5 };
@@ -1907,6 +2137,18 @@ export const BRIDGE_SCRIPT = `(function() {
             markers.push({ key: markerKey, id: record.id, number: number, hidden: true });
           }
         } else {
+          if (rangeAlive(target.range)) {
+            // Cull on the range's bounding rect BEFORE any per-rect work
+            // (client-rect collection, clip-chain walks, computed styles).
+            var rangeCullRect = null;
+            try { rangeCullRect = target.range.getBoundingClientRect(); } catch (exCull) {}
+            if (rangeCullRect && rectOutsideViewport(rangeCullRect)) {
+              if (!target.markerless) {
+                markers.push({ key: markerKey, id: record.id, number: number, hidden: true });
+              }
+              continue;
+            }
+          }
           var geometry = rangeVisualGeometry(target.range);
           for (var rectIndex = 0; rectIndex < geometry.paint.length; rectIndex++) {
             takeHighlightRect(
@@ -1939,13 +2181,24 @@ export const BRIDGE_SCRIPT = `(function() {
     // Clip-tested like committed rects (M1): a draft inside a scrolled inner
     // container must not stripe content outside the container's box.
     if (hasDraftRange) {
-      var draftGeometry = rangeVisualGeometry(pendingRange);
-      for (var draftIndex = 0; draftIndex < draftGeometry.paint.length; draftIndex++) {
-        takeHighlightRect('pn-hl-draft', draftGeometry.paint[draftIndex], '');
+      var draftCullRect = null;
+      try { draftCullRect = pendingRange.getBoundingClientRect(); } catch (exDraftCull) {}
+      if (!draftCullRect || !rectOutsideViewport(draftCullRect)) {
+        var draftGeometry = rangeVisualGeometry(pendingRange);
+        for (var draftIndex = 0; draftIndex < draftGeometry.paint.length; draftIndex++) {
+          takeHighlightRect('pn-hl-draft', draftGeometry.paint[draftIndex], '');
+        }
       }
     }
-    hideUnusedHighlights();
+    // Write phase: every geometry read above is done before the first pool
+    // style write lands (B2), so the pass costs one layout, not one per
+    // record.
+    flushQueuedHighlights();
     placeMarkers(markers);
+    // Eligible dead-target searches skipped for budget get a follow-up pass;
+    // the loop terminates once every eligible target has been attempted at
+    // the current generation (its failedGeneration then blocks it).
+    if (deadSearchSkipped) schedulePinpointReconcile();
   }
 
   function focusAnnotationRecord(id, flash) {
@@ -1969,6 +2222,7 @@ export const BRIDGE_SCRIPT = `(function() {
   function scrollToAnnotation(id) {
     var record = findAnnRecord(id);
     if (!record) return;
+    beginDeadSearchPass();
     refreshRecordTargets(record);
     var scrollEl = null;
     for (var i = 0; i < record.targets.length && !scrollEl; i++) {
@@ -3786,13 +4040,26 @@ export const BRIDGE_SCRIPT = `(function() {
     return true;
   }
 
+  // Zero-work observer gate (B4): with no committed records, no pending
+  // draft, and pinpoint inactive there is nothing for the reconcile pass to
+  // do, so a page mutation should not schedule one. The generation bump
+  // still happens — a record registered later must see the mutations that
+  // occurred while the overlay was idle.
+  function reconcileHasWork() {
+    return annRecords.length > 0
+      || !!pendingSelection
+      || !!pendingPinEl
+      || pendingMultiTargets.length > 0
+      || currentInputMethod === 'pinpoint';
+  }
+
   function watchPageMutations() {
     if (pageMutationObserver || typeof MutationObserver === 'undefined' || !document.documentElement) return;
     pageMutationObserver = new MutationObserver(function(mutations) {
       for (var i = 0; i < mutations.length; i++) {
         if (!isOverlayOnlyMutation(mutations[i])) {
           domGeneration += 1; // page text may have changed: unlock dead-target re-search
-          schedulePinpointReconcile();
+          if (reconcileHasWork()) schedulePinpointReconcile();
           return;
         }
       }
@@ -3886,6 +4153,7 @@ export const BRIDGE_SCRIPT = `(function() {
       layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;';
       var sx = window.scrollX || 0;
       var sy = window.scrollY || 0;
+      beginDeadSearchPass();
       for (var recordIndex = 0; recordIndex < annRecords.length; recordIndex++) {
         var record = annRecords[recordIndex];
         refreshRecordTargets(record);
