@@ -15,6 +15,7 @@ import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
+import { DiffHScrollbar } from './DiffHScrollbar';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
@@ -709,6 +710,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   return (
     <div className="h-full flex flex-col">
+      {/* `relative` anchors this file's horizontal scrollbar to the header's
+          bottom edge (#1048) — same placement as the all-files surface. */}
+      <div className="relative flex-none">
       <FileHeader
         filePath={filePath}
         patch={patch}
@@ -735,6 +739,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         stageError={stageError}
         onFileComment={setFileCommentAnchor}
       />
+      {!collapsed && diffOverflow !== 'wrap' && (
+        <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
+      )}
+      </div>
 
       {!collapsed && <OverlayScrollArea
         className={`flex-1 min-h-0 relative ${isDraggingSplit ? 'select-none' : ''}`}
