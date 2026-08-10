@@ -152,7 +152,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   return (
     <div
       ref={headerRef}
-      className="flex-shrink-0 px-3 border-b border-border/50 flex items-center justify-between gap-2"
+      className="flex-shrink-0 px-3 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30"
       style={{ height: 'var(--panel-header-h)' }}
     >
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
