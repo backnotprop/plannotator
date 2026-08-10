@@ -3562,4 +3562,29 @@ describe("injectIntoHead", () => {
     );
     expect(injectIntoHead("<p>no head</p>", "[X]")).toBe("[X]<p>no head</p>");
   });
+
+  test("removes document-authored CSP meta tags so the bridge can execute", () => {
+    // The exact tag Plannotator's own portable guided-review exports embed;
+    // with it present the inline bridge script is blocked and annotation dies.
+    const csp =
+      '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src \'none\'; connect-src \'none\'; media-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'; frame-src \'none\'">';
+    const out = injectIntoHead(`<html><head>${csp}<title>t</title></head><body/></html>`, "[X]");
+    expect(out).not.toMatch(/content-security-policy/i);
+    expect(out).toContain("[X]</head>");
+    expect(out).toContain("<title>t</title>");
+
+    // Attribute-order, quoting, casing, and self-closing variants.
+    const variants = [
+      "<meta content=\"default-src 'none'\" http-equiv=content-security-policy>",
+      "<META HTTP-EQUIV='Content-Security-Policy' CONTENT=\"script-src 'none'\" />",
+      "<meta http-equiv = \" content-security-policy \" content=\"default-src 'self'\">",
+    ];
+    for (const tag of variants) {
+      expect(injectIntoHead(`<head>${tag}</head>`, "[X]")).not.toMatch(/http-equiv/i);
+    }
+
+    // Other meta tags survive untouched.
+    const keep = '<meta http-equiv="refresh" content="0"><meta charset="utf-8">';
+    expect(injectIntoHead(`<head>${keep}</head>`, "[X]")).toContain(keep);
+  });
 });
