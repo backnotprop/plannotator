@@ -48,7 +48,7 @@ import { markVimModeAnnouncementSeen, needsVimModeAnnouncement } from '@plannota
 import { buildDefaultPrompt, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
-import { getInputMethod, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
+import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
 import { getHtmlChromeState, saveHtmlChromeState } from '@plannotator/ui/utils/htmlChrome';
 import { useInputMethodSwitch } from '@plannotator/ui/hooks/useInputMethodSwitch';
 import { usePrintMode } from '@plannotator/ui/hooks/usePrintMode';
@@ -1633,6 +1633,7 @@ const App: React.FC = () => {
     setHtmlToolsHidden(chrome.toolsHidden);
     if (chrome.sidebarOpen) sidebar.open();
     else sidebar.close();
+    setIsPanelOpen(chrome.panelOpen);
     htmlChromeRestoredRef.current = true;
   }, [
     annotateSource,
@@ -1664,8 +1665,8 @@ const App: React.FC = () => {
       skipNextHtmlChromeSaveRef.current = false;
       return;
     }
-    saveHtmlChromeState({ toolsHidden: htmlToolsHidden, sidebarOpen: sidebar.isOpen });
-  }, [isHtmlSurface, htmlToolsHidden, sidebar.isOpen]);
+    saveHtmlChromeState({ toolsHidden: htmlToolsHidden, sidebarOpen: sidebar.isOpen, panelOpen: isPanelOpen });
+  }, [isHtmlSurface, htmlToolsHidden, sidebar.isOpen, isPanelOpen]);
 
   const ensureShareLink = useCallback(async (): Promise<string | null> => {
     const existing = shortShareUrl || shareUrl;
@@ -3325,6 +3326,15 @@ const App: React.FC = () => {
     setAnnotations(prev => [...prev, ann]);
     setSelectedAnnotationId(ann.id);
     setSelectedCodeAnnotationId(null);
+    // Annotation activity keeps the HTML-surface preferences alive: re-stamp
+    // the input method and chrome records so they only expire for users who
+    // have not annotated HTML within the staleness TTL (see preferenceTtl.ts).
+    if (isHtmlSurface) {
+      refreshInputMethodStamp(inputMethod);
+      if (htmlChromeRestoredRef.current) {
+        saveHtmlChromeState({ toolsHidden: htmlToolsHidden, sidebarOpen: sidebar.isOpen, panelOpen: isPanelOpen });
+      }
+    }
   };
 
   // Keep selection behavior explicit across mobile/wide-mode transitions.
