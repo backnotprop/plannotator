@@ -52,10 +52,9 @@ export function stripConflictingPlanModeRules(systemEntries: string[]): string[]
           .join("\n"),
       ),
     )
-    .map((s) => s.trim())
     .filter(Boolean);
 }
 
 export function composeSystemPrompt(system: string[], additions: string[]): string[] {
-  return [system.concat(additions).filter(Boolean).join("\n\n")];
+  return [system.concat(additions).map((s) => s.trim()).filter(Boolean).join("\n\n")];
 }
