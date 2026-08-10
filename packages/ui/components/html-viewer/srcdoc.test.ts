@@ -2747,10 +2747,10 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       let rectCollections = 0;
       (Range.prototype as unknown as { getBoundingClientRect: () => DOMRect })
         .getBoundingClientRect = () => rectOf(10, 2000, 100, 20);
-      (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = (() => {
+      (Range.prototype as unknown as { getClientRects: () => DOMRect[] }).getClientRects = () => {
         rectCollections += 1;
         return [rectOf(10, 2000, 100, 20)];
-      }) as unknown as typeof Range.prototype.getClientRects;
+      };
       try {
         postBridge({
           type: "plannotator-bridge-find-and-mark",
