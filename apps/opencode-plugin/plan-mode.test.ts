@@ -80,6 +80,7 @@ describe("composeSystemPrompt", () => {
     ["empty strip case", [], ["prompt"], ["prompt"]],
     ["multi-element order", ["base", "extra"], ["add1", "add2"], ["base\n\nextra\n\nadd1\n\nadd2"]],
     ["content order (plan path)", ["strip1"], ["plan", "improve"], ["strip1\n\nplan\n\nimprove"]],
+    ["empty string entry collapses", ["", "a"], ["b"], ["a\n\nb"]],
     ["empty inputs", [], [], [""]],
   ])("%s", (_name, system, additions, expected) => {
     expect(composeSystemPrompt(system, additions)).toEqual(expected);

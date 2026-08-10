@@ -52,6 +52,7 @@ export function stripConflictingPlanModeRules(systemEntries: string[]): string[]
           .join("\n"),
       ),
     )
+    .map((s) => s.trim())
     .filter(Boolean);
 }
 

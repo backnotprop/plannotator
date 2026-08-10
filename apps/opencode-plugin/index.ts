@@ -430,8 +430,9 @@ When you have completed your plan, call the \`submit_plan\` tool to submit it fo
 The user will review your plan in a visual UI where they can annotate, approve, or request changes. If rejected, the response includes your plan with line numbers; use targeted edits to revise specific sections.
 
 Do NOT proceed with implementation until your plan is approved.`;
+      const composed = composeSystemPrompt(output.system, [planSubmissionReminder]);
       output.system.length = 0;
-      output.system.push(...composeSystemPrompt(output.system, [planSubmissionReminder]));
+      output.system.push(...composed);
     },
 
     // Intercept plannotator commands before the agent sees them.
