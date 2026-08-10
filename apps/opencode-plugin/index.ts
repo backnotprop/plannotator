@@ -423,7 +423,7 @@ tools (except writing markdown files), or otherwise make changes to the system.
 
       if (!shouldInjectGenericPlanReminder(lastUserAgent, isSubagent, workflowOptions)) return;
 
-      const planSubmissionReminder = `\n\n## Plan Submission
+      const planSubmissionReminder = `## Plan Submission
 
 When you have completed your plan, call the \`submit_plan\` tool to submit it for user review. Pass your full plan as a single edit: \`{ "edits": [{ "start": 1, "content": "..." }] }\`.
 
