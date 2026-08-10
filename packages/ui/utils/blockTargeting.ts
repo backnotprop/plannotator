@@ -360,9 +360,9 @@ export function getOwningBlockTarget(
 /** Pick the block nearest the visible center of the document viewport. */
 export function findInitialSemanticTarget(
   graph: SemanticTargetGraph,
+  scrollViewport?: HTMLElement | null,
 ): SemanticTarget | null {
-  const viewport = graph.container.closest<HTMLElement>('[data-overlayscrollbars-viewport]');
-  const viewportRect = (viewport ?? graph.container).getBoundingClientRect();
+  const viewportRect = (scrollViewport ?? graph.container).getBoundingClientRect();
   const centerY = viewportRect.top + viewportRect.height / 2;
   return graph.blockKeys
     .map((key) => resolveSemanticTarget(graph, key))

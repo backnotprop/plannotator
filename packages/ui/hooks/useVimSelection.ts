@@ -287,7 +287,7 @@ export function useVimSelection({
     const container = containerRef.current;
     if (!container) return null;
     const graph = buildSemanticTargetGraph(container);
-    const initial = findInitialSemanticTarget(graph);
+    const initial = findInitialSemanticTarget(graph, scrollViewportRef.current);
     if (!initial) return null;
     const next: VimBlockState = { phase: 'block', targetKey: initial.key };
     setState(next);
@@ -661,7 +661,12 @@ export function useVimSelection({
     if (key === 'G') {
       updateTextState(graph, {
         ...current,
-        cursor: moveTextPosition(graph.container, current.cursor, 'document-end'),
+        cursor: moveTextPosition(
+          graph.container,
+          current.cursor,
+          'document-end',
+          scrollViewportRef.current,
+        ),
       });
       return true;
     }
@@ -687,7 +692,12 @@ export function useVimSelection({
           graph,
           current.targetKey,
           nativePosition
-            ?? moveTextPosition(graph.container, current.cursor, fallback),
+            ?? moveTextPosition(
+              graph.container,
+              current.cursor,
+              fallback,
+              scrollViewportRef.current,
+            ),
           direction,
         ),
       });
@@ -695,7 +705,12 @@ export function useVimSelection({
     }
     const motion = motionFromTextKey(key);
     if (!motion) return false;
-    const nextPosition = moveTextPosition(graph.container, current.cursor, motion);
+    const nextPosition = moveTextPosition(
+      graph.container,
+      current.cursor,
+      motion,
+      scrollViewportRef.current,
+    );
     updateTextState(graph, {
       ...current,
       cursor: motion === 'block-backward' || motion === 'block-forward'
@@ -823,12 +838,13 @@ export function useVimSelection({
           graph.container,
           current.cursor,
           end ? 'document-end' : 'document-start',
+          scrollViewportRef.current,
         ),
       });
       return true;
     }
     const currentTarget = resolveSemanticTarget(graph, targetKeyForState(current))
-      ?? findInitialSemanticTarget(graph);
+      ?? findInitialSemanticTarget(graph, scrollViewportRef.current);
     if (!currentTarget) return false;
     setSemanticTarget(moveSemanticTarget(
       graph,
