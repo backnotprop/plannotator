@@ -440,7 +440,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
     // Placed-marker numbering is parent-authoritative and matches the
     // numbers exportAnnotations writes into the submitted feedback: the full
-    // createdA-sorted list INCLUDING globals is numbered index + 1, and
+    // list INCLUDING globals is numbered by ARRAY position (the export's
+    // effective order — its sort keys tie for raw-HTML annotations), and
     // globals then ship no entry (no page location) — see buildSyncNumbering
     // for the contract. Renumbers on delete; the bridge's own registration
     // order is only a pre-sync fallback.
