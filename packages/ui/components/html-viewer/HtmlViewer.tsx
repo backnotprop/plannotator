@@ -172,6 +172,11 @@ export interface HtmlViewerProps {
   onAskAI?: CommentAskAIHandler;
   /** Disable every annotation mutation entry point while preserving reading and navigation. */
   readOnly?: boolean;
+  /** Reports the full set of annotation ids with no live representation on
+   *  the page (fail-closed anchors hide markers rather than guess). Called
+   *  with the complete current set whenever it changes, including back to
+   *  empty on recovery. Fires in readOnly mode too. */
+  onUnanchoredChange?: (ids: string[]) => void;
   /** Accessible iframe title. */
   title?: string;
 }
@@ -205,6 +210,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onToggleDiff,
       onAskAI,
       readOnly = false,
+      onUnanchoredChange,
       title = "HTML Plan Viewer",
     },
     ref,
@@ -294,6 +300,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       mode,
       onResize: handleResize,
       onBridgePointer: handleBridgePointer,
+      onUnanchoredChange,
     });
 
     const multiSelectActive = !readOnly && !!hook.commentPopover && hook.draftTargets.length > 0;

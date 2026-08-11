@@ -77,7 +77,11 @@ describe('AnnotationPanel consumer props', () => {
     expect(document.querySelector('button[title="Edit annotation"]')).toBeNull();
   });
 
-  test.skipIf(!hasDom)('readOnly hides direct-edit discard and host mutation slots', async () => {
+  test.skipIf(!hasDom)('readOnly hides direct-edit discard but keeps the host footer slot', async () => {
+    // The footer's contents are host-owned and may be pure read affordances
+    // (a replies list, a copy link) — view-only panels losing them was the
+    // Workspaces regression behind the 0.30.0 change. Built-in mutation
+    // affordances stay hidden; the host gates its own footer contents.
     await mount(
       <AnnotationPanel
         {...baseProps}
@@ -93,7 +97,8 @@ describe('AnnotationPanel consumer props', () => {
       />,
     );
     expect(document.body.textContent).not.toContain('Discard');
-    expect(document.body.textContent).not.toContain('Reply');
+    expect(document.querySelector('[data-annotation-card-footer="true"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('Reply');
   });
 
   test.skipIf(!hasDom)('renderCardFooter renders per-card and does not select the card', async () => {

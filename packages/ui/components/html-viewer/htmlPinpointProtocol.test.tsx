@@ -982,3 +982,62 @@ describe.if(hasDom)('readOnly view-only contract', () => {
     expect(document.querySelector('[data-annotation-toolbar]')).toBeNull();
   });
 });
+
+describe.if(hasDom)('unanchored report (trust boundary + delivery)', () => {
+  const MSG = 'plannotator-bridge-unanchored';
+
+  test('accepts a bounded report, including the empty recovery set', () => {
+    expect(hookModule!.parseBridgeMessage({ type: MSG, ids: ['a-1', 'b-2'] }))
+      .toEqual({ type: MSG, ids: ['a-1', 'b-2'] });
+    expect(hookModule!.parseBridgeMessage({ type: MSG, ids: [] }))
+      .toEqual({ type: MSG, ids: [] });
+  });
+
+  test('out-of-contract reports are rejected whole (forged-message posture)', () => {
+    // The real bridge caps at 512 ids of <=256 chars; anything past that is a
+    // hostile page forging the message, so nothing salvageable is delivered.
+    expect(hookModule!.parseBridgeMessage({ type: MSG, ids: 'a' })).toBeNull();
+    expect(hookModule!.parseBridgeMessage({ type: MSG })).toBeNull();
+    expect(hookModule!.parseBridgeMessage({ type: MSG, ids: [42] })).toBeNull();
+    expect(hookModule!.parseBridgeMessage({ type: MSG, ids: ['ok', 'x'.repeat(257)] })).toBeNull();
+    expect(
+      hookModule!.parseBridgeMessage({ type: MSG, ids: Array.from({ length: 513 }, () => 'a') }),
+    ).toBeNull();
+  });
+
+  test('delivery reaches onUnanchoredChange even in readOnly mode', async () => {
+    // View-only surfaces are exactly where silently missing markers would go
+    // unnoticed, so the report must bypass the enabled gate like mark-click.
+    if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
+    const HtmlViewer = htmlViewerModule.HtmlViewer;
+    const received: string[][] = [];
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    mountedRoots.push(root);
+    await act(async () => {
+      root.render(
+        <HtmlViewer
+          rawHtml="<html><body><p>Page</p></body></html>"
+          annotations={[]}
+          onAddAnnotation={() => {}}
+          onSelectAnnotation={() => {}}
+          selectedAnnotationId={null}
+          mode="selection"
+          inputMethod="pinpoint"
+          readOnly
+          onUnanchoredChange={(ids) => received.push(ids)}
+        />,
+      );
+    });
+    const iframe = host.querySelector<HTMLIFrameElement>('iframe');
+    if (!iframe?.contentWindow) throw new Error('HTML iframe missing');
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: iframe.contentWindow,
+        data: { type: MSG, ids: ['lost-1'] },
+      }));
+    });
+    expect(received).toEqual([['lost-1']]);
+  });
+});

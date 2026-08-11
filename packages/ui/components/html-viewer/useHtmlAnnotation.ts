@@ -65,6 +65,7 @@ type BridgeMessage =
   | { type: `${typeof PREFIX}selection-rect`; rect: BridgeRect }
   | { type: `${typeof PREFIX}keytype`; key: string }
   | { type: `${typeof PREFIX}mark-click`; id: string }
+  | { type: `${typeof PREFIX}unanchored`; ids: string[] }
   | { type: `${typeof PREFIX}resize`; height: number };
 
 /** Dependencies and callbacks for the sandboxed HTML annotation bridge. */
@@ -84,6 +85,13 @@ export interface UseHtmlAnnotationOptions {
    *  held while the pointer lives in the sandbox). Drives the composer-yield
    *  fade in the host component. */
   onBridgePointer?: (x: number, y: number, shift: boolean) => void;
+  /** Reports the full set of annotation ids that currently have NO live
+   *  representation on the page — every target dead, or the restore never
+   *  resolved (fail-closed anchors hide markers rather than guess). Called
+   *  with the complete current set whenever it changes, including back to
+   *  empty on recovery. Delivered in readOnly mode too: view-only surfaces
+   *  are exactly where silently missing markers would go unnoticed. */
+  onUnanchoredChange?: (ids: string[]) => void;
 }
 
 function postToIframe(iframe: HTMLIFrameElement | null, msg: Record<string, unknown>) {
@@ -258,6 +266,18 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       return typeof value.id === "string" && value.id.length <= 256
         ? { type: value.type, id: value.id }
         : null;
+    case `${PREFIX}unanchored`: {
+      // Bounded like the bridge's own emission (512 ids, 256 chars each); any
+      // out-of-contract entry rejects the whole report — the real bridge
+      // never sends one, so a violation means a forged message.
+      if (!Array.isArray(value.ids) || value.ids.length > 512) return null;
+      const unanchoredIds: string[] = [];
+      for (const entry of value.ids) {
+        if (typeof entry !== "string" || entry.length > 256) return null;
+        unanchoredIds.push(entry);
+      }
+      return { type: value.type, ids: unanchoredIds };
+    }
     case `${PREFIX}resize`:
       return typeof value.height === "number" && Number.isFinite(value.height)
         ? { type: value.type, height: value.height }
@@ -282,6 +302,7 @@ export function useHtmlAnnotation({
   mode,
   onResize,
   onBridgePointer,
+  onUnanchoredChange,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement"
@@ -328,6 +349,8 @@ export function useHtmlAnnotation({
   onAddRef.current = onAddAnnotation;
   const onSelectRef = useRef(onSelectAnnotation);
   onSelectRef.current = onSelectAnnotation;
+  const onUnanchoredChangeRef = useRef(onUnanchoredChange);
+  onUnanchoredChangeRef.current = onUnanchoredChange;
 
   const anchorRef = useRef<HTMLDivElement | null>(null);
 
@@ -411,7 +434,12 @@ export function useHtmlAnnotation({
 
       const type = message.type;
 
-      if (!enabledRef.current && type !== `${PREFIX}mark-click` && type !== `${PREFIX}resize`) {
+      if (
+        !enabledRef.current
+        && type !== `${PREFIX}mark-click`
+        && type !== `${PREFIX}unanchored`
+        && type !== `${PREFIX}resize`
+      ) {
         return;
       }
 
@@ -562,6 +590,10 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}mark-click`) {
         onSelectRef.current?.(message.id);
+      }
+
+      if (type === `${PREFIX}unanchored`) {
+        onUnanchoredChangeRef.current?.(message.ids);
       }
 
       if (type === `${PREFIX}resize`) {

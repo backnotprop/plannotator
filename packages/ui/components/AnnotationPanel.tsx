@@ -80,8 +80,11 @@ interface PanelProps {
     *  resolve UI). The panel stays presentation-only; clicks inside the slot
     *  do not select the card. Default: nothing rendered. */
   renderCardFooter?: (annotation: Annotation) => React.ReactNode;
-  /** Hide every mutation affordance (delete/edit, direct-edit discard, and host card footers).
-    *  Selection and scrolling still work. Default false — today's behavior. */
+  /** Hide every built-in mutation affordance (delete/edit, direct-edit
+    *  discard). The host footer slot still renders: its contents are
+    *  host-owned and may be read affordances (replies, links), so the host
+    *  gates what belongs in it. Selection and scrolling still work.
+    *  Default false — today's behavior. */
   readOnly?: boolean;
 }
 
@@ -207,7 +210,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   onDelete={() => onDelete(entry.annotation.id)}
                   onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(entry.annotation.id, updates) : undefined}
                   readOnly={readOnly}
-                  footer={readOnly ? undefined : renderCardFooter?.(entry.annotation)}
+                  footer={renderCardFooter?.(entry.annotation)}
                 />
               ) : (
                 <CodeAnnotationCard

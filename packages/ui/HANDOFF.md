@@ -328,7 +328,7 @@ Re-verify your seam contract against `0.23.0` before adopting; the list above is
 
 Six items accumulated through Workspaces' first three integration slices. All are additive; every default reproduces 0.23.0 behavior.
 
-1. **`AnnotationPanel` host props.** `renderCardFooter?: (annotation) => ReactNode` — a per-card slot at each plan-annotation card's foot (plug reply/resolve UI in; clicks inside the slot don't select the card). `readOnly?: boolean` — hides every mutation affordance (delete/edit on all card kinds); selection and scrolling still work.
+1. **`AnnotationPanel` host props.** `renderCardFooter?: (annotation) => ReactNode` — a per-card slot at each plan-annotation card's foot (plug reply/resolve UI in; clicks inside the slot don't select the card). `readOnly?: boolean` — hides the built-in mutation affordances (delete/edit on all card kinds); selection and scrolling still work, and as of 0.30.0 the host footer slot still renders (see "Unanchored-annotation reporting + readOnly footer fix (0.30.0)").
 2. **Six more supported imports** (already in the table above, tagged *Blessed in 0.24.0*): `TableOfContents`, `ResizeHandle` + `useResizablePanel`, `useActiveSection`, `useScrollViewport`, `utils/annotationHelpers`. All verified under the strict-consumer gate.
 3. **`Viewer`/`CommentPopover` `allowImages?: boolean`.** Pass `false` when you have no `uploadTransport` — the attach-image affordance disappears instead of dead-ending. (CommentPopover already had the prop; Viewer now exposes and threads it.)
 4. **`Viewer` `readOnly?: boolean`.** View-only users: suppresses every composer entry point (selection toolbar, comment popovers, quick labels, pinpoint, global comment, attachments, checkbox toggles) while existing annotations still render and select.
@@ -444,9 +444,30 @@ Additive only, but required: `@plannotator/ui` 0.29.0 imports the new `@plannota
 
 ---
 
+## Unanchored-annotation reporting + readOnly footer fix (0.30.0)
+
+Two consumer-driven changes: the `onUnanchoredChange` callback (the accepted ask from the 0.29.0 adoption) and a behavior fix to `AnnotationPanel`'s readOnly mode.
+
+### `HtmlViewer` `onUnanchoredChange?: (ids: string[]) => void`
+
+Fail-closed anchors hide markers rather than guess, which previously meant an annotation whose content vanished from the page disappeared silently. The viewer now reports it:
+
+1. **The callback receives the complete current set** of annotation ids with no live representation on the page — every target dead (element disconnected AND text unfindable), or the restore never resolved anything. It fires only when the set changes, including back to `[]` on recovery. An id being merely offscreen, clipped, or style-hidden is NOT unanchored: its content exists, so no report.
+2. **It fires in readOnly mode too** — view-only surfaces are exactly where silently missing markers go unnoticed.
+3. **Bounded like every bridge message:** at most 512 ids of at most 256 chars; an out-of-contract report is rejected whole at the parent trust boundary.
+4. **Timing:** reports ride the overlay reconcile (rAF-coalesced), so expect them shortly after load, after page mutations, and after your own `annotations` prop changes — not synchronously with them.
+
+Pinned by "unanchored ids are reported on change" in `components/html-viewer/srcdoc.test.ts` (bridge behavior) and the "unanchored report" suite in `components/html-viewer/htmlPinpointProtocol.test.tsx` (trust boundary + readOnly delivery).
+
+### `AnnotationPanel` readOnly no longer suppresses the host footer slot
+
+**Behavior change.** Through 0.29.1, `readOnly` dropped the `renderCardFooter` slot entirely, which threw away host READ affordances (a replies list, a copy link) along with mutations — view-only panels lost their replies. As of 0.30.0 the footer slot always renders; `readOnly` hides only the built-in mutation affordances (delete/edit, direct-edit discard). **The host gates its own footer contents:** if you render mutation UI in the footer, gate it on your own view-only state. A host that relied on the automatic suppression must add that gate when upgrading.
+
+---
+
 ## Publishing & versioning
 
-- `@plannotator/ui` is now `0.29.0`; `@plannotator/core` is `0.23.0`. **Publish `core` first** — ui 0.29.0 imports `@plannotator/core/annotatable`, which does not exist in core 0.22.0. The ui→core dependency resolves exactly at pack time.
+- `@plannotator/ui` is now `0.30.0`; `@plannotator/core` is `0.23.0`. **Publish `core` first** — ui 0.29.0 imports `@plannotator/core/annotatable`, which does not exist in core 0.22.0. The ui→core dependency resolves exactly at pack time.
 - They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --access public`). Publish **`core` first, then `ui`**.
 - **`--provenance` only works from a supported CI environment (GitHub Actions OIDC)** — a local publish fails with `Automatic provenance generation not supported for provider: null`. Until a CI publish job exists for these two packages, local publishes drop the flag. Publishing under `--tag next` first lets the consumer preflight before `npm dist-tag add <pkg>@<version> latest` promotes it.
 - `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS.

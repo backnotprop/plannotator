@@ -499,6 +499,7 @@ export const BRIDGE_SCRIPT = `(function() {
       annRecords = [];
       annNumbers = null; // stale synced numbers must not leak onto future records
       focusedAnnotationId = null;
+      restoreFailedIds.clear();
       renderAnnotationOverlay();
     }
 
@@ -1327,7 +1328,41 @@ export const BRIDGE_SCRIPT = `(function() {
     for (var i = annRecords.length - 1; i >= 0; i--) {
       if (annRecords[i].id === id) annRecords.splice(i, 1);
     }
+    restoreFailedIds['delete'](id);
     if (focusedAnnotationId === id) focusedAnnotationId = null;
+  }
+
+  // Fail-closed transparency (host ask): markers for dead targets are
+  // omitted, never guessed — this names WHICH annotations currently have no
+  // live representation on the page (every target dead, or the restore never
+  // resolved anything) so the host can tell the user instead of letting them
+  // silently vanish. Emitted only when the set changes, and only from
+  // complete overlay passes — budget-starved passes reschedule themselves
+  // and would flap the set. restoreFailedIds carries total restore failures,
+  // whose records are removed and therefore invisible to the per-pass scan.
+  var lastUnanchoredKey = '[]';
+  var restoreFailedIds = new Set();
+  function emitUnanchored(deadRecordIds) {
+    var seen = new Set();
+    var combined = [];
+    for (var deadIndex = 0; deadIndex < deadRecordIds.length; deadIndex++) {
+      if (!seen.has(deadRecordIds[deadIndex])) {
+        seen.add(deadRecordIds[deadIndex]);
+        combined.push(deadRecordIds[deadIndex]);
+      }
+    }
+    restoreFailedIds.forEach(function(failedId) {
+      if (!seen.has(failedId)) {
+        seen.add(failedId);
+        combined.push(failedId);
+      }
+    });
+    combined.sort();
+    if (combined.length > 512) combined = combined.slice(0, 512);
+    var key = JSON.stringify(combined);
+    if (key === lastUnanchoredKey) return;
+    lastUnanchoredKey = key;
+    parent.postMessage({ type: PREFIX + 'unanchored', ids: combined }, '*');
   }
 
   function validNormalizedPoint(p) {
@@ -1467,7 +1502,12 @@ export const BRIDGE_SCRIPT = `(function() {
         }
       }
     }
-    if (!record.targets.length) removeAnnRecord(id);
+    if (!record.targets.length) {
+      // The record is removed (nothing to retry), so the per-pass dead scan
+      // cannot see this id: track it separately for the unanchored report.
+      removeAnnRecord(id);
+      restoreFailedIds.add(id);
+    }
     // rAF-coalesced render (B3): restoring N annotations posts N
     // find-and-mark messages, and a synchronous render here made a batch
     // restore O(N^2) full overlay passes. The searches above stay
@@ -2094,10 +2134,17 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function renderAnnotationOverlay() {
     var hasDraftRange = !!(pendingSelection && pendingRange);
-    if (!annRecords.length && !hasDraftRange && !overlayHostEl) return;
+    if (!annRecords.length && !hasDraftRange && !overlayHostEl) {
+      // Nothing to project, but total restore failures must still report:
+      // a session whose only annotations failed to restore never builds the
+      // overlay host, and silence here would hide exactly that case.
+      emitUnanchored([]);
+      return;
+    }
     ensureOverlayHost();
     beginDeadSearchPass();
     queuedHighlights.length = 0;
+    var unanchoredThisPass = [];
     var markers = [];
     // Fallback numbering by first-seen registration order — used only until
     // the parent's ordered sync arrives. Numbering NEVER derives from target
@@ -2111,6 +2158,20 @@ export const BRIDGE_SCRIPT = `(function() {
     for (var recordIndex = 0; recordIndex < annRecords.length; recordIndex++) {
       var record = annRecords[recordIndex];
       refreshRecordTargets(record);
+      // Live means connected/findable — clipped, offscreen, or style-hidden
+      // targets are still anchored (their content exists; it just isn't
+      // currently visible) and must not report as unanchored.
+      var recordAnchored = false;
+      for (var liveIndex = 0; liveIndex < record.targets.length; liveIndex++) {
+        var liveTarget = record.targets[liveIndex];
+        if (liveTarget.kind === 'element'
+          ? (liveTarget.element && liveTarget.element.isConnected)
+          : rangeAlive(liveTarget.range)) {
+          recordAnchored = true;
+          break;
+        }
+      }
+      if (!recordAnchored) unanchoredThisPass.push(record.id);
       var number = annNumbers && annNumbers.has(record.id)
         ? annNumbers.get(record.id)
         : fallbackNumbers.get(record.id);
@@ -2219,6 +2280,9 @@ export const BRIDGE_SCRIPT = `(function() {
     // record.
     flushQueuedHighlights();
     placeMarkers(markers);
+    // Budget-starved passes reschedule below and may still revive targets,
+    // so only a complete pass may update the unanchored report.
+    if (!deadSearchSkipped) emitUnanchored(unanchoredThisPass);
     // Eligible dead-target searches skipped for budget get a follow-up pass;
     // the loop terminates once every eligible target has been attempted at
     // the current generation (its failedGeneration then blocks it).
