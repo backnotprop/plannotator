@@ -877,3 +877,108 @@ describe.if(hasDom)('multi-target composer flow (chips, promotion, submit)', () 
     expect(popover.className).not.toContain('pn-composer-yield-near');
   });
 });
+
+describe.if(hasDom)('readOnly view-only contract', () => {
+  // The promise made to hosts (HANDOFF.md 0.29.0): readOnly disables every
+  // authoring entry point but is NOT blank — committed annotations restore,
+  // markers paint with export-matching numbers, and marker clicks still
+  // navigate. View-only review contexts depend on all three.
+  async function mountReadOnly(
+    annotations: Annotation[],
+    onSelect: (id: string | null) => void = () => {},
+  ) {
+    if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
+    const HtmlViewer = htmlViewerModule.HtmlViewer;
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    mountedRoots.push(root);
+    await act(async () => {
+      root.render(
+        <HtmlViewer
+          rawHtml="<html><body><p>Read-only target</p></body></html>"
+          annotations={annotations}
+          onAddAnnotation={() => {}}
+          onSelectAnnotation={onSelect}
+          selectedAnnotationId={null}
+          mode="selection"
+          inputMethod="pinpoint"
+          readOnly
+        />,
+      );
+    });
+    const iframe = host.querySelector<HTMLIFrameElement>('iframe');
+    if (!iframe?.contentWindow) throw new Error('HTML iframe missing');
+    const postedToIframe: Array<Record<string, unknown>> = [];
+    const realPost = iframe.contentWindow.postMessage.bind(iframe.contentWindow);
+    (iframe.contentWindow as unknown as { postMessage: (data: unknown) => void }).postMessage =
+      ((data: unknown, ...rest: unknown[]) => {
+        if (data && typeof data === 'object') postedToIframe.push(data as Record<string, unknown>);
+        return (realPost as (...args: unknown[]) => unknown)(data, ...rest);
+      }) as typeof iframe.contentWindow.postMessage;
+    const post = async (data: Record<string, unknown>) => {
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', {
+          source: iframe.contentWindow,
+          data,
+        }));
+      });
+    };
+    return { post, postedToIframe };
+  }
+
+  function committed(id: string): Annotation {
+    return {
+      id,
+      blockId: '',
+      startOffset: 0,
+      endOffset: 0,
+      type: 'COMMENT',
+      text: 'noted',
+      originalText: 'Read-only target',
+      createdA: 1,
+      htmlAnchor: { selector: 'p', tagName: 'p', text: 'Read-only target' },
+    } as Annotation;
+  }
+
+  test('readOnly still restores markers and syncs export-matching numbers on ready', async () => {
+    const { post, postedToIframe } = await mountReadOnly([committed('ro-1'), committed('ro-2')]);
+    await post({ type: 'plannotator-bridge-ready' });
+
+    const restores = postedToIframe.filter((m) => m.type === 'plannotator-bridge-find-and-mark');
+    expect(restores.map((m) => m.id)).toEqual(['ro-1', 'ro-2']);
+    // Anchor-first restore must survive readOnly: the anchor is forwarded so
+    // the bridge can pin the marker at the element, not just text-search.
+    expect((restores[0]!.anchor as { selector: string }).selector).toBe('p');
+
+    const syncs = postedToIframe.filter((m) => m.type === 'plannotator-bridge-sync-annotations');
+    expect(syncs.at(-1)!.annotations).toEqual([
+      { id: 'ro-1', number: 1 },
+      { id: 'ro-2', number: 2 },
+    ]);
+  });
+
+  test('readOnly marker clicks still navigate via onSelectAnnotation', async () => {
+    const selected: Array<string | null> = [];
+    const { post } = await mountReadOnly([committed('ro-1')], (id) => selected.push(id));
+    await post({ type: 'plannotator-bridge-ready' });
+    await post({ type: 'plannotator-bridge-mark-click', id: 'ro-1' });
+    expect(selected).toEqual(['ro-1']);
+  });
+
+  test('readOnly ignores selection messages: no toolbar, no composer', async () => {
+    const { post } = await mountReadOnly([committed('ro-1')]);
+    await post({ type: 'plannotator-bridge-ready' });
+    await post({
+      type: 'plannotator-bridge-selection',
+      text: 'Read-only target',
+      rect: { top: 10, left: 10, width: 120, height: 24 },
+      pinpoint: true,
+      targetKey: 'ht-ro',
+      targetLabel: 'Paragraph',
+      anchor: { selector: 'p', tagName: 'p', text: 'Read-only target' },
+    });
+    expect(document.querySelector('[data-comment-popover]')).toBeNull();
+    expect(document.querySelector('[data-annotation-toolbar]')).toBeNull();
+  });
+});
