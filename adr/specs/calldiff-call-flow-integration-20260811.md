@@ -25,13 +25,15 @@ CallDiff compares complete source trees at two Git commits. It uses Tree-sitter 
 
 CallDiff is syntactic evidence, not a runtime trace. It does not provide type or import resolution, dataflow, side effects, severity, confidence, test coverage, or a proof of dynamic dispatch. Duplicate bare symbol names can be ambiguous, and moves or reorderings can appear as remove/add pairs. Product copy therefore says “inferred entry paths” and “changed call-flow steps.”
 
-CallDiff currently advertises 22 languages. JavaScript/JSX and TypeScript/TSX share grammars, so the managed runtime contains 21 pinned grammar packages plus the pinned Tree-sitter parser.
+CallDiff currently advertises 22 extractor modes. JavaScript/JSX and TypeScript/TSX share a core grammar family; the other modes map to 19 independently installable grammar packs.
 
 ## Runtime boundary
 
 The published npm package named `calldiff@0.4.1` predates source-location output and the current language set. Plannotator therefore installs the exact upstream source archive at the commit above, verifies its SHA-512 integrity, and compiles it once at install time.
 
-The runtime is large (roughly 800 MB on disk) for a feature that is off by default, so installation is strictly user-initiated. Nothing installs it by default: the Plannotator installers do not download it, and the normal path is the in-app flow. Enabling Call flow surfaces an install funnel in the Call flow Dock whenever the capability advert reports the runtime-missing flavor of unavailable; the funnel discloses the on-disk size and the Node.js 22+ requirement, starts the install through `POST /api/call-flow/install`, shows staged progress, and hands off to the analysis in the same session once the advert re-resolves as available. The other entry points are the headless CLI (`plannotator install-runtime call-flow`) and an installer opt-in (`--with-call-flow` / `-WithCallFlow`, `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `{ "installCallFlow": true }` in config.json; flag > env var > config). Minimal installs always exclude it.
+Installation is strictly user-initiated and selective. Nothing installs Call flow by default. On first use, the server maps the current patch's changed extensions to language families and offers one install containing the pruned core (CallDiff, Tree-sitter, JavaScript, and TypeScript) plus exactly the missing grammar packs needed by that review. The funnel names those languages, totals repository-owned per-pack size estimates, discloses Node.js 22+, shows staged progress, and hands off to analysis in the same session. A later review can analyze installed languages immediately while returning explicit skipped-file metadata for missing languages; its quiet inline notice installs those packs and reruns the same snapshot. The Dock's detail area also lists every supported language for install-ahead-of-need. Packs are not individually removable in v1; uninstall removes the whole managed Call flow tree.
+
+The other entry points are the headless core install (`plannotator install-runtime call-flow`) and an installer core opt-in (`--with-call-flow` / `-WithCallFlow`, `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `{ "installCallFlow": true }` in config.json; flag > env var > config). Language packs remain selectable from the review UI, where the current patch provides the authoritative need. Minimal installs always exclude Call flow.
 
 The managed runtime lives at:
 
@@ -43,18 +45,26 @@ Its contract is:
 
 - Node.js 22 or newer;
 - exact CallDiff source commit and archive integrity;
-- exact direct versions for Tree-sitter, every grammar, TypeScript, and Node types;
-- a package-lock root dependency contract checked before use;
-- no package installation or network access during review;
+- a small core containing exact direct versions for Tree-sitter and the JavaScript/TypeScript grammars;
+- one repository-committed `package-lock.json` per optional grammar pack, with exact package versions and registry integrity hashes;
+- optional-pack tarballs are downloaded into memory, checked against those repository-owned SHA-512 values, and only then exposed to a fresh private npm cache; `npm ci` consumes that cache in offline mode;
+- a lock marker written only after a pruned pack loads successfully through CallDiff; a folder without that exact marker is not installed;
+- `npm ci --ignore-scripts` before any explicit native rebuild, for core and every pack;
+- post-install pruning of TypeScript/Node build tools, generated parser sources, foreign-platform prebuilds, and node-gyp intermediates; locally compiled final `.node` addons are retained;
+- no package installation or network access during review: server preflight resolves missing packs before spawn, the worker verifies CallDiff, Tree-sitter, every core grammar, and each relevant optional grammar at its exact version before importing CallDiff, `CALLDIFF_GRAMMAR_CACHE` points only at the managed store, npm offline flags are set, and a PATH-front npm blocker makes CallDiff's upstream lazy installer unreachable during both post-prune validation and analysis;
 - a short-lived Node worker with a 512 MB heap, 45 second timeout, and 12 MB output limit;
 - parsed output bounded to 100 trees, 5,000 nodes, depth 32, and 100 diagnostics;
 - untrusted source paths rejected when absolute or parent-traversing.
 
-`PLANNOTATOR_CALLDIFF_PATH` is a development override for a built CallDiff package. Normal uninstall removes the managed `vendor/call-flow` directory while preserving unknown vendor entries. The former `PLANNOTATOR_SKIP_CALLDIFF_INSTALL` opt-out was deleted: opting out of a default-off install is meaningless.
+Measured on macOS arm64 with Node 24.15.0 after the pinned install on 2026-08-11: core shrank from 94,408,476 bytes before pruning to 4,649,257 bytes; the representative Python pack shrank from 7,513,587 bytes to 527,081 bytes. All 19 optional packs plus core occupy 71,925,356 bytes on that platform. UI estimates are the measured pruned sizes rounded up per pack; native artifact sizes can vary modestly by platform.
+
+`PLANNOTATOR_CALLDIFF_PATH` is a development override for a built CallDiff package whose optional grammars are already available under its own `node_modules`. Managed pack installation is never offered for an override: invalid override states explain their direct recovery instead of presenting an install funnel that cannot repair them. Normal uninstall removes the managed `vendor/call-flow` directory while preserving unknown vendor entries. The former `PLANNOTATOR_SKIP_CALLDIFF_INSTALL` opt-out was deleted: opting out of a default-off install is meaningless.
 
 ## Exact snapshot materialization
 
 CallDiff requires two immutable commits. Plannotator never points it at a mutable worktree for patch-backed views. Instead it makes a temporary shared clone, seeds a temporary index at the correct base, applies the exact visible patch, and creates unreachable synthetic commits with `git commit-tree`. Cleanup removes the temporary clone. No ref, index, or worktree in the user's repository is changed.
+
+Before spawning the worker, Plannotator groups both sides of every changed path by supported extension. It then lists both immutable snapshots and passes CallDiff an exact path filter containing all files in the installed language families relevant to the patch. This preserves complete same-language repository call graphs rather than reducing analysis to changed files, while preventing an unrelated unsupported language elsewhere in the repository from reaching CallDiff's lazy grammar loader.
 
 | Review view | CallDiff `from` | CallDiff `to` |
 | --- | --- | --- |
@@ -76,11 +86,12 @@ Bun and Pi expose the same endpoints and response shapes.
 
 - Every initial and switched diff payload advertises `semanticDiff` and `callFlow` capability state.
 - `POST /api/review-analysis` validates and persists independent boolean settings, returns fresh adverts, and applies the change to the live session.
+- `GET /api/review-analysis` refreshes adverts without joining the settings mutation epoch. Install completion uses this read-only route, retries transient failures, and therefore cannot supersede or silently lose a concurrent toggle mutation.
 - `GET /api/call-flow?snapshot=<snapshotId>` analyzes only the active snapshot.
 - A mismatched snapshot or a repository change during execution returns the structured `stale` state with HTTP 409 and `Cache-Control: no-store`.
 - Disabled, unsupported, unavailable, stale, error, and successful results remain distinct domain states.
-- `POST /api/call-flow/install` starts the user-initiated runtime install in the background and is single-flighted: concurrent POSTs join the one in-flight install. A Node.js 22+ preflight runs before any download; a missing or too-old Node is a distinct, immediate `{ state: "error", reason: "node-unavailable" | "node-version" }`. Because this endpoint triggers a large download and build, it carries a cheap origin guard: when an Origin header is present it must match the request host, otherwise the request is rejected with 403.
-- `GET /api/call-flow/install-status` reports `{ state: "idle" | "running" | "done" | "error", stage?, error?, reason? }` with `stage` advancing through `downloading`, `verifying`, `installing-deps`, `building`. `done` persists until the runtime advert resolves available; `error` persists until the next install POST retries. Install completion invalidates the 30 second runtime probe cache in both runtimes, so the next capability advert resolves available without a server restart.
+- `POST /api/call-flow/install` accepts `{ languageIds?: CallFlowLanguageId[] }`. Omitting the list installs the server-authored current-review plan; the manual language list supplies explicit ids. Core is prepended when needed. One coordinator deduplicates targets, queues new targets onto the active single flight, and reports the current pack. A Node.js 22+ preflight runs before any download; a missing or too-old Node is a distinct, immediate `{ state: "error", reason: "node-unavailable" | "node-version" }`. The same-origin guard remains mandatory.
+- `GET /api/call-flow/install-status` reports `{ state: "idle" | "running" | "done" | "error", stage?, languageIds?, currentLanguageId?, error?, reason? }` with `stage` advancing through `downloading`, `verifying`, `installing-deps`, `building`. `error` persists until the next install POST retries. Completion cancels old work and invalidates the runtime probe plus successful/failure result caches in both runtimes, so the same snapshot immediately reruns with the new language set.
 
 Each review server permits one CallDiff execution at a time. Requests for the same snapshot share an in-flight promise. Successful results are kept in a bounded session cache, repeated failures have a 30 second cooldown, and every committed diff/base/PR/scope/whitespace change cancels work for the prior snapshot. Server shutdown and disabling the feature also cancel all workers.
 
@@ -89,6 +100,8 @@ Each review server permits one CallDiff execution at a time. Requests for the sa
 When disabled, no Call flow row, Dock, Lens, preflight, or analysis request appears.
 
 When enabled, the navigation row stays visible even if the active review mode or runtime is unavailable. Its count is `—`; opening it explains the state and recovery action. On supported snapshots the client begins one background request and shares the result across the Dock and all virtualized file headers.
+
+When only some changed languages are installed, the response remains successful and includes `skippedLanguages`. The Dock names the number of skipped files, languages, and combined install size; each skipped file Lens shows an actionable `flow —` state. Installing refreshes adverts and retries analysis in-session. The compact Languages disclosure shows installed state and measured per-pack size for every supported family.
 
 The Dock's primary chrome shows the result, not the engine. It reports unique changed-step and impacted-file counts, then offers two dedicated views:
 
@@ -111,6 +124,8 @@ Changes to this integration must preserve:
 
 - Bun/Pi endpoint parity and Pi vendoring;
 - exact managed dependency pins and offline analysis;
+- selective changed-language preflight, successful partial results, and explicit skipped-file states;
+- post-prune runtime loading for both prebuilt and locally compiled native grammars;
 - source-repository immutability during snapshot creation;
 - stale-result rejection and cancellation on view changes;
 - independent Semantic changes and Call flow settings;

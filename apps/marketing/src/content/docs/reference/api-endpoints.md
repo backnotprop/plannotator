@@ -77,10 +77,10 @@ Used during code review (`/plannotator-review`).
 |----------|--------|---------|
 | `/api/diff` | GET | Returns the diff and session info |
 | `/api/semantic-diff` | GET | Returns optional semantic analysis for the active patch |
-| `/api/call-flow` | GET | Returns snapshot-bound CallDiff trees, canonical colorless raw output, and per-file impacts (`?snapshot=<id>`) |
-| `/api/call-flow/install` | POST | Starts the opt-in CallDiff runtime install in the background (single-flighted; Node 22+ preflight; same-origin only) |
-| `/api/call-flow/install-status` | GET | Polls the runtime install: `{ state, stage?, error? }` across `downloading`, `verifying`, `installing-deps`, `building` |
-| `/api/review-analysis` | POST | Persists independent `{ semanticDiff, callFlow }` flags and returns refreshed capability adverts |
+| `/api/call-flow` | GET | Returns snapshot-bound CallDiff trees, raw output, per-file impacts, and skipped-language metadata (`?snapshot=<id>`) |
+| `/api/call-flow/install` | POST | Starts or joins the selective core/pack install; body `{ languageIds?: [...] }`, omission uses the current review plan (Node 22+ preflight; same-origin only) |
+| `/api/call-flow/install-status` | GET | Polls `{ state, stage?, languageIds?, currentLanguageId?, error? }` across `downloading`, `verifying`, `installing-deps`, `building` |
+| `/api/review-analysis` | GET / POST | GET refreshes adverts without mutation; POST persists independent `{ semanticDiff, callFlow }` flags and returns adverts |
 | `/api/feedback` | POST | Submit review feedback |
 | `/api/image` | GET | Serve a local image by path |
 | `/api/upload` | POST | Upload an image attachment |

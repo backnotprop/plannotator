@@ -21,6 +21,13 @@ function advert(overrides: Partial<CallFlowAdvert>): CallFlowAdvert {
     available: false,
     state: 'unavailable',
     provider: 'calldiff',
+    installable: true,
+    installPlan: {
+      languageIds: ['javascript-typescript'],
+      labels: ['JavaScript and TypeScript'],
+      changedFiles: 1,
+      installSizeBytes: 32 * 1024 * 1024,
+    },
     ...overrides,
   };
 }
@@ -83,7 +90,8 @@ describe('ReviewCallFlowPanel install funnel', () => {
     ));
     expect(installButton()?.textContent).toContain('Install runtime');
     const text = host?.textContent ?? '';
-    expect(text).toContain('approximately 800 MB');
+    expect(text).toContain('~32 MB');
+    expect(text).toContain('JavaScript and TypeScript');
     expect(text).toContain('Node.js 22 or newer');
     expect(text).toContain('One-time install');
   });
@@ -102,6 +110,19 @@ describe('ReviewCallFlowPanel install funnel', () => {
     ));
     expect(installButton()).toBeNull();
     expect(host?.textContent).not.toContain('Install runtime');
+
+    await render(stateWith(
+      advert({
+        state: 'unavailable',
+        reason: 'override-relative',
+        message: 'PLANNOTATOR_CALLDIFF_PATH must be absolute.',
+        installable: false,
+        installPlan: undefined,
+      }),
+      { state: 'idle' },
+    ));
+    expect(installButton()).toBeNull();
+    expect(host?.textContent).toContain('PLANNOTATOR_CALLDIFF_PATH must be absolute.');
   });
 
   test.skipIf(!hasDom)('clicking Install starts the install and running renders staged progress', async () => {
@@ -119,7 +140,7 @@ describe('ReviewCallFlowPanel install funnel', () => {
 
     await render(stateWith(
       advert({ reason: 'runtime-unavailable' }),
-      { state: 'running', stage: 'installing-deps' },
+      { state: 'running', stage: 'installing-deps', languageIds: ['javascript-typescript'] },
     ));
     const stages = [...(host?.querySelectorAll('.call-flow-install-stages li') ?? [])];
     expect(stages).toHaveLength(4);
@@ -149,6 +170,61 @@ describe('ReviewCallFlowPanel install funnel', () => {
     expect(text).toContain('Install Node.js 22 or newer, make sure it is on PATH, then retry.');
     const retry = installButton();
     expect(retry?.textContent).toContain('Retry install');
+    await act(async () => {
+      retry?.click();
+      await Promise.resolve();
+    });
+    expect(starts).toBe(1);
+  });
+
+  test.skipIf(!hasDom)('surfaces an optional-pack failure beside skipped files and the language row', async () => {
+    let starts = 0;
+    const callFlowAdvert = advert({
+      available: true,
+      state: 'available',
+      installPlan: undefined,
+      languages: [{
+        id: 'python',
+        label: 'Python',
+        kind: 'pack',
+        installed: false,
+        required: true,
+        changedFiles: 1,
+        installSizeBytes: 1024 * 1024,
+      }],
+    });
+    const readyState = {
+      ...stateWith(callFlowAdvert, {
+        state: 'error',
+        error: 'Pinned Python package failed integrity verification.',
+        languageIds: ['python'],
+        currentLanguageId: 'python',
+      }, () => starts++),
+      callFlowAnalysis: {
+        status: 'ready',
+        data: {
+          status: 'ok',
+          snapshotId: 'snapshot',
+          provider: 'calldiff',
+          version: '0.4.1',
+          from: 'before',
+          to: 'after',
+          raw: '',
+          trees: [],
+          fileImpacts: {},
+          summary: { entries: 0, changedNodes: 0, added: 0, removed: 0, impactedFiles: 0, warnings: 0 },
+          diagnostics: [],
+          skippedLanguages: [{ id: 'python', label: 'Python', files: ['tool.py'], installSizeBytes: 1024 * 1024 }],
+        },
+      },
+    } as unknown as ReviewState;
+
+    await render(readyState);
+    const text = host?.textContent ?? '';
+    expect(text).toContain('Install failed: Pinned Python package failed integrity verification.');
+    const retry = [...(host?.querySelectorAll('button') ?? [])]
+      .find((button) => button.textContent?.trim() === 'Retry');
+    expect(retry).toBeDefined();
     await act(async () => {
       retry?.click();
       await Promise.resolve();

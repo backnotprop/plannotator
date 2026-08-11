@@ -20,6 +20,7 @@ const okPayload = {
   fileImpacts: {},
   summary: { entries: 0, changedNodes: 0, added: 0, removed: 0, impactedFiles: 0, warnings: 0 },
   diagnostics: [],
+  skippedLanguages: [],
 };
 
 function Harness({ snapshotId }: { snapshotId: string }) {

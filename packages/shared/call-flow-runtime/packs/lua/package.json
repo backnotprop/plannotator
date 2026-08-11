@@ -1,0 +1,1 @@
+{"name":"plannotator-call-flow-pack-lua","version":"1.0.0","private":true,"dependencies":{"tree-sitter":"0.25.1","@tree-sitter-grammars/tree-sitter-lua":"0.2.0"}}

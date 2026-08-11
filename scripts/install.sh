@@ -88,8 +88,8 @@ Options:
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
                          via env var or ~/.plannotator/config.json.
-  --with-call-flow       Also install the optional CallDiff call-flow runtime
-                         (large: roughly 800 MB on disk, needs Node.js 22+).
+  --with-call-flow       Also install the optional pruned CallDiff core
+                         (about 5 MB on macOS arm64, needs Node.js 22+).
                          By default it is NOT installed; the review UI offers
                          a one-click install when Call flow is enabled. Also
                          enabled by PLANNOTATOR_INSTALL_CALLDIFF=1 or
@@ -1035,9 +1035,8 @@ install_agent_terminal_runtime() {
     fi
 }
 
-# Strictly opt-in: the CallDiff runtime is large (~800 MB on disk) and its
-# feature is off by default, so a default install never downloads it. The
-# review UI offers a one-click install when Call flow is enabled.
+# Strictly opt-in: Call flow is off by default, so a default install never
+# downloads even its pruned core. Review-specific packs install in-app.
 install_call_flow_runtime() {
     if [ "$install_call_flow" -ne 1 ]; then
         echo "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"

@@ -925,6 +925,54 @@ diffs-container {
 .call-flow-diagnostics summary { color: var(--warning); cursor: pointer; }
 .call-flow-diagnostics ul { margin: 0.5rem 0 0; padding-left: 1.25rem; }
 
+.call-flow-language-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 0.55);
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+}
+.call-flow-language-notice button,
+.call-flow-languages button {
+  flex: none;
+  min-height: 1.75rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0 0.5rem;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.call-flow-language-notice button:disabled,
+.call-flow-languages button:disabled { opacity: 0.55; cursor: default; }
+.call-flow-language-notice .call-flow-language-error { display: block; margin-top: 0.125rem; }
+.call-flow-languages {
+  margin-top: 1rem;
+  border-top: 1px solid oklch(from var(--border) l c h / 0.55);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+}
+.call-flow-languages summary { padding: 0.625rem 0; cursor: pointer; }
+.call-flow-languages ul { margin: 0; padding: 0; list-style: none; }
+.call-flow-languages li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2.5rem;
+  gap: 0.75rem;
+  border-top: 1px solid oklch(from var(--border) l c h / 0.35);
+}
+.call-flow-languages li > span { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 0.125rem 0.5rem; }
+.call-flow-languages strong { color: var(--foreground); font-size: 0.75rem; font-weight: 550; }
+.call-flow-languages small { color: var(--muted-foreground); font-size: 0.625rem; font-variant-numeric: tabular-nums; }
+.call-flow-language-error { flex-basis: 100%; color: var(--destructive) !important; font-variant-numeric: normal !important; line-height: 1.35; }
+
 .call-flow-file-badge {
   display: inline-flex;
   align-items: center;
@@ -944,6 +992,7 @@ diffs-container {
   transition: color 120ms ease, background-color 120ms ease;
 }
 .call-flow-file-badge-disabled { cursor: default; opacity: 0.45; }
+.call-flow-file-badge-missing { cursor: pointer; opacity: 0.7; }
 .call-flow-file-badge-error { color: var(--destructive); }
 .call-flow-file-badge-label { font-weight: 650; letter-spacing: 0.02em; }
 .call-flow-file-badge-count {

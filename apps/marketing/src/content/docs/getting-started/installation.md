@@ -65,7 +65,9 @@ Version pinning is fully supported from **v0.17.2 onwards**. v0.17.2 is the firs
 <details>
 <summary><strong>Optional Call flow runtime (not installed by default)</strong></summary>
 
-Code review's **Call flow** layer uses a pinned CallDiff runtime that is large (roughly 800 MB on disk) and needs Node.js 22 or newer, so the installers never download it by default. The normal path is in-app: enable Call flow in the review UI and click **Install runtime** in the Call flow panel; the install runs in the background and the analysis starts in the same session. For scripted or headless installs, opt in with the `--with-call-flow` flag (PowerShell: `-WithCallFlow`), `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `{ "installCallFlow": true }` in `~/.plannotator/config.json` (flag > env var > config), or run `plannotator install-runtime call-flow` at any time. `--minimal` always excludes it.
+Code review's **Call flow** layer uses a pinned, pruned CallDiff runtime and needs Node.js 22 or newer, so it is never installed by default. The normal path is in-app: enable Call flow and the panel detects the changed languages, then one click installs the core (about 5 MB on macOS arm64) plus only the needed grammar packs. The panel names the languages and estimated total before starting. If a later review introduces another language, installed languages are still analyzed and a quiet skipped-files notice offers that pack. The panel's **Languages** list also supports installing a pack ahead of need.
+
+For scripted or headless installs, `--with-call-flow` (PowerShell: `-WithCallFlow`), `PLANNOTATOR_INSTALL_CALLDIFF=1`, `{ "installCallFlow": true }`, and `plannotator install-runtime call-flow` install the core; review-specific packs remain selectable in the UI. `--minimal` always excludes it.
 
 </details>
 

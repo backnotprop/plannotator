@@ -11,7 +11,7 @@ param(
     [Alias("BinaryOnly")]
     [switch]$Minimal,
     [switch]$NoMinimal,
-    # Opt-in install of the large CallDiff call-flow runtime (default off;
+    # Opt-in install of the pruned CallDiff call-flow core (default off;
     # the review UI offers a one-click install). Mirrors install.sh's
     # --with-call-flow.
     [switch]$WithCallFlow,
@@ -291,9 +291,8 @@ function Install-AgentTerminalRuntime {
     }
 }
 
-# Strictly opt-in: the CallDiff runtime is large (~800 MB on disk) and its
-# feature is off by default, so a default install never downloads it. The
-# review UI offers a one-click install when Call flow is enabled.
+# Strictly opt-in: Call flow is off by default, so a default install never
+# downloads even its pruned core. Review-specific packs install in-app.
 function Install-CallFlowRuntime {
     if (-not $installCallFlowResolved) {
         Write-Host "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"

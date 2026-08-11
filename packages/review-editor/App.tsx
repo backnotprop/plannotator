@@ -1355,36 +1355,25 @@ const ReviewApp: React.FC = () => {
     setCallFlowAdvert(callFlow);
   }, []);
 
-  // Re-advertise both analysis capabilities without changing any setting.
-  // POST /api/review-analysis with an empty body persists nothing new and
-  // returns fresh adverts for the current view; used after the in-app
-  // runtime install completes so the advert flips to available and
-  // useCallFlowAnalysis starts the analysis for the current snapshot
-  // without a reload.
-  const refreshAnalysisAdverts = useCallback(() => {
-    fetch('/api/review-analysis', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('Analysis capabilities could not be refreshed.');
-        return response.json() as Promise<{
-          semanticDiff?: SemanticDiffAdvert;
-          callFlow?: CallFlowAdvert;
-          superseded?: boolean;
-        }>;
-      })
-      .then((data) => {
-        if (data.superseded) return;
-        applySemanticDiffAdvert(data.semanticDiff);
-        applyCallFlowAdvert(data.callFlow);
-      })
-      .catch(() => {
-        // A failed refresh keeps the current advert; the next diff payload
-        // re-advertises capabilities anyway.
-      });
-  }, [applyCallFlowAdvert, applySemanticDiffAdvert]);
+  // Re-advertise both capabilities through the read-only endpoint. Keeping
+  // this separate from the settings mutation prevents install completion
+  // from superseding a concurrent toggle write.
+  const refreshAnalysisAdverts = useCallback(async (): Promise<void> => {
+    const response = await fetch('/api/review-analysis', { method: 'GET' });
+    if (!response.ok) throw new Error('Analysis capabilities could not be refreshed.');
+    const data = await response.json() as {
+      semanticDiff?: SemanticDiffAdvert;
+      callFlow?: CallFlowAdvert;
+      superseded?: boolean;
+    };
+    if (data.superseded) throw new Error('The review changed while capabilities were refreshed.');
+    if (data.callFlow?.state === 'unavailable' && data.callFlow.installable) {
+      throw new Error(data.callFlow.message ?? 'The Call flow install is not visible yet.');
+    }
+    applySemanticDiffAdvert(data.semanticDiff);
+    applyCallFlowAdvert(data.callFlow);
+    retryCallFlowAnalysis();
+  }, [applyCallFlowAdvert, applySemanticDiffAdvert, retryCallFlowAnalysis]);
 
   const callFlowInstall = useCallFlowInstall(refreshAnalysisAdverts);
 

@@ -23,7 +23,7 @@ const tempDirs: string[] = [];
 // ---------------------------------------------------------------------------
 // Test seams: both runtimes' call-flow modules are mocked so the endpoint
 // tests exercise the coordinator + endpoint wiring against a controllable
-// installCallFlowRuntime / preflightCallFlowNode. The real ~800 MB install
+// installCallFlowRuntime / preflightCallFlowNode. A real install
 // must never run in tests. Everything else in the modules stays real.
 //
 // bun's mock.module is process-global with no restore, so these overrides
@@ -34,21 +34,24 @@ const tempDirs: string[] = [];
 // a real install), and preflight's default stays a harmless ok.
 // ---------------------------------------------------------------------------
 let installCalls = 0;
+let installedTargets: string[] = [];
 let installImpl: (onStage: (stage: CallFlowInstallStage) => void) => Promise<CallFlowRuntimeInstallResult> =
   async () => {
     throw new Error('installImpl not configured for this test');
   };
 let preflightImpl: () => Promise<CallFlowNodePreflight> = async () => ({ ok: true });
 
-const recordedInstall = (onStage: (stage: CallFlowInstallStage) => void = () => {}) => {
+const recordedInstall = (target: string, onStage: (stage: CallFlowInstallStage) => void = () => {}) => {
   installCalls++;
+  installedTargets.push(target);
   return installImpl(onStage);
 };
 
 const actualShared = { ...(await import('@plannotator/shared/call-flow')) };
 const sharedMock = () => ({
   ...actualShared,
-  installCallFlowRuntime: recordedInstall,
+  installCallFlowRuntime: (onStage: (stage: CallFlowInstallStage) => void) => recordedInstall('javascript-typescript', onStage),
+  installCallFlowLanguagePack: (id: string, onStage: (stage: CallFlowInstallStage) => void) => recordedInstall(id, onStage),
   preflightCallFlowNode: () => preflightImpl(),
 });
 mock.module('@plannotator/shared/call-flow', sharedMock);
@@ -57,7 +60,8 @@ mock.module('../shared/call-flow.ts', sharedMock);
 const actualPi = { ...(await import('../../apps/pi-extension/generated/call-flow.ts')) };
 mock.module('../../apps/pi-extension/generated/call-flow.ts', () => ({
   ...actualPi,
-  installCallFlowRuntime: recordedInstall,
+  installCallFlowRuntime: (onStage: (stage: CallFlowInstallStage) => void) => recordedInstall('javascript-typescript', onStage),
+  installCallFlowLanguagePack: (id: string, onStage: (stage: CallFlowInstallStage) => void) => recordedInstall(id, onStage),
   preflightCallFlowNode: () => preflightImpl(),
 }));
 
@@ -80,7 +84,6 @@ try {
 }
 const {
   CALLDIFF_COMMIT,
-  CALLDIFF_GRAMMAR_SPECS,
   CALLDIFF_VERSION,
   getCallFlowManagedRuntimeDir,
 } = actualShared;
@@ -114,6 +117,8 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 interface InstallStatusBody {
   state: string;
   stage?: string;
+  languageIds?: string[];
+  currentLanguageId?: string;
   error?: string;
   reason?: string;
 }
@@ -139,13 +144,18 @@ function materializeFakeRuntime(): void {
   const packageRoot = join(runtimeDir, 'node_modules', 'calldiff');
   mkdirSync(join(packageRoot, 'dist'), { recursive: true });
   writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({ name: 'calldiff', version: CALLDIFF_VERSION }));
-  writeFileSync(join(packageRoot, 'dist', 'index.js'), 'export const runDiff = () => {};\n');
+  writeFileSync(join(packageRoot, 'dist', 'run.js'), 'export const runDiff = () => {};\n');
   writeFileSync(join(runtimeDir, '.calldiff-revision'), `${CALLDIFF_COMMIT}\n`);
   const lockSource = join(import.meta.dir, '..', 'shared', 'call-flow-runtime', 'package-lock.json');
   writeFileSync(join(runtimeDir, 'package-lock.json'), readFileSync(lockSource));
-  for (const spec of CALLDIFF_GRAMMAR_SPECS) {
-    const name = spec.startsWith('@') ? spec.slice(0, spec.indexOf('@', 1)) : spec.slice(0, spec.lastIndexOf('@'));
-    mkdirSync(join(runtimeDir, 'node_modules', ...name.split('/')), { recursive: true });
+  for (const [name, version] of [
+    ['tree-sitter', '0.25.1'],
+    ['tree-sitter-javascript', '0.25.0'],
+    ['tree-sitter-typescript', '0.23.2'],
+  ] as const) {
+    const dependencyRoot = join(runtimeDir, 'node_modules', name);
+    mkdirSync(dependencyRoot, { recursive: true });
+    writeFileSync(join(dependencyRoot, 'package.json'), JSON.stringify({ name, version }));
   }
 }
 
@@ -169,6 +179,7 @@ afterEach(() => {
   if (originalPath === undefined) delete process.env.PATH;
   else process.env.PATH = originalPath;
   installCalls = 0;
+  installedTargets = [];
   installImpl = async () => {
     throw new Error('installImpl not configured for this test');
   };
@@ -196,11 +207,12 @@ describe('Call flow install endpoints', () => {
     ['Bun', startBunReviewServer],
     ['Pi', startPiReviewServer],
   ] as const) {
-    const boot = async () => {
+    const boot = async (options: { rawPatch?: string; coreInstalled?: boolean } = {}) => {
       process.env.PLANNOTATOR_DATA_DIR = makeTempDir('plannotator-call-flow-rt-');
+      if (options.coreInstalled) materializeFakeRuntime();
       if (runtime === 'Pi') process.env.PLANNOTATOR_PORT = String(await reservePort());
       return await startServer({
-        rawPatch: '',
+        rawPatch: options.rawPatch ?? '',
         gitRef: 'Working tree',
         diffType: 'uncommitted',
         origin: runtime === 'Pi' ? 'pi' : 'claude-code',
@@ -237,30 +249,30 @@ describe('Call flow install endpoints', () => {
       try {
         const sameOrigin = new URL(server.url).origin;
         const [first, second] = await Promise.all([
-          fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { Origin: sameOrigin } })
+          fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { Origin: sameOrigin, 'Content-Type': 'application/json' }, body: '{}' })
             .then((response) => response.json() as Promise<InstallStatusBody>),
-          fetch(`${server.url}/api/call-flow/install`, { method: 'POST' })
+          fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
             .then((response) => response.json() as Promise<InstallStatusBody>),
         ]);
-        expect(first).toEqual({ state: 'running', stage: 'downloading' });
-        expect(second).toEqual({ state: 'running', stage: 'downloading' });
+        expect(first).toEqual({ state: 'running', stage: 'downloading', languageIds: ['javascript-typescript'] });
+        expect(second).toEqual({ state: 'running', stage: 'downloading', languageIds: ['javascript-typescript'] });
         expect(installCalls).toBe(1);
 
         emitStage?.('installing-deps');
-        expect(await getInstallStatus(server.url)).toEqual({ state: 'running', stage: 'installing-deps' });
+        expect(await getInstallStatus(server.url)).toEqual({ state: 'running', stage: 'installing-deps', languageIds: ['javascript-typescript'], currentLanguageId: 'javascript-typescript' });
         emitStage?.('building');
-        expect(await getInstallStatus(server.url)).toEqual({ state: 'running', stage: 'building' });
+        expect(await getInstallStatus(server.url)).toEqual({ state: 'running', stage: 'building', languageIds: ['javascript-typescript'], currentLanguageId: 'javascript-typescript' });
 
         // A third POST while running still joins instead of restarting.
-        const third = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST' })
+        const third = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then((response) => response.json() as Promise<InstallStatusBody>);
         expect(third.state).toBe('running');
         expect(installCalls).toBe(1);
 
-        gate.resolve({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', message: 'installed' });
-        expect(await waitForInstallState(server.url, 'done')).toEqual({ state: 'done' });
+        gate.resolve({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', languageId: 'javascript-typescript', message: 'installed' });
+        expect(await waitForInstallState(server.url, 'done')).toEqual({ state: 'done', languageIds: ['javascript-typescript'] });
       } finally {
-        gate.resolve({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', message: 'installed' });
+        gate.resolve({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', languageId: 'javascript-typescript', message: 'installed' });
         server.stop();
       }
     });
@@ -273,12 +285,13 @@ describe('Call flow install endpoints', () => {
         message: 'Call flow requires Node.js 22 or newer, which was not found on PATH.',
       });
       try {
-        const status = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST' })
+        const status = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then((response) => response.json() as Promise<InstallStatusBody>);
         expect(status).toEqual({
           state: 'error',
           reason: 'node-unavailable',
           error: 'Call flow requires Node.js 22 or newer, which was not found on PATH.',
+          languageIds: ['javascript-typescript'],
         });
         expect(installCalls).toBe(0);
         // The error persists on the status endpoint until the next POST.
@@ -292,15 +305,72 @@ describe('Call flow install endpoints', () => {
       const server = await boot();
       installImpl = async () => ({ ok: false, status: 'failed', runtimeDir: '/tmp/rt', message: 'npm ci failed' });
       try {
-        await fetch(`${server.url}/api/call-flow/install`, { method: 'POST' });
-        expect(await waitForInstallState(server.url, 'error')).toEqual({ state: 'error', error: 'npm ci failed' });
+        await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        expect(await waitForInstallState(server.url, 'error')).toEqual({
+          state: 'error',
+          error: 'npm ci failed',
+          languageIds: ['javascript-typescript'],
+          currentLanguageId: 'javascript-typescript',
+        });
 
-        installImpl = async () => ({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', message: 'installed' });
-        const retried = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST' })
+        installImpl = async () => ({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', languageId: 'javascript-typescript', message: 'installed' });
+        const retried = await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then((response) => response.json() as Promise<InstallStatusBody>);
-        expect(retried).toEqual({ state: 'running', stage: 'downloading' });
-        expect(await waitForInstallState(server.url, 'done')).toEqual({ state: 'done' });
+        expect(retried).toEqual({ state: 'running', stage: 'downloading', languageIds: ['javascript-typescript'] });
+        expect(await waitForInstallState(server.url, 'done')).toEqual({ state: 'done', languageIds: ['javascript-typescript'] });
         expect(installCalls).toBe(2);
+      } finally {
+        server.stop();
+      }
+    });
+
+    test.skipIf(process.platform === 'win32')(`${runtime} derives the default pack target from changed files`, async () => {
+      installFakeNode();
+      const rawPatch = [
+        'diff --git a/tool.py b/tool.py',
+        '--- a/tool.py',
+        '+++ b/tool.py',
+        '@@ -1 +1 @@',
+        '-pass',
+        '+print("changed")',
+      ].join('\n');
+      const server = await boot({ rawPatch, coreInstalled: true });
+      installImpl = async () => ({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', languageId: 'python', message: 'installed' });
+      try {
+        const started = await fetch(`${server.url}/api/call-flow/install`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        }).then((response) => response.json()) as InstallStatusBody;
+        expect(started).toMatchObject({ state: 'running', languageIds: ['python'] });
+        expect(await waitForInstallState(server.url, 'done')).toMatchObject({ state: 'done', languageIds: ['python'] });
+        expect(installedTargets).toEqual(['python']);
+      } finally {
+        server.stop();
+      }
+    });
+
+    test.skipIf(process.platform === 'win32')(`${runtime} prepends only core to an explicit manual language request`, async () => {
+      installFakeNode();
+      const rawPatch = [
+        'diff --git a/tool.py b/tool.py',
+        '--- a/tool.py',
+        '+++ b/tool.py',
+        '@@ -1 +1 @@',
+        '-pass',
+        '+print("changed")',
+      ].join('\n');
+      const server = await boot({ rawPatch });
+      installImpl = async (id) => ({ ok: true, status: 'installed', runtimeDir: '/tmp/rt', languageId: id, message: 'installed' });
+      try {
+        const started = await fetch(`${server.url}/api/call-flow/install`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ languageIds: ['ruby'] }),
+        }).then((response) => response.json()) as InstallStatusBody;
+        expect(started).toMatchObject({ state: 'running', languageIds: ['javascript-typescript', 'ruby'] });
+        expect(await waitForInstallState(server.url, 'done')).toMatchObject({ state: 'done', languageIds: ['javascript-typescript', 'ruby'] });
+        expect(installedTargets).toEqual(['javascript-typescript', 'ruby']);
       } finally {
         server.stop();
       }
@@ -313,7 +383,7 @@ describe('Call flow install endpoints', () => {
         const server = await boot();
         installImpl = async () => {
           materializeFakeRuntime();
-          return { ok: true, status: 'installed', runtimeDir: getCallFlowManagedRuntimeDir(), message: 'installed' };
+          return { ok: true, status: 'installed', runtimeDir: getCallFlowManagedRuntimeDir(), languageId: 'javascript-typescript', message: 'installed' };
         };
         try {
           // Enable Call flow; the runtime is not installed yet, so the advert
@@ -326,16 +396,13 @@ describe('Call flow install endpoints', () => {
           }).then((response) => response.json()) as { callFlow?: { state: string; available: boolean } };
           expect(before.callFlow?.state).toBe('unavailable');
 
-          await fetch(`${server.url}/api/call-flow/install`, { method: 'POST' });
+          await fetch(`${server.url}/api/call-flow/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
           await waitForInstallState(server.url, 'done');
 
           // Without probe-cache invalidation this re-advertisement would
           // still read the cached unavailable resolution for up to 30s.
-          const after = await fetch(`${server.url}/api/review-analysis`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{}',
-          }).then((response) => response.json()) as { callFlow?: { state: string; available: boolean } };
+          const after = await fetch(`${server.url}/api/review-analysis`)
+            .then((response) => response.json()) as { callFlow?: { state: string; available: boolean } };
           expect(after.callFlow?.state).toBe('available');
           expect(after.callFlow?.available).toBe(true);
         } finally {

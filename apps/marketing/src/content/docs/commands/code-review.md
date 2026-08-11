@@ -128,7 +128,7 @@ The review UI shows your changes in a familiar diff format:
 
 Open **Settings → Analysis** to control Semantic Changes and Call Flow independently. A one-time review welcome presents the same two switches side by side. Disabling either layer avoids its analysis work and leaves the ordinary patch unchanged.
 
-**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and uses a separate runtime installed on first use: when the layer is enabled and the runtime is missing, the Call flow panel offers a one-click **Install runtime** (a one-time download of roughly 800 MB, requiring Node.js 22 or newer) and the analysis starts in the same session once it completes. When enabled, Call Flow appears in two places:
+**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and requires Node.js 22 or newer. On first use, one click installs the roughly 5 MB pruned core plus only the grammar packs needed by the current changed files; the panel names the languages and total first. A later missing language does not block installed ones: affected files are listed as skipped with an install action, and analysis refreshes in the same session. When enabled, Call Flow appears in two places:
 
 - **Dock** — switch between expandable entry-path trees with source navigation and CallDiff's exact, copyable raw output.
 - **Lens** — a compact `flow N` badge in each impacted file header, opening the complete inferred entry trees that contain a changed call in that file, plus a link to the full Dock.
@@ -137,7 +137,9 @@ In either structured tree, use the comment action on a changed call to open Plan
 
 The Dock and every Lens share one snapshot-bound result. CallDiff provenance is available from the Dock's info control rather than occupying the primary analysis heading.
 
-For working-tree modes, Plannotator creates temporary synthetic Git commits from the already-visible patch; it never stages files or changes the source repository. The analysis is snapshot-bound, cached per review, run in an isolated Node worker with time, memory, and output limits, and discarded if the underlying review changes while it runs.
+The Dock's compact **Languages** detail lists every supported family, installed state, and estimated pruned size. It supports install-ahead-of-need; per-pack removal is not available in this version.
+
+For working-tree modes, Plannotator creates temporary synthetic Git commits from the already-visible patch; it never stages files or changes the source repository. Before the worker starts, the server maps changed extensions to installed packs and gives CallDiff an exact snapshot path set for those language families. Analysis cannot install packages: its grammar cache is the verified managed store and npm is blocked in the worker. The result is snapshot-bound, cached per review, and discarded if the underlying review changes while it runs.
 
 Call Flow is syntactic and does not resolve types, imports, runtime dispatch, or data flow. It currently requires a local Git checkout and is unavailable for multi-repository workspace reviews, GitButler committed views, jj, P4, and the baseline-free All Files mode.
 

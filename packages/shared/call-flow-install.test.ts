@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CallFlowInstallCoordinator, callFlowInstallOriginAllowed } from "./call-flow-install";
 import type { CallFlowInstallStage, CallFlowRuntimeInstallResult } from "./call-flow";
+import type { CallFlowLanguageId } from "./call-flow-languages";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -14,6 +15,7 @@ const installed: CallFlowRuntimeInstallResult = {
   ok: true,
   status: "installed",
   runtimeDir: "/tmp/runtime",
+  languageId: "python",
   message: "installed",
 };
 
@@ -30,22 +32,23 @@ describe("CallFlowInstallCoordinator", () => {
     });
 
     const [first, second, third] = await Promise.all([
-      coordinator.start(),
-      coordinator.start(),
-      coordinator.start(),
+      coordinator.start(["python"]),
+      coordinator.start(["python"]),
+      coordinator.start(["python"]),
     ]);
-    expect(first).toEqual({ state: "running", stage: "downloading" });
+    expect(first).toEqual({ state: "running", stage: "downloading", languageIds: ["python"] });
     expect(second).toEqual(first);
     expect(third).toEqual(first);
     expect(installs).toBe(1);
 
     // Still running: a later POST joins rather than restarting.
-    expect(await coordinator.start()).toEqual({ state: "running", stage: "downloading" });
+    expect(await coordinator.start(["python"])).toEqual({ state: "running", stage: "downloading", languageIds: ["python"] });
     expect(installs).toBe(1);
 
     gate.resolve(installed);
     await Bun.sleep(0);
-    expect(coordinator.getStatus()).toEqual({ state: "done" });
+    expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["python"] });
+    expect(installs).toBe(1);
   });
 
   test("stage callbacks advance the running status in order", async () => {
@@ -53,27 +56,27 @@ describe("CallFlowInstallCoordinator", () => {
     const gate = deferred<CallFlowRuntimeInstallResult>();
     const coordinator = new CallFlowInstallCoordinator({
       preflight: async () => ({ ok: true }),
-      install: (onStage) => {
+      install: (_id, onStage) => {
         emit = onStage;
         return gate.promise;
       },
     });
 
-    await coordinator.start();
-    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "downloading" });
+    await coordinator.start(["python"]);
+    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "downloading", languageIds: ["python"] });
     emit?.("verifying");
-    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "verifying" });
+    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "verifying", languageIds: ["python"], currentLanguageId: "python" });
     emit?.("installing-deps");
-    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "installing-deps" });
+    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "installing-deps", languageIds: ["python"], currentLanguageId: "python" });
     emit?.("building");
-    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "building" });
+    expect(coordinator.getStatus()).toEqual({ state: "running", stage: "building", languageIds: ["python"], currentLanguageId: "python" });
 
     gate.resolve(installed);
     await Bun.sleep(0);
-    expect(coordinator.getStatus()).toEqual({ state: "done" });
+    expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["python"] });
     // A late stage callback can never resurrect a settled status.
     emit?.("downloading");
-    expect(coordinator.getStatus()).toEqual({ state: "done" });
+    expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["python"] });
   });
 
   test("a failed Node preflight reports a distinct error before any install work", async () => {
@@ -86,11 +89,32 @@ describe("CallFlowInstallCoordinator", () => {
       },
     });
 
-    const status = await coordinator.start();
-    expect(status).toEqual({ state: "error", error: "Node.js was not found.", reason: "node-unavailable" });
+    const status = await coordinator.start(["python"]);
+    expect(status).toEqual({ state: "error", error: "Node.js was not found.", reason: "node-unavailable", languageIds: ["python"] });
     expect(installs).toBe(0);
     // The error persists until the next start retries.
     expect(coordinator.getStatus()).toEqual(status);
+  });
+
+  test("a failed preflight cannot leak an old review's languages into a later retry", async () => {
+    let preflights = 0;
+    const installedIds: CallFlowLanguageId[] = [];
+    const coordinator = new CallFlowInstallCoordinator({
+      preflight: async () => ++preflights === 1
+        ? { ok: false, reason: "node-unavailable", message: "Node.js was not found." }
+        : { ok: true },
+      install: async (id) => {
+        installedIds.push(id);
+        return { ...installed, languageId: id };
+      },
+    });
+
+    await coordinator.start(["python"]);
+    await coordinator.start(["go"]);
+    await Bun.sleep(0);
+
+    expect(installedIds).toEqual(["go"]);
+    expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["go"] });
   });
 
   test("an install failure persists as error and the next start retries", async () => {
@@ -108,14 +132,14 @@ describe("CallFlowInstallCoordinator", () => {
       onSettled: (ok) => settled.push(ok),
     });
 
-    await coordinator.start();
+    await coordinator.start(["python"]);
     await Bun.sleep(0);
-    expect(coordinator.getStatus()).toEqual({ state: "error", error: "npm ci failed" });
+    expect(coordinator.getStatus()).toEqual({ state: "error", error: "npm ci failed", languageIds: ["python"], currentLanguageId: "python" });
     expect(settled).toEqual([false]);
 
-    await coordinator.start();
+    await coordinator.start(["python"]);
     await Bun.sleep(0);
-    expect(coordinator.getStatus()).toEqual({ state: "done" });
+    expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["python"] });
     expect(installs).toBe(2);
     expect(settled).toEqual([false, true]);
   });
@@ -127,9 +151,31 @@ describe("CallFlowInstallCoordinator", () => {
         throw new Error("unexpected crash");
       },
     });
-    await coordinator.start();
+    await coordinator.start(["python"]);
     await Bun.sleep(0);
-    expect(coordinator.getStatus()).toEqual({ state: "error", error: "unexpected crash" });
+    expect(coordinator.getStatus()).toEqual({ state: "error", error: "unexpected crash", languageIds: ["python"], currentLanguageId: "python" });
+  });
+
+  test("queues a second language onto the active single flight", async () => {
+    const calls: string[] = [];
+    const first = deferred<CallFlowRuntimeInstallResult>();
+    const coordinator = new CallFlowInstallCoordinator({
+      preflight: async () => ({ ok: true }),
+      install: async (id) => {
+        calls.push(id);
+        if (id === "python") return first.promise;
+        return { ...installed, languageId: id };
+      },
+    });
+
+    await coordinator.start(["python"]);
+    await coordinator.start(["go"]);
+    expect(coordinator.getStatus()).toMatchObject({ state: "running", languageIds: ["python", "go"] });
+    first.resolve(installed);
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(calls).toEqual(["python", "go"]);
+    expect(coordinator.getStatus()).toEqual({ state: "done", languageIds: ["python", "go"] });
   });
 });
 

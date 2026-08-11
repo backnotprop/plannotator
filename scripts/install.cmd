@@ -12,7 +12,7 @@ REM Three-layer opt-in for SLSA provenance verification.
 REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
-REM Opt-in install of the large CallDiff call-flow runtime (default off; the
+REM Opt-in install of the pruned CallDiff call-flow core (default off; the
 REM review UI offers a one-click install). Precedence: --with-call-flow >
 REM PLANNOTATOR_INSTALL_CALLDIFF > config installCallFlow > default (off).
 REM -1 = flag not set (fall through); 1 = enable.
@@ -1592,10 +1592,9 @@ if !ERRORLEVEL! neq 0 (
 goto :eof
 
 REM ======================================================================
-REM Opt-in CallDiff runtime install. Strictly opt-in: the runtime is large
-REM (~800 MB on disk) and its feature is off by default, so a default
-REM install never downloads it. The review UI offers a one-click install
-REM when Call flow is enabled. Non-fatal when the opt-in install fails.
+REM Opt-in CallDiff core install. Call flow is off by default, so a default
+REM install never downloads even the pruned core. Review-specific packs
+REM install in-app. Non-fatal when the opt-in install fails.
 REM ======================================================================
 :InstallCallFlowRuntime
 if not "!INSTALL_CALL_FLOW!"=="1" (

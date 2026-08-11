@@ -34,6 +34,9 @@ export const CallFlowFileBadge: React.FC<{ filePath: string; oldPath?: string }>
     () => analysis?.status === 'ready' ? getCallFlowTreesForFiles(analysis.data.trees, focusFiles) : [],
     [analysis, focusFiles],
   );
+  const skippedLanguage = useMemo(() => analysis?.status === 'ready'
+    ? analysis.data.skippedLanguages.find((language) => language.files.some((file) => focusFiles.includes(file)))
+    : undefined, [analysis, focusFiles]);
   if (!state || !state.callFlowAvailable || !analysis) return null;
   const cancelClose = () => {
     if (!closeTimer.current) return;
@@ -57,6 +60,20 @@ export const CallFlowFileBadge: React.FC<{ filePath: string; oldPath?: string }>
     setOpen(false);
     state.onRequestLineAnnotation(node.file, range);
   };
+
+  if (skippedLanguage) {
+    return (
+      <button
+        type="button"
+        className="call-flow-file-badge call-flow-file-badge-missing"
+        onClick={state.openCallFlowPanel}
+        title={`${skippedLanguage.label} support is not installed`}
+      >
+        <span className="call-flow-file-badge-label">flow</span>
+        <span className="call-flow-file-badge-count">—</span>
+      </button>
+    );
+  }
 
   if (analysis.status === 'idle' || analysis.status === 'loading' || impacts.length === 0) {
     const failed = analysis.status === 'error';

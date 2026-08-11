@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CallFlowInstallStatus } from '@plannotator/shared/call-flow-types';
+import type { CallFlowLanguageId } from '@plannotator/shared/call-flow-languages';
 
 export interface CallFlowInstallController {
   readonly status: CallFlowInstallStatus;
   /** Start the runtime install, or retry after an error. */
-  readonly start: () => void;
+  readonly start: (languageIds?: readonly CallFlowLanguageId[]) => void;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 2_500;
@@ -14,12 +15,12 @@ const DEFAULT_POLL_INTERVAL_MS = 2_500;
  *
  * POST /api/call-flow/install starts (or joins) the server-side install;
  * while it reports running, GET /api/call-flow/install-status is polled on
- * a slow interval. Polling stops on done, error, and unmount, and never
- * runs in any other state. A transition to done fires onInstalled exactly
- * once per attempt so the owner can refresh the capability advert.
+ * a slow interval. Status polling stops on done, error, and unmount. Once
+ * done, capability reconciliation retries at the same interval until it
+ * succeeds, so one transient advert failure cannot strand the panel.
  */
 export function useCallFlowInstall(
-  onInstalled: () => void,
+  onInstalled: () => Promise<void>,
   pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS,
 ): CallFlowInstallController {
   const [status, setStatus] = useState<CallFlowInstallStatus>({ state: 'idle' });
@@ -28,20 +29,20 @@ export function useCallFlowInstall(
     onInstalledRef.current = onInstalled;
   }, [onInstalled]);
 
-  // Tracked outside setState so the done transition side effect fires exactly
-  // once even when React re-runs state updaters.
   const statusRef = useRef<CallFlowInstallStatus>(status);
   const applyStatus = useCallback((next: CallFlowInstallStatus) => {
-    const wasDone = statusRef.current.state === 'done';
     statusRef.current = next;
     setStatus(next);
-    if (!wasDone && next.state === 'done') onInstalledRef.current();
   }, []);
 
-  const start = useCallback(() => {
+  const start = useCallback((languageIds?: readonly CallFlowLanguageId[]) => {
     if (statusRef.current.state === 'running') return;
-    applyStatus({ state: 'running', stage: 'downloading' });
-    fetch('/api/call-flow/install', { method: 'POST' })
+    applyStatus({ state: 'running', stage: 'downloading', languageIds: [...(languageIds ?? [])] });
+    fetch('/api/call-flow/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(languageIds ? { languageIds } : {}),
+    })
       .then(async (response) => {
         if (!response.ok) {
           const body = await response.json().catch(() => null) as { error?: string } | null;
@@ -54,16 +55,37 @@ export function useCallFlowInstall(
         applyStatus({
           state: 'error',
           error: error instanceof Error ? error.message : 'The runtime install could not be started.',
+          ...(languageIds && { languageIds: [...languageIds] }),
         });
       });
   }, [applyStatus]);
+
+  useEffect(() => {
+    if (status.state !== 'done') return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const reconcile = () => {
+      onInstalledRef.current()
+        .catch(() => {
+          if (!cancelled) timer = window.setTimeout(reconcile, pollIntervalMs);
+        });
+    };
+    reconcile();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [pollIntervalMs, status.state]);
 
   useEffect(() => {
     if (status.state !== 'running') return;
     let cancelled = false;
     const timer = window.setInterval(() => {
       fetch('/api/call-flow/install-status')
-        .then((response) => response.json() as Promise<CallFlowInstallStatus>)
+        .then((response) => {
+          if (!response.ok) throw new Error('Call-flow install status is temporarily unavailable.');
+          return response.json() as Promise<CallFlowInstallStatus>;
+        })
         .then((next) => {
           if (!cancelled) applyStatus(next);
         })

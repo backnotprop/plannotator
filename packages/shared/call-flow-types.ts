@@ -1,5 +1,7 @@
 /** Browser-safe contracts for Plannotator's optional CallDiff integration. */
 
+import type { CallFlowLanguageId } from "./call-flow-languages";
+
 export type CallFlowNodeStatus = "same" | "added" | "removed";
 export type CallFlowNodeKind = "call" | "branch";
 
@@ -61,6 +63,34 @@ export interface CallFlowAdvert {
   version?: string;
   reason?: string;
   message?: string;
+  /** True only when the managed install flow applies; its Node preflight can still require user action. */
+  installable?: boolean;
+  languages?: CallFlowLanguageAdvert[];
+  installPlan?: CallFlowInstallPlan;
+}
+
+export interface CallFlowLanguageAdvert {
+  id: CallFlowLanguageId;
+  label: string;
+  kind: "core" | "pack";
+  installed: boolean;
+  required: boolean;
+  changedFiles: number;
+  installSizeBytes: number;
+}
+
+export interface CallFlowInstallPlan {
+  languageIds: CallFlowLanguageId[];
+  labels: string[];
+  changedFiles: number;
+  installSizeBytes: number;
+}
+
+export interface CallFlowSkippedLanguage {
+  id: CallFlowLanguageId;
+  label: string;
+  files: string[];
+  installSizeBytes: number;
 }
 
 /** Coarse phases reported while the opt-in runtime install runs. */
@@ -68,14 +98,14 @@ export type CallFlowInstallStage = "downloading" | "verifying" | "installing-dep
 
 /**
  * Wire contract for POST /api/call-flow/install and
- * GET /api/call-flow/install-status. done persists until the runtime advert
- * resolves available; error persists until the next install POST retries.
+ * GET /api/call-flow/install-status. done identifies the completed target
+ * set; error persists until the next install POST retries.
  */
 export type CallFlowInstallStatus =
   | { state: "idle" }
-  | { state: "running"; stage: CallFlowInstallStage }
-  | { state: "done" }
-  | { state: "error"; error: string; reason?: string };
+  | { state: "running"; stage: CallFlowInstallStage; languageIds: CallFlowLanguageId[]; currentLanguageId?: CallFlowLanguageId }
+  | { state: "done"; languageIds: CallFlowLanguageId[] }
+  | { state: "error"; error: string; reason?: string; languageIds?: CallFlowLanguageId[]; currentLanguageId?: CallFlowLanguageId };
 
 export type CallFlowResponse =
   | {
@@ -92,6 +122,7 @@ export type CallFlowResponse =
       fileImpacts: Record<string, CallFlowFileImpact[]>;
       summary: CallFlowSummary;
       diagnostics: CallFlowDiagnostic[];
+      skippedLanguages: CallFlowSkippedLanguage[];
     }
   | {
       status: "disabled" | "unsupported" | "unavailable" | "stale" | "error";

@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  CALLDIFF_COMMIT,
   CALLDIFF_SOURCE_INTEGRITY,
+  CALLDIFF_VERSION,
   CallFlowService,
   createCallFlowSnapshotPlan,
+  getCallFlowManagedRuntimeDir,
   resolveCallFlowRuntime,
+  pruneCallFlowNativePackage,
   type CallFlowAnalysisInput,
   type CallFlowRuntime,
 } from "./call-flow";
@@ -34,8 +38,11 @@ afterEach(() => rmSync(repo, { recursive: true, force: true }));
 
 const runtime: CallFlowRuntime = {
   nodePath: "node",
-  packageEntry: "/runtime/calldiff/dist/index.js",
+  packageEntry: "/runtime/calldiff/dist/run.js",
   runtimeDir: "/runtime",
+  grammarCacheDir: "/runtime/grammar-cache",
+  installedLanguageIds: ["javascript-typescript"],
+  managed: true,
   version: "0.4.1",
 };
 
@@ -235,6 +242,57 @@ describe("CallFlowService", () => {
     expect(probes).toBe(2);
   });
 
+  test("offers the managed install flow when Node preflight must explain recovery", async () => {
+    const service = new CallFlowService({
+      resolveRuntime: async () => ({
+        ok: false,
+        reason: "node-unavailable",
+        message: "Call flow requires Node.js 22 or newer, which was not found on PATH.",
+      }),
+    });
+    const rawPatch = [
+      "diff --git a/tool.py b/tool.py",
+      "--- a/tool.py",
+      "+++ b/tool.py",
+      "@@ -1 +1 @@",
+      "-pass",
+      "+print('changed')",
+    ].join("\n");
+
+    const advert = await service.getAdvert(true, { vcsType: "git", diffType: "uncommitted", rawPatch });
+    expect(advert.state).toBe("unavailable");
+    expect(advert.installable).toBe(true);
+    expect(advert.installPlan?.languageIds).toEqual(["javascript-typescript", "python"]);
+  });
+
+  test("runtime installation invalidates a cached partial result for the same snapshot", async () => {
+    let executions = 0;
+    let installedLanguageIds: CallFlowRuntime["installedLanguageIds"] = ["javascript-typescript"];
+    const service = new CallFlowService({
+      resolveRuntime: async () => ({ ok: true, runtime: { ...runtime, installedLanguageIds } }),
+      executeAnalysis: async () => {
+        executions++;
+        return parsedResult;
+      },
+    });
+    const rawPatch = [
+      "diff --git a/tool.py b/tool.py",
+      "--- a/tool.py",
+      "+++ b/tool.py",
+      "@@ -1 +1 @@",
+      "-pass",
+      "+print('changed')",
+    ].join("\n");
+
+    const before = await service.analyze({ ...input(), rawPatch });
+    expect(before.status === "ok" ? before.skippedLanguages.map(({ id }) => id) : []).toEqual(["python"]);
+    installedLanguageIds = ["javascript-typescript", "python"];
+    service.invalidateRuntimeState();
+    const after = await service.analyze({ ...input(), rawPatch });
+    expect(after.status === "ok" ? after.skippedLanguages : []).toEqual([]);
+    expect(executions).toBe(2);
+  });
+
   test("rejects unsupported views before probing or executing the runtime", async () => {
     let probes = 0;
     const service = new CallFlowService({
@@ -251,6 +309,116 @@ describe("CallFlowService", () => {
     expect(jj.state).toBe("unsupported");
     expect(probes).toBe(0);
   });
+
+  test("advertises only the missing language packs required by the current patch", async () => {
+    const service = new CallFlowService({ resolveRuntime: async () => ({ ok: true, runtime }) });
+    const rawPatch = [
+      "diff --git a/tool.py b/tool.py",
+      "--- a/tool.py",
+      "+++ b/tool.py",
+      "@@ -1 +1 @@",
+      "-pass",
+      "+print('changed')",
+    ].join("\n");
+
+    const advert = await service.getAdvert(true, { vcsType: "git", diffType: "uncommitted", rawPatch });
+    expect(advert.state).toBe("available");
+    expect(advert.installPlan?.languageIds).toEqual(["python"]);
+    expect(advert.installPlan?.changedFiles).toBe(1);
+    expect(advert.languages?.find((language) => language.id === "python")).toMatchObject({ installed: false, required: true });
+    expect(advert.languages?.find((language) => language.id === "go")).toMatchObject({ installed: false, required: false });
+  });
+
+  test("returns a successful partial result with explicit skipped files", async () => {
+    const service = new CallFlowService({
+      resolveRuntime: async () => ({ ok: true, runtime }),
+      executeAnalysis: async () => parsedResult,
+    });
+    const rawPatch = [
+      "diff --git a/tool.py b/tool.py",
+      "--- a/tool.py",
+      "+++ b/tool.py",
+      "@@ -1 +1 @@",
+      "-pass",
+      "+print('changed')",
+    ].join("\n");
+    const result = await service.analyze({ ...input(), rawPatch });
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.skippedLanguages).toEqual([{
+        id: "python",
+        label: "Python",
+        files: ["tool.py"],
+        installSizeBytes: 1024 * 1024,
+      }]);
+    }
+  });
+
+  test("never offers the managed funnel for an invalid runtime override", async () => {
+    const service = new CallFlowService({
+      resolveRuntime: async () => ({ ok: false, reason: "override-relative", message: "Override must be absolute." }),
+    });
+    const advert = await service.getAdvert(true, { vcsType: "git", diffType: "uncommitted", rawPatch: "" });
+    expect(advert.state).toBe("unavailable");
+    expect(advert.installable).toBe(false);
+    expect(advert.installPlan).toBeUndefined();
+  });
+
+  test("the worker cannot invoke npm during analysis", async () => {
+    writeFileSync(join(repo, "main.ts"), "export function main() { return changed(); }\nfunction changed() { return 2; }\n");
+    const rawPatch = run(["diff", "--binary", "--full-index"]);
+    const runtimeDir = join(repo, "fake-runtime");
+    const packageRoot = join(runtimeDir, "node_modules", "calldiff");
+    mkdirSync(join(packageRoot, "dist"), { recursive: true });
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ type: "module", version: "0.4.1" }));
+    writeFileSync(join(packageRoot, "dist", "run.js"), [
+      'import { execFileSync } from "node:child_process";',
+      'export function runDiff() { execFileSync("npm", ["--version"]); return {}; }',
+    ].join("\n"));
+    for (const [name, version] of [["tree-sitter", "0.25.1"], ["tree-sitter-javascript", "0.25.0"], ["tree-sitter-typescript", "0.23.2"]]) {
+      const grammarRoot = join(runtimeDir, "node_modules", name);
+      mkdirSync(grammarRoot, { recursive: true });
+      writeFileSync(join(grammarRoot, "package.json"), JSON.stringify({ version }));
+    }
+    const fakeRuntime: CallFlowRuntime = {
+      nodePath: process.execPath,
+      packageEntry: join(packageRoot, "dist", "run.js"),
+      runtimeDir,
+      grammarCacheDir: join(runtimeDir, "grammar-cache"),
+      installedLanguageIds: ["javascript-typescript"],
+      managed: true,
+      version: "0.4.1",
+    };
+    const service = new CallFlowService({ resolveRuntime: async () => ({ ok: true, runtime: fakeRuntime }) });
+    const result = await service.analyze({ ...input(), rawPatch });
+    expect(result.status).toBe("error");
+    if (result.status === "error") expect(result.message).toContain("package installation is disabled during analysis");
+  });
+
+  test("a worker-side grammar race becomes a missing-grammar state", async () => {
+    writeFileSync(join(repo, "tool.py"), "def before():\n    pass\n");
+    run(["add", "tool.py"]);
+    run(["commit", "-qm", "add python"]);
+    writeFileSync(join(repo, "tool.py"), "def after():\n    pass\n");
+    const rawPatch = run(["diff", "--binary", "--full-index"]);
+    const runtimeDir = join(repo, "missing-runtime");
+    const packageRoot = join(runtimeDir, "node_modules", "calldiff");
+    mkdirSync(join(packageRoot, "dist"), { recursive: true });
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ type: "module", version: "0.4.1" }));
+    writeFileSync(join(packageRoot, "dist", "run.js"), "export function runDiff() { throw new Error('must not run'); }\n");
+    const fakeRuntime: CallFlowRuntime = {
+      nodePath: process.execPath,
+      packageEntry: join(packageRoot, "dist", "run.js"),
+      runtimeDir,
+      grammarCacheDir: join(runtimeDir, "grammar-cache"),
+      installedLanguageIds: ["javascript-typescript", "python"],
+      managed: true,
+      version: "0.4.1",
+    };
+    const service = new CallFlowService({ resolveRuntime: async () => ({ ok: true, runtime: fakeRuntime }) });
+    const result = await service.analyze({ ...input(), rawPatch });
+    expect(result).toMatchObject({ status: "unavailable", reason: "missing-grammar" });
+  });
 });
 
 describe("managed CallDiff runtime", () => {
@@ -265,6 +433,40 @@ describe("managed CallDiff runtime", () => {
     }
   });
 
+  test("ships an independent integrity-complete lock for every optional grammar", () => {
+    const packsRoot = join(import.meta.dir, "call-flow-runtime", "packs");
+    for (const id of readdirSync(packsRoot)) {
+      const manifest = JSON.parse(readFileSync(join(packsRoot, id, "package.json"), "utf8"));
+      const lock = JSON.parse(readFileSync(join(packsRoot, id, "package-lock.json"), "utf8"));
+      expect(lock.packages[""].dependencies).toEqual(manifest.dependencies);
+      for (const entry of Object.values(lock.packages) as Array<{ resolved?: string; integrity?: string }>) {
+        if (entry.resolved?.startsWith("http")) expect(entry.integrity).toStartWith("sha512-");
+      }
+    }
+  });
+
+  test("prunes foreign/source artifacts but preserves final locally-built addons", () => {
+    const packageRoot = join(repo, "native-package");
+    const currentPrebuild = join(packageRoot, "prebuilds", `${process.platform}-${process.arch}`);
+    mkdirSync(currentPrebuild, { recursive: true });
+    mkdirSync(join(packageRoot, "prebuilds", "foreign-platform"), { recursive: true });
+    mkdirSync(join(packageRoot, "src"), { recursive: true });
+    mkdirSync(join(packageRoot, "build", "Release"), { recursive: true });
+    writeFileSync(join(currentPrebuild, "grammar.node"), "current");
+    writeFileSync(join(packageRoot, "prebuilds", "foreign-platform", "grammar.node"), "foreign");
+    writeFileSync(join(packageRoot, "src", "parser.c"), "generated");
+    writeFileSync(join(packageRoot, "build", "Release", "compiled.node"), "compiled");
+    writeFileSync(join(packageRoot, "build", "Makefile"), "intermediate");
+
+    pruneCallFlowNativePackage(packageRoot);
+
+    expect(existsSync(join(currentPrebuild, "grammar.node"))).toBe(true);
+    expect(existsSync(join(packageRoot, "prebuilds", "foreign-platform"))).toBe(false);
+    expect(existsSync(join(packageRoot, "src"))).toBe(false);
+    expect(readFileSync(join(packageRoot, "build", "Release", "compiled.node"), "utf8")).toBe("compiled");
+    expect(existsSync(join(packageRoot, "build", "Makefile"))).toBe(false);
+  });
+
   test("rejects a relative PLANNOTATOR_CALLDIFF_PATH before inspecting the review cwd", async () => {
     const previous = process.env.PLANNOTATOR_CALLDIFF_PATH;
     process.env.PLANNOTATOR_CALLDIFF_PATH = "relative/runtime";
@@ -275,6 +477,35 @@ describe("managed CallDiff runtime", () => {
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_CALLDIFF_PATH;
       else process.env.PLANNOTATOR_CALLDIFF_PATH = previous;
+    }
+  });
+
+  test("rejects a managed core whose pinned Tree-sitter parser is missing", async () => {
+    const previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = repo;
+    try {
+      const runtimeDir = getCallFlowManagedRuntimeDir();
+      const callDiffRoot = join(runtimeDir, "node_modules", "calldiff");
+      mkdirSync(join(callDiffRoot, "dist"), { recursive: true });
+      writeFileSync(join(callDiffRoot, "package.json"), JSON.stringify({ name: "calldiff", version: CALLDIFF_VERSION }));
+      writeFileSync(join(callDiffRoot, "dist", "run.js"), "export const runDiff = () => {};\n");
+      writeFileSync(join(runtimeDir, ".calldiff-revision"), `${CALLDIFF_COMMIT}\n`);
+      writeFileSync(join(runtimeDir, "package-lock.json"), readFileSync(join(import.meta.dir, "call-flow-runtime", "package-lock.json")));
+      for (const [name, version] of [
+        ["tree-sitter-javascript", "0.25.0"],
+        ["tree-sitter-typescript", "0.23.2"],
+      ] as const) {
+        const dependencyRoot = join(runtimeDir, "node_modules", name);
+        mkdirSync(dependencyRoot, { recursive: true });
+        writeFileSync(join(dependencyRoot, "package.json"), JSON.stringify({ name, version }));
+      }
+
+      const result = await resolveCallFlowRuntime();
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("core-incomplete");
+    } finally {
+      if (previousDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
     }
   });
 });

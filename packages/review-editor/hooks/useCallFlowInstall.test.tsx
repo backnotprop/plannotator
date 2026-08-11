@@ -13,19 +13,19 @@ const originalFetch = globalThis.fetch;
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-function Harness({ onInstalled }: { onInstalled: () => void }) {
+function Harness({ onInstalled }: { onInstalled: () => Promise<void> }) {
   const install = useCallFlowInstall(onInstalled, 10);
   return (
     <div>
       <span data-state>{install.status.state}</span>
       <span data-stage>{install.status.state === 'running' ? install.status.stage : ''}</span>
       <span data-error>{install.status.state === 'error' ? install.status.error : ''}</span>
-      <button type="button" onClick={install.start}>Install</button>
+      <button type="button" onClick={() => install.start()}>Install</button>
     </div>
   );
 }
 
-async function render(onInstalled: () => void) {
+async function render(onInstalled: () => Promise<void>) {
   if (!host) {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -72,16 +72,16 @@ afterEach(async () => {
 describe('useCallFlowInstall', () => {
   test.skipIf(!hasDom)('starts one install, polls only while running, and fires onInstalled on done', async () => {
     const requests: Array<{ url: string; method: string }> = [];
-    let statusPayload: CallFlowInstallStatus = { state: 'running', stage: 'downloading' };
+    let statusPayload: CallFlowInstallStatus = { state: 'running', stage: 'downloading', languageIds: ['javascript-typescript'] };
     globalThis.fetch = async (input, init) => {
       const url = String(input);
       requests.push({ url, method: init?.method ?? 'GET' });
       if (url.includes('/api/call-flow/install-status')) return jsonResponse(statusPayload);
-      return jsonResponse({ state: 'running', stage: 'downloading' });
+      return jsonResponse({ state: 'running', stage: 'downloading', languageIds: ['javascript-typescript'] });
     };
 
     let installedCalls = 0;
-    await render(() => installedCalls++);
+    await render(async () => { installedCalls++; });
     expect(host?.querySelector('[data-state]')?.textContent).toBe('idle');
     // Idle never polls.
     await act(async () => {
@@ -94,7 +94,7 @@ describe('useCallFlowInstall', () => {
     expect(host?.querySelector('[data-state]')?.textContent).toBe('running');
 
     // Polling reflects server-side stage progress.
-    statusPayload = { state: 'running', stage: 'building' };
+    statusPayload = { state: 'running', stage: 'building', languageIds: ['javascript-typescript'] };
     for (let attempt = 0; attempt < 300 && host?.querySelector('[data-stage]')?.textContent !== 'building'; attempt++) {
       await act(async () => {
         await Bun.sleep(5);
@@ -102,7 +102,7 @@ describe('useCallFlowInstall', () => {
     }
     expect(host?.querySelector('[data-stage]')?.textContent).toBe('building');
 
-    statusPayload = { state: 'done' };
+    statusPayload = { state: 'done', languageIds: ['javascript-typescript'] };
     await waitForState('done');
     expect(installedCalls).toBe(1);
 
@@ -130,13 +130,13 @@ describe('useCallFlowInstall', () => {
             reason: 'node-unavailable',
           });
         }
-        return jsonResponse({ state: 'done' });
+        return jsonResponse({ state: 'done', languageIds: ['javascript-typescript'] });
       }
-      return jsonResponse({ state: 'done' });
+      return jsonResponse({ state: 'done', languageIds: ['javascript-typescript'] });
     };
 
     let installedCalls = 0;
-    await render(() => installedCalls++);
+    await render(async () => { installedCalls++; });
     await clickInstall();
     await waitForState('error');
     expect(host?.querySelector('[data-error]')?.textContent).toContain('Node.js 22 or newer');
@@ -145,6 +145,42 @@ describe('useCallFlowInstall', () => {
     await clickInstall();
     await waitForState('done');
     expect(posts).toBe(2);
+    expect(installedCalls).toBe(1);
+  });
+
+  test.skipIf(!hasDom)('retries the read-only advert handoff after a transient failure', async () => {
+    globalThis.fetch = async () => jsonResponse({ state: 'done', languageIds: ['python'] });
+    let reconciliations = 0;
+    await render(async () => {
+      reconciliations++;
+      if (reconciliations < 3) throw new Error('transient refresh failure');
+    });
+    await clickInstall();
+    await waitForState('done');
+    for (let attempt = 0; attempt < 100 && reconciliations < 3; attempt++) {
+      await act(async () => { await Bun.sleep(5); });
+    }
+    expect(reconciliations).toBe(3);
+  });
+
+  test.skipIf(!hasDom)('keeps polling after a transient non-2xx status response', async () => {
+    let polls = 0;
+    globalThis.fetch = async (input, init) => {
+      if ((init?.method ?? 'GET') === 'POST') {
+        return jsonResponse({ state: 'running', stage: 'downloading', languageIds: ['python'] });
+      }
+      if (String(input).includes('/api/call-flow/install-status')) {
+        polls++;
+        if (polls === 1) return jsonResponse({ error: 'temporary status failure' }, 500);
+        return jsonResponse({ state: 'done', languageIds: ['python'] });
+      }
+      return jsonResponse({ state: 'done', languageIds: ['python'] });
+    };
+    let installedCalls = 0;
+    await render(async () => { installedCalls++; });
+    await clickInstall();
+    await waitForState('done');
+    expect(polls).toBeGreaterThanOrEqual(2);
     expect(installedCalls).toBe(1);
   });
 });

@@ -5,13 +5,22 @@
  * it in a short-lived Node 22 worker and never imports it into Bun or Pi.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import runtimePackageJson from "./call-flow-runtime/package.json" with { type: "json" };
 import runtimePackageLock from "./call-flow-runtime/package-lock.json" with { type: "json" };
+import { CALL_FLOW_PACK_LOCKS } from "./call-flow-pack-locks";
+import {
+  CALL_FLOW_CORE_LANGUAGE_ID,
+  CALL_FLOW_LANGUAGES,
+  getCallFlowLanguage,
+  getCallFlowLanguageForPath,
+  getCallFlowPatchLanguageUsage,
+} from "./call-flow-languages";
+import type { CallFlowLanguageDefinition, CallFlowLanguageId } from "./call-flow-languages";
 import { getPlannotatorDataDir } from "./data-dir";
 import { indexCallFlowImpacts, parseCallDiffWorkerResult } from "./call-flow-types";
 import type {
@@ -29,41 +38,28 @@ export const CALLDIFF_SOURCE_INTEGRITY = "sha512-5y6tjre5UE00qPrVFPurnk9RBdk8WlR
 export const CALLDIFF_TREE_SITTER_VERSION = "0.25.1";
 const CALLDIFF_ARCHIVE_FILE = `calldiff-${CALLDIFF_COMMIT}.tar.gz`;
 const MAX_CALLDIFF_ARCHIVE_BYTES = 20 * 1024 * 1024;
+const MAX_PACK_ARCHIVES_BYTES = 256 * 1024 * 1024;
 
-/** Exact grammar set validated against CallDiff 0.4.1. */
-export const CALLDIFF_GRAMMAR_SPECS = [
-  "tree-sitter-javascript@0.25.0",
-  "tree-sitter-typescript@0.23.2",
-  "tree-sitter-python@0.25.0",
-  "tree-sitter-go@0.25.0",
-  "tree-sitter-rust@0.24.0",
-  "tree-sitter-java@0.23.5",
-  "tree-sitter-ruby@0.23.1",
-  "tree-sitter-c@0.24.1",
-  "tree-sitter-cpp@0.23.4",
-  "tree-sitter-c-sharp@0.23.1",
-  "tree-sitter-php@0.24.2",
-  "tree-sitter-kotlin@0.3.8",
-  "tree-sitter-swift@0.7.1",
-  "tree-sitter-scala@0.24.0",
-  "@tree-sitter-grammars/tree-sitter-lua@0.2.0",
-  "tree-sitter-elixir@0.3.5",
-  "tree-sitter-bash@0.25.1",
-  "tree-sitter-haskell@0.23.1",
-  "@tree-sitter-grammars/tree-sitter-zig@1.1.2",
-  "tree-sitter-solidity@1.2.13",
-  "tree-sitter-ocaml@0.24.2",
+const CORE_GRAMMAR_PACKAGES = ["tree-sitter-javascript", "tree-sitter-typescript"] as const;
+const CORE_RUNTIME_DEPENDENCIES = [
+  { packageName: "tree-sitter", version: CALLDIFF_TREE_SITTER_VERSION, label: "Tree-sitter" },
+  { packageName: "tree-sitter-javascript", version: "0.25.0", label: "JavaScript" },
+  { packageName: "tree-sitter-typescript", version: "0.23.2", label: "TypeScript" },
 ] as const;
-
-function packageNameFromSpec(spec: string): string {
-  if (spec.startsWith("@")) {
-    const separator = spec.indexOf("@", 1);
-    return separator === -1 ? spec : spec.slice(0, separator);
-  }
-  return spec.slice(0, spec.lastIndexOf("@"));
-}
-
-const REQUIRED_GRAMMAR_PACKAGES = CALLDIFF_GRAMMAR_SPECS.map(packageNameFromSpec);
+const CORE_PRUNED_PACKAGES = [
+  "@types",
+  "typescript",
+  "undici-types",
+  "node-addon-api",
+  "incur",
+  "@cfworker",
+  "@modelcontextprotocol",
+  "@scalar",
+  "@toon-format",
+  "tokenx",
+  "yaml",
+  "zod",
+] as const;
 
 const WORKER_TIMEOUT_MS = 45_000;
 const GIT_TIMEOUT_MS = 20_000;
@@ -86,6 +82,9 @@ export type CallFlowRuntime = {
   nodePath: string;
   packageEntry: string;
   runtimeDir: string;
+  grammarCacheDir: string;
+  installedLanguageIds: CallFlowLanguageId[];
+  managed: boolean;
   version: string;
 };
 
@@ -94,7 +93,7 @@ export type CallFlowRuntimeResolution =
   | { ok: false; reason: string; message: string };
 
 export type CallFlowRuntimeInstallResult =
-  | { ok: true; status: "installed" | "already-installed"; runtimeDir: string; message: string }
+  | { ok: true; status: "installed" | "already-installed"; runtimeDir: string; languageId: CallFlowLanguageId; message: string; sizeBeforePruneBytes?: number; sizeAfterPruneBytes?: number }
   | { ok: false; status: "failed"; runtimeDir: string; message: string };
 
 export type { CallFlowInstallStage };
@@ -119,7 +118,12 @@ interface SnapshotPlan {
   cleanup: () => void;
 }
 
+class CallFlowMissingGrammarError extends Error {
+  readonly reason = "missing-grammar";
+}
+
 const WORKER_SOURCE = String.raw`
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 let input = "";
@@ -131,6 +135,18 @@ console.error = (...values) => {
   diagnostics.push({ level: "warning", message: values.map(String).join(" ") });
 };
 try {
+  for (const grammar of request.grammars) {
+    const packageJson = grammar.packageJson;
+    if (!existsSync(packageJson)) {
+      process.stdout.write(JSON.stringify({ protocol: 1, ok: false, reason: "missing-grammar", message: grammar.message, diagnostics }));
+      process.exit(2);
+    }
+    const installed = JSON.parse(readFileSync(packageJson, "utf8"));
+    if (installed.version !== grammar.version) {
+      process.stdout.write(JSON.stringify({ protocol: 1, ok: false, reason: "missing-grammar", message: grammar.message, diagnostics }));
+      process.exit(2);
+    }
+  }
   const moduleUrl = pathToFileURL(request.packageEntry).href;
   const mod = await import(moduleUrl);
   if (typeof mod.runDiff !== "function") throw new Error("CallDiff does not export runDiff().");
@@ -141,6 +157,7 @@ try {
     maxDepth: request.maxDepth,
     color: false,
     locs: true,
+    paths: request.paths,
   });
   process.stdout.write(JSON.stringify({ protocol: 1, ok: true, version: request.version, result, diagnostics }));
 } catch (error) {
@@ -156,6 +173,46 @@ export function getCallFlowManagedRuntimeDir(dataDir = getPlannotatorDataDir()):
   return join(dataDir, "vendor", "call-flow", `calldiff-${CALLDIFF_VERSION}`);
 }
 
+function getCallFlowGrammarCacheDir(runtimeDir: string): string {
+  return join(runtimeDir, "grammar-cache");
+}
+
+function getLanguagePackageRoot(runtimeDir: string, language: CallFlowLanguageDefinition): string {
+  if (language.kind === "core") return join(runtimeDir, "node_modules", "tree-sitter-typescript");
+  return join(getCallFlowGrammarCacheDir(runtimeDir), "node_modules", ...(language.packageName ?? "").split("/"));
+}
+
+function getLanguageLockMarker(runtimeDir: string, id: CallFlowLanguageId): string {
+  return join(getCallFlowGrammarCacheDir(runtimeDir), ".plannotator-locks", `${id}.json`);
+}
+
+function packHasCommittedLock(runtimeDir: string, id: Exclude<CallFlowLanguageId, "javascript-typescript">): boolean {
+  try {
+    const installed: unknown = JSON.parse(readFileSync(getLanguageLockMarker(runtimeDir, id), "utf8"));
+    return JSON.stringify(installed) === JSON.stringify(CALL_FLOW_PACK_LOCKS[id]);
+  } catch {
+    return false;
+  }
+}
+
+function installDirHasCommittedPackLock(installDir: string, id: Exclude<CallFlowLanguageId, "javascript-typescript">): boolean {
+  try {
+    const installed: unknown = JSON.parse(readFileSync(join(installDir, "package-lock.json"), "utf8"));
+    return JSON.stringify(installed) === JSON.stringify(CALL_FLOW_PACK_LOCKS[id]);
+  } catch {
+    return false;
+  }
+}
+
+function isLanguageInstalled(runtimeDir: string, language: CallFlowLanguageDefinition, managed: boolean): boolean {
+  if (language.kind === "core") return true;
+  const packageRoot = managed
+    ? getLanguagePackageRoot(runtimeDir, language)
+    : join(runtimeDir, "node_modules", ...(language.packageName ?? "").split("/"));
+  if (readPackageVersion(packageRoot) !== language.packageVersion) return false;
+  return !managed || packHasCommittedLock(runtimeDir, language.id as Exclude<CallFlowLanguageId, "javascript-typescript">);
+}
+
 function readPackageVersion(packageRoot: string): string | null {
   try {
     const parsed = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { version?: unknown };
@@ -166,7 +223,10 @@ function readPackageVersion(packageRoot: string): string | null {
 }
 
 function resolvePackageEntry(packageRoot: string): string | null {
-  const entry = join(packageRoot, "dist", "index.js");
+  // Import the analysis module directly. dist/index.js eagerly exports the
+  // CLI, which pulls an otherwise-unused schema/MCP dependency tree into the
+  // managed runtime.
+  const entry = join(packageRoot, "dist", "run.js");
   return existsSync(entry) ? entry : null;
 }
 
@@ -207,10 +267,6 @@ function findExecutable(name: string): string | null {
   return null;
 }
 
-function missingGrammarPackages(runtimeDir: string): string[] {
-  return REQUIRED_GRAMMAR_PACKAGES.filter((name) => !existsSync(join(runtimeDir, "node_modules", ...name.split("/"))));
-}
-
 /**
  * Cheap Node availability check used before any runtime download starts.
  * The in-app install endpoint runs this preflight synchronously so a
@@ -224,7 +280,7 @@ export async function preflightCallFlowNode(): Promise<CallFlowNodePreflight> {
   return { ok: true };
 }
 
-/** Resolve a complete, offline-safe CallDiff runtime without executing analysis. */
+/** Resolve the pruned core and report independently installed language packs. */
 export async function resolveCallFlowRuntime(): Promise<CallFlowRuntimeResolution> {
   const nodePath = findExecutable("node");
   if (!nodePath) return { ok: false, reason: "node-unavailable", message: "Call flow requires Node.js 22 or newer." };
@@ -240,6 +296,7 @@ export async function resolveCallFlowRuntime(): Promise<CallFlowRuntimeResolutio
     };
   }
   const runtimeDir = override ?? getCallFlowManagedRuntimeDir();
+  const managed = !override;
   const packageRoot = override ? runtimeDir : join(runtimeDir, "node_modules", "calldiff");
   const version = readPackageVersion(packageRoot);
   const packageEntry = resolvePackageEntry(packageRoot);
@@ -249,7 +306,7 @@ export async function resolveCallFlowRuntime(): Promise<CallFlowRuntimeResolutio
       reason: "runtime-unavailable",
       message: override
         ? `PLANNOTATOR_CALLDIFF_PATH does not contain a built CallDiff package: ${runtimeDir}`
-        : "Call flow runtime is not installed. Run plannotator install-runtime call-flow or reinstall Plannotator.",
+        : "The Call flow core is not installed.",
     };
   }
   if (version !== CALLDIFF_VERSION) {
@@ -259,21 +316,37 @@ export async function resolveCallFlowRuntime(): Promise<CallFlowRuntimeResolutio
     const revisionPath = join(runtimeDir, ".calldiff-revision");
     const installedRevision = existsSync(revisionPath) ? readFileSync(revisionPath, "utf8").trim() : "";
     if (installedRevision !== CALLDIFF_COMMIT) {
-      return { ok: false, reason: "revision-mismatch", message: "The CallDiff runtime is stale. Re-run plannotator install-runtime call-flow." };
+      return { ok: false, reason: "revision-mismatch", message: "The managed Call flow core is stale and needs reinstalling." };
     }
     if (!hasCommittedRuntimeLock(runtimeDir)) {
-      return { ok: false, reason: "runtime-lock-mismatch", message: "The CallDiff runtime dependency lock is stale. Re-run plannotator install-runtime call-flow." };
+      return { ok: false, reason: "runtime-lock-mismatch", message: "The managed Call flow core dependency lock is stale and needs reinstalling." };
     }
   }
-  const missing = missingGrammarPackages(runtimeDir);
-  if (missing.length > 0) {
+  const invalidCore = CORE_RUNTIME_DEPENDENCIES.filter(({ packageName, version: expected }) => (
+    readPackageVersion(join(runtimeDir, "node_modules", packageName)) !== expected
+  ));
+  if (invalidCore.length > 0) {
     return {
       ok: false,
-      reason: "grammars-incomplete",
-      message: `Call flow runtime is missing ${missing.length} pinned grammar package${missing.length === 1 ? "" : "s"}. Re-run plannotator install-runtime call-flow.`,
+      reason: "core-incomplete",
+      message: `The Call flow core has missing or stale dependencies (${invalidCore.map(({ label }) => label).join(", ")}). Reinstall its managed runtime.`,
     };
   }
-  return { ok: true, runtime: { nodePath, packageEntry, runtimeDir, version } };
+  const installedLanguageIds = CALL_FLOW_LANGUAGES
+    .filter((language) => isLanguageInstalled(runtimeDir, language, managed))
+    .map((language) => language.id);
+  return {
+    ok: true,
+    runtime: {
+      nodePath,
+      packageEntry,
+      runtimeDir,
+      grammarCacheDir: managed ? getCallFlowGrammarCacheDir(runtimeDir) : runtimeDir,
+      installedLanguageIds,
+      managed,
+      version,
+    },
+  };
 }
 
 function writeRuntimeManifest(runtimeDir: string): void {
@@ -328,6 +401,314 @@ async function downloadVerifiedCallDiffArchive(
   writeFileSync(destination, Buffer.concat(chunks, totalBytes));
 }
 
+type VerifiedLockArtifact = { url: string; integrity: string; bytes: Buffer };
+
+async function downloadVerifiedLockArtifacts(
+  lock: unknown,
+  destination: string,
+  onStage: (stage: CallFlowInstallStage) => void,
+): Promise<string[]> {
+  const packages = (lock as { packages?: Record<string, { resolved?: unknown; integrity?: unknown }> }).packages;
+  if (!packages) throw new Error("The committed grammar lock has no package records.");
+  const specs = new Map<string, { url: string; integrity: string }>();
+  for (const entry of Object.values(packages)) {
+    if (typeof entry.resolved !== "string" || !entry.resolved.startsWith("https://")) continue;
+    if (typeof entry.integrity !== "string" || !entry.integrity.startsWith("sha512-")) {
+      throw new Error(`The committed grammar lock has no SHA-512 integrity for ${entry.resolved}.`);
+    }
+    specs.set(`${entry.resolved}\0${entry.integrity}`, { url: entry.resolved, integrity: entry.integrity });
+  }
+  if (specs.size === 0) throw new Error("The committed grammar lock has no downloadable package artifacts.");
+
+  onStage("downloading");
+  const downloaded: VerifiedLockArtifact[] = [];
+  let totalBytes = 0;
+  for (const spec of specs.values()) {
+    const response = await fetch(spec.url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
+    if (!response.ok || !response.body) {
+      throw new Error(`Pinned grammar download failed with HTTP ${response.status}.`);
+    }
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let artifactBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      artifactBytes += chunk.length;
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_PACK_ARCHIVES_BYTES) {
+        await reader.cancel();
+        throw new Error("Pinned grammar downloads exceeded the 256 MB install limit.");
+      }
+      chunks.push(chunk);
+    }
+    downloaded.push({ ...spec, bytes: Buffer.concat(chunks, artifactBytes) });
+  }
+
+  onStage("verifying");
+  mkdirSync(destination, { recursive: true });
+  const verifiedPaths: string[] = [];
+  for (const [index, artifact] of downloaded.entries()) {
+    const integrity = `sha512-${createHash("sha512").update(artifact.bytes).digest("base64")}`;
+    if (integrity !== artifact.integrity) {
+      throw new Error(`Pinned grammar package failed its repository-owned SHA-512 check: ${artifact.url}`);
+    }
+    const path = join(destination, `artifact-${index}.tgz`);
+    // Only verified bytes become visible to npm.
+    writeFileSync(path, artifact.bytes);
+    verifiedPaths.push(path);
+  }
+  return verifiedPaths;
+}
+
+async function seedVerifiedNpmCache(
+  npmPath: string,
+  installDir: string,
+  artifacts: readonly string[],
+): Promise<string> {
+  const cacheDir = join(installDir, ".verified-npm-cache");
+  for (const artifact of artifacts) {
+    const cached = await runCommand(npmPath, [
+      "cache", "add", artifact, "--cache", cacheDir, "--ignore-scripts",
+    ], {
+      cwd: installDir,
+      timeoutMs: 60_000,
+      maxOutputBytes: 1024 * 1024,
+      env: {
+        ...process.env,
+        npm_config_offline: "true",
+        NPM_CONFIG_OFFLINE: "true",
+        npm_config_ignore_scripts: "true",
+        NPM_CONFIG_IGNORE_SCRIPTS: "true",
+      },
+    });
+    if (cached.exitCode !== 0) {
+      throw new Error(cached.stderr.trim() || cached.stdout.trim() || "Could not stage a verified grammar package.");
+    }
+  }
+  return cacheDir;
+}
+
+const PRUNED_PACKAGE_DIRECTORIES = [
+  "build",
+  "src",
+  "vendor",
+  "queries",
+  "common",
+  "grammars",
+  "typescript",
+  "tsx",
+] as const;
+
+function removeDirectoryStrict(path: string): void {
+  rmSync(path, { recursive: true, force: true });
+}
+
+function assertPathRemoved(path: string, description: string): void {
+  if (existsSync(path)) throw new Error(`Call-flow pruning did not remove ${description}.`);
+}
+
+function prunePrebuilds(packageRoot: string): void {
+  const prebuilds = join(packageRoot, "prebuilds");
+  if (!existsSync(prebuilds)) return;
+  const currentPlatform = `${process.platform}-${process.arch}`;
+  for (const entry of readdirSync(prebuilds)) {
+    if (entry !== currentPlatform) removeDirectoryStrict(join(prebuilds, entry));
+  }
+}
+
+function assertNativePackagePruned(packageRoot: string): void {
+  for (const directory of PRUNED_PACKAGE_DIRECTORIES) {
+    if (directory !== "build") {
+      assertPathRemoved(join(packageRoot, directory), `${basename(packageRoot)}/${directory}`);
+    }
+  }
+  assertPathRemoved(join(packageRoot, "node_modules"), `${basename(packageRoot)}/node_modules`);
+  for (const file of ["binding.gyp", "grammar.js", "tree-sitter.json"]) {
+    assertPathRemoved(join(packageRoot, file), `${basename(packageRoot)}/${file}`);
+  }
+  const prebuilds = join(packageRoot, "prebuilds");
+  if (existsSync(prebuilds)) {
+    const currentPlatform = `${process.platform}-${process.arch}`;
+    const foreign = readdirSync(prebuilds).filter((entry) => entry !== currentPlatform);
+    if (foreign.length > 0) {
+      throw new Error(`Call-flow pruning retained foreign ${basename(packageRoot)} prebuilds: ${foreign.join(", ")}.`);
+    }
+  }
+  const assertOnlyNativeAddons = (directory: string): void => {
+    if (!existsSync(directory)) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) assertOnlyNativeAddons(path);
+      else if (!entry.isFile() || !entry.name.endsWith(".node")) {
+        throw new Error(`Call-flow pruning retained a non-runtime build artifact in ${basename(packageRoot)}: ${entry.name}.`);
+      }
+    }
+  };
+  assertOnlyNativeAddons(join(packageRoot, "build"));
+  const bindings = join(packageRoot, "bindings", "node");
+  if (existsSync(bindings)) {
+    const retainedSource = readdirSync(bindings).find((file) => file === "binding.cc" || file.endsWith("_test.js"));
+    if (retainedSource) throw new Error(`Call-flow pruning retained ${basename(packageRoot)}/${retainedSource}.`);
+  }
+  if (existsSync(packageRoot)) {
+    const wasm = readdirSync(packageRoot).find((file) => file.endsWith(".wasm"));
+    if (wasm) throw new Error(`Call-flow pruning retained ${basename(packageRoot)}/${wasm}.`);
+  }
+}
+
+/** Keep only the loadable native payload for one npm Tree-sitter package. */
+export function pruneCallFlowNativePackage(packageRoot: string): void {
+  const builtAddons: Array<{ name: string; bytes: Buffer }> = [];
+  const collectBuiltAddons = (directory: string): void => {
+    if (!existsSync(directory)) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) collectBuiltAddons(path);
+      else if (entry.isFile() && entry.name.endsWith(".node")) {
+        builtAddons.push({ name: basename(path), bytes: readFileSync(path) });
+      }
+    }
+  };
+  collectBuiltAddons(join(packageRoot, "build"));
+  prunePrebuilds(packageRoot);
+  for (const directory of PRUNED_PACKAGE_DIRECTORIES) {
+    removeDirectoryStrict(join(packageRoot, directory));
+  }
+  removeDirectoryStrict(join(packageRoot, "node_modules"));
+  const bindings = join(packageRoot, "bindings", "node");
+  if (existsSync(bindings)) {
+    for (const file of readdirSync(bindings)) {
+      if (file === "binding.cc" || file.endsWith("_test.js")) rmSync(join(bindings, file), { force: true });
+    }
+  }
+  for (const file of ["binding.gyp", "grammar.js", "tree-sitter.json"]) {
+    rmSync(join(packageRoot, file), { force: true });
+  }
+  if (builtAddons.length > 0) {
+    const releaseDir = join(packageRoot, "build", "Release");
+    mkdirSync(releaseDir, { recursive: true });
+    for (const addon of builtAddons) writeFileSync(join(releaseDir, addon.name), addon.bytes);
+  }
+  if (existsSync(packageRoot)) {
+    for (const file of readdirSync(packageRoot)) {
+      if (file.endsWith(".wasm")) rmSync(join(packageRoot, file), { force: true });
+    }
+  }
+  assertNativePackagePruned(packageRoot);
+}
+
+function pruneCoreRuntime(runtimeDir: string): void {
+  for (const packageName of ["tree-sitter", ...CORE_GRAMMAR_PACKAGES]) {
+    pruneCallFlowNativePackage(join(runtimeDir, "node_modules", packageName));
+  }
+  const packageRoot = join(runtimeDir, "node_modules", "calldiff");
+  removeDirectoryStrict(join(packageRoot, "src"));
+  for (const file of readdirSync(join(packageRoot, "dist"))) {
+    if (file.startsWith("cli.") || file === "index.js" || file === "index.d.ts") {
+      rmSync(join(packageRoot, "dist", file), { force: true });
+    }
+  }
+  for (const packagePath of CORE_PRUNED_PACKAGES) {
+    removeDirectoryStrict(join(runtimeDir, "node_modules", ...packagePath.split("/")));
+  }
+  removeDirectoryStrict(join(runtimeDir, "node_modules", ".bin"));
+  assertPathRemoved(join(packageRoot, "src"), "calldiff/src");
+  for (const packagePath of CORE_PRUNED_PACKAGES) {
+    assertPathRemoved(join(runtimeDir, "node_modules", ...packagePath.split("/")), `node_modules/${packagePath}`);
+  }
+  assertPathRemoved(join(runtimeDir, "node_modules", ".bin"), "node_modules/.bin");
+}
+
+function validationFileForLanguage(id: CallFlowLanguageId): string {
+  const extension = getCallFlowLanguage(id).extensions[0];
+  return `validation${extension}`;
+}
+
+async function validatePrunedLanguage(
+  nodePath: string,
+  runtimeDir: string,
+  grammarCacheDir: string,
+  ids: readonly CallFlowLanguageId[],
+): Promise<void> {
+  const extractEntry = join(runtimeDir, "node_modules", "calldiff", "dist", "extract.js");
+  const script = String.raw`
+import { pathToFileURL } from "node:url";
+const request = JSON.parse(process.argv[1]);
+const mod = await import(pathToFileURL(request.extractEntry).href);
+for (const file of request.files) mod.extractFunctions(file, "");
+`;
+  const npmBlocker = await createNpmBlocker();
+  try {
+    const result = await runCommand(nodePath, ["--input-type=module", "--eval", script, JSON.stringify({
+      extractEntry,
+      files: ids.map(validationFileForLanguage),
+    })], {
+      cwd: runtimeDir,
+      timeoutMs: 20_000,
+      maxOutputBytes: 1024 * 1024,
+      env: {
+        ...process.env,
+        PATH: `${npmBlocker.path}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        CALLDIFF_GRAMMAR_CACHE: grammarCacheDir,
+        npm_config_offline: "true",
+        NPM_CONFIG_OFFLINE: "true",
+        npm_config_ignore_scripts: "true",
+        NPM_CONFIG_IGNORE_SCRIPTS: "true",
+      },
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || "The pruned grammar failed runtime validation.");
+    }
+  } finally {
+    npmBlocker.cleanup();
+  }
+}
+
+function ensureGrammarCacheManifest(cacheDir: string): void {
+  mkdirSync(cacheDir, { recursive: true });
+  writeFileSync(join(cacheDir, "package.json"), runtimeJson({
+    name: "plannotator-calldiff-grammar-cache",
+    private: true,
+  }), "utf8");
+}
+
+async function preserveValidatedLanguagePacks(
+  nodePath: string,
+  currentRuntimeDir: string,
+  candidateRuntimeDir: string,
+): Promise<void> {
+  const candidateCache = getCallFlowGrammarCacheDir(candidateRuntimeDir);
+  ensureGrammarCacheManifest(candidateCache);
+  for (const language of CALL_FLOW_LANGUAGES) {
+    if (language.kind !== "pack" || !isLanguageInstalled(currentRuntimeDir, language, true)) continue;
+    const packId = language.id as Exclude<CallFlowLanguageId, "javascript-typescript">;
+    const currentRoot = getLanguagePackageRoot(currentRuntimeDir, language);
+    const candidateRoot = getLanguagePackageRoot(candidateRuntimeDir, language);
+    mkdirSync(dirname(candidateRoot), { recursive: true });
+    cpSync(currentRoot, candidateRoot, { recursive: true, force: true });
+    try {
+      await validatePrunedLanguage(nodePath, candidateRuntimeDir, candidateCache, [language.id]);
+      const marker = getLanguageLockMarker(candidateRuntimeDir, language.id);
+      mkdirSync(dirname(marker), { recursive: true });
+      writeFileSync(marker, runtimeJson(CALL_FLOW_PACK_LOCKS[packId]), "utf8");
+    } catch {
+      // A pack whose files no longer load is not independently verified and
+      // must not cross the atomic core repair boundary.
+      removeDirectoryStrict(candidateRoot);
+    }
+  }
+}
+
+/** Recursively measure installed bytes for size regression tests and release evidence. */
+export function measureCallFlowDirectoryBytes(path: string): number {
+  if (!existsSync(path)) return 0;
+  const stat = statSync(path);
+  if (!stat.isDirectory()) return stat.size;
+  return readdirSync(path).reduce((total, entry) => total + measureCallFlowDirectoryBytes(join(path, entry)), 0);
+}
+
 export async function installCallFlowRuntime(
   onStage: (stage: CallFlowInstallStage) => void = () => {},
 ): Promise<CallFlowRuntimeInstallResult> {
@@ -342,7 +723,7 @@ export async function installCallFlowRuntime(
 
   const existing = await resolveCallFlowRuntime();
   if (existing.ok && existing.runtime.runtimeDir === runtimeDir) {
-    return { ok: true, status: "already-installed", runtimeDir, message: `Call-flow runtime already installed at ${runtimeDir}.` };
+    return { ok: true, status: "already-installed", runtimeDir, languageId: CALL_FLOW_CORE_LANGUAGE_ID, message: `Call-flow core already installed at ${runtimeDir}.` };
   }
   const runtimeParent = dirname(runtimeDir);
   mkdirSync(runtimeParent, { recursive: true });
@@ -364,7 +745,7 @@ export async function installCallFlowRuntime(
     // integrity-locked parser packages are rebuilt, as one explicit step.
     const rebuild = await runCommand(npmPath, [
       "rebuild", "--no-audit", "--no-fund", "--legacy-peer-deps",
-      "tree-sitter", ...REQUIRED_GRAMMAR_PACKAGES,
+      "tree-sitter", ...CORE_GRAMMAR_PACKAGES,
     ], {
       cwd: installDir,
       timeoutMs: 240_000,
@@ -397,9 +778,18 @@ export async function installCallFlowRuntime(
     if (readPackageVersion(packageRoot) !== CALLDIFF_VERSION || !resolvePackageEntry(packageRoot)) {
       throw new Error("The verified CallDiff package did not produce the expected runtime entry.");
     }
-    const missing = missingGrammarPackages(installDir);
-    if (missing.length > 0) throw new Error(`The runtime is missing ${missing.length} grammar packages.`);
     if (!hasCommittedRuntimeLock(installDir)) throw new Error("npm changed the committed call-flow dependency lock.");
+    const sizeBeforePruneBytes = measureCallFlowDirectoryBytes(installDir);
+    pruneCoreRuntime(installDir);
+    ensureGrammarCacheManifest(getCallFlowGrammarCacheDir(installDir));
+    await validatePrunedLanguage(nodePath, installDir, getCallFlowGrammarCacheDir(installDir), [CALL_FLOW_CORE_LANGUAGE_ID]);
+    const sizeAfterPruneBytes = measureCallFlowDirectoryBytes(installDir);
+
+    // A core repair preserves only packs whose exact marker, package version,
+    // and native payload all still validate against the candidate core.
+    const nextCache = getCallFlowGrammarCacheDir(installDir);
+    await preserveValidatedLanguagePacks(nodePath, runtimeDir, installDir);
+    ensureGrammarCacheManifest(nextCache);
 
     if (existsSync(runtimeDir)) renameSync(runtimeDir, backupDir);
     try {
@@ -409,7 +799,7 @@ export async function installCallFlowRuntime(
       throw error;
     }
     removeDirectoryBestEffort(backupDir);
-    return { ok: true, status: "installed", runtimeDir, message: `Installed CallDiff ${CALLDIFF_VERSION} and integrity-locked grammars at ${runtimeDir}.` };
+    return { ok: true, status: "installed", runtimeDir, languageId: CALL_FLOW_CORE_LANGUAGE_ID, sizeBeforePruneBytes, sizeAfterPruneBytes, message: `Installed the pruned CallDiff ${CALLDIFF_VERSION} core at ${runtimeDir}.` };
   } catch (error) {
     return {
       ok: false,
@@ -419,6 +809,122 @@ export async function installCallFlowRuntime(
     };
   } finally {
     removeDirectoryBestEffort(installDir);
+  }
+}
+
+function packManifest(id: Exclude<CallFlowLanguageId, "javascript-typescript">): Record<string, unknown> {
+  const root = CALL_FLOW_PACK_LOCKS[id].packages[""];
+  if (typeof root !== "object" || root === null || Array.isArray(root)) {
+    throw new Error(`The committed ${id} grammar lock has no root package.`);
+  }
+  const record = root as Record<string, unknown>;
+  return {
+    name: record.name,
+    version: record.version,
+    private: true,
+    dependencies: record.dependencies,
+  };
+}
+
+/** Install one optional grammar through its own integrity-locked pipeline. */
+export async function installCallFlowLanguagePack(
+  id: Exclude<CallFlowLanguageId, "javascript-typescript">,
+  onStage: (stage: CallFlowInstallStage) => void = () => {},
+): Promise<CallFlowRuntimeInstallResult> {
+  const runtimeDir = getCallFlowManagedRuntimeDir();
+  const language = getCallFlowLanguage(id);
+  const nodePath = findExecutable("node");
+  const npmPath = findExecutable("npm");
+  if (!nodePath || !npmPath) {
+    return { ok: false, status: "failed", runtimeDir, message: "Call-flow language packs require Node.js 22+ and npm." };
+  }
+  const runtime = await resolveCallFlowRuntime();
+  if (!runtime.ok || !runtime.runtime.managed || runtime.runtime.runtimeDir !== runtimeDir) {
+    return { ok: false, status: "failed", runtimeDir, message: runtime.ok
+      ? "Language packs cannot be installed into PLANNOTATOR_CALLDIFF_PATH."
+      : runtime.message };
+  }
+  if (runtime.runtime.installedLanguageIds.includes(id)) {
+    return { ok: true, status: "already-installed", runtimeDir, languageId: id, message: `${language.label} support is already installed.` };
+  }
+
+  const runtimeParent = dirname(runtimeDir);
+  const installDir = await mkdtemp(join(runtimeParent, `.calldiff-${id}-install-`));
+  const stagingCache = await mkdtemp(join(runtimeDir, `.grammar-cache-${id}-`));
+  const packageRoot = join(installDir, "node_modules", ...(language.packageName ?? "").split("/"));
+  const stagedPackageRoot = join(stagingCache, "node_modules", ...(language.packageName ?? "").split("/"));
+  const finalPackageRoot = getLanguagePackageRoot(runtimeDir, language);
+  const backupPackageRoot = `${finalPackageRoot}.previous-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(join(installDir, "package.json"), runtimeJson(packManifest(id)), "utf8");
+    writeFileSync(join(installDir, "package-lock.json"), runtimeJson(CALL_FLOW_PACK_LOCKS[id]), "utf8");
+    const verifiedArtifacts = await downloadVerifiedLockArtifacts(
+      CALL_FLOW_PACK_LOCKS[id],
+      join(installDir, ".verified-artifacts"),
+      onStage,
+    );
+    const npmCacheDir = await seedVerifiedNpmCache(npmPath, installDir, verifiedArtifacts);
+    onStage("installing-deps");
+    const install = await runCommand(npmPath, [
+      "ci", "--offline", "--cache", npmCacheDir,
+      "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund", "--legacy-peer-deps",
+    ], {
+      cwd: installDir,
+      timeoutMs: 240_000,
+      maxOutputBytes: 4 * 1024 * 1024,
+      env: {
+        ...process.env,
+        npm_config_offline: "true",
+        NPM_CONFIG_OFFLINE: "true",
+        npm_config_ignore_scripts: "true",
+        NPM_CONFIG_IGNORE_SCRIPTS: "true",
+      },
+    });
+    if (install.exitCode !== 0) throw new Error(install.stderr.trim() || install.stdout.trim() || "npm ci failed");
+    if (!installDirHasCommittedPackLock(installDir, id)) {
+      throw new Error(`npm changed the committed ${language.label} dependency lock.`);
+    }
+
+    onStage("building");
+    const rebuild = await runCommand(npmPath, [
+      "rebuild", "--no-audit", "--no-fund", "--legacy-peer-deps", language.packageName ?? "",
+    ], {
+      cwd: installDir,
+      timeoutMs: 240_000,
+      maxOutputBytes: 4 * 1024 * 1024,
+      env: { ...process.env, npm_config_ignore_scripts: "false", NPM_CONFIG_IGNORE_SCRIPTS: "false" },
+    });
+    if (rebuild.exitCode !== 0) throw new Error(rebuild.stderr.trim() || rebuild.stdout.trim() || "grammar rebuild failed");
+    if (readPackageVersion(packageRoot) !== language.packageVersion) {
+      throw new Error(`${language.label} did not install at the repository-pinned version.`);
+    }
+    const sizeBeforePruneBytes = measureCallFlowDirectoryBytes(packageRoot);
+    pruneCallFlowNativePackage(packageRoot);
+    const sizeAfterPruneBytes = measureCallFlowDirectoryBytes(packageRoot);
+    mkdirSync(dirname(stagedPackageRoot), { recursive: true });
+    cpSync(packageRoot, stagedPackageRoot, { recursive: true });
+    ensureGrammarCacheManifest(stagingCache);
+    await validatePrunedLanguage(nodePath, runtimeDir, stagingCache, [id]);
+
+    ensureGrammarCacheManifest(getCallFlowGrammarCacheDir(runtimeDir));
+    mkdirSync(dirname(finalPackageRoot), { recursive: true });
+    if (existsSync(finalPackageRoot)) renameSync(finalPackageRoot, backupPackageRoot);
+    try {
+      renameSync(stagedPackageRoot, finalPackageRoot);
+      mkdirSync(dirname(getLanguageLockMarker(runtimeDir, id)), { recursive: true });
+      writeFileSync(getLanguageLockMarker(runtimeDir, id), runtimeJson(CALL_FLOW_PACK_LOCKS[id]), "utf8");
+    } catch (error) {
+      removeDirectoryBestEffort(finalPackageRoot);
+      if (existsSync(backupPackageRoot)) renameSync(backupPackageRoot, finalPackageRoot);
+      throw error;
+    }
+    removeDirectoryBestEffort(backupPackageRoot);
+    return { ok: true, status: "installed", runtimeDir, languageId: id, sizeBeforePruneBytes, sizeAfterPruneBytes, message: `Installed pruned ${language.label} support.` };
+  } catch (error) {
+    return { ok: false, status: "failed", runtimeDir, message: (error instanceof Error ? error.message : String(error)).slice(0, 2_000) };
+  } finally {
+    removeDirectoryBestEffort(installDir);
+    removeDirectoryBestEffort(stagingCache);
   }
 }
 
@@ -516,6 +1022,14 @@ async function git(cwd: string, args: readonly string[], input?: string): Promis
     throw new Error((result.stderr.trim() || result.stdout.trim() || `git ${args[0]} failed`).slice(0, 2_000));
   }
   return result.stdout.trim();
+}
+
+async function gitRaw(cwd: string, args: readonly string[]): Promise<string> {
+  const result = await runCommand("git", args, { cwd, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 64 * 1024 * 1024 });
+  if (result.exitCode !== 0) {
+    throw new Error((result.stderr.trim() || result.stdout.trim() || `git ${args[0]} failed`).slice(0, 2_000));
+  }
+  return result.stdout;
 }
 
 async function resolveCommit(cwd: string, ref: string): Promise<string> {
@@ -635,7 +1149,65 @@ export async function createCallFlowSnapshotPlan(input: CallFlowAnalysisInput): 
   throw new Error(`Call flow does not yet support the ${diffType} review mode.`);
 }
 
-async function executeWorker(runtime: CallFlowRuntime, plan: SnapshotPlan, signal: AbortSignal): Promise<ParsedCallDiffWorkerResult> {
+function grammarChecksForLanguages(runtime: CallFlowRuntime, ids: readonly CallFlowLanguageId[]): Array<{
+  packageJson: string;
+  version: string;
+  message: string;
+}> {
+  const checks = new Map<string, { packageJson: string; version: string; message: string }>();
+  const callDiffRoot = runtime.managed
+    ? join(runtime.runtimeDir, "node_modules", "calldiff")
+    : runtime.runtimeDir;
+  checks.set("calldiff", {
+    packageJson: join(callDiffRoot, "package.json"),
+    version: CALLDIFF_VERSION,
+    message: `CallDiff ${CALLDIFF_VERSION} is not installed.`,
+  });
+  // These are the core runtime boundary even for a review that currently
+  // analyzes only an optional language. CallDiff imports its grammar loader
+  // before runDiff(), so the worker validates every hard dependency first.
+  for (const dependency of CORE_RUNTIME_DEPENDENCIES) {
+    checks.set(dependency.packageName, {
+      packageJson: join(runtime.runtimeDir, "node_modules", dependency.packageName, "package.json"),
+      version: dependency.version,
+      message: `${dependency.label} support is not installed at the required version.`,
+    });
+  }
+  for (const id of ids) {
+    const language = getCallFlowLanguage(id);
+    if (language.kind !== "pack" || !language.packageName || !language.packageVersion) continue;
+    const packageRoot = runtime.managed
+      ? getLanguagePackageRoot(runtime.runtimeDir, language)
+      : join(runtime.runtimeDir, "node_modules", ...language.packageName.split("/"));
+    checks.set(language.packageName, {
+      packageJson: join(packageRoot, "package.json"),
+      version: language.packageVersion,
+      message: `${language.label} support is not installed.`,
+    });
+  }
+  return [...checks.values()];
+}
+
+async function createNpmBlocker(): Promise<{ path: string; cleanup: () => void }> {
+  const root = await mkdtemp(join(tmpdir(), "plannotator-call-flow-path-"));
+  if (process.platform === "win32") {
+    writeFileSync(join(root, "npm.cmd"), "@echo CallDiff package installation is disabled during analysis. 1>&2\r\n@exit /b 91\r\n", "utf8");
+    writeFileSync(join(root, "npm.exe"), "", "utf8");
+  } else {
+    const blocker = join(root, "npm");
+    writeFileSync(blocker, "#!/bin/sh\necho 'CallDiff package installation is disabled during analysis.' >&2\nexit 91\n", "utf8");
+    chmodSync(blocker, 0o700);
+  }
+  return { path: root, cleanup: () => removeDirectoryBestEffort(root) };
+}
+
+async function executeWorker(
+  runtime: CallFlowRuntime,
+  plan: SnapshotPlan,
+  paths: readonly string[],
+  languageIds: readonly CallFlowLanguageId[],
+  signal: AbortSignal,
+): Promise<ParsedCallDiffWorkerResult> {
   const request = JSON.stringify({
     packageEntry: runtime.packageEntry,
     version: runtime.version,
@@ -643,24 +1215,33 @@ async function executeWorker(runtime: CallFlowRuntime, plan: SnapshotPlan, signa
     from: plan.from,
     to: plan.to,
     maxDepth: 10,
+    paths,
+    grammars: grammarChecksForLanguages(runtime, languageIds),
   });
-  const result = await runCommand(runtime.nodePath, [
-    "--max-old-space-size=512",
-    "--input-type=module",
-    "--eval",
-    WORKER_SOURCE,
-  ], {
-    cwd: runtime.runtimeDir,
-    input: request,
-    timeoutMs: WORKER_TIMEOUT_MS,
-    signal,
-    env: {
-      ...process.env,
-      CALLDIFF_GRAMMAR_CACHE: runtime.runtimeDir,
-      npm_config_offline: "true",
-      NPM_CONFIG_OFFLINE: "true",
-    },
-  });
+  const npmBlocker = await createNpmBlocker();
+  let result: CommandResult;
+  try {
+    result = await runCommand(runtime.nodePath, [
+      "--max-old-space-size=512",
+      "--input-type=module",
+      "--eval",
+      WORKER_SOURCE,
+    ], {
+      cwd: runtime.runtimeDir,
+      input: request,
+      timeoutMs: WORKER_TIMEOUT_MS,
+      signal,
+      env: {
+        ...process.env,
+        PATH: `${npmBlocker.path}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        CALLDIFF_GRAMMAR_CACHE: runtime.grammarCacheDir,
+        npm_config_offline: "true",
+        NPM_CONFIG_OFFLINE: "true",
+      },
+    });
+  } finally {
+    npmBlocker.cleanup();
+  }
   if (result.aborted) throw new Error("Call-flow analysis was superseded by a newer review snapshot.");
   if (result.timedOut) throw new Error("CallDiff exceeded the 45 second analysis limit.");
   if (result.outputLimitExceeded) throw new Error("CallDiff result exceeded Plannotator's 12 MB output limit.");
@@ -670,7 +1251,31 @@ async function executeWorker(runtime: CallFlowRuntime, plan: SnapshotPlan, signa
   } catch {
     throw new Error((result.stderr.trim() || "CallDiff worker returned invalid JSON.").slice(0, 2_000));
   }
+  if (
+    typeof parsed === "object"
+    && parsed !== null
+    && !Array.isArray(parsed)
+    && (parsed as Record<string, unknown>).reason === "missing-grammar"
+  ) {
+    const message = (parsed as Record<string, unknown>).message;
+    throw new CallFlowMissingGrammarError(typeof message === "string" ? message : "Call flow language support is not installed.");
+  }
   return parseCallDiffWorkerResult(parsed);
+}
+
+async function snapshotPathsForLanguages(
+  plan: SnapshotPlan,
+  languageIds: ReadonlySet<CallFlowLanguageId>,
+): Promise<string[]> {
+  const files = new Set<string>();
+  for (const ref of [plan.from, plan.to]) {
+    const output = await gitRaw(plan.cwd, ["ls-tree", "-r", "--name-only", "-z", ref]);
+    for (const filePath of output.split("\0")) {
+      const language = getCallFlowLanguageForPath(filePath);
+      if (language && languageIds.has(language.id)) files.add(filePath);
+    }
+  }
+  return [...files].sort();
 }
 
 async function executeCallFlowAnalysis(
@@ -682,7 +1287,34 @@ async function executeCallFlowAnalysis(
   try {
     plan = await createCallFlowSnapshotPlan(input);
     if (signal.aborted) throw new Error("Call-flow analysis was superseded by a newer review snapshot.");
-    return await executeWorker(runtime, plan, signal);
+    const installed = new Set(runtime.installedLanguageIds);
+    const analyzedLanguageIds = getCallFlowPatchLanguageUsage(input.rawPatch)
+      .map(({ language }) => language.id)
+      .filter((id) => installed.has(id));
+    if (analyzedLanguageIds.length === 0) {
+      return {
+        version: runtime.version,
+        from: plan.from,
+        to: plan.to,
+        message: "No installed language support matched the changed files.",
+        raw: "",
+        trees: [],
+        diagnostics: [],
+      };
+    }
+    const paths = await snapshotPathsForLanguages(plan, new Set(analyzedLanguageIds));
+    if (paths.length === 0) {
+      return {
+        version: runtime.version,
+        from: plan.from,
+        to: plan.to,
+        message: "No supported source files were found in the review snapshots.",
+        raw: "",
+        trees: [],
+        diagnostics: [],
+      };
+    }
+    return await executeWorker(runtime, plan, paths, analyzedLanguageIds, signal);
   } finally {
     plan?.cleanup();
   }
@@ -726,7 +1358,7 @@ export class CallFlowService {
     return [input.snapshotId, input.cwd, input.diffType, input.base, pair].join("\0");
   }
 
-  async getAdvert(enabled: boolean, input?: Pick<CallFlowAnalysisInput, "vcsType" | "diffType">): Promise<CallFlowAdvert> {
+  async getAdvert(enabled: boolean, input?: Pick<CallFlowAnalysisInput, "vcsType" | "diffType" | "rawPatch">): Promise<CallFlowAdvert> {
     if (!enabled) return { enabled: false, available: false, state: "disabled", provider: "calldiff" };
     if (input?.vcsType && input.vcsType !== "git") {
       return { enabled: true, available: false, state: "unsupported", provider: "calldiff", reason: "vcs-unsupported", message: `Call flow does not yet support ${input.vcsType} reviews.` };
@@ -736,8 +1368,61 @@ export class CallFlowService {
       return { enabled: true, available: false, state: "unsupported", provider: "calldiff", reason: "view-unsupported", message: "Call flow is not available for this review view." };
     }
     const resolved = await this.resolveRuntimeCached();
-    if (!resolved.ok) return { enabled: true, available: false, state: "unavailable", provider: "calldiff", reason: resolved.reason, message: resolved.message };
-    return { enabled: true, available: true, state: "available", provider: "calldiff", version: resolved.runtime.version };
+    const usage = getCallFlowPatchLanguageUsage(input?.rawPatch ?? "");
+    const required = new Map(usage.map(({ language, files }) => [language.id, files.length]));
+    const managedInstallState = !process.env.PLANNOTATOR_CALLDIFF_PATH && [
+      "node-unavailable",
+      "node-version",
+      "runtime-unavailable",
+      "revision-mismatch",
+      "runtime-lock-mismatch",
+      "core-incomplete",
+    ].includes(resolved.ok ? "" : resolved.reason);
+    const installed = new Set(resolved.ok ? resolved.runtime.installedLanguageIds : []);
+    const languages = CALL_FLOW_LANGUAGES.map((language) => ({
+      id: language.id,
+      label: language.label,
+      kind: language.kind,
+      installed: installed.has(language.id),
+      required: required.has(language.id),
+      changedFiles: required.get(language.id) ?? 0,
+      installSizeBytes: language.installSizeBytes,
+    }));
+    const missingRequired = languages.filter((language) => language.required && !language.installed);
+    const installIds = resolved.ok
+      ? missingRequired.map((language) => language.id)
+      : managedInstallState
+        ? [CALL_FLOW_CORE_LANGUAGE_ID, ...missingRequired.filter((language) => language.kind === "pack").map((language) => language.id)]
+        : [];
+    const installPlan = installIds.length > 0 ? {
+      languageIds: [...new Set(installIds)],
+      labels: [...new Set(installIds.map((id) => getCallFlowLanguage(id).label))],
+      changedFiles: missingRequired.reduce((total, language) => total + language.changedFiles, 0),
+      installSizeBytes: [...new Set(installIds)].reduce((total, id) => total + getCallFlowLanguage(id).installSizeBytes, 0),
+    } : undefined;
+    if (!resolved.ok) {
+      return {
+        enabled: true,
+        available: false,
+        state: "unavailable",
+        provider: "calldiff",
+        reason: resolved.reason,
+        message: resolved.message,
+        installable: managedInstallState,
+        languages,
+        ...(installPlan && { installPlan }),
+      };
+    }
+    return {
+      enabled: true,
+      available: true,
+      state: "available",
+      provider: "calldiff",
+      version: resolved.runtime.version,
+      installable: resolved.runtime.managed,
+      languages,
+      ...(installPlan && { installPlan }),
+    };
   }
 
   analyze(input: CallFlowAnalysisInput): Promise<CallFlowResponse> {
@@ -788,6 +1473,18 @@ export class CallFlowService {
     this.runtimeProbe = undefined;
   }
 
+  /**
+   * Reconcile a completed core/pack install with the live review session.
+   * A partial result for this same snapshot must not survive the install or
+   * the client retry would replay its old skipped-language set.
+   */
+  invalidateRuntimeState(): void {
+    this.cancelAll();
+    this.runtimeProbe = undefined;
+    this.cache.clear();
+    this.failureCache.clear();
+  }
+
   private finish(key: string, controller: AbortController): void {
     if (this.controllers.get(key) !== controller) return;
     this.controllers.delete(key);
@@ -822,6 +1519,15 @@ export class CallFlowService {
     if (!runtime.ok) return { status: "unavailable", reason: runtime.reason, message: runtime.message };
     try {
       const parsed = await this.executeAnalysis(runtime.runtime, input, signal);
+      const installed = new Set(runtime.runtime.installedLanguageIds);
+      const skippedLanguages = getCallFlowPatchLanguageUsage(input.rawPatch)
+        .filter(({ language }) => !installed.has(language.id))
+        .map(({ language, files }) => ({
+          id: language.id,
+          label: language.label,
+          files: [...files],
+          installSizeBytes: language.installSizeBytes,
+        }));
       const indexed = indexCallFlowImpacts(parsed.trees);
       const response: Extract<CallFlowResponse, { status: "ok" }> = {
         status: "ok",
@@ -836,6 +1542,7 @@ export class CallFlowService {
         fileImpacts: indexed.fileImpacts,
         summary: { ...indexed.summary, warnings: parsed.diagnostics.filter((diagnostic) => diagnostic.level === "warning").length },
         diagnostics: parsed.diagnostics,
+        skippedLanguages,
       };
       if (signal.aborted) {
         return { status: "stale", reason: "snapshot-superseded", message: "Call-flow analysis was superseded by a newer review snapshot." };
@@ -853,6 +1560,10 @@ export class CallFlowService {
     } catch (error) {
       if (signal.aborted) {
         return { status: "stale", reason: "snapshot-superseded", message: "Call-flow analysis was superseded by a newer review snapshot." };
+      }
+      if (error instanceof CallFlowMissingGrammarError) {
+        this.invalidateRuntimeProbe();
+        return { status: "unavailable", reason: error.reason, message: error.message };
       }
       return { status: "error", reason: "analysis-failed", message: error instanceof Error ? error.message : String(error) };
     }
