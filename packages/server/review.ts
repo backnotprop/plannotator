@@ -114,6 +114,7 @@ import { handleOpenInApps, handleOpenIn } from "./open-in";
 import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
 import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "./review-skill-loader";
+import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shared/guide-instructions-store";
 import {
   BUILTIN_DEFAULT_PROFILE,
   type ReviewProfilesResponse,
@@ -2637,6 +2638,27 @@ export async function startReviewServer(
                 { error: err instanceof Error ? err.message : "Could not enable review." },
                 { status: 400 },
               );
+            }
+          }
+
+          // API: Guided Review standing instructions (#1265) — server-owned,
+          // stored in the data dir like review-skills.json. Guide launches
+          // apply the stored text when the launch body carries none.
+          if (url.pathname === "/api/agents/guide-instructions") {
+            if (req.method === "GET") {
+              return Response.json({ instructions: readGuideInstructions() });
+            }
+            if (req.method === "PUT") {
+              let instructions: unknown;
+              try {
+                ({ instructions } = (await req.json()) as { instructions?: unknown });
+              } catch {
+                return Response.json({ error: "Invalid JSON" }, { status: 400 });
+              }
+              if (typeof instructions !== "string") {
+                return Response.json({ error: "`instructions` must be a string." }, { status: 400 });
+              }
+              return Response.json({ instructions: writeGuideInstructions(instructions) });
             }
           }
 

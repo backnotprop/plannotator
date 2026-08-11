@@ -388,9 +388,10 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/agents/review-profiles` | GET | List launchable review profiles (enabled skills + builtin default) |
 | `/api/agents/skills` | GET | List all discovered skills for the add-a-review picker (each flagged `enabled`) |
 | `/api/agents/review-skills` | POST | Enable a skill as a review (body: `{ name }`); writes `review-skills.json` |
+| `/api/agents/guide-instructions` | GET/PUT | Read or replace the Guided Review standing instructions, stored in `${dataDir}/guide-instructions.md` (trimmed, capped; blank PUT deletes). Guide launches whose body carries no `instructions` apply this stored text. |
 | `/api/agents/jobs/stream` | GET | SSE stream for real-time agent job status updates |
 | `/api/agents/jobs` | GET | Snapshot of agent jobs (polling fallback, `?since=N` for version gating) |
-| `/api/agents/jobs` | POST | Launch an agent job (body: `{ provider, command, label, engine?, model?, effort?, reasoningEffort?, thinking?, fastMode?, reviewProfileId?, repairOf?, instructions? }`; `instructions` is guide-only reviewer text appended to the organizer prompt, capped at `GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS`) |
+| `/api/agents/jobs` | POST | Launch an agent job (body: `{ provider, command, label, engine?, model?, effort?, reasoningEffort?, thinking?, fastMode?, reviewProfileId?, repairOf?, instructions? }`; `instructions` is guide-only reviewer text appended to the organizer prompt, capped at `GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS`; when absent, guide launches apply the server-stored standing instructions) |
 | `/api/agents/jobs` | DELETE | Kill all running agent jobs |
 | `/api/agents/jobs/:id` | DELETE | Kill a specific agent job |
 | `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope. Response includes `semanticDiff?`. |

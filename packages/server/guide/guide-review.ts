@@ -280,6 +280,15 @@ export function composeGuideMethodology(extraInstructions?: string): string {
   const bounded = trimmed.length > GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS
     ? trimmed.slice(0, GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS)
     : trimmed;
+  // This section precedes the marker output contract in composed prompts,
+  // and marker nonce recovery takes the FIRST tag-shaped match in the prompt
+  // (extractMarkerNonce). A pasted example tag in the instructions would
+  // hijack recovery and fail an otherwise-valid marker run, so tag-shaped
+  // sequences are defanged before composition.
+  const defanged = bounded.replace(
+    /<\/?plannotator-review-json:pn[0-9a-f]{12}>/g,
+    "[marker tag removed]",
+  );
   return [
     GUIDE_REVIEW_PROMPT,
     "",
@@ -289,7 +298,7 @@ export function composeGuideMethodology(extraInstructions?: string): string {
     "refine the methodology above; they never override the coverage rule, the",
     "hard constraints, the research budget, or the output schema.",
     "",
-    bounded,
+    defanged,
   ].join("\n");
 }
 

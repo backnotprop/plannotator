@@ -157,6 +157,7 @@ import {
 } from "../generated/semantic-diff.ts";
 import type { SemanticDiffAvailability, SemanticDiffResponse } from "../generated/semantic-diff-types.ts";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "../generated/review-skill-loader.ts";
+import { readGuideInstructions, writeGuideInstructions } from "../generated/guide-instructions-store.ts";
 import {
 	BUILTIN_DEFAULT_PROFILE,
 	type ReviewProfilesResponse,
@@ -2554,6 +2555,25 @@ export async function startReviewServer(options: {
 			} catch (err) {
 				json(res, { error: err instanceof Error ? err.message : "Could not enable review." }, 400);
 			}
+		} else if (url.pathname === "/api/agents/guide-instructions" && req.method === "GET") {
+			// Guided Review standing instructions (#1265) — server-owned, stored in
+			// the data dir like review-skills.json. Guide launches apply the stored
+			// text when the launch body carries none.
+			json(res, { instructions: readGuideInstructions() });
+		} else if (url.pathname === "/api/agents/guide-instructions" && req.method === "PUT") {
+			let instructions: unknown;
+			try {
+				const body = await parseBody(req);
+				instructions = body.instructions;
+			} catch {
+				json(res, { error: "Invalid JSON" }, 400);
+				return;
+			}
+			if (typeof instructions !== "string") {
+				json(res, { error: "`instructions` must be a string." }, 400);
+				return;
+			}
+			json(res, { instructions: writeGuideInstructions(instructions) });
 		} else if (url.pathname === "/api/git-add" && req.method === "POST") {
 			try {
 				const body = await parseBody(req);

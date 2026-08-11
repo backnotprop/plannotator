@@ -3,7 +3,6 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { AgentCapabilities } from '@plannotator/ui/types';
 import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from '@plannotator/shared/guide';
 import type { SavedGuideListEntry } from '@plannotator/shared/guide';
-import { getGuideInstructions, setGuideInstructions } from '@plannotator/ui/utils/storage';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 // Same catalogs AgentsTab's launch panel uses — one source of truth for both
@@ -202,12 +201,53 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
   // every edit) so a standing team preference never needs retyping; launches
   // read the persisted value fresh (useGuideLaunch.buildParams), so this local
   // state is only the textarea's view of it.
-  const [instructions, setInstructions] = useState(getGuideInstructions);
+  const [instructions, setInstructions] = useState('');
   const [showInstructions, setShowInstructions] = useState(false);
   const hasInstructions = instructions.trim().length > 0;
+  // Server-stored (#1265, GET/PUT /api/agents/guide-instructions): the text
+  // is consumed by the server at launch time, and a data-dir file has none
+  // of a cookie's size ceiling. Saves are debounced; launches carry the LIVE
+  // textarea value (explicit wins server-side), so a just-typed preference
+  // can never race a pending save.
+  const instructionsRef = React.useRef('');
+  const instructionsSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const putInstructions = (value: string) => {
+    void fetch('/api/agents/guide-instructions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instructions: value }),
+    }).catch(() => {});
+  };
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/agents/guide-instructions')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { instructions?: unknown } | null) => {
+        if (!cancelled && data && typeof data.instructions === 'string') {
+          setInstructions(data.instructions);
+          instructionsRef.current = data.instructions;
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      // Flush a pending debounced save so the last keystrokes before
+      // navigating away still persist for the next session.
+      if (instructionsSaveTimer.current) {
+        clearTimeout(instructionsSaveTimer.current);
+        instructionsSaveTimer.current = null;
+        putInstructions(instructionsRef.current);
+      }
+    };
+  }, []);
   const handleInstructionsChange = (value: string) => {
     setInstructions(value);
-    setGuideInstructions(value);
+    instructionsRef.current = value;
+    if (instructionsSaveTimer.current) clearTimeout(instructionsSaveTimer.current);
+    instructionsSaveTimer.current = setTimeout(() => {
+      instructionsSaveTimer.current = null;
+      putInstructions(value);
+    }, 400);
   };
 
   // Previous guides persisted for this repo (#1112). Null until the list
@@ -350,7 +390,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
     setLaunchError(null);
     // Launch-param shapes live in useGuideLaunch (shared with GuideView's
     // Regenerate hint) and mirror AgentsTab's buildGuideLaunch exactly.
-    const params: AgentLaunchParams = launch.buildParams();
+    const params: AgentLaunchParams = launch.buildParams(instructions);
     try {
       await launchJob(params);
     } catch (err) {

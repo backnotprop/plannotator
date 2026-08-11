@@ -3,7 +3,6 @@ import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
 import { useAgentSettings } from '@plannotator/ui/hooks/useAgentSettings';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 import { REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
-import { getGuideInstructions } from '@plannotator/ui/utils/storage';
 
 export const GUIDE_ENGINES = Object.keys(REVIEW_ENGINE_LABEL) as ReviewEngine[];
 
@@ -33,8 +32,12 @@ export interface GuideLaunchState {
   effectiveCopilotModel: string;
   /** Whether a guide launch can be attempted at all on this machine. */
   canLaunch: boolean;
-  /** Build the launch params for the current effective engine + models. */
-  buildParams: () => AgentLaunchParams;
+  /** Build the launch params for the current effective engine + models.
+   *  `instructions` is the caller's LIVE textarea value (GuideEmptyState),
+   *  sent so a just-typed preference can never race the server-side save;
+   *  callers without an editor (GuideView Regenerate) pass nothing and the
+   *  server applies its stored standing instructions. */
+  buildParams: (instructions?: string) => AgentLaunchParams;
 }
 
 /**
@@ -102,13 +105,14 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
 
   // Config shapes mirror AgentsTab's buildGuideLaunch exactly — one shape
   // per engine, so the server sees identical launches from every surface.
-  // Persisted extra instructions (#1265) are read fresh at launch time and
-  // attached uniformly across engines; blank means the field is omitted so
-  // the launch body is unchanged from before the feature.
-  const buildParams = (): AgentLaunchParams => {
-    const instructions = getGuideInstructions().trim();
+  // Extra instructions (#1265) are server-stored; only the launch page's
+  // live editor value rides the body (explicit wins server-side), so a
+  // surface without an editor omits the field and the server applies the
+  // stored standing instructions itself.
+  const buildParams = (instructions?: string): AgentLaunchParams => {
+    const live = instructions?.trim();
     const params = buildEngineParams();
-    return instructions ? { ...params, instructions } : params;
+    return live ? { ...params, instructions: live } : params;
   };
 
   const buildEngineParams = (): AgentLaunchParams =>

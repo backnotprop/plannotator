@@ -23,6 +23,7 @@ import {
 	AGENT_HEARTBEAT_COMMENT,
 	AGENT_HEARTBEAT_INTERVAL_MS,
 } from "../generated/agent-jobs.ts";
+import { resolveGuideLaunchInstructions } from "../generated/guide-instructions-store.ts";
 import { formatClaudeLogEvent } from "../generated/claude-review.ts";
 import {
 	MARKER_ENGINES,
@@ -645,9 +646,13 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						if (body.fastMode === true) config.fastMode = true;
 						if (typeof body.reviewProfileId === "string") config.reviewProfileId = body.reviewProfileId;
 						if (typeof body.repairOf === "string") config.repairOf = body.repairOf;
-						// Guide extra instructions (#1265): blank text is dropped here so
-						// instruction-less launches build the exact same prompts as before.
-						if (typeof body.instructions === "string" && body.instructions.trim() !== "") config.instructions = body.instructions;
+						// Guide extra instructions (#1265): explicit launch text wins,
+						// else the server-stored standing instructions apply; neither
+						// yields text and launches build the exact same prompts as before.
+						const launchInstructions = provider === "guide"
+							? resolveGuideLaunchInstructions(body.instructions)
+							: undefined;
+						if (launchInstructions !== undefined) config.instructions = launchInstructions;
 						const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined);
 						if (built) {
 							command = built.command;
