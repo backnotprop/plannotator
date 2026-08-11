@@ -425,6 +425,8 @@ highlight.js was removed from the package; the single highlighter is now Shiki v
 2. **Per-theme token CSS is the wrong layer now.** Fences resolve a real Shiki theme from the active palette (`utils/syntaxTheme`, `hooks/useFenceTheme`); to change code colors, map the palette to a different Shiki theme — don't write token-class CSS.
 3. **New supported utils:** `utils/codeHighlight` (`applyHighlight`, `highlightToHtml`, `codeBlockClassName`, `onCodeHighlightSwap`), `utils/codeBlockMark` (annotation marks that survive highlight swaps), `utils/syntaxTheme`. All pure/browser-safe.
 4. **Language-less fences render as plain text — there is no auto-detection anywhere.** Don't reintroduce it host-side; it breaks the byte-identity contract the annotation layer depends on.
+5. **Remove any bundler alias on `highlight.js`.** A host that aliased `highlight.js/lib/common` (or any hljs path) while consuming ≤0.28.0 will now **fail at config load** — the module no longer exists in the dependency tree. Delete the alias along with the `.hljs` CSS. (Reported by the first 0.29.0 adopter.)
+6. **Known cosmetic install warning:** `@pierre/diffs@1.3.2` → `@pierre/theming@1.0.0` declares a peer of `@pierre/theme@^1.1.0` while `2.0.0` resolves. Upstream ranges we don't control; harmless, appears in every consumer's install output.
 
 ### Blessed: `components/html-viewer` (`HtmlViewer`)
 
@@ -445,7 +447,8 @@ Additive only, but required: `@plannotator/ui` 0.29.0 imports the new `@plannota
 ## Publishing & versioning
 
 - `@plannotator/ui` is now `0.29.0`; `@plannotator/core` is `0.23.0`. **Publish `core` first** — ui 0.29.0 imports `@plannotator/core/annotatable`, which does not exist in core 0.22.0. The ui→core dependency resolves exactly at pack time.
-- They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --provenance --access public`). Publish **`core` first, then `ui`**.
+- They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --access public`). Publish **`core` first, then `ui`**.
+- **`--provenance` only works from a supported CI environment (GitHub Actions OIDC)** — a local publish fails with `Automatic provenance generation not supported for provider: null`. Until a CI publish job exists for these two packages, local publishes drop the flag. Publishing under `--tag next` first lets the consumer preflight before `npm dist-tag add <pkg>@<version> latest` promotes it.
 - `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS.
 - There is **no CI publish job for these two packages yet** — first publish is manual from `main` after merge. (Wiring a CI publish job is a follow-up.)
 
