@@ -1045,6 +1045,44 @@ diffs-container {
 .call-flow-retry:hover { background: var(--muted); }
 .call-flow-retry:focus-visible { outline: 1px solid var(--ring); outline-offset: 2px; }
 
+/* Opt-in runtime install funnel (runtime-missing advert only). */
+.call-flow-install-disclosure {
+  color: var(--foreground);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.call-flow-install-detail { font-size: 0.6875rem; }
+.call-flow-install-stages {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0.25rem;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+}
+.call-flow-install-stages li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted-foreground);
+}
+.call-flow-install-stages li[data-stage-state='active'] { color: var(--foreground); font-weight: 600; }
+.call-flow-install-stages li[data-stage-state='complete'] { color: var(--foreground); }
+.call-flow-install-stages li[data-stage-state='complete'] svg { color: var(--primary); }
+.call-flow-install-stage-dot {
+  width: 0.8125rem;
+  height: 0.8125rem;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+}
+.call-flow-spinner-small {
+  width: 0.8125rem;
+  height: 0.8125rem;
+  border-width: 1.5px;
+  flex: none;
+}
+
 @media (pointer: coarse) {
   .call-flow-row { grid-template-columns: 2.75rem 1.25rem minmax(0, 1fr) 2.75rem; }
   .call-flow-expand,

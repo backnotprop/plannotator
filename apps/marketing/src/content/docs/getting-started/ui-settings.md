@@ -145,7 +145,7 @@ The first code-review session shows both choices side by side in a one-time welc
 
 When Call Flow is enabled and supported, **Call flow** appears beside All files in the left panel. Its Dock switches between an interactive **Paths** tree and CallDiff's exact, copyable **Raw** output. The compact **flow** badge in a file header opens every complete inferred entry tree containing a changed call in that file rather than a pruned step list. Both structured surfaces navigate to source locations in the ordinary diff, and all Dock/Lens views share one snapshot-bound analysis result.
 
-Call Flow is syntactic: it does not use type resolution, runtime traces, or data-flow analysis. Treat its paths as review and navigation context, not proof that a path executes. The managed runtime requires Node.js 22 or newer and is installed during a full Plannotator install; minimal installs and `PLANNOTATOR_SKIP_CALLDIFF_INSTALL=1` omit it.
+Call Flow is syntactic: it does not use type resolution, runtime traces, or data-flow analysis. Treat its paths as review and navigation context, not proof that a path executes. The managed runtime requires Node.js 22 or newer and is a one-time, opt-in install of roughly 800 MB: it is not installed with Plannotator. When Call Flow is enabled and the runtime is missing, the Call flow panel offers an **Install runtime** button that installs it in the background and starts the analysis in the same session. Scripted installs can opt in with the installer's `--with-call-flow` flag, `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `plannotator install-runtime call-flow`.
 
 ## Resizable panels
 

@@ -63,6 +63,20 @@ export interface CallFlowAdvert {
   message?: string;
 }
 
+/** Coarse phases reported while the opt-in runtime install runs. */
+export type CallFlowInstallStage = "downloading" | "verifying" | "installing-deps" | "building";
+
+/**
+ * Wire contract for POST /api/call-flow/install and
+ * GET /api/call-flow/install-status. done persists until the runtime advert
+ * resolves available; error persists until the next install POST retries.
+ */
+export type CallFlowInstallStatus =
+  | { state: "idle" }
+  | { state: "running"; stage: CallFlowInstallStage }
+  | { state: "done" }
+  | { state: "error"; error: string; reason?: string };
+
 export type CallFlowResponse =
   | {
       status: "ok";

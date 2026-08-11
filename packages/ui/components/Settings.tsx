@@ -318,7 +318,7 @@ function ReviewAnalysisTab() {
           checked={callFlowEnabled}
           onChange={(enabled) => configStore.set('callFlowEnabled', enabled)}
           label="Call flow"
-          description="Show complete inferred entry paths containing added or removed calls. Experimental and off by default."
+          description="Show complete inferred entry paths containing added or removed calls. Experimental and off by default. Uses a separate runtime installed on first use."
         />
       </div>
 

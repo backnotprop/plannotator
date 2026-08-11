@@ -29,7 +29,9 @@ CallDiff currently advertises 22 languages. JavaScript/JSX and TypeScript/TSX sh
 
 ## Runtime boundary
 
-The published npm package named `calldiff@0.4.1` predates source-location output and the current language set. Plannotator therefore installs the exact upstream source archive at the commit above, verifies its SHA-512 integrity, and compiles it once during installation.
+The published npm package named `calldiff@0.4.1` predates source-location output and the current language set. Plannotator therefore installs the exact upstream source archive at the commit above, verifies its SHA-512 integrity, and compiles it once at install time.
+
+The runtime is large (roughly 800 MB on disk) for a feature that is off by default, so installation is strictly user-initiated. Nothing installs it by default: the Plannotator installers do not download it, and the normal path is the in-app flow. Enabling Call flow surfaces an install funnel in the Call flow Dock whenever the capability advert reports the runtime-missing flavor of unavailable; the funnel discloses the on-disk size and the Node.js 22+ requirement, starts the install through `POST /api/call-flow/install`, shows staged progress, and hands off to the analysis in the same session once the advert re-resolves as available. The other entry points are the headless CLI (`plannotator install-runtime call-flow`) and an installer opt-in (`--with-call-flow` / `-WithCallFlow`, `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `{ "installCallFlow": true }` in config.json; flag > env var > config). Minimal installs always exclude it.
 
 The managed runtime lives at:
 
@@ -48,7 +50,7 @@ Its contract is:
 - parsed output bounded to 100 trees, 5,000 nodes, depth 32, and 100 diagnostics;
 - untrusted source paths rejected when absolute or parent-traversing.
 
-`PLANNOTATOR_SKIP_CALLDIFF_INSTALL=1` skips installation. Minimal installs skip it as well. `PLANNOTATOR_CALLDIFF_PATH` is a development override for a built CallDiff package. Normal uninstall removes the managed `vendor/call-flow` directory while preserving unknown vendor entries.
+`PLANNOTATOR_CALLDIFF_PATH` is a development override for a built CallDiff package. Normal uninstall removes the managed `vendor/call-flow` directory while preserving unknown vendor entries. The former `PLANNOTATOR_SKIP_CALLDIFF_INSTALL` opt-out was deleted: opting out of a default-off install is meaningless.
 
 ## Exact snapshot materialization
 
@@ -77,6 +79,8 @@ Bun and Pi expose the same endpoints and response shapes.
 - `GET /api/call-flow?snapshot=<snapshotId>` analyzes only the active snapshot.
 - A mismatched snapshot or a repository change during execution returns the structured `stale` state with HTTP 409 and `Cache-Control: no-store`.
 - Disabled, unsupported, unavailable, stale, error, and successful results remain distinct domain states.
+- `POST /api/call-flow/install` starts the user-initiated runtime install in the background and is single-flighted: concurrent POSTs join the one in-flight install. A Node.js 22+ preflight runs before any download; a missing or too-old Node is a distinct, immediate `{ state: "error", reason: "node-unavailable" | "node-version" }`. Because this endpoint triggers a large download and build, it carries a cheap origin guard: when an Origin header is present it must match the request host, otherwise the request is rejected with 403.
+- `GET /api/call-flow/install-status` reports `{ state: "idle" | "running" | "done" | "error", stage?, error?, reason? }` with `stage` advancing through `downloading`, `verifying`, `installing-deps`, `building`. `done` persists until the runtime advert resolves available; `error` persists until the next install POST retries. Install completion invalidates the 30 second runtime probe cache in both runtimes, so the next capability advert resolves available without a server restart.
 
 Each review server permits one CallDiff execution at a time. Requests for the same snapshot share an in-flight promise. Successful results are kept in a bounded session cache, repeated failures have a 30 second cooldown, and every committed diff/base/PR/scope/whitespace change cancels work for the prior snapshot. Server shutdown and disabling the feature also cancel all workers.
 

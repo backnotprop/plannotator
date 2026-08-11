@@ -64,6 +64,7 @@
     "./semantic-diff-types": "./semantic-diff-types.ts",
     "./call-flow-types": "./call-flow-types.ts",
     "./call-flow": "./call-flow.ts",
+    "./call-flow-install": "./call-flow-install.ts",
     "./single-flight": "./single-flight.ts",
     "./source-save": "./source-save.ts",
     "./source-save-node": "./source-save-node.ts",

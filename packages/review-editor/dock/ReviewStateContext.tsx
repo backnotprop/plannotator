@@ -12,6 +12,7 @@ import type { FeedbackDiffContext } from '../utils/exportFeedback';
 import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import type { EditSelectionComment } from '../edit/useEditSession';
 import type { CallFlowAnalysisState } from '../hooks/useCallFlowAnalysis';
+import type { CallFlowInstallController } from '../hooks/useCallFlowInstall';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 
 /** One-shot request to open the native code-annotation composer on a source range. */
@@ -218,6 +219,8 @@ export interface ReviewState {
   isCallFlowNodeInPatch: (node: CallFlowNode) => boolean;
   isCallFlowActive: boolean;
   openCallFlowPanel: () => void;
+  /** Opt-in runtime install controller backing the Dock's install funnel. */
+  callFlowInstall: CallFlowInstallController;
 
   // Tour
   openTourPanel: (jobId: string) => void;

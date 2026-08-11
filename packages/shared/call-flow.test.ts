@@ -206,6 +206,35 @@ describe("CallFlowService", () => {
     expect(probes).toBe(2);
   });
 
+  test("invalidating the runtime probe re-resolves before the TTL expires", async () => {
+    let probes = 0;
+    let available = false;
+    const service = new CallFlowService({
+      runtimeProbeTtlMs: 60_000,
+      resolveRuntime: async () => {
+        probes++;
+        return available
+          ? { ok: true, runtime }
+          : { ok: false, reason: "runtime-unavailable", message: "not installed" };
+      },
+    });
+
+    const before = await service.getAdvert(true, { vcsType: "git", diffType: "uncommitted" });
+    expect(before.state).toBe("unavailable");
+    expect(probes).toBe(1);
+
+    // Without invalidation the 60s TTL would keep reporting unavailable.
+    available = true;
+    const cached = await service.getAdvert(true, { vcsType: "git", diffType: "uncommitted" });
+    expect(cached.state).toBe("unavailable");
+    expect(probes).toBe(1);
+
+    service.invalidateRuntimeProbe();
+    const after = await service.getAdvert(true, { vcsType: "git", diffType: "uncommitted" });
+    expect(after.state).toBe("available");
+    expect(probes).toBe(2);
+  });
+
   test("rejects unsupported views before probing or executing the runtime", async () => {
     let probes = 0;
     const service = new CallFlowService({

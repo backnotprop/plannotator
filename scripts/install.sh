@@ -33,6 +33,12 @@ VERSION_EXPLICIT=0
 # Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
 VERIFY_ATTESTATION_FLAG=-1
+# Three-layer opt-in for the CallDiff call-flow runtime (large on-disk
+# footprint, default off). The normal path installs it in-app from the review
+# UI; this flag exists for scripted installs.
+# Precedence: --with-call-flow > PLANNOTATOR_INSTALL_CALLDIFF > config.json
+# installCallFlow > default (off).
+WITH_CALL_FLOW_FLAG=-1
 # Guided-install answers. Precedence: CLI flags > wizard (terminal, first run
 # or --reconfigure) > saved prefs from a previous run > defaults (no extras,
 # nothing model-invocable). Empty string = not set by a flag.
@@ -82,6 +88,12 @@ Options:
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
                          via env var or ~/.plannotator/config.json.
+  --with-call-flow       Also install the optional CallDiff call-flow runtime
+                         (large: roughly 800 MB on disk, needs Node.js 22+).
+                         By default it is NOT installed; the review UI offers
+                         a one-click install when Call flow is enabled. Also
+                         enabled by PLANNOTATOR_INSTALL_CALLDIFF=1 or
+                         { "installCallFlow": true } in config.json.
   --extras               Install the extra skills (compound, setup-goal,
                          visual-explainer) via `npx skills add` without asking.
   --no-extras            Skip the extras without asking.
@@ -214,6 +226,10 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             VERIFY_ATTESTATION_FLAG=1
+            shift
+            ;;
+        --with-call-flow)
+            WITH_CALL_FLOW_FLAG=1
             shift
             ;;
         --skip-attestation)
@@ -460,6 +476,23 @@ esac
 # Layer 1: CLI flag (overrides everything).
 if [ "$VERIFY_ATTESTATION_FLAG" -ne -1 ]; then
     verify_attestation="$VERIFY_ATTESTATION_FLAG"
+fi
+
+# Resolve the CallDiff call-flow runtime opt-in. Same three-layer shape as
+# verifyAttestation: CLI flag > env var > config.json > default (off). The
+# config grep targets a flat top-level boolean, matching verifyAttestation.
+install_call_flow=0
+if [ -f "$_config_dir/config.json" ]; then
+    if grep -q '"installCallFlow"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
+        install_call_flow=1
+    fi
+fi
+case "${PLANNOTATOR_INSTALL_CALLDIFF:-}" in
+    1|true|yes|TRUE|YES|True|Yes) install_call_flow=1 ;;
+    0|false|no|FALSE|NO|False|No) install_call_flow=0 ;;
+esac
+if [ "$WITH_CALL_FLOW_FLAG" -ne -1 ]; then
+    install_call_flow="$WITH_CALL_FLOW_FLAG"
 fi
 
 # Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
@@ -1002,16 +1035,17 @@ install_agent_terminal_runtime() {
     fi
 }
 
+# Strictly opt-in: the CallDiff runtime is large (~800 MB on disk) and its
+# feature is off by default, so a default install never downloads it. The
+# review UI offers a one-click install when Call flow is enabled.
 install_call_flow_runtime() {
-    case "${PLANNOTATOR_SKIP_CALLDIFF_INSTALL:-}" in
-        1|true|yes|TRUE|YES|True|Yes)
-            echo "Skipping call-flow runtime install (PLANNOTATOR_SKIP_CALLDIFF_INSTALL is set)"
-            return 0
-            ;;
-    esac
+    if [ "$install_call_flow" -ne 1 ]; then
+        echo "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"
+        return 0
+    fi
 
     if ! "$INSTALL_DIR/plannotator" install-runtime call-flow; then
-        echo "Skipping call-flow runtime install (plannotator install-runtime failed)"
+        echo "Call-flow runtime install failed; it remains available as an in-app opt-in install"
     fi
 }
 

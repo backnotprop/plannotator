@@ -16,6 +16,7 @@ import { getPlannotatorDataDir } from "./data-dir";
 import { indexCallFlowImpacts, parseCallDiffWorkerResult } from "./call-flow-types";
 import type {
   CallFlowAdvert,
+  CallFlowInstallStage,
   CallFlowResponse,
   ParsedCallDiffWorkerResult,
 } from "./call-flow-types";
@@ -93,8 +94,14 @@ export type CallFlowRuntimeResolution =
   | { ok: false; reason: string; message: string };
 
 export type CallFlowRuntimeInstallResult =
-  | { ok: true; status: "installed" | "already-installed" | "skipped"; runtimeDir: string; message: string }
+  | { ok: true; status: "installed" | "already-installed"; runtimeDir: string; message: string }
   | { ok: false; status: "failed"; runtimeDir: string; message: string };
+
+export type { CallFlowInstallStage };
+
+export type CallFlowNodePreflight =
+  | { ok: true }
+  | { ok: false; reason: "node-unavailable" | "node-version"; message: string };
 
 interface CommandResult {
   exitCode: number;
@@ -144,10 +151,6 @@ try {
   console.error = originalError;
 }
 `;
-
-function isTruthy(value: string | undefined): boolean {
-  return value === "1" || value?.toLowerCase() === "true" || value?.toLowerCase() === "yes";
-}
 
 export function getCallFlowManagedRuntimeDir(dataDir = getPlannotatorDataDir()): string {
   return join(dataDir, "vendor", "call-flow", `calldiff-${CALLDIFF_VERSION}`);
@@ -206,6 +209,19 @@ function findExecutable(name: string): string | null {
 
 function missingGrammarPackages(runtimeDir: string): string[] {
   return REQUIRED_GRAMMAR_PACKAGES.filter((name) => !existsSync(join(runtimeDir, "node_modules", ...name.split("/"))));
+}
+
+/**
+ * Cheap Node availability check used before any runtime download starts.
+ * The in-app install endpoint runs this preflight synchronously so a
+ * missing or too-old Node reports immediately, without background work.
+ */
+export async function preflightCallFlowNode(): Promise<CallFlowNodePreflight> {
+  const nodePath = findExecutable("node");
+  if (!nodePath) return { ok: false, reason: "node-unavailable", message: "Call flow requires Node.js 22 or newer, which was not found on PATH." };
+  const nodeCheck = await checkNode22(nodePath);
+  if (!nodeCheck.ok) return { ok: false, reason: "node-version", message: nodeCheck.message };
+  return { ok: true };
 }
 
 /** Resolve a complete, offline-safe CallDiff runtime without executing analysis. */
@@ -274,7 +290,11 @@ function removeDirectoryBestEffort(path: string): void {
   }
 }
 
-async function downloadVerifiedCallDiffArchive(destination: string): Promise<void> {
+async function downloadVerifiedCallDiffArchive(
+  destination: string,
+  onStage: (stage: CallFlowInstallStage) => void,
+): Promise<void> {
+  onStage("downloading");
   const response = await fetch(CALLDIFF_SOURCE_SPEC, {
     redirect: "follow",
     signal: AbortSignal.timeout(120_000),
@@ -298,6 +318,7 @@ async function downloadVerifiedCallDiffArchive(destination: string): Promise<voi
     hash.update(chunk);
     chunks.push(chunk);
   }
+  onStage("verifying");
   const integrity = `sha512-${hash.digest("base64")}`;
   if (integrity !== CALLDIFF_SOURCE_INTEGRITY) {
     throw new Error("CallDiff source archive failed its repository-pinned SHA-512 check.");
@@ -307,11 +328,10 @@ async function downloadVerifiedCallDiffArchive(destination: string): Promise<voi
   writeFileSync(destination, Buffer.concat(chunks, totalBytes));
 }
 
-export async function installCallFlowRuntime(): Promise<CallFlowRuntimeInstallResult> {
+export async function installCallFlowRuntime(
+  onStage: (stage: CallFlowInstallStage) => void = () => {},
+): Promise<CallFlowRuntimeInstallResult> {
   const runtimeDir = getCallFlowManagedRuntimeDir();
-  if (isTruthy(process.env.PLANNOTATOR_SKIP_CALLDIFF_INSTALL)) {
-    return { ok: true, status: "skipped", runtimeDir, message: "Skipping call-flow runtime install (PLANNOTATOR_SKIP_CALLDIFF_INSTALL is set)." };
-  }
   const nodePath = findExecutable("node");
   const npmPath = findExecutable("npm");
   if (!nodePath || !npmPath) {
@@ -330,8 +350,9 @@ export async function installCallFlowRuntime(): Promise<CallFlowRuntimeInstallRe
   const backupDir = `${runtimeDir}.previous-${process.pid}-${Date.now()}`;
   try {
     writeRuntimeManifest(installDir);
-    await downloadVerifiedCallDiffArchive(join(installDir, CALLDIFF_ARCHIVE_FILE));
+    await downloadVerifiedCallDiffArchive(join(installDir, CALLDIFF_ARCHIVE_FILE), onStage);
 
+    onStage("installing-deps");
     const install = await runCommand(npmPath, [
       "ci", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund", "--legacy-peer-deps",
     ], { cwd: installDir, timeoutMs: 240_000, maxOutputBytes: 4 * 1024 * 1024 });
@@ -358,6 +379,7 @@ export async function installCallFlowRuntime(): Promise<CallFlowRuntimeInstallRe
       throw new Error(rebuild.stderr.trim() || rebuild.stdout.trim() || "grammar rebuild failed");
     }
 
+    onStage("building");
     const packageRoot = join(installDir, "node_modules", "calldiff");
     const tscPath = process.platform === "win32"
       ? join(installDir, "node_modules", ".bin", "tsc.cmd")
@@ -754,6 +776,16 @@ export class CallFlowService {
 
   cancelAll(): void {
     for (const controller of this.controllers.values()) controller.abort();
+  }
+
+  /**
+   * Drop the cached runtime probe so the next capability advert re-resolves
+   * from disk. Called when an in-app runtime install completes; without this,
+   * the 30 second probe cache would keep advertising unavailable after a
+   * successful install.
+   */
+  invalidateRuntimeProbe(): void {
+    this.runtimeProbe = undefined;
   }
 
   private finish(key: string, controller: AbortController): void {

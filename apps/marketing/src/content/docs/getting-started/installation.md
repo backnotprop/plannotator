@@ -63,6 +63,13 @@ Version pinning is fully supported from **v0.17.2 onwards**. v0.17.2 is the firs
 </details>
 
 <details>
+<summary><strong>Optional Call flow runtime (not installed by default)</strong></summary>
+
+Code review's **Call flow** layer uses a pinned CallDiff runtime that is large (roughly 800 MB on disk) and needs Node.js 22 or newer, so the installers never download it by default. The normal path is in-app: enable Call flow in the review UI and click **Install runtime** in the Call flow panel; the install runs in the background and the analysis starts in the same session. For scripted or headless installs, opt in with the `--with-call-flow` flag (PowerShell: `-WithCallFlow`), `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `{ "installCallFlow": true }` in `~/.plannotator/config.json` (flag > env var > config), or run `plannotator install-runtime call-flow` at any time. `--minimal` always excludes it.
+
+</details>
+
+<details>
 <summary><strong>Binary-only install (nothing but the CLI)</strong></summary>
 
 Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no CallDiff runtime, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, Gemini, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.

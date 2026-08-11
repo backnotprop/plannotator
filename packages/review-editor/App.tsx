@@ -38,6 +38,7 @@ import { useAIChat } from './hooks/useAIChat';
 import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
 import { useCallFlowAnalysis } from './hooks/useCallFlowAnalysis';
+import { useCallFlowInstall } from './hooks/useCallFlowInstall';
 import { extractLinesFromPatch, isLineRangeInPatch } from './utils/patchParser';
 import {
   shouldHandleReviewSearchShortcut,
@@ -1353,6 +1354,39 @@ const ReviewApp: React.FC = () => {
     if (!callFlow) return;
     setCallFlowAdvert(callFlow);
   }, []);
+
+  // Re-advertise both analysis capabilities without changing any setting.
+  // POST /api/review-analysis with an empty body persists nothing new and
+  // returns fresh adverts for the current view; used after the in-app
+  // runtime install completes so the advert flips to available and
+  // useCallFlowAnalysis starts the analysis for the current snapshot
+  // without a reload.
+  const refreshAnalysisAdverts = useCallback(() => {
+    fetch('/api/review-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Analysis capabilities could not be refreshed.');
+        return response.json() as Promise<{
+          semanticDiff?: SemanticDiffAdvert;
+          callFlow?: CallFlowAdvert;
+          superseded?: boolean;
+        }>;
+      })
+      .then((data) => {
+        if (data.superseded) return;
+        applySemanticDiffAdvert(data.semanticDiff);
+        applyCallFlowAdvert(data.callFlow);
+      })
+      .catch(() => {
+        // A failed refresh keeps the current advert; the next diff payload
+        // re-advertises capabilities anyway.
+      });
+  }, [applyCallFlowAdvert, applySemanticDiffAdvert]);
+
+  const callFlowInstall = useCallFlowInstall(refreshAnalysisAdverts);
 
   useEffect(() => {
     if (!semanticDiffEnabled) {
@@ -2724,6 +2758,7 @@ const ReviewApp: React.FC = () => {
     isCallFlowNodeInPatch,
     isCallFlowActive,
     openCallFlowPanel,
+    callFlowInstall,
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
@@ -2752,7 +2787,7 @@ const ReviewApp: React.FC = () => {
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
-    callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel,
+    callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);

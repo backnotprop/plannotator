@@ -11,6 +11,10 @@ param(
     [Alias("BinaryOnly")]
     [switch]$Minimal,
     [switch]$NoMinimal,
+    # Opt-in install of the large CallDiff call-flow runtime (default off;
+    # the review UI offers a one-click install). Mirrors install.sh's
+    # --with-call-flow.
+    [switch]$WithCallFlow,
     [switch]$SkipCodex,
     [switch]$SkipGemini,
     [switch]$SkipKiro,
@@ -176,6 +180,10 @@ Write-Host "Installing plannotator $latestTag..."
 # can fail fast without wasting bandwidth if the requested tag predates
 # provenance support. Precedence: CLI flag > env var > config file > default.
 $verifyAttestationResolved = $false
+# CallDiff call-flow runtime opt-in. Same three-layer shape:
+# -WithCallFlow > PLANNOTATOR_INSTALL_CALLDIFF > config installCallFlow >
+# default (off).
+$installCallFlowResolved = $false
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
 # Unset PLANNOTATOR_DATA_DIR: an existing ~/.plannotator (legacy default)
@@ -283,9 +291,12 @@ function Install-AgentTerminalRuntime {
     }
 }
 
+# Strictly opt-in: the CallDiff runtime is large (~800 MB on disk) and its
+# feature is off by default, so a default install never downloads it. The
+# review UI offers a one-click install when Call flow is enabled.
 function Install-CallFlowRuntime {
-    if ($env:PLANNOTATOR_SKIP_CALLDIFF_INSTALL -match '^(1|true|yes)$') {
-        Write-Host "Skipping call-flow runtime install (PLANNOTATOR_SKIP_CALLDIFF_INSTALL is set)"
+    if (-not $installCallFlowResolved) {
+        Write-Host "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"
         return
     }
 
@@ -293,10 +304,10 @@ function Install-CallFlowRuntime {
     try {
         & $plannotatorPath install-runtime call-flow
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Skipping call-flow runtime install (plannotator install-runtime failed)"
+            Write-Host "Call-flow runtime install failed; it remains available as an in-app opt-in install"
         }
     } catch {
-        Write-Host "Skipping call-flow runtime install ($($_.Exception.Message))"
+        Write-Host "Call-flow runtime install failed ($($_.Exception.Message)); it remains available as an in-app opt-in install"
     }
 }
 
@@ -310,6 +321,9 @@ if (Test-Path $configPath) {
         # greps for a literal boolean.
         if ($cfg.verifyAttestation -is [bool] -and $cfg.verifyAttestation) {
             $verifyAttestationResolved = $true
+        }
+        if ($cfg.installCallFlow -is [bool] -and $cfg.installCallFlow) {
+            $installCallFlowResolved = $true
         }
     } catch {
         # Malformed config - ignore, fall through to other layers.
@@ -331,6 +345,17 @@ if ($envVerify) {
 # script (lines ~13-16), so at most one of these branches can fire.
 if ($VerifyAttestation) { $verifyAttestationResolved = $true }
 if ($SkipAttestation)   { $verifyAttestationResolved = $false }
+
+# CallDiff runtime opt-in, layers 2 and 1 (config was read above).
+$envInstallCallFlow = $env:PLANNOTATOR_INSTALL_CALLDIFF
+if ($envInstallCallFlow) {
+    if ($envInstallCallFlow -match '^(1|true|yes)$') {
+        $installCallFlowResolved = $true
+    } elseif ($envInstallCallFlow -match '^(0|false|no)$') {
+        $installCallFlowResolved = $false
+    }
+}
+if ($WithCallFlow) { $installCallFlowResolved = $true }
 
 # Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
 # as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >

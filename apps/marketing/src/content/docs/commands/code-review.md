@@ -128,7 +128,7 @@ The review UI shows your changes in a familiar diff format:
 
 Open **Settings → Analysis** to control Semantic Changes and Call Flow independently. A one-time review welcome presents the same two switches side by side. Disabling either layer avoids its analysis work and leaves the ordinary patch unchanged.
 
-**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and appears in two places when enabled:
+**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and uses a separate runtime installed on first use: when the layer is enabled and the runtime is missing, the Call flow panel offers a one-click **Install runtime** (a one-time download of roughly 800 MB, requiring Node.js 22 or newer) and the analysis starts in the same session once it completes. When enabled, Call Flow appears in two places:
 
 - **Dock** — switch between expandable entry-path trees with source navigation and CallDiff's exact, copyable raw output.
 - **Lens** — a compact `flow N` badge in each impacted file header, opening the complete inferred entry trees that contain a changed call in that file, plus a link to the full Dock.

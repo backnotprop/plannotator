@@ -12,6 +12,11 @@ REM Three-layer opt-in for SLSA provenance verification.
 REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
+REM Opt-in install of the large CallDiff call-flow runtime (default off; the
+REM review UI offers a one-click install). Precedence: --with-call-flow >
+REM PLANNOTATOR_INSTALL_CALLDIFF > config installCallFlow > default (off).
+REM -1 = flag not set (fall through); 1 = enable.
+set "WITH_CALL_FLOW_FLAG=-1"
 REM Guided-install answers. Precedence: CLI flags > wizard (interactive, first
 REM run or --reconfigure) > saved prefs from a previous run > defaults.
 set "EXTRAS_FLAG="
@@ -71,6 +76,11 @@ if /i "%~1"=="--skip-attestation" (
         exit /b 1
     )
     set "VERIFY_ATTESTATION_FLAG=0"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--with-call-flow" (
+    set "WITH_CALL_FLOW_FLAG=1"
     shift
     goto parse_args
 )
@@ -175,7 +185,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -446,6 +456,21 @@ if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="no"   set "VERIFY_ATTESTATION=0"
 REM Layer 1: CLI flag (overrides everything).
 if "!VERIFY_ATTESTATION_FLAG!"=="1" set "VERIFY_ATTESTATION=1"
 if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
+
+REM Resolve the CallDiff call-flow runtime opt-in. Same three-layer shape as
+REM verifyAttestation: CLI flag > env var > config.json > default (off).
+set "INSTALL_CALL_FLOW=0"
+if exist "!_CONFIG_DIR!\config.json" (
+    findstr /r /c:"\"installCallFlow\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "INSTALL_CALL_FLOW=1"
+)
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="1"     set "INSTALL_CALL_FLOW=1"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="true"  set "INSTALL_CALL_FLOW=1"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="yes"   set "INSTALL_CALL_FLOW=1"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="0"     set "INSTALL_CALL_FLOW=0"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="false" set "INSTALL_CALL_FLOW=0"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="no"    set "INSTALL_CALL_FLOW=0"
+if "!WITH_CALL_FLOW_FLAG!"=="1" set "INSTALL_CALL_FLOW=1"
 
 REM Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
 REM as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >
@@ -1567,26 +1592,20 @@ if !ERRORLEVEL! neq 0 (
 goto :eof
 
 REM ======================================================================
-REM Optional CallDiff runtime install. Non-fatal: call flow stays disabled
-REM when Node/npm or the pinned grammar install is unavailable.
+REM Opt-in CallDiff runtime install. Strictly opt-in: the runtime is large
+REM (~800 MB on disk) and its feature is off by default, so a default
+REM install never downloads it. The review UI offers a one-click install
+REM when Call flow is enabled. Non-fatal when the opt-in install fails.
 REM ======================================================================
 :InstallCallFlowRuntime
-if /i "!PLANNOTATOR_SKIP_CALLDIFF_INSTALL!"=="1" (
-    echo Skipping call-flow runtime install ^(PLANNOTATOR_SKIP_CALLDIFF_INSTALL is set^)
-    goto :eof
-)
-if /i "!PLANNOTATOR_SKIP_CALLDIFF_INSTALL!"=="true" (
-    echo Skipping call-flow runtime install ^(PLANNOTATOR_SKIP_CALLDIFF_INSTALL is set^)
-    goto :eof
-)
-if /i "!PLANNOTATOR_SKIP_CALLDIFF_INSTALL!"=="yes" (
-    echo Skipping call-flow runtime install ^(PLANNOTATOR_SKIP_CALLDIFF_INSTALL is set^)
+if not "!INSTALL_CALL_FLOW!"=="1" (
+    echo Call-flow analysis: available as an in-app opt-in install ^(enable Call flow in review Settings^), or run: plannotator install-runtime call-flow
     goto :eof
 )
 
 "!INSTALL_PATH!" install-runtime call-flow
 if !ERRORLEVEL! neq 0 (
-    echo Skipping call-flow runtime install ^(plannotator install-runtime failed^)
+    echo Call-flow runtime install failed; it remains available as an in-app opt-in install
 )
 goto :eof
 
