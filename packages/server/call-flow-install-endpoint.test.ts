@@ -1,24 +1,37 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CallFlowInstallStage, CallFlowNodePreflight, CallFlowRuntimeInstallResult } from '@plannotator/shared/call-flow';
 
-// The base data dir must be pinned BEFORE the server modules load: config.ts
-// freezes its config path at import time. Runtime-dir resolution reads the
-// env live, so tests still get per-test runtime isolation below.
-const baseDataDir = mkdtempSync(join(tmpdir(), 'plannotator-call-flow-install-'));
-process.env.PLANNOTATOR_DATA_DIR = baseDataDir;
+// PLANNOTATOR_DATA_DIR is only ever changed INSIDE tests (boot() below) and
+// restored to its original value after each one. It must never be overridden
+// at module-eval time: bun evaluates every test file's module before running
+// tests in one shared process, and Pi's generated/storage.ts caches its data
+// dir at import time. A module-eval override here makes storage's cached dir
+// and later files' live getPlannotatorDataDir() calls disagree, which is
+// exactly the Pi annotate-history / durable-submit CI failure this comment
+// guards against. Config writes made by these tests target whatever dir the
+// process's config module froze at first import; the snapshot/restore in
+// afterAll below keeps those writes from leaking into a real config.json.
+const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 const originalPort = process.env.PLANNOTATOR_PORT;
 const originalPath = process.env.PATH;
-const tempDirs: string[] = [baseDataDir];
+const tempDirs: string[] = [];
 
 // ---------------------------------------------------------------------------
 // Test seams: both runtimes' call-flow modules are mocked so the endpoint
 // tests exercise the coordinator + endpoint wiring against a controllable
 // installCallFlowRuntime / preflightCallFlowNode. The real ~800 MB install
 // must never run in tests. Everything else in the modules stays real.
+//
+// bun's mock.module is process-global with no restore, so these overrides
+// outlive this file when CI runs the whole suite in one process. That is
+// safe here by construction: only these two functions are replaced, nothing
+// else in the repo's tests invokes installCallFlowRuntime (the throwing
+// default doubles as a guard against any future test accidentally starting
+// a real install), and preflight's default stays a harmless ok.
 // ---------------------------------------------------------------------------
 let installCalls = 0;
 let installImpl: (onStage: (stage: CallFlowInstallStage) => void) => Promise<CallFlowRuntimeInstallResult> =
@@ -50,6 +63,21 @@ mock.module('../../apps/pi-extension/generated/call-flow.ts', () => ({
 
 const { startReviewServer: startBunReviewServer } = await import('./review');
 const { startReviewServer: startPiReviewServer } = await import('../../apps/pi-extension/server');
+
+// Best-effort config hygiene: the /api/review-analysis POSTs below persist
+// { callFlow: true } through the process's frozen config module. When this
+// file runs on its own, that is the developer's real config.json; snapshot
+// it now (env is untouched at this point, so this is the same dir the config
+// module freezes to in an isolated run) and restore it after the suite so a
+// test run never flips a real setting.
+const { getPlannotatorDataDir } = await import('@plannotator/shared/data-dir');
+const realConfigPath = join(getPlannotatorDataDir(), 'config.json');
+let realConfigSnapshot: Buffer | null = null;
+try {
+  realConfigSnapshot = readFileSync(realConfigPath);
+} catch {
+  realConfigSnapshot = null;
+}
 const {
   CALLDIFF_COMMIT,
   CALLDIFF_GRAMMAR_SPECS,
@@ -131,7 +159,11 @@ function installFakeNode(): void {
 }
 
 afterEach(() => {
-  process.env.PLANNOTATOR_DATA_DIR = baseDataDir;
+  // Restore every process-global this file's tests touched (delete when a
+  // variable was originally unset). Later test files in the same process
+  // must observe exactly the environment they would see standalone.
+  if (originalDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
   if (originalPort === undefined) delete process.env.PLANNOTATOR_PORT;
   else process.env.PLANNOTATOR_PORT = originalPort;
   if (originalPath === undefined) delete process.env.PATH;
@@ -141,6 +173,18 @@ afterEach(() => {
     throw new Error('installImpl not configured for this test');
   };
   preflightImpl = async () => ({ ok: true });
+});
+
+afterAll(() => {
+  // Undo the config writes the advert tests persisted (see the snapshot
+  // comment above): put the original config.json bytes back, or remove the
+  // file when there was none.
+  try {
+    if (realConfigSnapshot === null) rmSync(realConfigPath, { force: true });
+    else writeFileSync(realConfigPath, realConfigSnapshot);
+  } catch {
+    // Best effort: an unwritable config dir must not fail the suite.
+  }
 });
 
 process.on('exit', () => {
