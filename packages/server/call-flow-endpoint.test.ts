@@ -1,10 +1,22 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startReviewServer as startBunReviewServer } from './review';
 import { startReviewServer as startPiReviewServer } from '../../apps/pi-extension/server';
+
+// The server imports above freeze shared/config.ts's CONFIG_PATH before any
+// per-test PLANNOTATOR_DATA_DIR override can take effect. Snapshot that exact
+// file so settings POSTs cannot leak into the developer's real configuration.
+const { getPlannotatorDataDir } = await import('@plannotator/shared/data-dir');
+const realConfigPath = join(getPlannotatorDataDir(), 'config.json');
+let realConfigSnapshot: Buffer | null = null;
+try {
+  realConfigSnapshot = readFileSync(realConfigPath);
+} catch {
+  realConfigSnapshot = null;
+}
 
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 const originalPort = process.env.PLANNOTATOR_PORT;
@@ -45,6 +57,17 @@ afterEach(() => {
   if (originalPath === undefined) delete process.env.PATH;
   else process.env.PATH = originalPath;
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+afterAll(() => {
+  // Restore the exact bytes present before this suite, or restore absence
+  // when no config existed. This mirrors call-flow-install-endpoint.test.ts.
+  try {
+    if (realConfigSnapshot === null) rmSync(realConfigPath, { force: true });
+    else writeFileSync(realConfigPath, realConfigSnapshot);
+  } catch {
+    // Best effort: an unwritable config directory must not fail the suite.
+  }
 });
 
 describe('Call flow endpoint capability guards', () => {

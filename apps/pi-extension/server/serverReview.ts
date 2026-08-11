@@ -88,7 +88,7 @@ import {
 	readDraftGenerationFromUrl,
 	handleUploadRequest,
 } from "./handlers.ts";
-import { handleApiNotFound, html, json, parseBody, requestUrl, send } from "./helpers.ts";
+import { handleApiNotFound, html, json, parseBody, parseJsonBody, requestUrl, send } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
@@ -1828,7 +1828,7 @@ export async function startReviewServer(options: {
 			}
 			let installRequest: ReturnType<typeof parseCallFlowInstallRequest>;
 			try {
-				installRequest = parseCallFlowInstallRequest(await parseBody(req));
+				installRequest = parseCallFlowInstallRequest(await parseJsonBody(req));
 			} catch {
 				installRequest = null;
 			}

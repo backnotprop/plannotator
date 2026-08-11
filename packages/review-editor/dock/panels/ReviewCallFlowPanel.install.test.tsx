@@ -177,7 +177,7 @@ describe('ReviewCallFlowPanel install funnel', () => {
     expect(starts).toBe(1);
   });
 
-  test.skipIf(!hasDom)('surfaces an optional-pack failure beside skipped files and the language row', async () => {
+  test.skipIf(!hasDom)('surfaces optional-pack failures and hides installs for an unmanaged override', async () => {
     let starts = 0;
     const callFlowAdvert = advert({
       available: true,
@@ -229,6 +229,17 @@ describe('ReviewCallFlowPanel install funnel', () => {
       retry?.click();
       await Promise.resolve();
     });
+    expect(starts).toBe(1);
+
+    await render({
+      ...readyState,
+      callFlowAdvert: { ...callFlowAdvert, installable: false },
+      callFlowInstall: { status: { state: 'idle' }, start: () => starts++ },
+    });
+    expect(host?.textContent).toContain('1 file skipped: Python support not installed');
+    const unavailableInstall = [...(host?.querySelectorAll('button') ?? [])]
+      .find((button) => button.textContent?.trim() === 'Install');
+    expect(unavailableInstall).toBeUndefined();
     expect(starts).toBe(1);
   });
 });

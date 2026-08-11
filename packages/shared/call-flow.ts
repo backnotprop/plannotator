@@ -621,9 +621,13 @@ function pruneCoreRuntime(runtimeDir: string): void {
   assertPathRemoved(join(runtimeDir, "node_modules", ".bin"), "node_modules/.bin");
 }
 
-function validationFileForLanguage(id: CallFlowLanguageId): string {
+function validationFilesForLanguage(id: CallFlowLanguageId): string[] {
+  if (id === CALL_FLOW_CORE_LANGUAGE_ID) {
+    // Exercise both independently pinned core grammar packages after pruning.
+    return ["validation.js", "validation.ts"];
+  }
   const extension = getCallFlowLanguage(id).extensions[0];
-  return `validation${extension}`;
+  return [`validation${extension}`];
 }
 
 async function validatePrunedLanguage(
@@ -643,7 +647,7 @@ for (const file of request.files) mod.extractFunctions(file, "");
   try {
     const result = await runCommand(nodePath, ["--input-type=module", "--eval", script, JSON.stringify({
       extractEntry,
-      files: ids.map(validationFileForLanguage),
+      files: ids.flatMap(validationFilesForLanguage),
     })], {
       cwd: runtimeDir,
       timeoutMs: 20_000,

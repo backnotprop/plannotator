@@ -1,25 +1,39 @@
 /**
  * Core HTTP helpers for Pi extension servers.
- * parseBody, json, handleApiNotFound, html, send, toWebRequest
+ * parseBody, parseJsonBody, json, handleApiNotFound, html, send, toWebRequest
  */
 
 import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 
-export function parseBody(
-	req: IncomingMessage,
-): Promise<Record<string, unknown>> {
-	return new Promise((resolve) => {
+function readBody(req: IncomingMessage): Promise<string> {
+	return new Promise((resolve, reject) => {
 		let data = "";
 		req.on("data", (chunk: string) => (data += chunk));
-		req.on("end", () => {
-			try {
-				resolve(JSON.parse(data));
-			} catch {
-				resolve({});
-			}
-		});
+		req.on("end", () => resolve(data));
+		req.on("error", reject);
 	});
+}
+
+export async function parseBody(
+	req: IncomingMessage,
+): Promise<Record<string, unknown>> {
+	try {
+		return JSON.parse(await readBody(req));
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Decode a request body as JSON and reject malformed input.
+ *
+ * Use this for endpoints where an empty object is a valid command and parse
+ * failure must remain distinguishable from that command. Legacy endpoints
+ * continue to use {@link parseBody}, which deliberately falls back to `{}`.
+ */
+export async function parseJsonBody(req: IncomingMessage): Promise<unknown> {
+	return JSON.parse(await readBody(req));
 }
 
 export function json(

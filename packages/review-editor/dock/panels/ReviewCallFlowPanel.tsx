@@ -274,13 +274,15 @@ export function ReviewCallFlowPanel() {
                 <small className="call-flow-language-error">Install failed: {skippedInstallError.error}</small>
               )}
             </span>
-            <button
-              type="button"
-              onClick={installSkipped}
-              disabled={state.callFlowInstall.status.state === 'running'}
-            >
-              {state.callFlowInstall.status.state === 'running' ? 'Installing…' : skippedInstallError ? 'Retry' : 'Install'}
-            </button>
+            {state.callFlowAdvert.installable && (
+              <button
+                type="button"
+                onClick={installSkipped}
+                disabled={state.callFlowInstall.status.state === 'running'}
+              >
+                {state.callFlowInstall.status.state === 'running' ? 'Installing…' : skippedInstallError ? 'Retry' : 'Install'}
+              </button>
+            )}
           </div>
         )}
 

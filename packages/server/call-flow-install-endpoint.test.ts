@@ -238,6 +238,24 @@ describe('Call flow install endpoints', () => {
       }
     });
 
+    test(`${runtime} rejects malformed install JSON without starting work`, async () => {
+      const server = await boot();
+      try {
+        const response = await fetch(`${server.url}/api/call-flow/install`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{not-json',
+        });
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({ error: 'Invalid call-flow install request' });
+        expect(installCalls).toBe(0);
+        expect(await getInstallStatus(server.url)).toEqual({ state: 'idle' });
+      } finally {
+        server.stop();
+      }
+    });
+
     test(`${runtime} single-flights concurrent POSTs and reports staged progress through done`, async () => {
       const server = await boot();
       const gate = deferred<CallFlowRuntimeInstallResult>();
