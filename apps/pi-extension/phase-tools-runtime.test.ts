@@ -62,6 +62,7 @@ function createContext(options: { cwd?: string; entries?: SessionEntry[] } = {})
 		model: undefined,
 		modelRegistry: { find: () => undefined },
 		sessionManager: {
+			getBranch: () => entries,
 			getEntries: () => entries,
 			getSessionFile: () => undefined,
 			getSessionId: () => "test-session",

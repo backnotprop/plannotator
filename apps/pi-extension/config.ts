@@ -235,6 +235,16 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
 export function loadPlannotatorConfig(cwd: string): LoadedPlannotatorConfig {
   const warnings: string[] = [];
 
+  // The bundled config carries the planning rules and phase instructions. A
+  // packaging regression that drops it would otherwise silently produce a
+  // rule-less planning phase, so its absence is worth a warning (user global
+  // and project configs stay optional and silent).
+  if (!existsSync(INTERNAL_CONFIG_PATH)) {
+    warnings.push(
+      `Built-in config missing at ${INTERNAL_CONFIG_PATH}: phase instructions and planning tools will not apply. Reinstall the extension.`,
+    );
+  }
+
   const internal = loadConfigSource(INTERNAL_CONFIG_PATH);
   warnings.push(...internal.warnings);
 

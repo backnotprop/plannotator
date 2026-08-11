@@ -96,6 +96,7 @@ function createHarness(cwd: string) {
 		model: { provider: "test", id: "original-model" },
 		modelRegistry: { find: (provider: string, id: string) => ({ provider, id }) },
 		sessionManager: {
+			getBranch: () => [],
 			getEntries: () => [],
 			getSessionId: () => "test-session",
 			getSessionFile: () => "session.json",

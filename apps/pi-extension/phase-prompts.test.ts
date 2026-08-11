@@ -78,6 +78,7 @@ function createContext(options: { cwd?: string; entries?: SessionEntry[] } = {})
 		modelRegistry: { find: () => undefined },
 		notifications,
 		sessionManager: {
+			getBranch: () => entries,
 			getEntries: () => entries,
 			getSessionFile: () => undefined,
 			getSessionId: () => "test-session",
@@ -101,11 +102,14 @@ function createContext(options: { cwd?: string; entries?: SessionEntry[] } = {})
 function createRuntime(initialTools: string[] = ["read", "bash", "edit", "write"]) {
 	const commands = new Map<string, { handler: (args: string, context: ReturnType<typeof createContext>) => unknown }>();
 	const handlers = new Map<string, Handler[]>();
+	const persisted: Array<Record<string, unknown>> = [];
 
 	let activeTools = [...initialTools];
 
 	const pi = {
-		appendEntry: () => undefined,
+		appendEntry: (_type: string, data: Record<string, unknown>) => {
+			persisted.push(data);
+		},
 		events: { on: () => () => undefined },
 		getActiveTools: () => [...activeTools],
 		getFlag: () => false,
@@ -132,6 +136,7 @@ function createRuntime(initialTools: string[] = ["read", "bash", "edit", "write"
 
 	return {
 		commands,
+		lastPersistedState: () => persisted.at(-1),
 		run: async (event: string, context: ReturnType<typeof createContext>, payload: unknown = {}) => {
 			const results: unknown[] = [];
 			for (const handler of handlers.get(event) ?? []) results.push(await handler(payload, context));
@@ -288,6 +293,9 @@ describe("Plannotator phase framing messages", () => {
 		expect(second?.message?.customType).toBe("plannotator-context");
 		expect(second?.message?.content).toContain("0/2 steps complete");
 		expect(second?.message?.content).toContain("- [ ] 1. Step one");
+		// The completion-marker convention rides every todo message so the
+		// protocol survives between a compaction and the framing re-delivery.
+		expect(second?.message?.content).toContain("[DONE:n]");
 		expect(second?.message?.content).not.toContain("planning phase is over");
 
 		writeFileSync(join(cwd, "PLAN.md"), "# Plan\n\n- [x] Step one\n- [ ] Step two\n", "utf-8");
@@ -360,6 +368,108 @@ describe("Plannotator phase framing messages", () => {
 		const warnings = templateWarnings(context);
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]?.message).toContain("bogus");
+	});
+
+	test("persistState records the framing latch on both sides", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		// Entering planning persists the reopened latch.
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "planning",
+			framingDelivered: false,
+		});
+
+		await startAgent(runtime, context);
+		// Delivering the framing persists the closed latch. This pins the
+		// write side: dropping framingDelivered from persistState (or always
+		// writing false) must fail here.
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "planning",
+			framingDelivered: true,
+		});
+	});
+
+	test("compaction reopens the latch and the framing is re-delivered exactly once", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+
+		expect((await startAgent(runtime, context))?.message?.customType).toBe("plannotator-framing");
+		expect(await startAgent(runtime, context)).toBeUndefined();
+
+		// Compaction can summarize away the framing message from history.
+		await runtime.run("session_compact", context, { reason: "threshold", willRetry: false });
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "planning",
+			framingDelivered: false,
+		});
+
+		const redelivered = await startAgent(runtime, context);
+		expect(redelivered?.message?.customType).toBe("plannotator-framing");
+		expect(redelivered?.message?.content).toContain("[PLANNOTATOR - PLANNING PHASE]");
+		// Once only: the following prompt injects nothing again.
+		expect(await startAgent(runtime, context)).toBeUndefined();
+	});
+
+	test("compaction while idle does not touch state", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		const before = runtime.lastPersistedState();
+		await runtime.run("session_compact", context, { reason: "manual", willRetry: false });
+		expect(runtime.lastPersistedState()).toBe(before);
+		expect(await startAgent(runtime, context)).toBeUndefined();
+	});
+
+	test("a tree switch to a path without plannotator state returns to idle", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		expect((await startAgent(runtime, context))?.message?.customType).toBe("plannotator-framing");
+
+		// Branch to a point recorded before plannotator was ever active: the
+		// new active path has no plannotator entries.
+		const prePlannotatorPath = createContext({ cwd, entries: [] });
+		await runtime.run("session_tree", prePlannotatorPath, { newLeafId: "n1", oldLeafId: "n2" });
+
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "idle",
+			framingDelivered: false,
+		});
+		expect(await startAgent(runtime, prePlannotatorPath)).toBeUndefined();
+	});
+
+	test("a tree switch resyncs phase and latch from the new active path", async () => {
+		const cwd = makeWorkspace();
+		writeFileSync(join(cwd, "PLAN.md"), "# Plan\n\n- [ ] Step one\n", "utf-8");
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		// Branch onto a path whose state entry recorded the executing phase
+		// before its framing was delivered (latch open on that path).
+		const executingPath = executingContext(cwd);
+		await runtime.run("session_tree", executingPath, { newLeafId: "n1", oldLeafId: null });
+
+		const first = await startAgent(runtime, executingPath);
+		expect(first?.message?.customType).toBe("plannotator-framing");
+		expect(first?.message?.content).toContain("planning phase is over");
+
+		// A path that already delivered its framing keeps the latch closed.
+		const deliveredPath = executingContext(cwd, { framingDelivered: true });
+		await runtime.run("session_tree", deliveredPath, { newLeafId: "n2", oldLeafId: "n1" });
+		const after = await startAgent(runtime, deliveredPath);
+		expect(after?.message?.customType).toBe("plannotator-context");
 	});
 
 	test("obsolete systemPrompt config keys are ignored with a warning at session start", async () => {

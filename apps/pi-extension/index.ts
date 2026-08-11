@@ -1281,13 +1281,18 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		const todoStats = phase === "executing" ? formatTodoList(checklistItems) : formatTodoList([]);
+		// The closing line restates the completion-marker convention so the
+		// protocol survives even when compaction has swallowed the framing and
+		// re-delivery has not happened yet.
 		const todoStatus =
 			phase === "executing" && todoStats.remainingCount > 0
 				? `[PLANNOTATOR - EXECUTING PLAN]
 Todo status for ${planRef}: ${todoStats.completedCount}/${todoStats.totalCount} steps complete.
 
 Remaining steps:
-${todoStats.todoList}`
+${todoStats.todoList}
+
+Mark completed steps with [DONE:n] in your response.`
 				: null;
 
 		if (framingDelivered) {
@@ -1491,20 +1496,18 @@ ${todoStats.todoList}`
 	});
 
 	// Restore state on session start/resume
-	pi.on("session_start", async (_event, ctx) => {
-		const loadedConfig = loadPlannotatorConfig(ctx.cwd);
-		plannotatorConfig = loadedConfig.config;
-		for (const warning of loadedConfig.warnings) {
-			ctx.ui.notify(`Plannotator config: ${warning}`, "warning");
-		}
-
-		// Check --plan flag
-		if (pi.getFlag("plan") === true) {
-			phase = "planning";
-		}
-
-		// Restore persisted state
-		const entries = ctx.sessionManager.getEntries();
+	/**
+	 * Re-derive phase, framing latch, and checklist state from the ACTIVE
+	 * session path (root to current leaf). Shared by session_start (resume) and
+	 * session_tree (branch navigation): a branch switch can land on a path
+	 * whose plannotator state differs from memory, or where the delivered
+	 * framing message is absent because it lives on another branch.
+	 */
+	async function resyncPhaseFromSession(
+		ctx: ExtensionContext,
+		options: { phaseWhenUnrecorded: Phase; warnOnPlanning: boolean },
+	): Promise<void> {
+		const entries = ctx.sessionManager.getBranch();
 		const stateEntry = entries
 			.filter(
 				(e: { type: string; customType?: string }) =>
@@ -1513,13 +1516,20 @@ ${todoStats.todoList}`
 			.pop() as { data?: PersistedPlannotatorState } | undefined;
 
 		if (stateEntry?.data) {
-			phase = stateEntry.data.phase ?? phase;
+			phase = stateEntry.data.phase ?? options.phaseWhenUnrecorded;
 			lastSubmittedPath = stateEntry.data.lastSubmittedPath ?? lastSubmittedPath;
 			savedState = stateEntry.data.savedState ?? savedState;
 			phaseAddedTools = stateEntry.data.phaseAddedTools ?? phaseAddedTools;
 			// The framing message persists in the restored conversation history,
-			// so a resumed phase must not deliver it again.
+			// so a resumed phase must not deliver it again. A path recorded
+			// before delivery restores the latch open and re-delivers.
 			framingDelivered = stateEntry.data.framingDelivered ?? false;
+		} else {
+			// No plannotator activity on this path. Memory savedState and
+			// phaseAddedTools are kept so the idle branch below can hand back
+			// tools and settings a now-abandoned branch's phase had taken.
+			phase = options.phaseWhenUnrecorded;
+			framingDelivered = false;
 		}
 
 		if (phase === "planning" && !savedState) {
@@ -1562,13 +1572,13 @@ ${todoStats.todoList}`
 			}
 		}
 
-
-
 		if (phase === "planning") {
 			checklistItems = [];
-			const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
-			if (warning) {
-				ctx.ui.notify(warning, "warning");
+			if (options.warnOnPlanning) {
+				const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+				if (warning) {
+					ctx.ui.notify(warning, "warning");
+				}
 			}
 		}
 
@@ -1588,5 +1598,39 @@ ${todoStats.todoList}`
 		updateStatus(ctx);
 		updateWidget(ctx);
 		persistState();
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
+		const loadedConfig = loadPlannotatorConfig(ctx.cwd);
+		plannotatorConfig = loadedConfig.config;
+		for (const warning of loadedConfig.warnings) {
+			ctx.ui.notify(`Plannotator config: ${warning}`, "warning");
+		}
+
+		// Check --plan flag
+		if (pi.getFlag("plan") === true) {
+			phase = "planning";
+		}
+
+		await resyncPhaseFromSession(ctx, { phaseWhenUnrecorded: phase, warnOnPlanning: true });
+	});
+
+	// Compaction summarizes conversation history and can swallow the delivered
+	// framing message (custom messages are ordinary compactable messages), so
+	// reopen the latch: the next prompt re-delivers the phase framing. If the
+	// framing survived in the kept tail, the context filter keeps only the
+	// newest copy, so re-delivery never duplicates.
+	pi.on("session_compact", async () => {
+		if (phase !== "planning" && phase !== "executing") return;
+		framingDelivered = false;
+		persistState();
+	});
+
+	// A /tree branch switch changes the active path out from under the latch:
+	// the new path can carry different phase state, or lack the framing message
+	// that was delivered on the abandoned branch. Re-derive everything from the
+	// new path; a path with no plannotator state at all means idle.
+	pi.on("session_tree", async (_event, ctx) => {
+		await resyncPhaseFromSession(ctx, { phaseWhenUnrecorded: "idle", warnOnPlanning: false });
 	});
 }
