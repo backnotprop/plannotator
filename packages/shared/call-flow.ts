@@ -1237,6 +1237,8 @@ async function executeWorker(
         CALLDIFF_GRAMMAR_CACHE: runtime.grammarCacheDir,
         npm_config_offline: "true",
         NPM_CONFIG_OFFLINE: "true",
+        npm_config_ignore_scripts: "true",
+        NPM_CONFIG_IGNORE_SCRIPTS: "true",
       },
     });
   } finally {
