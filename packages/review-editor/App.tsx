@@ -31,6 +31,8 @@ import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
+import type { SuggestionHunk } from './edit/deriveSuggestions';
+import type { EditSelectionComment } from './edit/useEditSession';
 import { useAIChat } from './hooks/useAIChat';
 import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
@@ -105,12 +107,20 @@ import { ReviewSetupDialog } from './components/ReviewSetupDialog';
 import { needsReviewSetup, markReviewSetupSeen } from './utils/reviewSetup';
 import { GuideIntroDialog } from './components/GuideIntroDialog';
 import { needsGuideIntro, markGuideIntroSeen, needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
+import { EditModeAnnouncementDialog } from './components/EditModeAnnouncementDialog';
+import {
+  editModeAnnouncementCanShow,
+  enableEditSuggestionsFromAnnouncement,
+  markEditModeAnnouncementSeen,
+  needsEditModeAnnouncement,
+} from './utils/editModeAnnouncement';
 import { DestinationSpotlight } from './components/DestinationSpotlight';
 import { needsDestinationSpotlight, markDestinationSpotlightSeen } from './utils/destinationSpotlight';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey } from '@plannotator/ui/utils/platform';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { TourDialog } from './components/tour/TourDialog';
 import { DEMO_TOUR_ID } from './demoTour';
 import { GuideScreen } from './components/guide/GuideScreen';
@@ -249,6 +259,8 @@ const ReviewApp: React.FC = () => {
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
   const diffTabSize = useConfigValue('diffTabSize');
+  // EXPERIMENTAL: edit code in place to author suggestions (default OFF).
+  const editSuggestionsEnabled = useConfigValue('editSuggestions');
   // Global plan-look preference; surfaced here only by the shared 0.20.0
   // look-and-feel announcement (the grid/clean chooser applies to plan review).
   const gridEnabled = useConfigValue('gridEnabled');
@@ -629,10 +641,9 @@ const ReviewApp: React.FC = () => {
   // module (utils/reviewAgentInstructions.ts) so it's easy to edit independently.
   const handleCopyAgentInstructions = useCallback(async () => {
     const payload = buildReviewAgentInstructions(window.location.origin);
-    try {
-      await navigator.clipboard.writeText(payload);
+    if (await copyTextToClipboard(payload)) {
       toast.success('Agent instructions copied');
-    } catch {
+    } else {
       toast.error('Failed to copy');
     }
   }, []);
@@ -670,11 +681,11 @@ const ReviewApp: React.FC = () => {
   // Guide click, even for users who dismissed the dialog without reading.
   const [showGuideIntro, setShowGuideIntro] = useState(needsGuideIntro);
   const [guideHintActive, setGuideHintActive] = useState(needsGuideHint);
-  // FIRST in the dialog chain (guide intro → look-and-feel → review setup).
-  // The intro only shows when a Guide button exists to point at
+  // FIRST in the dialog chain (guide intro → look-and-feel → review setup →
+  // edit mode). The intro only shows when a Guide button exists to point at
   // (hasSearchableFiles) — on an empty diff it is skipped WITHOUT consuming
   // the one-shot cookie, so the next session with files shows it. The other
-  // two dialogs' gates must use this same visibility (not the raw
+  // chain dialogs' gates must use this same visibility (not the raw
   // showGuideIntro), or an empty diff would block them forever.
   //
   // Eligibility is LATCHED at the first post-load render (dialogs only mount
@@ -696,6 +707,29 @@ const ReviewApp: React.FC = () => {
     markGuideHintSeen();
     setGuideHintActive(false);
   }, [guideOpen, guideHintActive]);
+  // One-time Edit Mode (edit-to-suggest) announcement. LAST in the dialog
+  // chain (guide intro → look-and-feel → review setup → edit mode) — the
+  // chain dialogs never stack. Skipped forever when the user already enabled
+  // the setting from Settings (latched at mount so enabling from the dialog
+  // itself doesn't unmount it mid-click).
+  const [editModeIntroPending, setEditModeIntroPending] = useState(
+    () => needsEditModeAnnouncement() && !configStore.get('editSuggestions'),
+  );
+  const editModeIntroVisible = editModeAnnouncementCanShow({
+    announcementPending: editModeIntroPending,
+    isLoading,
+    guideIntroVisible,
+    lookAndFeelVisible: showLookAndFeel,
+    reviewSetupVisible: showReviewSetup,
+  });
+  const dismissEditModeIntro = useCallback(() => {
+    markEditModeAnnouncementSeen();
+    setEditModeIntroPending(false);
+  }, []);
+  const enableEditModeIntro = useCallback(() => {
+    enableEditSuggestionsFromAnnouncement();
+    setEditModeIntroPending(false);
+  }, []);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1511,6 +1545,63 @@ const ReviewApp: React.FC = () => {
     setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
     setPendingSelection(null);
   }, [pendingSelection, identity, withPRContext]);
+
+  // Sink for the experimental edit-to-suggestion flow: a completed edit
+  // session delivers one hunk per contiguous changed region, each becoming a
+  // normal suggestion annotation (same shape SuggestionModal produces —
+  // type 'comment' carrying suggestedCode/originalCode) so it flows through
+  // rendering, sidebar, and feedback export unchanged. The browser never
+  // writes files; the agent applies these suggestions.
+  const handleAddSuggestionsForFile = useCallback((filePath: string, hunks: SuggestionHunk[]) => {
+    if (hunks.length === 0) return;
+    const now = Date.now();
+    setAnnotations(prev => [
+      ...prev,
+      ...hunks.map((hunk) => withPRContext({
+        id: generateId(),
+        type: 'comment' as CodeAnnotationType,
+        scope: 'line' as const,
+        filePath,
+        lineStart: hunk.lineStart,
+        lineEnd: hunk.lineEnd,
+        side: 'new' as const,
+        // A fully-emptied file derives an empty suggestion; the export
+        // template skips falsy suggestedCode, so describe it in text instead.
+        text: hunk.suggestedCode === '' ? 'Suggested change: remove these lines.' : undefined,
+        suggestedCode: hunk.suggestedCode === '' ? undefined : hunk.suggestedCode,
+        originalCode: hunk.originalCode === '' ? undefined : hunk.originalCode,
+        createdAt: now,
+        author: identity,
+      })),
+    ]);
+  }, [identity, withPRContext]);
+
+  // Sink for the edit session's "Make annotation" selection action: a plain
+  // line-scoped comment whose anchor was mapped from the edited buffer to
+  // PRISTINE new-side coordinates at selection time (edit/selectionAnchor.ts),
+  // so it renders and exports correctly whether the session later completes
+  // or is discarded. `selectedText` preserves what was actually highlighted;
+  // `selectedTextFromEdits` flags an approximate anchor (selection overlapped
+  // in-session edits) so the export can label it honestly.
+  const handleAddEditorCommentForFile = useCallback((filePath: string, comment: EditSelectionComment) => {
+    const trimmed = comment.text.trim();
+    if (!trimmed) return;
+    const newAnnotation: CodeAnnotation = {
+      id: generateId(),
+      type: 'comment',
+      scope: 'line',
+      filePath,
+      lineStart: comment.lineStart,
+      lineEnd: comment.lineEnd,
+      side: 'new',
+      text: trimmed,
+      selectedText: comment.selectedText || undefined,
+      ...(comment.exact ? {} : { selectedTextFromEdits: true }),
+      createdAt: Date.now(),
+      author: identity,
+    };
+    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
+  }, [identity, withPRContext]);
 
   const handleAddAnnotation = useCallback((
     type: CodeAnnotationType,
@@ -2399,6 +2490,9 @@ const ReviewApp: React.FC = () => {
     onLineSelection: handleLineSelection,
     onAddAnnotation: handleAddAnnotation,
     onAddAnnotationForFile: handleAddAnnotationForFile,
+    editSuggestionsEnabled,
+    onAddSuggestionsForFile: handleAddSuggestionsForFile,
+    onAddEditorCommentForFile: handleAddEditorCommentForFile,
     onAddFileComment: handleAddFileComment,
     onAddFileCommentForFile: handleAddFileCommentForFile,
     onEditAnnotation: handleEditAnnotation,
@@ -2499,6 +2593,7 @@ const ReviewApp: React.FC = () => {
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffAvailable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
+    editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);
 
@@ -2508,12 +2603,11 @@ const ReviewApp: React.FC = () => {
   // Copy raw diff to clipboard
   const handleCopyDiff = useCallback(async () => {
     if (!diffData) return;
-    try {
-      await navigator.clipboard.writeText(diffData.rawPatch);
+    if (await copyTextToClipboard(diffData.rawPatch)) {
       setCopyRawDiffStatus('success');
       setTimeout(() => setCopyRawDiffStatus('idle'), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
       setCopyRawDiffStatus('error');
       setTimeout(() => setCopyRawDiffStatus('idle'), 2000);
     }
@@ -2548,14 +2642,15 @@ const ReviewApp: React.FC = () => {
       setShowNoAnnotationsDialog(true);
       return;
     }
-    try {
-      await navigator.clipboard.writeText(feedbackMarkdown);
+    if (await copyTextToClipboard(feedbackMarkdown)) {
       setCopyFeedback('Feedback copied!');
       setTimeout(() => setCopyFeedback(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+      toast.success('Feedback copied');
+    } else {
+      console.error('Failed to copy');
       setCopyFeedback('Failed to copy');
       setTimeout(() => setCopyFeedback(null), 2000);
+      toast.error('Failed to copy');
     }
   }, [totalAnnotationCount, feedbackMarkdown]);
 
@@ -2867,6 +2962,25 @@ const ReviewApp: React.FC = () => {
     submitted, isSendingFeedback, isApproving, isExiting, isPlatformActioning,
     origin, platformMode, platformLabel, platformUser, prMetadata, totalAnnotationCount, openPlatformDialog,
     handleApprove, handleSendFeedback, handlePlatformAction
+  ]);
+
+  // Cmd/Ctrl+Shift+Y keyboard shortcut to copy feedback, mirroring the
+  // Copy Feedback button in the header.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'y' || isTypingTarget(e.target)) return;
+
+      if (platformCommentDialog || showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
+
+      e.preventDefault();
+      handleCopyFeedback();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    platformCommentDialog, showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
+    handleCopyFeedback
   ]);
 
   if (isLoading) {
@@ -3688,8 +3802,8 @@ const ReviewApp: React.FC = () => {
               </div>
               <div className="p-4 border-t border-border flex justify-end gap-2">
                 <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(feedbackMarkdown);
+                  onClick={() => {
+                    void copyTextToClipboard(feedbackMarkdown);
                   }}
                   className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-colors"
                 >
@@ -3735,7 +3849,7 @@ const ReviewApp: React.FC = () => {
                 <div>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">Path</span>
                   <button
-                    onClick={() => navigator.clipboard.writeText((agentCwd || gitContext?.cwd)!)}
+                    onClick={() => { void copyTextToClipboard((agentCwd || gitContext?.cwd)!); }}
                     className="mt-1 w-full text-left font-mono text-xs bg-muted/50 border border-border/50 rounded-md px-3 py-2 text-foreground hover:bg-muted transition-colors cursor-pointer break-all"
                     title="Click to copy"
                   >
@@ -3794,7 +3908,7 @@ const ReviewApp: React.FC = () => {
         {/* 0.20.0 look-and-feel / release announcement. Shared with the plan
             editor via a host-scoped cookie, so it shows once across both apps.
             Second in the dialog chain (guide intro → look-and-feel → review
-            setup) — the three never stack. */}
+            setup → edit mode) — the chain dialogs never stack. */}
         <LookAndFeelAnnouncementDialog
           isOpen={showLookAndFeel && !guideIntroVisible}
           gridEnabled={gridEnabled}
@@ -3803,8 +3917,8 @@ const ReviewApp: React.FC = () => {
         />
 
         {/* One-time guided-review intro. First in the dialog chain, ahead of
-            the look-and-feel announcement and the review setup — the three
-            never stack. */}
+            the look-and-feel announcement, the review setup, and the edit-mode
+            announcement — the chain dialogs never stack. */}
         {guideIntroVisible && (
           <GuideIntroDialog
             isOpen
@@ -3816,9 +3930,9 @@ const ReviewApp: React.FC = () => {
         )}
 
         {/* First-run review-view chooser (panel view + tree default diff).
-            Last in the dialog chain (guide intro → look-and-feel → review
-            setup) so the three never stack. On dismiss, apply the chosen
-            default to the current session. */}
+            Third in the dialog chain (guide intro → look-and-feel → review
+            setup → edit mode) so the chain dialogs never stack. On dismiss,
+            apply the chosen default to the current session. */}
         {showReviewSetup && !showLookAndFeel && !guideIntroVisible && (
           <ReviewSetupDialog
             isOpen
@@ -3838,12 +3952,24 @@ const ReviewApp: React.FC = () => {
           />
         )}
 
+        {/* One-time Edit Mode (edit-to-suggest) announcement. LAST in the
+            dialog chain (guide intro → look-and-feel → review setup → edit
+            mode) — editModeAnnouncementCanShow gates on all three, so the
+            chain dialogs never stack. */}
+        {editModeIntroVisible && (
+          <EditModeAnnouncementDialog
+            isOpen
+            onEnable={enableEditModeIntro}
+            onDismiss={dismissEditModeIntro}
+          />
+        )}
+
         {/* One-time PR feedback-destination spotlight. Strictly AFTER the
             first-run dialog chain (guide intro → look-and-feel → review
-            setup): it only mounts once none of the three is showing, so it
-            never stacks with them. PR mode only — the switcher it points at
-            doesn't render otherwise. */}
-        {showDestSpotlight && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && (
+            setup → edit mode): it only mounts once none of the four is
+            showing, so it never stacks with them. PR mode only — the switcher
+            it points at doesn't render otherwise. */}
+        {showDestSpotlight && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && (
           <DestinationSpotlight
             targetRef={destToggleRef}
             platformLabel={platformLabel}

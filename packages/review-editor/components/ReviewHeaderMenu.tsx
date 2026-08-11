@@ -7,7 +7,6 @@ import {
 } from '@plannotator/ui/components/ActionMenu';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { THEME_MODES } from '@plannotator/ui/components/themeModes';
-import { isThemeModeAvailable } from '@plannotator/ui/utils/themeRegistry';
 import { MenuVersionSection } from '@plannotator/ui/components/MenuVersionSection';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
@@ -46,7 +45,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
   origin,
   isWSL = false,
 }) => {
-  const { theme, setTheme, colorTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
 
   const showUpdateDot = !!updateInfo?.updateAvailable && !updateInfo.dismissed;
 
@@ -87,30 +86,23 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           <div className="px-3 py-2 space-y-1.5">
             <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
-              {THEME_MODES.map(({ id, label, Icon }) => {
-                const available = isThemeModeAvailable(colorTheme, id);
-                return (
-                  <button
-                    key={id}
-                    disabled={!available}
-                    title={available ? undefined : 'Not supported by the current color theme'}
-                    onClick={() => {
-                      closeMenu();
-                      setTheme(id);
-                    }}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                      !available
-                        ? 'cursor-not-allowed text-muted-foreground opacity-40'
-                        : theme === id
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Icon />
-                    <span>{label}</span>
-                  </button>
-                );
-              })}
+              {THEME_MODES.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    closeMenu();
+                    setTheme(id);
+                  }}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                    theme === id
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon />
+                  <span>{label}</span>
+                </button>
+              ))}
             </div>
           </div>
 

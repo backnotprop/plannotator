@@ -2,6 +2,7 @@ import React from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
 import { ViewedControl, ChangeTypeLetter, StageControl, AnnotationBadge, DiffCounts, CommittedDot } from './FileRowBits';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 
 interface FileTreeNodeProps {
   node: TreeNode;
@@ -186,20 +187,20 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
         <ContextMenu.Positioner className="z-50">
           <ContextMenu.Popup className="min-w-[160px] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           <ContextMenu.Item
-            onClick={() => navigator.clipboard.writeText(node.path)}
+            onClick={() => { void copyTextToClipboard(node.path); }}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
           >
             Copy path
           </ContextMenu.Item>
           <ContextMenu.Item
-            onClick={() => navigator.clipboard.writeText(node.name)}
+            onClick={() => { void copyTextToClipboard(node.name); }}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
           >
             Copy filename
           </ContextMenu.Item>
           {repoRoot && (
             <ContextMenu.Item
-              onClick={() => navigator.clipboard.writeText(`${repoRoot.replace(/\/$/, '')}/${node.path}`)}
+              onClick={() => { void copyTextToClipboard(`${repoRoot.replace(/\/$/, '')}/${node.path}`); }}
               className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
             >
               Copy full path

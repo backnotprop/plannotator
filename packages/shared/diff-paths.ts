@@ -180,6 +180,65 @@ export function parseDiffFilePathLines(lines: string[]): DiffPathPair {
   return { oldPath, newPath };
 }
 
+/**
+ * Extended-header line the review core injects into the display-only stub it
+ * emits for a file whose bytes exceed the review size cap. Without it the stub
+ * is indistinguishable from a genuine binary file, and the UI could only show
+ * a header-only card with no counts and no explanation — which reads as broken.
+ *
+ * Lives here (rather than in review-core) so the browser bundle can detect the
+ * shape without pulling the whole node-facing review core in. Both server
+ * runtimes get it from review-core, which is vendored to Pi alongside this file.
+ *
+ * The `#` prefix is what makes detection unambiguous: diff CONTENT lines are
+ * always prefixed with `+`, `-`, or a space, so a bare match on this exact line
+ * can only come from the extended header we wrote. Git ignores unknown
+ * extended-header lines, and @pierre/diffs parses the stub identically with or
+ * without it.
+ */
+export const OVERSIZED_REVIEW_STUB_MARKER = "#plannotator-oversized-file";
+
+/**
+ * Human-readable form of the cap for UI copy. The authoritative byte value is
+ * `MAX_REVIEW_FILE_CONTENT_BYTES` in review-core, which is node-facing; a
+ * review-core test asserts the two never drift.
+ */
+export const OVERSIZED_REVIEW_STUB_LIMIT_LABEL = "5 MB";
+
+/** True when `patch` is one of our oversized-file stubs (see the marker above). */
+export function isOversizedReviewStubPatch(patch: string): boolean {
+  return patch.split("\n").some((line) => line === OVERSIZED_REVIEW_STUB_MARKER);
+}
+
+/**
+ * True when a single file's patch chunk carries a binary marker and no hunks,
+ * so a diff renderer has literally nothing to draw for it.
+ *
+ * The GENERAL case, of which `isOversizedReviewStubPatch` above is the one
+ * specific case we can name: git emits this shape for real binary files, and
+ * the review core emits it for files it declined to read. Either way the card
+ * renders as a bare header with no counts and no body, which reads as a broken
+ * or empty diff rather than as content that was deliberately not shown.
+ *
+ * Callers that can say something more specific should ask the marker predicate
+ * FIRST and fall back to this one, so a marker-carrying stub is explained once,
+ * by the message that knows why.
+ *
+ * Scanning stops at the first hunk header: content lines always carry a `+`,
+ * `-`, or space prefix, so a `Binary files ` line at column zero before any
+ * `@@ ` can only be the extended header git (or the stub builder) wrote.
+ */
+export function isContentlessBinaryPatch(patch: string): boolean {
+  let hasBinaryMarker = false;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@ ")) return false;
+    if (line.startsWith("Binary files ") || line === "GIT binary patch") {
+      hasBinaryMarker = true;
+    }
+  }
+  return hasBinaryMarker;
+}
+
 export function parseDiffMetadataPathLines(lines: string[]): DiffPathPair {
   let oldPath: string | undefined;
   let newPath: string | undefined;

@@ -79,9 +79,49 @@ export interface Annotation {
     displayMode: boolean;
   }>; // math elements covered by a mixed text+formula selection
   prUrl?: string; // code-review PR mode: the PR this note belongs to, so it isn't shown/exported against another PR after an in-place switch
+  htmlAnchor?: HtmlElementAnchor; // raw-HTML pinpoint: serialized element anchor for reliable restoration
+  htmlAdditionalTargets?: HtmlAnnotationTarget[]; // raw-HTML shift-click multi-select: extra elements this one comment covers (primary stays htmlAnchor/originalText)
   // web-highlighter metadata for cross-element selections
   startMeta?: AnnotationTextMeta;
   endMeta?: AnnotationTextMeta;
+}
+
+/**
+ * Serialized element anchor for annotations created on the raw-HTML surface
+ * (pinpoint mode). Built inside the sandboxed viewer bridge: a verified-unique
+ * CSS selector plus a fingerprint (tag + normalized text snapshot) used to
+ * fail closed when a weak selector no longer matches the same content.
+ * Additive — annotations without one restore via document-wide text search.
+ */
+export interface HtmlElementAnchor {
+  selector: string;
+  tagName: string;
+  text?: string;
+  /**
+   * The user's selected point inside the target element's rect, normalized to
+   * 0..1 on each axis. Placed comment markers reproject it against the
+   * element's CURRENT rect, so the marker follows the element through
+   * responsive movement instead of pinning stale pixels. Additive — anchors
+   * without one (older records, keyboard-driven selections) fall back to the
+   * target rect center.
+   */
+  point?: { x: number; y: number };
+}
+
+/**
+ * One additional element covered by a multi-target raw-HTML pinpoint comment
+ * (shift-click multi-select). Carries what the export and composer chips need
+ * even when anchoring failed closed: the semantic label from the pinpoint
+ * hover cascade and the element's text (or `[element: …]` description).
+ * Additive — annotations without the array behave exactly as before.
+ */
+export interface HtmlAnnotationTarget {
+  /** Semantic label from the hover-label cascade (e.g. "Button", "rowchip"). */
+  label?: string;
+  /** The target element's capped text, or an element description when text-less. */
+  text: string;
+  /** Element anchor for restoration; absent when the bridge failed closed. */
+  anchor?: HtmlElementAnchor;
 }
 
 export type AlertKind = 'note' | 'tip' | 'warning' | 'caution' | 'important';
@@ -165,6 +205,15 @@ export interface CodeAnnotation {
   charStart?: number; // Character offset within lineStart (token-level selection)
   charEnd?: number; // Character offset within lineEnd (token-level selection)
   tokenText?: string; // Selected token/span text (token-level selection)
+  /** Exact text highlighted when the comment was created inside an edit
+   *  session (captured from the editor selection). Exported alongside the
+   *  comment so the agent sees what was highlighted even when it differs
+   *  from the anchored diff lines. */
+  selectedText?: string;
+  /** True when the edit-session selection overlapped in-session edits: the
+   *  line anchor maps to the pristine lines those edits replace, so it is
+   *  approximate and the export labels it as such. */
+  selectedTextFromEdits?: boolean;
   createdAt: number;
   author?: string;
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API

@@ -523,7 +523,7 @@ const MermaidBlockImpl: React.FC<{ block: Block }> = ({ block }) => {
 
   const inlineSource = (
     <pre className="rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30 p-4">
-      <code className="hljs font-mono language-mermaid">{block.content}</code>
+      <code className="pn-code font-mono language-mermaid">{block.content}</code>
     </pre>
   );
 

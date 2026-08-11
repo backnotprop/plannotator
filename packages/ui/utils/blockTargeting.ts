@@ -15,7 +15,7 @@ const SKIP_SELECTORS = [
   '[data-pinpoint-ignore]',
 ].join(',');
 
-const INLINE_TARGET_SELECTOR = 'strong,em,a,code:not(.hljs)';
+const INLINE_TARGET_SELECTOR = 'strong,em,a,code:not(.pn-code)';
 const TABLE_EDGE_ZONE = 22;
 
 /** The semantic kind of a document target. */
@@ -198,7 +198,7 @@ export function buildSemanticTargetGraph(container: HTMLElement): SemanticTarget
 
     const group = block.closest<HTMLElement>('[data-pinpoint-group]');
     const parentKey = group ? groupTargets.get(group)?.key ?? null : null;
-    const codeElement = block.querySelector<HTMLElement>('pre > code.hljs');
+    const codeElement = block.querySelector<HTMLElement>('pre > code.pn-code');
     const mathElement = block.matches('.math-annotatable,[data-math-tex]')
       ? block
       : block.querySelector<HTMLElement>('.math-annotatable,[data-math-tex]');
@@ -360,9 +360,9 @@ export function getOwningBlockTarget(
 /** Pick the block nearest the visible center of the document viewport. */
 export function findInitialSemanticTarget(
   graph: SemanticTargetGraph,
+  scrollViewport?: HTMLElement | null,
 ): SemanticTarget | null {
-  const viewport = graph.container.closest<HTMLElement>('[data-overlayscrollbars-viewport]');
-  const viewportRect = (viewport ?? graph.container).getBoundingClientRect();
+  const viewportRect = (scrollViewport ?? graph.container).getBoundingClientRect();
   const centerY = viewportRect.top + viewportRect.height / 2;
   return graph.blockKeys
     .map((key) => resolveSemanticTarget(graph, key))
@@ -453,7 +453,7 @@ export function resolveSemanticTargetAtPoint(
   const blockTarget = targetForBlock(graph, block);
   if (!blockTarget) return null;
 
-  const code = block.querySelector<HTMLElement>('pre > code.hljs');
+  const code = block.querySelector<HTMLElement>('pre > code.pn-code');
   if (
     code
     && (pointerTarget === code || code.contains(pointerTarget) || pointerTarget.closest('pre'))

@@ -4,6 +4,7 @@ import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 import { annotateFileFeedback, annotateMessageFeedback, wrapFeedbackForClipboard, type AnnotateFeedbackTemplates } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
+import { primeSkillCatalog, primeSkillContentsForExport } from '@plannotator/ui/utils/skillCatalog';
 import { Viewer, ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
 import { MarkdownEditor, type MarkdownEditorHandle } from '@plannotator/ui/components/MarkdownEditor';
@@ -25,6 +26,7 @@ import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { storage } from '@plannotator/ui/utils/storage';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
@@ -46,7 +48,8 @@ import { markVimModeAnnouncementSeen, needsVimModeAnnouncement } from '@plannota
 import { buildDefaultPrompt, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
-import { getInputMethod, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
+import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
+import { getHtmlChromeState, saveHtmlChromeState } from '@plannotator/ui/utils/htmlChrome';
 import { useInputMethodSwitch } from '@plannotator/ui/hooks/useInputMethodSwitch';
 import { usePrintMode } from '@plannotator/ui/hooks/usePrintMode';
 import { requestVimDocumentFocus } from '@plannotator/ui/hooks/useVimDocumentFocus';
@@ -354,6 +357,11 @@ const App: React.FC = () => {
   const planAreaRef = useRef<HTMLDivElement>(null);
   const [actionsLabelMode, setActionsLabelMode] = useState<ActionsLabelMode>('full');
   const [isApiMode, setIsApiMode] = useState(false);
+  // Warm the skill-reference catalog once per API session so export enrichment
+  // covers comments whose composer never opened (draft restore, panel edits).
+  useEffect(() => {
+    if (isApiMode) primeSkillCatalog();
+  }, [isApiMode]);
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
@@ -436,7 +444,20 @@ const App: React.FC = () => {
   const [convertHtml, setConvertHtml] = useState(false);
   // Hide the floating HTML annotation controls (toolstrip + action cluster) so the
   // user can read the rendered page unobstructed. Selections/annotations are unaffected.
+  // First-ever HTML session opens minimal (everything hidden); afterwards the user's
+  // last chrome state is restored from the persisted cookie (see utils/htmlChrome.ts).
   const [htmlToolsHidden, setHtmlToolsHidden] = useState(false);
+  // Gate for the chrome-persistence writer: only start saving once the persisted
+  // state has been applied, so a pre-restore render can't clobber the cookie.
+  const htmlChromeRestoredRef = useRef(false);
+  // The restore's own commit still renders pre-restore values; the writer
+  // consumes this flag to skip that exact run (see the save effect).
+  const skipNextHtmlChromeSaveRef = useRef(false);
+  // Every overlay the document surface paints over a rendered HTML page — the
+  // toolstrip and the collapsed sidebar tab flags — drops out together, so the
+  // page really gets the whole viewport. The header's "Show tools" button stays
+  // put, and Mod+B still opens the sidebar, so neither can be locked away.
+  const htmlChromeHidden = isHtmlSurface && htmlToolsHidden;
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1407,6 +1428,53 @@ const App: React.FC = () => {
       linkedDocHook.docAnnotationCount +
       globalAttachments.length;
 
+  // Lazily fetch the SKILL.md contents of referenced HUMAN-ONLY skills so the
+  // exported feedback can inject their instructions (a human referencing a
+  // human-only skill IS the human invocation). Runs whenever comment state
+  // changes — covering typed comments, panel edits, draft restore, and
+  // external annotations — and bumps a generation so memoized exports
+  // recompute once content lands. A submit that races the fetch degrades to
+  // the name + directory fallback inside skillReferenceExportBlock.
+  const [skillContentGeneration, setSkillContentGeneration] = useState(0);
+  useEffect(() => {
+    if (!isApiMode) return;
+    // Only reviewer-written comments prime skill contents. Annotations with a
+    // `source` arrived through the unauthenticated external-annotations API
+    // and can never cause injection (see skillReferenceExportBlock), so their
+    // references must not trigger content fetches either.
+    const texts: Array<string | undefined> = [];
+    for (const a of allAnnotations) if (!a.source) texts.push(a.text);
+    for (const a of codeAnnotations) if (!a.source) texts.push(a.text);
+    for (const entry of linkedDocHook.getDocAnnotations().values()) {
+      for (const a of entry.annotations) if (!a.source) texts.push(a.text);
+    }
+    if (messageMultiSelectMode) {
+      for (const state of getMessageStatesWithCurrent().values()) {
+        for (const a of state.linkedDocSession.root.annotations) if (!a.source) texts.push(a.text);
+        for (const doc of state.linkedDocSession.docs.values()) {
+          for (const a of doc.annotations) if (!a.source) texts.push(a.text);
+        }
+        for (const a of state.codeAnnotations) if (!a.source) texts.push(a.text);
+      }
+    }
+    let cancelled = false;
+    primeSkillContentsForExport(texts).then((changed) => {
+      if (changed && !cancelled) setSkillContentGeneration((g) => g + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isApiMode,
+    allAnnotations,
+    codeAnnotations,
+    linkedDocHook.docAnnotationCount,
+    linkedDocHook.getDocAnnotations,
+    messageMultiSelectMode,
+    getMessageStatesWithCurrent,
+    activeMessageAnnotationCounts,
+  ]);
+
   const annotationsOutput = useMemo(() => {
     const docAnnotations = linkedDocHook.getDocAnnotations();
     const hasDocAnnotations = Array.from(docAnnotations.values()).some(
@@ -1457,7 +1525,9 @@ const App: React.FC = () => {
     }
 
     return output;
-  }, [blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations, codeAnnotations, sourceConverted, annotateSource, linkedDocHook.isActive, linkedDocHook.filepath]);
+    // skillContentGeneration re-runs this once lazily fetched human-only skill
+    // contents land in the export registry (module state the exporters read).
+  }, [blocks, allAnnotations, globalAttachments, linkedDocHook.getDocAnnotations, editorAnnotations, codeAnnotations, sourceConverted, annotateSource, linkedDocHook.isActive, linkedDocHook.filepath, skillContentGeneration]);
 
   // Code-file comments are intentionally not serialized into share URLs in v1.
   // Hide share entry points once they exist so we do not silently drop feedback.
@@ -1524,10 +1594,9 @@ const App: React.FC = () => {
 
     initialSidebarPreferenceAppliedRef.current = true;
     if (archive.archiveMode || goalSetupMode || annotateSource === 'folder') return;
-    if (renderAs === 'html') {
-      sidebar.close();
-      return;
-    }
+    // HTML chrome is owned by the surface-transition effect below, which also
+    // covers linked .html docs opened from a markdown session.
+    if (renderAs === 'html') return;
     if (uiPrefs.tocEnabled && hasTocEntries) {
       sidebar.open('toc');
     }
@@ -1544,6 +1613,60 @@ const App: React.FC = () => {
     uiPrefs.tocEnabled,
     wideModeType,
   ]);
+
+  // Restore-on-entry: every time the session transitions ONTO an HTML surface
+  // (a root raw-HTML session, or a linked .html doc opened from markdown),
+  // apply the chrome the user last left an HTML session with (first-ever run:
+  // everything hidden, sidebar closed — a minimal "just the page" paint).
+  // Re-restoring on each entry is also what keeps a markdown surface's sidebar
+  // state from leaking into the HTML cookie on the way back.
+  const prevHtmlChromeSurfaceRef = useRef(false);
+  useEffect(() => {
+    if (isLoading || isLoadingShared) return;
+    if (wideModeType !== null) return;
+    const wasHtml = prevHtmlChromeSurfaceRef.current;
+    prevHtmlChromeSurfaceRef.current = isHtmlSurface;
+    if (!isHtmlSurface || wasHtml) return;
+    if (archive.archiveMode || goalSetupMode || annotateSource === 'folder') return;
+    const chrome = getHtmlChromeState();
+    skipNextHtmlChromeSaveRef.current = true;
+    setHtmlToolsHidden(chrome.toolsHidden);
+    if (chrome.sidebarOpen) sidebar.open();
+    else sidebar.close();
+    setIsPanelOpen(chrome.panelOpen);
+    htmlChromeRestoredRef.current = true;
+  }, [
+    annotateSource,
+    archive.archiveMode,
+    goalSetupMode,
+    isHtmlSurface,
+    isLoading,
+    isLoadingShared,
+    sidebar.close,
+    sidebar.open,
+    wideModeType,
+  ]);
+
+  // Persist the chrome the user leaves an HTML session in (tools visibility +
+  // sidebar open), so the next raw-HTML session opens exactly as they left this
+  // one. Gated on the restore having run — a pre-restore render must not save
+  // the transient defaults over the user's remembered state — and on being ON
+  // the HTML surface, so a linked markdown doc's sidebar use never writes here.
+  useEffect(() => {
+    if (!isHtmlSurface || !htmlChromeRestoredRef.current) return;
+    // The restore effect flips htmlChromeRestoredRef synchronously, but its
+    // state updates land a commit LATER — a save in the restore commit itself
+    // would still see pre-restore values and clobber the remembered state
+    // (self-corrected next flush, but a page ending in between would freeze
+    // the inverted value). Skip exactly that one run. If the restore changed
+    // any state, the changed deps re-run this effect and save then; if it
+    // changed nothing, the cookie already holds exactly those values.
+    if (skipNextHtmlChromeSaveRef.current) {
+      skipNextHtmlChromeSaveRef.current = false;
+      return;
+    }
+    saveHtmlChromeState({ toolsHidden: htmlToolsHidden, sidebarOpen: sidebar.isOpen, panelOpen: isPanelOpen });
+  }, [isHtmlSurface, htmlToolsHidden, sidebar.isOpen, isPanelOpen]);
 
   const ensureShareLink = useCallback(async (): Promise<string | null> => {
     const existing = shortShareUrl || shareUrl;
@@ -2344,8 +2467,21 @@ const App: React.FC = () => {
 
   const handleInputMethodChange = (method: InputMethod) => {
     setInputMethod(method);
-    saveInputMethod(method);
+    // Surface-scoped persistence: an explicit choice made on the HTML surface
+    // sticks for HTML sessions only; markdown keeps its own preference.
+    saveInputMethod(method, isHtmlSurface ? 'html' : 'markdown');
   };
+
+  // Raw-HTML surfaces resolve their own input-method preference (default:
+  // Pinpoint — see utils/inputMethod.ts for the persistence decision). Applied
+  // whenever the surface flips (session load or linked-doc navigation), so a
+  // markdown-era "drag" cookie never suppresses the HTML default.
+  const prevSurfaceRef = useRef(isHtmlSurface);
+  useEffect(() => {
+    if (prevSurfaceRef.current === isHtmlSurface) return;
+    prevSurfaceRef.current = isHtmlSurface;
+    setInputMethod(getInputMethod(isHtmlSurface ? 'html' : 'markdown'));
+  }, [isHtmlSurface]);
 
   // Alt/Option key: hold to temporarily switch, double-tap to toggle
   useInputMethodSwitch(inputMethod, handleInputMethodChange);
@@ -3190,6 +3326,15 @@ const App: React.FC = () => {
     setAnnotations(prev => [...prev, ann]);
     setSelectedAnnotationId(ann.id);
     setSelectedCodeAnnotationId(null);
+    // Annotation activity keeps the HTML-surface preferences alive: re-stamp
+    // the input method and chrome records so they only expire for users who
+    // have not annotated HTML within the staleness TTL (see preferenceTtl.ts).
+    if (isHtmlSurface) {
+      refreshInputMethodStamp(inputMethod);
+      if (htmlChromeRestoredRef.current) {
+        saveHtmlChromeState({ toolsHidden: htmlToolsHidden, sidebarOpen: sidebar.isOpen, panelOpen: isPanelOpen });
+      }
+    }
   };
 
   // Keep selection behavior explicit across mobile/wide-mode transitions.
@@ -3829,10 +3974,9 @@ const App: React.FC = () => {
   // (utils/agentInstructions.ts) so it's easy to edit independently of UI code.
   const handleCopyAgentInstructions = async () => {
     const payload = buildPlanAgentInstructions(window.location.origin);
-    try {
-      await navigator.clipboard.writeText(payload);
+    if (await copyTextToClipboard(payload)) {
       toast.success('Agent instructions copied');
-    } catch {
+    } else {
       toast.error('Failed to copy');
     }
   };
@@ -3845,10 +3989,9 @@ const App: React.FC = () => {
       toast.error('Failed to create share link');
       return;
     }
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyTextToClipboard(url)) {
       toast.success('Share link copied');
-    } catch {
+    } else {
       toast.error('Failed to copy');
     }
   };
@@ -4259,7 +4402,7 @@ const App: React.FC = () => {
             </div>
           )}
           {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
-          {wideModeType === null && !sidebar.isOpen && !goalSetupMode && !isAgentTerminalOpen && (
+          {wideModeType === null && !sidebar.isOpen && !goalSetupMode && !isAgentTerminalOpen && !htmlChromeHidden && (
             <SidebarTabs
               activeTab={sidebar.activeTab}
               onToggleTab={toggleSidebarTab}
@@ -4408,7 +4551,7 @@ const App: React.FC = () => {
                   comment/markup mode). Hidden during plan diff, and on HTML surfaces
                   when the header's "Hide tools" toggle is on (leaving the rendered HTML
                   free of overlay controls). On HTML it floats top-left over the doc. */}
-              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && !isEditingMarkdown && !(isHtmlSurface && htmlToolsHidden) && (
+              {!goalSetupMode && !isPlanDiffActive && !archive.archiveMode && !isEditingMarkdown && !htmlChromeHidden && (
                 <div
                   data-print-hide
                   className={isHtmlSurface
@@ -4726,7 +4869,7 @@ const App: React.FC = () => {
             onClose={() => setIsPanelOpen(false)}
             onQuickCopy={async () => {
               const output = getCurrentFeedbackPayload();
-              await navigator.clipboard.writeText(wrapCopiedFeedback(output));
+              return copyTextToClipboard(wrapCopiedFeedback(output));
             }}
             onShare={canShareCurrentSession ? () => { setIsPanelOpen(false); setInitialExportTab('share'); setShowExport(true); } : undefined}
             otherFileAnnotations={otherFileAnnotations}

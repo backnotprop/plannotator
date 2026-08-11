@@ -19,6 +19,36 @@ Obsidian users can auto-save approved plans to Obsidian as well. [See details](#
 
 ## Install
 
+### OpenCode 2 beta
+
+Install OpenCode 2 from npm's `next` tag, then add Plannotator to the V2 `plugins` field:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "@plannotator/opencode@latest",
+      "options": {
+        "workflow": "plan-agent",
+        "planningAgents": ["plan"]
+      }
+    }
+  ]
+}
+```
+
+Restart OpenCode 2 and verify that `plannotator` appears in `opencode2 plugin list`.
+
+OpenCode 2 support is experimental while its plugin API is in beta. The core `submit_plan` review flow works, but the current API has these limitations:
+
+- OpenCode 2 does not expose a native slash-command execution hook. Its command definitions expand to model prompts, so `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last` remain OpenCode 1-only instead of silently becoming model-mediated commands.
+- V2 tool execution does not expose an abort signal. Cancelling a turn cannot yet stop a running review server or CLI child immediately.
+- The V2 plugin context cannot switch the active session agent. Agent switching selected in the review UI is ignored with a server-log warning; switch to `build` manually after approval before implementation.
+- The V2 plugin context has no TUI toast/log API, so remote session URLs are written to the server output rather than shown as a toast.
+
+### OpenCode 1
+
 Add to your `opencode.json`:
 
 ```json
@@ -30,7 +60,7 @@ Add to your `opencode.json`:
 
 Restart OpenCode. By default, the `submit_plan` tool is available to OpenCode's `plan` agent, not to `build` or other primary agents.
 
-> **Slash commands:** Run the install script to get `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last`:
+> **OpenCode 1 slash commands:** Run the install script to get `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last`:
 > ```bash
 > curl -fsSL https://plannotator.ai/install.sh | bash
 > ```
@@ -38,7 +68,7 @@ Restart OpenCode. By default, the `submit_plan` tool is available to OpenCode's 
 
 ## Workflow Modes
 
-Plannotator supports four OpenCode workflows:
+The examples below use the OpenCode 1 config shape. OpenCode 2 places the same option keys under the plugin entry's `options` object shown above. In V2, `manual` intentionally registers no tool and native slash-command handlers are unavailable, so it currently leaves the integration inactive.
 
 - **`plan-agent`** (default): `submit_plan` is available to OpenCode's built-in `plan` agent plus any extra agents listed in `planningAgents`. This keeps Plannotator integrated with OpenCode plan mode without nudging `build` to call it.
 - **`manual`**: `submit_plan` is not registered. Use `/plannotator-last`, `/plannotator-annotate`, and `/plannotator-review` when you want Plannotator.

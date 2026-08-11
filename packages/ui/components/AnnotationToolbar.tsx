@@ -3,6 +3,7 @@ import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 import { type QuickLabel, getQuickLabels } from "../utils/quickLabels";
+import { copyTextToClipboard } from "../utils/clipboard";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
@@ -72,19 +73,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       const codeEl = element.querySelector('code');
       textToCopy = codeEl?.textContent || element.textContent || '';
     }
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = textToCopy;
-      textarea.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      textarea.remove();
+    if (await copyTextToClipboard(textToCopy)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   };
 
   // Update position on scroll/resize

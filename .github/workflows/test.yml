@@ -39,6 +39,24 @@ jobs:
       - name: Run file-browser DOM test (isolated)
         run: DOM_TESTS=1 bun test packages/ui/hooks/useFileBrowser.test.tsx
 
+      # These two render against the REAL @pierre/diffs, because the defects
+      # they cover (a stale render cache served across a cacheKey collision;
+      # an empty stub card) only exist inside its renderer. A sibling in the
+      # list below, AllFilesCodeView.lifecycle.test.tsx, calls
+      # `mock.module('@pierre/diffs', ...)` with a hunk-less getSingularPatch
+      # and `processFile: () => null` — and bun's module mocks are process
+      # global with no restore, so in one shared process the real renderer is
+      # not guaranteed to still be there by the time these load. That leak
+      # reproduced on the Linux runner and not on macOS. Their own process
+      # removes the coupling outright, same reasoning as the isolated step
+      # above.
+      - name: Run diff-renderer DOM tests (isolated, real @pierre/diffs)
+        run: >-
+          DOM_TESTS=1 bun test
+          packages/review-editor/components/DiffViewer.fullContentSwap.test.tsx
+          packages/review-editor/components/DiffViewer.oversizedStub.test.tsx
+          packages/review-editor/components/DiffViewer.binaryNotice.test.tsx
+
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
       # (not the whole ui suite) to keep this process light.
       - name: Run UI seam-contract + DOM tests
@@ -48,16 +66,37 @@ jobs:
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
           packages/ui/components/html-viewer/srcdoc.test.ts
+          packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
+          packages/ui/components/html-viewer/HtmlViewer.vimHud.test.tsx
+          packages/ui/components/Viewer.vimMode.integration.test.tsx
+          packages/ui/hooks/useVimSelection.test.tsx
+          packages/ui/utils/codeHighlight.test.ts
+          packages/ui/utils/htmlChrome.test.ts
+          packages/ui/utils/inputMethod.test.ts
+          packages/ui/utils/vimNavigation.test.ts
+          packages/ui/utils/clipboard.test.ts
+          packages/ui/utils/vimScroll.test.ts
           packages/ui/components/InlineMarkdown.resolveLinkedDoc.test.tsx
           packages/ui/components/MarkdownDiff.frozen.test.tsx
           packages/ui/components/MarkdownEditor.extensions.test.tsx
+          packages/ui/components/CommentPopover.skillReferences.test.tsx
+          packages/ui/components/SkillReferenceMenu.placement.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
           packages/review-editor/components/CommentActions.test.tsx
           packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
+          packages/review-editor/components/FileHeader.edit.test.tsx
+          packages/review-editor/edit/useEditSession.recovery.test.tsx
+          packages/review-editor/edit/discardRestoreRender.test.tsx
+          packages/review-editor/edit/selectionActionPopover.test.ts
+          packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
+          packages/review-editor/components/guide/GuideSectionCard.test.tsx
+          packages/review-editor/components/guide/GuideView.test.tsx
           packages/review-editor/hooks/useReviewSearch.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
           packages/ui/components/Viewer.consumer.test.tsx
+          packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
+          packages/ui/utils/codeBlockMark.test.ts
           packages/ui/components/InlineMarkdown.seam.test.tsx
           packages/ui/components/ImageThumbnail.seam.test.tsx
           packages/ui/hooks/useAnnotationHighlighter.test.tsx
@@ -71,7 +110,49 @@ jobs:
           packages/ui/components/DocBadges.test.tsx
           packages/editor/planDiffAutoExit.test.tsx
           packages/editor/App.archiveReadOnly.test.tsx
+          packages/editor/App.htmlHideTools.test.tsx
           packages/editor/actionsLabelMode.test.ts
+
+  opencode-v2:
+    name: OpenCode 2 installed package
+    runs-on: ubuntu-latest
+    # The smoke's own budgets (health 120s, plugin activation 300s) are the real assertion;
+    # this is only a backstop so a genuinely wedged runner cannot idle for hours.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install OpenCode 2
+        run: npm install --global @opencode-ai/cli@0.0.0-next-16775
+
+      - name: Build OpenCode plugin assets
+        run: bun run build:review && bun run build:hook && bun run build:opencode
+
+      # This is the only job with the single-file bundles on disk, so it is the
+      # only place the built-artifact assertions in entry-assets can actually
+      # run (they skip on an unbuilt checkout). Chief among them: no inlined
+      # WebAssembly survived the bundle.
+      - name: Assert built bundles ship no inlined WASM
+        run: bun test tests/entry-assets.test.ts
+
+      - name: Pack OpenCode plugin
+        working-directory: apps/opencode-plugin
+        run: npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+
+      - name: Run installed-package smoke
+        # Glob the tarball so this job survives version bumps; npm pack wrote
+        # exactly one plannotator-opencode-*.tgz into RUNNER_TEMP above.
+        run: >-
+          bun run --cwd apps/opencode-plugin smoke:v2 --
+          "$(command -v opencode2)"
+          "$RUNNER_TEMP"/plannotator-opencode-*.tgz
 
   uninstall-windows:
     # Run the filesystem and path logic under real Windows path semantics.

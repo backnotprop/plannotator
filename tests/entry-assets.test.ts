@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dir, '..');
@@ -24,9 +24,51 @@ describe('review entry assets', () => {
     expect(theme).toContain("--font-sans: 'Inter Variable'");
     expect(theme).toContain("--font-mono: 'Geist Mono Variable'");
 
+    // Syntax highlighting is the bundled Shiki instance @pierre/diffs already
+    // runs (JavaScript regex engine, no WASM, no network). A CDN-loaded
+    // highlighter or a runtime wasm fetch would break the single-file builds.
     const codeBlock = read('packages/ui/components/blocks/CodeBlock.tsx');
-    expect(codeBlock).toContain("import hljs from 'highlight.js';");
-    expect(codeBlock).toContain("import 'highlight.js/styles/github-dark.css';");
+    expect(codeBlock).toContain("from '../../utils/codeHighlight'");
+
+    const highlighter = read('packages/ui/utils/codeHighlight.ts');
+    expect(highlighter).toContain("import('@pierre/diffs')");
+    expect(highlighter).toContain("preferredHighlighter: 'shiki-js'");
+    expect(highlighter).not.toMatch(/https?:\/\//);
+  });
+
+  test('nothing depends on highlight.js any more', () => {
+    for (const manifest of ['packages/ui/package.json', 'packages/review-editor/package.json']) {
+      expect(read(manifest)).not.toContain('highlight.js');
+    }
+  });
+
+  test('the dead Oniguruma WASM is aliased out of every bundled app', () => {
+    for (const config of [
+      'apps/review/vite.config.ts',
+      'apps/hook/vite.config.ts',
+      'apps/portal/vite.config.ts',
+    ]) {
+      expect(read(config)).toContain("'shiki/wasm': path.resolve(");
+    }
+  });
+
+  // The alias assertions above only read SOURCE. A future @pierre/diffs bump
+  // could reach the same inlined blob through a different import specifier and
+  // every source check would still pass, so this reads the ARTIFACT: a base64
+  // WASM module always starts `\0asm\x01\0\0\0`, which encodes with the
+  // `AGFzbQ` prefix regardless of how it got inlined.
+  //
+  // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
+  // job that builds the bundles runs this file right after the build so the
+  // assertion is not silently optional there.
+  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html'];
+  test.each(bundles)('%s ships no inlined WebAssembly (skipped if unbuilt)', (path) => {
+    const full = resolve(root, path);
+    if (!existsSync(full)) return;
+    // Asserted on a boolean, not the string: these bundles are ~20MB and a
+    // `toContain` failure would print all of it.
+    const inlinedWasm = readFileSync(full, 'utf8').includes('AGFzbQ');
+    expect({ path, inlinedWasm }).toEqual({ path, inlinedWasm: false });
   });
 });
 

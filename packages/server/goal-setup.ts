@@ -15,7 +15,7 @@ import {
   type GoalSetupQuestionAnswer,
   type GoalSetupResult,
 } from "@plannotator/shared/goal-setup";
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import {
   handleFavicon,
@@ -132,6 +132,7 @@ export async function startGoalSetupServer(
               const body = (await req.json()) as {
                 displayName?: string;
                 diffOptions?: Record<string, unknown>;
+                theme?: Record<string, unknown>;
                 conventionalComments?: boolean;
                 conventionalLabels?: unknown[] | null;
               };
@@ -141,6 +142,9 @@ export async function startGoalSetupServer(
               }
               if (body.diffOptions !== undefined) {
                 toSave.diffOptions = body.diffOptions;
+              }
+              if (body.theme !== undefined) {
+                toSave.theme = body.theme;
               }
               if (body.conventionalComments !== undefined) {
                 toSave.conventionalComments = body.conventionalComments;
@@ -204,7 +208,7 @@ export async function startGoalSetupServer(
   );
 
   const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
+  const serverUrl = buildAdvertisedUrl(port);
   onReady?.(serverUrl, isRemote, port);
 
   return {

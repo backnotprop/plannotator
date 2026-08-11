@@ -1,4 +1,4 @@
-/** Map file extension to highlight.js language name */
+/** Map file extension to a Shiki language name (undefined = render plain) */
 export function detectLanguage(filePath: string): string | undefined {
   const ext = filePath.split('.').pop()?.toLowerCase();
   const map: Record<string, string> = {

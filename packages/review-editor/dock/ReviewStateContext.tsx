@@ -9,6 +9,8 @@ import type { PRMetadata, PRContext } from '@plannotator/shared/pr-types';
 import type { PRArtifact } from '../utils/prArtifacts';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { FeedbackDiffContext } from '../utils/exportFeedback';
+import type { SuggestionHunk } from '../edit/deriveSuggestions';
+import type { EditSelectionComment } from '../edit/useEditSession';
 
 /**
  * Shared review state consumed by dockview panel wrappers.
@@ -61,6 +63,15 @@ export interface ReviewState {
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
   onAddAnnotationForFile: (filePath: string, type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
+  /** EXPERIMENTAL edit-to-suggestion flag (cookie setting, default OFF). Only
+   * the plain all-files panel consumes it — Guided Review surfaces stay off. */
+  editSuggestionsEnabled: boolean;
+  /** Sink for suggestions derived from a completed edit session (one hunk per
+   * contiguous changed region; becomes normal suggestion annotations). */
+  onAddSuggestionsForFile: (filePath: string, hunks: SuggestionHunk[]) => void;
+  /** Sink for a comment authored through the edit session's Selection Action
+   * ("Make annotation"): line-scoped comment on pristine new-side lines. */
+  onAddEditorCommentForFile: (filePath: string, comment: EditSelectionComment) => void;
   onAddFileComment: (text: string) => void;
   onAddFileCommentForFile: (filePath: string, text: string) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;

@@ -27,6 +27,7 @@
 @import "./themes/cursor.css";
 @import "./themes/cursor-hc.css";
 @import "./themes/cursor-midnight.css";
+@import "./themes/colorblind.css";
 @import "./themes/everforest.css";
 @import "./themes/everforest-hard.css";
 @import "./themes/everforest-soft.css";
@@ -55,6 +56,28 @@
 @import "./themes/simple.css";
 @import "./themes/neutral.css";
 @import "./print.css";
+
+/* Skill-reference composer input (CommentPopover). The textarea's own glyphs
+ * are transparent — a mirrored aria-hidden overlay behind it paints the text,
+ * with reference tokens in the theme's primary color. The caret and the
+ * selection stay on the textarea: the caret takes the foreground token, and
+ * the selection uses a translucent primary wash so the overlay text stays
+ * readable through it. During IME composition `.pn-ref-composing` restores
+ * the native text so composition underlines render normally. */
+.pn-ref-input {
+  color: transparent;
+  caret-color: var(--foreground);
+}
+.pn-ref-input::selection {
+  background: color-mix(in oklab, var(--primary) 30%, transparent);
+  color: transparent;
+}
+.pn-ref-input.pn-ref-composing {
+  color: inherit;
+}
+.pn-ref-input.pn-ref-composing::selection {
+  color: inherit;
+}
 
 /* Live Vim HUD target — mirrors the four-corner treatment used in the
  * product demo while measuring the real semantic target/caret/range. */

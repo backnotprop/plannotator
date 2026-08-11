@@ -28,6 +28,15 @@ interface FileHeaderProps {
   fileCommentButtonRef?: (el: HTMLButtonElement | null) => void;
   collapseToggle?: React.ReactNode;
   onCollapseToggle?: () => void;
+  /** EXPERIMENTAL edit-to-suggestion mode: enter edit mode on this file.
+   * Absent = the feature is off and no edit UI renders. */
+  onEditFile?: () => void;
+  /** This file currently hosts the active edit session. Suppresses the Edit
+   * entry button; the session controls live in the EditSessionHud strip the
+   * owner renders below this header, never here. */
+  isEditing?: boolean;
+  /** When set, the Edit button is disabled with this tooltip. */
+  editDisabledReason?: string | null;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -104,6 +113,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   fileCommentButtonRef,
   collapseToggle,
   onCollapseToggle,
+  onEditFile,
+  isEditing = false,
+  editDisabledReason,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -140,7 +152,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   return (
     <div
       ref={headerRef}
-      className="flex-shrink-0 px-3 border-b border-border/50 flex items-center justify-between gap-2"
+      className="flex-shrink-0 px-3 border-b border-border/50 flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30"
       style={{ height: 'var(--panel-header-h)' }}
     >
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
@@ -261,6 +273,30 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </button>
         )}
         <SemanticFileBadge filePath={filePath} />
+        {/* Edit entry lives at the far right of the row, next to the file
+            actions dropdown, so the experimental affordance stays out of the
+            everyday Viewed/Add/Comment cluster. */}
+        {onEditFile && !isEditing && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!editDisabledReason) onEditFile();
+            }}
+            disabled={!!editDisabledReason}
+            className={`text-xs rounded transition-colors flex items-center ${isVeryTight ? 'px-1.5 py-1' : 'gap-1 px-2 py-1'} ${
+              editDisabledReason
+                ? 'opacity-50 cursor-not-allowed text-muted-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+            }`}
+            title={editDisabledReason ?? 'Edit this file to author a suggestion (experimental)'}
+            data-testid="edit-session-start"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            {!isVeryTight && <span>Edit</span>}
+          </button>
+        )}
         {/* File actions: open in app (when the live checkout matches this
             snapshot), copy path, copy file diff. Copy actions remain when a
             PR has no checkout or a committed GitButler layer is selected. */}

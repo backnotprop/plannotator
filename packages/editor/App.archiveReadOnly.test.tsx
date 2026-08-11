@@ -180,7 +180,14 @@ describe.if(hasDom)("App document permissions", () => {
     const codeBlock = document.querySelector<HTMLElement>('pre')?.closest<HTMLElement>('[data-block-id]');
     const code = codeBlock?.querySelector('code');
     if (!codeBlock || !code) throw new Error("Archived fenced code block did not render");
-    const renderedCode = code.innerHTML;
+    // Text, NOT innerHTML: `applyHighlight` writes plain text first and swaps in
+    // Shiki markup once the grammar attaches, so the fence's MARKUP legitimately
+    // changes on its own schedule and an innerHTML comparison races that swap.
+    // What this test is actually asserting is that the click/hover opened no
+    // mutation entry point, which is exactly what the text plus the absence of an
+    // annotation `<mark>` says (a code-block annotation is one whole-fence
+    // `<mark data-bind-id>`, per codeBlockMark.ts).
+    const renderedCodeText = code.textContent;
     await act(async () => {
       codeBlock.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
       codeBlock.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -189,7 +196,7 @@ describe.if(hasDom)("App document permissions", () => {
     expect(document.querySelector('textarea')).toBeNull();
     expect(document.querySelector('[data-quick-label-picker]')).toBeNull();
     expect(code.querySelector('mark')).toBeNull();
-    expect(code.innerHTML).toBe(renderedCode);
+    expect(code.textContent).toBe(renderedCodeText);
 
     const optionsButton = document.querySelector<HTMLButtonElement>('button[title="Options"]');
     if (!optionsButton) throw new Error("Options menu trigger did not render");

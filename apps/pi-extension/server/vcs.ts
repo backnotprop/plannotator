@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import {
 	type DiffResult,
 	type DiffType,
@@ -42,7 +43,7 @@ function runCommand(
 			cwd: options?.cwd,
 			detached: isolateProcessGroup,
 			env: preparedGitCommand?.env ?? commandEnvironment,
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 			windowsHide: true,
 		});
 
@@ -73,6 +74,7 @@ function runCommand(
 		const stderrChunks: Buffer[] = [];
 		proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
 		proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+		if (options?.stdin !== undefined) proc.stdin!.end(options.stdin);
 
 		proc.on("close", (code) => {
 			if (timer) clearTimeout(timer);
@@ -102,6 +104,31 @@ export const reviewRuntime: ReviewGitRuntime = {
 	async readTextFile(path: string): Promise<string | null> {
 		try {
 			return readFileSync(path, "utf-8");
+		} catch {
+			return null;
+		}
+	},
+
+	async getFileInfo(basePath, path) {
+		const fullPath = resolvePath(basePath ?? "", path);
+		try {
+			const fileStat = lstatSync(fullPath);
+			return {
+				path: fullPath,
+				size: fileStat.size,
+				mtimeMs: fileStat.mtimeMs,
+				isFile: fileStat.isFile(),
+				isSymbolicLink: fileStat.isSymbolicLink(),
+				isExecutable: (fileStat.mode & 0o111) !== 0,
+			};
+		} catch {
+			return null;
+		}
+	},
+
+	async readLink(path: string): Promise<string | null> {
+		try {
+			return readlinkSync(path);
 		} catch {
 			return null;
 		}

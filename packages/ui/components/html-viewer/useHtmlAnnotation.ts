@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type RefObject } from "react";
-import { AnnotationType, type Annotation, type EditorMode, type ImageAttachment } from "../../types";
+import { AnnotationType, type Annotation, type EditorMode, type HtmlAnnotationTarget, type HtmlElementAnchor, type ImageAttachment } from "../../types";
 import type { QuickLabel } from "../../utils/quickLabels";
 import { getIdentity } from "../../utils/identity";
 import type {
@@ -23,6 +23,30 @@ interface BridgeSelectionMessage {
   text: string;
   rect: BridgeRect;
   modeOverride?: EditorMode;
+  /** Serialized element anchor (pinpoint clicks) — validated, size-capped. */
+  anchor?: HtmlElementAnchor;
+  /** True when the selection came from a pinpoint click on an element. */
+  pinpoint?: boolean;
+  /** Bridge-assigned key for the primary target (multi-select bookkeeping). */
+  targetKey?: string;
+  /** Semantic label from the pinpoint hover cascade (chips + export). */
+  targetLabel?: string;
+}
+
+/** One draft target in an in-flight multi-select comment. Index 0 is primary. */
+export interface HtmlDraftTarget {
+  key: string;
+  label?: string;
+  text: string;
+  anchor: HtmlElementAnchor | null;
+}
+
+interface BridgeMultiTargetAddedMessage {
+  type: `${typeof PREFIX}multi-target-added`;
+  key: string;
+  label?: string;
+  text: string;
+  anchor?: HtmlElementAnchor;
 }
 
 interface BridgeRect {
@@ -34,6 +58,9 @@ interface BridgeRect {
 
 type BridgeMessage =
   | BridgeSelectionMessage
+  | BridgeMultiTargetAddedMessage
+  | { type: `${typeof PREFIX}multi-target-removed`; key: string }
+  | { type: `${typeof PREFIX}pointer`; x: number; y: number; shift: boolean }
   | { type: `${typeof PREFIX}selection-clear` }
   | { type: `${typeof PREFIX}selection-rect`; rect: BridgeRect }
   | { type: `${typeof PREFIX}keytype`; key: string }
@@ -51,6 +78,12 @@ export interface UseHtmlAnnotationOptions {
   selectedAnnotationId: string | null;
   mode: EditorMode;
   onResize?: (height: number) => void;
+  /** Validated pointer positions relayed from inside the iframe while a
+   *  pinpoint draft is open (iframe-local viewport coordinates), with the
+   *  Shift state observed by the iframe (the parent cannot see modifiers
+   *  held while the pointer lives in the sandbox). Drives the composer-yield
+   *  fade in the host component. */
+  onBridgePointer?: (x: number, y: number, shift: boolean) => void;
 }
 
 function postToIframe(iframe: HTMLIFrameElement | null, msg: Record<string, unknown>) {
@@ -70,6 +103,94 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+// Size caps for the anchor DTO — the bridge script runs inside a sandboxed
+// iframe rendering arbitrary HTML, so everything it posts is validated and
+// bounded before it can reach React state or the annotation model.
+const MAX_ANCHOR_SELECTOR_LENGTH = 1024;
+const MAX_ANCHOR_TAG_LENGTH = 64;
+const MAX_ANCHOR_TEXT_LENGTH = 400;
+// Multi-select caps: the additional-target array is bounded at the trust
+// boundary (a hostile page cannot grow a draft past this), and the bridge's
+// short target keys / 40-char hover labels get generous-but-hard ceilings.
+export const MAX_ADDITIONAL_TARGETS = 16;
+const MAX_TARGET_KEY_LENGTH = 64;
+const MAX_TARGET_LABEL_LENGTH = 64;
+// Selection text is page-controlled too (a pinpoint click posts the element's
+// entire textContent), so it gets the same treatment: truncated here — not
+// rejected, a legitimate huge selection still annotates — before it can reach
+// React state, drafts, exported feedback, or a share URL. Mirrors
+// MAX_SELECTION_TEXT in bridge-script.ts; this side is the authoritative one.
+export const MAX_SELECTION_TEXT_LENGTH = 10000;
+
+/** Truncate to the cap without ever splitting a UTF-16 surrogate pair (a
+ * lone high surrogate becomes U+FFFD once UTF-8-encoded downstream). */
+export function capSelectionText(text: string): string {
+  if (text.length <= MAX_SELECTION_TEXT_LENGTH) return text;
+  let cut = MAX_SELECTION_TEXT_LENGTH;
+  const last = text.charCodeAt(cut - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut -= 1;
+  return text.slice(0, cut);
+}
+
+/**
+ * Validate a bridge-posted normalized marker point. Fail-closed but additive:
+ * a malformed point is DROPPED (the marker falls back to the target-rect
+ * default) without rejecting the anchor it rides on; finite values are
+ * clamped into the normalized 0..1 range.
+ */
+function parseAnchorPoint(value: unknown): { x: number; y: number } | undefined {
+  if (!isRecord(value)) return undefined;
+  const { x, y } = value;
+  if (
+    typeof x !== "number" || !Number.isFinite(x)
+    || typeof y !== "number" || !Number.isFinite(y)
+  ) {
+    return undefined;
+  }
+  return {
+    x: Math.min(1, Math.max(0, x)),
+    y: Math.min(1, Math.max(0, y)),
+  };
+}
+
+/** Validate a bridge-posted element anchor. Exported for protocol tests. */
+export function parseHtmlElementAnchor(value: unknown): HtmlElementAnchor | null {
+  if (!isRecord(value)) return null;
+  const { selector, tagName, text } = value;
+  if (
+    typeof selector !== "string"
+    || selector.length === 0
+    || selector.length > MAX_ANCHOR_SELECTOR_LENGTH
+    || typeof tagName !== "string"
+    || tagName.length === 0
+    || tagName.length > MAX_ANCHOR_TAG_LENGTH
+  ) {
+    return null;
+  }
+  const point = parseAnchorPoint(value.point);
+  if (text === undefined) return { selector, tagName, ...(point ? { point } : {}) };
+  if (typeof text !== "string" || text.length > MAX_ANCHOR_TEXT_LENGTH) return null;
+  return { selector, tagName, text, ...(point ? { point } : {}) };
+}
+
+function parseTargetKey(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_TARGET_KEY_LENGTH
+    ? value
+    : null;
+}
+
+function parseTargetLabel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  // Labels derive from page-controlled attributes (aria-label etc.), so a
+  // hostile page can embed newlines that would become real markdown structure
+  // in the exported feedback — collapse ALL whitespace at the trust boundary.
+  const collapsed = value.replace(/\s+/g, " ").trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > MAX_TARGET_LABEL_LENGTH
+    ? collapsed.slice(0, MAX_TARGET_LABEL_LENGTH)
+    : collapsed;
+}
+
 function parseBridgeRect(value: unknown): BridgeRect | null {
   if (!isRecord(value)) return null;
   const { top, left, width, height } = value;
@@ -81,7 +202,8 @@ function parseBridgeRect(value: unknown): BridgeRect | null {
     : null;
 }
 
-function parseBridgeMessage(value: unknown): BridgeMessage | null {
+/** Validate any bridge message. Exported for protocol tests. */
+export function parseBridgeMessage(value: unknown): BridgeMessage | null {
   if (!isRecord(value) || typeof value.type !== "string") return null;
 
   switch (value.type) {
@@ -90,11 +212,35 @@ function parseBridgeMessage(value: unknown): BridgeMessage | null {
       if (typeof value.text !== "string" || !rect) return null;
       return {
         type: value.type,
-        text: value.text,
+        text: capSelectionText(value.text),
         rect,
         modeOverride: parseEditorMode(value.modeOverride),
+        anchor: parseHtmlElementAnchor(value.anchor) ?? undefined,
+        pinpoint: value.pinpoint === true,
+        targetKey: parseTargetKey(value.targetKey) ?? undefined,
+        targetLabel: parseTargetLabel(value.targetLabel),
       };
     }
+    case `${PREFIX}multi-target-added`: {
+      const key = parseTargetKey(value.key);
+      if (!key || typeof value.text !== "string") return null;
+      return {
+        type: value.type,
+        key,
+        label: parseTargetLabel(value.label),
+        text: capSelectionText(value.text),
+        anchor: parseHtmlElementAnchor(value.anchor) ?? undefined,
+      };
+    }
+    case `${PREFIX}multi-target-removed`: {
+      const key = parseTargetKey(value.key);
+      return key ? { type: value.type, key } : null;
+    }
+    case `${PREFIX}pointer`:
+      return typeof value.x === "number" && Number.isFinite(value.x)
+        && typeof value.y === "number" && Number.isFinite(value.y)
+        ? { type: value.type, x: value.x, y: value.y, shift: value.shift === true }
+        : null;
     case `${PREFIX}selection-clear`:
       return { type: value.type };
     case `${PREFIX}selection-rect`: {
@@ -106,7 +252,10 @@ function parseBridgeMessage(value: unknown): BridgeMessage | null {
         ? { type: value.type, key: value.key }
         : null;
     case `${PREFIX}mark-click`:
-      return typeof value.id === "string"
+      // The id is page-controlled like every other bridge string: cap it like
+      // the bridge's own sync validation does (256) so a hostile page cannot
+      // ship an unbounded string into parent state via a forged mark-click.
+      return typeof value.id === "string" && value.id.length <= 256
         ? { type: value.type, id: value.id }
         : null;
     case `${PREFIX}resize`:
@@ -132,15 +281,34 @@ export function useHtmlAnnotation({
   selectedAnnotationId,
   mode,
   onResize,
+  onBridgePointer,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement"
-> {
+> & {
+  /** In-flight multi-select targets (index 0 = primary); empty outside pinpoint drafts. */
+  draftTargets: HtmlDraftTarget[];
+  /** Remove one draft target (chip X). Removing the last cancels the draft. */
+  removeDraftTarget: (key: string) => void;
+  /** Flash a draft target's pinned outline in the page (chip hover). */
+  flashDraftTarget: (key: string) => void;
+  /** Bumped after every target add/remove so the composer can refocus its textarea. */
+  composerFocusToken: number;
+} {
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
+  const [draftTargets, setDraftTargets] = useState<HtmlDraftTarget[]>([]);
+  const [composerFocusToken, setComposerFocusToken] = useState(0);
 
   const pendingTextRef = useRef<string>("");
+  // Element anchor for the pending pinpoint selection — committed onto the
+  // annotation so restoration can resolve the exact element again.
+  const pendingAnchorRef = useRef<HtmlElementAnchor | null>(null);
+  const draftTargetsRef = useRef<HtmlDraftTarget[]>(draftTargets);
+  draftTargetsRef.current = draftTargets;
+  const onBridgePointerRef = useRef(onBridgePointer);
+  onBridgePointerRef.current = onBridgePointer;
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
   const modeRef = useRef(mode);
@@ -162,6 +330,47 @@ export function useHtmlAnnotation({
   onSelectRef.current = onSelectAnnotation;
 
   const anchorRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Remove one draft target. Removing the primary promotes the next remaining
+   * target (the composer's context text and pending anchor follow it);
+   * removing the final target cancels the draft. The bridge performs the same
+   * deterministic update on its side, so `remove-target` is ALWAYS posted:
+   * for chip removals it drives the bridge, and for bridge-echoed removals it
+   * is an idempotent no-op — which also resyncs the two sides if a hostile
+   * page forged the removal message the bridge never actually performed.
+   */
+  const applyTargetRemoval = useCallback(
+    (key: string) => {
+      const targets = draftTargetsRef.current;
+      const index = targets.findIndex((t) => t.key === key);
+      if (index < 0) return;
+      postToIframe(iframeRef.current, { type: `${PREFIX}remove-target`, key });
+      const remaining = targets.filter((t) => t.key !== key);
+      if (remaining.length === 0) {
+        // Final target removed — the draft is cancelled (bridge side already
+        // tore down its pinned state via toggle-off or the remove-target post).
+        setDraftTargets([]);
+        setCommentPopover(null);
+        pendingTextRef.current = "";
+        pendingAnchorRef.current = null;
+        return;
+      }
+      if (index === 0) {
+        // Primary removed — promote the next target: the comment's quoted
+        // text and restoration anchor now belong to it.
+        const next = remaining[0]!;
+        pendingTextRef.current = next.text;
+        pendingAnchorRef.current = next.anchor;
+        setCommentPopover((prev) =>
+          prev ? { ...prev, contextText: next.text, selectedText: next.text } : prev,
+        );
+      }
+      setDraftTargets(remaining);
+      setComposerFocusToken((t) => t + 1);
+    },
+    [iframeRef],
+  );
 
   const getOrCreateAnchor = useCallback(() => {
     if (!anchorRef.current) {
@@ -208,6 +417,8 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}selection`) {
         pendingTextRef.current = message.text;
+        pendingAnchorRef.current = message.anchor ?? null;
+        setDraftTargets([]); // a new selection always starts a fresh draft
         const anchor = positionAnchor(message.rect);
         if (!anchor) return;
 
@@ -225,9 +436,16 @@ export function useHtmlAnnotation({
             originalText: message.text,
             author: getIdentity(),
             createdA: Date.now(),
+            htmlAnchor: message.anchor,
           });
           pendingTextRef.current = "";
-        } else if (currentMode === "comment") {
+          pendingAnchorRef.current = null;
+        } else if (
+          currentMode === "comment"
+          // Pinpoint click-to-pin: the click already chose the target, so skip
+          // the intermediate toolbar and go straight to the comment composer.
+          || (message.pinpoint && currentMode === "selection")
+        ) {
           // Release iframe focus so the popover's textarea autofocus lands in the
           // parent (otherwise the iframe keeps focus and swallows further keys).
           iframeRef.current?.blur();
@@ -236,6 +454,25 @@ export function useHtmlAnnotation({
             contextText: message.text,
             selectedText: message.text,
           });
+          // Pinpoint drafts arm shift-click multi-select: the clicked element
+          // becomes the primary target of the (single) draft comment. The
+          // bridge only accepts shift-toggles once THIS explicit arm arrives,
+          // so drafts the composer does not mirror (quickLabel, redline) can
+          // never accumulate pins the saved annotation would not carry.
+          if (message.pinpoint && message.targetKey) {
+            setDraftTargets([
+              {
+                key: message.targetKey,
+                label: message.targetLabel,
+                text: message.text,
+                anchor: message.anchor ?? null,
+              },
+            ]);
+            postToIframe(iframeRef.current, {
+              type: `${PREFIX}arm-multi-select`,
+              key: message.targetKey,
+            });
+          }
         } else if (currentMode === "quickLabel") {
           setQuickLabelPicker({
             anchorEl: anchor,
@@ -250,6 +487,38 @@ export function useHtmlAnnotation({
         }
       }
 
+      if (type === `${PREFIX}multi-target-added`) {
+        // Only meaningful while a pinpoint draft composer is open. The array
+        // cap is enforced HERE, at the trust boundary — a hostile page cannot
+        // grow the draft past MAX_ADDITIONAL_TARGETS extra targets.
+        const targets = draftTargetsRef.current;
+        if (
+          commentPopoverRef.current
+          && targets.length > 0
+          && targets.length < 1 + MAX_ADDITIONAL_TARGETS
+          && !targets.some((t) => t.key === message.key)
+        ) {
+          setDraftTargets([
+            ...targets,
+            {
+              key: message.key,
+              label: message.label,
+              text: message.text,
+              anchor: message.anchor ?? null,
+            },
+          ]);
+          setComposerFocusToken((t) => t + 1);
+        }
+      }
+
+      if (type === `${PREFIX}multi-target-removed`) {
+        applyTargetRemoval(message.key);
+      }
+
+      if (type === `${PREFIX}pointer`) {
+        onBridgePointerRef.current?.(message.x, message.y, message.shift);
+      }
+
       if (type === `${PREFIX}selection-clear`) {
         setToolbarState(null);
         // Keep the captured text alive while a comment/quick-label is open: the user
@@ -257,6 +526,7 @@ export function useHtmlAnnotation({
         // not drop the annotation on submit. It's overwritten on the next selection.
         if (!commentPopoverRef.current && !quickLabelPickerRef.current) {
           pendingTextRef.current = "";
+          pendingAnchorRef.current = null;
         }
       }
 
@@ -307,14 +577,16 @@ export function useHtmlAnnotation({
         anchorRef.current = null;
       }
     };
-  }, [iframeRef, positionAnchor, onResize, getOrCreateAnchor]);
+  }, [iframeRef, positionAnchor, onResize, getOrCreateAnchor, applyTargetRemoval]);
 
   useEffect(() => {
     if (enabled) return;
     setToolbarState(null);
     setCommentPopover(null);
     setQuickLabelPicker(null);
+    setDraftTargets([]);
     pendingTextRef.current = "";
+    pendingAnchorRef.current = null;
     anchorRef.current?.remove();
     anchorRef.current = null;
     postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
@@ -351,10 +623,12 @@ export function useHtmlAnnotation({
         originalText: text,
         author: getIdentity(),
         createdA: Date.now(),
+        htmlAnchor: pendingAnchorRef.current ?? undefined,
       });
 
       setToolbarState(null);
       pendingTextRef.current = "";
+      pendingAnchorRef.current = null;
     },
     [iframeRef],
   );
@@ -379,6 +653,17 @@ export function useHtmlAnnotation({
       const text = commentPopoverRef.current?.selectedText || pendingTextRef.current;
       if (!text) return;
 
+      // Multi-select: everything past the primary rides on the SAME comment.
+      const targets = draftTargetsRef.current;
+      const additionalTargets: HtmlAnnotationTarget[] | undefined =
+        targets.length > 1
+          ? targets.slice(1, 1 + MAX_ADDITIONAL_TARGETS).map((t) => ({
+              label: t.label,
+              text: t.text,
+              anchor: t.anchor ?? undefined,
+            }))
+          : undefined;
+
       const id = nextHtmlAnnId();
       postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "comment" });
       onAddRef.current?.({
@@ -392,10 +677,14 @@ export function useHtmlAnnotation({
         author: getIdentity(),
         createdA: Date.now(),
         images,
+        htmlAnchor: pendingAnchorRef.current ?? undefined,
+        htmlAdditionalTargets: additionalTargets,
       });
 
       setCommentPopover(null);
+      setDraftTargets([]);
       pendingTextRef.current = "";
+      pendingAnchorRef.current = null;
     },
     [iframeRef],
   );
@@ -403,13 +692,31 @@ export function useHtmlAnnotation({
   const handleCommentClose = useCallback(() => {
     postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
     setCommentPopover(null);
+    setDraftTargets([]);
     pendingTextRef.current = "";
+    pendingAnchorRef.current = null;
   }, [iframeRef]);
+
+  const removeDraftTarget = useCallback(
+    (key: string) => {
+      if (!enabledRef.current) return;
+      applyTargetRemoval(key);
+    },
+    [applyTargetRemoval],
+  );
+
+  const flashDraftTarget = useCallback(
+    (key: string) => {
+      postToIframe(iframeRef.current, { type: `${PREFIX}flash-target`, key });
+    },
+    [iframeRef],
+  );
 
   const handleToolbarClose = useCallback(() => {
     postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
     setToolbarState(null);
     pendingTextRef.current = "";
+    pendingAnchorRef.current = null;
   }, [iframeRef]);
 
   const applyQuickLabel = useCallback(
@@ -431,9 +738,11 @@ export function useHtmlAnnotation({
         quickLabelTip: label.tip,
         author: getIdentity(),
         createdA: Date.now(),
+        htmlAnchor: pendingAnchorRef.current ?? undefined,
       });
       clearState();
       pendingTextRef.current = "";
+      pendingAnchorRef.current = null;
     },
     [iframeRef],
   );
@@ -452,6 +761,7 @@ export function useHtmlAnnotation({
     postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
     setQuickLabelPicker(null);
     pendingTextRef.current = "";
+    pendingAnchorRef.current = null;
   }, [iframeRef]);
 
   const removeHighlight = useCallback(
@@ -470,11 +780,21 @@ export function useHtmlAnnotation({
       for (const ann of anns) {
         if (ann.type === AnnotationType.GLOBAL_COMMENT) continue;
         const annType = ann.type === AnnotationType.DELETION ? "deletion" : "comment";
+        // Multi-target annotations restore every additional target as a pin
+        // under the same id (same badge number). Anchor-only and capped.
+        const additionalAnchors = (ann.htmlAdditionalTargets ?? [])
+          .map((t) => t.anchor)
+          .filter((a): a is HtmlElementAnchor => !!a)
+          .slice(0, MAX_ADDITIONAL_TARGETS);
         postToIframe(iframeRef.current, {
           type: `${PREFIX}find-and-mark`,
           id: ann.id,
           originalText: ann.originalText,
           annotationType: annType,
+          // Anchor-first restore: the bridge resolves the serialized element
+          // and scopes the text search to it, falling back to document-wide.
+          anchor: ann.htmlAnchor,
+          additionalAnchors: additionalAnchors.length ? additionalAnchors : undefined,
         });
       }
     },
@@ -496,5 +816,9 @@ export function useHtmlAnnotation({
     removeHighlight,
     clearAllHighlights,
     applyAnnotations,
+    draftTargets,
+    removeDraftTarget,
+    flashDraftTarget,
+    composerFocusToken,
   };
 }

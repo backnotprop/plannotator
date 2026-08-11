@@ -267,6 +267,8 @@ interface Annotation {
 
 **Honesty note:** the failure path (step 4) is exercised in real use but is **not covered by automated tests** — nothing in the suite asserts the stale-anchor behavior. Treat the described degradation as accurate-but-unverified-by-CI, and test it in your integration if you depend on it.
 
+**Migration caveat — reference-style link resolution (#923):** `parseMarkdownToBlocks` now rewrites CommonMark reference links (`[text][id]`) and blanks their `[id]: url` definitions before splitting into blocks, so documents containing that syntax render differently than they did before this pass existed — a `[text][id]` pair that used to render as literal bracket text now renders as a link, and the definition line disappears from the rendered DOM entirely. That changes both the text and the per-tag DOM index at the affected positions. Any annotation whose `startMeta`/`endMeta` was captured against the *old* (pre-resolution) render of such a document — i.e. persisted before a host upgrades past this change — can restore onto the wrong text after upgrading, same as any other DOM-structure change described above; the text-search fallback (step 3) is the recovery path, and `originalText` is what to fall back to if you need to re-anchor server-side.
+
 ---
 
 ## Known rough edges (and why they're fine for now)

@@ -34,6 +34,8 @@ Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain
 
 The agent runs `plannotator annotate <arg>` under the hood. The annotation UI opens in the browser. When you submit, feedback is returned to the agent as structured output.
 
+You do not have to pass a bare path. Extra words around a path are fine (`/plannotator-annotate look at docs/spec.md please` opens `docs/spec.md`), and a purely natural-language request (`/plannotator-annotate the aim doc`) hands off to the agent, which works out the file you mean and re-runs the command with a concrete target. If several of your words each name a real file, Plannotator errors and lists the candidates instead of guessing, so name exactly one target per invocation.
+
 ### Standalone CLI (outside an agent session)
 
 ```bash

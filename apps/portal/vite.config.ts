@@ -39,6 +39,9 @@ export default defineConfig({
   plugins: [faviconPlugin(), react(), tailwindcss()],
   resolve: {
     alias: {
+      // Drop the dead Oniguruma WASM (~622 KB base64). See
+      // build/shiki-wasm-stub.ts.
+      'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
       '@': path.resolve(__dirname, '.'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/editor/styles': path.resolve(__dirname, '../../packages/editor/index.css'),

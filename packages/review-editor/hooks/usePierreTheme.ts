@@ -3,49 +3,14 @@ import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useConfigValue } from '@plannotator/ui/config';
 
-export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: string | null }> = {
-  'andromeeda': { dark: 'andromeeda', light: null },
-  'aurora-x': { dark: 'aurora-x', light: null },
-  'ayu-dark': { dark: 'ayu-dark', light: null },
-  'catppuccin': { dark: 'catppuccin-mocha', light: 'catppuccin-latte' },
-  'dark-plus': { dark: 'dark-plus', light: 'light-plus' },
-  'dracula': { dark: 'dracula', light: null },
-  'everforest': { dark: 'everforest-dark', light: 'everforest-light' },
-  'everforest-hard': { dark: 'everforest-dark', light: 'everforest-light' },
-  'everforest-soft': { dark: 'everforest-dark', light: 'everforest-light' },
-  'github': { dark: 'github-dark', light: 'github-light' },
-  'gruvbox': { dark: 'gruvbox-dark-medium', light: 'gruvbox-light-medium' },
-  'houston': { dark: 'houston', light: null },
-  'kanagawa-dragon': { dark: 'kanagawa-dragon', light: null },
-  'kanagawa-lotus': { dark: null, light: 'kanagawa-lotus' },
-  'kanagawa-wave': { dark: 'kanagawa-wave', light: null },
-  'laserwave': { dark: 'laserwave', light: null },
-  'material': { dark: 'material-theme', light: 'material-theme-lighter' },
-  'min': { dark: 'min-dark', light: 'min-light' },
-  'monokai-pro': { dark: 'monokai', light: null },
-  'night-owl': { dark: 'night-owl', light: null },
-  'nord': { dark: 'nord', light: null },
-  'one-dark-pro': { dark: 'one-dark-pro', light: null },
-  'one-light': { dark: null, light: 'one-light' },
-  'plastic': { dark: 'plastic', light: null },
-  'poimandres': { dark: 'poimandres', light: null },
-  'red': { dark: 'red', light: null },
-  'rose-pine': { dark: 'rose-pine', light: 'rose-pine-dawn' },
-  'slack': { dark: 'slack-dark', light: 'slack-ochin' },
-  'snazzy-light': { dark: null, light: 'snazzy-light' },
-  'solarized': { dark: 'solarized-dark', light: 'solarized-light' },
-  'synthwave-84': { dark: 'synthwave-84', light: null },
-  'tokyo-night': { dark: 'tokyo-night', light: null },
-  'vesper': { dark: 'vesper', light: null },
-  'vitesse': { dark: 'vitesse-dark', light: 'vitesse-light' },
-  'vitesse-black': { dark: 'vitesse-black', light: null },
-};
-
-export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): { dark: string; light: string } | undefined {
-  const map = SHIKI_THEME_MAP[colorTheme];
-  if (!map || !map[mode]) return undefined;
-  return { dark: map.dark || 'pierre-dark', light: map.light || 'pierre-light' };
-}
+/**
+ * The (colorTheme, mode) -> Shiki theme mapping moved to
+ * `@plannotator/ui/utils/syntaxTheme` so the plan editor's markdown fences
+ * resolve the same theme this diff pane does. Re-exported here because it is
+ * the import path the review editor has always used.
+ */
+import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
 
 export interface PierreTheme {
   type: 'dark' | 'light';
@@ -62,6 +27,17 @@ export interface PierreTheme {
  * 88 / 80) since darker themes need a larger colour share to read at the
  * same perceptual intensity.
  *
+ * `hoverMix*` values are the FINAL rendered bg shares, matching what our
+ * pre-1.3 overrides produced. Since @pierre/diffs 1.3.0 the per-selector
+ * hover rules (`[data-hovered] { --mix-light: … }`) are gone; hover is one
+ * central rule that re-mixes `--diffs-computed-editor-active-line-bg`
+ * 97% (light) / 91% (dark) toward `--diffs-hover-mix-target` (the
+ * addition/deletion base colour on changed lines). Our hovered `--mix-*`
+ * values therefore feed the rest formula first and get multiplied by
+ * 0.97 / 0.91 on the way to the screen — `hoverEmittedMix()` divides the
+ * targets back out so the composed result equals these numbers exactly
+ * (color-mix in lab is linear, so the compensation is exact).
+ *
  * Driving the line bg through these vars (instead of overriding the final
  * `background-color`) keeps Pierre's `--diffs-line-bg` pipeline intact, so
  * selected / hovered / decorated states keep their state-specific visuals.
@@ -76,6 +52,29 @@ interface IntensityConfig {
 const INTENSITY_CONFIG: Record<Exclude<DiffLineBgIntensity, 'subtle'>, IntensityConfig> = {
   normal: { restMixLight: 55, restMixDark: 45, hoverMixLight: 45, hoverMixDark: 35 },
   strong: { restMixLight: 35, restMixDark: 25, hoverMixLight: 25, hoverMixDark: 15 },
+};
+
+/** Pierre's central hover rule mixes the rest bg by these shares toward the
+ * hover mix target (light-dark(97%, 91%) since 1.3.0). */
+const PIERRE_HOVER_KEEP_LIGHT = 0.97;
+const PIERRE_HOVER_KEEP_DARK = 0.91;
+
+/** Convert a desired FINAL hovered bg share into the `--mix-*` value to emit,
+ * compensating for Pierre's central hover re-mix. */
+function hoverEmittedMix(finalShare: number, keep: number): string {
+  return (finalShare / keep).toFixed(2);
+}
+
+/**
+ * At 1.2.12 Pierre's own per-selector hover rules gave changed lines these
+ * final bg shares (deletion 80/75, addition 80/70). `subtle` rode them
+ * untouched; 1.3.x's central hover rule instead lands at ~85.4 light /
+ * ~72.8 dark, a visibly weaker light-theme hover. We pin the old finals so
+ * `subtle` hover looks the same before and after the upgrade.
+ */
+const SUBTLE_HOVER_FINALS = {
+  deletion: { light: 80, dark: 75 },
+  addition: { light: 80, dark: 70 },
 };
 
 /**
@@ -114,11 +113,6 @@ export function buildLineBgOverrides(intensity: DiffLineBgIntensity, mode: 'ligh
       background-color: transparent !important;
     }
   `;
-  if (intensity === 'subtle') return hideEmphasisWithoutBg;
-  const cfg = INTENSITY_CONFIG[intensity];
-  const lShift = mode === 'dark'
-    ? `+ ${EMPHASIS_LIGHTNESS_SHIFT}`
-    : `- ${EMPHASIS_LIGHTNESS_SHIFT}`;
   // Targeting `[data-line]` and `[data-no-newline]` only — the actual code
   // lines. Skipping `[data-gutter-buffer]` / `[data-column-number]` keeps the
   // line-number gutter at the page bg (matching the existing
@@ -126,20 +120,46 @@ export function buildLineBgOverrides(intensity: DiffLineBgIntensity, mode: 'ligh
   // `[data-background]` mirrors the library's own `:where([data-background])`
   // scoping, so the "Diff background" toggle still turns line bgs off.
   //
-  // Specificity is (0,0,4); wins against the library's (0,0,1) baseline and
-  // (0,0,3) hover rule. The `:not([data-hovered])` variant yields to the
-  // explicit `[data-hovered]` variant on hover.
+  // Specificity is (0,4,0); wins against the library's rest rules (max
+  // (0,2,0) inside `:where([data-background])`). Since 1.3.0 the library's
+  // hover rule sets `--diffs-computed-hovered-line-bg` (a different property)
+  // on `[data-line][data-hovered]`, so there is no specificity race on
+  // `--mix-*` anymore — our hovered `--mix-*` values flow through the rest
+  // formula and Pierre's central hover re-mix composes on top (compensated
+  // via hoverEmittedMix, see INTENSITY_CONFIG docs).
   const changedLine =
     "[data-background] :is([data-line-type='change-addition'], [data-line-type='change-deletion'])" +
     ":is([data-line], [data-no-newline])";
+  if (intensity === 'subtle') {
+    // Keep Pierre's rest bg untouched, but pin the hovered finals to the
+    // 1.2.x values (see SUBTLE_HOVER_FINALS). Per-type split preserved:
+    // 1.2.x deletion hover was 80/75, addition 80/70.
+    const del = SUBTLE_HOVER_FINALS.deletion;
+    const add = SUBTLE_HOVER_FINALS.addition;
+    return `
+      [data-background] [data-line-type='change-deletion']:is([data-line], [data-no-newline])[data-hovered] {
+        --mix-light: ${hoverEmittedMix(del.light, PIERRE_HOVER_KEEP_LIGHT)}%;
+        --mix-dark: ${hoverEmittedMix(del.dark, PIERRE_HOVER_KEEP_DARK)}%;
+      }
+      [data-background] [data-line-type='change-addition']:is([data-line], [data-no-newline])[data-hovered] {
+        --mix-light: ${hoverEmittedMix(add.light, PIERRE_HOVER_KEEP_LIGHT)}%;
+        --mix-dark: ${hoverEmittedMix(add.dark, PIERRE_HOVER_KEEP_DARK)}%;
+      }
+      ${hideEmphasisWithoutBg}
+    `;
+  }
+  const cfg = INTENSITY_CONFIG[intensity];
+  const lShift = mode === 'dark'
+    ? `+ ${EMPHASIS_LIGHTNESS_SHIFT}`
+    : `- ${EMPHASIS_LIGHTNESS_SHIFT}`;
   return `
     ${changedLine}:not([data-hovered]) {
       --mix-light: ${cfg.restMixLight}%;
       --mix-dark: ${cfg.restMixDark}%;
     }
     ${changedLine}[data-hovered] {
-      --mix-light: ${cfg.hoverMixLight}%;
-      --mix-dark: ${cfg.hoverMixDark}%;
+      --mix-light: ${hoverEmittedMix(cfg.hoverMixLight, PIERRE_HOVER_KEEP_LIGHT)}%;
+      --mix-dark: ${hoverEmittedMix(cfg.hoverMixDark, PIERRE_HOVER_KEEP_DARK)}%;
     }
     ${changedLine} {
       --diffs-bg-addition-emphasis: oklch(from var(--diffs-computed-diff-line-bg) calc(l ${lShift}) c h);

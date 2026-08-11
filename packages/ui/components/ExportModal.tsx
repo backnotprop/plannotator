@@ -11,6 +11,7 @@ import { getObsidianSettings, getEffectiveVaultPath } from '../utils/obsidian';
 import { getBearSettings } from '../utils/bear';
 import { getOctarineSettings } from '../utils/octarine';
 import { wrapFeedbackForAgent } from '../utils/parser';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
 /** POST body shape sent to the notes endpoint (mirrors what the Notes tab builds today). */
@@ -123,12 +124,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const isOctarineReady = octarineSettings.enabled && octarineSettings.workspace.trim().length > 0;
 
   const handleCopy = async (text: string, which: 'short' | 'full' | 'annotations') => {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyTextToClipboard(text)) {
       setCopied(which);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy:', e);
+    } else {
+      console.error('Failed to copy');
     }
   };
 

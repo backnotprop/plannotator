@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import hljs from 'highlight.js';
-import 'highlight.js/styles/github-dark.css';
 import type { Block } from '../../types';
+import { copyTextToClipboard } from '../../utils/clipboard';
+import { applyHighlight, codeBlockClassName } from '../../utils/codeHighlight';
+import { useFenceTheme } from '../../hooks/useFenceTheme';
 
 interface CodeBlockProps {
   block: Block;
@@ -14,24 +15,23 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
   const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLElement>(null);
+  const fenceTheme = useFenceTheme();
 
-  // Highlight code block on mount and when content/language changes
+  // Highlight on mount, on content/language change, and whenever the palette
+  // changes. Language-less fences stay plain text (#1212) — nothing is guessed.
   useEffect(() => {
     if (codeRef.current) {
-      // Reset any previous highlighting
-      codeRef.current.removeAttribute('data-highlighted');
-      codeRef.current.className = `hljs font-mono${block.language ? ` language-${block.language}` : ''}`;
-      hljs.highlightElement(codeRef.current);
+      codeRef.current.className = codeBlockClassName(block.language);
+      applyHighlight(codeRef.current, block.content, block.language, fenceTheme);
     }
-  }, [block.content, block.language]);
+  }, [block.content, block.language, fenceTheme]);
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(block.content);
+    if (await copyTextToClipboard(block.content)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
     }
   }, [block.content]);
 
@@ -42,7 +42,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
   };
 
   // Build className for code element
-  const codeClassName = `hljs font-mono${block.language ? ` language-${block.language}` : ''}`;
+  const codeClassName = codeBlockClassName(block.language);
 
   return (
     <div

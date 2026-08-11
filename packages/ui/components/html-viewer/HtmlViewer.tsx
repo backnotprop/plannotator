@@ -24,10 +24,20 @@ import {
 } from "../../utils/vimHud";
 import { AnnotationToolbar } from "../AnnotationToolbar";
 import { AttachmentsButton } from "../AttachmentsButton";
-import { CommentPopover, type CommentAskAIHandler } from "../CommentPopover";
+import {
+  CommentPopover,
+  type CommentAskAIHandler,
+  type CommentTargetChip,
+} from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import { VimKeyHud } from "../VimKeyHud";
 import type { ViewerHandle } from "../Viewer";
+import {
+  computeComposerYield,
+  distanceToRect,
+  type ComposerYieldState,
+} from "./composerYield";
+import { buildSyncNumbering } from "./annotationNumbering";
 import { useHtmlAnnotation } from "./useHtmlAnnotation";
 import {
   THEME_TOKENS,
@@ -235,6 +245,45 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       setIframeHeight(height);
     }, []);
 
+    // Composer yield while shift-selecting (multi-target drafts): fade the
+    // composer as the pointer approaches, click-through when over it. Pointer
+    // positions arrive from parent mousemoves AND from the bridge (the iframe
+    // consumes moves over the page, so the bridge relays them).
+    const [composerYield, setComposerYield] = useState<ComposerYieldState>("none");
+    const composerYieldRef = useRef(composerYield);
+    composerYieldRef.current = composerYield;
+    const shiftHeldRef = useRef(false);
+
+    const handleYieldPointer = useCallback((clientX: number, clientY: number) => {
+      if (!shiftHeldRef.current) return;
+      const popover = document.querySelector("[data-comment-popover]");
+      if (!popover) return;
+      const rect = popover.getBoundingClientRect();
+      const next = computeComposerYield(
+        composerYieldRef.current,
+        distanceToRect(clientX, clientY, rect),
+      );
+      if (next !== composerYieldRef.current) setComposerYield(next);
+    }, []);
+
+    const handleBridgePointer = useCallback(
+      (x: number, y: number, shift: boolean) => {
+        // The bridge is the only observer of Shift while the pointer lives
+        // inside the sandbox (parent keydowns don't fire there, and window
+        // blur clears our local flag when focus enters the iframe) — so the
+        // relayed shift state arms/disarms the yield directly.
+        shiftHeldRef.current = shift;
+        if (!shift) {
+          setComposerYield("none");
+          return;
+        }
+        const iframeRect = iframeRef.current?.getBoundingClientRect();
+        if (!iframeRect) return;
+        handleYieldPointer(iframeRect.left + x, iframeRect.top + y);
+      },
+      [handleYieldPointer],
+    );
+
     const hook = useHtmlAnnotation({
       iframeRef,
       enabled: !readOnly,
@@ -244,7 +293,55 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       selectedAnnotationId,
       mode,
       onResize: handleResize,
+      onBridgePointer: handleBridgePointer,
     });
+
+    const multiSelectActive = !readOnly && !!hook.commentPopover && hook.draftTargets.length > 0;
+
+    // Track Shift while a multi-select draft composer is open; releasing it
+    // (or losing window focus) always restores the composer.
+    useEffect(() => {
+      if (!multiSelectActive) {
+        shiftHeldRef.current = false;
+        setComposerYield("none");
+        return;
+      }
+      const down = (e: KeyboardEvent) => {
+        if (e.key === "Shift") shiftHeldRef.current = true;
+      };
+      const release = () => {
+        shiftHeldRef.current = false;
+        setComposerYield("none");
+      };
+      const up = (e: KeyboardEvent) => {
+        if (e.key === "Shift") release();
+      };
+      const move = (e: MouseEvent) => {
+        // Parent-side pointer (over app chrome or the composer itself).
+        if (e.shiftKey) shiftHeldRef.current = true;
+        handleYieldPointer(e.clientX, e.clientY);
+      };
+      window.addEventListener("keydown", down);
+      window.addEventListener("keyup", up);
+      window.addEventListener("blur", release);
+      window.addEventListener("mousemove", move);
+      return () => {
+        window.removeEventListener("keydown", down);
+        window.removeEventListener("keyup", up);
+        window.removeEventListener("blur", release);
+        window.removeEventListener("mousemove", move);
+      };
+    }, [multiSelectActive, handleYieldPointer]);
+
+    // Chip data for the composer: semantic label + short excerpt per target.
+    const targetChips = useMemo<CommentTargetChip[] | undefined>(() => {
+      if (!hook.draftTargets.length) return undefined;
+      return hook.draftTargets.map((t) => ({
+        key: t.key,
+        label: t.label,
+        excerpt: t.text.replace(/\s+/g, " ").trim().slice(0, 80),
+      }));
+    }, [hook.draftTargets]);
 
     useEffect(() => {
       function handler(e: MessageEvent<unknown>) {
@@ -340,6 +437,21 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         hook.applyAnnotations(annotations);
       }
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Placed-marker numbering is parent-authoritative and matches the
+    // numbers exportAnnotations writes into the submitted feedback: the full
+    // list INCLUDING globals is numbered by ARRAY position (the export's
+    // effective order — its sort keys tie for raw-HTML annotations), and
+    // globals then ship no entry (no page location) — see buildSyncNumbering
+    // for the contract. Renumbers on delete; the bridge's own registration
+    // order is only a pre-sync fallback.
+    useEffect(() => {
+      if (iframeReadyVersion === 0) return;
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: `${PREFIX}sync-annotations`, annotations: buildSyncNumbering(annotations) },
+        "*",
+      );
+    }, [iframeReadyVersion, annotations]);
 
     // Tell the bridge the current input method (drag vs pinpoint). Re-posts on
     // ready (fresh iframe) and whenever the user switches it in the toolstrip.
@@ -599,12 +711,19 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={false}
               onSubmit={hook.handleCommentSubmit}
               onClose={hook.handleCommentClose}
+              skillReferences
               onAskAI={onAskAI}
               askAIContext={{
                 kind: "selection",
                 label: "Selected HTML",
                 text: hook.commentPopover.selectedText ?? hook.commentPopover.contextText,
               }}
+              targetChips={targetChips}
+              onRemoveTargetChip={targetChips ? hook.removeDraftTarget : undefined}
+              onHoverTargetChip={targetChips ? hook.flashDraftTarget : undefined}
+              refocusToken={targetChips ? hook.composerFocusToken : undefined}
+              captureStrayKeys={multiSelectActive}
+              yieldState={multiSelectActive ? composerYield : undefined}
             />,
             document.body,
           )}
@@ -630,6 +749,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={true}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
+              skillReferences
               onAskAI={onAskAI}
               askAIContext={{ kind: "general", label: "Document" }}
             />,

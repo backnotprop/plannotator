@@ -1,5 +1,80 @@
 import { describe, expect, test } from "bun:test";
-import { parseDiffFilePathLines, parsePatchPathToken, unquoteGitPath } from "./diff-paths";
+import {
+  isContentlessBinaryPatch,
+  parseDiffFilePathLines,
+  parsePatchPathToken,
+  unquoteGitPath,
+} from "./diff-paths";
+
+describe("isContentlessBinaryPatch", () => {
+  test("flags a git binary chunk with no hunks", () => {
+    expect(isContentlessBinaryPatch([
+      "diff --git a/logo.png b/logo.png",
+      "index 1111111111aa..2222222222bb 100644",
+      "Binary files a/logo.png and b/logo.png differ",
+      "",
+    ].join("\n"))).toBe(true);
+  });
+
+  test("flags a review stub for a file the server declined to read", () => {
+    expect(isContentlessBinaryPatch([
+      "diff --git a/src/Panel.tsx b/src/Panel.tsx",
+      "similarity index 94%",
+      "rename from src/Card.tsx",
+      "rename to src/Panel.tsx",
+      "index bab081fdb737..99fffbd3cac3 100644",
+      "Binary files a/src/Card.tsx and b/src/Panel.tsx differ",
+      "",
+    ].join("\n"))).toBe(true);
+  });
+
+  test("flags a literal GIT binary patch payload", () => {
+    expect(isContentlessBinaryPatch([
+      "diff --git a/logo.png b/logo.png",
+      "GIT binary patch",
+      "literal 12",
+      "",
+    ].join("\n"))).toBe(true);
+  });
+
+  test("does not flag a text patch", () => {
+    expect(isContentlessBinaryPatch([
+      "diff --git a/calc.ts b/calc.ts",
+      "--- a/calc.ts",
+      "+++ b/calc.ts",
+      "@@ -1,2 +1,2 @@",
+      "-const b = 1;",
+      "+const b = 2;",
+      "",
+    ].join("\n"))).toBe(false);
+  });
+
+  test("does not flag a text patch whose content mentions the binary marker", () => {
+    // Content lines always carry a +/-/space prefix, and the scan stops at the
+    // first hunk header, so quoted marker text cannot be mistaken for a header.
+    expect(isContentlessBinaryPatch([
+      "diff --git a/notes.md b/notes.md",
+      "--- a/notes.md",
+      "+++ b/notes.md",
+      "@@ -1,2 +1,2 @@",
+      "-old note",
+      "+Binary files a/x and b/x differ",
+      " GIT binary patch",
+      "",
+    ].join("\n"))).toBe(false);
+  });
+
+  test("does not flag a metadata-only chunk with no binary marker", () => {
+    // A pure mode change has no body either, but git says nothing about
+    // content there, so it keeps its existing rendering.
+    expect(isContentlessBinaryPatch([
+      "diff --git a/run.sh b/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "",
+    ].join("\n"))).toBe(false);
+  });
+});
 
 describe("diff path parsing", () => {
   test("unquoteGitPath decodes octal (UTF-8 byte) escapes", () => {

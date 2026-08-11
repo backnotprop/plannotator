@@ -89,21 +89,23 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveDefaultDiffType, resolveUseJina, resolveSharingEnabled } from "@plannotator/shared/config";
+import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
 } from "@plannotator/shared/goal-setup";
-import { stripAtPrefix, resolveAtReference } from "@plannotator/shared/at-reference";
-import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
-import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
+import {
+  buildAmbiguousAnnotateArgsMessage,
+  buildUnresolvedAnnotateArgsMessage,
+  probeAnnotateToken,
+  selectAnnotateTokenTarget,
+} from "@plannotator/shared/annotate-target";
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC_REGEX, ANNOTATABLE_EXTENSIONS_HINT, MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/shared/resolve-file";
-import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
-import { statSync, rmSync, realpathSync, existsSync } from "fs";
+import { resolveAnnotateTarget } from "./annotate-resolution";
+import { rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
   getReviewApprovedPrompt,
@@ -160,6 +162,7 @@ import {
 import { completeAnnotateCommand } from "./annotate-command";
 import {
   annotateStartupFailureExitCode,
+  isStrictAnnotateInvocation,
   assertResultPathAvailable,
   resolveResultFilePath,
   STRICT_GATE_ERROR_EXIT_CODE,
@@ -232,7 +235,8 @@ const hookFlag = hookIdx !== -1;
 if (hookFlag) args.splice(hookIdx, 1);
 if (hookFlag) gateFlag = true;
 const renderHtmlIdx = args.indexOf("--render-html");
-if (renderHtmlIdx !== -1) args.splice(renderHtmlIdx, 1);
+const renderHtmlFlag = renderHtmlIdx !== -1;
+if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
 const renderMarkdownIdx = args.indexOf("--markdown");
 const renderMarkdownFlag = renderMarkdownIdx !== -1;
 if (renderMarkdownFlag) args.splice(renderMarkdownIdx, 1);
@@ -340,7 +344,6 @@ if (args[0] === "uninstall") {
     {
       purge: options.purge,
       dryRun: options.dryRun,
-      skipHosts: options.skipHosts,
     },
     environment,
   );
@@ -1005,11 +1008,6 @@ if (args[0] === "sessions") {
     exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
   }
 
-  // Primary resolution strips the `@` reference marker; rawFilePath is
-  // preserved so each branch can fall back to the literal form below
-  // (scoped-package-style names).
-  let filePath = stripAtPrefix(rawFilePath);
-
   // Use PLANNOTATOR_CWD if set (original working directory before script cd'd)
   const projectRoot = process.env.PLANNOTATOR_CWD || process.cwd();
 
@@ -1023,117 +1021,107 @@ if (args[0] === "sessions") {
     }
   }
 
-  if (process.env.PLANNOTATOR_DEBUG) {
-    console.error(`[DEBUG] Project root: ${projectRoot}`);
-    console.error(`[DEBUG] File path arg: ${filePath}`);
-  }
+  // Strict invocations keep the exact legacy contract: args[1] is the target,
+  // a typo'd path stays a startup failure (exit 2), and stdout carries only
+  // the decision record. The tolerant token fallback below never runs. Same
+  // predicate as the exit-code path, so the two cannot drift.
+  const strictAnnotate = isStrictAnnotateInvocation({
+    requireApproval: requireApprovalFlag,
+    resultFile,
+  });
 
-  let markdown: string;
-  let rawHtml: string | undefined;
-  let absolutePath: string;
-  let folderPath: string | undefined;
-  let annotateMode: "annotate" | "annotate-folder" = "annotate";
-  let sourceInfo: string | undefined;
-  let sourceConverted = false;
+  // Tolerant argument handling (#1182): slash-command hosts forward raw user
+  // words verbatim, so a non-strict invocation with several tokens probes
+  // each one instead of blindly taking args[1]. Exactly one token naming an
+  // existing target proceeds with it; several is an error naming every
+  // candidate (never guess); two or more unresolvable words become a handoff
+  // for the agent reading this output. Single-token invocations run the
+  // unchanged pipeline and keep every legacy error (a lone typo'd path stays
+  // "File not found" with exit 1), and unrecognized dash-prefixed tokens
+  // disable tolerance entirely so a typo'd flag errors the way it always
+  // did instead of being silently skipped.
+  const targetTokens = args.slice(1);
+  const tolerantMultiToken = !strictAnnotate && targetTokens.length > 1;
+  // Bare directory names only count as targets when they are the sole
+  // argument; in multi-token mode a stray word matching a directory (or `.`)
+  // must not hijack the fast path.
+  const annotateProbe = (token: string) =>
+    probeAnnotateToken(token, projectRoot, { bareDirectories: false });
 
-  // --- URL annotation ---
-  const isUrl = /^https?:\/\//i.test(filePath);
+  let resolution: Awaited<ReturnType<typeof resolveAnnotateTarget>> | null =
+    tolerantMultiToken
+      ? null
+      : await resolveAnnotateTarget({
+          rawFilePath,
+          projectRoot,
+          noJina: cliNoJina,
+          renderMarkdown: renderMarkdownFlag,
+        });
 
-  if (isUrl) {
-    const useJina = resolveUseJina(cliNoJina, loadConfig());
-    console.error(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}`);
-    try {
-      const result = await urlToMarkdown(filePath, { useJina });
-      markdown = result.markdown;
-      sourceConverted = isConvertedSource(result.source);
-      if (process.env.PLANNOTATOR_DEBUG) {
-        console.error(`[DEBUG] Fetched via ${result.source} (${markdown.length} chars)`);
-      }
-    } catch (err) {
-      exitAnnotateStartupFailure(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    absolutePath = filePath; // Use URL as the "path" for display
-    sourceInfo = filePath;   // Full URL for source attribution
-  } else {
-    // Folder check with literal-@ fallback for scoped-package-style names.
-    const folderCandidate = resolveAtReference(rawFilePath, (c) => {
-      try { return statSync(resolveUserPath(c, projectRoot)).isDirectory(); }
-      catch { return false; }
-    });
-
-    if (folderCandidate !== null) {
-      const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
-      // Folder annotation mode (markdown/plain text/config + HTML files)
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
-        exitAnnotateStartupFailure(`No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}`);
-      }
-      folderPath = resolvedArg;
-      absolutePath = resolvedArg;
-      markdown = "";
-      annotateMode = "annotate-folder";
-      console.error(`Folder: ${resolvedArg}`);
-    } else {
-      // HTML check with the same literal-@ fallback semantics.
-      const htmlCandidate = resolveAtReference(rawFilePath, (c) => {
-        const abs = resolveUserPath(c, projectRoot);
-        return /\.html?$/i.test(abs) && existsSync(abs);
+  if (tolerantMultiToken) {
+    const selection = selectAnnotateTokenTarget(targetTokens, annotateProbe);
+    if (selection.kind === "single") {
+      resolution = await resolveAnnotateTarget({
+        rawFilePath: selection.candidate.value,
+        projectRoot,
+        noJina: cliNoJina,
+        renderMarkdown: renderMarkdownFlag,
       });
-
-      if (htmlCandidate !== null) {
-        const resolvedArg = resolveUserPath(htmlCandidate, projectRoot);
-        const htmlFile = Bun.file(resolvedArg);
-        const html = await htmlFile.text();
-        const renderHtmlForFile = !renderMarkdownFlag;
-        if (renderHtmlForFile) {
-          rawHtml = html;
-          markdown = "";
-        } else {
-          markdown = htmlToMarkdown(html);
-          sourceConverted = true;
-        }
-        absolutePath = resolvedArg;
-        sourceInfo = path.basename(resolvedArg);
-        console.error(`${renderHtmlForFile ? "Raw HTML" : "Converted"}: ${absolutePath}`);
-      } else {
-        // Single markdown/plain-text file annotation mode
-        // Strip-first with literal-@ fallback (scoped-package-style names).
-        let resolved = resolveMarkdownFile(filePath, projectRoot);
-        if (resolved.kind === "not_found" && rawFilePath !== filePath) {
-          resolved = resolveMarkdownFile(rawFilePath, projectRoot);
-        }
-
-        if (resolved.kind === "ambiguous") {
-          exitAnnotateStartupFailure([
-            `Ambiguous filename "${resolved.input}" — found ${resolved.matches.length} matches:`,
-            ...resolved.matches.map((match) => `  ${match}`),
-          ].join("\n"));
-        }
-        if (resolved.kind === "not_found") {
-          // Check if file exists but has unsupported type
-          const resolvedPath = resolveUserPath(resolved.input, projectRoot);
-          const fileExists = existsSync(resolvedPath);
-
-          if (fileExists) {
-            const ext = path.extname(resolvedPath).toLowerCase();
-            exitAnnotateStartupFailure(
-              `File type not supported: ${ext}\n` +
-              `Supported types: ${ANNOTATABLE_EXTENSIONS_HINT}\n` +
-              `For code review, use: plannotator review [file]`
-            );
-          } else {
-            exitAnnotateStartupFailure(`File not found: ${resolved.input}`);
-          }
-        }
-
-        absolutePath = resolved.path;
-        if (Bun.file(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
-          exitAnnotateStartupFailure(`File too large to annotate (max 2MB): ${absolutePath}`);
-        }
-        markdown = await Bun.file(absolutePath).text();
-        console.error(`Resolved: ${absolutePath}`);
+    } else if (selection.kind === "multiple") {
+      exitAnnotateStartupFailure(buildAmbiguousAnnotateArgsMessage(selection.candidates));
+    } else if (selection.kind === "none" && selection.words.length > 1) {
+      // Content flags only: transport flags (--gate/--json/--hook) describe
+      // this invocation's plumbing, and suggesting them would tell an agent
+      // to start a blocking interactive gate from a plain re-run.
+      const handoffFlags = [
+        ...(renderMarkdownFlag ? ["--markdown"] : []),
+        ...(cliNoJina ? ["--no-jina"] : []),
+        ...(renderHtmlFlag ? ["--render-html"] : []),
+      ];
+      const message = buildUnresolvedAnnotateArgsMessage({
+        words: selection.words,
+        flags: handoffFlags,
+        agentHandoff: true,
+      });
+      if (jsonFlag || hookFlag) {
+        // Machine-readable stdout stays reserved for decision records; the
+        // droid wrapper forwards stderr on failure.
+        exitAnnotateStartupFailure(message);
       }
+      // Plain mode: a non-zero exit from Claude Code's bash-substitution
+      // skill prefix aborts the prompt before the model runs, so the handoff
+      // must land on stdout with exit 0 to reach the agent at all.
+      console.log(message);
+      process.exit(0);
     }
+    // "flagged" (unrecognized dash tokens) or a single unresolvable word:
+    // fall through to the unchanged pipeline on args[1] so its legacy
+    // failure surfaces verbatim.
   }
+
+  if (resolution === null) {
+    resolution = await resolveAnnotateTarget({
+      rawFilePath,
+      projectRoot,
+      noJina: cliNoJina,
+      renderMarkdown: renderMarkdownFlag,
+    });
+  }
+
+  if (!resolution.ok) {
+    exitAnnotateStartupFailure(resolution.message);
+  }
+
+  const {
+    markdown,
+    rawHtml,
+    absolutePath,
+    folderPath,
+    annotateMode,
+    sourceInfo,
+    sourceConverted,
+    isUrl,
+  } = resolution;
 
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 

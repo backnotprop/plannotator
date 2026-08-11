@@ -9,11 +9,13 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
+import { isUrlHostOverridden } from "./remote";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
 import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
+import { listReferenceSkills, readReferenceSkillContent } from "./review-skill-loader";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -151,6 +153,44 @@ export function handleDraftDelete(contentKey: string, req?: Request): Response {
   return Response.json({ ok: true });
 }
 
+/**
+ * List global agent skills for comment skill references. Used by plan +
+ * annotate servers. Takes no client input (fixed roots only) and degrades to an
+ * empty catalog on any failure so the composer never breaks.
+ */
+export function handleReferenceSkills(): Response {
+  try {
+    return Response.json({ skills: listReferenceSkills() });
+  } catch (err) {
+    console.error(
+      `[plannotator] Skill catalog failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return Response.json({ skills: [] });
+  }
+}
+
+/**
+ * Serve a referenced skill's SKILL.md contents for feedback injection
+ * (`?name=<skill>`). Used by plan + annotate servers. The name is matched
+ * against discovered skills only — it is never used as a path — so traversal
+ * and absolute-path inputs answer 404, never a file outside the skill roots.
+ */
+export function handleReferenceSkillContent(req: Request): Response {
+  try {
+    const name = new URL(req.url).searchParams.get("name") ?? "";
+    const skill = readReferenceSkillContent(name);
+    if (!skill) {
+      return Response.json({ error: "Skill not found" }, { status: 404 });
+    }
+    return Response.json({ skill });
+  } catch (err) {
+    console.error(
+      `[plannotator] Skill content failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return Response.json({ error: "Skill content failed" }, { status: 500 });
+  }
+}
+
 /** Return the shared JSON response for an unmatched API route. */
 export function handleApiNotFound(path: string): Response {
   return Response.json({ error: "Not found", path }, { status: 404 });
@@ -207,8 +247,12 @@ export async function handleServerReady(
   // reachable URL is the lifeline. Without it, a sharing-disabled remote user
   // saw no URL at all and the agent hung waiting on the review.
   if (isRemote) {
+    // With an advertised-URL host override the link is directly reachable
+    // (e.g. over a tailnet), so the port-forwarding advice would be wrong.
     process.stderr.write(
-      `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
+      isUrlHostOverridden()
+        ? `\n  Plannotator session ready — open on your device:\n  ${url}\n\n`
+        : `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
     );
   } else if (isCodexDesktopHost()) {
     process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);

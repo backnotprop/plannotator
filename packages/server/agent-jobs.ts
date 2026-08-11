@@ -83,7 +83,12 @@ const SERVER_BUILT_PROVIDERS: ReadonlySet<string> = new Set([
 export interface AgentJobHandlerOptions {
   /** Which server mode this handler is mounted in. */
   mode: "plan" | "review" | "annotate";
-  /** Returns the server's base URL (e.g., "http://localhost:12345"). Late-bound. */
+  /**
+   * Returns the server's base URL for spawned subprocesses (e.g.,
+   * "http://127.0.0.1:12345"). Late-bound. Jobs run on the same machine, so
+   * this must stay loopback-reachable regardless of any advertised-URL host
+   * override.
+   */
   getServerUrl: () => string;
   /** Returns the working directory for spawned processes. */
   getCwd: () => string;

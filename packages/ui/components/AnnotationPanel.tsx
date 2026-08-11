@@ -66,7 +66,10 @@ interface PanelProps {
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
   onClose?: () => void;
-  onQuickCopy?: () => Promise<void>;
+  /** Copy the full feedback payload. May resolve a success boolean; resolving
+    *  `false` suppresses the "Copied" flash. A void resolution (existing hosts)
+    *  is treated as success, preserving the original behavior. */
+  onQuickCopy?: () => Promise<void | boolean>;
   onShare?: () => void;
   otherFileAnnotations?: { count: number; files: number };
   onOtherFileAnnotationsClick?: () => void;
@@ -249,7 +252,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
           {onQuickCopy && (
             <button
               onClick={async () => {
-                await onQuickCopy();
+                const result = await onQuickCopy();
+                if (result === false) return;
                 setCopiedText(true);
                 setTimeout(() => setCopiedText(false), 2000);
               }}

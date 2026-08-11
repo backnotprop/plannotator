@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTheme } from './ThemeProvider';
 import { THEME_MODES } from './themeModes';
-import { isThemeModeAvailable } from '../utils/themeRegistry';
 
 export function ModeToggle() {
-  const { theme, setTheme, colorTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -50,26 +49,19 @@ export function ModeToggle() {
 
       {isOpen && (
         <div className="absolute right-0 mt-1 w-32 rounded-lg border border-border bg-popover shadow-xl z-50 overflow-hidden py-1">
-          {THEME_MODES.map(({ id, label }) => {
-            const available = isThemeModeAvailable(colorTheme, id);
-            return (
-              <button
-                key={id}
-                disabled={!available}
-                title={available ? undefined : 'Not supported by the current color theme'}
-                onClick={() => { setTheme(id); setIsOpen(false); }}
-                className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
-                  !available
-                    ? 'cursor-not-allowed text-muted-foreground opacity-40'
-                    : theme === id
-                      ? 'text-primary bg-primary/10 font-medium'
-                      : 'text-popover-foreground hover:bg-muted'
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+          {THEME_MODES.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => { setTheme(id); setIsOpen(false); }}
+              className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
+                theme === id
+                  ? 'text-primary bg-primary/10 font-medium'
+                  : 'text-popover-foreground hover:bg-muted'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       )}
     </div>

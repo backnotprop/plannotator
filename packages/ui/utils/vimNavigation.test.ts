@@ -23,7 +23,7 @@ function createDocumentFixture(): HTMLElement {
     '<thead><tr><th>A1</th><th>A2</th></tr></thead>',
     '<tbody><tr><td>B1</td><td>B2</td></tr><tr><td>C1</td><td>C2</td></tr></tbody>',
     '</table></div>',
-    '<div data-block-id="code"><pre><code class="hljs">const answer = 42;</code></pre></div>',
+    '<div data-block-id="code"><pre><code class="pn-code">const answer = 42;</code></pre></div>',
     '<p data-block-id="outro">Charlie delta</p>',
   ].join('');
   document.body.appendChild(container);

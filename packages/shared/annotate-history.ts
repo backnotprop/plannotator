@@ -21,7 +21,7 @@
  * non-Bun runtimes can vendor it unmodified.
  */
 
-import { saveToHistory, getPlanVersion, getVersionCount } from "./storage";
+import { saveToHistory, getPlanVersion, getVersionCount, saveAnnotateSubmission } from "./storage";
 import { contentHash } from "./draft";
 
 export interface AnnotateVersionInfo {
@@ -90,6 +90,72 @@ export function computeAnnotateHistory(
   } catch (error) {
     console.error(
       `[plannotator] warning: annotate history unavailable (${error instanceof Error ? error.message : String(error)}); continuing without version diff`,
+    );
+    return null;
+  }
+}
+
+// --- Durable submit records (#678) ---
+
+export interface AnnotateSubmissionInput {
+  /** Project namespace, same one used for the session's version history. */
+  project: string;
+  /**
+   * Stable identity of what was annotated: the resolved file path for
+   * single-file sessions, the resolved folder path for folder sessions, the
+   * URL for URL sessions, or the session's filePath label for message
+   * sessions. Runs through deriveAnnotateHistorySlug, so single-file records
+   * land in the SAME history slug directory as the file's version snapshots.
+   */
+  sessionPath: string;
+  /** Exported human-readable feedback text (what the agent would receive). */
+  feedback: string;
+  /** Raw annotations payload from the submit body. */
+  annotations: unknown[];
+  /** True for approve-with-notes, false/absent for plain feedback. */
+  approved?: boolean;
+}
+
+/**
+ * Persist a durable record of a submitted annotate decision BEFORE the
+ * reviewer's draft is deleted (#678).
+ *
+ * The annotate decision promise's consumer is the invoking CLI/agent, which
+ * may have timed out by the time the reviewer clicks submit. Without this
+ * record, a successful submit settles the promise (nobody listening), deletes
+ * the draft, and the feedback then exists nowhere. The record is written to
+ * `{DATA_DIR}/history/{project}/{slug}/submissions/{timestamp}.md`, alongside
+ * the file's annotate version history.
+ *
+ * Never throws: any storage failure is logged and `null` is returned so the
+ * caller can react (the servers keep the draft as the recovery copy when this
+ * returns null).
+ */
+export function persistAnnotateSubmission(input: AnnotateSubmissionInput): string | null {
+  try {
+    const slug = deriveAnnotateHistorySlug(input.sessionPath);
+    // The exported feedback text already embeds every annotation in
+    // human-readable form; the raw annotations JSON is only recorded when
+    // there is no text to fall back on (defensive — the UI always exports).
+    const body = input.feedback.trim()
+      ? input.feedback
+      : "```json\n" + JSON.stringify(input.annotations, null, 2) + "\n```";
+    const content = [
+      "# Annotate feedback",
+      "",
+      `- Source: ${input.sessionPath}`,
+      `- Decision: ${input.approved ? "approved (with notes)" : "feedback"}`,
+      `- Submitted: ${new Date().toISOString()}`,
+      "",
+      "---",
+      "",
+      body,
+      "",
+    ].join("\n");
+    return saveAnnotateSubmission(input.project, slug, content);
+  } catch (error) {
+    console.error(
+      `[plannotator] warning: could not persist submitted annotate feedback (${error instanceof Error ? error.message : String(error)}); keeping the annotation draft as the recovery copy`,
     );
     return null;
   }

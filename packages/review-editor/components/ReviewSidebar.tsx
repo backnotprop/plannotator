@@ -17,6 +17,7 @@ import { isAgentGeneratedFinding } from '../utils/explainFinding';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 
 export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
@@ -186,12 +187,11 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
 
   const handleQuickCopy = async () => {
     if (!feedbackMarkdown) return;
-    try {
-      await navigator.clipboard.writeText(feedbackMarkdown);
+    if (await copyTextToClipboard(feedbackMarkdown)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy:', e);
+    } else {
+      console.error('Failed to copy');
     }
   };
 

@@ -850,10 +850,10 @@ diffs-container {
   background: var(--code-bg);
 }
 
-/* GitHub-style suggestion block */
+/* GitHub-style suggestion block. The colored header is the sole identity
+   marker; no left accent bar on the card body. */
 .suggestion-block {
   border: 1px solid oklch(from var(--success) l c h / 0.3);
-  border-left: 3px solid var(--success);
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
@@ -898,7 +898,6 @@ diffs-container {
 
 .light .suggestion-block {
   border-color: oklch(from var(--success) l c h / 0.3);
-  border-left-color: var(--success);
 }
 
 .light .suggestion-block-header {
@@ -1531,9 +1530,9 @@ diffs-container {
   animation: overlay-fade-in 0.15s ease-out both;
 }
 
-/* Code navigation peek panel — strip hljs hardcoded background */
+/* Code navigation peek panel — strip the syntax theme's block background */
 .code-nav-peek code,
-.code-nav-peek .hljs {
+.code-nav-peek .pn-code {
   background: transparent !important;
 }
 
@@ -1618,7 +1617,7 @@ diffs-container {
    tighten the box. `.my-5` is unique to the code-block wrapper in this renderer. */
 .md-compact .my-5 { margin-top: 0.625rem; margin-bottom: 0.625rem; } /* was 20px */
 .md-compact pre { font-size: 0.75rem; }                              /* 12px, under the body */
-.md-compact pre code.hljs { padding: 0.5rem 0.625rem; }              /* tighter than hljs default */
+.md-compact pre code.pn-code { padding: 0.5rem 0.625rem; }           /* tighter than the 1rem default */
 
 /* PR description + comment media: cap wide screenshots/videos to the card width
    (GitHub embeds them at their natural size, e.g. width="1440"), and wrap long

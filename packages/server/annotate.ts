@@ -11,16 +11,16 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
+import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { handleFileBrowserFilesStream } from "./reference-watch";
 import { resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
-import { computeAnnotateHistory, deriveAnnotateHistorySlug, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
+import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { htmlDiff } from "@plannotator/shared/html-diff";
 import { disabledSourceSave, type SourceSaveRequest } from "@plannotator/shared/source-save";
 import { getAnnotateReferenceRootPaths } from "@plannotator/shared/annotate-reference-roots-node";
@@ -194,12 +194,16 @@ export async function startAnnotateServer(
   // when rendering HTML. Only single local files (not URLs/folders/messages).
   const annotateProjectName = project ?? "_unknown";
   const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+  // Single local file sessions are the only ones the annotate-history contract
+  // covers: URL / folder / agent-message sessions never write session content
+  // to the data dir. Both the version history below and the durable submit
+  // records share this gate.
+  const singleFileLocalAnnotate = mode === "annotate" && !/^https?:\/\//i.test(filePath);
   let annotateHistory: AnnotateHistoryResult | null = null;
   {
     const historyContent = renderHtml && rawHtml ? rawHtml : markdown;
     const eligible =
-      mode === "annotate" &&
-      !/^https?:\/\//i.test(filePath) &&
+      singleFileLocalAnnotate &&
       historyContent.length > 0 &&
       annotateHistoryEnabled;
     // History is an enhancement, never a gate: a read-only/full data dir
@@ -234,6 +238,54 @@ export async function startAnnotateServer(
       ? `folder:${resolvePath(folderPath)}`
       : renderHtml && rawHtml ? rawHtml : markdown;
   const draftKey = contentHash(draftSource);
+
+  // Durable submit records (#678): the caller consuming waitForDecision() may
+  // be gone (agent-side timeout) by the time the reviewer clicks submit —
+  // settling the promise then deleting the draft would leave the submitted
+  // feedback existing nowhere. persistAnnotateSubmission writes the record to
+  // {DATA_DIR}/history/{project}/{slug}/submissions/{timestamp}.md (next to
+  // the file's annotate version history) BEFORE the draft delete.
+  //
+  // annotateHistory opt-out policy: PLANNOTATOR_ANNOTATE_HISTORY=0 means "do
+  // not write annotated content to the data dir", and submitted feedback
+  // quotes that content, so the record is skipped and the legacy submit
+  // behavior (draft deleted) is preserved unchanged. A missing/timed-out
+  // consumer is not detectable in-process (the server cannot know its caller
+  // stopped reading), so there is no narrower condition to key off.
+  //
+  // Scope: identical to the version-history gate above — single local files
+  // only. annotate-last / URL / folder sessions were stateless before this
+  // record existed and STAY stateless: their submissions quote agent messages
+  // or fetched pages, which the documented annotateHistory contract never
+  // covered writing to disk.
+  //
+  // Returns whether the draft delete may proceed: true when the record was
+  // written, when there was no user content to lose, or when the session
+  // does not persist; false only when a durable write was expected and
+  // failed — the draft then stays behind as the recovery copy.
+  const persistSubmittedDecision = (
+    feedback: unknown,
+    annotations: unknown,
+    approved: boolean,
+  ): boolean => {
+    // Defensive: /api/feedback does not type-validate its body (unlike
+    // /api/approve), and a malformed value must degrade to the legacy
+    // behavior (settle + delete draft + 200), never throw into a 500.
+    const feedbackText = typeof feedback === "string" ? feedback : "";
+    const annotationList = Array.isArray(annotations) ? annotations : [];
+    if (!feedbackText.trim() && annotationList.length === 0) return true; // contentless (e.g. bare approve)
+    if (!annotateHistoryEnabled) return true; // opt-out: stateless annotate sessions
+    if (!singleFileLocalAnnotate) return true; // stateless modes stay stateless
+    return (
+      persistAnnotateSubmission({
+        project: annotateProjectName,
+        sessionPath: resolvePath(filePath),
+        feedback: feedbackText,
+        annotations: annotationList,
+        approved,
+      }) !== null
+    );
+  };
   const externalAnnotations = createExternalAnnotationHandler("plan");
   const aiRuntime = resolveAIEnabled() ? await createAIRuntime() : null;
   const htmlAssets = createHtmlAssetRegistry();
@@ -562,10 +614,11 @@ export async function startAnnotateServer(
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
             try {
-              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
+              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
               const toSave: Record<string, unknown> = {};
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+              if (body.theme !== undefined) toSave.theme = body.theme;
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
               if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
@@ -682,6 +735,16 @@ export async function startAnnotateServer(
           // API: Detect Obsidian vaults
           if (url.pathname === "/api/obsidian/vaults") {
             return handleObsidianVaults();
+          }
+
+          // API: Global skill catalog for comment skill references
+          if (url.pathname === "/api/skills" && req.method === "GET") {
+            return handleReferenceSkills();
+          }
+
+          // API: SKILL.md contents for a referenced human-only skill
+          if (url.pathname === "/api/skills/content" && req.method === "GET") {
+            return handleReferenceSkillContent(req);
           }
 
           // API: List Obsidian vault files as a tree
@@ -834,7 +897,14 @@ export async function startAnnotateServer(
                     : undefined,
             });
             if (!approvalWon) return alreadyDecided();
-            deleteDraft(draftKey, readDraftGenerationFromBody(body));
+            // Approve-with-notes carries user content — make it durable before
+            // the draft (the reviewer's only other copy) is deleted (#678).
+            const approvalDurable = persistSubmittedDecision(
+              (body.feedback as string | undefined) || "",
+              (body.annotations as unknown[] | undefined) || [],
+              true,
+            );
+            if (approvalDurable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
             clientLease.cancel();
             return Response.json({ ok: true });
           }
@@ -857,7 +927,15 @@ export async function startAnnotateServer(
                 feedbackScope: body.feedbackScope,
               });
               if (!feedbackWon) return alreadyDecided();
-              deleteDraft(draftKey, readDraftGenerationFromBody(body));
+              // Make the submitted feedback durable BEFORE deleting the draft:
+              // the decision promise's consumer may have timed out, and this
+              // record is then the only surviving copy (#678).
+              const feedbackDurable = persistSubmittedDecision(
+                body.feedback || "",
+                body.annotations || [],
+                false,
+              );
+              if (feedbackDurable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
               clientLease.cancel();
 
               return Response.json({ ok: true });
@@ -901,7 +979,7 @@ export async function startAnnotateServer(
   );
 
   const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
+  const serverUrl = buildAdvertisedUrl(port);
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.

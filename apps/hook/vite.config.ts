@@ -18,6 +18,10 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: {
+      // Drop the dead Oniguruma WASM (~622 KB base64). The plan editor reaches
+      // Pierre's shared highlighter through CodeFilePopout and the fence
+      // highlighter. See build/shiki-wasm-stub.ts.
+      'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
       '@': path.resolve(__dirname, '.'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),

@@ -14,6 +14,10 @@ Open settings with the **gear icon** in the header. The dialog has three tabs: *
 
 The sun/moon toggle in the header switches between **Dark**, **Light**, and **System** themes. System follows your OS preference and updates automatically. Dark is the default.
 
+The **Theme** tab in Settings assigns a palette to each half of a pair: one theme for light mode, one for dark mode. A Light/Dark switch above the grid decides which half you are assigning, and the grid then lists only the palettes that can render it (Kanagawa Wave appears under Dark, Kanagawa Lotus under Light, and a palette that ships both variants appears under each with that mode's colors). The summary line above the grid always names both halves, and clicking either side jumps the grid to it.
+
+With **System** selected, your two choices swap as your OS switches between light and dark. All three mode buttons stay available whatever you pick, because a dark-only palette simply never occupies the light half. The pair is saved to `~/.plannotator/config.json` under `theme`, so it carries across sessions and hosts.
+
 ## General
 
 ### Identity

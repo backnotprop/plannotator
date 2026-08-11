@@ -7,8 +7,9 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import hljs from "highlight.js";
 import { parseMarkdownToBlocks, computeListIndices } from "../../utils/parser";
+import { applyHighlight, codeBlockClassName } from "../../utils/codeHighlight";
+import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
@@ -331,6 +332,7 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
           initialText={commentPopover.initialText}
           onSubmit={handleCommentSubmit}
           onClose={handleCommentClose}
+          skillReferences
         />
       )}
 
@@ -695,22 +697,20 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
 
 const SimpleCodeBlock: React.FC<{ block: Block }> = ({ block }) => {
   const codeRef = useRef<HTMLElement>(null);
+  const fenceTheme = useFenceTheme();
 
   useEffect(() => {
     if (codeRef.current) {
-      codeRef.current.removeAttribute("data-highlighted");
-      codeRef.current.className = `hljs font-mono${block.language ? ` language-${block.language}` : ""}`;
-      hljs.highlightElement(codeRef.current);
+      codeRef.current.className = codeBlockClassName(block.language);
+      // Language-less fences stay plain (#1212) — applyHighlight never guesses.
+      applyHighlight(codeRef.current, block.content, block.language, fenceTheme);
     }
-  }, [block.content, block.language]);
+  }, [block.content, block.language, fenceTheme]);
 
   return (
     <div className="relative group my-5">
       <pre className="bg-muted/50 border border-border/30 rounded-lg overflow-x-auto">
-        <code
-          ref={codeRef}
-          className={`hljs font-mono${block.language ? ` language-${block.language}` : ""}`}
-        >
+        <code ref={codeRef} className={codeBlockClassName(block.language)}>
           {block.content}
         </code>
       </pre>

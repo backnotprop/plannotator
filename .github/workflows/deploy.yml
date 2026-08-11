@@ -134,6 +134,14 @@ jobs:
             --distribution-id E284ON0A27O2H6 \
             --paths "/*"
 
+  # NOTE: the /install.sh, /install.ps1, and /install.cmd paths on
+  # plannotator.ai are served from the dedicated plannotator-install-scripts
+  # bucket, NOT the marketing bucket. That bucket is deliberately NOT writable
+  # by the CI deploy role, so there is no auto-sync job here: after any change
+  # to scripts/install.*, sync BY HAND with local credentials (aws s3 cp each
+  # script with its content-type, then a CloudFront invalidation for the three
+  # paths on E284ON0A27O2H6) and verify the served md5s match the repo. See the
+  # release runbook's post-release checklist for the exact commands.
   deploy-portal:
     needs: detect-changes
     if: needs.detect-changes.outputs.portal == 'true'

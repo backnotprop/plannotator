@@ -59,6 +59,12 @@ function provider(
 }
 
 const gitRuntime: ReviewGitRuntime = {
+  async getFileInfo() {
+    return null;
+  },
+  async readLink() {
+    return null;
+  },
   async runGit() {
     return { stdout: "", stderr: "", exitCode: 0 };
   },

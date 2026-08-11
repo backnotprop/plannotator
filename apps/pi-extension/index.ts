@@ -72,7 +72,8 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
-import { isRemoteSession } from "./server/network.ts";
+import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
+import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -92,14 +93,20 @@ function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
 }
 
 async function loadAnnotateCommandModules() {
-	const [annotateArgs, atReference, resolveFile, referenceCommon] = await Promise.all([
+	const [annotateArgs, annotateTarget, atReference, resolveFile, referenceCommon] = await Promise.all([
 		import("./generated/annotate-args.ts"),
+		import("./generated/annotate-target.ts"),
 		import("./generated/at-reference.ts"),
 		import("./generated/resolve-file.ts"),
 		import("./generated/reference-common.ts"),
 	]);
 	return {
 		parseAnnotateArgs: annotateArgs.parseAnnotateArgs,
+		annotateInputNamesExistingTarget: annotateTarget.annotateInputNamesExistingTarget,
+		buildAmbiguousAnnotateArgsMessage: annotateTarget.buildAmbiguousAnnotateArgsMessage,
+		buildUnresolvedAnnotateArgsMessage: annotateTarget.buildUnresolvedAnnotateArgsMessage,
+		probeAnnotateToken: annotateTarget.probeAnnotateToken,
+		selectAnnotateTokenTarget: annotateTarget.selectAnnotateTokenTarget,
 		resolveAtReference: atReference.resolveAtReference,
 		hasMarkdownFiles: resolveFile.hasMarkdownFiles,
 		resolveUserPath: resolveFile.resolveUserPath,
@@ -156,14 +163,24 @@ function safeNotify(
  * after-turn notify inside openBrowserForServer fires too late to render.
  */
 function sessionOpenedMessage(label: string, url: string): string {
-	return isRemoteSession()
-		? `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`
-		: `${label}. You can keep chatting while it runs.`;
+	if (!isRemoteSession()) return `${label}. You can keep chatting while it runs.`;
+	// With an advertised-URL host override the link is directly reachable
+	// (e.g. over a tailnet), so the port-forwarding advice would be wrong.
+	return isUrlHostOverridden()
+		? `${label} — open ${url} on your device. You can keep chatting while it runs.`
+		: `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`;
 }
 
 function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown, origin?: PiSessionIdentity): void {
 	const detail = getStartupErrorMessage(err);
 	console.error(`${message}: ${detail}`);
+	// A stopped session is not a failure: it is how supersession ends a stale
+	// undecided session (port self-preemption, #1159) and how cancel paths
+	// settle a pending waitForDecision.
+	if (isBrowserSessionStoppedError(err)) {
+		safeNotify(ctx, "A Plannotator browser session was closed.", "info", origin);
+		return;
+	}
 	safeNotify(ctx, `${message}: ${detail}`, "error", origin);
 }
 
@@ -286,6 +303,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		sessionAlive = false;
 		currentPiSession.clear();
+		// Browser sessions deliberately outlive in-process session replacement so
+		// a tab opened before /new can still deliver feedback to the replacement
+		// session (withCurrentPiSessionFallbackHeader). On real process teardown
+		// the OS frees the ports, and port self-preemption reclaims any stale
+		// fixed-port session on the next command.
 	});
 
 	// ── Flags ────────────────────────────────────────────────────────────
@@ -636,6 +658,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 				FILE_BROWSER_EXCLUDED,
 				hasMarkdownFiles,
 				parseAnnotateArgs,
+				annotateInputNamesExistingTarget,
+				buildAmbiguousAnnotateArgsMessage,
+				buildUnresolvedAnnotateArgsMessage,
+				probeAnnotateToken,
+				selectAnnotateTokenTarget,
 				resolveAtReference,
 				resolveUserPath,
 				isAnnotatableTextPath,
@@ -647,10 +674,43 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
 			// (scoped-package-style names).
-			const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
+			let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
 			if (!filePath) {
 				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
 				return;
+			}
+
+			// Tolerant fallback (#1182): when the whole argument string names
+			// nothing, probe each token; exactly one existing target proceeds,
+			// several is an error, several unresolvable words get an actionable
+			// message instead of "File not found: the". Bare directory names
+			// only count in the sole-arg pre-pass, and unrecognized
+			// dash-prefixed tokens disable tolerance so a typo'd flag errors
+			// the way it always did.
+			if (!annotateInputNamesExistingTarget(rawFilePath, ctx.cwd)) {
+				const selection = selectAnnotateTokenTarget(rawFilePath, (token: string) =>
+					probeAnnotateToken(token, ctx.cwd, { bareDirectories: false }),
+				);
+				if (selection.kind === "single") {
+					filePath = selection.candidate.value;
+					rawFilePath = selection.candidate.value;
+				} else if (selection.kind === "multiple") {
+					ctx.ui.notify(buildAmbiguousAnnotateArgsMessage(selection.candidates), "error");
+					return;
+				} else if (selection.kind === "none" && selection.words.length > 1) {
+					// Content flags only; --gate is transport for this
+					// invocation, not a property of the target.
+					const tolerantFlags = [
+						...(renderMarkdownFlag ? ["--markdown"] : []),
+						...(noJina ? ["--no-jina"] : []),
+						...(renderHtmlFlag ? ["--render-html"] : []),
+					];
+					ctx.ui.notify(buildUnresolvedAnnotateArgsMessage({ words: selection.words, flags: tolerantFlags }), "error");
+					return;
+				}
+				// "flagged" (unrecognized dash tokens) or a single unresolvable
+				// word falls through to the existing pipeline so its specific
+				// errors stay verbatim.
 			}
 			if (!hasPlanBrowserHtml()) {
 				ctx.ui.notify(
@@ -940,7 +1000,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}),
 		}) as any,
 
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			// Guard: must be in planning phase
 			if (phase !== "planning") {
 				return {
@@ -1066,8 +1126,22 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			let result: Awaited<ReturnType<typeof openPlanReviewBrowser>>;
 			try {
-				result = await openPlanReviewBrowser(ctx, planContent);
+				result = await openPlanReviewBrowser(ctx, planContent, signal);
 			} catch (err) {
+				// A stopped session is an outcome, not a startup failure: the review
+				// was closed (cancellation or port self-preemption) before a decision.
+				if (isBrowserSessionStoppedError(err)) {
+					ctx.ui.notify("Plan review session was closed before a decision.", "info");
+					return {
+						content: [
+							{
+								type: "text",
+								text: "The plan review browser session was closed before a decision was made. The plan was neither approved nor rejected; resubmit to reopen review.",
+							},
+						],
+						details: { approved: false },
+					};
+				}
 				const message = `Failed to start plan review UI: ${getStartupErrorMessage(err)}`;
 				ctx.ui.notify(message, "error");
 				return {

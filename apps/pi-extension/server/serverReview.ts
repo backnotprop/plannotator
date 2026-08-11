@@ -90,7 +90,7 @@ import {
 import { handleApiNotFound, html, json, parseBody, requestUrl, send } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
-import { isRemoteSession, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
 import { resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
@@ -683,8 +683,12 @@ export async function startReviewServer(options: {
 		);
 	}
 
-	// Agent jobs — background process manager (late-binds serverUrl via getter)
+	// Agent jobs — background process manager (late-binds serverUrl via getter).
+	// Spawned jobs run on this machine, so their API URL is pinned to loopback
+	// and never inherits the advertised-URL host override (a tailnet-only
+	// hostname must not break local agent jobs).
 	let serverUrl = "";
+	let agentApiUrl = "";
 	function resolveAgentCwd(): string {
 		if (workspace) return workspace.root;
 		if (options.worktreePool && prMeta) {
@@ -880,7 +884,7 @@ export async function startReviewServer(options: {
 
 	const agentJobs = createAgentJobHandler({
 		mode: "review",
-		getServerUrl: () => serverUrl,
+		getServerUrl: () => agentApiUrl,
 		getCwd: resolveAgentCwd,
 
 		async buildCommand(provider, config) {
@@ -2476,10 +2480,11 @@ export async function startReviewServer(options: {
 			}
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
 				json(res, { ok: true });
@@ -2742,7 +2747,8 @@ export async function startReviewServer(options: {
 	});
 
 	const { port, portSource } = await listenOnPort(server);
-	serverUrl = `http://localhost:${port}`;
+	serverUrl = buildAdvertisedUrl(port);
+	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();
 	process.once("exit", exitHandler);
 
@@ -2757,16 +2763,26 @@ export async function startReviewServer(options: {
 		isRemote,
 		waitForDecision: () => decisionPromise,
 		stop: () => {
-			process.removeListener("exit", exitHandler);
-			agentJobs.killAll();
-			aiRuntime?.dispose();
-			server.close();
-			// Invoke cleanup callback (e.g., remove temp worktree)
-			if (options.onCleanup) {
-				try {
-					const result = options.onCleanup();
-					if (result instanceof Promise) result.catch(() => {});
-				} catch { /* best effort */ }
+			// try/finally: a throwing dispose must never leave the listener bound.
+			try {
+				process.removeListener("exit", exitHandler);
+				agentJobs.killAll();
+				aiRuntime?.dispose();
+			} finally {
+				server.close();
+				// close() only stops the listener; drain browser keep-alive sockets so a
+				// stopped session's connections die immediately instead of at the
+				// browser's whim (parity with Bun's server.stop(), which closes idle
+				// connections). Guarded: jiti can run under hosts whose node:http lacks
+				// closeAllConnections.
+				server.closeAllConnections?.();
+				// Invoke cleanup callback (e.g., remove temp worktree)
+				if (options.onCleanup) {
+					try {
+						const result = options.onCleanup();
+						if (result instanceof Promise) result.catch(() => {});
+					} catch { /* best effort */ }
+				}
 			}
 		},
 	};

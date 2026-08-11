@@ -22,6 +22,7 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { CommentPopover } from '../CommentPopover';
 import { Button } from '../core/button';
 import { Textarea } from '../core/textarea';
+import { copyTextToClipboard } from '../../utils/clipboard';
 
 interface GoalSetupSurfaceProps {
   bundle: GoalSetupBundle;
@@ -67,10 +68,22 @@ async function submitGoalSetup(payload: unknown): Promise<void> {
 }
 
 async function copyGoalSetupText(text: string): Promise<void> {
-  if (!navigator.clipboard?.writeText) {
-    throw new Error('Clipboard is unavailable in this browser');
+  let writeError: unknown;
+  try {
+    const clipboardWrite = navigator.clipboard?.writeText(text);
+    if (clipboardWrite) {
+      await clipboardWrite;
+      return;
+    }
+  } catch (err) {
+    writeError = err;
   }
-  await navigator.clipboard.writeText(text);
+  // Clipboard API absent or rejected: try the legacy copy-event fallback.
+  if (await copyTextToClipboard(text)) return;
+  // All strategies failed. When the API existed but rejected, surface its
+  // real error; use the generic message only when the API was absent.
+  if (writeError instanceof Error) throw writeError;
+  throw new Error('Clipboard is unavailable in this browser');
 }
 
 function useGoalSetupCopy(onError: (message: string) => void) {

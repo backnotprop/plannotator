@@ -21,6 +21,8 @@ import {
 	handleDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleReferenceSkillsRequest,
+	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
 	handleSaveNotesRequest,
 	handleUploadRequest,
@@ -37,7 +39,7 @@ import {
 	saveToObsidian,
 	saveToOctarine,
 } from "./integrations.ts";
-import { listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, listenOnPort } from "./network.ts";
 
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveSharingEnabled } from "../generated/config.ts";
 import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
@@ -255,10 +257,11 @@ export async function startPlanReviewServer(options: {
 			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+				if (body.theme !== undefined) toSave.theme = body.theme;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
 				if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
@@ -285,6 +288,10 @@ export async function startPlanReviewServer(options: {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
 			handleObsidianVaultsRequest(res);
+		} else if (url.pathname === "/api/skills" && req.method === "GET") {
+			handleReferenceSkillsRequest(res);
+		} else if (url.pathname === "/api/skills/content" && req.method === "GET") {
+			handleReferenceSkillContentRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
@@ -466,7 +473,7 @@ export async function startPlanReviewServer(options: {
 		reviewId,
 		port,
 		portSource,
-		url: `http://localhost:${port}`,
+		url: buildAdvertisedUrl(port),
 		waitForDecision: () => decisionPromise,
 		onDecision: (listener) => {
 			decisionListeners.add(listener);
@@ -476,8 +483,18 @@ export async function startPlanReviewServer(options: {
 		},
 		...(donePromise && { waitForDone: () => donePromise }),
 		stop: () => {
-			aiRuntime?.dispose();
-			server.close();
+			// try/finally: a throwing dispose must never leave the listener bound.
+			try {
+				aiRuntime?.dispose();
+			} finally {
+				server.close();
+				// close() only stops the listener; drain browser keep-alive sockets so a
+				// stopped session's connections die immediately instead of at the
+				// browser's whim (parity with Bun's server.stop(), which closes idle
+				// connections). Guarded: jiti can run under hosts whose node:http lacks
+				// closeAllConnections.
+				server.closeAllConnections?.();
+			}
 		},
 	};
 }

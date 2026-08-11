@@ -128,15 +128,20 @@ function findBlock(container: HTMLElement, blockId: string): HTMLElement | null 
   return null;
 }
 
-function getViewportCenterY(container: HTMLElement): number {
-  const viewport = container.closest<HTMLElement>('[data-overlayscrollbars-viewport]');
-  const rect = (viewport ?? container).getBoundingClientRect();
+function getViewportCenterY(
+  container: HTMLElement,
+  scrollViewport?: HTMLElement | null,
+): number {
+  const rect = (scrollViewport ?? container).getBoundingClientRect();
   return rect.top + rect.height / 2;
 }
 
 /** Pick the first text cursor nearest the visible center of the document. */
-export function findInitialTextPosition(container: HTMLElement): VimTextPosition | null {
-  const centerY = getViewportCenterY(container);
+export function findInitialTextPosition(
+  container: HTMLElement,
+  scrollViewport?: HTMLElement | null,
+): VimTextPosition | null {
+  const centerY = getViewportCenterY(container, scrollViewport);
   const candidates = getBlockElements(container)
     .map((block) => ({ block, position: getPositionAtBlockBoundary(block, 'start') }))
     .filter((candidate): candidate is { block: HTMLElement; position: VimTextPosition } =>
@@ -378,9 +383,10 @@ export function moveTextPosition(
   container: HTMLElement,
   position: VimTextPosition,
   motion: VimTextMotion,
+  scrollViewport?: HTMLElement | null,
 ): VimTextPosition {
   const currentBlock = findBlock(container, position.blockId);
-  if (!currentBlock) return findInitialTextPosition(container) ?? position;
+  if (!currentBlock) return findInitialTextPosition(container, scrollViewport) ?? position;
   const currentText = getBlockText(currentBlock);
   const nextOffset = moveWithinBlock(currentText, position.textOffset, motion);
   if (nextOffset !== null) {
@@ -397,7 +403,7 @@ export function moveTextPosition(
   }
 
   const blockIndex = blocks.indexOf(currentBlock);
-  if (blockIndex < 0) return findInitialTextPosition(container) ?? position;
+  if (blockIndex < 0) return findInitialTextPosition(container, scrollViewport) ?? position;
   if (motion === 'block-backward' || motion === 'block-forward') {
     const delta = motion === 'block-backward' ? -1 : 1;
     const nextBlock = blocks[Math.max(0, Math.min(blocks.length - 1, blockIndex + delta))];

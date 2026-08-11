@@ -83,6 +83,46 @@ For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the envir
 
 </details>
 
+<details>
+<summary><strong>Skipping individual agent integrations</strong></summary>
+
+Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex
+```
+
+PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode`. Windows CMD: same `--skip-*` flags as bash.
+
+For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`) or persist the choice in `~/.plannotator/config.json`:
+
+```json
+{ "skipInstall": { "codex": true } }
+```
+
+Precedence: flag over environment variable over config file.
+
+</details>
+
+<details>
+<summary><strong>Skipping the skills and slash commands</strong></summary>
+
+The `/plannotator-*` skills and slash commands are fetched with a sparse `git clone` of the release tag. `--skip-skills` turns that fetch into a no-op: nothing is written to `~/.claude/skills`, `~/.agents/skills`, the OpenCode or Gemini command directories, or `~/.kiro`, the extras are not offered, and the skill-scope cleanup sweeps stay suspended. The binary, hooks, and per-agent config still install, and git stops being a hard requirement. Use it where the tag being installed cannot be fetched from GitHub, or where you manage the skills yourself.
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-skills
+```
+
+PowerShell: `-SkipSkills`. Windows CMD: `--skip-skills`. For unattended runs set `PLANNOTATOR_SKIP_SKILLS_INSTALL=1`, or persist it:
+
+```json
+{ "skipInstall": { "skills": true } }
+```
+
+Same precedence: flag over environment variable over config file. The installer reports `Skills: skipped (...)` and stops claiming the `/plannotator-*` commands are ready, so a skipped run is never mistaken for a complete one.
+
+</details>
+
 ## Uninstall
 
 `plannotator uninstall` removes recognized installed components while
@@ -110,17 +150,17 @@ local-only: it is not stored on a Plannotator server and cannot be recovered
 after purge. `--yes` (or `-y`) skips confirmation for automation, and is
 required when no interactive terminal is available. `--dry-run` previews the
 recognized removal set without changing anything.
-If a broken or unavailable host blocks cleanup, `--skip-hosts` leaves host
-plugin managers and shared host configuration untouched while removing the
-remaining installer-owned components and binary. Remove the skipped host
-integrations manually afterward.
+Host integrations are always part of uninstall. If a broken or unavailable
+host prevents safe cleanup, the command names the blocking plugin manager or
+configuration, gives exact manual cleanup instructions, and stops before
+deleting the binary. Complete that cleanup and rerun uninstall.
 
 The purge removes only known Plannotator entries from the configured data
 directory. Unknown top-level files are preserved rather than guessed at, and
 custom external plan-save paths or project-local integrations are never
-deleted. Malformed host config is treated as a fail-safe error unless
-`--skip-hosts` is explicit. If a host plugin manager is unavailable or a shared
-config cannot be edited safely, the command reports the follow-up and preserves
+deleted. Malformed host config is treated as a fail-safe error. If a host
+plugin manager is unavailable or a shared config cannot be edited safely, the
+command reports the exact manual follow-up and preserves
 the CLI and its Windows PATH entry so you can fix the problem and retry. If
 Windows PATH restoration itself fails, the CLI remains on disk and the output
 gives its full path for retry and manual PATH repair.

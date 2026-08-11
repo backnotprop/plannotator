@@ -135,10 +135,12 @@ describe("annotate startup failure exit codes", () => {
   });
 
   test("routes every annotate startup failure through the shared helper", () => {
-    // The annotate startup path in index.ts must not reach a bare
-    // `process.exit(1)`: each of the six failure classes (missing path,
-    // unreachable URL, empty folder, ambiguous name, missing/unsupported file,
-    // oversized file) has to pick its code from the parsed strict options.
+    // The annotate startup path must not reach a bare `process.exit(1)`: each
+    // of the six failure classes (missing path, unreachable URL, empty folder,
+    // ambiguous name, missing/unsupported file, oversized file) has to pick
+    // its code from the parsed strict options. The failure classes live in
+    // annotate-resolution.ts, which returns them instead of exiting; index.ts
+    // maps every returned failure onto the helper.
     const source = readFileSync(
       join(import.meta.dir, "index.ts"),
       "utf8",
@@ -153,17 +155,20 @@ describe("annotate startup failure exit codes", () => {
 
     const annotateStartupBlock = source.slice(start, end);
     // No bare exit(1) anywhere in the annotate startup path — that code is the
-    // reviewer-requested-changes signal once a strict flag is in play.
+    // reviewer-requested-changes signal once a strict flag is in play. (The
+    // tolerant handoff's `process.exit(0)` is fine: exit 0 is never a strict
+    // outcome and the handoff is gated off strict invocations.)
     expect(annotateStartupBlock).not.toContain("process.exit(1)");
-    // Every failure class routes through the helper that reads the strict flags.
+    // The tolerance gate must be the NEGATED strict predicate: an inverted
+    // gate (tolerance in strict mode) cannot be spawn-tested without starting
+    // a server, so pin the source shape here.
+    expect(annotateStartupBlock).toContain("!strictAnnotate");
+    expect(annotateStartupBlock).toContain("isStrictAnnotateInvocation(");
+    // The usage failure and every resolution failure route through the helper
+    // that reads the strict flags.
     for (const failure of [
       "Usage: plannotator annotate",
-      "Failed to fetch URL:",
-      "No annotatable files",
-      "Ambiguous filename",
-      "File type not supported:",
-      "File not found:",
-      "File too large to annotate",
+      "resolution.message",
     ]) {
       const site = annotateStartupBlock.indexOf(failure);
       expect(site).toBeGreaterThan(-1);
@@ -174,6 +179,24 @@ describe("annotate startup failure exit codes", () => {
       ).toBeGreaterThan(
         annotateStartupBlock.slice(0, site).lastIndexOf("console.error("),
       );
+    }
+
+    // The extracted resolution pipeline returns failures instead of exiting;
+    // every failure class must be present there and none may exit directly.
+    const resolutionSource = readFileSync(
+      join(import.meta.dir, "annotate-resolution.ts"),
+      "utf8",
+    );
+    expect(resolutionSource).not.toContain("process.exit");
+    for (const failure of [
+      "Failed to fetch URL:",
+      "No annotatable files",
+      "Ambiguous filename",
+      "File type not supported:",
+      "File not found:",
+      "File too large to annotate",
+    ]) {
+      expect(resolutionSource).toContain(failure);
     }
   });
 });

@@ -27,6 +27,13 @@ import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, ANNOTATABLE_DOC
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
+import {
+  annotateInputNamesExistingTarget,
+  buildAmbiguousAnnotateArgsMessage,
+  buildUnresolvedAnnotateArgsMessage,
+  probeAnnotateToken,
+  selectAnnotateTokenTarget,
+} from "@plannotator/shared/annotate-target";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
@@ -218,13 +225,46 @@ export async function handleAnnotateCommand(
   // --json is accepted silently (OpenCode writes to session, not stdout).
   // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
   // `rawFilePath` preserves it for the scoped-package markdown fallback.
-  const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(rawArgs);
+  let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(rawArgs);
   // @ts-ignore - Event properties contain sessionID
   const sessionId = event.properties?.sessionID;
 
   if (!filePath) {
     client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]" });
     return;
+  }
+
+  // Tolerant fallback (#1182): when the whole argument string names nothing,
+  // probe each token; exactly one existing target proceeds, several is an
+  // error, several unresolvable words get an actionable message instead of
+  // "File not found: the". Bare directory names only count in the sole-arg
+  // pre-pass, and unrecognized dash-prefixed tokens disable tolerance so a
+  // typo'd flag errors the way it always did.
+  const tolerantRoot = directory || process.cwd();
+  if (!annotateInputNamesExistingTarget(rawFilePath, tolerantRoot)) {
+    const selection = selectAnnotateTokenTarget(rawFilePath, (token) =>
+      probeAnnotateToken(token, tolerantRoot, { bareDirectories: false }),
+    );
+    if (selection.kind === "single") {
+      filePath = selection.candidate.value;
+      rawFilePath = selection.candidate.value;
+    } else if (selection.kind === "multiple") {
+      client.app.log({ level: "error", message: buildAmbiguousAnnotateArgsMessage(selection.candidates) });
+      return;
+    } else if (selection.kind === "none" && selection.words.length > 1) {
+      // Content flags only; --gate is transport for this invocation, not a
+      // property of the target.
+      const flags = [
+        ...(renderMarkdownFlag ? ["--markdown"] : []),
+        ...(noJina ? ["--no-jina"] : []),
+        ...(renderHtmlFlag ? ["--render-html"] : []),
+      ];
+      client.app.log({ level: "error", message: buildUnresolvedAnnotateArgsMessage({ words: selection.words, flags }) });
+      return;
+    }
+    // "flagged" (unrecognized dash tokens) or a single unresolvable word
+    // falls through to the existing pipeline so its specific errors
+    // ("File not found", unsupported type) stay verbatim.
   }
 
   let markdown: string;

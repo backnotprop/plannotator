@@ -55,6 +55,7 @@
     "./guide": "./guide.ts",
     "./guide-store": "./guide-store.ts",
     "./annotate-args": "./annotate-args.ts",
+    "./annotate-target": "./annotate-target.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
     "./goal-setup": "./goal-setup.ts",

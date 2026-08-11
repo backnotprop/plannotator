@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   linkSync,
   lstatSync,
@@ -368,7 +369,7 @@ describe("default uninstall", () => {
     });
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
@@ -470,7 +471,7 @@ describe("default uninstall", () => {
     const before = snapshotTree(fixture.root);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: true, skipHosts: false },
+      { purge: false, dryRun: true },
       {
         ...fixture.environment,
         which: () => "/fake/claude",
@@ -511,7 +512,7 @@ describe("default uninstall", () => {
     writeText(configPath, contents);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
@@ -526,7 +527,7 @@ describe("default uninstall", () => {
     expect(result.errors).toEqual([]);
   });
 
-  test("preserves invalid OpenCode config rather than guessing", async () => {
+  test("keeps the binary until malformed OpenCode config is cleaned manually", async () => {
     const fixture = createFixture();
     const binary = join(
       fixture.homeDir,
@@ -545,16 +546,31 @@ describe("default uninstall", () => {
     writeText(configPath, contents);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
     expect(readFileSync(configPath, "utf8")).toBe(contents);
     expect(existsSync(binary)).toBe(true);
     expect(result.ok).toBe(false);
-    expect(result.errors).toContain(
-      `Preserved ${configPath}: it is not valid JSON or JSONC, so managed host entries cannot be classified safely. Re-run with --skip-hosts to leave host integrations for manual cleanup.`,
+    expect(result.errors[0]).toContain(
+      `Preserved ${configPath}: it is not valid JSON or JSONC, so @plannotator/opencode plugin entries cannot be classified safely.`,
     );
+    expect(result.errors[0]).toContain(
+      "Remove every plugin array entry for @plannotator/opencode, including versioned entries and tuple entries",
+    );
+    expect(result.errors[0]).toContain(
+      "Then rerun `plannotator uninstall`.",
+    );
+
+    writeJson(configPath, { plugin: ["keep-plugin"] });
+    const retry = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      fixture.environment,
+    );
+    expect(retry.ok).toBe(true);
+    expect(existsSync(binary)).toBe(false);
+    expect(readJson(configPath)).toEqual({ plugin: ["keep-plugin"] });
   });
 
   test("preserves a custom Gemini hook sharing the managed matcher", async () => {
@@ -580,7 +596,7 @@ describe("default uninstall", () => {
     });
 
     await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
@@ -623,7 +639,7 @@ describe("default uninstall", () => {
     writeText(settingsPath, contents);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
@@ -632,6 +648,60 @@ describe("default uninstall", () => {
       ['{', '    "theme": "custom"', '}', ''].join("\r\n"),
     );
   });
+
+  test.skipIf(process.platform === "win32")(
+    "keeps the binary and hook when Gemini settings cannot be edited",
+    async () => {
+      const fixture = createFixture();
+      const binary = join(fixture.homeDir, ".local", "bin", "plannotator");
+      const settingsPath = join(
+        fixture.homeDir,
+        ".gemini",
+        "settings.json",
+      );
+      writeText(binary);
+      writeJson(settingsPath, {
+        theme: "custom",
+        hooks: {
+          BeforeTool: [
+            {
+              matcher: "exit_plan_mode",
+              hooks: [{ type: "command", command: "plannotator" }],
+            },
+          ],
+        },
+      });
+      chmodSync(settingsPath, 0o400);
+
+      const blocked = await runPlannotatorUninstall(
+        { purge: false, dryRun: false },
+        fixture.environment,
+      );
+
+      expect(blocked.ok).toBe(false);
+      expect(existsSync(binary)).toBe(true);
+      expect(readFileSync(settingsPath, "utf8")).toContain("plannotator");
+      expect(blocked.errors[0]).toContain(
+        `Could not update ${settingsPath}`,
+      );
+      expect(blocked.errors[0]).toContain(
+        'Remove only Plannotator command hooks from hooks.BeforeTool entries whose matcher is "exit_plan_mode"',
+      );
+      expect(blocked.errors[0]).toContain(
+        "Then rerun `plannotator uninstall`.",
+      );
+
+      chmodSync(settingsPath, 0o600);
+      writeJson(settingsPath, { theme: "custom" });
+      const retry = await runPlannotatorUninstall(
+        { purge: false, dryRun: false },
+        fixture.environment,
+      );
+      expect(retry.ok).toBe(true);
+      expect(existsSync(binary)).toBe(false);
+      expect(readJson(settingsPath)).toEqual({ theme: "custom" });
+    },
+  );
 
   test("removes a relocated Codex hook adopted by the installer", async () => {
     const fixture = createFixture();
@@ -656,7 +726,7 @@ describe("default uninstall", () => {
     });
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
@@ -677,7 +747,7 @@ describe("default uninstall", () => {
     });
   });
 
-  test("requires an explicit host skip for unrelated malformed Gemini settings", async () => {
+  test("requires manual repair for unrelated malformed Gemini settings", async () => {
     const fixture = createFixture();
     const binary = join(fixture.homeDir, ".local", "bin", "plannotator");
     const settingsPath = join(
@@ -690,24 +760,31 @@ describe("default uninstall", () => {
     writeText(settingsPath, contents);
 
     const blocked = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
     expect(blocked.ok).toBe(false);
     expect(existsSync(binary)).toBe(true);
     expect(readFileSync(settingsPath, "utf8")).toBe(contents);
-    expect(blocked.errors).toContain(
-      `Preserved ${settingsPath}: it is not strict JSON, so managed host entries cannot be classified safely. Re-run with --skip-hosts to leave host integrations for manual cleanup.`,
+    expect(blocked.errors[0]).toContain(
+      `Preserved ${settingsPath}: it is not strict JSON, so managed Gemini hooks cannot be classified safely.`,
+    );
+    expect(blocked.errors[0]).toContain(
+      'Remove only Plannotator command hooks from hooks.BeforeTool entries whose matcher is "exit_plan_mode"',
+    );
+    expect(blocked.errors[0]).toContain(
+      "Then rerun `plannotator uninstall`.",
     );
 
-    const escaped = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: true },
+    writeJson(settingsPath, { theme: "custom" });
+    const retry = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
       fixture.environment,
     );
-    expect(escaped.ok).toBe(true);
+    expect(retry.ok).toBe(true);
     expect(existsSync(binary)).toBe(false);
-    expect(readFileSync(settingsPath, "utf8")).toBe(contents);
+    expect(readJson(settingsPath)).toEqual({ theme: "custom" });
   });
 
   test("fails safe for escaped managed spellings in malformed host config", async () => {
@@ -731,26 +808,27 @@ describe("default uninstall", () => {
     writeText(kiroAgentPath, kiroContents);
 
     const blocked = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
     expect(blocked.ok).toBe(false);
     expect(existsSync(binary)).toBe(true);
     expect(contents.toLowerCase()).not.toContain("plannotator");
-    expect(blocked.errors[0]).toContain("cannot be classified safely");
-    expect(blocked.errors[0]).toContain("--skip-hosts");
-
-    const escaped = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: true },
-      fixture.environment,
+    expect(blocked.errors).toHaveLength(2);
+    expect(blocked.errors[0]).toContain(
+      "managed Gemini hooks cannot be classified safely",
     );
-
-    expect(escaped.ok).toBe(true);
-    expect(existsSync(binary)).toBe(false);
+    expect(blocked.errors[1]).toContain(
+      "the Plannotator Kiro agent cannot be classified safely",
+    );
+    expect(
+      blocked.errors.every((error) =>
+        error.includes("Then rerun `plannotator uninstall`.")
+      ),
+    ).toBe(true);
     expect(readFileSync(settingsPath, "utf8")).toBe(contents);
     expect(readFileSync(kiroAgentPath, "utf8")).toBe(kiroContents);
-    expect(escaped.warnings[0]).toContain("Skipped host plugin managers");
   });
 
   test("skips data-contained runtimes when the configured data root is broad", async () => {
@@ -771,7 +849,7 @@ describe("default uninstall", () => {
     writeText(unrelatedVendorFile, "unrelated");
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         dataDir: fixture.homeDir,
@@ -793,7 +871,7 @@ describe("purge uninstall", () => {
     writeText(join(fixture.dataDir, "vendor", "sem", "v0.8.0", "sem"));
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: true, skipHosts: false },
+      { purge: true, dryRun: true },
       fixture.environment,
     );
 
@@ -809,7 +887,7 @@ describe("purge uninstall", () => {
     mkdirSync(vendorDirectory, { recursive: true });
 
     const preview = await runPlannotatorUninstall(
-      { purge: true, dryRun: true, skipHosts: false },
+      { purge: true, dryRun: true },
       fixture.environment,
     );
     expect(preview.preserved).toContain(
@@ -817,7 +895,7 @@ describe("purge uninstall", () => {
     );
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
@@ -842,7 +920,7 @@ describe("purge uninstall", () => {
     writeText(customPath, "not installer-owned");
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       fixture.environment,
     );
 
@@ -865,7 +943,7 @@ describe("purge uninstall", () => {
     writeText(join(fixture.dataDir, "vendor", "sem", "v0.8.0", "sem"));
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       fixture.environment,
     );
 
@@ -892,7 +970,7 @@ describe("purge uninstall", () => {
     writeText(binary);
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       {
         ...fixture.environment,
         dataDir: fixture.homeDir,
@@ -925,7 +1003,7 @@ describe("purge uninstall", () => {
     });
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       {
         ...fixture.environment,
         which: (command) => command === "claude" ? "/fake/claude" : null,
@@ -966,7 +1044,7 @@ describe("purge uninstall", () => {
       writeText(binary);
 
       const result = await runPlannotatorUninstall(
-        { purge: true, dryRun: false, skipHosts: false },
+        { purge: true, dryRun: false },
         {
           ...fixture.environment,
           dataDir: caseVariantHome,
@@ -1016,7 +1094,7 @@ describe("purge uninstall", () => {
       writeText(binary);
 
       const result = await runPlannotatorUninstall(
-        { purge: true, dryRun: false, skipHosts: false },
+        { purge: true, dryRun: false },
         {
           ...fixture.environment,
           ...safetyCase.configure(fixture),
@@ -1040,7 +1118,7 @@ describe("purge uninstall", () => {
     linkSync(externalFile, join(fixture.dataDir, "config.json"));
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       fixture.environment,
     );
 
@@ -1066,7 +1144,7 @@ describe("purge uninstall", () => {
     writeText(binary);
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       {
         ...fixture.environment,
         dataDir: symlink,
@@ -1092,7 +1170,7 @@ describe("purge uninstall", () => {
     writeText(binary);
 
     const result = await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       {
         ...fixture.environment,
         dataDir: dataFile,
@@ -1106,7 +1184,7 @@ describe("purge uninstall", () => {
 });
 
 describe("host and platform integrations", () => {
-  test("returns a partial-failure status when a detected host is unavailable", async () => {
+  test("keeps the binary and reports the exact command when a host is unavailable", async () => {
     const fixture = createFixture();
     const binary = join(
       fixture.homeDir,
@@ -1120,7 +1198,7 @@ describe("host and platform integrations", () => {
     });
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       fixture.environment,
     );
 
@@ -1128,19 +1206,60 @@ describe("host and platform integrations", () => {
     expect(result.errors[0]).toContain(
       "Droid plugin plannotator@plannotator",
     );
-    expect(result.errors[0]).toContain("was not removed");
+    expect(result.errors[0]).toContain("droid is unavailable");
+    expect(result.errors[0]).toContain(
+      "restore droid on PATH and run `droid plugin uninstall plannotator@plannotator --scope user`",
+    );
+    expect(result.errors[0]).toContain(
+      "After it succeeds, rerun `plannotator uninstall`.",
+    );
     expect(existsSync(binary)).toBe(true);
     expect(result.warnings).toContain(
       "Preserved the Plannotator CLI and its Windows PATH entry so you can resolve the errors and retry uninstall.",
     );
 
-    const escaped = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: true },
+    writeJson(join(fixture.homeDir, ".factory", "settings.json"), {
+      enabledPlugins: {},
+    });
+    const retry = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
       fixture.environment,
     );
-    expect(escaped.ok).toBe(true);
+    expect(retry.ok).toBe(true);
     expect(existsSync(binary)).toBe(false);
-    expect(escaped.warnings[0]).toContain("Skipped host plugin managers");
+  });
+
+  test("keeps the binary and reports the exact command when a host manager fails", async () => {
+    const fixture = createFixture();
+    const binary = join(fixture.homeDir, ".local", "bin", "plannotator");
+    writeText(binary);
+    writeJson(join(fixture.homeDir, ".pi", "agent", "settings.json"), {
+      packages: [{ source: "npm:@plannotator/pi-extension@0.25.1" }],
+    });
+
+    const result = await runPlannotatorUninstall(
+      { purge: true, dryRun: false },
+      {
+        ...fixture.environment,
+        which: (command) => command === "pi" ? "/fake/pi" : null,
+        runCommand: async (command, args, env) => {
+          fixture.commandCalls.push({ command, args, env });
+          return { exitCode: 23, timedOut: false };
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(existsSync(binary)).toBe(true);
+    expect(result.errors[0]).toContain(
+      "Pi extension npm:@plannotator/pi-extension was not removed automatically (exit 23)",
+    );
+    expect(result.errors[0]).toContain(
+      "run `pi remove npm:@plannotator/pi-extension` directly",
+    );
+    expect(result.errors[0]).toContain(
+      "Then rerun `plannotator uninstall --purge`.",
+    );
   });
 
   test("detects disabled Claude and Droid plugins from installation metadata", async () => {
@@ -1167,7 +1286,7 @@ describe("host and platform integrations", () => {
     );
 
     await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         which: (command) => `/fake/${command}`,
@@ -1219,7 +1338,7 @@ describe("host and platform integrations", () => {
     );
 
     await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         which: (command) => `/fake/${command}`,
@@ -1261,7 +1380,7 @@ describe("host and platform integrations", () => {
     });
 
     await runPlannotatorUninstall(
-      { purge: true, dryRun: false, skipHosts: false },
+      { purge: true, dryRun: false },
       {
         ...fixture.environment,
         which: (command) => `/fake/${command}`,
@@ -1286,7 +1405,7 @@ describe("host and platform integrations", () => {
     writeText(legacyExe);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         platform: "win32",
@@ -1322,7 +1441,7 @@ describe("host and platform integrations", () => {
     writeText(unrelatedFile);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         platform: "win32",
@@ -1347,7 +1466,7 @@ describe("host and platform integrations", () => {
     writeText(currentExe);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         platform: "win32",
@@ -1373,7 +1492,7 @@ describe("host and platform integrations", () => {
     writeText(currentExe);
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         platform: "win32",
@@ -1404,7 +1523,7 @@ describe("host and platform integrations", () => {
     let commandCount = 0;
 
     const result = await runPlannotatorUninstall(
-      { purge: false, dryRun: false, skipHosts: false },
+      { purge: false, dryRun: false },
       {
         ...fixture.environment,
         platform: "win32",
