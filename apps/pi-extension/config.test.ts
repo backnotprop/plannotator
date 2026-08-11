@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadPlannotatorConfig, formatTodoList, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
+import { buildPromptVariables, loadPlannotatorConfig, formatTodoList, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
 
 const tempDirs: string[] = [];
 const originalHome = process.env.HOME;
@@ -37,7 +37,7 @@ describe("plannotator config", () => {
     expect(resolveExecutionMode(loaded.config)).toBe("automatic");
     expect(planning.statusLabel).toBe("⏸ plan");
     expect(planning.activeTools).toEqual(["grep", "find", "ls", "plannotator_submit_plan"]);
-    expect(planning.systemPrompt).not.toContain("Available tools:");
+    expect(planning.instructions).not.toContain("Available tools:");
   });
 
   test("defaults to automatic execution", () => {
@@ -171,14 +171,14 @@ describe("plannotator config", () => {
   test("treats empty strings as clearing values", () => {
     const profile = resolvePhaseProfile(
       {
-        defaults: { statusLabel: "base", systemPrompt: "base prompt", activeTools: ["bash"] },
-        phases: { planning: { statusLabel: "", systemPrompt: "", activeTools: [] } },
+        defaults: { statusLabel: "base", instructions: "base instructions", activeTools: ["bash"] },
+        phases: { planning: { statusLabel: "", instructions: "", activeTools: [] } },
       },
       "planning",
     );
 
     expect(profile.statusLabel).toBeUndefined();
-    expect(profile.systemPrompt).toBeUndefined();
+    expect(profile.instructions).toBeUndefined();
     expect(profile.activeTools).toEqual([]);
   });
 
@@ -208,6 +208,70 @@ describe("plannotator config", () => {
 
     expect(rendered.text).toBe("Hello  ");
     expect(rendered.unknownVariables).toEqual(["name", "missing"]);
+  });
+
+  test("renders buildPromptVariables output into instruction templates", () => {
+    const vars = buildPromptVariables({
+      planFilePath: "PLAN.md",
+      phase: "executing",
+      totalCount: 2,
+      completedCount: 1,
+      todoList: "- [ ] 2. Second",
+    });
+
+    const rendered = renderTemplate("Plan ${planFilePath}: ${completedCount}/${totalCount}\n${todoList}", vars);
+
+    expect(rendered.text).toBe("Plan PLAN.md: 1/2\n- [ ] 2. Second");
+    expect(rendered.unknownVariables).toEqual([]);
+  });
+
+  test("shipped phase instructions carry the framing contract", () => {
+    const cwdDir = makeTempDir("plannotator-config-shipped-instructions-");
+    process.env.HOME = makeTempDir("plannotator-config-home-shipped-instructions-");
+
+    const loaded = loadPlannotatorConfig(cwdDir);
+    const planning = resolvePhaseProfile(loaded.config, "planning");
+    const executing = resolvePhaseProfile(loaded.config, "executing");
+
+    expect(loaded.warnings).toEqual([]);
+    expect(planning.instructions).toContain("[PLANNOTATOR - PLANNING PHASE]");
+    // The framing is a conversation message, never a system prompt, so the
+    // retired composition variable must not appear anywhere.
+    expect(planning.instructions).not.toContain("${baseSystemPrompt}");
+    expect(executing.instructions).not.toContain("${baseSystemPrompt}");
+    // Executing framing supersedes the stale planning rules in history and
+    // carries an entry-time todo snapshot.
+    expect(executing.instructions).toContain("planning phase is over");
+    expect(executing.instructions).toContain("${planFilePath}");
+    expect(executing.instructions).toContain("${todoList}");
+  });
+
+  test("warns about and ignores the obsolete systemPrompt config key", () => {
+    const homeDir = makeTempDir("plannotator-config-home-obsolete-");
+    const cwdDir = makeTempDir("plannotator-config-cwd-obsolete-");
+    process.env.HOME = homeDir;
+
+    const projectConfigDir = join(cwdDir, ".pi");
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(
+      join(projectConfigDir, "plannotator.json"),
+      JSON.stringify({
+        defaults: { systemPrompt: "OLD DEFAULT" },
+        phases: { executing: { systemPrompt: "OLD EXECUTING" } },
+      }),
+      "utf-8",
+    );
+
+    const loaded = loadPlannotatorConfig(cwdDir);
+    const executing = resolvePhaseProfile(loaded.config, "executing");
+
+    // The obsolete key is ignored: the shipped instructions still apply.
+    expect(executing.instructions).toContain("[PLANNOTATOR - EXECUTING PLAN]");
+    expect(executing.instructions).not.toContain("OLD EXECUTING");
+    expect(loaded.warnings).toHaveLength(1);
+    expect(loaded.warnings[0]).toContain('obsolete "systemPrompt"');
+    expect(loaded.warnings[0]).toContain("defaults, phases.executing");
+    expect(loaded.warnings[0]).toContain("instructions");
   });
 
   test("formats todo lists from checklist items", () => {

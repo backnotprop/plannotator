@@ -6,7 +6,7 @@
  * browser UI and can approve, deny with annotations, or request changes.
  *
  * Features:
- * - /plannotator command or Ctrl+Alt+P to toggle
+ * - /plannotator-plan-mode command or Ctrl+Alt+P to toggle
  * - --plan flag to start in planning mode
  * - Bash unrestricted during planning (prompt-guided)
  * - Writes restricted to markdown files inside cwd during planning
@@ -129,6 +129,8 @@ type PersistedPlannotatorState = {
 	lastSubmittedPath?: string;
 	savedState?: SavedPhaseState;
 	phaseAddedTools?: string[];
+	/** Whether the current phase's entry framing message was already delivered. */
+	framingDelivered?: boolean;
 };
 
 function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml: boolean }): string | null {
@@ -282,6 +284,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 	let phaseAddedTools: string[] = [];
 	let plannotatorConfig = {};
 	let justApprovedPlan = false;
+	// One-shot latch per phase entry: the phase framing message is delivered on
+	// the first prompt of a phase and then lives in conversation history, so it
+	// must never be re-sent on later prompts of the same phase. Reset at every
+	// phase transition; persisted so session resume does not re-deliver.
+	let framingDelivered = false;
 	/**
 	 * Cleared when this extension instance's session is torn down or replaced.
 	 * Pi builds a fresh instance for the replacement session, so this latch only
@@ -414,6 +421,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			lastSubmittedPath,
 			savedState,
 			phaseAddedTools,
+			framingDelivered,
 		});
 	}
 
@@ -497,6 +505,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 	async function enterPlanning(ctx: ExtensionContext): Promise<void> {
 		phase = "planning";
+		framingDelivered = false;
 		checklistItems = [];
 		captureSavedState(ctx);
 		await applyPhaseConfig(ctx, { restoreSavedState: false });
@@ -518,6 +527,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	 */
 	async function returnToIdle(ctx: ExtensionContext): Promise<void> {
 		phase = "idle";
+		framingDelivered = false;
 		checklistItems = [];
 		lastSubmittedPath = null;
 		// Re-detect for the next plan: a provider that appeared (or a transient
@@ -565,7 +575,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 	// ── Commands & Shortcuts ─────────────────────────────────────────────
 
-	pi.registerCommand("plannotator", {
+	pi.registerCommand("plannotator-plan-mode", {
 		description: "Toggle plannotator planning mode",
 		handler: async (_args, ctx) => {
 			await togglePlanMode(ctx);
@@ -1007,7 +1017,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: "Error: Not in plan mode. Use /plannotator to enter planning mode first.",
+							text: "Error: Not in plan mode. Use /plannotator-plan-mode to enter planning mode first.",
 						},
 					],
 					details: { approved: false },
@@ -1107,6 +1117,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 
 				phase = "executing";
+				framingDelivered = false;
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
@@ -1165,6 +1176,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 
 				phase = "executing";
+				framingDelivered = false;
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
@@ -1246,8 +1258,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 	});
 
-	// Inject phase-specific context
+	// Deliver phase framing once per phase entry, plus per-turn todo status.
+	// Plannotator never returns or modifies systemPrompt: Pi's base prompt
+	// (AGENTS.md context, skills catalog, tools guidance, user append text) is
+	// left untouched, and cache-busting reduces to conversation-suffix appends
+	// (#922, approach suggested by Karrq).
 	pi.on("before_agent_start", async (_event, ctx) => {
+		if (phase !== "planning" && phase !== "executing") return;
+
 		const profile = getPhaseProfile();
 		const planRef = lastSubmittedPath ?? "your plan file";
 
@@ -1263,158 +1281,140 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		const todoStats = phase === "executing" ? formatTodoList(checklistItems) : formatTodoList([]);
+		const todoStatus =
+			phase === "executing" && todoStats.remainingCount > 0
+				? `[PLANNOTATOR - EXECUTING PLAN]
+Todo status for ${planRef}: ${todoStats.completedCount}/${todoStats.totalCount} steps complete.
 
-		let improveContext: string | null = null;
-		if (phase === "planning") {
-			const hook = readImprovementHook("enterplanmode-improve");
-			const pfmEnabled = loadConfig().pfmReminder === true;
-			improveContext = composeImproveContext({
-				pfmEnabled,
-				improvementHookContent: hook?.content ?? null,
-			});
-		}
+Remaining steps:
+${todoStats.todoList}`
+				: null;
 
-		if (profile?.systemPrompt) {
-			const rendered = renderTemplate(
-				profile.systemPrompt,
-				buildPromptVariables({
-					planFilePath: planRef,
-					phase,
-					todoList: todoStats.todoList,
-					completedCount: todoStats.completedCount,
-					totalCount: todoStats.totalCount,
-					remainingCount: todoStats.remainingCount,
-				}),
-			);
-			if (rendered.unknownVariables.length > 0) {
-				ctx.ui.notify(
-					"Plannotator: unknown template variables in " + phase + " prompt: " + rendered.unknownVariables.join(", "),
-					"warning",
-				);
-			}
-
-			return { systemPrompt: rendered.text + (improveContext ? "\n\n" + improveContext : "") };
-		}
-
-		if (phase === "planning") {
+		if (framingDelivered) {
+			// Same phase, later prompt: the framing already sits in conversation
+			// history, so inject nothing beyond the small todo snapshot during
+			// execution.
+			if (!todoStatus) return;
 			return {
 				message: {
 					customType: "plannotator-context",
-					content: `[PLANNOTATOR - PLANNING PHASE]
-You are in plan mode. You MUST NOT make any changes to the codebase — no edits, no commits, no installs, no destructive commands. During planning you may only write or edit markdown files (.md, .mdx) inside the working directory.
-
-Use the available reading, searching, and command tools to explore the codebase. Use the available file tools only for markdown plan files.
-
-Do not run destructive commands (rm, git push, npm install, etc.) — focus on reading and exploring the codebase. Web fetching is fine.
-
-## Iterative Planning Workflow
-
-You are pair-planning with the user. Explore the code to build context, then write your findings into a markdown plan file as you go. The plan starts as a rough skeleton and gradually becomes the final plan.
-
-### Picking a plan file
-
-Choose a descriptive filename for your plan. Convention: \`PLAN.md\` at the repo root for a single focused plan, or \`plans/<short-name>.md\` for projects that keep multiple plans. Reuse the same filename across revisions of the same plan so version history links up.
-
-### The Loop
-
-Repeat this cycle until the plan is complete:
-
-1. **Explore** — Use the available reading, searching, and command tools to understand the codebase. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.
-2. **Update the plan file** — After each discovery, immediately capture what you learned in the plan. Don't wait until the end. Use the available file tools to create the initial draft and make targeted updates.
-3. **Ask the user** — When you hit an ambiguity or decision you can't resolve from code alone, ask. Then go back to step 1.
-
-### First Turn
-
-Start by quickly scanning key files to form an initial understanding of the task scope. Then write a skeleton plan (headers and rough notes) and ask the user your first round of questions. Don't explore exhaustively before engaging the user.
-
-### Asking Good Questions
-
-- Never ask what you could find out by reading the code.
-- Batch related questions together.
-- Focus on things only the user can answer: requirements, preferences, tradeoffs, edge-case priorities.
-- Scale depth to the task — a vague feature request needs many rounds; a focused bug fix may need one or none.
-
-### Plan File Structure
-
-Your plan file should use markdown with clear sections:
-- **Context** — Why this change is being made: the problem, what prompted it, the intended outcome.
-- **Approach** — Your recommended approach only, not all alternatives considered.
-- **Files to modify** — List the critical file paths that will be changed.
-- **Reuse** — Reference existing functions and utilities you found, with their file paths.
-- **Steps** — Implementation checklist:
-  - [ ] Step 1 description
-  - [ ] Step 2 description
-- **Verification** — How to test the changes end-to-end (run the code, run tests, manual checks).
-
-Keep the plan concise enough to scan quickly, but detailed enough to execute effectively.
-
-### When to Submit
-
-Your plan is ready when you've addressed all ambiguities and it covers: what to change, which files to modify, what existing code to reuse, and how to verify. Call ${PLAN_SUBMIT_TOOL} with the path to your plan file to submit for review.
-
-### Revising After Feedback
-
-When the user denies a plan with feedback:
-1. Read the plan file to see the current plan.
-2. Make targeted changes addressing the feedback — do NOT rewrite the entire file.
-3. Call ${PLAN_SUBMIT_TOOL} again with the same filePath to resubmit.
-
-### Ending Your Turn
-
-Your turn should only end by either:
-- Asking the user a question to gather more information.
-- Calling ${PLAN_SUBMIT_TOOL} when the plan is ready for review.
-
-Do not end your turn without doing one of these two things.` + (improveContext ? "\n\n---\n\n" + improveContext : ""),
+					content: todoStatus,
 					display: false,
 				},
 			};
 		}
 
-		if (phase === "executing" && checklistItems.length > 0) {
-			const remaining = checklistItems.filter((t) => !t.completed);
-			if (remaining.length > 0) {
-				const todoList = remaining
-					.map((t) => `- [ ] ${t.step}. ${t.text}`)
-					.join("\n");
-				return {
-					message: {
-						customType: "plannotator-context",
-						content: `[PLANNOTATOR - EXECUTING PLAN]
-Full tool access is enabled. Execute the plan from ${planRef}.
+		framingDelivered = true;
+		persistState();
 
-Remaining steps:
-${todoList}
-
-Execute each step in order. After completing a step, include [DONE:n] in your response where n is the step number.`,
-						display: false,
-					},
-				};
-			}
+		if (!profile?.instructions) {
+			// Framing explicitly disabled (instructions null/empty): deliver only
+			// the todo snapshot during execution, nothing during planning.
+			if (!todoStatus) return;
+			return {
+				message: {
+					customType: "plannotator-context",
+					content: todoStatus,
+					display: false,
+				},
+			};
 		}
-	});
 
-	// Filter stale context when idle
-	pi.on("context", async (event) => {
-		if (phase !== "idle") return;
+		const rendered = renderTemplate(
+			profile.instructions,
+			buildPromptVariables({
+				planFilePath: planRef,
+				phase,
+				todoList: todoStats.todoList,
+				completedCount: todoStats.completedCount,
+				totalCount: todoStats.totalCount,
+				remainingCount: todoStats.remainingCount,
+			}),
+		);
+		if (rendered.unknownVariables.length > 0) {
+			ctx.ui.notify(
+				"Plannotator: unknown template variables in " + phase + " instructions: " + rendered.unknownVariables.join(", "),
+				"warning",
+			);
+		}
+
+		let content = rendered.text;
+		if (phase === "planning") {
+			const hook = readImprovementHook("enterplanmode-improve");
+			const pfmEnabled = loadConfig().pfmReminder === true;
+			const improveContext = composeImproveContext({
+				pfmEnabled,
+				improvementHookContent: hook?.content ?? null,
+			});
+			if (improveContext) content += "\n\n---\n\n" + improveContext;
+		}
+		// Instructions render an entry-time todo snapshot when they reference
+		// ${todoList}; otherwise append the snapshot so the first executing
+		// prompt still carries the checklist.
+		if (todoStatus && !profile.instructions.includes("${todoList}")) {
+			content += "\n\n" + todoStatus;
+		}
 
 		return {
-			messages: event.messages.filter((m) => {
-				const msg = m as { customType?: string; role?: string; content?: unknown };
-				if (msg.customType === "plannotator-context") return false;
-				if (msg.role !== "user") return true;
+			message: {
+				customType: "plannotator-framing",
+				content,
+				display: false,
+				details: { phase },
+			},
+		};
+	});
 
-				const content = msg.content;
-				if (typeof content === "string") {
-					return !content.includes("[PLANNOTATOR -");
-				}
-				if (Array.isArray(content)) {
-					return !content.some(
-						(c) =>
-							c.type === "text" &&
-							(c as { text?: string }).text?.includes("[PLANNOTATOR -"),
-					);
-				}
+	// Keep plannotator conversation messages coherent with the current phase.
+	// While idle, everything plannotator injected is filtered out (as before).
+	// During a phase, only the newest framing for the CURRENT phase survives:
+	// framing from other phases or earlier cycles is dropped (stale planning
+	// rules cannot leak into execution), along with todo-status messages that
+	// predate the current cycle's framing. The filter is deterministic within a
+	// phase, so it never perturbs the provider's cached prefix mid-phase; the
+	// only mid-history changes happen at phase transitions.
+	pi.on("context", async (event) => {
+		if (phase === "idle") {
+			return {
+				messages: event.messages.filter((m) => {
+					const msg = m as { customType?: string; role?: string; content?: unknown };
+					if (msg.customType === "plannotator-framing") return false;
+					if (msg.customType === "plannotator-context") return false;
+					if (msg.role !== "user") return true;
+
+					const content = msg.content;
+					if (typeof content === "string") {
+						return !content.includes("[PLANNOTATOR -");
+					}
+					if (Array.isArray(content)) {
+						return !content.some(
+							(c) =>
+								c.type === "text" &&
+								(c as { text?: string }).text?.includes("[PLANNOTATOR -"),
+						);
+					}
+					return true;
+				}),
+			};
+		}
+
+		let anchor = -1;
+		for (let i = event.messages.length - 1; i >= 0; i--) {
+			const msg = event.messages[i] as { customType?: string; details?: unknown };
+			if (
+				msg.customType === "plannotator-framing" &&
+				(msg.details as { phase?: string } | undefined)?.phase === phase
+			) {
+				anchor = i;
+				break;
+			}
+		}
+
+		return {
+			messages: event.messages.filter((m, index) => {
+				const msg = m as { customType?: string };
+				if (msg.customType === "plannotator-framing") return index === anchor;
+				if (msg.customType === "plannotator-context") return anchor === -1 || index > anchor;
 				return true;
 			}),
 		};
@@ -1517,6 +1517,9 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			lastSubmittedPath = stateEntry.data.lastSubmittedPath ?? lastSubmittedPath;
 			savedState = stateEntry.data.savedState ?? savedState;
 			phaseAddedTools = stateEntry.data.phaseAddedTools ?? phaseAddedTools;
+			// The framing message persists in the restored conversation history,
+			// so a resumed phase must not deliver it again.
+			framingDelivered = stateEntry.data.framingDelivered ?? false;
 		}
 
 		if (phase === "planning" && !savedState) {

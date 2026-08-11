@@ -131,9 +131,9 @@ function createHarness(cwd: string) {
 				await handler({ message: { role: "assistant", content: [{ type: "text", text }] } }, ctx);
 			}
 		},
-		/** The `/plannotator` toggle is the shared exit back to idle. */
+		/** The `/plannotator-plan-mode` toggle is the shared exit back to idle. */
 		async toggle(): Promise<void> {
-			await commands.get("plannotator")?.handler("", ctx);
+			await commands.get("plannotator-plan-mode")?.handler("", ctx);
 		},
 	};
 }
