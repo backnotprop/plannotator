@@ -3,6 +3,7 @@ import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
 import { useAgentSettings } from '@plannotator/ui/hooks/useAgentSettings';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 import { REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
+import { getGuideInstructions } from '@plannotator/ui/utils/storage';
 
 export const GUIDE_ENGINES = Object.keys(REVIEW_ENGINE_LABEL) as ReviewEngine[];
 
@@ -101,7 +102,16 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
 
   // Config shapes mirror AgentsTab's buildGuideLaunch exactly — one shape
   // per engine, so the server sees identical launches from every surface.
-  const buildParams = (): AgentLaunchParams =>
+  // Persisted extra instructions (#1265) are read fresh at launch time and
+  // attached uniformly across engines; blank means the field is omitted so
+  // the launch body is unchanged from before the feature.
+  const buildParams = (): AgentLaunchParams => {
+    const instructions = getGuideInstructions().trim();
+    const params = buildEngineParams();
+    return instructions ? { ...params, instructions } : params;
+  };
+
+  const buildEngineParams = (): AgentLaunchParams =>
     engine === 'cursor'
       ? {
           provider: 'guide',

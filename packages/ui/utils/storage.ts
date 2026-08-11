@@ -132,6 +132,30 @@ export function setLastOpenInApp(id: string): void {
 }
 
 /**
+ * Guide extra instructions (#1265): freeform standing preferences appended to
+ * the Guided Review organizer prompt at launch. Stored under a dedicated key
+ * rather than inside the plannotator.agents blob so a long text can never push
+ * that whole settings cookie past the browser's ~4KB per-cookie limit.
+ * Read fresh at launch time by every guide launch surface, so no cross-instance
+ * sync machinery is needed. The length bound lives server-side
+ * (GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS in @plannotator/shared/guide, mirrored
+ * by the launch textarea's maxLength).
+ */
+const GUIDE_INSTRUCTIONS_KEY = 'plannotator-guide-instructions';
+
+export function getGuideInstructions(): string {
+  return getItem(GUIDE_INSTRUCTIONS_KEY) ?? '';
+}
+
+export function setGuideInstructions(value: string): void {
+  if (value.trim() === '') {
+    removeItem(GUIDE_INSTRUCTIONS_KEY);
+  } else {
+    setItem(GUIDE_INSTRUCTIONS_KEY, value);
+  }
+}
+
+/**
  * Storage object with localStorage-like API
  */
 export const storage = {

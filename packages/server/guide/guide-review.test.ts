@@ -1,12 +1,18 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  GUIDE_REVIEW_PROMPT,
+  buildGuideMarkerOutputContract,
+  buildGuideUserMessage,
   composeGuideMarkerPrompt,
+  composeGuideMethodology,
   createGuideSession,
   repairGuideJsonText,
   validateGuideOutput,
   parseGuideStreamOutput,
 } from "./guide-review";
+import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from "@plannotator/shared/guide";
+import type { DiffType } from "../vcs";
 import { markerClose, markerOpen } from "../marker-review";
 
 // Pins the behaviors the PR-993 review rounds fixed. This module previously
@@ -161,6 +167,85 @@ describe("parseGuideStreamOutput", () => {
 
   it("returns null on empty stdout", () => {
     expect(parseGuideStreamOutput("")).toBeNull();
+  });
+});
+
+describe("guide extra instructions (#1265)", () => {
+  it("absent or blank instructions return the organizer prompt byte-identical", () => {
+    expect(composeGuideMethodology()).toBe(GUIDE_REVIEW_PROMPT);
+    expect(composeGuideMethodology("")).toBe(GUIDE_REVIEW_PROMPT);
+    expect(composeGuideMethodology("   \n\t ")).toBe(GUIDE_REVIEW_PROMPT);
+  });
+
+  it("appends instructions after the full methodology, never replacing it", () => {
+    const composed = composeGuideMethodology("Prefer product vocabulary over internal codenames.");
+    expect(composed.startsWith(GUIDE_REVIEW_PROMPT)).toBe(true);
+    expect(composed).toContain("## Additional reviewer instructions");
+    expect(composed.endsWith("Prefer product vocabulary over internal codenames.")).toBe(true);
+  });
+
+  it("truncates instructions past the length cap", () => {
+    const long = "A".repeat(GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS) + "OVERFLOW";
+    const composed = composeGuideMethodology(long);
+    expect(composed).toContain("A".repeat(GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS));
+    expect(composed).not.toContain("OVERFLOW");
+  });
+
+  it("marker prompt without instructions keeps the exact pre-feature byte layout", () => {
+    const nonce = PI_FIXTURE_NONCE;
+    const expected =
+      GUIDE_REVIEW_PROMPT + "\n\n" + buildGuideMarkerOutputContract(nonce) + "\n\n---\n\n" + "msg";
+    expect(composeGuideMarkerPrompt("msg", nonce)).toBe(expected);
+    expect(composeGuideMarkerPrompt("msg", nonce, "  ")).toBe(expected);
+  });
+
+  it("marker prompt with instructions carries the appended section before the output contract", () => {
+    const composed = composeGuideMarkerPrompt("msg", PI_FIXTURE_NONCE, "Never invent ticket IDs.");
+    const sectionAt = composed.indexOf("## Additional reviewer instructions");
+    const contractAt = composed.indexOf("## Output contract");
+    expect(sectionAt).toBeGreaterThan(-1);
+    expect(contractAt).toBeGreaterThan(sectionAt);
+    expect(composed).toContain("Never invent ticket IDs.");
+  });
+
+  it("buildCommand without instructions produces the exact prior claude prompt bytes", async () => {
+    const session = createGuideSession();
+    const built = await session.buildCommand({
+      cwd: "/tmp",
+      patch: "diff",
+      diffType: "uncommitted" as DiffType,
+      config: { engine: "claude" },
+    });
+    const userMessage = buildGuideUserMessage("diff", "uncommitted" as DiffType, undefined, undefined, undefined);
+    expect(built.prompt).toBe(GUIDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage);
+    expect(built.stdinPrompt).toBe(built.prompt);
+  });
+
+  it("buildCommand threads config.instructions into the claude prompt", async () => {
+    const session = createGuideSession();
+    const built = await session.buildCommand({
+      cwd: "/tmp",
+      patch: "diff",
+      diffType: "uncommitted" as DiffType,
+      config: { engine: "claude", instructions: "Use product names." },
+    });
+    expect(built.prompt).toContain("## Additional reviewer instructions");
+    expect(built.prompt).toContain("Use product names.");
+    expect(built.prompt!.startsWith(GUIDE_REVIEW_PROMPT)).toBe(true);
+  });
+
+  it("repair launches ignore instructions (mechanical fix, not a content rewrite)", async () => {
+    const session = createGuideSession();
+    const built = await session.buildCommand({
+      cwd: "/tmp",
+      patch: "diff",
+      diffType: "uncommitted" as DiffType,
+      config: { engine: "claude", instructions: "Use product names." },
+      repair: { payload: "{}" },
+    });
+    expect(built.label).toBe("Guide Repair");
+    expect(built.prompt).not.toContain("## Additional reviewer instructions");
+    expect(built.prompt).not.toContain("Use product names.");
   });
 });
 

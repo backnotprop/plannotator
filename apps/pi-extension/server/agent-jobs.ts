@@ -579,7 +579,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 					const KNOWN_JOB_FIELDS = new Set([
 						"provider", "command", "label",
 						"engine", "model", "reasoningEffort", "effort", "thinking", "fastMode",
-						"reviewProfileId", "repairOf",
+						"reviewProfileId", "repairOf", "instructions",
 					]);
 					if (body && typeof body === "object") {
 						const unknown = Object.keys(body).filter((k) => !KNOWN_JOB_FIELDS.has(k));
@@ -645,6 +645,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						if (body.fastMode === true) config.fastMode = true;
 						if (typeof body.reviewProfileId === "string") config.reviewProfileId = body.reviewProfileId;
 						if (typeof body.repairOf === "string") config.repairOf = body.repairOf;
+						// Guide extra instructions (#1265): blank text is dropped here so
+						// instruction-less launches build the exact same prompts as before.
+						if (typeof body.instructions === "string" && body.instructions.trim() !== "") config.instructions = body.instructions;
 						const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined);
 						if (built) {
 							command = built.command;

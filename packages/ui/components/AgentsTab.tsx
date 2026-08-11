@@ -23,6 +23,7 @@ import type { AgentEngine, AgentMode, ReviewEngine } from '../hooks/useAgentSett
 import type { AgentLaunchParams } from '../hooks/useAgentJobs';
 import { ConfigRow, SegmentedPicker, Toggle, SelectMenu } from './AgentControls';
 import { CODEX_MODELS, CODEX_EFFORT_LABELS, codexReasoningOptions } from '../utils/codexModels';
+import { getGuideInstructions } from '../utils/storage';
 
 export type { AgentLaunchParams } from '../hooks/useAgentJobs';
 
@@ -872,7 +873,16 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
       ? { effort: tourClaudeEffort }
       : { reasoningEffort: tourCodexReasoning, ...(tourCodexFast && { fastMode: true }) }),
   });
+  // Persisted guide extra instructions (#1265) ride along from this surface
+  // too, so a launch from the sidebar panel behaves exactly like one from the
+  // guide landing page (the editing affordance lives there). Read fresh at
+  // launch time; blank omits the field entirely.
   const buildGuideLaunch = (): LaunchParams => {
+    const instructions = getGuideInstructions().trim();
+    const params = buildGuideEngineParams();
+    return instructions ? { ...params, instructions } : params;
+  };
+  const buildGuideEngineParams = (): LaunchParams => {
     if (guideEngine === 'cursor') {
       // Same omission rules as buildReviewLaunch: auto/empty ⇒ engine default.
       // Guide-scoped model — deliberately NOT the shared cursorModel (see

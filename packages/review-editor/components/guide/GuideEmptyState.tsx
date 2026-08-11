@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { AgentCapabilities } from '@plannotator/ui/types';
+import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from '@plannotator/shared/guide';
 import type { SavedGuideListEntry } from '@plannotator/shared/guide';
+import { getGuideInstructions, setGuideInstructions } from '@plannotator/ui/utils/storage';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 // Same catalogs AgentsTab's launch panel uses — one source of truth for both
@@ -194,6 +196,19 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
 
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+
+  // Extra instructions (#1265): a quiet, collapsed-by-default disclosure below
+  // the Model defaults card. Persisted via its own cookie (write-through on
+  // every edit) so a standing team preference never needs retyping; launches
+  // read the persisted value fresh (useGuideLaunch.buildParams), so this local
+  // state is only the textarea's view of it.
+  const [instructions, setInstructions] = useState(getGuideInstructions);
+  const [showInstructions, setShowInstructions] = useState(false);
+  const hasInstructions = instructions.trim().length > 0;
+  const handleInstructionsChange = (value: string) => {
+    setInstructions(value);
+    setGuideInstructions(value);
+  };
 
   // Previous guides persisted for this repo (#1112). Null until the list
   // resolves; an empty list hides the section entirely. Standalone/demo mode
@@ -440,6 +455,39 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
             <p className="mt-2.5 text-[11px] leading-snug text-muted-foreground/60">
               Newer models with lower effort are recommended — guides generate quicker.
             </p>
+          </div>
+
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowInstructions((v) => !v)}
+              aria-expanded={showInstructions}
+              className="flex items-center gap-1 rounded-md px-1 py-1 text-[11.5px] text-muted-foreground/70 transition-colors hover:text-foreground"
+            >
+              <ChevronRight className={`transition-transform ${showInstructions ? 'rotate-90' : ''}`} size={12} />
+              Custom instructions
+              {hasInstructions && !showInstructions && (
+                <span className="ml-1 rounded border border-border/50 bg-muted/40 px-1 py-px font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
+                  on
+                </span>
+              )}
+            </button>
+            {showInstructions && (
+              <div className="mt-1.5 max-w-[560px]">
+                <textarea
+                  value={instructions}
+                  onChange={(e) => handleInstructionsChange(e.target.value)}
+                  maxLength={GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS}
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={'Standing preferences for guide generation, e.g. "prefer product vocabulary over internal codenames".'}
+                  className="w-full resize-y rounded-md border border-border/50 bg-background p-2.5 text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-border"
+                />
+                <p className="mt-1 text-[11px] leading-snug text-muted-foreground/60">
+                  Added on top of the built-in guide methodology for every guide you generate. Saved for next time.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="mt-4 flex items-center gap-2">

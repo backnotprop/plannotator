@@ -18,6 +18,7 @@ import {
   type MarkerEngine,
   type MarkerEngineId,
 } from "../marker-review";
+import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from "@plannotator/shared/guide";
 import type {
   CodeGuideOutput,
   GuideDiffRef,
@@ -262,6 +263,35 @@ bugs; that is normal and expected, not a sign you did not look hard enough.
    diffs, or in unplacedFiles. Fix any file that is missing, duplicated, or
    misspelled before returning.
 8. Return structured JSON matching the schema.`;
+
+/**
+ * The guide methodology, optionally extended with reviewer-supplied extra
+ * instructions (#1265): freeform standing preferences ("prefer product
+ * vocabulary X", "never invent ticket IDs") APPENDED as a clearly delimited
+ * section, never replacing the built-in organizer prompt. Absent or blank
+ * instructions return GUIDE_REVIEW_PROMPT itself, byte-identical, so every
+ * existing prompt path is unchanged. Text beyond
+ * GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS is truncated (hygiene bound on prompt
+ * size; the launch UI caps input at the same limit).
+ */
+export function composeGuideMethodology(extraInstructions?: string): string {
+  const trimmed = extraInstructions?.trim();
+  if (!trimmed) return GUIDE_REVIEW_PROMPT;
+  const bounded = trimmed.length > GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS
+    ? trimmed.slice(0, GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS)
+    : trimmed;
+  return [
+    GUIDE_REVIEW_PROMPT,
+    "",
+    "## Additional reviewer instructions",
+    "The reviewer supplied these standing preferences for this guide. Apply",
+    "them where they shape vocabulary, emphasis, or ordering judgment. They",
+    "refine the methodology above; they never override the coverage rule, the",
+    "hard constraints, the research budget, or the output schema.",
+    "",
+    bounded,
+  ].join("\n");
+}
 
 export interface GuideChangedFile {
   path: string;
@@ -525,12 +555,13 @@ chapter over dumping it in unplacedFiles.`;
 
 /**
  * Compose a marker engine's guide prompt: the guide methodology (GUIDE_REVIEW_PROMPT,
- * unchanged from the claude/codex paths) + the marker output contract (nonce-tagged)
+ * unchanged from the claude/codex paths, plus any reviewer extra instructions
+ * via composeGuideMethodology) + the marker output contract (nonce-tagged)
  * + the user message. Mirrors composeMarkerReviewPrompt's shape; guide has no
  * custom-profile concept, so there is no "replace the methodology" branch.
  */
-export function composeGuideMarkerPrompt(userMessage: string, nonce: string): string {
-  return GUIDE_REVIEW_PROMPT + "\n\n" + buildGuideMarkerOutputContract(nonce) + "\n\n---\n\n" + userMessage;
+export function composeGuideMarkerPrompt(userMessage: string, nonce: string, extraInstructions?: string): string {
+  return composeGuideMethodology(extraInstructions) + "\n\n" + buildGuideMarkerOutputContract(nonce) + "\n\n---\n\n" + userMessage;
 }
 
 // ---------------------------------------------------------------------------
@@ -1148,6 +1179,15 @@ export function createGuideSession(): GuideSession {
         return { command, stdinPrompt, prompt: repairPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: "claude", model, effort: "low" };
       }
 
+      // Reviewer-supplied extra instructions (#1265) apply only to the normal
+      // guide-organizing prompt. The repair paths above never see them: a
+      // repair is a mechanical JSON-syntax fix of previously-captured output,
+      // and content preferences have no business influencing it.
+      const extraInstructions =
+        typeof config?.instructions === "string" && config.instructions.trim().length > 0
+          ? config.instructions
+          : undefined;
+
       const userMessage = buildGuideUserMessage(patch, diffType, options, prMetadata, changedFiles);
 
       // Marker engines (Cursor, OpenCode, Pi) — none has a schema flag, so the
@@ -1160,12 +1200,12 @@ export function createGuideSession(): GuideSession {
       if (markerEngine) {
         const thinking = typeof config?.thinking === "string" && config.thinking ? config.thinking : undefined;
         const nonce = makeMarkerNonce();
-        const markerPrompt = composeGuideMarkerPrompt(userMessage, nonce);
+        const markerPrompt = composeGuideMarkerPrompt(userMessage, nonce, extraInstructions);
         const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
         return { command, prompt: markerPrompt, cwd, label: "Guided Review", captureStdout: true, engine: markerEngine.id, model, thinking };
       }
 
-      const prompt = GUIDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
+      const prompt = composeGuideMethodology(extraInstructions) + "\n\n---\n\n" + userMessage;
 
       if (engine === "codex") {
         const outputPath = generateGuideOutputPath();

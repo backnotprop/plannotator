@@ -1,3 +1,10 @@
+/** Hard cap on reviewer-supplied extra guide instructions (#1265): the
+ *  freeform text appended to the organizer methodology at launch. A hygiene
+ *  bound on prompt size, not a security boundary (the instructions run on the
+ *  user's own machine against their own agent). Enforced server-side in
+ *  composeGuideMethodology and mirrored by the launch textarea's maxLength. */
+export const GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS = 2000;
+
 export interface GuideDiffRef {
   /** Repo-relative path; must match a DiffFile.path in the current review patch. */
   file: string;
