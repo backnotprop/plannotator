@@ -111,10 +111,12 @@ import { observeActionsLabelMode } from './actionsLabelMode';
 // same env var on the server side so V2/V3 stay paired.
 import { DEMO_PLAN_CONTENT as DEFAULT_DEMO_PLAN_CONTENT } from './demoPlan';
 import { DIFF_DEMO_PLAN_CONTENT } from './demoPlanDiffDemo';
-import { canUseAnnotateWideMode, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from '@plannotator/ui/utils/wideMode';
+import { canUseAnnotateWideMode, resolveFocusShortcutAction, resolveWideModeExitLayout, type WideModeLayoutSnapshot, type WideModeType } from '@plannotator/ui/utils/wideMode';
+import { modKey } from '@plannotator/ui/utils/platform';
 import {
   annotateSidebarShortcuts,
   useAnnotateSidebarShortcuts,
+  useDocumentViewShortcuts,
   useDoubleTapShortcuts,
 } from '@plannotator/ui/shortcuts';
 const USE_DIFF_DEMO =
@@ -984,8 +986,11 @@ const App: React.FC = () => {
     [projectRoot, uiPrefs]
   );
 
-  const canHandleAnnotateSidebarShortcut = useCallback((event: KeyboardEvent) => {
-    if (!annotateMode || archive.archiveMode || goalSetupMode) return false;
+  // Shared gate for the chrome-level keyboard commands (sidebars, focus mode):
+  // never while a dialog, an overlay, a submission, or a text field owns the
+  // keystroke. Annotate-only commands layer their own conditions on top.
+  const canHandleDocumentChromeShortcut = useCallback((event: KeyboardEvent) => {
+    if (archive.archiveMode || goalSetupMode) return false;
     if (event.defaultPrevented) return false;
     if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return false;
     if (showExport || showImport || showFeedbackPrompt || showClaudeCodeWarning ||
@@ -997,7 +1002,6 @@ const App: React.FC = () => {
     const tag = target?.tagName;
     return tag !== 'INPUT' && tag !== 'TEXTAREA' && !target?.isContentEditable;
   }, [
-    annotateMode,
     archive.archiveMode,
     goalSetupMode,
     showExport,
@@ -1015,6 +1019,36 @@ const App: React.FC = () => {
     isExiting,
     isEditingMarkdown,
   ]);
+
+  const canHandleAnnotateSidebarShortcut = useCallback(
+    (event: KeyboardEvent) => annotateMode && canHandleDocumentChromeShortcut(event),
+    [annotateMode, canHandleDocumentChromeShortcut],
+  );
+
+  // Focus mode from the keyboard. Mirrors the document card's `Focus` control —
+  // including its availability — so the shortcut can never park the layout in a
+  // state with no visible way back. HTML surfaces are excluded because they own
+  // their own persisted chrome and never render that control.
+  const handleToggleFocusMode = useCallback(() => {
+    const action = resolveFocusShortcutAction({
+      canUseWideMode: canUseWideMode && !isHtmlSurface,
+      wideModeType,
+    });
+    if (action === 'enter-focus') enterViewMode('focus');
+    else if (action === 'exit') exitWideMode();
+  }, [canUseWideMode, enterViewMode, exitWideMode, isHtmlSurface, wideModeType]);
+
+  useDocumentViewShortcuts({
+    handlers: {
+      toggleFocusMode: {
+        when: (event) =>
+          canHandleDocumentChromeShortcut(event)
+          && !isHtmlSurface
+          && (canUseWideMode || wideModeType !== null),
+        handle: handleToggleFocusMode,
+      },
+    },
+  });
 
   useAnnotateSidebarShortcuts({
     handlers: {
@@ -4627,7 +4661,7 @@ const App: React.FC = () => {
                           <Tooltip
                             side="top"
                             align="end"
-                            content={type === 'wide' ? 'Hide panels and expand document width' : 'Hide panels, keep document width'}
+                            content={type === 'wide' ? 'Hide panels and expand document width' : `Hide panels, keep document width (${modKey}+.)`}
                           >
                             <button
                               type="button"

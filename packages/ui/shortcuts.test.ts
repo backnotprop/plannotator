@@ -8,6 +8,7 @@ import {
   formatShortcutBindingText,
   formatShortcutBindingTokens,
   getShortcut,
+  listRegistryShortcuts,
   listRegistryShortcutSections,
   matchesKeyName,
   matchesShortcutBinding,
@@ -73,6 +74,7 @@ describe('shortcuts', () => {
 
     expect(planReviewSections.map(section => section.title)).toEqual([
       'Actions',
+      'View',
       'Input Method',
       'Annotations',
       'Vim Document Navigation',
@@ -84,6 +86,7 @@ describe('shortcuts', () => {
     expect(annotateSections.map(section => section.title)).toEqual([
       'Actions',
       'Sidebar',
+      'View',
       'Input Method',
       'Annotations',
       'Vim Document Navigation',
@@ -111,6 +114,21 @@ describe('shortcuts', () => {
       'PR Comments',
       'Tour',
     ]);
+  });
+
+  // The focus-mode toggle collapses both side panels at once. It has to exist
+  // on BOTH plan surfaces (they render the same panels), and its binding has to
+  // stay the only claim on `Mod+.` there — a second claimant would double-fire,
+  // since the dispatcher has no cross-scope arbitration.
+  it('binds focus mode once on every plan surface', () => {
+    for (const registry of [planReviewSettingsShortcutRegistry, annotateSettingsShortcutRegistry]) {
+      expect(getShortcut(registry, 'document-view', 'toggleFocusMode')?.bindings).toEqual(['Mod+.']);
+
+      const claimants = listRegistryShortcuts(registry)
+        .filter(entry => entry.bindings.includes('Mod+.'))
+        .map(entry => `${entry.scopeId}.${entry.actionId}`);
+      expect(claimants).toEqual(['document-view.toggleFocusMode']);
+    }
   });
 
   it('matches normalized runtime bindings', () => {

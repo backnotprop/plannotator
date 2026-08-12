@@ -8,6 +8,7 @@ export { commentPopoverShortcuts } from './plan-review/commentPopover.shortcuts'
 export { imageAnnotatorShortcuts, useImageAnnotatorShortcuts } from './plan-review/imageAnnotator.shortcuts';
 export { inputMethodShortcuts } from './plan-review/inputMethod.shortcuts';
 export { viewerShortcuts, useViewerShortcuts } from './plan-review/viewer.shortcuts';
+export { documentViewShortcuts, useDocumentViewShortcuts } from './plan-review/documentView.shortcuts';
 export {
   describeVimSelectionAction,
   isVimSelectionActionId,

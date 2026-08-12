@@ -84,6 +84,13 @@ const inputMethodShortcuts: ShortcutSection = {
   ],
 };
 
+const documentViewShortcuts: ShortcutSection = {
+  title: 'View',
+  shortcuts: [
+    { keys: [modKey, '.'], desc: 'Toggle focus mode', hint: 'Collapses the Contents sidebar and the right-hand panel together; press again to restore whatever was open before.' },
+  ],
+};
+
 const annotationShortcuts: ShortcutSection = {
   title: 'Annotations',
   shortcuts: [
@@ -108,6 +115,7 @@ const imageAnnotatorShortcuts: ShortcutSection = {
 };
 
 const sharedPlanEditorShortcuts: ShortcutSection[] = [
+  documentViewShortcuts,
   inputMethodShortcuts,
   annotationShortcuts,
   imageAnnotatorShortcuts,
