@@ -454,6 +454,10 @@ const warnedInvalidUrlHosts = new Set<string>();
  * localhost — a display setting must never crash a server launch. The echoed
  * value is JSON-encoded so an embedded newline cannot forge extra stderr
  * lines (hosts surface "Plannotator session ready" lines as clickable links).
+ *
+ * The sentinel "auto" is returned verbatim (it matches the hostname shape);
+ * the advertised-URL layer resolves it via Tailscale detection
+ * (packages/server/remote.ts and the Pi network.ts mirror).
  */
 export function resolveUrlHost(config: PlannotatorConfig): string | undefined {
   const envVal = process.env.PLANNOTATOR_URL_HOST;
