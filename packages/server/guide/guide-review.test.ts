@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  GUIDE_NO_SECTIONS_ERROR,
   GUIDE_REVIEW_PROMPT,
   buildGuideMarkerOutputContract,
   buildGuideUserMessage,
@@ -57,6 +58,41 @@ describe("validateGuideOutput", () => {
     const raw = JSON.parse(guideJson([{ title: "X", overview: "", diffs: [{ file: "not/changed.ts" }] }]));
     const result = validateGuideOutput(raw, FILES);
     expect("error" in result).toBe(true);
+  });
+
+  it("explains a fully-invalidated guide whose refs were outside the changeset (count + example paths)", () => {
+    // The model guided a different commit than the one under review — the
+    // failure card must say so instead of the bare generic message. Asserts
+    // the data the message carries (count, example paths, the Commits-panel
+    // pointer), not the surrounding prose.
+    const raw = JSON.parse(
+      guideJson([
+        { title: "X", overview: "o", diffs: [{ file: "other/one.ts" }, { file: "other/two.ts" }] },
+        { title: "Y", overview: "o", diffs: [{ file: "other/three.ts" }, { file: "other/four.ts" }] },
+      ]),
+    );
+    const result = validateGuideOutput(raw, FILES);
+    if (!("error" in result)) throw new Error("expected a validation error");
+    expect(result.error).toContain("4 file(s) outside the changeset");
+    expect(result.error).toContain("other/one.ts");
+    expect(result.error).toContain("Commits panel");
+    // Examples are capped at 3 — the fourth path must not be listed.
+    expect(result.error).not.toContain("other/four.ts");
+  });
+
+  it("keeps the generic message for genuinely structural emptiness (no outside-changeset drops)", () => {
+    const noSections = validateGuideOutput(JSON.parse(guideJson([])), FILES);
+    if (!("error" in noSections)) throw new Error("expected a validation error");
+    expect(noSections.error).toBe(GUIDE_NO_SECTIONS_ERROR);
+
+    // A zero-diff section with a blank overview dies structurally, not
+    // because of the changeset — same generic message.
+    const blankOverview = validateGuideOutput(
+      JSON.parse(guideJson([{ title: "S", overview: "", diffs: [] }])),
+      FILES,
+    );
+    if (!("error" in blankOverview)) throw new Error("expected a validation error");
+    expect(blankOverview.error).toBe(GUIDE_NO_SECTIONS_ERROR);
   });
 
   it("keeps a deliberate prose-only section but drops one that LOST its diffs to validation", () => {

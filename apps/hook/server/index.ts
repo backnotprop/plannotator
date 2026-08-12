@@ -258,6 +258,14 @@ if (tailscaleFlag) {
  * prompt, so this path must never leave the loopback server waiting. (The
  * server APIs also await ready handlers and stop the server on rejection,
  * which covers any other async onReady user.)
+ *
+ * A publish failure is a STARTUP failure: no reviewer ever saw the session.
+ * Under a strict annotate gate (--require-approval / --result-file) exit 1
+ * is reserved for "the reviewer did not approve, decision record published",
+ * so this exits through annotateStartupFailureExitCode with the strict flags
+ * the invocation parsed — exit 2 for strict gates, the documented exit 1
+ * otherwise (review and non-strict annotate; strict flags only parse on the
+ * annotate subcommand, so review sessions always take the exit-1 leg).
  */
 async function handleTailscaleReady(port: number): Promise<void> {
   let url: string;
@@ -265,7 +273,12 @@ async function handleTailscaleReady(port: number): Promise<void> {
     ({ url } = enableTailscaleServe(port));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exit(1);
+    process.exit(
+      annotateStartupFailureExitCode({
+        requireApproval: requireApprovalFlag,
+        resultFile,
+      }),
+    );
   }
   process.stderr.write(`\n  Plannotator session ready — served over your tailnet:\n  ${url}\n\n`);
   writeUrlQr(url);
@@ -443,12 +456,16 @@ process.on("exit", () => unregisterSession());
 // default a SIGINT/SIGTERM death skips them, leaking background-warmup
 // children and stale `git worktree` registrations (the --local PR checkout
 // cleanup below is registered on "exit"). `once` keeps a second Ctrl-C as a
-// force-quit escape hatch if cleanup ever hangs. SIGHUP (terminal close) is
-// routed too — otherwise closing the terminal skips exit handlers and leaks
-// the --tailscale serve mapping.
+// force-quit escape hatch if cleanup ever hangs. SIGHUP is deliberately NOT
+// routed here: installing any SIGHUP listener overrides the ignored
+// disposition `nohup` depends on, so a plain `nohup plannotator review &`
+// must end up with no listener and survive terminal close. The --tailscale
+// path installs its own SIGHUP→exit handler only once a serve mapping
+// actually exists (enableTailscaleServe in
+// packages/server/tailscale-serve.ts), which is the only case where terminal
+// close would otherwise leak tailnet state.
 process.once("SIGINT", () => process.exit(130));
 process.once("SIGTERM", () => process.exit(143));
-process.once("SIGHUP", () => process.exit(129));
 
 // Check if URL sharing is enabled (default: true)
 const sharingEnabled = resolveSharingEnabled(loadConfig());

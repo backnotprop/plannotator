@@ -101,7 +101,10 @@ export interface AnnotateServerOptions {
    * Whether this transport can safely resolve an abandoned gate automatically.
    * Only local direct structured annotate gates (`--gate --json`, not `--hook`,
    * not remote/shared) qualify — see supportsAnnotateClientLease in
-   * apps/hook/server/annotate-output.ts.
+   * apps/hook/server/annotate-output.ts. The server additionally forces this
+   * off while `tailnetPublished` is set: `--tailscale` counts as local to the
+   * CLI predicate, but the session is reached through the serve proxy, whose
+   * disconnects would read as abandonment exactly like a remote tunnel's.
    */
   clientLeaseSupported?: boolean;
   /**
@@ -182,7 +185,6 @@ export async function startAnnotateServer(
     pasteApiUrl,
     gate = false,
     approvalNotesSupported = false,
-    clientLeaseSupported = false,
     clientLeaseTestOverrides,
     rawHtml,
     renderHtml = false,
@@ -191,6 +193,16 @@ export async function startAnnotateServer(
     project,
     onReady,
   } = options;
+
+  // Effective client-lease capability. A --tailscale session forces local
+  // mode, so the CLI-side supportsAnnotateClientLease predicate reads it as
+  // local — but every client reaches it through the tailscale serve proxy,
+  // and a proxy/network disconnect longer than the grace period would
+  // auto-dismiss a live review. Same rationale that keeps the capability off
+  // for remote/shared sessions; this is the single decision point both the
+  // /api/plan advert and the SSE endpoint below read.
+  const clientLeaseSupported =
+    (options.clientLeaseSupported ?? false) && options.tailnetPublished !== true;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();

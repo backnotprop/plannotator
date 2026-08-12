@@ -14,8 +14,11 @@
  *     other ports are never touched, and unrecognizable `serve status`
  *     output fails closed.
  *   - Mappings this process creates are torn down on normal completion and
- *     on SIGINT/SIGTERM/SIGHUP (the CLI entry routes those through
- *     process.exit, which fires "exit" handlers). Teardown failures retry
+ *     on SIGINT/SIGTERM/SIGHUP (the CLI entry routes SIGINT/SIGTERM through
+ *     process.exit, which fires "exit" handlers; SIGHUP is routed by THIS
+ *     module, installed only once a mapping exists — an unconditional SIGHUP
+ *     listener would override the ignored disposition `nohup` depends on and
+ *     kill plain nohup'd sessions on terminal close). Teardown failures retry
  *     once, then warn with the exact manual command; a port is only
  *     forgotten after a successful off. `--bg` mappings survive a hard kill
  *     (SIGKILL) or reboot — that is Tailscale's persistence model, and the
@@ -71,6 +74,12 @@ function onProcessExit(): void {
   cleanupAllServeMappings();
 }
 
+/** SIGHUP (terminal close) routed through process.exit so the "exit" handler
+ *  above tears the serve mapping down. 129 = 128 + SIGHUP. */
+function onSigHup(): void {
+  process.exit(129);
+}
+
 /**
  * Publish a loopback-bound session port over the tailnet. Returns the HTTPS
  * URL tailscale advertises. Throws with an actionable message when the CLI
@@ -118,6 +127,13 @@ export function enableTailscaleServe(
   if (!exitCleanupInstalled) {
     exitCleanupInstalled = true;
     process.on("exit", onProcessExit);
+    // SIGHUP is routed through process.exit ONLY once a mapping exists.
+    // Installing any SIGHUP listener overrides the ignored disposition
+    // `nohup` relies on, so sessions without a serve mapping must never gain
+    // one — `nohup plannotator review &` has to keep surviving terminal
+    // close. With a mapping, terminal close must run the exit cleanup above
+    // or the `--bg` mapping leaks.
+    process.once("SIGHUP", onSigHup);
   }
   return { url };
 }
@@ -149,5 +165,6 @@ export function resetTailscaleServeForTests(): void {
   if (exitCleanupInstalled) {
     exitCleanupInstalled = false;
     process.removeListener("exit", onProcessExit);
+    process.removeListener("SIGHUP", onSigHup);
   }
 }

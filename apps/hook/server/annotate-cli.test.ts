@@ -31,7 +31,7 @@ let dataDir: string;
 const createdDistFiles: string[] = [];
 let createdDistDir = false;
 
-function runAnnotate(args: string[]): {
+function runAnnotate(args: string[], envOverrides: Record<string, string> = {}): {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -44,6 +44,7 @@ function runAnnotate(args: string[]): {
         ...process.env,
         PLANNOTATOR_CWD: fixtureDir,
         PLANNOTATOR_DATA_DIR: dataDir,
+        ...envOverrides,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -75,6 +76,15 @@ beforeAll(() => {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(fixtureDir, "out"));
   writeFileSync(join(fixtureDir, "notes.md"), "# Notes");
+
+  // Failing `tailscale` shim for the --tailscale publish-failure exit-code
+  // tests: shadows any real CLI on PATH so no tailnet state is ever touched.
+  mkdirSync(join(fixtureDir, "bin"));
+  writeFileSync(
+    join(fixtureDir, "bin", "tailscale"),
+    "#!/bin/sh\necho 'Log in to Tailscale first' >&2\nexit 1\n",
+    { mode: 0o755 },
+  );
 });
 
 afterAll(() => {
@@ -130,6 +140,38 @@ describe("annotate CLI strict gate bypasses tolerance", () => {
     ]);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("File not found: the");
+    expect(result.stdout).toBe("");
+  });
+});
+
+describe("annotate CLI --tailscale publish failure exit codes", () => {
+  // The tailnet publish happens in onReady, after the loopback server is up,
+  // through the failing shim above. Under a strict gate exit 1 is reserved
+  // for "the reviewer did not approve, decision record published" — a
+  // publish failure must present as a startup failure (exit 2, no record
+  // file), never as a rejection. POSIX shim, so skipped on Windows.
+  const testUnix = test.skipIf(process.platform === "win32");
+  const tailscaleEnv = () => ({
+    PATH: `${join(fixtureDir, "bin")}:${process.env.PATH ?? ""}`,
+    PLANNOTATOR_AI: "disabled",
+  });
+
+  testUnix("strict gate: exits 2 with no result file", () => {
+    const resultFile = join("out", "ts-result.json");
+    const result = runAnnotate(
+      ["notes.md", "--tailscale", "--gate", "--json", "--result-file", resultFile],
+      tailscaleEnv(),
+    );
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("--tailscale");
+    expect(result.stdout).toBe("");
+    expect(existsSync(join(fixtureDir, resultFile))).toBe(false);
+  });
+
+  testUnix("non-strict: keeps the documented exit 1", () => {
+    const result = runAnnotate(["notes.md", "--tailscale"], tailscaleEnv());
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--tailscale");
     expect(result.stdout).toBe("");
   });
 });

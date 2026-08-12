@@ -29,6 +29,12 @@ export type { CodeGuideOutput, GuideDiffRef, GuideSection };
 
 export const GUIDE_EMPTY_OUTPUT_ERROR = "Guide generation returned empty or malformed output";
 
+/** Generic structural validation failure (no sections / blank overviews).
+ *  onJobComplete deliberately does NOT surface this string on the job card —
+ *  the caller substitutes GUIDE_EMPTY_OUTPUT_ERROR — whereas the informative
+ *  outside-changeset validation error passes through verbatim. */
+export const GUIDE_NO_SECTIONS_ERROR = "No sections survived validation";
+
 export const GUIDE_SCHEMA_JSON = JSON.stringify({
   type: "object",
   properties: {
@@ -968,7 +974,9 @@ export interface GuideSession {
   buildCommand(opts: GuideSessionBuildCommandOptions): Promise<GuideSessionBuildCommandResult>;
   onJobComplete(opts: GuideSessionOnJobCompleteOptions): Promise<{
     summary: GuideSessionJobSummary | null;
-    /** Sanitized provider failure when transport succeeded but the Pi run did not. */
+    /** Sanitized provider failure when transport succeeded but the Pi run did
+     *  not, or an informative validation failure worth showing verbatim on
+     *  the job card (refs outside the changeset under review). */
     error?: string;
   }>;
   getGuide(jobId: string): (CodeGuideOutput & { reviewed: boolean[] }) | null;
@@ -1016,12 +1024,20 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
   const placed = new Set<string>();
   const validatedSections: GuideSection[] = [];
   const sanitizedSections = sanitizeGuideSections(output.sections);
+  // Files the model referenced that are not part of the changeset — tracked
+  // so a fully-invalidated guide can explain WHY nothing survived (typically
+  // the model guided a different commit than the one under review).
+  const outsideChangeset = new Set<string>();
 
   for (const section of sanitizedSections) {
     const originalDiffCount = section.diffs.length;
     const diffs: GuideDiffRef[] = [];
     for (const ref of section.diffs) {
-      if (!changedSet.has(ref.file)) continue; // not a real changed file
+      if (!changedSet.has(ref.file)) {
+        // not a real changed file
+        outsideChangeset.add(ref.file);
+        continue;
+      }
       if (placed.has(ref.file)) continue; // duplicate — first placement wins
       placed.add(ref.file);
       diffs.push(ref);
@@ -1044,8 +1060,20 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
   if (validatedSections.length === 0) {
     // Nothing survived validation — a guide screen with zero sections is
     // useless (it would just be a single "Everything else" bucket for the
-    // whole diff). Fail closed, same as an unparseable output.
-    return { error: "No sections survived validation" };
+    // whole diff). Fail closed, same as an unparseable output. When the
+    // sections died because their refs named files outside the changeset,
+    // say so — that failure is actionable (guide the right commit), unlike
+    // genuinely structural emptiness (no sections / blank overviews), which
+    // keeps the generic message.
+    if (outsideChangeset.size > 0) {
+      const examples = [...outsideChangeset].slice(0, 3).join(", ");
+      return {
+        error:
+          `Guide referenced ${outsideChangeset.size} file(s) outside the changeset under review ` +
+          `(e.g. ${examples}). To guide a different commit, open it in the Commits panel first, then relaunch.`,
+      };
+    }
+    return { error: GUIDE_NO_SECTIONS_ERROR };
   }
 
   // unplacedFiles = every changed file that never landed in a section,
@@ -1280,7 +1308,12 @@ export function createGuideSession(): GuideSession {
       if ("error" in result) {
         console.error(`[guide] ${result.error} for job ${job.id}`);
         stashFailedPayload(failedPayloads, job.id, rawCandidate);
-        return { summary: null };
+        // Surface only the informative outside-changeset explanation on the
+        // failure card; the generic structural case keeps the empty-output
+        // message the caller substitutes when `error` is absent.
+        return result.error === GUIDE_NO_SECTIONS_ERROR
+          ? { summary: null }
+          : { summary: null, error: result.error };
       }
 
       guideResults.set(job.id, result.guide);

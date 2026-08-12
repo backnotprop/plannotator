@@ -179,6 +179,30 @@ describe("teardown hardening", () => {
   });
 });
 
+describe("SIGHUP routing", () => {
+  // Guards the nohup contract: any SIGHUP listener overrides the ignored
+  // disposition `nohup` depends on, so a listener may exist ONLY while a
+  // serve mapping does. An unconditional listener regressed
+  // `nohup plannotator review &` into dying on terminal close.
+  test("installs the SIGHUP→exit route only once a mapping exists, and reset removes it", () => {
+    const before = process.listenerCount("SIGHUP");
+    const { runner } = makeRunner({});
+    enableTailscaleServe(4321, runner);
+    expect(process.listenerCount("SIGHUP")).toBe(before + 1);
+    resetTailscaleServeForTests();
+    expect(process.listenerCount("SIGHUP")).toBe(before);
+  });
+
+  test("a failed publish leaves no SIGHUP listener behind", () => {
+    const before = process.listenerCount("SIGHUP");
+    const { runner } = makeRunner({
+      status: { status: 1, stdout: "", stderr: "backend stopped" },
+    });
+    expect(() => enableTailscaleServe(4321, runner)).toThrow();
+    expect(process.listenerCount("SIGHUP")).toBe(before);
+  });
+});
+
 describe("disableTailscaleServe", () => {
   test("is a no-op for ports this process never published", () => {
     const { runner, calls } = makeRunner({});

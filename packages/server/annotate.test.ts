@@ -1224,6 +1224,39 @@ describe("annotate server: client lease", () => {
     }
   });
 
+  test("a tailnet-published session neither advertises nor serves the lease even when the CLI predicate allowed it", async () => {
+    // --tailscale forces local mode, so the CLI-side predicate reads the
+    // session as local and passes clientLeaseSupported: true — but clients
+    // reach it through the serve proxy, and a proxy disconnect longer than
+    // the grace would auto-dismiss a live review. The server must force the
+    // capability off, exactly like a remote session.
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    const sandboxDataDir = mkdtempSync(join(tmpdir(), "plannotator-lease-tailnet-"));
+    process.env.PLANNOTATOR_DATA_DIR = sandboxDataDir;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-tailnet.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      tailnetPublished: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as { clientLease?: { enabled: boolean } };
+      expect(plan.clientLease).toEqual({ enabled: false });
+      const stream = await fetch(`${server.url}/api/annotate/client-lease`);
+      expect(stream.status).toBe(404);
+    } finally {
+      server.stop();
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(sandboxDataDir, { recursive: true, force: true });
+    }
+  });
+
   test("returns 404 for the client-lease stream when the capability is disabled", async () => {
     const server = await startAnnotateServer({
       markdown: "# Test",
