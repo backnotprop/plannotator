@@ -8,7 +8,7 @@
  * (packages/shared/open-in-apps.ts, vendored into generated/).
  */
 
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import os from "node:os";
@@ -103,7 +103,26 @@ export function getAvailableOpenInApps(): Array<{
 	});
 }
 
-/** Run execFile and surface ENOENT (app not found) as a friendly error. */
+/**
+ * How long a launch may take to fail before we call it launched (ms). Mirrors
+ * the Bun runtime (packages/server/open-in.ts).
+ */
+const LAUNCH_GRACE_MS = 2000;
+
+/** Cap on captured stderr; the stream keeps draining beyond it. */
+const LAUNCH_STDERR_CAP_BYTES = 8192;
+
+/**
+ * Run an argv launcher and surface ENOENT (app not found) as a friendly error.
+ *
+ * Mirrors the Bun runtime's runArgv semantics exactly: the child is spawned
+ * DETACHED (its own process group) so an editor cold-started by a launcher CLI
+ * can never be taken down by a signal aimed at this server's group, the wait
+ * is BOUNDED so a launcher CLI that stays attached to the app it started
+ * cannot hold the HTTP request hostage, and stderr is drained from spawn time
+ * so a chatty child can never fill the pipe and deadlock inside the grace
+ * window.
+ */
 function run(
 	cmd: string,
 	args: string[],
@@ -111,20 +130,85 @@ function run(
 	opts?: { cwd?: string },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	return new Promise((resolve) => {
-		const proc = execFile(cmd, args, opts?.cwd ? { cwd: opts.cwd } : {}, (err) => {
-			if (!err) {
-				resolve({ ok: true });
+		const failure = (msg: string): { ok: false; error: string } =>
+			/ENOENT|not found/i.test(msg)
+				? { ok: false, error: `${notFoundLabel} was not found on this system.` }
+				: { ok: false, error: msg };
+
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(cmd, args, {
+				detached: true,
+				stdio: ["ignore", "ignore", "pipe"],
+				...(opts?.cwd ? { cwd: opts.cwd } : {}),
+			});
+		} catch (err) {
+			resolve(failure(err instanceof Error ? err.message : String(err)));
+			return;
+		}
+
+		let stderr = "";
+		child.stderr?.on("data", (chunk: Buffer) => {
+			if (stderr.length < LAUNCH_STDERR_CAP_BYTES) stderr += chunk.toString();
+		});
+
+		let settled = false;
+		let exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null =
+			null;
+		const finish = (result: { ok: true } | { ok: false; error: string }) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(deadline);
+			resolve(result);
+		};
+
+		const concludeExit = () => {
+			if (!exitInfo) return;
+			if (/not found|ENOENT/i.test(stderr)) {
+				finish({ ok: false, error: `${notFoundLabel} was not found on this system.` });
 				return;
 			}
-			const code = (err as NodeJS.ErrnoException).code;
-			if (code === "ENOENT" || /ENOENT|not found/i.test(err.message)) {
-				resolve({ ok: false, error: `${notFoundLabel} was not found on this system.` });
-			} else {
-				resolve({ ok: false, error: err.message });
-			}
+			const status = exitInfo.code ?? exitInfo.signal ?? "unknown";
+			finish({
+				ok: false,
+				error: `Failed to open ${notFoundLabel} (exit ${status})${stderr ? `: ${stderr.trim()}` : ""}`,
+			});
+		};
+
+		// Still running at the deadline: it launched. A failure observed just
+		// before the deadline still reports as a failure.
+		const deadline = setTimeout(() => {
+			if (exitInfo) concludeExit();
+			else finish({ ok: true });
+		}, LAUNCH_GRACE_MS);
+
+		child.once("error", (err) => {
+			finish(failure(err instanceof Error ? err.message : String(err)));
 		});
-		// Detach: we don't care about the child's lifetime once launched.
-		proc.unref?.();
+
+		child.once("exit", (code, signal) => {
+			if (code === 0) {
+				finish({ ok: true });
+				return;
+			}
+			exitInfo = { code, signal };
+			// Give the stderr pipe a beat to flush before reporting; "close" (all
+			// stdio ended) concludes immediately when it arrives first. close alone
+			// is not enough: a grandchild inheriting the pipe can hold it open.
+			setTimeout(concludeExit, 50);
+		});
+
+		child.once("close", (code, signal) => {
+			if (code === 0) {
+				finish({ ok: true });
+				return;
+			}
+			exitInfo = { code, signal };
+			concludeExit();
+		});
+
+		// The launcher runs on its own; never keep this process alive for it.
+		child.unref();
 	});
 }
 
