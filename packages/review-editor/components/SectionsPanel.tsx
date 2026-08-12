@@ -78,6 +78,7 @@ interface SectionsPanelProps {
   callFlowEnabled?: boolean;
   callFlowCount?: number;
   callFlowLoading?: boolean;
+  callFlowError?: boolean;
   /** Footer copy-diffs. */
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
@@ -199,6 +200,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   callFlowEnabled,
   callFlowCount,
   callFlowLoading,
+  callFlowError,
   onCopyRawDiff,
   canCopyRawDiff,
   copyRawDiffStatus = 'idle',
@@ -586,7 +588,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
           <>
           {/* Nav rows — shared with the tree view, same order. */}
           {callFlowEnabled && onSelectCallFlow && (
-            <CallFlowRow active={isCallFlowActive ?? false} onClick={onSelectCallFlow} count={callFlowCount} loading={callFlowLoading} />
+            <CallFlowRow active={isCallFlowActive ?? false} onClick={onSelectCallFlow} count={callFlowCount} loading={callFlowLoading} error={callFlowError} />
           )}
           {semanticDiffAvailable && onSelectSemanticDiff && (
             <SemanticDiffRow active={isSemanticDiffActive ?? false} onClick={onSelectSemanticDiff} />

@@ -95,6 +95,8 @@ interface SettingsProps {
    *  (base ref unresolvable) — the Git tab shows a note that the Git-status
    *  preference can't take effect in THIS repo. */
   sinceBaseUnavailable?: boolean;
+  /** Review-host-authored disclosure shown beside the Call flow consent toggle. */
+  callFlowEnableDescription?: string;
   /** Override Obsidian vault detection (default = GET /api/obsidian/vaults). */
   onDetectObsidianVaults?: () => Promise<string[]>;
 }
@@ -294,7 +296,7 @@ function VimSettingsTab({
   );
 }
 
-function ReviewAnalysisTab() {
+function ReviewAnalysisTab({ callFlowEnableDescription }: { callFlowEnableDescription?: string }) {
   const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const callFlowEnabled = useConfigValue('callFlowEnabled');
   return (
@@ -318,7 +320,7 @@ function ReviewAnalysisTab() {
           checked={callFlowEnabled}
           onChange={(enabled) => configStore.set('callFlowEnabled', enabled)}
           label="Call flow"
-          description="Show complete inferred entry paths containing added or removed calls. Experimental and off by default. Uses a separate runtime installed on first use."
+          description={callFlowEnableDescription ?? 'Show complete inferred entry paths containing added or removed calls. Enabling installs a small local runtime; missing language support installs automatically as reviews need it. Requires Node.js 22 or newer.'}
         />
       </div>
 
@@ -822,7 +824,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, onDetectObsidianVaults }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, callFlowEnableDescription, onDetectObsidianVaults }) => {
   const [showDialog, setShowDialog] = useState(false);
   const settingsWasOpenRef = useRef(false);
   const [themePreview, setThemePreview] = useState(false);
@@ -1411,7 +1413,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
 
                 {activeTab === 'analysis' && mode === 'review' && (
-                  <ReviewAnalysisTab />
+                  <ReviewAnalysisTab callFlowEnableDescription={callFlowEnableDescription} />
                 )}
 
                 {activeTab === 'display' && mode !== 'review' && (

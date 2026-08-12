@@ -265,6 +265,62 @@ describe("CallFlowService", () => {
     expect(advert.installPlan?.languageIds).toEqual(["javascript-typescript", "python"]);
   });
 
+  test("advertises the exact managed install consent while the feature is disabled", async () => {
+    let probes = 0;
+    const service = new CallFlowService({
+      resolveRuntime: async () => {
+        probes++;
+        return { ok: false, reason: "runtime-unavailable", message: "not installed" };
+      },
+    });
+    const rawPatch = [
+      "diff --git a/tool.py b/tool.py",
+      "--- a/tool.py",
+      "+++ b/tool.py",
+      "@@ -1 +1 @@",
+      "-pass",
+      "+print('changed')",
+    ].join("\n");
+
+    const advert = await service.getAdvert(false, { vcsType: "git", diffType: "uncommitted", rawPatch });
+    expect(advert).toMatchObject({
+      enabled: false,
+      state: "disabled",
+      installable: true,
+      consentPlan: {
+        languageIds: ["javascript-typescript", "python"],
+        labels: ["JavaScript and TypeScript", "Python"],
+        installSizeBytes: 6 * 1024 * 1024,
+      },
+    });
+    expect(probes).toBe(0);
+  });
+
+  test("does not advertise automatic consent work for an override while disabled", async () => {
+    const previousOverride = process.env.PLANNOTATOR_CALLDIFF_PATH;
+    process.env.PLANNOTATOR_CALLDIFF_PATH = "/tmp/external-calldiff";
+    let probes = 0;
+    const service = new CallFlowService({
+      resolveRuntime: async () => {
+        probes++;
+        return { ok: true, runtime: { ...runtime, managed: false } };
+      },
+    });
+    try {
+      const advert = await service.getAdvert(false, {
+        vcsType: "git",
+        diffType: "uncommitted",
+        rawPatch: "diff --git a/tool.py b/tool.py\n",
+      });
+      expect(advert).toMatchObject({ enabled: false, state: "disabled", installable: false });
+      expect(advert.consentPlan).toBeUndefined();
+      expect(probes).toBe(0);
+    } finally {
+      if (previousOverride === undefined) delete process.env.PLANNOTATOR_CALLDIFF_PATH;
+      else process.env.PLANNOTATOR_CALLDIFF_PATH = previousOverride;
+    }
+  });
+
   test("runtime installation invalidates a cached partial result for the same snapshot", async () => {
     let executions = 0;
     let installedLanguageIds: CallFlowRuntime["installedLanguageIds"] = ["javascript-typescript"];
@@ -304,9 +360,15 @@ describe("CallFlowService", () => {
 
     const allFiles = await service.getAdvert(true, { vcsType: "git", diffType: "all" });
     const jj = await service.getAdvert(true, { vcsType: "jj", diffType: "jj-working-copy" });
+    const disabledAllFiles = await service.getAdvert(false, { vcsType: "git", diffType: "all" });
+    const disabledJj = await service.getAdvert(false, { vcsType: "jj", diffType: "jj-working-copy" });
 
     expect(allFiles.state).toBe("unsupported");
     expect(jj.state).toBe("unsupported");
+    expect(disabledAllFiles).toMatchObject({ state: "disabled", reason: "view-unsupported" });
+    expect(disabledAllFiles.consentPlan).toBeUndefined();
+    expect(disabledJj).toMatchObject({ state: "disabled", reason: "vcs-unsupported" });
+    expect(disabledJj.consentPlan).toBeUndefined();
     expect(probes).toBe(0);
   });
 

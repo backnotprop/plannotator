@@ -25,9 +25,9 @@ describe('review analysis intro persistence', () => {
   test('uses a versioned seen cookie', () => {
     expect(needsReviewAnalysisIntro()).toBe(true);
     markReviewAnalysisIntroSeen();
-    expect(stored.get(SEEN_KEY)).toBe('1');
+    expect(stored.get(SEEN_KEY)).toBe('2');
     expect(needsReviewAnalysisIntro()).toBe(false);
-    stored.set(SEEN_KEY, '0');
+    stored.set(SEEN_KEY, '1');
     expect(needsReviewAnalysisIntro()).toBe(true);
   });
 });

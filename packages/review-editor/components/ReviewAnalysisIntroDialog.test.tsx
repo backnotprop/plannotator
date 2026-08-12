@@ -16,6 +16,7 @@ function Harness({ onDismiss = () => {} }: { onDismiss?: () => void }) {
       isOpen={open}
       semanticChangesEnabled={semantic}
       callFlowEnabled={callFlow}
+      callFlowEnableDescription="Enabling prepares a small local analysis runtime with JavaScript and TypeScript + Bash support for this review (~7 MB total). If anything is missing, Plannotator installs it automatically in the background. Requires Node.js 22 or newer. Other language support installs automatically as reviews need it."
       onSemanticChangesChange={setSemantic}
       onCallFlowChange={setCallFlow}
       onDismiss={() => { onDismiss(); setOpen(false); }}
@@ -50,6 +51,8 @@ describe('ReviewAnalysisIntroDialog', () => {
     expect(dialog?.textContent).toContain('completeOrder()');
     expect(dialog?.textContent).toContain('checkout.ts:118');
     expect(dialog?.textContent).toContain('Powered by CallDiff, created by');
+    expect(dialog?.textContent).toContain('JavaScript and TypeScript + Bash support for this review (~7 MB total)');
+    expect(dialog?.textContent).toContain('Other language support installs automatically as reviews need it.');
     expect(dialog?.textContent).toContain('Settings → Analysis');
 
     const examples = Array.from(dialog?.querySelectorAll<HTMLElement>('figure[role="img"]') ?? []);

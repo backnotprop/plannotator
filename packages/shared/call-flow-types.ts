@@ -66,6 +66,9 @@ export interface CallFlowAdvert {
   /** True only when the managed install flow applies; its Node preflight can still require user action. */
   installable?: boolean;
   languages?: CallFlowLanguageAdvert[];
+  /** Static current-review footprint shown at the disabled consent boundary; it never starts work. */
+  consentPlan?: CallFlowInstallPlan;
+  /** Exact missing targets the managed installer can install now. */
   installPlan?: CallFlowInstallPlan;
 }
 

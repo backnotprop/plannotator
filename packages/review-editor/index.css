@@ -829,16 +829,40 @@ diffs-container {
 .call-flow-empty {
   display: grid;
   justify-items: start;
-  gap: 0.375rem;
-  padding: 3rem 0.75rem;
+  /* align-content is load-bearing: this element also carries
+     .call-flow-shell's min-height:100%, and without it the auto rows
+     stretch across the whole panel, spreading the copy apart and pulling
+     the button into a tall rectangle. */
+  align-content: start;
+  gap: 0.625rem;
+  max-width: 34rem;
+  padding: clamp(1.75rem, 7vh, 3.5rem) 0.75rem 3rem;
   color: var(--muted-foreground);
+  /* Prose, not code: the shell defaults to the mono diff face. */
+  font-family: var(--font-sans);
+}
+.call-flow-empty .call-flow-empty-kicker {
+  margin-bottom: 0;
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
 }
 .call-flow-empty strong {
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
-.call-flow-empty p { max-width: 62ch; margin: 0; }
+.call-flow-empty p {
+  max-width: 58ch;
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
 
 .call-flow-loading {
   display: flex;
@@ -951,6 +975,12 @@ diffs-container {
 .call-flow-language-notice button:disabled,
 .call-flow-languages button:disabled { opacity: 0.55; cursor: default; }
 .call-flow-language-notice .call-flow-language-error { display: block; margin-top: 0.125rem; }
+.call-flow-language-progress {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: normal;
+}
 .call-flow-languages {
   margin-top: 1rem;
   border-top: 1px solid oklch(from var(--border) l c h / 0.55);
@@ -1094,11 +1124,48 @@ diffs-container {
 .call-flow-retry:hover { background: var(--muted); }
 .call-flow-retry:focus-visible { outline: 1px solid var(--ring); outline-offset: 2px; }
 
-/* Opt-in runtime install funnel (runtime-missing advert only). */
-.call-flow-install-disclosure {
-  color: var(--foreground);
+/* Background runtime setup (runtime-missing advert only). */
+
+/* Keep the explicit recovery action separate from the failure explanation. */
+.call-flow-install-action {
+  display: grid;
+  justify-items: start;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 0.75rem;
+  padding-top: 1.125rem;
+  border-top: 1px solid oklch(from var(--border) l c h / 0.55);
+}
+
+.call-flow-install-cta {
+  min-height: 2rem;
+  padding: 0 0.9375rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-family: var(--font-sans);
   font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 140ms ease, transform 100ms ease;
+}
+.call-flow-install-cta:hover { filter: brightness(1.1); }
+/* Feedback on press, not on release. */
+.call-flow-install-cta:active { transform: scale(0.97); }
+.call-flow-install-cta:focus-visible { outline: 1px solid var(--ring); outline-offset: 2px; }
+
+.call-flow-install-disclosure {
+  max-width: 58ch;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.55;
   font-variant-numeric: tabular-nums;
+}
+.call-flow-install-disclosure strong {
+  color: var(--foreground);
+  font-size: inherit;
+  font-weight: 600;
 }
 .call-flow-install-detail { font-size: 0.6875rem; }
 .call-flow-install-stages {
@@ -1161,6 +1228,8 @@ diffs-container {
   .call-flow-file-badge { transition: none; }
   .call-flow-popover.popover-enter { animation: none; }
   .call-flow-retry { transition: none; }
+  .call-flow-install-cta { transition: none; }
+  .call-flow-install-cta:active { transform: none; }
 }
 
 /* =====================================================

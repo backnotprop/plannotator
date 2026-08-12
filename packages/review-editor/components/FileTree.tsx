@@ -86,6 +86,7 @@ interface FileTreeProps {
   callFlowEnabled?: boolean;
   callFlowCount?: number;
   callFlowLoading?: boolean;
+  callFlowError?: boolean;
   onSelectAllFiles?: () => void;
   isAllFilesActive?: boolean;
   scrollHighlightIndex?: number;
@@ -162,6 +163,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   callFlowEnabled = false,
   callFlowCount,
   callFlowLoading,
+  callFlowError,
   onSelectAllFiles,
   isAllFilesActive = false,
   scrollHighlightIndex,
@@ -560,7 +562,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             </SidebarActionRow>
           )}
           {callFlowEnabled && onSelectCallFlow && (
-            <CallFlowRow active={isCallFlowActive} onClick={onSelectCallFlow} count={callFlowCount} loading={callFlowLoading} />
+            <CallFlowRow active={isCallFlowActive} onClick={onSelectCallFlow} count={callFlowCount} loading={callFlowLoading} error={callFlowError} />
           )}
           {semanticDiffAvailable && onSelectSemanticDiff && (
             <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />

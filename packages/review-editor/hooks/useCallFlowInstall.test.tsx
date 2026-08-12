@@ -163,6 +163,21 @@ describe('useCallFlowInstall', () => {
     expect(reconciliations).toBe(3);
   });
 
+  test.skipIf(!hasDom)('stops reconciliation after ten failures and exposes a quiet retry state', async () => {
+    globalThis.fetch = async () => jsonResponse({ state: 'done', languageIds: ['python'] });
+    let reconciliations = 0;
+    await render(async () => {
+      reconciliations++;
+      throw new Error('store remains incomplete');
+    });
+    await clickInstall();
+    await waitForState('error');
+    expect(reconciliations).toBe(10);
+    expect(host?.querySelector('[data-error]')?.textContent).toContain('could not be refreshed');
+    await act(async () => { await Bun.sleep(30); });
+    expect(reconciliations).toBe(10);
+  });
+
   test.skipIf(!hasDom)('keeps polling after a transient non-2xx status response', async () => {
     let polls = 0;
     globalThis.fetch = async (input, init) => {

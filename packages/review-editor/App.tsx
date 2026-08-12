@@ -39,6 +39,8 @@ import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
 import { useCallFlowAnalysis } from './hooks/useCallFlowAnalysis';
 import { useCallFlowInstall } from './hooks/useCallFlowInstall';
+import { useCallFlowAutoInstall } from './hooks/useCallFlowAutoInstall';
+import { getCallFlowEnableDescription } from './utils/callFlowPresentation';
 import { extractLinesFromPatch, isLineRangeInPatch } from './utils/patchParser';
 import {
   shouldHandleReviewSearchShortcut,
@@ -1376,6 +1378,21 @@ const ReviewApp: React.FC = () => {
   }, [applyCallFlowAdvert, applySemanticDiffAdvert, retryCallFlowAnalysis]);
 
   const callFlowInstall = useCallFlowInstall(refreshAnalysisAdverts);
+  // A version bump to the analysis intro re-establishes consent for automatic
+  // installs. Existing Call flow users do not start background work until the
+  // updated disclosure has appeared in the normal no-stack dialog chain.
+  useCallFlowAutoInstall(callFlowEnabled, !analysisIntroPending, callFlowAdvert, callFlowInstall);
+  const callFlowEnableDescription = getCallFlowEnableDescription(callFlowAdvert);
+  const callFlowSetupPending = callFlowEnabled
+    && callFlowAdvert.installable === true
+    && callFlowAdvert.installPlan !== undefined
+    && callFlowInstall.status.state !== 'error';
+  const callFlowNavLoading = callFlowAnalysis.status !== 'ready' && (
+    callFlowAnalysis.status === 'loading'
+    || callFlowInstall.status.state === 'running'
+    || callFlowSetupPending
+  );
+  const callFlowNavError = callFlowInstall.status.state === 'error';
 
   useEffect(() => {
     if (!semanticDiffEnabled) {
@@ -1387,6 +1404,17 @@ const ReviewApp: React.FC = () => {
       if (isCallFlowActive) openAllFilesPanel();
     }
   }, [callFlowEnabled, dockApi, isCallFlowActive, isSemanticDiffActive, openAllFilesPanel, semanticDiffEnabled]);
+
+  // Turning Call flow on opens its panel. Without this the only sign anything
+  // happened is a new sidebar row, so a user who just opted in (intro dialog
+  // or Settings) sees nothing and cannot find the install they were promised.
+  // Only on the off -> on transition, so it never fights a user who closed it.
+  const callFlowWasEnabled = useRef(callFlowEnabled);
+  useEffect(() => {
+    const turnedOn = callFlowEnabled && !callFlowWasEnabled.current;
+    callFlowWasEnabled.current = callFlowEnabled;
+    if (turnedOn) openCallFlowPanel();
+  }, [callFlowEnabled, openCallFlowPanel]);
 
   // The shared config store persists both toggles for future sessions. This
   // review-specific handshake also re-advertises capabilities immediately so
@@ -1421,9 +1449,6 @@ const ReviewApp: React.FC = () => {
         confirmedAnalysisSettings.current = requested;
         applySemanticDiffAdvert(data.semanticDiff);
         applyCallFlowAdvert(data.callFlow);
-        if (!previous.callFlow && callFlowEnabled && data.callFlow && !data.callFlow.available) {
-          toast.error(data.callFlow.message ?? 'Call flow is unavailable for this review.');
-        }
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -3674,7 +3699,8 @@ const ReviewApp: React.FC = () => {
                 isCallFlowActive={isCallFlowActive}
                 callFlowEnabled={callFlowEnabled}
                 callFlowCount={callFlowAnalysis.status === 'ready' ? callFlowAnalysis.data.summary.changedNodes : undefined}
-                callFlowLoading={callFlowAnalysis.status === 'loading'}
+                callFlowLoading={callFlowNavLoading}
+                callFlowError={callFlowNavError}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
                 copyRawDiffStatus={copyRawDiffStatus}
@@ -3734,7 +3760,8 @@ const ReviewApp: React.FC = () => {
                 isCallFlowActive={isCallFlowActive}
                 callFlowEnabled={callFlowEnabled}
                 callFlowCount={callFlowAnalysis.status === 'ready' ? callFlowAnalysis.data.summary.changedNodes : undefined}
-                callFlowLoading={callFlowAnalysis.status === 'loading'}
+                callFlowLoading={callFlowNavLoading}
+                callFlowError={callFlowNavError}
                 onSelectAllFiles={openAllFilesPanel}
                 isAllFilesActive={isAllFilesActive}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
@@ -4025,6 +4052,7 @@ const ReviewApp: React.FC = () => {
               !!gitContext && gitContext.vcsType === 'git' && !prMetadata &&
               reviewMode !== 'workspace' && !sectionsCapable
             }
+            callFlowEnableDescription={callFlowEnableDescription}
           />
         </div>
 
@@ -4152,6 +4180,7 @@ const ReviewApp: React.FC = () => {
             isOpen
             semanticChangesEnabled={semanticDiffEnabled}
             callFlowEnabled={callFlowEnabled}
+            callFlowEnableDescription={callFlowEnableDescription}
             onSemanticChangesChange={(enabled) => configStore.set('semanticDiffEnabled', enabled)}
             onCallFlowChange={(enabled) => configStore.set('callFlowEnabled', enabled)}
             onDismiss={dismissAnalysisIntro}

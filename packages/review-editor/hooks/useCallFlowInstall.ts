@@ -9,6 +9,7 @@ export interface CallFlowInstallController {
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 2_500;
+const MAX_RECONCILE_ATTEMPTS = 10;
 
 /**
  * Client controller for the opt-in CallDiff runtime install.
@@ -16,8 +17,9 @@ const DEFAULT_POLL_INTERVAL_MS = 2_500;
  * POST /api/call-flow/install starts (or joins) the server-side install;
  * while it reports running, GET /api/call-flow/install-status is polled on
  * a slow interval. Status polling stops on done, error, and unmount. Once
- * done, capability reconciliation retries at the same interval until it
- * succeeds, so one transient advert failure cannot strand the panel.
+ * done, capability reconciliation retries at the same interval for a bounded
+ * number of attempts, so one transient advert failure cannot strand the panel
+ * and a corrupt store cannot leave the UI polling forever.
  */
 export function useCallFlowInstall(
   onInstalled: () => Promise<void>,
@@ -64,10 +66,23 @@ export function useCallFlowInstall(
     if (status.state !== 'done') return;
     let cancelled = false;
     let timer: number | undefined;
+    let attempts = 0;
+    const languageIds = status.languageIds;
     const reconcile = () => {
+      attempts++;
       onInstalledRef.current()
         .catch(() => {
-          if (!cancelled) timer = window.setTimeout(reconcile, pollIntervalMs);
+          if (cancelled) return;
+          if (attempts >= MAX_RECONCILE_ATTEMPTS) {
+            applyStatus({
+              state: 'error',
+              reason: 'reconcile-failed',
+              error: 'Call flow was installed, but its capabilities could not be refreshed. Retry to reconcile.',
+              languageIds,
+            });
+            return;
+          }
+          timer = window.setTimeout(reconcile, pollIntervalMs);
         });
     };
     reconcile();
@@ -75,7 +90,7 @@ export function useCallFlowInstall(
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [pollIntervalMs, status.state]);
+  }, [applyStatus, pollIntervalMs, status]);
 
   useEffect(() => {
     if (status.state !== 'running') return;

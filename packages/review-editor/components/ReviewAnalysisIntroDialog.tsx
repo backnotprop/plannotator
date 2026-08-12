@@ -7,6 +7,7 @@ interface ReviewAnalysisIntroDialogProps {
   readonly isOpen: boolean;
   readonly semanticChangesEnabled: boolean;
   readonly callFlowEnabled: boolean;
+  readonly callFlowEnableDescription: string;
   readonly onSemanticChangesChange: (enabled: boolean) => void;
   readonly onCallFlowChange: (enabled: boolean) => void;
   readonly onDismiss: () => void;
@@ -94,6 +95,7 @@ export function ReviewAnalysisIntroDialog({
   isOpen,
   semanticChangesEnabled,
   callFlowEnabled,
+  callFlowEnableDescription,
   onSemanticChangesChange,
   onCallFlowChange,
   onDismiss,
@@ -211,7 +213,7 @@ export function ReviewAnalysisIntroDialog({
                     </span>
                   </span>
                 )}
-                description="Reconstructs complete entry paths containing added or removed calls. This is static analysis, not runtime tracing. Uses a separate local runtime installed on first use."
+                description={`Reconstructs complete entry paths containing added or removed calls. This is static analysis, not runtime tracing. ${callFlowEnableDescription}`}
                 className="items-start rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
               />
               <CallFlowExample />

@@ -2,7 +2,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 
 const STORAGE_KEY = 'plannotator-review-analysis-intro-seen';
 // Bump after a meaningful change to the choices or explanation.
-const CURRENT_VERSION = '1';
+const CURRENT_VERSION = '2';
 
 export function needsReviewAnalysisIntro(): boolean {
   return storage.getItem(STORAGE_KEY) !== CURRENT_VERSION;

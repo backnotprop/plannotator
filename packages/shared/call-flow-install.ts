@@ -1,10 +1,13 @@
 /**
  * In-app CallDiff runtime install coordination.
  *
- * The runtime is strictly opt-in and is not installed by default. A review
- * session installs it on demand through POST /api/call-flow/install, which
- * this coordinator single-flights: concurrent POSTs (double-click, second
- * tab) join the one in-flight install and never start a second download.
+ * The runtime is strictly opt-in and is not installed by default. Enabling
+ * Call flow is the consent that lets a review session install it on demand
+ * through POST /api/call-flow/install. This coordinator single-flights
+ * concurrent POSTs (a newly required pack, explicit retry, or second tab in
+ * this server), which join the active install and never start a second
+ * download. The data-dir lease in call-flow-install-lock.ts separately
+ * serializes verified publication across server processes.
  */
 import { installCallFlowLanguagePack, installCallFlowRuntime, preflightCallFlowNode } from "./call-flow";
 import type { CallFlowNodePreflight, CallFlowRuntimeInstallResult } from "./call-flow";

@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ReviewCallFlowPanel } from './ReviewCallFlowPanel';
 import { ReviewStateProvider, type ReviewState } from '../ReviewStateContext';
 import type { CallFlowAdvert, CallFlowInstallStatus } from '@plannotator/shared/call-flow-types';
+import type { CallFlowLanguageId } from '@plannotator/shared/call-flow-languages';
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
@@ -35,7 +36,7 @@ function advert(overrides: Partial<CallFlowAdvert>): CallFlowAdvert {
 function stateWith(
   callFlowAdvert: CallFlowAdvert,
   installStatus: CallFlowInstallStatus,
-  startInstall: () => void = () => {},
+  startInstall: (languageIds?: readonly CallFlowLanguageId[]) => void = () => {},
 ): ReviewState {
   // The panel's pre-analysis branches only touch these fields; the partial
   // cast keeps the harness honest about what the funnel depends on.
@@ -72,7 +73,7 @@ async function render(state: ReviewState) {
 
 function installButton(): HTMLButtonElement | null {
   return [...(host?.querySelectorAll('button') ?? [])]
-    .find((button) => /install runtime|retry install/i.test(button.textContent ?? '')) ?? null;
+    .find((button) => /retry install/i.test(button.textContent ?? '')) ?? null;
 }
 
 afterEach(async () => {
@@ -83,17 +84,17 @@ afterEach(async () => {
 });
 
 describe('ReviewCallFlowPanel install funnel', () => {
-  test.skipIf(!hasDom)('renders the funnel with disclosure for the runtime-missing advert', async () => {
+  test.skipIf(!hasDom)('renders automatic setup disclosure without a second consent button', async () => {
     await render(stateWith(
       advert({ reason: 'runtime-unavailable', message: 'Call flow runtime is not installed.' }),
       { state: 'idle' },
     ));
-    expect(installButton()?.textContent).toContain('Install runtime');
+    expect(installButton()).toBeNull();
     const text = host?.textContent ?? '';
     expect(text).toContain('~32 MB');
     expect(text).toContain('JavaScript and TypeScript');
     expect(text).toContain('Node.js 22 or newer');
-    expect(text).toContain('One-time install');
+    expect(text).toContain('setting up in the background');
   });
 
   test.skipIf(!hasDom)('never offers the install for unsupported views or demo mode', async () => {
@@ -125,19 +126,7 @@ describe('ReviewCallFlowPanel install funnel', () => {
     expect(host?.textContent).toContain('PLANNOTATOR_CALLDIFF_PATH must be absolute.');
   });
 
-  test.skipIf(!hasDom)('clicking Install starts the install and running renders staged progress', async () => {
-    let starts = 0;
-    await render(stateWith(
-      advert({ reason: 'runtime-unavailable' }),
-      { state: 'idle' },
-      () => starts++,
-    ));
-    await act(async () => {
-      installButton()?.click();
-      await Promise.resolve();
-    });
-    expect(starts).toBe(1);
-
+  test.skipIf(!hasDom)('running renders staged progress without another install control', async () => {
     await render(stateWith(
       advert({ reason: 'runtime-unavailable' }),
       { state: 'running', stage: 'installing-deps', languageIds: ['javascript-typescript'] },
@@ -237,9 +226,149 @@ describe('ReviewCallFlowPanel install funnel', () => {
       callFlowInstall: { status: { state: 'idle' }, start: () => starts++ },
     });
     expect(host?.textContent).toContain('1 file skipped: Python support not installed');
+    expect(host?.textContent).toContain('Add this language grammar to PLANNOTATOR_CALLDIFF_PATH');
     const unavailableInstall = [...(host?.querySelectorAll('button') ?? [])]
       .find((button) => button.textContent?.trim() === 'Install');
     expect(unavailableInstall).toBeUndefined();
     expect(starts).toBe(1);
+  });
+
+  test.skipIf(!hasDom)('keeps manual controls for every missing required pack after an unrelated failure', async () => {
+    const starts: CallFlowLanguageId[][] = [];
+    const callFlowAdvert = advert({
+      available: true,
+      state: 'available',
+      installPlan: {
+        languageIds: ['python', 'go'],
+        labels: ['Python', 'Go'],
+        changedFiles: 2,
+        installSizeBytes: 2 * 1024 * 1024,
+      },
+      languages: [
+        {
+          id: 'python',
+          label: 'Python',
+          kind: 'pack',
+          installed: false,
+          required: true,
+          changedFiles: 1,
+          installSizeBytes: 1024 * 1024,
+        },
+        {
+          id: 'go',
+          label: 'Go',
+          kind: 'pack',
+          installed: false,
+          required: true,
+          changedFiles: 1,
+          installSizeBytes: 1024 * 1024,
+        },
+      ],
+    });
+    const installStatus: CallFlowInstallStatus = {
+      state: 'error',
+      error: 'Python install failed.',
+      languageIds: ['python'],
+      currentLanguageId: 'python',
+    };
+    await render({
+      ...stateWith(callFlowAdvert, installStatus, (languageIds) => {
+        starts.push([...(languageIds ?? [])]);
+      }),
+      callFlowAnalysis: {
+        status: 'ready',
+        data: {
+          status: 'ok',
+          snapshotId: 'snapshot',
+          provider: 'calldiff',
+          version: '0.4.1',
+          from: 'before',
+          to: 'after',
+          raw: '',
+          trees: [],
+          fileImpacts: {},
+          summary: { entries: 0, changedNodes: 0, added: 0, removed: 0, impactedFiles: 0, warnings: 0 },
+          diagnostics: [],
+          skippedLanguages: [
+            { id: 'python', label: 'Python', files: ['tool.py'], installSizeBytes: 1024 * 1024 },
+            { id: 'go', label: 'Go', files: ['tool.go'], installSizeBytes: 1024 * 1024 },
+          ],
+        },
+      },
+    } as unknown as ReviewState);
+
+    const languageRows = [...(host?.querySelectorAll('.call-flow-languages li') ?? [])];
+    expect(languageRows).toHaveLength(2);
+    expect(languageRows[0]?.querySelector('button')?.textContent).toBe('Retry');
+    expect(languageRows[1]?.querySelector('button')?.textContent).toBe('Install');
+    await act(async () => {
+      languageRows[1]?.querySelector<HTMLButtonElement>('button')?.click();
+      await Promise.resolve();
+    });
+    expect(starts).toEqual([['go']]);
+  });
+
+  test.skipIf(!hasDom)('shows automatic pack progress and cumulative installed size without a prompt', async () => {
+    const callFlowAdvert = advert({
+      available: true,
+      state: 'available',
+      installPlan: {
+        languageIds: ['python'],
+        labels: ['Python'],
+        changedFiles: 1,
+        installSizeBytes: 1024 * 1024,
+      },
+      languages: [
+        {
+          id: 'javascript-typescript',
+          label: 'JavaScript and TypeScript',
+          kind: 'core',
+          installed: true,
+          required: false,
+          changedFiles: 0,
+          installSizeBytes: 5 * 1024 * 1024,
+        },
+        {
+          id: 'python',
+          label: 'Python',
+          kind: 'pack',
+          installed: false,
+          required: true,
+          changedFiles: 1,
+          installSizeBytes: 1024 * 1024,
+        },
+      ],
+    });
+    await render({
+      ...stateWith(callFlowAdvert, {
+        state: 'running',
+        stage: 'installing-deps',
+        languageIds: ['python'],
+        currentLanguageId: 'python',
+      }),
+      callFlowAnalysis: {
+        status: 'ready',
+        data: {
+          status: 'ok',
+          snapshotId: 'snapshot',
+          provider: 'calldiff',
+          version: '0.4.1',
+          from: 'before',
+          to: 'after',
+          raw: '',
+          trees: [],
+          fileImpacts: {},
+          summary: { entries: 0, changedNodes: 0, added: 0, removed: 0, impactedFiles: 0, warnings: 0 },
+          diagnostics: [],
+          skippedLanguages: [{ id: 'python', label: 'Python', files: ['tool.py'], installSizeBytes: 1024 * 1024 }],
+        },
+      },
+    } as unknown as ReviewState);
+
+    expect(host?.textContent).toContain('Installing support in the background…');
+    expect(host?.textContent).toContain('Languages · ~5 MB installed');
+    const install = [...(host?.querySelectorAll('button') ?? [])]
+      .find((button) => button.textContent?.trim() === 'Install');
+    expect(install).toBeUndefined();
   });
 });

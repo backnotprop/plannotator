@@ -13,6 +13,7 @@ import { spawn, spawnSync } from "node:child_process";
 import runtimePackageJson from "./call-flow-runtime/package.json" with { type: "json" };
 import runtimePackageLock from "./call-flow-runtime/package-lock.json" with { type: "json" };
 import { CALL_FLOW_PACK_LOCKS } from "./call-flow-pack-locks";
+import { withCallFlowInstallLock } from "./call-flow-install-lock";
 import {
   CALL_FLOW_CORE_LANGUAGE_ID,
   CALL_FLOW_LANGUAGES,
@@ -716,6 +717,12 @@ export function measureCallFlowDirectoryBytes(path: string): number {
 export async function installCallFlowRuntime(
   onStage: (stage: CallFlowInstallStage) => void = () => {},
 ): Promise<CallFlowRuntimeInstallResult> {
+  return await withCallFlowInstallLock(() => installCallFlowRuntimeUnlocked(onStage));
+}
+
+async function installCallFlowRuntimeUnlocked(
+  onStage: (stage: CallFlowInstallStage) => void,
+): Promise<CallFlowRuntimeInstallResult> {
   const runtimeDir = getCallFlowManagedRuntimeDir();
   const nodePath = findExecutable("node");
   const npmPath = findExecutable("npm");
@@ -834,6 +841,13 @@ function packManifest(id: Exclude<CallFlowLanguageId, "javascript-typescript">):
 export async function installCallFlowLanguagePack(
   id: Exclude<CallFlowLanguageId, "javascript-typescript">,
   onStage: (stage: CallFlowInstallStage) => void = () => {},
+): Promise<CallFlowRuntimeInstallResult> {
+  return await withCallFlowInstallLock(() => installCallFlowLanguagePackUnlocked(id, onStage));
+}
+
+async function installCallFlowLanguagePackUnlocked(
+  id: Exclude<CallFlowLanguageId, "javascript-typescript">,
+  onStage: (stage: CallFlowInstallStage) => void,
 ): Promise<CallFlowRuntimeInstallResult> {
   const runtimeDir = getCallFlowManagedRuntimeDir();
   const language = getCallFlowLanguage(id);
@@ -1365,17 +1379,53 @@ export class CallFlowService {
   }
 
   async getAdvert(enabled: boolean, input?: Pick<CallFlowAnalysisInput, "vcsType" | "diffType" | "rawPatch">): Promise<CallFlowAdvert> {
-    if (!enabled) return { enabled: false, available: false, state: "disabled", provider: "calldiff" };
     if (input?.vcsType && input.vcsType !== "git") {
-      return { enabled: true, available: false, state: "unsupported", provider: "calldiff", reason: "vcs-unsupported", message: `Call flow does not yet support ${input.vcsType} reviews.` };
+      return {
+        enabled,
+        available: false,
+        state: enabled ? "unsupported" : "disabled",
+        provider: "calldiff",
+        reason: "vcs-unsupported",
+        message: `Call flow does not yet support ${input.vcsType} reviews.`,
+      };
     }
     const effective = parseWorktreeDiffType(input?.diffType ?? "")?.subType ?? input?.diffType;
     if (effective === "all" || effective?.startsWith("jj-") || effective?.startsWith("gitbutler:") || effective?.startsWith("p4-")) {
-      return { enabled: true, available: false, state: "unsupported", provider: "calldiff", reason: "view-unsupported", message: "Call flow is not available for this review view." };
+      return {
+        enabled,
+        available: false,
+        state: enabled ? "unsupported" : "disabled",
+        provider: "calldiff",
+        reason: "view-unsupported",
+        message: "Call flow is not available for this review view.",
+      };
     }
-    const resolved = await this.resolveRuntimeCached();
     const usage = getCallFlowPatchLanguageUsage(input?.rawPatch ?? "");
     const required = new Map(usage.map(({ language, files }) => [language.id, files.length]));
+    if (!enabled) {
+      const managed = !process.env.PLANNOTATOR_CALLDIFF_PATH;
+      const consentIds = [
+        CALL_FLOW_CORE_LANGUAGE_ID,
+        ...usage.filter(({ language }) => language.kind === "pack").map(({ language }) => language.id),
+      ];
+      const languageIds = [...new Set(consentIds)];
+      return {
+        enabled: false,
+        available: false,
+        state: "disabled",
+        provider: "calldiff",
+        installable: managed,
+        ...(managed && {
+          consentPlan: {
+            languageIds,
+            labels: languageIds.map((id) => getCallFlowLanguage(id).label),
+            changedFiles: usage.reduce((total, { files }) => total + files.length, 0),
+            installSizeBytes: languageIds.reduce((total, id) => total + getCallFlowLanguage(id).installSizeBytes, 0),
+          },
+        }),
+      };
+    }
+    const resolved = await this.resolveRuntimeCached();
     const managedInstallState = !process.env.PLANNOTATOR_CALLDIFF_PATH && [
       "node-unavailable",
       "node-version",
