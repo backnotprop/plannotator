@@ -1451,22 +1451,29 @@ export function parseWorktreeDiffType(
   // it can't be recognized by the single lastIndexOf(':') split below. Split
   // on the LAST ':commit:' occurrence (a path that itself ends in ':commit'
   // followed by a hex segment would be misread — accepted pathological edge).
+  // An empty worktree path is never valid: it would resolve to an empty cwd,
+  // and Bun.spawn({ cwd: "" }) silently runs git in the SERVER's own directory
+  // rather than the target repo — leaking an unrelated checkout's diff. Treat a
+  // missing path as unparseable so callers fall back to their real cwd.
+  const finalize = (path: string, subType: string) =>
+    path === "" ? null : { path, subType };
+
   const commitIdx = rest.lastIndexOf(":commit:");
   if (commitIdx !== -1) {
     const maybeCommit = rest.slice(commitIdx + 1);
     if (parseCommitDiffType(maybeCommit)) {
-      return { path: rest.slice(0, commitIdx), subType: maybeCommit };
+      return finalize(rest.slice(0, commitIdx), maybeCommit);
     }
   }
   const lastColon = rest.lastIndexOf(":");
   if (lastColon !== -1) {
     const maybeSub = rest.slice(lastColon + 1);
     if (WORKTREE_SUB_TYPES.has(maybeSub)) {
-      return { path: rest.slice(0, lastColon), subType: maybeSub };
+      return finalize(rest.slice(0, lastColon), maybeSub);
     }
   }
 
-  return { path: rest, subType: "uncommitted" };
+  return finalize(rest, "uncommitted");
 }
 
 export async function runGitDiff(

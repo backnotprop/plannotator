@@ -92,6 +92,7 @@ jobs:
           packages/review-editor/components/guide/GuideSectionCard.test.tsx
           packages/review-editor/components/guide/GuideView.test.tsx
           packages/review-editor/hooks/useReviewSearch.test.tsx
+          packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
           packages/review-editor/hooks/useCallFlowInstall.test.tsx
           packages/review-editor/hooks/useCallFlowAutoInstall.test.tsx
           packages/review-editor/dock/panels/ReviewCallFlowPanel.install.test.tsx
