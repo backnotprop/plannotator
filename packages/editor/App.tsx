@@ -1027,8 +1027,10 @@ const App: React.FC = () => {
 
   // Focus mode from the keyboard. Mirrors the document card's `Focus` control —
   // including its availability — so the shortcut can never park the layout in a
-  // state with no visible way back. HTML surfaces are excluded because they own
-  // their own persisted chrome and never render that control.
+  // state with no visible way back. HTML surfaces cannot ENTER focus mode (they
+  // own their own persisted chrome and never render that control), but exit stays
+  // available everywhere: a linked-doc navigation can flip the surface to HTML
+  // while focus mode is active, and without the exit path that layout is stuck.
   const handleToggleFocusMode = useCallback(() => {
     const action = resolveFocusShortcutAction({
       canUseWideMode: canUseWideMode && !isHtmlSurface,
@@ -1043,8 +1045,7 @@ const App: React.FC = () => {
       toggleFocusMode: {
         when: (event) =>
           canHandleDocumentChromeShortcut(event)
-          && !isHtmlSurface
-          && (canUseWideMode || wideModeType !== null),
+          && ((canUseWideMode && !isHtmlSurface) || wideModeType !== null),
         handle: handleToggleFocusMode,
       },
     },
