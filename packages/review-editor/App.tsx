@@ -112,6 +112,7 @@ import { useCommitsView } from './hooks/useCommitsView';
 import { ReviewSetupDialog } from './components/ReviewSetupDialog';
 import { needsReviewSetup, markReviewSetupSeen } from './utils/reviewSetup';
 import { resolvePanelView } from './utils/resolvePanelView';
+import { isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
 import { GuideIntroDialog } from './components/GuideIntroDialog';
 import { needsGuideIntro, markGuideIntroSeen, needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
 import { EditModeAnnouncementDialog } from './components/EditModeAnnouncementDialog';
@@ -427,6 +428,13 @@ const ReviewApp: React.FC = () => {
   // Declared this early because the global keyboard handler consults it.
   const commitsCapable = !prMetadata && reviewMode !== 'workspace' && gitContext?.vcsType === 'git';
   const showCommitsPanel = commitsCapable && panelView === 'commits';
+  // The diff the session was reviewing before the Commits view's commit
+  // clicks (or its HEAD auto-select) took over the single session-global
+  // diff — captured on the first non-commit → commit switch, restored when
+  // the panel view leaves Commits for the Tree, and cleared by any applied
+  // non-commit switch (see fetchDiffSwitch). Ref, not state: it never drives
+  // a render, and capture happens inside event handlers.
+  const preCommitDiffRef = useRef<CommitViewRestoreTarget | null>(null);
 
   const prStackCallbacksRef = useRef<import('./hooks/usePRStack').PRStackCallbacks | null>(null);
   const {
@@ -2159,6 +2167,14 @@ const ReviewApp: React.FC = () => {
       // A newer switch superseded this one server-side — ignore this stale
       // body so it can't overwrite the newer result (last-response-wins).
       if (data.superseded) return true;
+      // Leave-Commits restore memo: any APPLIED switch to a non-commit diff
+      // (the restore itself, the Git-status since-base reset, a manual
+      // DiffTypePicker escape, a worktree switch) ends the commit family, so
+      // the memo it would restore is spent. The superseded early-return above
+      // never reaches this clear, so a stale response can't drop a memo a
+      // newer commit switch still needs — correct by construction. Failed
+      // switches never get here either, keeping the memo for a later retry.
+      if (!isCommitDiffType(data.diffType)) preCommitDiffRef.current = null;
       setSnapshotId(data.snapshotId);
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
@@ -2297,10 +2313,14 @@ const ReviewApp: React.FC = () => {
     if (activeDiffBase !== 'since-base') void handleDiffSwitch('since-base');
   }, [selectPanelView, activeDiffBase, handleDiffSwitch]);
 
-  // Unified toggle handler for all three panel views. Only Sections carries a
-  // diff coupling (it can render nothing but since-base); Commits and Tree
-  // switch the view alone and leave the active diff as-is — Tree can render
-  // any diff, including a clicked commit's.
+  // Unified toggle handler for all three panel views. Sections carries a
+  // diff coupling (it can render nothing but since-base); Commits switches
+  // the view alone (its session machine then owns the diff via commit
+  // clicks / HEAD auto-select); and Tree restores the pre-Commits diff when
+  // it's the exit from the Commits view — the commit click hijacked the
+  // single session-global diff, so leaving the view brings back what the
+  // session was reviewing before. Outside that exit, Tree still leaves the
+  // active diff as-is (it can render any diff).
   const handlePanelViewSelect = useCallback((view: 'sections' | 'commits' | 'tree') => {
     if (view === 'commits') {
       // The Commits rail has no search input, so an open search would become
@@ -2314,8 +2334,33 @@ const ReviewApp: React.FC = () => {
       handleSwitchToSections();
       return;
     }
+    if (
+      view === 'tree' && panelView === 'commits' &&
+      // A commit diff on screen is the normal exit. The in-flight arm covers
+      // exiting while a commit switch (typically the HEAD auto-select right
+      // after entry) hasn't landed yet — the memo is captured synchronously
+      // before that fetch, so memo + loading means a commit diff is inbound;
+      // issuing the restore now supersedes it server-side (epoch guard) and
+      // its stale body is ignored client-side.
+      (isCommitDiffType(diffType) || (isLoadingDiff && preCommitDiffRef.current !== null))
+    ) {
+      // Restore through fetchDiffSwitch with the memo's FULL diff type (not
+      // handleDiffSwitch, which would re-compose the current worktree prefix
+      // over an already-composed one). No memo — the page reloaded while a
+      // commit diff was active; refs don't survive — falls back to the
+      // session default, same resolution handleWorktreeSwitch applies. A
+      // failed switch keeps the commit diff on screen with the normal
+      // diffError and the memo intact (no retry loop; the next exit — or a
+      // manual picker switch — is the recovery path).
+      const target = resolveCommitExitDiff(preCommitDiffRef.current, {
+        preferredDefault: configStore.get('defaultDiffType'),
+        diffOptions: gitContext?.diffOptions ?? [],
+        activeWorktreePath,
+      });
+      void fetchDiffSwitch(target.diffType, target.base ?? undefined);
+    }
     selectPanelView(view);
-  }, [handleSwitchToSections, selectPanelView, searchQuery, isSearchOpen, clearSearch, closeSearch]);
+  }, [handleSwitchToSections, selectPanelView, searchQuery, isSearchOpen, clearSearch, closeSearch, panelView, diffType, isLoadingDiff, gitContext, activeWorktreePath, fetchDiffSwitch]);
 
   // Open a commit's own diff (vs its first parent) in the center dock. The
   // switch resets the dock to the all-files surface via the existing
@@ -2333,8 +2378,19 @@ const ReviewApp: React.FC = () => {
       openAllFilesPanel();
       return;
     }
+    // First entry into the commit family (covers both user clicks and the
+    // HEAD auto-select, which routes through this same handler): remember the
+    // diff the session came from so leaving the Commits view can restore it.
+    // Walking further commits must not overwrite the memo with another commit
+    // diff — the exit target is where the REVIEW was, not the previous stop
+    // on the rail. A capture whose switch then fails or is superseded leaves
+    // a memo with no commit diff active; harmless, since the memo is only
+    // read while one is, and re-entry recaptures over it.
+    if (!isCommitDiffType(diffType)) {
+      preCommitDiffRef.current = { diffType, base: selectedBase };
+    }
     void fetchDiffSwitch(fullDiffType);
-  }, [activeWorktreePath, diffType, fetchDiffSwitch, openAllFilesPanel]);
+  }, [activeWorktreePath, diffType, selectedBase, fetchDiffSwitch, openAllFilesPanel]);
 
   // The Commits-view session machine (log + poll + HEAD auto-select + center
   // veil) lives in the hook so its invariants stay in one file; App supplies
@@ -2350,6 +2406,29 @@ const ReviewApp: React.FC = () => {
     diffError,
     onOpenCommit: handleSelectCommit,
   });
+
+  // Reload un-trap: the server keeps ONE session-global diff, so a page
+  // loaded while a commit:<sha> diff is active is served that commit — but
+  // the opening panel view is never Commits (deliberately not persisted, and
+  // the restore memo above is client memory that didn't survive either), so
+  // the session would open on the tree stuck showing a historical commit
+  // with no marked picker option and no restore path. Snap it back to the
+  // session default once, on load only — a commit diff the USER opens later
+  // in this session must never be snapped, hence the one-shot ref that burns
+  // on the first settled load regardless of what it observed.
+  const snappedCommitDiffOnLoad = useRef(false);
+  useEffect(() => {
+    if (snappedCommitDiffOnLoad.current || isLoading || !diffData) return;
+    snappedCommitDiffOnLoad.current = true;
+    if (!isCommitDiffType(diffType)) return;
+    if (panelView === 'commits') return; // defensive: unreachable on load
+    const target = resolveCommitExitDiff(null, {
+      preferredDefault: configStore.get('defaultDiffType'),
+      diffOptions: gitContext?.diffOptions ?? [],
+      activeWorktreePath,
+    });
+    void fetchDiffSwitch(target.diffType);
+  }, [isLoading, diffData, diffType, panelView, gitContext, activeWorktreePath, fetchDiffSwitch]);
 
   // Self-heal a conflicted persisted pair: reviewPanelView=sections with a
   // non-since-base defaultDiffType. Every UI writer enforces the coupling
