@@ -678,6 +678,15 @@ bun run dev:vscode     # VS Code extension (watch mode)
 
 **Local `plannotator` command:** run `bun link` once in the checkout to make the global `plannotator` command use this repo's source (`apps/hook/server/index.ts`) instead of an installed release binary. Commands like `plannotator review` then reflect local changes immediately. Rebuild the bundled HTML when changing UI code (see Build below).
 
+## Testing Rules
+
+A test must guard a behavior that can actually regress. Before writing one, name the failure it catches; if you can't, don't write it.
+
+- **Never pin UI prose.** Dialog text, labels, descriptions, and other copy are freely editable and must never require a test change. If a UI string carries data that must stay truthful (a server-computed size, a language list, a version), assert those facts with `toContain` on the data — never `toBe` on the sentence around them.
+- **No round-trip prop tests.** Asserting that a hardcoded string passed as a prop appears in the DOM verifies nothing — any string round-trips. If the only thing worth checking is "this prop renders somewhere," use a sentinel string and one assertion, and say so in a comment.
+- **Assert behavior, not implementation echo.** A test that restates what the code obviously does (calls X with Y, sets state to Z) without exercising an observable outcome is noise; it breaks on refactors and catches nothing.
+- **Bun runs every test file in one process.** Never mutate `process.env`, `~/.plannotator`, or any global at module scope; mutate inside tests with restore in `finally`/`afterEach`, and sandbox all server/data-dir interaction under a temp `PLANNOTATOR_DATA_DIR`. Never read or write the real user config.
+
 ## Build
 
 ```bash
