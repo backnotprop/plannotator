@@ -10,6 +10,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { isUrlHostOverridden } from "./remote";
+import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
 import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
@@ -254,6 +255,8 @@ export async function handleServerReady(
         ? `\n  Plannotator session ready — open on your device:\n  ${url}\n\n`
         : `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
     );
+    // Remote URLs usually make a device hop; a QR skips the retyping (TTY only).
+    writeUrlQr(url);
   } else if (isCodexDesktopHost()) {
     process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);
   }
