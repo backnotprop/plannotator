@@ -19,7 +19,7 @@ describe('getCallFlowEnableDescription', () => {
     };
 
     expect(getCallFlowEnableDescription(advert)).toBe(
-      'Enabling prepares a small local analysis runtime with JavaScript and TypeScript + Bash support for this review (~7 MB total). If anything is missing, Plannotator installs it automatically in the background. Requires Node.js 22 or newer. Other language support installs automatically as reviews need it.',
+      'Installs a small runtime for this review (JavaScript and TypeScript + Bash, ~7 MB) in the background. Needs Node.js 22+; other languages install as reviews need them.',
     );
   });
 
@@ -43,6 +43,6 @@ describe('getCallFlowEnableDescription', () => {
       message: 'Call flow is not available for this review view.',
     });
     expect(description).toContain('Switch to a supported local Git review');
-    expect(description).not.toContain('installs it automatically');
+    expect(description).not.toContain('Installs');
   });
 });

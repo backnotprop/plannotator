@@ -320,7 +320,7 @@ function ReviewAnalysisTab({ callFlowEnableDescription }: { callFlowEnableDescri
           checked={callFlowEnabled}
           onChange={(enabled) => configStore.set('callFlowEnabled', enabled)}
           label="Call flow"
-          description={callFlowEnableDescription ?? 'Show complete inferred entry paths containing added or removed calls. Enabling installs a small local runtime; missing language support installs automatically as reviews need it. Requires Node.js 22 or newer.'}
+          description={callFlowEnableDescription ?? 'Traces how changed calls reach the rest of the codebase. Installs a small runtime in the background when needed. Needs Node.js 22+.'}
         />
       </div>
 

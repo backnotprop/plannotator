@@ -213,7 +213,7 @@ export function ReviewAnalysisIntroDialog({
                     </span>
                   </span>
                 )}
-                description={`Reconstructs complete entry paths containing added or removed calls. This is static analysis, not runtime tracing. ${callFlowEnableDescription}`}
+                description={`Traces how changed calls reach the rest of the codebase. ${callFlowEnableDescription}`}
                 className="items-start rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
               />
               <CallFlowExample />

@@ -6,7 +6,7 @@ export function formatCallFlowInstallSize(bytes: number): string {
 }
 
 function planDescription(plan: CallFlowInstallPlan): string {
-  return `${plan.labels.join(' + ')} support for this review (${formatCallFlowInstallSize(plan.installSizeBytes)} total)`;
+  return `${plan.labels.join(' + ')}, ${formatCallFlowInstallSize(plan.installSizeBytes)}`;
 }
 
 /**
@@ -23,7 +23,7 @@ export function getCallFlowEnableDescription(advert: CallFlowAdvert): string {
   }
   const plan = advert.consentPlan ?? advert.installPlan;
   if (plan) {
-    return `Enabling prepares a small local analysis runtime with ${planDescription(plan)}. If anything is missing, Plannotator installs it automatically in the background. Requires Node.js 22 or newer. Other language support installs automatically as reviews need it.`;
+    return `Installs a small runtime for this review (${planDescription(plan)}) in the background. Needs Node.js 22+; other languages install as reviews need them.`;
   }
-  return 'Enabling uses a local analysis runtime. If managed runtime or language support is missing, Plannotator installs it automatically in the background. Requires Node.js 22 or newer.';
+  return 'Installs a small runtime in the background when needed. Needs Node.js 22+.';
 }
