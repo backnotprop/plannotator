@@ -20,7 +20,7 @@ describe('Settings review analysis disclosure', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    const disclosure = 'Installs a small runtime for this review (JavaScript and TypeScript + Bash, ~7 MB) in the background. Needs Node.js 22+; other languages install as reviews need them.';
+    const disclosure = 'Consent disclosure sentinel: JavaScript and TypeScript + Bash, ~7 MB, Node.js 22+.';
     await act(async () => {
       root!.render(
         <Settings

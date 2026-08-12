@@ -18,9 +18,14 @@ describe('getCallFlowEnableDescription', () => {
       },
     };
 
-    expect(getCallFlowEnableDescription(advert)).toBe(
-      'Installs a small runtime for this review (JavaScript and TypeScript + Bash, ~7 MB) in the background. Needs Node.js 22+; other languages install as reviews need them.',
-    );
+    // Assert the facts, not the prose: the languages and size shown beside
+    // the toggle must be the server plan's, and the Node floor must be
+    // disclosed. The sentence around them is free to change.
+    const description = getCallFlowEnableDescription(advert);
+    expect(description).toContain('JavaScript and TypeScript');
+    expect(description).toContain('Bash');
+    expect(description).toContain('~7 MB');
+    expect(description).toContain('Node.js 22');
   });
 
   test('does not promise managed installation for an override runtime', () => {
