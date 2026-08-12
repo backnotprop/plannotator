@@ -175,6 +175,8 @@ export PLANNOTATOR_REMOTE=1
 export PLANNOTATOR_PORT=9999
 ```
 
+**Tailnet sessions (`--tailscale`):** `plannotator review --tailscale` (also `annotate` and `annotate-last`/`last`; Bun CLI only, not mirrored to Pi) publishes the session over the user's tailnet instead of remote mode: the server stays **loopback-bound** and the CLI orchestrates `tailscale serve --bg --https=<port> http://127.0.0.1:<port>`, so devices on the tailnet reach the session over HTTPS while nothing listens beyond localhost and nothing is ever public (serve, never funnel). The advertised HTTPS URL prints on stderr with a terminal QR code (TTY only). Preconditions fail with actionable errors (CLI missing, daemon down or logged out); a pre-existing serve mapping on the chosen port aborts rather than being stolen, mappings on other ports are never touched, and every mapping the process creates is removed on every exit path (normal completion, SIGINT/SIGTERM, errors) via the CLI's exit-routed signal handlers. Combined with `PLANNOTATOR_REMOTE`/SSH detection, `--tailscale` wins and forces local mode with a stderr notice — the wide `0.0.0.0` bind would only broaden exposure. Because the session is a local session, local-session behavior applies unchanged (including the annotate agent terminal, whose tokenized PTY becomes reachable to the user's own tailnet devices through the proxy). Orchestration lives in `packages/server/tailscale-serve.ts` on shared parsers in `packages/shared/tailscale.ts`.
+
 ## Plan Review Flow
 
 ```

@@ -104,6 +104,8 @@ import {
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
+import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
+import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
@@ -214,6 +216,38 @@ const browserIdx = args.indexOf("--browser");
 if (browserIdx !== -1 && args[browserIdx + 1]) {
   process.env.PLANNOTATOR_BROWSER = args[browserIdx + 1];
   args.splice(browserIdx, 2);
+}
+
+// Transport flag: --tailscale (review / annotate / annotate-last) — publish
+// the session over the user's tailnet via `tailscale serve`. The server stays
+// LOOPBACK-bound: serve provides reachability plus TLS, so remote mode's wide
+// bind is redundant and would only broaden exposure. Forcing local mode here
+// (before any port/bind decision) is the safer resolution of the
+// --tailscale + PLANNOTATOR_REMOTE combination; it also restores the random
+// local port, so simultaneous sessions get distinct serve mappings.
+const tailscaleIdx = args.indexOf("--tailscale");
+const tailscaleFlag = tailscaleIdx !== -1;
+if (tailscaleFlag) {
+  args.splice(tailscaleIdx, 1);
+  if (isRemoteSession()) {
+    process.stderr.write(
+      "[plannotator] --tailscale keeps the server loopback-bound behind `tailscale serve`; ignoring remote mode (PLANNOTATOR_REMOTE/SSH detection) for this session.\n",
+    );
+  }
+  process.env.PLANNOTATOR_REMOTE = "0";
+}
+
+/**
+ * --tailscale ready path: publish the loopback port over the tailnet, print
+ * the HTTPS URL (with a QR for the device hop), and hand the reachable URL to
+ * the ready-file side channel. Never opens a local browser. Throwing here
+ * propagates through onReady, which stops the just-started server.
+ */
+async function handleTailscaleReady(port: number): Promise<void> {
+  const { url } = enableTailscaleServe(port);
+  process.stderr.write(`\n  Plannotator session ready — served over your tailnet:\n  ${url}\n\n`);
+  writeUrlQr(url);
+  await handleServerReady(url, false, port, { skipBrowserOpen: true });
 }
 
 // Global flag: --no-jina (disables Jina Reader for URL annotation)
@@ -945,6 +979,10 @@ if (args[0] === "sessions") {
     htmlContent: reviewHtmlContent,
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleReviewServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled && rawPatch) {
@@ -1159,6 +1197,10 @@ if (args[0] === "sessions") {
     project: annotateProject,
     htmlContent: planHtmlContent,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
@@ -1397,6 +1439,10 @@ if (args[0] === "sessions") {
     htmlContent: planHtmlContent,
     recentMessages: pickerMessages,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
