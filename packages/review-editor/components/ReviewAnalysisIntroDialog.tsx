@@ -213,7 +213,7 @@ export function ReviewAnalysisIntroDialog({
                     </span>
                   </span>
                 )}
-                description={`Traces how changed calls reach the rest of the codebase. ${callFlowEnableDescription}`}
+                description={`Diffs for function call stacks across git commits. 22 languages supported (AST-based, built using Tree-sitter). Great for agentic review. ${callFlowEnableDescription}`}
                 className="items-start rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
               />
               <CallFlowExample />
