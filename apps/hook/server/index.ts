@@ -225,26 +225,48 @@ if (browserIdx !== -1 && args[browserIdx + 1]) {
 // (before any port/bind decision) is the safer resolution of the
 // --tailscale + PLANNOTATOR_REMOTE combination; it also restores the random
 // local port, so simultaneous sessions get distinct serve mappings.
+const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last"]);
 const tailscaleIdx = args.indexOf("--tailscale");
 const tailscaleFlag = tailscaleIdx !== -1;
 if (tailscaleFlag) {
   args.splice(tailscaleIdx, 1);
+  if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
+    console.error(
+      "--tailscale is only supported with: plannotator review, annotate, annotate-last (last)",
+    );
+    process.exit(1);
+  }
   if (isRemoteSession()) {
     process.stderr.write(
       "[plannotator] --tailscale keeps the server loopback-bound behind `tailscale serve`; ignoring remote mode (PLANNOTATOR_REMOTE/SSH detection) for this session.\n",
     );
   }
   process.env.PLANNOTATOR_REMOTE = "0";
+  // urlHost is irrelevant here — the advertised URL comes from tailscale
+  // serve, and the session is local-bound. An empty-but-set env var also
+  // suppresses a config-file urlHost, avoiding the misleading
+  // "set PLANNOTATOR_REMOTE=1" local-session warning mid --tailscale run.
+  process.env.PLANNOTATOR_URL_HOST = "";
 }
 
 /**
  * --tailscale ready path: publish the loopback port over the tailnet, print
  * the HTTPS URL (with a QR for the device hop), and hand the reachable URL to
- * the ready-file side channel. Never opens a local browser. Throwing here
- * propagates through onReady, which stops the just-started server.
+ * the ready-file side channel. Never opens a local browser. Publishing
+ * failures resolve HERE with a clean actionable message and a nonzero exit —
+ * under the bang-prefix skill a hanging session blocks the whole Claude Code
+ * prompt, so this path must never leave the loopback server waiting. (The
+ * server APIs also await ready handlers and stop the server on rejection,
+ * which covers any other async onReady user.)
  */
 async function handleTailscaleReady(port: number): Promise<void> {
-  const { url } = enableTailscaleServe(port);
+  let url: string;
+  try {
+    ({ url } = enableTailscaleServe(port));
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
   process.stderr.write(`\n  Plannotator session ready — served over your tailnet:\n  ${url}\n\n`);
   writeUrlQr(url);
   await handleServerReady(url, false, port, { skipBrowserOpen: true });
@@ -421,9 +443,12 @@ process.on("exit", () => unregisterSession());
 // default a SIGINT/SIGTERM death skips them, leaking background-warmup
 // children and stale `git worktree` registrations (the --local PR checkout
 // cleanup below is registered on "exit"). `once` keeps a second Ctrl-C as a
-// force-quit escape hatch if cleanup ever hangs.
+// force-quit escape hatch if cleanup ever hangs. SIGHUP (terminal close) is
+// routed too — otherwise closing the terminal skips exit handlers and leaks
+// the --tailscale serve mapping.
 process.once("SIGINT", () => process.exit(130));
 process.once("SIGTERM", () => process.exit(143));
+process.once("SIGHUP", () => process.exit(129));
 
 // Check if URL sharing is enabled (default: true)
 const sharingEnabled = resolveSharingEnabled(loadConfig());
@@ -1196,6 +1221,7 @@ if (args[0] === "sessions") {
     agentCwd: projectRoot,
     project: annotateProject,
     htmlContent: planHtmlContent,
+    tailnetPublished: tailscaleFlag,
     onReady: async (url, isRemote, port) => {
       if (tailscaleFlag) {
         await handleTailscaleReady(port);
@@ -1438,6 +1464,7 @@ if (args[0] === "sessions") {
     }),
     htmlContent: planHtmlContent,
     recentMessages: pickerMessages,
+    tailnetPublished: tailscaleFlag,
     onReady: async (url, isRemote, port) => {
       if (tailscaleFlag) {
         await handleTailscaleReady(port);

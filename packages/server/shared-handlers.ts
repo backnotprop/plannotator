@@ -250,13 +250,16 @@ export async function handleServerReady(
   if (isRemote) {
     // With an advertised-URL host override the link is directly reachable
     // (e.g. over a tailnet), so the port-forwarding advice would be wrong.
-    process.stderr.write(
-      isUrlHostOverridden()
-        ? `\n  Plannotator session ready — open on your device:\n  ${url}\n\n`
-        : `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
-    );
-    // Remote URLs usually make a device hop; a QR skips the retyping (TTY only).
-    writeUrlQr(url);
+    if (isUrlHostOverridden()) {
+      process.stderr.write(`\n  Plannotator session ready — open on your device:\n  ${url}\n\n`);
+      // The URL makes a device hop; a QR skips the retyping (TTY only). Only
+      // for overridden hosts: a QR of a localhost URL scans to nowhere.
+      writeUrlQr(url);
+    } else {
+      process.stderr.write(
+        `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
+      );
+    }
   } else if (isCodexDesktopHost()) {
     process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);
   }

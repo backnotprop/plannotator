@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildServeArgs,
   buildServeOffArgs,
+  checkServeStatusPort,
   describeTailscaleFailure,
   detectTailnetHost,
   extractServeHttpsUrl,
@@ -19,7 +20,6 @@ import {
   parseTailscaleIpv4,
   parseTailscaleIpv4Output,
   parseTailscaleStatusDnsName,
-  serveStatusHasPort,
   type TailscaleRunResult,
 } from "./tailscale";
 
@@ -135,26 +135,48 @@ describe("serve command construction", () => {
   });
 });
 
-describe("serveStatusHasPort", () => {
-  test("detects an existing TCP mapping for the port", () => {
+describe("checkServeStatusPort", () => {
+  test("detects an existing background TCP mapping for the port", () => {
     const json = JSON.stringify({
       TCP: { "8443": { HTTPS: true } },
       Web: { "host.tail1234.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:3000" } } } },
     });
-    expect(serveStatusHasPort(json, 8443)).toBe(true);
-    expect(serveStatusHasPort(json, 19432)).toBe(false);
+    expect(checkServeStatusPort(json, 8443)).toBe("conflict");
+    expect(checkServeStatusPort(json, 19432)).toBe("free");
   });
 
-  test("treats empty, {} and unparsable status as no existing config", () => {
-    expect(serveStatusHasPort("", 19432)).toBe(false);
-    expect(serveStatusHasPort("{}", 19432)).toBe(false);
-    expect(serveStatusHasPort("No serve config", 19432)).toBe(false);
-    expect(serveStatusHasPort(JSON.stringify({ TCP: null }), 19432)).toBe(false);
+  test("detects foreground session mappings, which Tailscale prefers over background", () => {
+    const json = JSON.stringify({
+      Foreground: {
+        "1234567890": {
+          TCP: { "8443": { HTTPS: true } },
+          Web: { "host.tail1234.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:9000" } } } },
+        },
+      },
+    });
+    expect(checkServeStatusPort(json, 8443)).toBe("conflict");
+    expect(checkServeStatusPort(json, 19432)).toBe("free");
+  });
+
+  test("treats {} and null as honestly-empty config", () => {
+    expect(checkServeStatusPort("{}", 19432)).toBe("free");
+    expect(checkServeStatusPort("null", 19432)).toBe("free");
+    expect(checkServeStatusPort(JSON.stringify({ TCP: null }), 19432)).toBe("free");
+  });
+
+  test("fails CLOSED on unrecognized or malformed output", () => {
+    expect(checkServeStatusPort("", 19432)).toBe("malformed");
+    expect(checkServeStatusPort("No serve config", 19432)).toBe("malformed");
+    expect(checkServeStatusPort("[1,2]", 19432)).toBe("malformed");
+    expect(checkServeStatusPort(JSON.stringify({ TCP: "weird" }), 19432)).toBe("malformed");
+    expect(checkServeStatusPort(JSON.stringify({ Foreground: { s1: { TCP: 42 } } }), 19432)).toBe(
+      "malformed",
+    );
   });
 });
 
 describe("extractServeHttpsUrl", () => {
-  test("pulls the https URL out of realistic serve --bg output", () => {
+  test("pulls the https URL for the requested port out of realistic serve --bg output", () => {
     const output = [
       "Available within your tailnet:",
       "",
@@ -163,11 +185,28 @@ describe("extractServeHttpsUrl", () => {
       "",
       "Serve started and running in the background.",
     ].join("\n");
-    expect(extractServeHttpsUrl(output)).toBe("https://my-machine.tail1234.ts.net:19432");
+    expect(extractServeHttpsUrl(output, 19432)).toBe("https://my-machine.tail1234.ts.net:19432");
+  });
+
+  test("skips https URLs for other ports (echoed pre-existing mappings)", () => {
+    const output = [
+      "https://my-machine.tail1234.ts.net:8443/",
+      "|-- proxy http://127.0.0.1:3000",
+      "https://my-machine.tail1234.ts.net:19432/",
+      "|-- proxy http://127.0.0.1:19432",
+    ].join("\n");
+    expect(extractServeHttpsUrl(output, 19432)).toBe("https://my-machine.tail1234.ts.net:19432");
+    expect(extractServeHttpsUrl(output, 4321)).toBeUndefined();
+  });
+
+  test("port 443 URLs carry no explicit port", () => {
+    expect(extractServeHttpsUrl("https://my-machine.tail1234.ts.net/", 443)).toBe(
+      "https://my-machine.tail1234.ts.net",
+    );
   });
 
   test("returns undefined when no valid https URL is present", () => {
-    expect(extractServeHttpsUrl("Serve started.")).toBeUndefined();
-    expect(extractServeHttpsUrl("http://127.0.0.1:19432")).toBeUndefined();
+    expect(extractServeHttpsUrl("Serve started.", 19432)).toBeUndefined();
+    expect(extractServeHttpsUrl("http://127.0.0.1:19432", 19432)).toBeUndefined();
   });
 });

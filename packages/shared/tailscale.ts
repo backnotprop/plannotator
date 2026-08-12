@@ -143,34 +143,98 @@ export function buildServeOffArgs(port: number): string[] {
   return ["serve", `--https=${port}`, "off"];
 }
 
+export type ServeStatusPortCheck = "free" | "conflict" | "malformed";
+
 /**
- * True when `tailscale serve status --json` already routes the given port —
- * a pre-existing mapping we must not steal or tear down.
+ * Inspect `tailscale serve status --json` for an existing route on the given
+ * port. Both the top-level background config (`TCP`) and every foreground
+ * session (`Foreground.<sessionId>.TCP`) count: Tailscale prefers foreground
+ * handlers, so a foreground mapping would silently shadow a background one we
+ * install and route our advertised URL to someone else's service.
+ *
+ * Fails CLOSED: output we cannot recognize returns "malformed" so the caller
+ * errors clearly instead of assuming the port is free.
  */
-export function serveStatusHasPort(stdout: string, port: number): boolean {
+export function checkServeStatusPort(stdout: string, port: number): ServeStatusPortCheck {
   const trimmed = stdout.trim();
-  if (trimmed === "") return false;
+  if (trimmed === "") return "malformed";
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    return false;
+    return "malformed";
   }
-  const tcp = (parsed as { TCP?: unknown } | null)?.TCP;
-  if (!tcp || typeof tcp !== "object") return false;
-  return Object.prototype.hasOwnProperty.call(tcp, String(port));
+  // `null` is Tailscale's honest "no serve config"; `{}` likewise.
+  if (parsed === null) return "free";
+  if (typeof parsed !== "object" || Array.isArray(parsed)) return "malformed";
+
+  const key = String(port);
+  const checkTcp = (tcp: unknown): ServeStatusPortCheck => {
+    if (tcp === undefined || tcp === null) return "free";
+    if (typeof tcp !== "object" || Array.isArray(tcp)) return "malformed";
+    return Object.prototype.hasOwnProperty.call(tcp, key) ? "conflict" : "free";
+  };
+
+  const top = checkTcp((parsed as { TCP?: unknown }).TCP);
+  if (top !== "free") return top;
+
+  const foreground = (parsed as { Foreground?: unknown }).Foreground;
+  if (foreground === undefined || foreground === null) return "free";
+  if (typeof foreground !== "object" || Array.isArray(foreground)) return "malformed";
+  for (const session of Object.values(foreground)) {
+    if (session === null) continue;
+    if (typeof session !== "object" || Array.isArray(session)) return "malformed";
+    const result = checkTcp((session as { TCP?: unknown }).TCP);
+    if (result !== "free") return result;
+  }
+  return "free";
 }
 
-/** First https URL in `tailscale serve --bg` output, sans trailing slash. */
-export function extractServeHttpsUrl(output: string): string | undefined {
-  const match = output.match(/https:\/\/[^\s|]+/);
-  if (!match) return undefined;
-  const candidate = match[0].replace(/\/+$/, "");
-  try {
-    const url = new URL(candidate);
-    if (url.protocol !== "https:" || !url.hostname) return undefined;
-  } catch {
-    return undefined;
+/**
+ * First https URL in `tailscale serve --bg` output whose port matches the
+ * port we asked to publish, sans trailing slash. Serve output is
+ * version-dependent, so an https URL for a DIFFERENT port (some other
+ * pre-existing mapping echoed in the config dump) must not be advertised.
+ */
+export function extractServeHttpsUrl(output: string, expectedPort: number): string | undefined {
+  for (const match of output.matchAll(/https:\/\/[^\s|]+/g)) {
+    const candidate = match[0].replace(/\/+$/, "");
+    try {
+      const url = new URL(candidate);
+      if (url.protocol !== "https:" || !url.hostname) continue;
+      if (Number(url.port || "443") !== expectedPort) continue;
+      return candidate;
+    } catch {
+      continue;
+    }
   }
-  return candidate;
+  return undefined;
+}
+
+/**
+ * urlHost "auto": resolve this machine's tailnet host once per process.
+ * Detection is display-only like every urlHost value; callers gate on
+ * remote-session state before resolving, so a local session never spawns the
+ * tailscale CLI. A failed detection warns once and resolves undefined
+ * (callers advertise localhost); a display setting must never break a server
+ * launch. Shared by the Bun runtime and the Pi mirror (vendored copy), each
+ * process holding its own cache.
+ */
+let autoHostResolution: { host: string | undefined } | undefined;
+
+export function resolveAutoHostCached(
+  detect: (run?: TailscaleRunner) => TailnetHostDetection = detectTailnetHost,
+): string | undefined {
+  if (!autoHostResolution) {
+    const result = detect();
+    if ("host" in result) {
+      autoHostResolution = { host: result.host };
+    } else {
+      autoHostResolution = { host: undefined };
+      process.stderr.write(
+        `[plannotator] Warning: advertised URL host "auto" could not resolve a tailnet host — ${result.error} Advertising localhost.\n`,
+      );
+    }
+  }
+  return autoHostResolution.host;
 }

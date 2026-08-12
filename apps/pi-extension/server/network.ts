@@ -10,7 +10,7 @@ import { release } from "node:os";
 import { delimiter, join } from "node:path";
 import { loadConfig, resolveUrlHost, resolveUseGlimpse } from "../generated/config.ts";
 import { parsePortSelection } from "../generated/port-range.ts";
-import { detectTailnetHost, isAutoUrlHost } from "../generated/tailscale.ts";
+import { isAutoUrlHost, resolveAutoHostCached } from "../generated/tailscale.ts";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -117,35 +117,11 @@ export function getServerHostname(): string {
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
 }
 
-/**
- * urlHost "auto": resolve this machine's tailnet host once per process.
- * Detection is display-only like every urlHost value, and remote-only —
- * callers gate on isRemoteSession() before resolving, so a local session
- * never spawns the tailscale CLI. A failed detection warns once and falls
- * back to localhost; a display setting must never break a server launch.
- */
-let autoHostResolution: { host: string | undefined } | undefined;
-
-function resolveAutoHost(): string | undefined {
-	if (!autoHostResolution) {
-		const result = detectTailnetHost();
-		if ("host" in result) {
-			autoHostResolution = { host: result.host };
-		} else {
-			autoHostResolution = { host: undefined };
-			process.stderr.write(
-				`[plannotator] Warning: advertised URL host "auto" could not resolve a tailnet host — ${result.error} Advertising localhost.\n`,
-			);
-		}
-	}
-	return autoHostResolution.host;
-}
-
 /** True when the advertised-URL host is overridden away from localhost. */
 export function isUrlHostOverridden(): boolean {
 	const host = resolveUrlHost(loadConfig());
 	if (host === undefined) return false;
-	if (isAutoUrlHost(host)) return isRemoteSession() && resolveAutoHost() !== undefined;
+	if (isAutoUrlHost(host)) return isRemoteSession() && resolveAutoHostCached() !== undefined;
 	return true;
 }
 
@@ -175,7 +151,7 @@ export function buildAdvertisedUrl(port: number): string {
 		}
 		return `http://localhost:${port}`;
 	}
-	const resolved = isAutoUrlHost(host) ? resolveAutoHost() : host;
+	const resolved = isAutoUrlHost(host) ? resolveAutoHostCached() : host;
 	if (resolved === undefined) return `http://localhost:${port}`;
 	return `http://${resolved}:${port}`;
 }

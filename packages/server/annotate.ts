@@ -119,10 +119,19 @@ export interface AnnotateServerOptions {
   convertHtml?: boolean;
   /** CWD where the optional annotate agent terminal should launch. Defaults to process.cwd(). */
   agentCwd?: string;
+  /**
+   * The session is loopback-bound but published across the user's tailnet
+   * (--tailscale). Gates the agent terminal behind the same
+   * PLANNOTATOR_AGENT_TERMINAL_REMOTE opt-in remote mode uses: the PTY token
+   * is not an auth boundary against network peers (wsPath ships in the
+   * /api/plan capability payload), so tailnet reachability implies terminal
+   * reachability.
+   */
+  tailnetPublished?: boolean;
   /** Project name for keying per-file version history (powers the annotate version diff). */
   project?: string;
   /** Called when server starts with the URL, remote status, and port */
-  onReady?: (url: string, isRemote: boolean, port: number) => void;
+  onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
 }
 
 export interface AnnotateServerResult {
@@ -292,6 +301,7 @@ export async function startAnnotateServer(
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),
     cwd: agentCwd ?? process.cwd(),
+    tailnetPublished: options.tailnetPublished === true,
   });
 
   async function loadShareHtml(pathParam: string | null): Promise<Response> {
@@ -985,9 +995,25 @@ export async function startAnnotateServer(
   // walk yields between directories while requests remain serviceable.
   void warmFileListCache(process.cwd(), "code");
 
-  // Notify caller that server is ready
+  const stop = () => {
+    clientLease.cancel();
+    clientLease.closeSessions();
+    aiRuntime?.dispose();
+    agentTerminal.dispose();
+    server.stop();
+  };
+
+  // Notify caller that server is ready. An async ready handler that rejects
+  // (e.g. --tailscale publishing failed) must stop the server and propagate:
+  // firing-and-forgetting it would leave an unhandled rejection while the
+  // loopback server keeps listening and the session hangs forever.
   if (onReady) {
-    onReady(serverUrl, isRemote, port);
+    try {
+      await onReady(serverUrl, isRemote, port);
+    } catch (error) {
+      stop();
+      throw error;
+    }
   }
 
   return {
@@ -995,12 +1021,6 @@ export async function startAnnotateServer(
     url: serverUrl,
     isRemote,
     waitForDecision: () => decisionPromise,
-    stop: () => {
-      clientLease.cancel();
-      clientLease.closeSessions();
-      aiRuntime?.dispose();
-      agentTerminal.dispose();
-      server.stop();
-    },
+    stop,
   };
 }

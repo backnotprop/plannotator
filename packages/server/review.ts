@@ -169,7 +169,7 @@ export interface ReviewServerOptions {
   /** Custom base URL for share links (default: https://share.plannotator.ai) */
   shareBaseUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
-  onReady?: (url: string, isRemote: boolean, port: number) => void;
+  onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
   /** PR metadata when reviewing a pull request (PR mode) */
@@ -3200,9 +3200,32 @@ export async function startReviewServer(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
-  // Notify caller that server is ready
+  const stop = () => {
+    process.removeListener("exit", exitHandler);
+    agentJobs.killAll();
+    callFlowService.cancelAll();
+    aiRuntime?.dispose();
+    server.stop();
+    // Invoke cleanup callback (e.g., remove temp worktree)
+    if (options.onCleanup) {
+      try {
+        const result = options.onCleanup();
+        if (result instanceof Promise) result.catch(() => {});
+      } catch { /* best effort */ }
+    }
+  };
+
+  // Notify caller that server is ready. An async ready handler that rejects
+  // (e.g. --tailscale publishing failed) must stop the server and propagate:
+  // firing-and-forgetting it would leave an unhandled rejection while the
+  // loopback server keeps listening and the session hangs forever.
   if (onReady) {
-    onReady(serverUrl, isRemote, port);
+    try {
+      await onReady(serverUrl, isRemote, port);
+    } catch (error) {
+      stop();
+      throw error;
+    }
   }
 
   return {
@@ -3210,19 +3233,6 @@ export async function startReviewServer(
     url: serverUrl,
     isRemote,
     waitForDecision: () => decisionPromise,
-    stop: () => {
-      process.removeListener("exit", exitHandler);
-      agentJobs.killAll();
-      callFlowService.cancelAll();
-      aiRuntime?.dispose();
-      server.stop();
-      // Invoke cleanup callback (e.g., remove temp worktree)
-      if (options.onCleanup) {
-        try {
-          const result = options.onCleanup();
-          if (result instanceof Promise) result.catch(() => {});
-        } catch { /* best effort */ }
-      }
-    },
+    stop,
   };
 }

@@ -4,14 +4,18 @@
  * Run: bun test packages/server/tailscale-serve.test.ts
  *
  * Every test injects a fake runner — the real `tailscale` CLI is never
- * spawned and no tailnet state is touched. Each test that successfully
- * enables a mapping drains it with the same fake runner in `finally` so the
- * module's process-exit cleanup has nothing left to act on.
+ * spawned and no tailnet state is touched. Bun runs every test file in one
+ * process, so afterEach resets the module's port registry, cleanup runner,
+ * and process exit listener via resetTailscaleServeForTests().
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { TailscaleRunResult } from "@plannotator/shared/tailscale";
-import { disableTailscaleServe, enableTailscaleServe } from "./tailscale-serve";
+import {
+  disableTailscaleServe,
+  enableTailscaleServe,
+  resetTailscaleServeForTests,
+} from "./tailscale-serve";
 
 const SERVE_OUTPUT = [
   "Available within your tailnet:",
@@ -25,33 +29,54 @@ const SERVE_OUTPUT = [
 function makeRunner(responses: {
   status?: TailscaleRunResult;
   serve?: TailscaleRunResult;
-  off?: TailscaleRunResult;
+  off?: TailscaleRunResult | ((offCallIndex: number) => TailscaleRunResult);
 }) {
   const calls: string[][] = [];
+  let offCalls = 0;
   const runner = (args: string[]): TailscaleRunResult => {
     calls.push(args);
     if (args[1] === "status") return responses.status ?? { status: 0, stdout: "{}", stderr: "" };
-    if (args.includes("off")) return responses.off ?? { status: 0, stdout: "", stderr: "" };
+    if (args.includes("off")) {
+      const off = responses.off;
+      if (typeof off === "function") return off(offCalls++);
+      return off ?? { status: 0, stdout: "", stderr: "" };
+    }
     return responses.serve ?? { status: 0, stdout: SERVE_OUTPUT, stderr: "" };
   };
   return { runner, calls };
 }
 
+function captureStderr(): { output: () => string; restore: () => void } {
+  const original = process.stderr.write.bind(process.stderr);
+  let captured = "";
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    captured += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  return {
+    output: () => captured,
+    restore: () => {
+      process.stderr.write = original;
+    },
+  };
+}
+
+afterEach(() => {
+  resetTailscaleServeForTests();
+});
+
 describe("enableTailscaleServe", () => {
   test("publishes the port and returns the tailnet HTTPS URL", () => {
     const { runner, calls } = makeRunner({});
-    try {
-      const { url } = enableTailscaleServe(4321, runner);
-      expect(url).toBe("https://vps-1.tail1234.ts.net:4321");
-      expect(calls).toContainEqual(["serve", "--bg", "--https=4321", "http://127.0.0.1:4321"]);
-    } finally {
-      disableTailscaleServe(4321, runner);
-    }
+    const { url } = enableTailscaleServe(4321, runner);
+    expect(url).toBe("https://vps-1.tail1234.ts.net:4321");
+    expect(calls).toContainEqual(["serve", "--bg", "--https=4321", "http://127.0.0.1:4321"]);
+    disableTailscaleServe(4321, runner);
     // Teardown issued the matching off command for our port only.
     expect(calls.at(-1)).toEqual(["serve", "--https=4321", "off"]);
   });
 
-  test("refuses to steal a pre-existing serve mapping on the chosen port", () => {
+  test("refuses to steal a pre-existing background mapping on the chosen port", () => {
     const { runner, calls } = makeRunner({
       status: { status: 0, stdout: JSON.stringify({ TCP: { "4321": { HTTPS: true } } }), stderr: "" },
     });
@@ -61,15 +86,32 @@ describe("enableTailscaleServe", () => {
     expect(calls.some((args) => args.includes("off"))).toBe(false);
   });
 
+  test("refuses a foreground session mapping too (Tailscale prefers foreground handlers)", () => {
+    const { runner, calls } = makeRunner({
+      status: {
+        status: 0,
+        stdout: JSON.stringify({ Foreground: { "987": { TCP: { "4321": { HTTPS: true } } } } }),
+        stderr: "",
+      },
+    });
+    expect(() => enableTailscaleServe(4321, runner)).toThrow(/already routes port 4321/);
+    expect(calls.some((args) => args.includes("--bg"))).toBe(false);
+  });
+
+  test("fails closed on unrecognizable serve status output", () => {
+    const { runner, calls } = makeRunner({
+      status: { status: 0, stdout: "something unexpected", stderr: "" },
+    });
+    expect(() => enableTailscaleServe(4321, runner)).toThrow(/could not parse/);
+    expect(calls.some((args) => args.includes("--bg"))).toBe(false);
+  });
+
   test("a mapping on a different port does not block ours", () => {
     const { runner } = makeRunner({
       status: { status: 0, stdout: JSON.stringify({ TCP: { "8443": { HTTPS: true } } }), stderr: "" },
     });
-    try {
-      expect(enableTailscaleServe(4321, runner).url).toBe("https://vps-1.tail1234.ts.net:4321");
-    } finally {
-      disableTailscaleServe(4321, runner);
-    }
+    expect(enableTailscaleServe(4321, runner).url).toBe("https://vps-1.tail1234.ts.net:4321");
+    disableTailscaleServe(4321, runner);
   });
 
   test("surfaces a missing CLI as an install hint", () => {
@@ -78,11 +120,12 @@ describe("enableTailscaleServe", () => {
     expect(() => enableTailscaleServe(4321, runner)).toThrow(/not found on PATH/);
   });
 
-  test("tears its own mapping down when serve output has no parsable URL", () => {
+  test("rejects serve output whose only https URL is for a different port", () => {
     const { runner, calls } = makeRunner({
-      serve: { status: 0, stdout: "Serve started.", stderr: "" },
+      serve: { status: 0, stdout: "https://vps-1.tail1234.ts.net:8443/\n", stderr: "" },
     });
-    expect(() => enableTailscaleServe(4321, runner)).toThrow(/https:\/\/ URL/);
+    expect(() => enableTailscaleServe(4321, runner)).toThrow(/https:\/\/ URL for port 4321/);
+    // Our own just-created mapping was taken back down.
     expect(calls.at(-1)).toEqual(["serve", "--https=4321", "off"]);
   });
 
@@ -91,6 +134,48 @@ describe("enableTailscaleServe", () => {
       serve: { status: 1, stdout: "", stderr: "invalid port" },
     });
     expect(() => enableTailscaleServe(4321, runner)).toThrow(/invalid port/);
+  });
+});
+
+describe("teardown hardening", () => {
+  test("a failed off retries once, warns with the manual command, and keeps the port for exit retry", () => {
+    const { runner, calls } = makeRunner({ off: { status: 1, stdout: "", stderr: "backend stopped" } });
+    enableTailscaleServe(4321, runner);
+    const stderr = captureStderr();
+    try {
+      disableTailscaleServe(4321, runner);
+    } finally {
+      stderr.restore();
+    }
+    const offCalls = calls.filter((args) => args.includes("off"));
+    expect(offCalls).toHaveLength(2);
+    // The warning names the exact manual cleanup command.
+    expect(stderr.output()).toContain(`tailscale serve --https=4321 off`);
+    // The port was NOT forgotten: a later disable retries the off again.
+    const stderr2 = captureStderr();
+    try {
+      disableTailscaleServe(4321, runner);
+    } finally {
+      stderr2.restore();
+    }
+    expect(calls.filter((args) => args.includes("off"))).toHaveLength(4);
+  });
+
+  test("an off that succeeds on the retry forgets the port silently", () => {
+    const { runner, calls } = makeRunner({
+      off: (index) => (index === 0 ? { status: 1, stdout: "", stderr: "flake" } : { status: 0, stdout: "", stderr: "" }),
+    });
+    enableTailscaleServe(4321, runner);
+    const stderr = captureStderr();
+    try {
+      disableTailscaleServe(4321, runner);
+    } finally {
+      stderr.restore();
+    }
+    expect(stderr.output()).toBe("");
+    // Port forgotten: another disable is a no-op.
+    disableTailscaleServe(4321, runner);
+    expect(calls.filter((args) => args.includes("off"))).toHaveLength(2);
   });
 });
 
