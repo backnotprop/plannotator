@@ -40,7 +40,6 @@ import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
 import { useCallFlowAnalysis } from './hooks/useCallFlowAnalysis';
 import { useCallFlowInstall } from './hooks/useCallFlowInstall';
 import { useCallFlowAutoInstall } from './hooks/useCallFlowAutoInstall';
-import { getCallFlowEnableDescription } from './utils/callFlowPresentation';
 import { extractLinesFromPatch, isLineRangeInPatch } from './utils/patchParser';
 import {
   shouldHandleReviewSearchShortcut,
@@ -1382,7 +1381,6 @@ const ReviewApp: React.FC = () => {
   // installs. Existing Call flow users do not start background work until the
   // updated disclosure has appeared in the normal no-stack dialog chain.
   useCallFlowAutoInstall(callFlowEnabled, !analysisIntroPending, callFlowAdvert, callFlowInstall);
-  const callFlowEnableDescription = getCallFlowEnableDescription(callFlowAdvert);
   const callFlowSetupPending = callFlowEnabled
     && callFlowAdvert.installable === true
     && callFlowAdvert.installPlan !== undefined
@@ -4052,7 +4050,6 @@ const ReviewApp: React.FC = () => {
               !!gitContext && gitContext.vcsType === 'git' && !prMetadata &&
               reviewMode !== 'workspace' && !sectionsCapable
             }
-            callFlowEnableDescription={callFlowEnableDescription}
           />
         </div>
 
@@ -4180,7 +4177,6 @@ const ReviewApp: React.FC = () => {
             isOpen
             semanticChangesEnabled={semanticDiffEnabled}
             callFlowEnabled={callFlowEnabled}
-            callFlowEnableDescription={callFlowEnableDescription}
             onSemanticChangesChange={(enabled) => configStore.set('semanticDiffEnabled', enabled)}
             onCallFlowChange={(enabled) => configStore.set('callFlowEnabled', enabled)}
             onDismiss={dismissAnalysisIntro}

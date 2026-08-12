@@ -16,7 +16,6 @@ function Harness({ onDismiss = () => {} }: { onDismiss?: () => void }) {
       isOpen={open}
       semanticChangesEnabled={semantic}
       callFlowEnabled={callFlow}
-      callFlowEnableDescription="Consent disclosure sentinel: JavaScript and TypeScript + Bash, ~7 MB, Node.js 22+."
       onSemanticChangesChange={setSemantic}
       onCallFlowChange={setCallFlow}
       onDismiss={() => { onDismiss(); setOpen(false); }}
@@ -51,10 +50,6 @@ describe('ReviewAnalysisIntroDialog', () => {
     expect(dialog?.textContent).toContain('completeOrder()');
     expect(dialog?.textContent).toContain('checkout.ts:118');
     expect(dialog?.textContent).toContain('Powered by CallDiff, created by');
-    // Wiring only: the disclosure prop must render. Its wording is owned by
-    // getCallFlowEnableDescription and pinned (as facts, not prose) in
-    // callFlowPresentation.test.ts.
-    expect(dialog?.textContent).toContain('Consent disclosure sentinel');
     expect(dialog?.textContent).toContain('Settings → Analysis');
 
     const examples = Array.from(dialog?.querySelectorAll<HTMLElement>('figure[role="img"]') ?? []);

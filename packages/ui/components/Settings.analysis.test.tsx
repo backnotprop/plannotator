@@ -15,12 +15,11 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-describe('Settings review analysis disclosure', () => {
-  test.skipIf(!hasDom)('renders the review-authored computed Call flow install size beside the toggle', async () => {
+describe('Settings Analysis tab', () => {
+  test.skipIf(!hasDom)('shows both independent analysis layer toggles', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    const disclosure = 'Consent disclosure sentinel: JavaScript and TypeScript + Bash, ~7 MB, Node.js 22+.';
     await act(async () => {
       root!.render(
         <Settings
@@ -28,7 +27,6 @@ describe('Settings review analysis disclosure', () => {
           onTaterModeChange={() => {}}
           mode="review"
           externalOpen
-          callFlowEnableDescription={disclosure}
         />,
       );
     });
@@ -36,6 +34,11 @@ describe('Settings review analysis disclosure', () => {
     const analysisTab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
       .find((button) => button.textContent?.trim() === 'Analysis');
     await act(async () => analysisTab?.click());
-    expect(document.body.textContent).toContain(disclosure);
+
+    const switches = Array.from(document.querySelectorAll('[role="switch"]'));
+    expect(switches.length).toBeGreaterThanOrEqual(2);
+    // Deliberate label locks: these two layer names are maintainer-frozen.
+    expect(document.body.textContent).toContain('Semantic changes');
+    expect(document.body.textContent).toContain('Call flow');
   });
 });
