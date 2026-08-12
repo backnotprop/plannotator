@@ -1842,7 +1842,19 @@ export async function startReviewServer(
 
           // API: Snapshot-bound call-stack impact analysis.
           if (url.pathname === "/api/call-flow" && req.method === "GET") {
-            const result = await getCallFlow(url);
+            // A hard VCS failure before analyze() (e.g. patch materialization
+            // hitting an unreadable file) must still produce the JSON error
+            // envelope the client's quiet-failure UX parses, never a bare 500.
+            let result: CallFlowResponse;
+            try {
+              result = await getCallFlow(url);
+            } catch (error) {
+              result = {
+                status: "error",
+                reason: "analysis-failed",
+                message: error instanceof Error ? error.message : String(error),
+              };
+            }
             return Response.json(result, {
               status: result.status === "stale" ? 409 : 200,
               headers: { "Cache-Control": "no-store" },

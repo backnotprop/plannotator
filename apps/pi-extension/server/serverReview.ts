@@ -1811,7 +1811,19 @@ export async function startReviewServer(options: {
 		} else if (url.pathname === "/api/semantic-diff" && req.method === "GET") {
 			json(res, await getSemanticDiff(url));
 		} else if (url.pathname === "/api/call-flow" && req.method === "GET") {
-			const result = await getCallFlow(url);
+			// A throw here must never escape the handler: on Node it becomes an
+			// unhandled rejection, and Pi's process-level handler exits the whole
+			// session. Contain it as the same JSON error envelope Bun serves.
+			let result: CallFlowResponse;
+			try {
+				result = await getCallFlow(url);
+			} catch (error) {
+				result = {
+					status: "error",
+					reason: "analysis-failed",
+					message: error instanceof Error ? error.message : String(error),
+				};
+			}
 			res.setHeader("Cache-Control", "no-store");
 			json(res, result, result.status === "stale" ? 409 : 200);
 		} else if (url.pathname === "/api/call-flow/install" && req.method === "POST") {
