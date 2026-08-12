@@ -45,6 +45,10 @@ describe('resolveCommitExitDiff', () => {
 
   test('no memo: preferred default used only when the session offers it', () => {
     expect(resolveCommitExitDiff(null, fallback)).toEqual({ diffType: 'since-base', base: null });
+    // Offered but not first: must win over diffOptions[0].
+    expect(
+      resolveCommitExitDiff(null, { ...fallback, preferredDefault: 'uncommitted' }),
+    ).toEqual({ diffType: 'uncommitted', base: null });
     expect(
       resolveCommitExitDiff(null, { ...fallback, preferredDefault: 'merge-base' }),
     ).toEqual({ diffType: 'since-base', base: null }); // first offered option
