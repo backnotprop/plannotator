@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildTourCodexCommand,
   buildTourClaudeCommand,
   buildTourUserMessage,
   parseTourStreamOutput,
@@ -142,5 +143,16 @@ describe("buildTourClaudeCommand", () => {
     expect(allowedTools).toContain("Bash(jj cat:*)");
     expect(allowedTools).toContain("Bash(jj bookmark list:*)");
     expect(allowedTools).toContain("Bash(git -C:*)");
+  });
+});
+
+describe("buildTourCodexCommand", () => {
+  test("uses the current non-interactive read-only Codex flags", async () => {
+    const command = await buildTourCodexCommand({ cwd: "/tmp", outputPath: "/tmp/out.json", prompt: "tour" });
+
+    expect(command).toContain("--sandbox");
+    expect(command).toContain("read-only");
+    expect(command).toContain("--approve-for-me");
+    expect(command).not.toContain("--full-auto");
   });
 });

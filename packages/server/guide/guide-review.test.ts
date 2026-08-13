@@ -294,6 +294,21 @@ describe("guide extra instructions (#1265)", () => {
     expect(built.prompt).not.toContain("## Additional reviewer instructions");
     expect(built.prompt).not.toContain("Use product names.");
   });
+
+  it("uses the current non-interactive read-only Codex flags", async () => {
+    const session = createGuideSession();
+    const built = await session.buildCommand({
+      cwd: "/tmp",
+      patch: "diff",
+      diffType: "uncommitted" as DiffType,
+      config: { engine: "codex" },
+    });
+
+    expect(built.command).toContain("--sandbox");
+    expect(built.command).toContain("read-only");
+    expect(built.command).toContain("--approve-for-me");
+    expect(built.command).not.toContain("--full-auto");
+  });
 });
 
 describe("createGuideSession marker completion", () => {
