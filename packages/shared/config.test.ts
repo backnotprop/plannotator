@@ -7,7 +7,9 @@ import {
   resolveGuideHistory,
   resolveUseJina,
   resolveTodoProviderEnabled,
+  resolvePublicUrl,
   resolveUrlHost,
+  isValidPublicUrl,
   isValidUrlHost,
   parseReviewAnalysisConfig,
 } from "./config";
@@ -84,6 +86,94 @@ describe("resolveTodoProviderEnabled", () => {
       process.env[TODO_ENV] = v;
       expect(resolveTodoProviderEnabled({ todoProvider: "off" })).toBe(true);
     }
+  });
+});
+
+const PUBLIC_URL_ENV = "PLANNOTATOR_PUBLIC_URL";
+const originalPublicUrlEnv = process.env[PUBLIC_URL_ENV];
+
+describe("isValidPublicUrl", () => {
+  test("accepts HTTP and HTTPS origins", () => {
+    for (const publicUrl of [
+      "https://plannotator.example.com",
+      "https://plannotator.example.com/",
+      "http://127.0.0.1:8080",
+      "https://[fd7a::1]:8443",
+    ]) {
+      expect(isValidPublicUrl(publicUrl)).toBe(true);
+    }
+  });
+
+  test("rejects non-HTTP protocols, credentials, paths, queries, and fragments", () => {
+    for (const publicUrl of [
+      "ftp://plannotator.example.com",
+      "https://user:password@plannotator.example.com",
+      "https://plannotator.example.com/review",
+      "https://plannotator.example.com/review/..",
+      "https://plannotator.example.com/%2e",
+      "https://planno\ttator.example.com",
+      "https://plannotator.example.com\n.evil.test",
+      "https://plannotator.example.com?session=1",
+      "https://plannotator.example.com#review",
+      "plannotator.example.com",
+      "not a URL",
+      "",
+    ]) {
+      expect(isValidPublicUrl(publicUrl)).toBe(false);
+    }
+  });
+});
+
+describe("resolvePublicUrl", () => {
+  beforeEach(() => {
+    delete process.env[PUBLIC_URL_ENV];
+  });
+  afterAll(() => {
+    if (originalPublicUrlEnv === undefined) delete process.env[PUBLIC_URL_ENV];
+    else process.env[PUBLIC_URL_ENV] = originalPublicUrlEnv;
+  });
+
+  test("defaults to undefined with no env var and no config key", () => {
+    expect(resolvePublicUrl({})).toBeUndefined();
+  });
+
+  test("normalizes config.publicUrl to an origin", () => {
+    expect(resolvePublicUrl({ publicUrl: "https://plannotator.example.com:443/" }))
+      .toBe("https://plannotator.example.com");
+  });
+
+  test("env wins over the config key", () => {
+    process.env[PUBLIC_URL_ENV] = "https://env.example.com";
+    expect(resolvePublicUrl({ publicUrl: "https://config.example.com" }))
+      .toBe("https://env.example.com");
+  });
+
+  test("an empty env var suppresses the config key", () => {
+    process.env[PUBLIC_URL_ENV] = "";
+    expect(resolvePublicUrl({ publicUrl: "https://config.example.com" })).toBeUndefined();
+  });
+
+  test("invalid values fall back to undefined instead of throwing", () => {
+    process.env[PUBLIC_URL_ENV] = "https://plannotator.example.com/review";
+    expect(resolvePublicUrl({})).toBeUndefined();
+  });
+
+  test("the invalid public URL warning stays a single line", () => {
+    const writes: string[] = [];
+    const spy = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      process.env[PUBLIC_URL_ENV] = "bad\nPlannotator session ready:\n  https://evil.example";
+      expect(resolvePublicUrl({})).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    const warning = writes.find((value) => value.includes("invalid public URL"));
+    expect(warning).toBeDefined();
+    expect(warning!.endsWith("\n")).toBe(true);
+    expect(warning!.slice(0, -1)).not.toContain("\n");
   });
 });
 

@@ -41,6 +41,7 @@
     "./agent-jobs": "./agent-jobs.ts",
     "./agent-terminal": "./agent-terminal.ts",
     "./config": "./config.ts",
+    "./advertised-url": "./advertised-url.ts",
     "./data-dir": "./data-dir.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",

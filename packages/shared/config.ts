@@ -196,14 +196,14 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
-   * Display-only hostname for advertised session URLs (issue #657). Lets a
-   * remote-mode user hand out a reachable link (e.g. a Tailscale MagicDNS
-   * name or tailnet IP) instead of localhost. Host only — the port is chosen
-   * at runtime and always appended. Never affects which interface the server
-   * binds; that stays governed by PLANNOTATOR_REMOTE. Applied only in remote
-   * sessions: a local session binds loopback, so the override is ignored
-   * (localhost is advertised) with a once-per-process stderr warning.
-   * Mirrors the PLANNOTATOR_URL_HOST env var, which takes precedence.
+   * Full HTTP(S) reverse-proxy origin for remote sessions; range: first port only.
+   * Never changes binding; PLANNOTATOR_PUBLIC_URL overrides the config value.
+   * Paths, credentials, queries, and fragments are rejected.
+   */
+  publicUrl?: string;
+  /**
+   * Host-only override with runtime port; used when publicUrl does not apply.
+   * PLANNOTATOR_URL_HOST overrides the config value.
    */
   urlHost?: string;
   /**
@@ -441,6 +441,49 @@ export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
   if (envVal !== undefined) return envVal !== "disabled";
   if (config.share !== undefined) return config.share !== "disabled";
   return true;
+}
+
+/** Validate a public reverse-proxy URL as an HTTP(S) origin without a path. */
+export function isValidPublicUrl(value: string): boolean {
+  const publicUrl = value.trim();
+  if (!/^https?:\/\/[^\s/?#\\]+\/?$/i.test(publicUrl) || !URL.canParse(publicUrl)) {
+    return false;
+  }
+  const url = new URL(publicUrl);
+  return (url.protocol === "http:" || url.protocol === "https:")
+    && url.username === ""
+    && url.password === ""
+    && (url.pathname === "" || url.pathname === "/")
+    && url.search === ""
+    && url.hash === "";
+}
+
+const warnedInvalidPublicUrls = new Set<string>();
+
+/**
+ * Resolve the full public origin advertised for a reverse-proxied remote session.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_PUBLIC_URL env var  →  config.publicUrl  →  undefined
+ *
+ * Valid values are normalized to an origin, so a trailing slash and default
+ * port do not leak into the displayed link. Invalid values warn once and fall
+ * back to urlHost or localhost at the caller.
+ */
+export function resolvePublicUrl(config: PlannotatorConfig): string | undefined {
+  const envVal = process.env.PLANNOTATOR_PUBLIC_URL;
+  const raw = envVal !== undefined ? envVal : config.publicUrl;
+  if (typeof raw !== "string") return undefined;
+  const publicUrl = raw.trim();
+  if (publicUrl === "") return undefined;
+  if (isValidPublicUrl(publicUrl)) return new URL(publicUrl).origin;
+  if (!warnedInvalidPublicUrls.has(publicUrl)) {
+    warnedInvalidPublicUrls.add(publicUrl);
+    process.stderr.write(
+      `[plannotator] Warning: invalid public URL ${JSON.stringify(publicUrl)} — expected an HTTP(S) origin with no credentials, path, query, or fragment; using the advertised host or localhost\n`,
+    );
+  }
+  return undefined;
 }
 
 // Bare hostname or IPv4: letters/digits/dots/hyphens, no leading/trailing

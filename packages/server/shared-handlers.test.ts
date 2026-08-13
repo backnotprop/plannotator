@@ -155,6 +155,7 @@ describe("handleServerReady", () => {
       (process.stderr as { write: unknown }).write = original;
     }
     expect(writes.join("")).toContain("http://localhost:19432");
+    expect(writes.join("")).toContain("forward port 19432");
   });
 
   test("does not print the URL for a local session when the browser opens", async () => {
