@@ -6,6 +6,7 @@ import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useConfigValue } from '@plannotator/ui/config';
 import { useReviewState } from '../dock/ReviewStateContext';
 import { resolveSyntaxTheme, buildLineBgOverrides } from '../hooks/usePierreTheme';
+import { buildPierreFontCSS } from '../utils/pierreFontCss';
 
 interface DiffHunkPreviewProps {
   /** Raw diff hunk string (unified diff format). */
@@ -31,11 +32,7 @@ function buildPierreCSS(
     const fg = styles.getPropertyValue('--foreground').trim();
     if (!bg || !fg) return '';
 
-    const fontCSS = (fontFamily || fontSize) ? `
-      pre, code, [data-line-content], [data-column-number] {
-        ${fontFamily ? `font-family: '${fontFamily}', monospace !important;` : ''}
-        ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
-      }` : '';
+    const fontCSS = buildPierreFontCSS(fontFamily, fontSize);
 
     return `
       :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
