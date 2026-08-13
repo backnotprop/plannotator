@@ -1,5 +1,5 @@
 /**
- * Isolated CallDiff execution and exact Git snapshot materialization.
+ * Isolated CallDiff execution over immutable review snapshots.
  *
  * CallDiff is a Node-native, synchronous Tree-sitter library. Plannotator runs
  * it in a short-lived Node 22 worker and never imports it into Bun or Pi.
@@ -30,7 +30,6 @@ import type {
   CallFlowResponse,
   ParsedCallDiffWorkerResult,
 } from "./call-flow-types";
-import { parseCommitDiffType, parseWorktreeDiffType } from "./review-core";
 
 export const CALLDIFF_VERSION = "0.4.1";
 export const CALLDIFF_COMMIT = "a3194d20ca91ef6a314273d634e9b9c0db1c2707";
@@ -68,15 +67,17 @@ const MAX_PROCESS_OUTPUT_BYTES = 12 * 1024 * 1024;
 
 export interface CallFlowAnalysisInput {
   snapshotId: string;
-  cwd: string;
-  diffType: string;
-  base: string;
   rawPatch: string;
-  vcsType?: string;
-  /** Exact hosted-PR object pair, used only with a checkout that contains both. */
-  prCommitPair?: { from: string; to: string };
+  snapshot: CallFlowSnapshotSource;
   /** Revalidate mutable review state before an ok result can enter the cache. */
   verifySnapshot?: () => Promise<boolean>;
+}
+
+export interface CallFlowSnapshotSource {
+  materialize(options: {
+    includedExtensions: readonly string[];
+    signal?: AbortSignal;
+  }): Promise<SnapshotPlan>;
 }
 
 export type CallFlowRuntime = {
@@ -112,7 +113,7 @@ interface CommandResult {
   aborted: boolean;
 }
 
-interface SnapshotPlan {
+export interface SnapshotPlan {
   cwd: string;
   from: string;
   to: string;
@@ -1034,139 +1035,6 @@ async function runCommand(
   });
 }
 
-async function git(cwd: string, args: readonly string[], input?: string): Promise<string> {
-  const result = await runCommand("git", args, { cwd, input, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 8 * 1024 * 1024 });
-  if (result.exitCode !== 0) {
-    throw new Error((result.stderr.trim() || result.stdout.trim() || `git ${args[0]} failed`).slice(0, 2_000));
-  }
-  return result.stdout.trim();
-}
-
-async function gitRaw(cwd: string, args: readonly string[]): Promise<string> {
-  const result = await runCommand("git", args, { cwd, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 64 * 1024 * 1024 });
-  if (result.exitCode !== 0) {
-    throw new Error((result.stderr.trim() || result.stdout.trim() || `git ${args[0]} failed`).slice(0, 2_000));
-  }
-  return result.stdout;
-}
-
-async function resolveCommit(cwd: string, ref: string): Promise<string> {
-  return git(cwd, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
-}
-
-async function firstParent(cwd: string, ref: string): Promise<string> {
-  try {
-    return await resolveCommit(cwd, `${ref}^`);
-  } catch {
-    throw new Error("Call flow is unavailable for a root commit because CallDiff requires two commit snapshots.");
-  }
-}
-
-async function commitIndex(cwd: string, parent: string, message: string): Promise<string> {
-  const tree = await git(cwd, ["write-tree"]);
-  const env = {
-    ...process.env,
-    GIT_AUTHOR_NAME: "Plannotator",
-    GIT_AUTHOR_EMAIL: "call-flow@plannotator.invalid",
-    GIT_COMMITTER_NAME: "Plannotator",
-    GIT_COMMITTER_EMAIL: "call-flow@plannotator.invalid",
-  };
-  const result = await runCommand("git", ["commit-tree", tree, "-p", parent, "-m", message], {
-    cwd,
-    env,
-    timeoutMs: GIT_TIMEOUT_MS,
-  });
-  if (result.exitCode !== 0) throw new Error(result.stderr.trim() || "git commit-tree failed");
-  return result.stdout.trim();
-}
-
-async function applyPatchToIndex(cwd: string, patch: string): Promise<void> {
-  if (!patch.trim()) return;
-  const normalizedPatch = patch.endsWith("\n") ? patch : `${patch}\n`;
-  await git(cwd, ["apply", "--cached", "--binary", "--recount", "--whitespace=nowarn", "-"], normalizedPatch);
-}
-
-async function createSyntheticPlan(
-  sourceCwd: string,
-  baseCommit: string,
-  patches: readonly string[],
-): Promise<SnapshotPlan> {
-  const tempRoot = await mkdtemp(join(tmpdir(), "plannotator-call-flow-"));
-  const cloneCwd = join(tempRoot, "repo");
-  const cleanup = () => removeDirectoryBestEffort(tempRoot);
-  try {
-    await git(sourceCwd, ["clone", "--shared", "--no-checkout", "--quiet", "--", sourceCwd, cloneCwd]);
-    await git(cloneCwd, ["read-tree", baseCommit]);
-    let parent = baseCommit;
-    const commits: string[] = [];
-    for (let index = 0; index < patches.length; index += 1) {
-      await applyPatchToIndex(cloneCwd, patches[index]);
-      parent = await commitIndex(cloneCwd, parent, `Plannotator call-flow snapshot ${index + 1}`);
-      commits.push(parent);
-    }
-    return {
-      cwd: cloneCwd,
-      from: commits.length > 1 ? commits[commits.length - 2] : baseCommit,
-      to: commits[commits.length - 1] ?? baseCommit,
-      cleanup,
-    };
-  } catch (error) {
-    cleanup();
-    throw error;
-  }
-}
-
-/** Map the visible review mode to the exact two immutable commits CallDiff needs. */
-export async function createCallFlowSnapshotPlan(input: CallFlowAnalysisInput): Promise<SnapshotPlan> {
-  if (input.vcsType && input.vcsType !== "git") {
-    throw new Error(`Call flow does not yet support ${input.vcsType} reviews.`);
-  }
-  if (input.prCommitPair) {
-    return {
-      cwd: input.cwd,
-      from: await resolveCommit(input.cwd, input.prCommitPair.from),
-      to: await resolveCommit(input.cwd, input.prCommitPair.to),
-      cleanup: () => {},
-    };
-  }
-
-  const worktree = parseWorktreeDiffType(input.diffType);
-  const cwd = worktree?.path ?? input.cwd;
-  const diffType = worktree?.subType ?? input.diffType;
-  const commit = parseCommitDiffType(diffType);
-  if (commit) {
-    const to = await resolveCommit(cwd, commit.sha);
-    return { cwd, from: await firstParent(cwd, to), to, cleanup: () => {} };
-  }
-
-  if (diffType === "last-commit") {
-    const to = await resolveCommit(cwd, "HEAD");
-    return { cwd, from: await firstParent(cwd, to), to, cleanup: () => {} };
-  }
-  if (diffType === "branch") {
-    return { cwd, from: await resolveCommit(cwd, input.base), to: await resolveCommit(cwd, "HEAD"), cleanup: () => {} };
-  }
-  if (diffType === "merge-base") {
-    const from = await git(cwd, ["merge-base", "--", input.base, "HEAD"]);
-    return { cwd, from, to: await resolveCommit(cwd, "HEAD"), cleanup: () => {} };
-  }
-  if (diffType === "all") {
-    throw new Error("Call flow is unavailable for the All Files snapshot because it has no commit baseline.");
-  }
-  if (diffType === "since-base") {
-    const mergeBase = await git(cwd, ["merge-base", "--", input.base, "HEAD"]);
-    return createSyntheticPlan(cwd, mergeBase, [input.rawPatch]);
-  }
-  if (diffType === "uncommitted" || diffType === "staged") {
-    return createSyntheticPlan(cwd, await resolveCommit(cwd, "HEAD"), [input.rawPatch]);
-  }
-  if (diffType === "unstaged") {
-    const stagedPatch = await git(cwd, ["diff", "--cached", "--binary", "--full-index", "--no-ext-diff"]);
-    return createSyntheticPlan(cwd, await resolveCommit(cwd, "HEAD"), [stagedPatch, input.rawPatch]);
-  }
-  throw new Error(`Call flow does not yet support the ${diffType} review mode.`);
-}
-
 function grammarChecksForLanguages(runtime: CallFlowRuntime, ids: readonly CallFlowLanguageId[]): Array<{
   packageJson: string;
   version: string;
@@ -1283,6 +1151,14 @@ async function executeWorker(
   return parseCallDiffWorkerResult(parsed);
 }
 
+async function gitRaw(cwd: string, args: readonly string[]): Promise<string> {
+  const result = await runCommand("git", args, { cwd, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 64 * 1024 * 1024 });
+  if (result.exitCode !== 0) {
+    throw new Error((result.stderr.trim() || result.stdout.trim() || `git ${args[0]} failed`).slice(0, 2_000));
+  }
+  return result.stdout;
+}
+
 async function snapshotPathsForLanguages(
   plan: SnapshotPlan,
   languageIds: ReadonlySet<CallFlowLanguageId>,
@@ -1305,12 +1181,13 @@ async function executeCallFlowAnalysis(
 ): Promise<ParsedCallDiffWorkerResult> {
   let plan: SnapshotPlan | undefined;
   try {
-    plan = await createCallFlowSnapshotPlan(input);
-    if (signal.aborted) throw new Error("Call-flow analysis was superseded by a newer review snapshot.");
     const installed = new Set(runtime.installedLanguageIds);
     const analyzedLanguageIds = getCallFlowPatchLanguageUsage(input.rawPatch)
       .map(({ language }) => language.id)
       .filter((id) => installed.has(id));
+    const includedExtensions = analyzedLanguageIds.flatMap((id) => getCallFlowLanguage(id).extensions);
+    plan = await input.snapshot.materialize({ includedExtensions, signal });
+    if (signal.aborted) throw new Error("Call-flow analysis was superseded by a newer review snapshot.");
     if (analyzedLanguageIds.length === 0) {
       return {
         version: runtime.version,
@@ -1374,23 +1251,11 @@ export class CallFlowService {
   }
 
   private analysisKey(input: CallFlowAnalysisInput): string {
-    const pair = input.prCommitPair ? `${input.prCommitPair.from}:${input.prCommitPair.to}` : "";
-    return [input.snapshotId, input.cwd, input.diffType, input.base, pair].join("\0");
+    return input.snapshotId;
   }
 
-  async getAdvert(enabled: boolean, input?: Pick<CallFlowAnalysisInput, "vcsType" | "diffType" | "rawPatch">): Promise<CallFlowAdvert> {
-    if (input?.vcsType && input.vcsType !== "git") {
-      return {
-        enabled,
-        available: false,
-        state: enabled ? "unsupported" : "disabled",
-        provider: "calldiff",
-        reason: "vcs-unsupported",
-        message: `Call flow does not yet support ${input.vcsType} reviews.`,
-      };
-    }
-    const effective = parseWorktreeDiffType(input?.diffType ?? "")?.subType ?? input?.diffType;
-    if (effective === "all" || effective?.startsWith("jj-") || effective?.startsWith("gitbutler:") || effective?.startsWith("p4-")) {
+  async getAdvert(enabled: boolean, input?: { snapshotSupported: boolean; rawPatch: string }): Promise<CallFlowAdvert> {
+    if (input && !input.snapshotSupported) {
       return {
         enabled,
         available: false,

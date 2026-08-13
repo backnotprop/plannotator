@@ -43,7 +43,6 @@ import {
 	type SinceBaseSections,
 	detectRemoteDefaultInfo,
 	getFileContentsForDiff as getFileContentsForDiffCore,
-	getGitCallFlowMaterializationPatch,
 	getSinceBaseSections,
 	isBinaryPatchFile,
 	isSameCwdCommitSwitch,
@@ -176,10 +175,12 @@ import {
 	getVcsFileContentsForDiff,
 	resolveVcsCwd,
 	reviewRuntime,
+	materializeVcsSnapshot,
 	runVcsDiff,
 	stageFile,
 	unstageFile,
 	vcsOwnsDiffType,
+	vcsSupportsSnapshot,
 } from "./vcs.ts";
 
 const piCodeNavRuntime: CodeNavRuntime = {
@@ -929,8 +930,7 @@ export async function startReviewServer(options: {
 		enabled = callFlowEnabled(),
 	) {
 		return callFlowService.getAdvert(enabled, {
-			vcsType: workspace ? "workspace" : sessionVcsType,
-			diffType,
+			snapshotSupported: !workspace && (isPRMode || vcsSupportsSnapshot(sessionVcsType ?? "git", diffType)),
 			rawPatch: currentPatch,
 		});
 	}
@@ -988,20 +988,21 @@ export async function startReviewServer(options: {
 		if (requestedSnapshot !== currentSnapshotId() || (baseline && before && baseline !== before)) {
 			return { status: "stale", reason: "snapshot-stale", message: "The files changed before call flow could start. Refresh the review first." };
 		}
-		const materializationPatch = await getGitCallFlowMaterializationPatch(
-			reviewRuntime,
-			analysisDiffType as DiffType,
-			analysisBase,
-			analysisCwd,
-		);
+		const analysisVcsType = isPRMode ? "git" : sessionVcsType ?? "git";
 		return callFlowService.analyze({
 			snapshotId: requestedSnapshot,
-			cwd: analysisCwd,
-			diffType: analysisDiffType,
-			base: analysisBase,
-			rawPatch: materializationPatch ?? currentPatch,
-			vcsType: isPRMode ? "git" : sessionVcsType,
-			...(prCommitPair ? { prCommitPair } : {}),
+			rawPatch: currentPatch,
+			snapshot: {
+				materialize: ({ includedExtensions, signal }) => materializeVcsSnapshot(analysisVcsType, {
+					cwd: analysisCwd,
+					diffType: analysisDiffType as DiffType,
+					base: analysisBase,
+					rawPatch: currentPatch,
+					includedExtensions,
+					...(prCommitPair ? { prCommitPair } : {}),
+					signal,
+				}),
+			},
 			verifySnapshot: async () => {
 				const after = await computeDiffFingerprint();
 				return requestedSnapshot === currentSnapshotId() && !(before && after && before !== after);

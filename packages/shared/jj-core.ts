@@ -77,6 +77,34 @@ export async function getJjContext(
   };
 }
 
+export function isJjSnapshotDiffType(diffType: string): boolean {
+  return diffType === "jj-current"
+    || diffType === "jj-last"
+    || diffType === "jj-line"
+    || diffType === "jj-evolog";
+}
+
+export function getJjSnapshotRevsets(
+  diffType: DiffType,
+  compareTarget: string,
+): { from: string; to: string } | null {
+  switch (diffType) {
+    case "jj-current":
+      return { from: "@-", to: "@" };
+    case "jj-last":
+      return { from: "parents(@-)", to: "@-" };
+    case "jj-line":
+      return {
+        from: jjLineBaseRevset(compareTarget.length > 0 ? compareTarget : JJ_TRUNK_REVSET),
+        to: "@",
+      };
+    case "jj-evolog":
+      return compareTarget.length > 0 ? { from: compareTarget, to: "@" } : null;
+    default:
+      return null;
+  }
+}
+
 export async function runJjDiff(
   runtime: ReviewJjRuntime,
   diffType: DiffType,

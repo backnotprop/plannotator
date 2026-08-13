@@ -164,7 +164,7 @@ export const gitButlerRuntime: ReviewGitButlerRuntime = {
 };
 
 const api = createVcsApi([
-	createJjProvider(jjRuntime),
+	createJjProvider(jjRuntime, reviewRuntime),
 	createGitButlerProvider(gitButlerRuntime),
 	createGitProvider(reviewRuntime),
 ]);
@@ -183,6 +183,8 @@ export const {
 	stageFile,
 	unstageFile,
 	resolveVcsCwd,
+	vcsSupportsSnapshot,
+	materializeVcsSnapshot,
 } = api;
 
 export { resolveInitialDiffType };

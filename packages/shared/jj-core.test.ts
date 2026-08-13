@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  getJjSnapshotRevsets,
   getJjDiffArgs,
   getJjEvoLogEntries,
   jjLineBaseRevset,
@@ -11,6 +12,21 @@ import {
 } from "./jj-core";
 
 describe("jj diff args", () => {
+  test("maps Call flow modes to the revsets used by each visible Jujutsu diff", () => {
+    expect(getJjSnapshotRevsets("jj-current", "trunk()"))
+      .toEqual({ from: "@-", to: "@" });
+    expect(getJjSnapshotRevsets("jj-last", "trunk()"))
+      .toEqual({ from: "parents(@-)", to: "@-" });
+    expect(getJjSnapshotRevsets("jj-line", "trunk()"))
+      .toEqual({ from: "heads(::@ & ::(trunk()))", to: "@" });
+    expect(getJjSnapshotRevsets("jj-evolog", "abc123456789"))
+      .toEqual({ from: "abc123456789", to: "@" });
+    expect(getJjSnapshotRevsets("jj-evolog", ""))
+      .toBeNull();
+    expect(getJjSnapshotRevsets("jj-all", "trunk()"))
+      .toBeNull();
+  });
+
   test("builds git-format diff args for each jj mode", () => {
     expect(getJjDiffArgs("jj-current", "trunk()")).toEqual({
       args: ["diff", "--git", "-r", "@"],

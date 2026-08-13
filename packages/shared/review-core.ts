@@ -1285,14 +1285,14 @@ export async function getWorkingTreeDiffFromBase(
 }
 
 /**
- * Build the exact, applyable patch used only to materialize CallDiff snapshots.
+ * Build the exact, applyable patch used to materialize immutable analysis snapshots.
  *
  * The ordinary review patch remains bounded and human-readable. This separate
  * machine patch includes Git binary payloads and full object ids so a binary
  * file elsewhere in the review cannot make `git apply --binary` reject the
  * synthetic snapshot.
  */
-export async function getGitCallFlowMaterializationPatch(
+export async function getGitSnapshotMaterializationPatch(
   runtime: ReviewGitRuntime,
   diffType: DiffType,
   defaultBranch: string = "main",
@@ -1302,7 +1302,7 @@ export async function getGitCallFlowMaterializationPatch(
   let effectiveDiffType = diffType as string;
   const worktree = parseWorktreeDiffType(effectiveDiffType);
   if (effectiveDiffType.startsWith("worktree:")) {
-    if (!worktree) throw new Error("Could not parse the worktree call-flow snapshot.");
+    if (!worktree) throw new Error("Could not parse the worktree snapshot.");
     cwd = worktree.path;
     effectiveDiffType = worktree.subType;
   }

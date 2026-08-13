@@ -8,18 +8,24 @@ import {
   getFileContentsForDiff as getGitFileContentsForDiff,
   getGitContext,
   getGitDiffFingerprint,
+  getGitSnapshotMaterializationPatch,
   gitAddFile,
   gitResetFile,
   parseWorktreeDiffType,
   runGitDiff,
 } from "./review-core";
-import { isAbsolute, relative, resolve } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { rmSync } from "node:fs";
 import {
   type ReviewJjRuntime,
   detectJjWorkspace,
   getJjContext,
+  getJjSnapshotRevsets,
   getJjDiffFingerprint,
   getJjFileContentsForDiff,
+  isJjSnapshotDiffType,
   runJjDiff,
 } from "./jj-core";
 import {
@@ -78,6 +84,25 @@ export interface VcsProvider {
   unstageFile?(filePath: string, cwd?: string): Promise<void>;
   resolveCwd?(diffType: string, fallbackCwd?: string): string | undefined;
   detectRemoteDefaultCompareTarget?(cwd?: string): Promise<string | null>;
+  supportsSnapshot?(diffType: string): boolean;
+  materializeSnapshot?(options: VcsSnapshotOptions): Promise<VcsSnapshot>;
+}
+
+export interface VcsSnapshotOptions {
+  diffType: DiffType;
+  base: string;
+  cwd: string;
+  rawPatch: string;
+  includedExtensions: readonly string[];
+  prCommitPair?: { from: string; to: string };
+  signal?: AbortSignal;
+}
+
+export interface VcsSnapshot {
+  cwd: string;
+  from: string;
+  to: string;
+  cleanup(): void;
 }
 
 export type VcsSelection = "auto" | "git" | "gitbutler" | "jj" | "p4";
@@ -114,6 +139,11 @@ export interface VcsApi {
   stageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   resolveVcsCwd(diffType: string, fallbackCwd?: string): string | undefined;
+  vcsSupportsSnapshot(vcsType: Exclude<VcsSelection, "auto">, diffType: string): boolean;
+  materializeVcsSnapshot(
+    vcsType: Exclude<VcsSelection, "auto">,
+    options: VcsSnapshotOptions,
+  ): Promise<VcsSnapshot>;
 }
 
 export interface PrepareLocalReviewDiffOptions {
@@ -237,10 +267,16 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       const parsed = parseWorktreeDiffType(diffType);
       return parsed?.path ?? fallbackCwd;
     },
+
+    supportsSnapshot: supportsGitSnapshot,
+
+    materializeSnapshot(options: VcsSnapshotOptions): Promise<VcsSnapshot> {
+      return materializeGitSnapshot(runtime, options);
+    },
   };
 }
 
-export function createJjProvider(runtime: ReviewJjRuntime): VcsProvider {
+export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGitRuntime): VcsProvider {
   return {
     id: "jj",
 
@@ -270,6 +306,12 @@ export function createJjProvider(runtime: ReviewJjRuntime): VcsProvider {
 
     getDiffFingerprint(diffType, defaultBranch, cwd?) {
       return getJjDiffFingerprint(runtime, diffType, defaultBranch, cwd);
+    },
+
+    supportsSnapshot: isJjSnapshotDiffType,
+
+    materializeSnapshot(options: VcsSnapshotOptions): Promise<VcsSnapshot> {
+      return materializeJjSnapshot(runtime, gitRuntime, options);
     },
   };
 }
@@ -555,6 +597,21 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       const provider = getProviderForDiffType(diffType);
       return provider?.resolveCwd?.(diffType, fallbackCwd) ?? fallbackCwd;
     },
+
+    vcsSupportsSnapshot(vcsType: Exclude<VcsSelection, "auto">, diffType: string): boolean {
+      return getProviderById(vcsType)?.supportsSnapshot?.(diffType) ?? false;
+    },
+
+    async materializeVcsSnapshot(
+      vcsType: Exclude<VcsSelection, "auto">,
+      options: VcsSnapshotOptions,
+    ): Promise<VcsSnapshot> {
+      const provider = getProviderById(vcsType);
+      if (!provider?.materializeSnapshot || (!options.prCommitPair && !(provider.supportsSnapshot?.(options.diffType) ?? false))) {
+        throw new Error(`Snapshot materialization does not support the ${options.diffType} ${formatVcsName(vcsType)} review mode.`);
+      }
+      return provider.materializeSnapshot(options);
+    },
   };
 }
 
@@ -575,3 +632,210 @@ export function resolveInitialDiffType(
   const fallback = gitContext.diffOptions[0]?.id;
   return fallback ? fallback as DiffType : configuredDiffType;
 }
+
+const SNAPSHOT_TIMEOUT_MS = 20_000;
+const MAX_JJ_SNAPSHOT_PATCH_BYTES = 64 * 1024 * 1024;
+
+async function git(runtime: ReviewGitRuntime, cwd: string, args: string[], stdin?: string): Promise<string> {
+  const result = await runtime.runGit(args, { cwd, stdin, timeoutMs: SNAPSHOT_TIMEOUT_MS });
+  if (result.exitCode !== 0) {
+    throw new Error((result.stderr.trim() || result.stdout.trim() || `git ${args[0]} failed`).slice(0, 2_000));
+  }
+  return result.stdout.trim();
+}
+
+async function resolveCommit(runtime: ReviewGitRuntime, cwd: string, ref: string): Promise<string> {
+  return git(runtime, cwd, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
+}
+
+async function firstParent(runtime: ReviewGitRuntime, cwd: string, ref: string): Promise<string> {
+  try {
+    return await resolveCommit(runtime, cwd, `${ref}^`);
+  } catch {
+    throw new Error("Snapshot materialization requires a commit with a parent.");
+  }
+}
+
+async function commitIndex(
+  runtime: ReviewGitRuntime,
+  cwd: string,
+  parent: string | undefined,
+  message: string,
+): Promise<string> {
+  const tree = await git(runtime, cwd, ["write-tree"]);
+  return git(runtime, cwd, [
+    "-c", "user.name=Plannotator",
+    "-c", "user.email=snapshot@plannotator.invalid",
+    "commit-tree", tree,
+    ...(parent ? ["-p", parent] : []),
+    "-m", message,
+  ]);
+}
+
+async function applyPatchToIndex(runtime: ReviewGitRuntime, cwd: string, patch: string): Promise<void> {
+  if (!patch.trim()) return;
+  const normalizedPatch = patch.endsWith("\n") ? patch : `${patch}\n`;
+  await git(runtime, cwd, ["apply", "--cached", "--binary", "--recount", "--whitespace=nowarn", "-"], normalizedPatch);
+}
+
+function removeDirectoryBestEffort(path: string): void {
+  try {
+    rmSync(path, { recursive: true, force: true });
+  } catch {
+    // Snapshot cleanup must never replace the caller-visible analysis result.
+  }
+}
+
+async function createSyntheticSnapshot(
+  runtime: ReviewGitRuntime,
+  sourceCwd: string,
+  baseCommit: string,
+  patches: readonly string[],
+): Promise<VcsSnapshot> {
+  const tempRoot = await mkdtemp(join(tmpdir(), "plannotator-review-snapshot-"));
+  const snapshotCwd = join(tempRoot, "repo");
+  const cleanup = () => removeDirectoryBestEffort(tempRoot);
+  try {
+    await git(runtime, sourceCwd, ["clone", "--shared", "--no-checkout", "--quiet", "--", sourceCwd, snapshotCwd]);
+    await git(runtime, snapshotCwd, ["read-tree", baseCommit]);
+    let parent = baseCommit;
+    const commits: string[] = [];
+    for (let index = 0; index < patches.length; index += 1) {
+      await applyPatchToIndex(runtime, snapshotCwd, patches[index]);
+      parent = await commitIndex(runtime, snapshotCwd, parent, `Plannotator review snapshot ${index + 1}`);
+      commits.push(parent);
+    }
+    return {
+      cwd: snapshotCwd,
+      from: commits.length > 1 ? commits[commits.length - 2] : baseCommit,
+      to: commits[commits.length - 1] ?? baseCommit,
+      cleanup,
+    };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+function supportsGitSnapshot(diffType: string): boolean {
+  const effective = parseWorktreeDiffType(diffType)?.subType ?? diffType;
+  return effective !== "all" && (
+    effective === "since-base"
+    || effective === "uncommitted"
+    || effective === "staged"
+    || effective === "unstaged"
+    || effective === "branch"
+    || effective === "merge-base"
+    || effective === "last-commit"
+    || effective.startsWith("commit:")
+  );
+}
+
+async function materializeGitSnapshot(
+  runtime: ReviewGitRuntime,
+  options: VcsSnapshotOptions,
+): Promise<VcsSnapshot> {
+  if (options.prCommitPair) {
+    return {
+      cwd: options.cwd,
+      from: await resolveCommit(runtime, options.cwd, options.prCommitPair.from),
+      to: await resolveCommit(runtime, options.cwd, options.prCommitPair.to),
+      cleanup: () => {},
+    };
+  }
+
+  const worktree = parseWorktreeDiffType(options.diffType);
+  const cwd = worktree?.path ?? options.cwd;
+  const diffType = worktree?.subType ?? options.diffType;
+  const commit = diffType.startsWith("commit:") ? diffType.slice("commit:".length) : null;
+  if (commit) {
+    const to = await resolveCommit(runtime, cwd, commit);
+    return { cwd, from: await firstParent(runtime, cwd, to), to, cleanup: () => {} };
+  }
+  if (diffType === "last-commit") {
+    const to = await resolveCommit(runtime, cwd, "HEAD");
+    return { cwd, from: await firstParent(runtime, cwd, to), to, cleanup: () => {} };
+  }
+  if (diffType === "branch") {
+    return {
+      cwd,
+      from: await resolveCommit(runtime, cwd, options.base),
+      to: await resolveCommit(runtime, cwd, "HEAD"),
+      cleanup: () => {},
+    };
+  }
+  if (diffType === "merge-base") {
+    const from = await git(runtime, cwd, ["merge-base", "--", options.base, "HEAD"]);
+    return { cwd, from, to: await resolveCommit(runtime, cwd, "HEAD"), cleanup: () => {} };
+  }
+  if (!supportsGitSnapshot(diffType)) {
+    throw new Error(`Snapshot materialization does not support the ${diffType} review mode.`);
+  }
+
+  const patch = await getGitSnapshotMaterializationPatch(runtime, diffType as DiffType, options.base, cwd) ?? options.rawPatch;
+  if (diffType === "since-base") {
+    const mergeBase = await git(runtime, cwd, ["merge-base", "--", options.base, "HEAD"]);
+    return createSyntheticSnapshot(runtime, cwd, mergeBase, [patch]);
+  }
+  const head = await resolveCommit(runtime, cwd, "HEAD");
+  if (diffType === "uncommitted" || diffType === "staged") {
+    return createSyntheticSnapshot(runtime, cwd, head, [patch]);
+  }
+  const stagedPatch = await git(runtime, cwd, ["diff", "--cached", "--binary", "--full-index", "--no-ext-diff"]);
+  return createSyntheticSnapshot(runtime, cwd, head, [stagedPatch, patch]);
+}
+
+async function materializeJjSnapshot(
+  jjRuntime: ReviewJjRuntime,
+  gitRuntime: ReviewGitRuntime,
+  options: VcsSnapshotOptions,
+): Promise<VcsSnapshot> {
+  const revsets = getJjSnapshotRevsets(options.diffType, options.base);
+  if (!revsets) throw new Error(`Snapshot materialization does not support the ${options.diffType} Jujutsu review mode.`);
+
+  const tempRoot = await mkdtemp(join(tmpdir(), "plannotator-review-jj-snapshot-"));
+  const snapshotCwd = join(tempRoot, "repo");
+  const cleanup = () => removeDirectoryBestEffort(tempRoot);
+  try {
+    await git(gitRuntime, tempRoot, ["init", "--quiet", "--", snapshotCwd]);
+    const emptyCommit = await commitIndex(gitRuntime, snapshotCwd, undefined, "Plannotator review empty snapshot");
+    const filesets = options.includedExtensions.map((extension) => `glob-i:\"**/*${extension}\"`);
+    const snapshots: string[] = [];
+
+    for (const revset of [revsets.from, revsets.to]) {
+      if (options.signal?.aborted) throw new Error("Snapshot materialization was superseded by a newer review snapshot.");
+      let patch = "";
+      if (filesets.length > 0) {
+        const result = await jjRuntime.runJj([
+          "--ignore-working-copy",
+          "diff",
+          "--git",
+          "--from",
+          "root()",
+          "--to",
+          revset,
+          ...filesets,
+        ], { cwd: options.cwd, timeoutMs: SNAPSHOT_TIMEOUT_MS });
+        if (result.exitCode !== 0) {
+          throw new Error((result.stderr.trim() || "Jujutsu diff failed.").slice(0, 2_000));
+        }
+        if (Buffer.byteLength(result.stdout, "utf8") > MAX_JJ_SNAPSHOT_PATCH_BYTES) {
+          throw new Error("Jujutsu snapshot exceeded the 64 MB materialization limit.");
+        }
+        patch = result.stdout
+          .split(/(?=^diff --git )/m)
+          .filter((chunk) => !/^Binary files /m.test(chunk))
+          .join("");
+      }
+      await git(gitRuntime, snapshotCwd, ["read-tree", "--empty"]);
+      await applyPatchToIndex(gitRuntime, snapshotCwd, patch);
+      snapshots.push(await commitIndex(gitRuntime, snapshotCwd, emptyCommit, "Plannotator review Jujutsu snapshot"));
+    }
+
+    return { cwd: snapshotCwd, from: snapshots[0], to: snapshots[1], cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+

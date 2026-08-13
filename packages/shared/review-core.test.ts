@@ -21,7 +21,7 @@ import {
   detectRemoteDefaultInfo,
   getDefaultBranch,
   getFileContentsForDiff,
-  getGitCallFlowMaterializationPatch,
+  getGitSnapshotMaterializationPatch,
   getGitContext,
   getGitDiffFingerprint,
   getWorkingTreeDiffFromBase,
@@ -424,7 +424,7 @@ describe("review-core", () => {
     writeFileSync(join(repoDir, "new-logo.png"), Buffer.from([0, 5, 6, 0, 7]));
 
     const visible = await runGitDiff(runtime, "uncommitted", "main");
-    const materialization = await getGitCallFlowMaterializationPatch(
+    const materialization = await getGitSnapshotMaterializationPatch(
       runtime,
       "uncommitted",
       "main",
