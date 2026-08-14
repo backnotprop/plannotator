@@ -76,6 +76,46 @@ describe("executeSubmitPlan", () => {
     expect(result).toBe("Plan approved!");
   });
 
+  // #493 delivery guard: OpenCode's approval channel is the returned tool
+  // result, so an approval reported without version control must carry the note
+  // ON that text — and a normal repo approval must stay byte-identical.
+  test("appends the no-version-control note to approved text only when reported", async () => {
+    prepareDataDir();
+    const invocation = {
+      edits: [{ start: 1, content: "# Approved" }],
+      invokingAgent: "plan",
+      sessionId: "session-no-vcs",
+      directory: "/workspace/example",
+      workflowOptions: normalizeWorkflowOptions(undefined),
+    };
+    const host = {
+      resolveTargetAgent: async () => undefined,
+      sendApprovalHandoff: async () => {},
+    };
+
+    const withoutVcs = await executeSubmitPlan(invocation, {
+      ...host,
+      reviewPlan: async () => ({ approved: true, noVcs: true }),
+    });
+    expect(withoutVcs).toContain("Plan approved!");
+    expect(withoutVcs).toContain("No version control detected");
+
+    prepareDataDir();
+    const withVcs = await executeSubmitPlan(invocation, {
+      ...host,
+      reviewPlan: async () => ({ approved: true }),
+    });
+    expect(withVcs).toBe("Plan approved!");
+
+    // Denials keep their existing shape even when no VCS was detected.
+    prepareDataDir();
+    const denied = await executeSubmitPlan(invocation, {
+      ...host,
+      reviewPlan: async () => ({ approved: false, feedback: "Add tests", noVcs: true }),
+    });
+    expect(denied).not.toContain("No version control detected");
+  });
+
   test("preserves backing state when review startup fails", async () => {
     prepareDataDir();
 

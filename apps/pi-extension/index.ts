@@ -33,6 +33,10 @@ import {
 } from "./generated/checklist.ts";
 import { loadConfig, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
+import {
+	appendNoVcsApprovalNote,
+	resolveNoVcsApprovalNote,
+} from "./generated/no-vcs-note.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
 import {
 	hasPlanBrowserHtml,
@@ -81,6 +85,17 @@ import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 type PlannotatorPromptsModule = typeof import("./generated/prompts.ts");
 
 let promptsModulePromise: Promise<PlannotatorPromptsModule> | undefined;
+
+/**
+ * #493: is `cwd` under version control? Loaded lazily so the plan-review path
+ * pays for Pi's VCS runtime only when an approval actually needs the probe.
+ * Throwing is fine: resolveNoVcsApprovalNote() reads any failure as "version
+ * control is present" and stays silent.
+ */
+async function detectVcsPresent(cwd: string): Promise<boolean> {
+	const { detectManagedVcs } = await import("./server/vcs.ts");
+	return (await detectManagedVcs(cwd)) !== null;
+}
 
 function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
 	if (!promptsModulePromise) {
@@ -1187,17 +1202,27 @@ export default function plannotator(pi: ExtensionAPI): void {
 						? `After completing each step, include [DONE:n] in your response where n is the step number.`
 						: "";
 
+				// #493: Pi delivers approval text as this tool result, so the
+				// no-version-control note rides whichever approval prompt is sent.
+				const noVcsNote = await resolveNoVcsApprovalNote({
+					approved: true,
+					detectVcsPresent: () => detectVcsPresent(ctx.cwd),
+				});
+
 				if (result.feedback) {
 					const { getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
 					return {
 						content: [
 							{
 								type: "text",
-								text: getPlanApprovedWithNotesPrompt("pi", loadConfig(), {
-									planFilePath: inputPath,
-									doneMsg,
-									feedback: result.feedback,
-								}),
+								text: appendNoVcsApprovalNote(
+									getPlanApprovedWithNotesPrompt("pi", loadConfig(), {
+										planFilePath: inputPath,
+										doneMsg,
+										feedback: result.feedback,
+									}),
+									noVcsNote,
+								),
 							},
 						],
 						details: { approved: true, feedback: result.feedback },
@@ -1210,10 +1235,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: getPlanApprovedPrompt("pi", loadConfig(), {
-								planFilePath: inputPath,
-								doneMsg,
-							}),
+							text: appendNoVcsApprovalNote(
+								getPlanApprovedPrompt("pi", loadConfig(), {
+									planFilePath: inputPath,
+									doneMsg,
+								}),
+								noVcsNote,
+							),
 						},
 					],
 					details: { approved: true },

@@ -89,6 +89,10 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
+import {
+  appendNoVcsApprovalNote,
+  resolveNoVcsApprovalNote,
+} from "@plannotator/shared/no-vcs-note";
 import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import {
@@ -565,6 +569,20 @@ function makeOpenCodeBridgeClient(agents: unknown) {
       agents: async () => ({ data }),
     },
   };
+}
+
+/**
+ * Resolve the #493 "no version control" note for an approved plan, using the
+ * CLI's own provider set (git, jj, GitButler, p4). Detection runs only for an
+ * approval and never throws: `detectManagedVcs` rejecting is treated as
+ * "version control is present", so a broken probe stays silent.
+ */
+function getPlanApprovalVcsNote(approved: boolean, cwd?: string): Promise<string> {
+  return resolveNoVcsApprovalNote({
+    approved,
+    detectVcsPresent: async () =>
+      (await detectManagedVcs(cwd ?? process.env.PLANNOTATOR_CWD ?? process.cwd())) !== null,
+  });
 }
 
 function emitOpenCodeAnnotateOutcome(result: {
@@ -1621,11 +1639,16 @@ if (args[0] === "sessions") {
     await server.stop();
   }
 
+  // The OpenCode plugin builds the agent-facing approval text itself, so this
+  // bridge only reports the fact (#493); the plugin decides where it lands.
+  const bridgeNoVcs = !!(await getPlanApprovalVcsNote(result.approved, process.cwd()));
+
   console.log(JSON.stringify({
     approved: result.approved,
     ...(result.feedback && { feedback: result.feedback }),
     ...(result.savedPath && { savedPath: result.savedPath }),
     ...(result.agentSwitch && { agentSwitch: result.agentSwitch }),
+    ...(bridgeNoVcs && { noVcs: true }),
   }));
   process.exit(0);
 
@@ -2225,10 +2248,15 @@ if (args[0] === "sessions") {
   // Cleanup
   server.stop();
 
+  // #493: only an approval in a directory without version control adds a note.
+  const noVcsNote = await getPlanApprovalVcsNote(result.approved);
+
   // Output decision in the appropriate format for the harness
   if (isGemini) {
     if (result.approved) {
-      console.log(result.feedback ? JSON.stringify({ systemMessage: result.feedback }) : "{}");
+      // Gemini delivers approval text on `systemMessage`; the note rides it.
+      const systemMessage = appendNoVcsApprovalNote(result.feedback || "", noVcsNote);
+      console.log(systemMessage ? JSON.stringify({ systemMessage }) : "{}");
     } else {
       console.log(
         JSON.stringify({
@@ -2253,6 +2281,21 @@ if (args[0] === "sessions") {
         });
       }
 
+      // #493: Claude Code's PermissionRequest allow decision accepts only
+      // `updatedInput` and `updatedPermissions` (verified against the CLI's own
+      // hook-output schema) — there is no `message` on allow, and no
+      // `additionalContext` on this hook event. `updatedInput.plan` is the one
+      // allow-side field the model reads back, so the note rides the plan the
+      // agent is about to execute. Anything unexpected in tool_input is passed
+      // through untouched.
+      const updatedInput =
+        noVcsNote && typeof event.tool_input?.plan === "string"
+          ? {
+              ...event.tool_input,
+              plan: appendNoVcsApprovalNote(event.tool_input.plan, noVcsNote),
+            }
+          : event.tool_input;
+
       console.log(
         JSON.stringify({
           hookSpecificOutput: {
@@ -2263,7 +2306,7 @@ if (args[0] === "sessions") {
               // >= 2.1.199 silently drops an allow decision for ExitPlanMode
               // (a tool requiring user interaction) when updatedInput is
               // absent, falling back to the built-in approval dialog.
-              updatedInput: event.tool_input,
+              updatedInput,
               ...(updatedPermissions.length > 0 && { updatedPermissions }),
             },
           },

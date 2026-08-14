@@ -8,6 +8,10 @@ import {
 } from "@plannotator/shared/prompts";
 import { sanitizeTag } from "@plannotator/shared/project";
 import {
+  appendNoVcsApprovalNote,
+  resolveNoVcsApprovalNote,
+} from "@plannotator/shared/no-vcs-note";
+import {
   applyEdits,
   formatWithLineNumbers,
   getPlanBackingPath,
@@ -27,6 +31,11 @@ export interface SubmitPlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  /**
+   * #493: the review ran in a directory no VCS provider claims. Set by the
+   * review producer (embedded runtime or CLI bridge), which owns detection.
+   */
+  noVcs?: boolean;
 }
 
 export interface SubmitPlanInvocation {
@@ -147,19 +156,26 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
     }
   }
 
+  // #493: OpenCode's approval channel is this returned tool result, so the
+  // no-version-control note is appended to whichever approval text is sent.
+  const noVcsNote = await resolveNoVcsApprovalNote({
+    approved: true,
+    detectVcsPresent: () => !reviewResult.noVcs,
+  });
+
   if (reviewResult.feedback) {
-    return getPlanApprovedWithNotesPrompt("opencode", undefined, {
+    return appendNoVcsApprovalNote(getPlanApprovedWithNotesPrompt("opencode", undefined, {
       planFilePath: backingPath,
       doneMsg: reviewResult.savedPath ? `Saved to: ${reviewResult.savedPath}` : "",
       feedback: reviewResult.feedback,
       proceedSuffix: shouldStartImplementation
         ? "\n\nProceed with implementation, incorporating these notes where applicable."
         : "",
-    });
+    }), noVcsNote);
   }
 
-  return getPlanApprovedPrompt("opencode", undefined, {
+  return appendNoVcsApprovalNote(getPlanApprovedPrompt("opencode", undefined, {
     planFilePath: backingPath,
     doneMsg: reviewResult.savedPath ? ` Saved to: ${reviewResult.savedPath}` : "",
-  });
+  }), noVcsNote);
 }

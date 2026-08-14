@@ -38,6 +38,8 @@ export interface OpenCodePlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  /** #493: the approval happened in a directory no VCS provider claims. */
+  noVcs?: boolean;
 }
 
 export interface OpenCodeBridgeAgent {

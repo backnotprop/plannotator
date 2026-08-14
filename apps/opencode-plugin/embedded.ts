@@ -18,6 +18,8 @@ export interface EmbeddedPlanReviewInput {
   htmlContent: string;
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
+  /** Project directory the plan belongs to; used for the #493 VCS probe. */
+  directory?: string;
   logReady: (url: string, isRemote: boolean, port: number) => void;
 }
 
@@ -26,11 +28,32 @@ export interface EmbeddedPlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  /** #493: the approval happened in a directory no VCS provider claims. */
+  noVcs?: boolean;
 }
 
 async function loadPlanServer() {
   recoverNativeFetchConstructors();
   return await import("@plannotator/server");
+}
+
+/**
+ * #493: report whether an approved plan's directory has no version control.
+ * Detection runs only for approvals and never throws — a failure to probe is
+ * reported as "version control present" so no false warning reaches the agent.
+ */
+async function detectNoVcsForApproval(
+  approved: boolean,
+  directory?: string,
+): Promise<boolean> {
+  if (!approved) return false;
+  try {
+    recoverNativeFetchConstructors();
+    const { detectManagedVcs } = await import("@plannotator/server/vcs");
+    return (await detectManagedVcs(directory ?? process.cwd())) === null;
+  } catch {
+    return false;
+  }
 }
 
 async function loadCommandHandlers() {
@@ -98,7 +121,8 @@ export async function runEmbeddedPlanReview(
     });
 
     await waitForPlanReviewCloseDelay(1500, input.abortSignal);
-    return result;
+    const noVcs = await detectNoVcsForApproval(result.approved, input.directory);
+    return noVcs ? { ...result, noVcs: true } : result;
   } finally {
     await server.stop();
   }

@@ -319,6 +319,7 @@ async function runPlanReview(input: {
         htmlContent: getPlanHtml(),
         timeoutSeconds: input.timeoutSeconds,
         abortSignal: input.abortSignal,
+        directory: input.directory,
         // Intentionally empty. OpenCode 2's server-plugin context exposes no log or
         // tui domain, and the V2 client's app.log falls through to console.error,
         // which is the same stderr stream handleServerReady already prints to.

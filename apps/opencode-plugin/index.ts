@@ -207,6 +207,7 @@ async function runPlanReview(input: {
         htmlContent: input.htmlContent,
         timeoutSeconds: input.timeoutSeconds,
         abortSignal: input.abortSignal,
+        directory: input.cwd,
         logReady: (url) => logPlannotatorReady(input.client, "plan review", url),
       });
     } catch (error) {
