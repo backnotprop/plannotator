@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { createPortal } from 'react-dom';
 import type { ImageAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
@@ -483,6 +483,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     textareaRef,
     enabled: skillReferences,
   });
+  const skillListboxId = `skill-reference-listbox-${useId().replace(/:/g, '')}`;
+  const activeSkillOptionId =
+    skillAc.menu?.activeIndex === null || skillAc.menu?.activeIndex === undefined
+      ? undefined
+      : `${skillListboxId}-option-${skillAc.menu.activeIndex}`;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (skillAc.onKeyDown(e)) return;
@@ -591,6 +596,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           <div className="relative px-4 py-3 min-h-0 flex-1 overflow-y-auto">
             {skillAc.menu && (
               <SkillReferenceMenu
+                id={skillListboxId}
                 items={skillAc.menu.items}
                 activeIndex={skillAc.menu.activeIndex}
                 onSelect={skillAc.select}
@@ -606,6 +612,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               sizeClassName="min-h-32 max-h-full"
               skillReferences={skillReferences}
               tokens={skillAc.referenceTokens}
+              listboxId={skillListboxId}
+              listboxOpen={skillAc.menu !== null}
+              activeOptionId={activeSkillOptionId}
             />
             <HumanOnlySkillNotice skills={skillAc.humanOnlyReferences} />
           </div>
@@ -736,6 +745,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       <div className="relative px-3 py-2">
         {skillAc.menu && (
           <SkillReferenceMenu
+            id={skillListboxId}
             items={skillAc.menu.items}
             activeIndex={skillAc.menu.activeIndex}
             onSelect={skillAc.select}
@@ -751,6 +761,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           sizeClassName="max-h-64 min-h-[4.5rem]"
           skillReferences={skillReferences}
           tokens={skillAc.referenceTokens}
+          listboxId={skillListboxId}
+          listboxOpen={skillAc.menu !== null}
+          activeOptionId={activeSkillOptionId}
         />
         <HumanOnlySkillNotice skills={skillAc.humanOnlyReferences} />
       </div>
@@ -819,6 +832,10 @@ interface ComposerTextareaProps {
   tokens: SkillReferenceToken[];
   /** Off → render the plain pre-feature textarea, byte-for-byte. */
   skillReferences: boolean;
+  /** ARIA relationship to the skill-reference listbox. */
+  listboxId: string;
+  listboxOpen: boolean;
+  activeOptionId?: string;
 }
 
 /**
@@ -843,6 +860,9 @@ const ComposerTextarea: React.FC<ComposerTextareaProps> = ({
   textareaRef,
   tokens,
   skillReferences,
+  listboxId,
+  listboxOpen,
+  activeOptionId,
 }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
@@ -927,6 +947,12 @@ const ComposerTextarea: React.FC<ComposerTextareaProps> = ({
       </div>
       <textarea
         data-pn-mobile-editable="true"
+        role="combobox"
+        aria-label={placeholder}
+        aria-autocomplete="list"
+        aria-expanded={listboxOpen}
+        aria-controls={listboxOpen ? listboxId : undefined}
+        aria-activedescendant={activeOptionId}
         ref={attachRef}
         value={value}
         onChange={onChange}
