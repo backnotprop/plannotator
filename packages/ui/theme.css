@@ -712,6 +712,27 @@ body {
   font-feature-settings: "ss01", "ss02", "cv01";
 }
 
+/* Typography overrides belong to the active app surface, never the palette
+ * tokens. Unset values inherit from the selected palette. */
+[data-pn-surface='plan'] {
+  --pn-display-font: var(--pn-plan-display-font, var(--font-sans));
+  --pn-mono-font: var(--pn-plan-mono-font, var(--font-mono));
+}
+[data-pn-surface='annotate'] {
+  --pn-display-font: var(--pn-annotate-display-font, var(--font-sans));
+  --pn-mono-font: var(--pn-annotate-mono-font, var(--font-mono));
+}
+[data-pn-surface='review'] {
+  --pn-display-font: var(--pn-review-display-font, var(--font-sans));
+  --pn-mono-font: var(--pn-review-mono-font, var(--font-mono));
+}
+[data-pn-surface] {
+  font-family: var(--pn-display-font);
+}
+[data-pn-surface] :is(code, kbd, pre, samp) {
+  font-family: var(--pn-mono-font);
+}
+
 /* Safari extends the page canvas beneath its floating browser controls. The
  * plan document is a card-colored nested scroller, so leaving the outer canvas
  * on `--background` produces an opaque dark band around those controls. Match
@@ -1077,7 +1098,7 @@ html:has([data-pn-compact-touch-layout='true'])
   border: 1px solid oklch(from var(--border) l c h / 0.5);
   background: oklch(from var(--muted) l c h / 0.6);
   color: var(--foreground);
-  font-family: var(--font-mono);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.625rem;
   line-height: 1rem;
 }

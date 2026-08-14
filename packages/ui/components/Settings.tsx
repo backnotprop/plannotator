@@ -1495,7 +1495,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
 
                 {/* === THEME TAB === */}
-                {activeTab === 'theme' && <ThemeTab onPreview={() => { setShowDialog(false); setThemePreview(true); }} />}
+                {activeTab === 'theme' && <ThemeTab typographySurface={mode === 'review' ? 'review' : mode === 'annotate' ? 'annotate' : 'plan'} onPreview={() => { setShowDialog(false); setThemePreview(true); }} />}
 
                 {/* === GIT TAB === */}
                 {activeTab === 'git' && mode === 'review' && (
