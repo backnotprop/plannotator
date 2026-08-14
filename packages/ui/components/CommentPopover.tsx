@@ -947,11 +947,11 @@ const ComposerTextarea: React.FC<ComposerTextareaProps> = ({
       </div>
       <textarea
         data-pn-mobile-editable="true"
-        role="combobox"
         aria-label={placeholder}
         aria-autocomplete="list"
-        aria-expanded={listboxOpen}
+        aria-haspopup="listbox"
         aria-controls={listboxOpen ? listboxId : undefined}
+        aria-owns={listboxOpen ? listboxId : undefined}
         aria-activedescendant={activeOptionId}
         ref={attachRef}
         value={value}

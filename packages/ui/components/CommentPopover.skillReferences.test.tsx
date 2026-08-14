@@ -139,12 +139,14 @@ function activeRow(): Element | null {
   return document.querySelector('[data-skill-item-active]');
 }
 
-function assertOpenCombobox(el: HTMLTextAreaElement): Element {
-  expect(el.getAttribute('role')).toBe('combobox');
+function assertOpenAutocompleteTextbox(el: HTMLTextAreaElement): Element {
+  expect(el.hasAttribute('role')).toBe(false);
   expect(el.getAttribute('aria-autocomplete')).toBe('list');
-  expect(el.getAttribute('aria-expanded')).toBe('true');
+  expect(el.getAttribute('aria-haspopup')).toBe('listbox');
+  expect(el.hasAttribute('aria-expanded')).toBe(false);
   const controls = el.getAttribute('aria-controls');
   expect(controls).not.toBeNull();
+  expect(el.getAttribute('aria-owns')).toBe(controls);
   const listbox = document.getElementById(controls!);
   expect(listbox?.getAttribute('role')).toBe('listbox');
   return listbox!;
@@ -196,13 +198,16 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
     async () => {
       await mountPopover();
       const el = textarea();
-      expect(el.getAttribute('role')).toBe('combobox');
-      expect(el.getAttribute('aria-expanded')).toBe('false');
+      expect(el.hasAttribute('role')).toBe(false);
+      expect(el.getAttribute('aria-autocomplete')).toBe('list');
+      expect(el.getAttribute('aria-haspopup')).toBe('listbox');
+      expect(el.hasAttribute('aria-expanded')).toBe(false);
       expect(el.hasAttribute('aria-controls')).toBe(false);
+      expect(el.hasAttribute('aria-owns')).toBe(false);
       expect(el.hasAttribute('aria-activedescendant')).toBe(false);
 
       await type(el, 'use /anim');
-      const listbox = assertOpenCombobox(el);
+      const listbox = assertOpenAutocompleteTextbox(el);
       const options = listbox.querySelectorAll('[role="option"]');
       expect(options.length).toBe(1);
       for (const option of options) {
@@ -218,8 +223,9 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
       expect(el.getAttribute('aria-activedescendant')).toBe(active?.id);
 
       await press(el, 'Escape');
-      expect(el.getAttribute('aria-expanded')).toBe('false');
+      expect(el.hasAttribute('aria-expanded')).toBe(false);
       expect(el.hasAttribute('aria-controls')).toBe(false);
+      expect(el.hasAttribute('aria-owns')).toBe(false);
       expect(el.hasAttribute('aria-activedescendant')).toBe(false);
     },
   );
