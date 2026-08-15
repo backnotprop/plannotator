@@ -22,7 +22,13 @@ import type { ReviewJjRuntime } from "./jj-core";
 import { createJjProvider, createVcsApi } from "./vcs-core";
 
 function hasJj(): boolean {
-  return Bun.spawnSync(["jj", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;
+  // Bun.spawnSync throws when the executable is missing entirely (ENOENT),
+  // which is exactly the case this gate exists for on CI runners without jj.
+  try {
+    return Bun.spawnSync(["jj", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;
+  } catch {
+    return false;
+  }
 }
 
 const gitRuntime: ReviewGitRuntime = {
