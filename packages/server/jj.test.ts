@@ -80,7 +80,15 @@ describe("jj compare targets", () => {
  * Skipped when `jj` is not installed (CI runners do not ship it).
  */
 describe("jj runtime output ceiling", () => {
-  const testIfJj = Bun.spawnSync(["jj", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0
+  // Bun.spawnSync throws when the executable is missing entirely (ENOENT),
+  // which is exactly the case this gate exists for on CI runners without jj.
+  const testIfJj = (() => {
+    try {
+      return Bun.spawnSync(["jj", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;
+    } catch {
+      return false;
+    }
+  })()
     ? test
     : test.skip;
   let workspace = "";
