@@ -80,10 +80,12 @@ Before spawning the worker, Plannotator groups both sides of every changed path 
 | Last commit | first parent of HEAD | HEAD |
 | Commit rail | first parent of selected commit | selected commit |
 | PR layer/full stack | exact locally available base/head pair | exact locally available head |
-| JJ current change | `@-` | `@` |
-| JJ last change | parent of `@-` | `@-` |
+| JJ current change | first parent of `@` | `@` |
+| JJ last change | first parent of the first parent of `@` | first parent of `@` |
 | JJ line of work | line-of-work base for the selected revision | `@` |
 | JJ evolution | selected historical evolution entry | `@` |
+
+Jujutsu parent hops are walked against the repository rather than written as revsets. `@-` is `parents(@)`, so on a merge revision both `@-` and `parents(@-)` resolve to several revisions and `jj diff` rejects the command outright, even though the visible `jj diff -r @` review still renders. Each hop resolves the first parent's commit id, which is the same side `getJjFileContentsForDiff` already expands merges on, so Call flow and file expansion agree.
 
 Jujutsu snapshots request `jj diff --git` from `root()` to each view revision, restricted to the source extensions in the analyzed language families. Each filtered tree becomes an unreachable synthetic Git commit without changing the reviewed checkout; the existing snapshot fingerprint check rejects the result if the JJ revisions move during materialization. Binary entries are omitted because CallDiff consumes parseable source text and Jujutsu's Git-format diff does not carry binary payloads; text files, symlinks, executable modes, and deletions retain their Git patch semantics. The All Files snapshot has no meaningful commit baseline and is explicitly unsupported. GitButler, Perforce, nested workspace aggregation, and hosted PR analysis without a local checkout are also unsupported in this version.
 

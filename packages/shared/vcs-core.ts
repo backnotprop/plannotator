@@ -26,6 +26,7 @@ import {
   getJjDiffFingerprint,
   getJjFileContentsForDiff,
   isJjSnapshotDiffType,
+  resolveJjSnapshotEndpoint,
   runJjDiff,
 } from "./jj-core";
 import {
@@ -790,8 +791,15 @@ async function materializeJjSnapshot(
   gitRuntime: ReviewGitRuntime,
   options: VcsSnapshotOptions,
 ): Promise<VcsSnapshot> {
-  const revsets = getJjSnapshotRevsets(options.diffType, options.base);
-  if (!revsets) throw new Error(`Snapshot materialization does not support the ${options.diffType} Jujutsu review mode.`);
+  const endpoints = getJjSnapshotRevsets(options.diffType, options.base);
+  if (!endpoints) throw new Error(`Snapshot materialization does not support the ${options.diffType} Jujutsu review mode.`);
+
+  // Parent hops resolve against the repo before any diff runs, so a merge
+  // revision cannot hand `jj diff` an ambiguous `--to`.
+  const revisions = [
+    await resolveJjSnapshotEndpoint(jjRuntime, endpoints.from, options.cwd),
+    await resolveJjSnapshotEndpoint(jjRuntime, endpoints.to, options.cwd),
+  ];
 
   const tempRoot = await mkdtemp(join(tmpdir(), "plannotator-review-jj-snapshot-"));
   const snapshotCwd = join(tempRoot, "repo");
@@ -802,7 +810,7 @@ async function materializeJjSnapshot(
     const filesets = options.includedExtensions.map((extension) => `glob-i:\"**/*${extension}\"`);
     const snapshots: string[] = [];
 
-    for (const revset of [revsets.from, revsets.to]) {
+    for (const revision of revisions) {
       if (options.signal?.aborted) throw new Error("Snapshot materialization was superseded by a newer review snapshot.");
       let patch = "";
       if (filesets.length > 0) {
@@ -813,7 +821,7 @@ async function materializeJjSnapshot(
           "--from",
           "root()",
           "--to",
-          revset,
+          revision,
           ...filesets,
         ], { cwd: options.cwd, timeoutMs: SNAPSHOT_TIMEOUT_MS });
         if (result.exitCode !== 0) {

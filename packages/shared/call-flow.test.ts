@@ -162,12 +162,17 @@ describe("VCS snapshot materialization", () => {
       `+export const tool = ${version};`,
       "",
     ].join("\n");
+    const mergeParents = ["1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"];
     const jjRuntime = {
       async runJj(args: string[]) {
         calls.push(args);
+        // `@` is a MERGE here, so the old `@-` revset would have been ambiguous.
+        if (args.includes("log")) {
+          return { stdout: mergeParents.join("\n"), stderr: "", exitCode: 0 };
+        }
         const revision = args[args.indexOf("--to") + 1];
         return {
-          stdout: revision === "@-"
+          stdout: revision === mergeParents[0]
             ? snapshotPatch(1, true, "main.ts")
             : snapshotPatch(2, false, "tool.ts"),
           stderr: "",
@@ -197,9 +202,13 @@ describe("VCS snapshot materialization", () => {
       expect(Bun.spawnSync(["git", "show", `${plan.to}:alias.ts`], { cwd: plan.cwd }).stdout.toString()).toBe("tool.ts");
       expect(Bun.spawnSync(["git", "cat-file", "-e", `${plan.to}:binary.ts`], { cwd: plan.cwd }).exitCode).not.toBe(0);
       expect(run(["status", "--short"])).toBe("");
-      expect(calls.map((args) => args[args.indexOf("--to") + 1])).toEqual(["@-", "@"]);
+      const diffs = calls.filter((args) => args.includes("diff"));
+      expect(diffs.map((args) => args[args.indexOf("--to") + 1])).toEqual([mergeParents[0], "@"]);
+      // Ambiguous parent shorthands must never reach jj.
+      expect(calls.flat()).not.toContain("@-");
+      expect(calls.flat()).not.toContain("parents(@-)");
       expect(calls.every((args) => args[0] === "--ignore-working-copy")).toBe(true);
-      expect(calls.every((args) => args.includes('glob-i:"**/*.ts"'))).toBe(true);
+      expect(diffs.every((args) => args.includes('glob-i:"**/*.ts"'))).toBe(true);
     } finally {
       plan.cleanup();
     }
