@@ -72,6 +72,20 @@ const formattedDate = date.toLocaleDateString('en-US', {
     })();
   </script>
   <style is:global>
+    /* Blog-only readability bump (~10% over the shared .prose scale).
+       article.prose outranks .prose, so both breakpoints are restated. */
+    article.prose {
+      font-size: 0.96rem;
+    }
+    article.prose h1 { font-size: 1.65rem; }
+    article.prose h2 { font-size: 1.375rem; }
+    article.prose h3 { font-size: 1.1rem; }
+    article.prose h4 { font-size: 0.96rem; }
+    @media (min-width: 768px) {
+      article.prose {
+        font-size: 1.05rem;
+      }
+    }
     .prose img.lightboxable {
       cursor: zoom-in;
     }
