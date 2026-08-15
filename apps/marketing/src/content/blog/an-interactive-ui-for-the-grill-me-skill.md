@@ -22,6 +22,8 @@ That is the whole workflow. Review the questions, annotate or strike through par
 
 We are exploring more questionnaire-style input too, starting from shadcn's new [questionnaire component](https://ui.shadcn.com/docs/components/base/questionnaire). But what we keep finding is that the ability to annotate each part of a question or answer, rather than just selecting answers, is where the power is.
 
+Codex ships annotation in its native app now too, and it is good. It has been fun iterating on these ideas with their team in the open on X, down to some of the naming, and if you live in the Codex app their version is worth using.
+
 We posted a marked-up session here: [@plannotator on X](https://x.com/plannotator/status/2088688374790160503).
 
 ```bash
