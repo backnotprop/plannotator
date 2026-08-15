@@ -76,6 +76,13 @@ const formattedDate = date.toLocaleDateString('en-US', {
       cursor: zoom-in;
     }
     #img-lightbox {
+      /* Re-assert UA centering; the global reset zeroes dialog margins,
+         which shifts the box top-left. Size to the image exactly so the
+         click-to-close surface has no dead area around it. */
+      margin: auto;
+      inset: 0;
+      width: fit-content;
+      height: fit-content;
       padding: 0;
       border: none;
       background: transparent;
