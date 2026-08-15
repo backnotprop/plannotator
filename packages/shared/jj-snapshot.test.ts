@@ -169,4 +169,22 @@ describe("Jujutsu Call flow snapshots against a real repository", () => {
     }
   });
 
+  testIfJj("selects the same source files from a subdirectory as from the workspace root", async () => {
+    initMergeWorkspace();
+
+    const fromSubdirectory = await vcs.materializeVcsSnapshot("jj", {
+      cwd: join(workspace, "sub"),
+      diffType: "jj-current",
+      base: "",
+      rawPatch: "",
+      includedExtensions: [".ts"],
+    });
+    try {
+      // Every path stays workspace-relative, including the ones ABOVE the cwd.
+      expect(treeOf(fromSubdirectory.cwd, fromSubdirectory.to))
+        .toEqual(["a.ts", "b.ts", "base.ts", "merged.ts", "sub/deep.ts"]);
+    } finally {
+      fromSubdirectory.cleanup();
+    }
+  });
 });

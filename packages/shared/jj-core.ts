@@ -22,7 +22,7 @@ export {
 export interface ReviewJjRuntime {
   runJj: (
     args: string[],
-    options?: { cwd?: string; timeoutMs?: number },
+    options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
   ) => Promise<GitCommandResult>;
 }
 

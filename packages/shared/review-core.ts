@@ -139,6 +139,12 @@ export interface GitCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /**
+   * Set when `maxOutputBytes` was reached and the runtime stopped reading. The
+   * command was killed, so `exitCode` reports the signal, not the command's own
+   * verdict, and `stdout` is a prefix — never a usable result.
+   */
+  truncated?: boolean;
 }
 
 /** Per-command execution policy understood by every review Git runtime. */
@@ -149,6 +155,14 @@ export interface GitCommandOptions {
   stdin?: string;
   /** Whether the command may ask the user for credentials. Defaults to `"allow"`. */
   interaction?: "allow" | "forbid";
+  /**
+   * Hard ceiling on buffered stdout. The runtime stops reading and kills the
+   * command once the limit is passed, so a command that can emit an unbounded
+   * tree (a whole-repository diff) bounds real memory growth instead of being
+   * rejected after it has already been held in full. The result is flagged
+   * `truncated`. Omitted means no ceiling.
+   */
+  maxOutputBytes?: number;
   /**
    * Extra Git configuration for this one command, injected through the
    * `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`

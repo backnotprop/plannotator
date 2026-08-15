@@ -72,7 +72,24 @@ function runCommand(
 
 		const stdoutChunks: Buffer[] = [];
 		const stderrChunks: Buffer[] = [];
-		proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+		// Stop buffering AND kill at `maxOutputBytes`, so a command that can emit
+		// an entire repository tree bounds real memory growth instead of being
+		// measured and rejected after it is already held in full.
+		let stdoutBytes = 0;
+		let truncated = false;
+		proc.stdout!.on("data", (chunk: Buffer) => {
+			if (truncated) return;
+			stdoutBytes += chunk.byteLength;
+			if (
+				options?.maxOutputBytes !== undefined &&
+				stdoutBytes > options.maxOutputBytes
+			) {
+				truncated = true;
+				proc.kill("SIGKILL");
+				return;
+			}
+			stdoutChunks.push(chunk);
+		});
 		proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
 		if (options?.stdin !== undefined) proc.stdin!.end(options.stdin);
 
@@ -82,6 +99,7 @@ function runCommand(
 				stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
 				stderr: Buffer.concat(stderrChunks).toString("utf-8"),
 				exitCode: code ?? 1,
+				...(truncated ? { truncated: true } : {}),
 			});
 		});
 

@@ -137,13 +137,14 @@ describe("VCS snapshot materialization", () => {
 
   test("materializes the parseable Jujutsu source tree without touching the checkout", async () => {
     const calls: string[][] = [];
-    const snapshotPatch = (version: number, executable: boolean, linkTarget: string): string => [
+    // The base side is the whole parseable tree at the resolved first parent.
+    const basePatch = [
       "diff --git a/alias.ts b/alias.ts",
       "new file mode 120000",
       "--- /dev/null",
       "+++ b/alias.ts",
       "@@ -0,0 +1 @@",
-      `+${linkTarget}`,
+      "+main.ts",
       "\\ No newline at end of file",
       "diff --git a/binary.ts b/binary.ts",
       "new file mode 100644",
@@ -153,13 +154,34 @@ describe("VCS snapshot materialization", () => {
       "--- /dev/null",
       "+++ b/main.ts",
       "@@ -0,0 +1 @@",
-      `+export const version = ${version};`,
+      "+export const version = 1;",
       "diff --git a/tool.ts b/tool.ts",
-      `new file mode ${executable ? "100755" : "100644"}`,
+      "new file mode 100755",
       "--- /dev/null",
       "+++ b/tool.ts",
       "@@ -0,0 +1 @@",
-      `+export const tool = ${version};`,
+      "+export const tool = 1;",
+      "",
+    ].join("\n");
+    // The second side is only what changed between the two revisions.
+    const deltaPatch = [
+      "diff --git a/alias.ts b/alias.ts",
+      "--- a/alias.ts",
+      "+++ b/alias.ts",
+      "@@ -1 +1 @@",
+      "-main.ts",
+      "\\ No newline at end of file",
+      "+tool.ts",
+      "\\ No newline at end of file",
+      "diff --git a/main.ts b/main.ts",
+      "--- a/main.ts",
+      "+++ b/main.ts",
+      "@@ -1 +1 @@",
+      "-export const version = 1;",
+      "+export const version = 2;",
+      "diff --git a/tool.ts b/tool.ts",
+      "old mode 100755",
+      "new mode 100644",
       "",
     ].join("\n");
     const mergeParents = ["1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"];
@@ -170,11 +192,9 @@ describe("VCS snapshot materialization", () => {
         if (args.includes("log")) {
           return { stdout: mergeParents.join("\n"), stderr: "", exitCode: 0 };
         }
-        const revision = args[args.indexOf("--to") + 1];
+        const from = args[args.indexOf("--from") + 1];
         return {
-          stdout: revision === mergeParents[0]
-            ? snapshotPatch(1, true, "main.ts")
-            : snapshotPatch(2, false, "tool.ts"),
+          stdout: from === "root()" ? basePatch : deltaPatch,
           stderr: "",
           exitCode: 0,
         };
@@ -200,18 +220,50 @@ describe("VCS snapshot materialization", () => {
       expect(Bun.spawnSync(["git", "show", `${plan.to}:main.ts`], { cwd: plan.cwd }).stdout.toString()).toContain("version = 2");
       expect(Bun.spawnSync(["git", "show", `${plan.from}:alias.ts`], { cwd: plan.cwd }).stdout.toString()).toBe("main.ts");
       expect(Bun.spawnSync(["git", "show", `${plan.to}:alias.ts`], { cwd: plan.cwd }).stdout.toString()).toBe("tool.ts");
+      // The delta never mentions tool.ts contents, so the second side can only
+      // carry them by having been built ON TOP of the base tree.
+      expect(Bun.spawnSync(["git", "show", `${plan.to}:tool.ts`], { cwd: plan.cwd }).stdout.toString()).toContain("tool = 1");
       expect(Bun.spawnSync(["git", "cat-file", "-e", `${plan.to}:binary.ts`], { cwd: plan.cwd }).exitCode).not.toBe(0);
       expect(run(["status", "--short"])).toBe("");
+
       const diffs = calls.filter((args) => args.includes("diff"));
-      expect(diffs.map((args) => args[args.indexOf("--to") + 1])).toEqual([mergeParents[0], "@"]);
+      // Exactly one whole-tree pass; the second side is the changed files only.
+      expect(diffs.map((args) => args[args.indexOf("--from") + 1]))
+        .toEqual(["root()", mergeParents[0]]);
+      expect(diffs.map((args) => args[args.indexOf("--to") + 1]))
+        .toEqual([mergeParents[0], "@"]);
       // Ambiguous parent shorthands must never reach jj.
       expect(calls.flat()).not.toContain("@-");
       expect(calls.flat()).not.toContain("parents(@-)");
       expect(calls.every((args) => args[0] === "--ignore-working-copy")).toBe(true);
-      expect(diffs.every((args) => args.includes('glob-i:"**/*.ts"'))).toBe(true);
+      // Repo-root-anchored, so the review's invocation directory cannot narrow it.
+      expect(diffs.every((args) => args.includes('root-glob-i:"**/*.ts"'))).toBe(true);
+      expect(diffs.every((args) => args.some((arg) => arg.startsWith("glob-i:")))).toBe(false);
     } finally {
       plan.cleanup();
     }
+  });
+
+  test("refuses a Jujutsu snapshot whose diff hit the runtime output ceiling", async () => {
+    // A truncated tree would otherwise become a valid-looking snapshot and
+    // CallDiff would report call-graph edges that do not exist.
+    let requestedCap: number | undefined;
+    const jjRuntime = {
+      async runJj(args: string[], options?: { maxOutputBytes?: number }) {
+        if (args.includes("log")) return { stdout: "abc", stderr: "", exitCode: 0 };
+        requestedCap = options?.maxOutputBytes;
+        return { stdout: "diff --git a/main.ts b/main.ts\n", stderr: "", exitCode: 0, truncated: true };
+      },
+    };
+    const jjVcs = createVcsApi([createJjProvider(jjRuntime, reviewRuntime)]);
+    expect(jjVcs.materializeVcsSnapshot("jj", {
+      cwd: repo,
+      diffType: "jj-current",
+      base: "main",
+      rawPatch: "",
+      includedExtensions: [".ts"],
+    })).rejects.toThrow(/64 MB/);
+    expect(requestedCap).toBe(64 * 1024 * 1024);
   });
 });
 

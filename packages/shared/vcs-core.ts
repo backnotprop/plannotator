@@ -786,6 +786,47 @@ async function materializeGitSnapshot(
   return createSyntheticSnapshot(runtime, cwd, head, [stagedPatch, patch]);
 }
 
+/**
+ * One `jj diff` between two revisions, bounded and stripped of the entries
+ * `git apply` cannot replay.
+ *
+ * The byte cap is passed to the runtime so it stops READING at the limit; the
+ * post-check only covers runtimes that ignore the option, so a 64 MB tree can
+ * never be fully buffered just to be rejected afterwards.
+ */
+async function jjSnapshotPatch(
+  runtime: ReviewJjRuntime,
+  options: VcsSnapshotOptions,
+  from: string,
+  to: string,
+  filesets: readonly string[],
+): Promise<string> {
+  if (options.signal?.aborted) throw new Error("Snapshot materialization was superseded by a newer review snapshot.");
+  if (filesets.length === 0) return "";
+
+  const result = await runtime.runJj([
+    "--ignore-working-copy",
+    "diff",
+    "--git",
+    "--from",
+    from,
+    "--to",
+    to,
+    ...filesets,
+  ], { cwd: options.cwd, timeoutMs: SNAPSHOT_TIMEOUT_MS, maxOutputBytes: MAX_JJ_SNAPSHOT_PATCH_BYTES });
+
+  if (result.truncated || Buffer.byteLength(result.stdout, "utf8") > MAX_JJ_SNAPSHOT_PATCH_BYTES) {
+    throw new Error("Jujutsu snapshot exceeded the 64 MB materialization limit.");
+  }
+  if (result.exitCode !== 0) {
+    throw new Error((result.stderr.trim() || "Jujutsu diff failed.").slice(0, 2_000));
+  }
+  return result.stdout
+    .split(/(?=^diff --git )/m)
+    .filter((chunk) => !/^Binary files /m.test(chunk))
+    .join("");
+}
+
 async function materializeJjSnapshot(
   jjRuntime: ReviewJjRuntime,
   gitRuntime: ReviewGitRuntime,
@@ -796,10 +837,13 @@ async function materializeJjSnapshot(
 
   // Parent hops resolve against the repo before any diff runs, so a merge
   // revision cannot hand `jj diff` an ambiguous `--to`.
-  const revisions = [
-    await resolveJjSnapshotEndpoint(jjRuntime, endpoints.from, options.cwd),
-    await resolveJjSnapshotEndpoint(jjRuntime, endpoints.to, options.cwd),
-  ];
+  const fromRevision = await resolveJjSnapshotEndpoint(jjRuntime, endpoints.from, options.cwd);
+  const toRevision = await resolveJjSnapshotEndpoint(jjRuntime, endpoints.to, options.cwd);
+
+  // `root-glob-i:`, not `glob-i:`: plain filesets are relative to the INVOCATION
+  // directory, so reviewing from a subdirectory would silently drop every source
+  // file above it and hand CallDiff a partial repository call graph.
+  const filesets = options.includedExtensions.map((extension) => `root-glob-i:"**/*${extension}"`);
 
   const tempRoot = await mkdtemp(join(tmpdir(), "plannotator-review-jj-snapshot-"));
   const snapshotCwd = join(tempRoot, "repo");
@@ -807,40 +851,32 @@ async function materializeJjSnapshot(
   try {
     await git(gitRuntime, tempRoot, ["init", "--quiet", "--", snapshotCwd]);
     const emptyCommit = await commitIndex(gitRuntime, snapshotCwd, undefined, "Plannotator review empty snapshot");
-    const filesets = options.includedExtensions.map((extension) => `glob-i:\"**/*${extension}\"`);
-    const snapshots: string[] = [];
 
-    for (const revision of revisions) {
-      if (options.signal?.aborted) throw new Error("Snapshot materialization was superseded by a newer review snapshot.");
-      let patch = "";
-      if (filesets.length > 0) {
-        const result = await jjRuntime.runJj([
-          "--ignore-working-copy",
-          "diff",
-          "--git",
-          "--from",
-          "root()",
-          "--to",
-          revision,
-          ...filesets,
-        ], { cwd: options.cwd, timeoutMs: SNAPSHOT_TIMEOUT_MS });
-        if (result.exitCode !== 0) {
-          throw new Error((result.stderr.trim() || "Jujutsu diff failed.").slice(0, 2_000));
-        }
-        if (Buffer.byteLength(result.stdout, "utf8") > MAX_JJ_SNAPSHOT_PATCH_BYTES) {
-          throw new Error("Jujutsu snapshot exceeded the 64 MB materialization limit.");
-        }
-        patch = result.stdout
-          .split(/(?=^diff --git )/m)
-          .filter((chunk) => !/^Binary files /m.test(chunk))
-          .join("");
-      }
+    // Only the base side materializes the whole parseable tree.
+    const basePatch = await jjSnapshotPatch(jjRuntime, options, "root()", fromRevision, filesets);
+    await git(gitRuntime, snapshotCwd, ["read-tree", "--empty"]);
+    await applyPatchToIndex(gitRuntime, snapshotCwd, basePatch);
+    const fromCommit = await commitIndex(gitRuntime, snapshotCwd, emptyCommit, "Plannotator review Jujutsu snapshot");
+
+    // The second side is the base tree plus the CHANGED files, so materialization
+    // cost scales with the review instead of with the repository. Falling back to
+    // a second whole-tree pass keeps a patch git cannot replay from failing the
+    // analysis outright.
+    let toCommit: string;
+    try {
+      const deltaPatch = await jjSnapshotPatch(jjRuntime, options, fromRevision, toRevision, filesets);
+      await git(gitRuntime, snapshotCwd, ["read-tree", fromCommit]);
+      await applyPatchToIndex(gitRuntime, snapshotCwd, deltaPatch);
+      toCommit = await commitIndex(gitRuntime, snapshotCwd, fromCommit, "Plannotator review Jujutsu snapshot");
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      const wholePatch = await jjSnapshotPatch(jjRuntime, options, "root()", toRevision, filesets);
       await git(gitRuntime, snapshotCwd, ["read-tree", "--empty"]);
-      await applyPatchToIndex(gitRuntime, snapshotCwd, patch);
-      snapshots.push(await commitIndex(gitRuntime, snapshotCwd, emptyCommit, "Plannotator review Jujutsu snapshot"));
+      await applyPatchToIndex(gitRuntime, snapshotCwd, wholePatch);
+      toCommit = await commitIndex(gitRuntime, snapshotCwd, emptyCommit, "Plannotator review Jujutsu snapshot");
     }
 
-    return { cwd: snapshotCwd, from: snapshots[0], to: snapshots[1], cleanup };
+    return { cwd: snapshotCwd, from: fromCommit, to: toCommit, cleanup };
   } catch (error) {
     cleanup();
     throw error;
