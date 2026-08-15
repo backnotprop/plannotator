@@ -24,6 +24,12 @@ We are exploring more questionnaire-style input too, starting from shadcn's new 
 
 Codex ships annotation in its native app now too, and it is good. It has been fun iterating on these ideas with their team in the open on X, down to some of the naming, and if you live in the Codex app their version is worth using.
 
+What do I mean by iterating through rounds? Each round arrives as a new agent message, and it usually carries answers and clarifications to the feedback you sent on the previous one. Annotate those too. This ergonomic fits right into the agent session, because these are just agent messages.
+
+![Round two of a grill-me session in Plannotator: the agent's answers and clarifications from the previous round, marked up again](/assets/blog/iterate.jpeg)
+
+One last benefit: compounding. Every annotation you make is stored locally, and it is your data. If you later want to build skills out of how you answer certain things, design taste, system decisions, whatever, the raw material is already on your disk. Plannotator is a local open source tool. No data is collected, not even telemetry.
+
 We posted a marked-up session here: [@plannotator on X](https://x.com/plannotator/status/2088688374790160503).
 
 ```bash
