@@ -8,9 +8,9 @@ tags: ["annotate", "grill-me", "skills", "workflow"]
 
 [Matt Pocock](https://www.aihero.dev)'s [`/grill-me`](https://www.aihero.dev/skills-grill-me) skill interviews you about a loose idea until it is sharp enough to commit to. It asks in rounds: a batch of numbered questions, each with a recommended answer, and then it waits. Answering that in a terminal is cramped. You reply serially by number, scroll up to re-read Q7 while typing about Q3, and edit long answers in a prompt box.
 
-Plannotator fixes this with one command. `/plannotator-last` opens the agent's last message in your browser and makes it annotatable. Works in Claude Code, Codex CLI, OpenCode, and Pi. Mark up the round, hit Send Feedback, and the annotations go straight back to the agent as its next input.
+[Plannotator](https://github.com/backnotprop/plannotator) fixes this with one command. `/plannotator-last` opens the agent's last message in your browser and makes it annotatable. Works in Claude Code, Codex CLI, OpenCode, and Pi. Mark up the round, hit Send Feedback, and the annotations go straight back to the agent as its next input.
 
-![A grill-me round open in Plannotator: question text highlighted, several recommended answers struck through, comments listed in the sidebar](/assets/blog/grilling.jpeg)
+![Plannotator, an interactive UI for the grill-me skill: a round of questions annotated in the browser with highlights, strikethroughs, and comments](/assets/blog/grilling.jpeg)
 
 ```bash
 /grill-me            # start the interview
@@ -26,7 +26,7 @@ Codex ships annotation in its native app now too, and it is good. It has been fu
 
 What do I mean by iterating through rounds? Each round arrives as a new agent message, and it usually carries answers and clarifications to the feedback you sent on the previous one. Annotate those too. This ergonomic fits right into the agent session, because these are just agent messages.
 
-![Round two of a grill-me session in Plannotator: the agent's answers and clarifications from the previous round, marked up again](/assets/blog/iterate.jpeg)
+![Round two of a grill-me session in the Plannotator UI: the agent's answers and clarifications from the previous round, annotated again](/assets/blog/iterate.jpeg)
 
 One last benefit: compounding. Every annotation you make is stored locally, and it is your data. If you later want to build skills out of how you answer certain things, design taste, system decisions, whatever, the raw material is already on your disk. Plannotator is a local open source tool. No data is collected, not even telemetry.
 
