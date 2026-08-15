@@ -18,13 +18,9 @@ Plannotator fixes this with one command. `/plannotator-last` opens the agent's l
                      # mark it up, Send Feedback, agent computes the next round
 ```
 
-Strikethrough gets the most use. Models in grill sessions assume things constantly, usually inside the recommended answer, and crossing out the clause you reject is faster than typing "on Q4, the second half of the recommendation is wrong because...". Highlight a fragment and comment on exactly that fragment. Correct scope drift in the margin next to the sentence that drifted.
+That is the whole workflow. Review the questions, annotate or strike through parts of a question or an answer, send feedback, and iterate through each round of the session.
 
-This is why annotation beats a questionnaire for this job. A questionnaire takes one answer per question. Annotation lets you answer part of a question, reject a premise without answering at all, accept a recommendation but narrow it, or just delete an assumption. [Matt's own docs](https://raw.githubusercontent.com/mattpocock/skills/refs/heads/main/skills/productivity/grilling/SKILL.md) name the failure mode: answering "agreed, agreed, agreed" for forty questions and coming out with a plan the agent wrote and you nodded at. Pushing back is the point, and markup is a faster way to push back than prose.
-
-The same flow works for [`/grill-with-docs`](https://aihero.dev/skills-grill-with-docs), and for annotating [`/to-spec`](https://aihero.dev/skills-to-spec) and [`/prototype`](https://aihero.dev/skills-prototype) output when you continue into the build.
-
-Two notes for balance. The Codex team added message annotation to their app after watching how people used Plannotator, and what they shipped is good; if you live in the Codex app, use it. And questionnaire-style input has its place for rounds that really are just structured answers. We are looking at shadcn's new [questionnaire component](https://ui.shadcn.com/docs/components/base/questionnaire) for that. It would sit alongside annotation, not replace it.
+We are exploring more questionnaire-style input too, starting from shadcn's new [questionnaire component](https://ui.shadcn.com/docs/components/base/questionnaire). But what we keep finding is that the ability to annotate each part of a question or answer, rather than just selecting answers, is where the power is.
 
 We posted a marked-up session here: [@plannotator on X](https://x.com/plannotator/status/2088688374790160503).
 
