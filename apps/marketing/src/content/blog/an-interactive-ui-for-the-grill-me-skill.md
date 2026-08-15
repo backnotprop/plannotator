@@ -1,5 +1,5 @@
 ---
-title: "The Best Interface for /grill-me"
+title: "An interactive UI for the grill-me skill"
 description: "Run /plannotator-last on a grill-me round: the questions open in your browser, you strike out assumptions and comment on fragments, and the feedback goes straight back to the agent."
 date: 2026-08-15
 author: "backnotprop"
