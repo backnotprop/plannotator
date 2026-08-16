@@ -3,6 +3,11 @@ import react from '@astrojs/react';
 import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 
+const indexableBlogPages = new Set([
+  'https://plannotator.ai/blog/',
+  'https://plannotator.ai/blog/an-interactive-ui-for-the-grill-me-skill/',
+]);
+
 export default defineConfig({
   site: 'https://plannotator.ai',
   output: 'static',
@@ -15,7 +20,8 @@ export default defineConfig({
     sitemap({
       filter: (page) =>
         !page.startsWith('https://plannotator.ai/docs/') &&
-        !page.startsWith('https://plannotator.ai/blog/'),
+        (!page.startsWith('https://plannotator.ai/blog/') ||
+          indexableBlogPages.has(page)),
     }),
   ],
   markdown: {

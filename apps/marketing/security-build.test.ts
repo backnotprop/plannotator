@@ -103,4 +103,19 @@ describe('marketing security build', () => {
     expect(files.some((file) => /(^|\/)manifest(?:\.|$)/.test(file))).toBe(false);
     expect(files.some((file) => /\.(?:cjs|mjs)$/.test(file))).toBe(false);
   });
+
+  test('indexes live root blog pages without indexing migrated redirects', async () => {
+    const sitemap = await readFile(join(outputRoot, 'sitemap-0.xml'), 'utf8');
+
+    expect(sitemap).toContain('<loc>https://plannotator.ai/blog/</loc>');
+    expect(sitemap).toContain(
+      '<loc>https://plannotator.ai/blog/an-interactive-ui-for-the-grill-me-skill/</loc>',
+    );
+    expect(sitemap).not.toContain(
+      '<loc>https://plannotator.ai/blog/annotate-any-web-page-or-html-file/</loc>',
+    );
+    expect(sitemap).not.toContain(
+      '<loc>https://plannotator.ai/blog/sharing-plans-with-your-team/</loc>',
+    );
+  });
 });
