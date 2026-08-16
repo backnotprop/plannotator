@@ -761,6 +761,7 @@ if (args[0] === "sessions") {
         ? await Bun.stdin.text()
         : await Bun.file(reviewArgs.patchFile).text();
       gitRef = reviewArgs.patchFile === "-" ? "stdin patch" : reviewArgs.patchFile;
+      initialDiffType = "static-patch";
     } catch (err) {
       console.error(`Failed to read patch file: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
@@ -1050,7 +1051,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
-    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
+    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
     initialFingerprint,
     prMetadata,

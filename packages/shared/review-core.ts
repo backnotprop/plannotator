@@ -42,6 +42,7 @@ export type DiffType =
   | `commit:${string}`
   | `worktree:${string}`
   | `gitbutler:${string}`
+  | "static-patch"
   | "p4-default"
   | `p4-changelist:${string}`;
 
