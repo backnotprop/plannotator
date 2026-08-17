@@ -309,6 +309,30 @@ function shouldSendProviderAuth(url: URL, metadata: PRMetadata): boolean {
     || origin === 'https://private-user-images.githubusercontent.com';
 }
 
+/**
+ * Our credentials were not accepted. Name the command that fixes it: the alternative is a
+ * bare transport status, which reads as a broken artifact rather than a missing login.
+ */
+function providerAuthRequiredError(metadata: PRMetadata): PRArtifactDocumentError {
+  const loginHint = metadata.platform === 'github'
+    ? `gh auth login --hostname ${metadata.host}`
+    : `glab auth login --hostname ${metadata.host}`;
+  return new PRArtifactDocumentError(
+    `Artifact host requires authentication: run \`${loginHint}\``,
+    401,
+  );
+}
+
+/**
+ * A direct refusal carries the same diagnosis as a sign-in redirect: GitLab's `/api/v4`
+ * routes answer 401/403 as JSON instead of redirecting to a login page. GitHub's 403 is
+ * excluded because it also covers rate limiting and SSO enforcement, where a login hint
+ * would point at the wrong problem.
+ */
+function isProviderAuthRefusal(status: number, metadata: PRMetadata): boolean {
+  return status === 401 || (status === 403 && metadata.platform === 'gitlab');
+}
+
 function responseContentLength(response: Response): number | undefined {
   const contentEncoding = response.headers.get('content-encoding');
   if (contentEncoding !== null && contentEncoding.toLowerCase() !== 'identity') return undefined;
@@ -473,19 +497,16 @@ async function fetchArtifactContent(
         // A sign-in hop returns HTTP 200 with a login/SSO page. Following it would render
         // that page as the artifact, so fail loudly instead.
         if (SIGN_IN_PATH_RE.test(nextUrl.pathname)) {
-          const loginHint = metadata.platform === 'github'
-            ? `gh auth login --hostname ${metadata.host}`
-            : `glab auth login --hostname ${metadata.host}`;
-          throw new PRArtifactDocumentError(
-            `Artifact host requires authentication — run \`${loginHint}\``,
-            401,
-          );
+          throw providerAuthRequiredError(metadata);
         }
         currentUrl = nextUrl;
         continue;
       }
       if (!response.ok) {
         await response.body?.cancel();
+        if (isProviderAuthRefusal(response.status, metadata)) {
+          throw providerAuthRequiredError(metadata);
+        }
         throw new PRArtifactDocumentError(`Artifact host returned HTTP ${response.status}`, 502);
       }
       const contentType = refineOpaqueContentType(

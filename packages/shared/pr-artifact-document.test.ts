@@ -373,6 +373,55 @@ describe('fetchPRArtifactDocument', () => {
     }
   });
 
+  test('diagnoses a direct 401 or 403 from the GitLab API as a missing login', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: '', stderr: '', exitCode: 1 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const status of [401, 403]) {
+        globalThis.fetch = async () => new Response('{"message":"401 Unauthorized"}', {
+          status,
+          headers: { 'content-type': 'application/json' },
+        });
+        const promise = fetchPRArtifactDocument(
+          runtime,
+          gitlabMetadata,
+          { ...context, body: `[review](/uploads/${uploadSecret}/review.md)` },
+          `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
+        );
+        // The actionable outcome: the reader is told to log in, not that HTTP 401 happened.
+        await expect(promise).rejects.toMatchObject({ status: 401 });
+        await expect(promise).rejects.toThrow(/glab auth login --hostname gitlab\.example\.com/);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('leaves a GitHub 403 as a transport status, since it also covers rate limits', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('rate limited', { status: 403 });
+    try {
+      const promise = fetchPRArtifactDocument(
+        runtime,
+        github,
+        context,
+        'https://github.com/acme/widgets/blob/main/docs/review.html',
+      );
+      await expect(promise).rejects.toMatchObject({ status: 502 });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('fails loudly instead of rendering a provider sign-in page', async () => {
     const runtime: PRRuntime = {
       async runCommand() {
