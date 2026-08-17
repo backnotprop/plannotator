@@ -510,6 +510,45 @@ describe('fetchPRArtifactDocument', () => {
     }
   });
 
+  test('does not forward the GitLab token to a cross-origin redirect after the upload rewrite', async () => {
+    // The module-global auth cache is keyed by platform and host with a 5 minute TTL, so
+    // this deliberately resolves the same `test-token` every other gitlab test in this file
+    // does: whether the cache is cold or warm, request one carries that exact token.
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    const tokens: string[] = [];
+    const signedUrl = 'https://objects.example.net/gitlab/review.md?signature=abc';
+    globalThis.fetch = async (input, init) => {
+      requestedUrls.push(String(input));
+      tokens.push(new Headers(init?.headers).get('private-token') ?? '');
+      // Object storage hands an upload off to a signed URL on an unrelated host.
+      return requestedUrls.length === 1
+        ? new Response(null, { status: 302, headers: { location: signedUrl } })
+        : new Response('# Review', { headers: { 'content-type': 'text/markdown' } });
+    };
+    try {
+      const result = await fetchPRArtifactDocument(
+        runtime,
+        gitlabMetadata,
+        { ...context, body: `[review](/uploads/${uploadSecret}/review.md)` },
+        `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
+      );
+      expect(result.content).toBe('# Review');
+      expect(requestedUrls[0]).toContain('/api/v4/projects/acme%2Fwidgets/uploads/');
+      expect(requestedUrls[1]).toBe(signedUrl);
+      // The invariant: routing uploads through the API must not widen where the
+      // credential travels. The token stops at the provider's own origin.
+      expect(tokens).toEqual(['test-token', '']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('fails loudly instead of rendering a provider sign-in page', async () => {
     const runtime: PRRuntime = {
       async runCommand() {
