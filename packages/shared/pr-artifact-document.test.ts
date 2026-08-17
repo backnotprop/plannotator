@@ -55,6 +55,9 @@ const gitlabMetadata: GitlabMRMetadata = {
   url: 'https://gitlab.example.com/acme/widgets/-/merge_requests/7',
 };
 
+/** GitLab mints upload secrets as 32 lowercase hex characters; the rewrite requires that shape. */
+const uploadSecret = '0123456789abcdef0123456789abcdef';
+
 describe('isPRArtifactDocumentUrlAllowed', () => {
   test('allows referenced GitHub uploads and raw files from the active repository', () => {
     expect(isPRArtifactDocumentUrlAllowed(
@@ -260,8 +263,8 @@ describe('fetchPRArtifactDocument', () => {
       const result = await fetchPRArtifactDocument(
         runtime,
         gitlab,
-        { ...context, body: '[review](/uploads/hash/review.md)' },
-        'https://gitlab.example.com/uploads/hash/review.md',
+        { ...context, body: `[review](/uploads/${uploadSecret}/review.md)` },
+        `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
       );
       expect(result.content).toBe('# Review');
       expect(receivedToken).toBe('test-token');
@@ -285,24 +288,63 @@ describe('fetchPRArtifactDocument', () => {
     };
     try {
       for (const rawUrl of [
-        'https://gitlab.example.com/uploads/hash/review.md',
-        'https://gitlab.example.com/acme/widgets/uploads/hash/review.md',
+        `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
+        `https://gitlab.example.com/acme/widgets/uploads/${uploadSecret}/review.md`,
       ]) {
         const result = await fetchPRArtifactDocument(
           runtime,
           gitlabMetadata,
           {
             ...context,
-            body: '[a](/uploads/hash/review.md)\n[b](/acme/widgets/uploads/hash/review.md)',
+            body: [
+              `[a](/uploads/${uploadSecret}/review.md)`,
+              `[b](/acme/widgets/uploads/${uploadSecret}/review.md)`,
+            ].join('\n'),
           },
           rawUrl,
         );
         expect(result.content).toBe('# Review');
       }
       expect(requestedUrls).toEqual([
-        'https://gitlab.example.com/api/v4/projects/acme%2Fwidgets/uploads/hash/review.md',
-        'https://gitlab.example.com/api/v4/projects/acme%2Fwidgets/uploads/hash/review.md',
+        `https://gitlab.example.com/api/v4/projects/acme%2Fwidgets/uploads/${uploadSecret}/review.md`,
+        `https://gitlab.example.com/api/v4/projects/acme%2Fwidgets/uploads/${uploadSecret}/review.md`,
       ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rewrites only real upload paths, so a crafted MR link cannot steer the credentialed GET', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = async (input) => {
+      requestedUrls.push(String(input));
+      return new Response('# Review', { headers: { 'content-type': 'text/markdown' } });
+    };
+    const crafted = [
+      // Secrets GitLab could never have minted: too short, and not lowercase hex.
+      'https://gitlab.example.com/uploads/hash/review.md',
+      `https://gitlab.example.com/uploads/${uploadSecret.toUpperCase()}/review.md`,
+      // A multi-segment remainder would otherwise append an attacker-chosen path
+      // to the /api/v4 URL the token is sent to.
+      `https://gitlab.example.com/uploads/${uploadSecret}/nested/review.md`,
+    ];
+    try {
+      for (const rawUrl of crafted) {
+        await fetchPRArtifactDocument(
+          runtime,
+          gitlabMetadata,
+          { ...context, body: `[review](${rawUrl})` },
+          rawUrl,
+        );
+      }
+      // Left alone: fetched verbatim as the ordinary web route, never rewritten.
+      expect(requestedUrls).toEqual(crafted);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -322,8 +364,8 @@ describe('fetchPRArtifactDocument', () => {
       const result = await fetchPRArtifactContent(
         runtime,
         gitlabMetadata,
-        { ...context, body: '![shot](/uploads/hash/screenshot.png)' },
-        'https://gitlab.example.com/uploads/hash/screenshot.png',
+        { ...context, body: `![shot](/uploads/${uploadSecret}/screenshot.png)` },
+        `https://gitlab.example.com/uploads/${uploadSecret}/screenshot.png`,
       );
       expect(result.contentType).toBe('image/png');
     } finally {
@@ -352,8 +394,8 @@ describe('fetchPRArtifactDocument', () => {
       const promise = fetchPRArtifactDocument(
         runtime,
         gitlabMetadata,
-        { ...context, body: '[review](/uploads/hash/review.md)' },
-        'https://gitlab.example.com/uploads/hash/review.md',
+        { ...context, body: `[review](/uploads/${uploadSecret}/review.md)` },
+        `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
       );
       await expect(promise).rejects.toThrow(/requires authentication/);
     } finally {

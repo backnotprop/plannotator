@@ -8,7 +8,13 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const AUTH_CACHE_MS = 5 * 60 * 1000;
 const PRIVATE_IPV4_RE = /^(?:127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/;
 const PRIVATE_IPV6_RE = /^\[(?:::1|::ffff:|fe80:|fc|fd)/i;
-const GITLAB_UPLOAD_RE = /^\/uploads\/([^/]+)\/(.+)$/;
+/**
+ * A GitLab upload secret is 32 lowercase hex characters and the filename is a single path
+ * segment. Matching a looser shape would let a link in an attacker-authored MR body steer
+ * the rewritten, credentialed GET at an arbitrary `/api/v4/...` path, leaving the safety of
+ * that request to GitLab's router rather than to this allowlist.
+ */
+const GITLAB_UPLOAD_RE = /^\/uploads\/([0-9a-f]{32})\/([^/]+)$/;
 /** Provider sign-in entry points. Landing here means our credentials were not accepted. */
 const SIGN_IN_PATH_RE = /^\/(?:users\/(?:sign_in|auth)|login|session|oauth\/authorize)(?:\/|$)/;
 
