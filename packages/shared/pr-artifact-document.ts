@@ -470,8 +470,13 @@ async function fetchArtifactContent(
   const providerHeaders = await providerAuthHeaders(runtime, metadata);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let currentUrl = providerContentUrl(new URL(rawUrl), metadata);
-  currentUrl.hash = '';
+  const requestedUrl = new URL(rawUrl);
+  requestedUrl.hash = '';
+  // Kept so a 404 from the rewritten uploads API can be told apart from a 404 anywhere else.
+  const uploadApiUrl = metadata.platform === 'gitlab'
+    ? gitlabUploadApiUrl(requestedUrl, metadata)
+    : null;
+  let currentUrl = providerContentUrl(requestedUrl, metadata);
   try {
     for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
       const response = await fetch(currentUrl, {
@@ -504,6 +509,14 @@ async function fetchArtifactContent(
       }
       if (!response.ok) {
         await response.body?.cancel();
+        // `GET /projects/:id/uploads/:secret/:filename` landed in GitLab 17.4. An older
+        // self-hosted instance has no such route, while the original web route still reads
+        // a public project anonymously, so retry that route once before giving up. The
+        // retry is same-origin, so it carries credentials on the usual terms.
+        if (response.status === 404 && uploadApiUrl !== null && currentUrl.href === uploadApiUrl.href) {
+          currentUrl = requestedUrl;
+          continue;
+        }
         if (isProviderAuthRefusal(response.status, metadata)) {
           throw providerAuthRequiredError(metadata);
         }

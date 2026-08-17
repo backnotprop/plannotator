@@ -373,6 +373,66 @@ describe('fetchPRArtifactDocument', () => {
     }
   });
 
+  test('retries the original upload route once when the uploads API route is absent', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      // Pre-17.4 self-hosted GitLab: the uploads API route does not exist, while the
+      // original web route serves a public project without a session.
+      return url.includes('/api/v4/')
+        ? new Response('{"error":"404 Not Found"}', { status: 404 })
+        : new Response('# Review', { headers: { 'content-type': 'text/markdown' } });
+    };
+    try {
+      const result = await fetchPRArtifactDocument(
+        runtime,
+        gitlabMetadata,
+        { ...context, body: `[review](/uploads/${uploadSecret}/review.md)` },
+        `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
+      );
+      expect(result.content).toBe('# Review');
+      expect(requestedUrls).toEqual([
+        `https://gitlab.example.com/api/v4/projects/acme%2Fwidgets/uploads/${uploadSecret}/review.md`,
+        `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reports the transport status when the fallback route also 404s, without retrying again', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return new Response('missing', { status: 404 });
+    };
+    try {
+      const promise = fetchPRArtifactDocument(
+        runtime,
+        gitlabMetadata,
+        { ...context, body: `[review](/uploads/${uploadSecret}/review.md)` },
+        `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
+      );
+      await expect(promise).rejects.toMatchObject({ status: 502 });
+      expect(requests).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('diagnoses a direct 401 or 403 from the GitLab API as a missing login', async () => {
     const runtime: PRRuntime = {
       async runCommand() {
