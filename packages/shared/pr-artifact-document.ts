@@ -384,15 +384,17 @@ async function readBytesWithLimit(response: Response, maxBytes: number): Promise
 /**
  * The GitLab uploads API answers every file with `application/octet-stream`. Responses are
  * served with `nosniff`, so an unrefined type would stop images and video from rendering.
+ *
+ * Deliberately no `html` or `js`: naming an active type here buys nothing, because an HTML
+ * artifact is read through the document route, which always serves `text/plain`. Leaving
+ * them in would make the safety of the media route depend on its CSP header forever.
  */
 const EXTENSION_CONTENT_TYPES: Readonly<Record<string, string>> = {
   avif: 'image/avif',
   css: 'text/css',
   gif: 'image/gif',
-  html: 'text/html',
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
-  js: 'text/javascript',
   json: 'application/json',
   md: 'text/markdown',
   mov: 'video/quicktime',

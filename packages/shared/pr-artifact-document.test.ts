@@ -373,6 +373,34 @@ describe('fetchPRArtifactDocument', () => {
     }
   });
 
+  test('never refines an opaque upload into an active content type', async () => {
+    const runtime: PRRuntime = {
+      async runCommand() {
+        return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('<script>alert(1)</script>', {
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+    try {
+      // An HTML artifact is read through the document route, which always serves
+      // text/plain, so refining these here would only put an active type on the media
+      // route and leave its safety resting on a CSP header.
+      for (const filename of ['payload.html', 'payload.js']) {
+        const result = await fetchPRArtifactContent(
+          runtime,
+          gitlabMetadata,
+          { ...context, body: `[x](/uploads/${uploadSecret}/${filename})` },
+          `https://gitlab.example.com/uploads/${uploadSecret}/${filename}`,
+        );
+        expect(result.contentType).toBe('application/octet-stream');
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('retries the original upload route once when the uploads API route is absent', async () => {
     const runtime: PRRuntime = {
       async runCommand() {
