@@ -40,8 +40,14 @@
   width: 0 !important;
 }
 
-/* Code blocks */
-pre code.hljs {
+/* Code blocks.
+ *
+ * Token colours come from the active Shiki theme as inline styles (the same
+ * theme the code-review diff pane resolves), so this rule only owns layout and
+ * the block background. The old `.hljs-*` override stacks that existed to make
+ * highlight.js's hardcoded github-dark palette survive light mode are gone with
+ * it: a light palette now resolves a light Shiki theme. */
+pre code.pn-code {
   display: block;
   padding: 1rem;
   border-radius: var(--radius);
@@ -50,69 +56,11 @@ pre code.hljs {
   line-height: 1.6;
 }
 
-/* Fix: hljs markdown grammar applies github-dark token colors that are unreadable
-   in light mode. Emphasis/strong/code tokens use #c9d1d9 or #8b949e which wash out
-   against light backgrounds. Force them to inherit the base code color. */
-pre code.hljs .hljs-emphasis {
-  color: inherit !important;
-  font-style: normal !important;
-}
-pre code.hljs .hljs-strong {
-  color: inherit !important;
-}
-pre code.hljs .hljs-code {
-  color: inherit !important;
-}
-
-/* Light mode code - override hljs dark theme */
-.light pre code.hljs {
-  color: oklch(0.25 0.02 260) !important;
-}
-
-/* The code-file hover preview is a <div class="hljs">, so the pre code.hljs
-   rule above misses it. The unscoped .hljs-* token rules below already color
-   its tokens; this just supplies the matching default text color. */
+/* The code-file hover preview is not a <pre><code>, so the rule above misses
+   it. Its tokens carry their own theme colours; this supplies the default text
+   colour for the parts that have none. */
 .light .code-snippet-preview {
   color: oklch(0.25 0.02 260) !important;
-}
-
-.light .hljs-keyword,
-.light .hljs-selector-tag,
-.light .hljs-built_in,
-.light .hljs-name,
-.light .hljs-tag {
-  color: oklch(0.45 0.25 280) !important;
-}
-
-.light .hljs-string,
-.light .hljs-title,
-.light .hljs-section,
-.light .hljs-attribute,
-.light .hljs-literal,
-.light .hljs-template-tag,
-.light .hljs-template-variable,
-.light .hljs-type {
-  color: oklch(0.45 0.18 150) !important;
-}
-
-.light .hljs-comment,
-.light .hljs-quote {
-  color: oklch(0.55 0.02 260) !important;
-  font-style: italic;
-}
-
-.light .hljs-number,
-.light .hljs-symbol,
-.light .hljs-bullet {
-  color: oklch(0.50 0.20 50) !important;
-}
-
-.light .hljs-attr,
-.light .hljs-variable,
-.light .hljs-template-variable,
-.light .hljs-class .hljs-title,
-.light .hljs-function {
-  color: oklch(0.45 0.20 280) !important;
 }
 
 /* Annotation highlights moved to packages/ui/theme.css (shared with the

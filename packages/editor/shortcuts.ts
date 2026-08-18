@@ -1,4 +1,5 @@
 import {
+  annotationModeShortcuts,
   annotationPanelShortcuts,
   annotationToolbarShortcuts,
   annotateSidebarShortcuts,
@@ -6,6 +7,7 @@ import {
   createShortcutRegistry,
   createShortcutScopeHook,
   defineShortcutScope,
+  documentViewShortcuts,
   goalSetupShortcuts,
   imageAnnotatorShortcuts,
   inputMethodShortcuts,
@@ -79,7 +81,9 @@ const annotateEditorSettingsShortcuts = defineShortcutScope({
 });
 
 const sharedPlanSurfaceShortcuts = [
+  documentViewShortcuts,
   inputMethodShortcuts,
+  annotationModeShortcuts,
   annotationToolbarShortcuts,
   viewerShortcuts,
   vimSelectionShortcuts,

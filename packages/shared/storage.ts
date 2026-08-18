@@ -254,6 +254,38 @@ export function saveToHistory(
 }
 
 /**
+ * Save a durable record of submitted annotate feedback (#678).
+ *
+ * Annotate submissions settle a decision promise whose consumer (the invoking
+ * CLI/agent) may have timed out and stopped listening. The plan flow persists
+ * its decisions via saveFinalSnapshot; annotate had no equivalent, so a submit
+ * whose caller was gone deleted the draft and left the feedback nowhere. This
+ * writes the record next to the file's annotate version history:
+ *
+ *   {DATA_DIR}/history/{project}/{slug}/submissions/{timestamp}.md
+ *
+ * The `submissions/` subdirectory keeps these out of the numeric NNN.md
+ * version scans above (getNextVersionNumber / listVersions / listProjectPlans
+ * all match files directly in the slug directory only). Filenames are
+ * filesystem-safe ISO timestamps (colons/dots replaced) with a collision
+ * counter so rapid successive submits never overwrite each other.
+ *
+ * Returns the full path to the saved file. Throws on write failure — callers
+ * (persistAnnotateSubmission) catch and degrade.
+ */
+export function saveAnnotateSubmission(project: string, slug: string, content: string): string {
+  const submissionsDir = join(getHistoryDir(project, slug), "submissions");
+  mkdirSync(submissionsDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  let filePath = join(submissionsDir, `${stamp}.md`);
+  for (let n = 2; existsSync(filePath); n++) {
+    filePath = join(submissionsDir, `${stamp}-${n}.md`);
+  }
+  writeFileSync(filePath, content, "utf-8");
+  return filePath;
+}
+
+/**
  * Read a specific version's content from history.
  * Returns null if the version doesn't exist or on read error.
  */

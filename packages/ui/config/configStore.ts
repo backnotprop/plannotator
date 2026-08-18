@@ -29,6 +29,28 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
   }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Remove every leaf `shape` describes from `target`, pruning containers that
+ * empty out. Used to retract a queued server write once the server has spoken
+ * for the same leaves.
+ */
+function deletePaths(target: Record<string, unknown>, shape: Record<string, unknown>): void {
+  for (const key of Object.keys(shape)) {
+    if (!(key in target)) continue;
+    if (isPlainObject(target[key]) && isPlainObject(shape[key])) {
+      const child = target[key] as Record<string, unknown>;
+      deletePaths(child, shape[key] as Record<string, unknown>);
+      if (Object.keys(child).length === 0) delete target[key];
+    } else {
+      delete target[key];
+    }
+  }
+}
+
 /** Server write-back transport: posts a batch of changed server-synced settings. */
 export type ServerSyncFn = (payload: Record<string, unknown>) => void;
 
@@ -56,6 +78,10 @@ class ConfigStore {
   private serverSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private pagehideFlushRegistered = false;
   private serverSync: ServerSyncFn = defaultServerSync;
+  /** True once a host installed its own transport via setServerSync(). */
+  private serverSyncInstalled = false;
+  /** Settings whose value came from the server config; seeds must not undo them. */
+  private serverOverridden = new Set<string>();
   private loaded = false;
 
   /**
@@ -132,10 +158,55 @@ class ConfigStore {
           if (fromServer !== undefined) {
             this.values.set(name, fromServer);
             def.toCookie(fromServer as never);
+            this.serverOverridden.add(name);
+            // Retract any write still queued for the leaves the server just
+            // spoke for. Without this, a write queued before init() flushes
+            // AFTER it and pushes the pre-init value back to the config file,
+            // which the next session would then restore over the cookie.
+            if (def.toServer) {
+              deletePaths(
+                this.pendingServerWrites,
+                def.toServer(fromServer as never) as Record<string, unknown>,
+              );
+            }
           }
         }
       }
     }
+    this.notify();
+  }
+
+  /**
+   * Install a resolved default for a setting: memory + cookie, never the
+   * server. For values a component computes at mount (e.g. ThemeProvider's
+   * default theme pair) rather than values a user chose — seeding must not
+   * write to ~/.plannotator/config.json, and must never overwrite a value the
+   * server already supplied through init().
+   */
+  seed<K extends SettingName>(key: K, value: SettingValue<K>): void {
+    this.ensureLoaded();
+    if (this.serverOverridden.has(key)) return;
+    const def = SETTINGS[key];
+    this.values.set(key, value);
+    def.toCookie(value as never);
+    this.notify();
+  }
+
+  /**
+   * Persist a user choice to memory + cookie, queuing the server write-back
+   * only when this store is actually talking to a server. Hosts that never
+   * installed a serverSync seam have no /api/config endpoint, so the legacy
+   * cookie-only APIs (ThemeProvider.setColorTheme) use this instead of set().
+   */
+  setLocal<K extends SettingName>(key: K, value: SettingValue<K>): void {
+    if (this.serverSyncInstalled) {
+      this.set(key, value);
+      return;
+    }
+    this.ensureLoaded();
+    const def = SETTINGS[key];
+    this.values.set(key, value);
+    def.toCookie(value as never);
     this.notify();
   }
 
@@ -169,9 +240,13 @@ class ConfigStore {
   /** Override the server write-back transport (default = inline POST /api/config). */
   setServerSync(fn: ServerSyncFn): void {
     this.serverSync = fn;
+    this.serverSyncInstalled = true;
   }
 
-  resetServerSync(): void { this.serverSync = defaultServerSync; }
+  resetServerSync(): void {
+    this.serverSync = defaultServerSync;
+    this.serverSyncInstalled = false;
+  }
 
   private notify(): void {
     this.version++;

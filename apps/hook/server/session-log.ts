@@ -45,6 +45,10 @@ export function normalizeCwdForCompare(cwd: string): string {
 export interface SessionLogEntry {
   type: string;
   id?: string;
+  /** Entry identity. Bookkeeping types (`last-prompt`, `ai-title`, `mode`) have none. */
+  uuid?: string;
+  /** The entry this one follows. `null` on the root entry. */
+  parentUuid?: string | null;
   visibility?: string;
   message?: {
     id?: string;
@@ -316,7 +320,7 @@ function snapshotProcessTable(): Map<number, number> {
  * on first call and caches it for the lifetime of the closure, so walking
  * up to `maxHops` ancestors costs a single spawn instead of one per hop.
  */
-function createDefaultGetParentPid(): (pid: number) => number | null {
+export function createDefaultGetParentPid(): (pid: number) => number | null {
   let table: Map<number, number> | null = null;
   return (pid: number) => {
     if (table === null) table = snapshotProcessTable();
@@ -715,13 +719,74 @@ export function getLastRenderedMessage(
 }
 
 /**
+ * Resolve the entries that are actually part of the live conversation.
+ *
+ * Claude Code's transcript is append-only and tree-shaped: every entry records
+ * the entry it follows in `parentUuid`. `/rewind` writes nothing at all — the
+ * next message simply re-parents to an earlier entry, orphaning everything
+ * that came after it. So file order and the live conversation diverge, and
+ * reading the file bottom-up returns messages the user can no longer see.
+ *
+ * Walks `parentUuid` from the newest entry that has a `uuid` back to the root.
+ * The newest entry is not necessarily the last line: bookkeeping types
+ * (`last-prompt`, `ai-title`, `mode`, `file-history-snapshot`) carry no ids and
+ * are frequently written last.
+ *
+ * Returns a set of indices into `entries`, so callers keep reporting real file
+ * positions. Returns null when the chain can't be trusted — no ids at all, or a
+ * walk that dead-ends instead of reaching the root — so callers can fall back
+ * to a linear scan rather than returning nothing. Measured against 311 local
+ * transcripts, every one reaches the root with no dangling parents or cycles.
+ */
+export function resolveActiveBranchIndices(
+  entries: SessionLogEntry[],
+): Set<number> | null {
+  const indexByUuid = new Map<string, number>();
+  let cursor = -1;
+  for (let i = 0; i < entries.length; i++) {
+    const uuid = entries[i]?.uuid;
+    if (typeof uuid === "string" && uuid) {
+      indexByUuid.set(uuid, i);
+      cursor = i;
+    }
+  }
+  if (cursor === -1) {
+    return null;
+  }
+
+  const branch = new Set<number>();
+  for (;;) {
+    // A cycle would spin forever; treat a revisit as an untrustworthy chain.
+    if (branch.has(cursor)) {
+      return null;
+    }
+    branch.add(cursor);
+
+    const parentUuid = entries[cursor]?.parentUuid;
+    if (parentUuid === null || parentUuid === undefined) {
+      return branch;
+    }
+    if (typeof parentUuid !== "string") {
+      return null;
+    }
+    const parentIndex = indexByUuid.get(parentUuid);
+    if (parentIndex === undefined) {
+      return null;
+    }
+    cursor = parentIndex;
+  }
+}
+
+/**
  * Extract up to `limit` of the most recent rendered assistant messages.
  *
  * Returned newest-first. Unlike `extractLastRenderedMessage`, this does not
  * stop at turn boundaries (human prompts) — picker UIs want a flat list of
- * recent assistant bubbles. Necessary for the rewind case: after `/rewind`,
- * the message at the bottom of the terminal isn't the newest transcript
- * entry, so the user needs to pick from a list.
+ * recent assistant bubbles.
+ *
+ * Pass `branchIndices` (from `resolveActiveBranchIndices`) to skip entries that
+ * a `/rewind` orphaned. Without it, entries are read in file order, which after
+ * a rewind includes messages no longer in the conversation.
  *
  * Chunks of a single API message (same message.id) are concatenated.
  */
@@ -729,8 +794,10 @@ export function extractRecentRenderedMessages(
   entries: SessionLogEntry[],
   beforeIndex: number,
   limit: number,
+  opts: { branchIndices?: Set<number> | null } = {},
 ): RenderedMessage[] {
   if (limit <= 0) return [];
+  const { branchIndices } = opts;
 
   // Map preserves insertion order — we walk backward, so first key inserted is
   // newest. Each bucket collects the chunks of one API message (same message.id).
@@ -742,6 +809,7 @@ export function extractRecentRenderedMessages(
   for (let i = beforeIndex - 1; i >= 0; i--) {
     const entry = entries[i];
     if (!entry) continue;
+    if (branchIndices && !branchIndices.has(i)) continue;
 
     if (entry.type === "progress" || entry.type === "system") continue;
     if (entry.type === "file-history-snapshot") continue;
@@ -778,15 +846,39 @@ export function extractRecentRenderedMessages(
 
 /**
  * High-level: read up to `limit` recent assistant messages from a session log.
+ *
+ * `activeBranchOnly` restricts the read to the live conversation branch, so a
+ * `/rewind` doesn't surface orphaned messages. Only meaningful for transcripts
+ * that carry `uuid`/`parentUuid` (Claude Code); an untrustworthy or absent
+ * chain silently degrades to a plain file-order read.
+ *
+ * A `/compact` boundary is also a tree root (`parentUuid: null`), so right
+ * after a compaction the active branch may contain no assistant messages at
+ * all. An empty filtered result falls back to the file-order read: callers
+ * treat "no messages" as "wrong log file" and would walk off to an older
+ * session, which is strictly worse than offering the pre-compaction messages
+ * the user just watched scroll by.
  */
 export function getRecentRenderedMessages(
   logPath: string,
   limit: number,
+  opts: { activeBranchOnly?: boolean } = {},
 ): RenderedMessage[] {
   try {
     const content = readFileSync(logPath, "utf-8");
     const entries = parseSessionLog(content);
-    return extractRecentRenderedMessages(entries, entries.length, limit);
+    const branchIndices = opts.activeBranchOnly
+      ? resolveActiveBranchIndices(entries)
+      : null;
+    const messages = extractRecentRenderedMessages(entries, entries.length, limit, {
+      branchIndices,
+    });
+    if (messages.length === 0 && branchIndices) {
+      // Fail open, never fail empty: an empty active branch (fresh /compact)
+      // must not make this log look like the wrong file.
+      return extractRecentRenderedMessages(entries, entries.length, limit);
+    }
+    return messages;
   } catch {
     return [];
   }

@@ -16,7 +16,7 @@ const COOKIE_KEY = 'plannotator.agents';
 // would clobber writes exactly like before.
 const settingsListeners = new Set<(s: AgentSettingsState) => void>();
 
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-4-7';
+export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
 export const DEFAULT_CLAUDE_EFFORT = 'high';
 // gpt-5.3-codex is deprecated (ChatGPT-account Codex rejects it outright) —
 // default to the current flagship everywhere.

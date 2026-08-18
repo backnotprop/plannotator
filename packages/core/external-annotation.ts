@@ -383,7 +383,12 @@ export interface AnnotationStore<T extends StorableAnnotation> {
   remove(id: string): boolean;
   /** Remove all annotations from a specific source. Returns count removed. */
   clearBySource(source: string): number;
-  /** Update an annotation by ID. Returns the updated annotation, or null if not found. */
+  /**
+   * Update an annotation by ID. Returns the updated annotation, or null if
+   * not found. The identity fields `id` and `source` are pinned — values for
+   * them in `fields` are ignored (`source` gates verbatim skill-instruction
+   * injection in exported feedback and must not be clearable via PATCH).
+   */
   update(id: string, fields: Partial<T>): T | null;
   /** Remove all annotations. Returns count removed. */
   clearAll(): number;
@@ -441,7 +446,17 @@ export function createAnnotationStore<T extends StorableAnnotation>(): Annotatio
     update(id, fields) {
       const idx = annotations.findIndex((a) => a.id === id);
       if (idx === -1) return null;
-      const merged = { ...annotations[idx], ...fields, id } as T;
+      // Identity fields are pinned and can never be set, cleared, or changed
+      // by an update: `id` addresses the annotation, and `source` is the
+      // security marker the feedback exporters key on — a tool-submitted
+      // annotation (one carrying a `source`) must never receive verbatim
+      // SKILL.md injection (#1229). PATCH is an unauthenticated localhost
+      // surface, so allowing `{"source": ""}` through the merge would let
+      // any local process strip the external marker and re-arm injection.
+      const patch = { ...fields } as Record<string, unknown>;
+      delete patch.id;
+      delete patch.source;
+      const merged = { ...annotations[idx], ...(patch as Partial<T>) } as T;
       annotations[idx] = merged;
       version++;
       emit({ type: "update", id, annotation: merged });

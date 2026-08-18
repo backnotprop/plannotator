@@ -1,6 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { fetchGlMR, fetchGlMRContext, parsePaginatedArray } from "./pr-gitlab";
-import type { PRRuntime } from "./pr-types";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fetchGlMR, fetchGlMRContext, parsePaginatedArray, submitGlMRReview } from "./pr-gitlab";
+import type { PRReviewFileComment, PRRuntime } from "./pr-types";
 
 describe("fetchGlMR", () => {
   test("uses GitLab raw diffs so binary markers and collapsed files are preserved", async () => {
@@ -479,5 +482,270 @@ describe("parsePaginatedArray", () => {
 
   test("does not split on bracket characters inside strings", () => {
     expect(parsePaginatedArray<{ s: string }>('[{"s":"a][b"}]')).toEqual([{ s: "a][b" }]);
+  });
+});
+
+describe("submitGlMRReview", () => {
+  const comments: PRReviewFileComment[] = [
+    {
+      path: "src/first.ts",
+      line: 12,
+      side: "RIGHT",
+      body: "First finding",
+    },
+    {
+      path: "src/second.ts",
+      line: 27,
+      side: "LEFT",
+      body: "Second finding",
+    },
+  ];
+
+  function makeSubmissionRuntime(
+    discussionFailures: ReadonlySet<string>,
+    options: {
+      diffRefsReject?: boolean;
+      approvalReject?: boolean;
+    } = {},
+  ): { runtime: PRRuntime; postedBodies: string[] } {
+    const postedBodies: string[] = [];
+    return {
+      postedBodies,
+      runtime: {
+        async runCommand(_command, args) {
+          const endpoint = args[1] ?? "";
+          if (endpoint === "projects/g%2Fp/merge_requests/1") {
+            if (options.diffRefsReject) {
+              throw new Error("spawn glab ENOENT");
+            }
+            return {
+              stdout: JSON.stringify({
+                diff_refs: {
+                  base_sha: "base",
+                  start_sha: "start",
+                  head_sha: "head",
+                },
+              }),
+              stderr: "",
+              exitCode: 0,
+            };
+          }
+          return { stdout: "", stderr: `unexpected endpoint: ${endpoint}`, exitCode: 1 };
+        },
+        async runCommandWithInput(_command, args, input) {
+          const endpoint = args[1] ?? "";
+          const payload = JSON.parse(input) as { body?: string };
+          if (payload.body) postedBodies.push(payload.body);
+          if (endpoint.endsWith("/notes")) {
+            return { stdout: "{}", stderr: "", exitCode: 0 };
+          }
+          if (endpoint.endsWith("/discussions")) {
+            return discussionFailures.has(payload.body ?? "")
+              ? { stdout: "", stderr: `rejected ${payload.body}`, exitCode: 1 }
+              : { stdout: "{}", stderr: "", exitCode: 0 };
+          }
+          if (endpoint.endsWith("/approve") && options.approvalReject) {
+            throw new Error("spawn glab ENOENT");
+          }
+          return { stdout: "", stderr: `unexpected endpoint: ${endpoint}`, exitCode: 1 };
+        },
+      },
+    };
+  }
+
+  async function withFailedCommentDataDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
+    const original = process.env.PLANNOTATOR_DATA_DIR;
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-gitlab-submit-"));
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+    try {
+      return await run(dir);
+    } finally {
+      if (original === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = original;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("reports complete when every inline discussion is posted", async () => {
+    const { runtime } = makeSubmissionRuntime(new Set());
+
+    await expect(
+      submitGlMRReview(runtime, REF, "head", "comment", "", comments),
+    ).resolves.toEqual({ status: "complete" });
+  });
+
+  test("throws when every inline discussion fails before anything is posted", async () => {
+    await withFailedCommentDataDir(async () => {
+      const { runtime } = makeSubmissionRuntime(new Set(["First finding", "Second finding"]));
+
+      await expect(
+        submitGlMRReview(runtime, REF, "head", "comment", "", comments),
+      ).rejects.toThrow("Failed to post inline comments");
+    });
+  });
+
+  test("reports all inline failures as partial when the review body already posted", async () => {
+    await withFailedCommentDataDir(async () => {
+      const { runtime } = makeSubmissionRuntime(new Set(["First finding", "Second finding"]));
+
+      const result = await submitGlMRReview(
+        runtime,
+        REF,
+        "head",
+        "comment",
+        "Already posted body",
+        comments,
+      );
+
+      expect(result).toMatchObject({
+        status: "partial",
+        postedFileCommentCount: 0,
+        reviewBodyPosted: true,
+        failedFileComments: [
+          { comment: comments[0] },
+          { comment: comments[1] },
+        ],
+        retry: {
+          action: "comment",
+          fileComments: comments,
+        },
+      });
+    });
+  });
+
+  test("reports mixed outcomes with exact failed comments and a durable recovery file", async () => {
+    await withFailedCommentDataDir(async () => {
+      const { runtime, postedBodies } = makeSubmissionRuntime(new Set(["Second finding"]));
+
+      const result = await submitGlMRReview(
+        runtime,
+        REF,
+        "head",
+        "comment",
+        "Overall review",
+        comments,
+      );
+
+      expect(result).toMatchObject({
+        status: "partial",
+        postedFileCommentCount: 1,
+        reviewBodyPosted: true,
+        approval: "not-requested",
+        failedFileComments: [
+          {
+            comment: comments[1],
+            error: "src/second.ts:27: rejected Second finding",
+          },
+        ],
+        retry: {
+          action: "comment",
+          fileComments: [comments[1]],
+        },
+      });
+      expect(result.status === "partial" ? result.recoveryFile : undefined).toBeString();
+      if (result.status !== "partial" || !result.recoveryFile) {
+        throw new Error("Expected a partial result with a recovery file");
+      }
+      const persisted = JSON.parse(readFileSync(result.recoveryFile, "utf-8")) as {
+        failedComments: PRReviewFileComment[];
+      };
+      expect(persisted.failedComments).toEqual([comments[1]]);
+      expect(postedBodies).toEqual(["Overall review", "First finding", "Second finding"]);
+    });
+  });
+
+  test("turns a diff-ref spawn rejection after posting the body into a safe partial retry", async () => {
+    await withFailedCommentDataDir(async () => {
+      const { runtime } = makeSubmissionRuntime(new Set(), { diffRefsReject: true });
+
+      const result = await submitGlMRReview(
+        runtime,
+        REF,
+        "head",
+        "comment",
+        "Already posted body",
+        comments,
+      );
+
+      expect(result).toMatchObject({
+        status: "partial",
+        postedFileCommentCount: 0,
+        reviewBodyPosted: true,
+        failedFileComments: [
+          { comment: comments[0], error: expect.stringContaining("spawn glab ENOENT") },
+          { comment: comments[1], error: expect.stringContaining("spawn glab ENOENT") },
+        ],
+        retry: { action: "comment", fileComments: comments },
+      });
+    });
+  });
+
+  test("keeps a diff-ref spawn rejection retryable when no mutation occurred", async () => {
+    await withFailedCommentDataDir(async () => {
+      const { runtime } = makeSubmissionRuntime(new Set(), { diffRefsReject: true });
+
+      await expect(
+        submitGlMRReview(runtime, REF, "head", "comment", "", comments),
+      ).rejects.toThrow("Failed to post inline comments");
+    });
+  });
+
+  test("reports a failed approval as partial after inline comments have posted", async () => {
+    const { runtime } = makeSubmissionRuntime(new Set());
+
+    const result = await submitGlMRReview(
+      runtime,
+      REF,
+      "head",
+      "approve",
+      "",
+      comments,
+    );
+
+    expect(result).toMatchObject({
+      status: "partial",
+      postedFileCommentCount: 2,
+      failedFileComments: [],
+      reviewBodyPosted: false,
+      approval: "failed",
+      approvalError: "Failed to approve MR: unexpected endpoint: projects/g%2Fp/merge_requests/1/approve",
+      retry: {
+        action: "approve",
+        fileComments: [],
+      },
+    });
+  });
+
+  test("reports repeated approval-only spawn failures consistently as partial", async () => {
+    const { runtime } = makeSubmissionRuntime(new Set(), { approvalReject: true });
+
+    const first = await submitGlMRReview(
+      runtime,
+      REF,
+      "head",
+      "approve",
+      "",
+      [],
+    );
+    const retry = await submitGlMRReview(
+      runtime,
+      REF,
+      "head",
+      "approve",
+      "",
+      [],
+    );
+
+    const expected = {
+      status: "partial",
+      postedFileCommentCount: 0,
+      failedFileComments: [],
+      reviewBodyPosted: false,
+      approval: "failed",
+      approvalError: "Failed to approve MR: spawn glab ENOENT",
+      retry: { action: "approve", fileComments: [] },
+    };
+    expect(first).toEqual(expected);
+    expect(retry).toEqual(expected);
   });
 });

@@ -24,10 +24,20 @@ import {
 } from "../../utils/vimHud";
 import { AnnotationToolbar } from "../AnnotationToolbar";
 import { AttachmentsButton } from "../AttachmentsButton";
-import { CommentPopover, type CommentAskAIHandler } from "../CommentPopover";
+import {
+  CommentPopover,
+  type CommentAskAIHandler,
+  type CommentTargetChip,
+} from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import { VimKeyHud } from "../VimKeyHud";
 import type { ViewerHandle } from "../Viewer";
+import {
+  computeComposerYield,
+  distanceToRect,
+  type ComposerYieldState,
+} from "./composerYield";
+import { buildSyncNumbering } from "./annotationNumbering";
 import { useHtmlAnnotation } from "./useHtmlAnnotation";
 import {
   THEME_TOKENS,
@@ -160,6 +170,13 @@ export interface HtmlViewerProps {
   /** Toggle the diff-highlighted view on/off. */
   onToggleDiff?: () => void;
   onAskAI?: CommentAskAIHandler;
+  /** Disable every annotation mutation entry point while preserving reading and navigation. */
+  readOnly?: boolean;
+  /** Reports the full set of annotation ids with no live representation on
+   *  the page (fail-closed anchors hide markers rather than guess). Called
+   *  with the complete current set whenever it changes, including back to
+   *  empty on recovery. Fires in readOnly mode too. */
+  onUnanchoredChange?: (ids: string[]) => void;
   /** Accessible iframe title. */
   title?: string;
 }
@@ -192,6 +209,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       diffActive,
       onToggleDiff,
       onAskAI,
+      readOnly = false,
+      onUnanchoredChange,
       title = "HTML Plan Viewer",
     },
     ref,
@@ -208,7 +227,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [vimHudCommand, setVimHudCommand] = useState<VimHudCommand | null>(null);
     const [vimHelpOpen, setVimHelpOpen] = useState(false);
     const vimHudSequenceRef = useRef(0);
-    const vimHudActive = vimModeEnabled && vimHudEnabled;
+    const vimHudActive = !readOnly && vimModeEnabled && vimHudEnabled;
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
@@ -232,15 +251,104 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       setIframeHeight(height);
     }, []);
 
+    // Composer yield while shift-selecting (multi-target drafts): fade the
+    // composer as the pointer approaches, click-through when over it. Pointer
+    // positions arrive from parent mousemoves AND from the bridge (the iframe
+    // consumes moves over the page, so the bridge relays them).
+    const [composerYield, setComposerYield] = useState<ComposerYieldState>("none");
+    const composerYieldRef = useRef(composerYield);
+    composerYieldRef.current = composerYield;
+    const shiftHeldRef = useRef(false);
+
+    const handleYieldPointer = useCallback((clientX: number, clientY: number) => {
+      if (!shiftHeldRef.current) return;
+      const popover = document.querySelector("[data-comment-popover]");
+      if (!popover) return;
+      const rect = popover.getBoundingClientRect();
+      const next = computeComposerYield(
+        composerYieldRef.current,
+        distanceToRect(clientX, clientY, rect),
+      );
+      if (next !== composerYieldRef.current) setComposerYield(next);
+    }, []);
+
+    const handleBridgePointer = useCallback(
+      (x: number, y: number, shift: boolean) => {
+        // The bridge is the only observer of Shift while the pointer lives
+        // inside the sandbox (parent keydowns don't fire there, and window
+        // blur clears our local flag when focus enters the iframe) — so the
+        // relayed shift state arms/disarms the yield directly.
+        shiftHeldRef.current = shift;
+        if (!shift) {
+          setComposerYield("none");
+          return;
+        }
+        const iframeRect = iframeRef.current?.getBoundingClientRect();
+        if (!iframeRect) return;
+        handleYieldPointer(iframeRect.left + x, iframeRect.top + y);
+      },
+      [handleYieldPointer],
+    );
+
     const hook = useHtmlAnnotation({
       iframeRef,
+      enabled: !readOnly,
       annotations,
       onAddAnnotation,
       onSelectAnnotation,
       selectedAnnotationId,
       mode,
       onResize: handleResize,
+      onBridgePointer: handleBridgePointer,
+      onUnanchoredChange,
     });
+
+    const multiSelectActive = !readOnly && !!hook.commentPopover && hook.draftTargets.length > 0;
+
+    // Track Shift while a multi-select draft composer is open; releasing it
+    // (or losing window focus) always restores the composer.
+    useEffect(() => {
+      if (!multiSelectActive) {
+        shiftHeldRef.current = false;
+        setComposerYield("none");
+        return;
+      }
+      const down = (e: KeyboardEvent) => {
+        if (e.key === "Shift") shiftHeldRef.current = true;
+      };
+      const release = () => {
+        shiftHeldRef.current = false;
+        setComposerYield("none");
+      };
+      const up = (e: KeyboardEvent) => {
+        if (e.key === "Shift") release();
+      };
+      const move = (e: MouseEvent) => {
+        // Parent-side pointer (over app chrome or the composer itself).
+        if (e.shiftKey) shiftHeldRef.current = true;
+        handleYieldPointer(e.clientX, e.clientY);
+      };
+      window.addEventListener("keydown", down);
+      window.addEventListener("keyup", up);
+      window.addEventListener("blur", release);
+      window.addEventListener("mousemove", move);
+      return () => {
+        window.removeEventListener("keydown", down);
+        window.removeEventListener("keyup", up);
+        window.removeEventListener("blur", release);
+        window.removeEventListener("mousemove", move);
+      };
+    }, [multiSelectActive, handleYieldPointer]);
+
+    // Chip data for the composer: semantic label + short excerpt per target.
+    const targetChips = useMemo<CommentTargetChip[] | undefined>(() => {
+      if (!hook.draftTargets.length) return undefined;
+      return hook.draftTargets.map((t) => ({
+        key: t.key,
+        label: t.label,
+        excerpt: t.text.replace(/\s+/g, " ").trim().slice(0, 80),
+      }));
+    }, [hook.draftTargets]);
 
     useEffect(() => {
       function handler(e: MessageEvent<unknown>) {
@@ -256,7 +364,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         if (vimCopy !== null) {
           const iframe = iframeRef.current;
           if (
-            vimModeEnabled
+            !readOnly
+            && vimModeEnabled
             && iframe
             && document.activeElement === iframe
           ) {
@@ -288,7 +397,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       }
       window.addEventListener("message", handler);
       return () => window.removeEventListener("message", handler);
-    }, [vimHudActive, vimModeEnabled]);
+    }, [readOnly, vimHudActive, vimModeEnabled]);
 
     useEffect(() => {
       if (vimHudActive) return;
@@ -312,7 +421,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
     const focusVimDocument = useCallback((): boolean => {
       const iframe = iframeRef.current;
-      if (!vimModeEnabled || !iframe) return false;
+      if (readOnly || !vimModeEnabled || !iframe) return false;
       if (document.activeElement === iframe) return false;
       iframe.focus({ preventScroll: true });
       if (document.activeElement !== iframe) return false;
@@ -321,10 +430,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         "*",
       );
       return true;
-    }, [vimModeEnabled]);
+    }, [readOnly, vimModeEnabled]);
 
     useVimDocumentFocus({
-      enabled: vimModeEnabled,
+      enabled: !readOnly && vimModeEnabled,
       blocked: !!hook.toolbarState || !!hook.commentPopover || !!hook.quickLabelPicker,
       focusDocument: focusVimDocument,
     });
@@ -335,6 +444,21 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         hook.applyAnnotations(annotations);
       }
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Placed-marker numbering is parent-authoritative and matches the
+    // numbers exportAnnotations writes into the submitted feedback: the full
+    // list INCLUDING globals is numbered by ARRAY position (the export's
+    // effective order — its sort keys tie for raw-HTML annotations), and
+    // globals then ship no entry (no page location) — see buildSyncNumbering
+    // for the contract. Renumbers on delete; the bridge's own registration
+    // order is only a pre-sync fallback.
+    useEffect(() => {
+      if (iframeReadyVersion === 0) return;
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: `${PREFIX}sync-annotations`, annotations: buildSyncNumbering(annotations) },
+        "*",
+      );
+    }, [iframeReadyVersion, annotations]);
 
     // Tell the bridge the current input method (drag vs pinpoint). Re-posts on
     // ready (fresh iframe) and whenever the user switches it in the toolstrip.
@@ -352,13 +476,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       iframe?.contentWindow?.postMessage(
         {
           type: `${PREFIX}set-vim-mode`,
-          enabled: vimModeEnabled,
+          enabled: !readOnly && vimModeEnabled,
           hudEnabled: vimHudEnabled,
           mode,
         },
         "*",
       );
-      if (vimModeEnabled && iframe === document.activeElement) {
+      if (!readOnly && vimModeEnabled && iframe && iframe === document.activeElement) {
         // The initial parent focus can land before the sandbox bridge is ready.
         // Reassert it after configuration so raw HTML enters BLOCK immediately,
         // matching the Markdown surface instead of waiting for the first key.
@@ -367,7 +491,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           "*",
         );
       }
-    }, [iframeReadyVersion, mode, vimHudEnabled, vimModeEnabled]);
+    }, [iframeReadyVersion, mode, readOnly, vimHudEnabled, vimModeEnabled]);
 
     const vimOverlayWasOpenRef = useRef(false);
     useEffect(() => {
@@ -375,7 +499,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       const wasOpen = vimOverlayWasOpenRef.current;
       vimOverlayWasOpenRef.current = overlayOpen;
       if (
-        vimModeEnabled
+        !readOnly
+        && vimModeEnabled
         && wasOpen
         && !overlayOpen
         && (document.activeElement === document.body || document.activeElement === null)
@@ -386,7 +511,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           "*",
         );
       }
-    }, [hook.commentPopover, hook.quickLabelPicker, hook.toolbarState, vimModeEnabled]);
+    }, [hook.commentPopover, hook.quickLabelPicker, hook.toolbarState, readOnly, vimModeEnabled]);
 
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
@@ -418,6 +543,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
     const handleGlobalCommentSubmit = useCallback(
       (text: string, images?: ImageAttachment[]) => {
+        if (readOnly) return;
         onAddAnnotation({
           id: `global-${Date.now()}`,
           blockId: "",
@@ -432,8 +558,14 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         });
         setGlobalCommentPopover(null);
       },
-      [onAddAnnotation],
+      [onAddAnnotation, readOnly],
     );
+
+    useEffect(() => {
+      if (readOnly) setGlobalCommentPopover(null);
+    }, [readOnly]);
+
+    const hasActionButtons = !readOnly || Boolean(diffAvailable && onToggleDiff);
 
     // Document-level controls (attachments + global comment). Shared between the
     // normal layout (bar above the card) and full-viewport (floating overlay), so
@@ -452,7 +584,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             <span>{diffActive ? "Hide changes" : "Show changes"}</span>
           </button>
         )}
-        {onAddGlobalAttachment && onRemoveGlobalAttachment && (
+        {!readOnly && onAddGlobalAttachment && onRemoveGlobalAttachment && (
           <AttachmentsButton
             images={globalAttachments}
             onAdd={onAddGlobalAttachment}
@@ -460,22 +592,23 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             variant="toolbar"
           />
         )}
-        <button
-          ref={globalCommentButtonRef}
-          onClick={() => {
-            setGlobalCommentPopover({
-              anchorEl: globalCommentButtonRef.current!,
-              contextText: "",
-            });
-          }}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
-          title="Add global comment"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-          </svg>
-          <span>Comment</span>
-        </button>
+        {!readOnly && (
+          <button
+            ref={globalCommentButtonRef}
+            onClick={() => {
+              const anchorEl = globalCommentButtonRef.current;
+              if (!anchorEl) return;
+              setGlobalCommentPopover({ anchorEl, contextText: "" });
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
+            title="Add global comment"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+            </svg>
+            <span>Comment</span>
+          </button>
+        )}
       </>
     );
 
@@ -486,7 +619,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           style={fullViewport ? undefined : { maxWidth: maxWidth ?? undefined }}
         >
           {/* Action bar — above the iframe in normal mode (outside overflow:hidden). */}
-          {!fullViewport && (
+          {!fullViewport && hasActionButtons && (
             <div data-print-hide className="flex justify-end gap-1 md:gap-2 mb-2">
               {actionButtons}
             </div>
@@ -499,7 +632,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             {/* Full-viewport mode has no card chrome, so float the same controls
                 over the top-right of the iframe (with a backdrop so they read over
                 any HTML). The selection toolbar is portaled separately. */}
-            {fullViewport && !hideControls && (
+            {fullViewport && !hideControls && hasActionButtons && (
               <div
                 data-print-hide
                 className="absolute top-3 right-3 z-10 flex items-center gap-1 md:gap-2 rounded-lg border border-border/50 bg-background/80 px-1.5 py-1 shadow-md backdrop-blur-sm"
@@ -517,7 +650,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 border: "none",
                 display: "block",
                 colorScheme: "auto",
-                outline: vimModeEnabled ? "none" : undefined,
+                outline: !readOnly && vimModeEnabled ? "none" : undefined,
               }}
               title={title}
               onFocus={() => setIframeFocused(true)}
@@ -561,7 +694,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           )}
 
         {/* Toolbar portal */}
-        {hook.toolbarState &&
+        {!readOnly && hook.toolbarState &&
           createPortal(
             <AnnotationToolbar
               positionMode="center-above"
@@ -576,27 +709,35 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           )}
 
         {/* Comment popover portal */}
-        {hook.commentPopover &&
+        {!readOnly && hook.commentPopover &&
           createPortal(
             <CommentPopover
               anchorEl={hook.commentPopover.anchorEl}
               contextText={hook.commentPopover.contextText}
               initialText={hook.commentPopover.initialText}
               isGlobal={false}
+              draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
               onClose={hook.handleCommentClose}
+              skillReferences
               onAskAI={onAskAI}
               askAIContext={{
                 kind: "selection",
                 label: "Selected HTML",
                 text: hook.commentPopover.selectedText ?? hook.commentPopover.contextText,
               }}
+              targetChips={targetChips}
+              onRemoveTargetChip={targetChips ? hook.removeDraftTarget : undefined}
+              onHoverTargetChip={targetChips ? hook.flashDraftTarget : undefined}
+              refocusToken={targetChips ? hook.composerFocusToken : undefined}
+              captureStrayKeys={multiSelectActive}
+              yieldState={multiSelectActive ? composerYield : undefined}
             />,
             document.body,
           )}
 
         {/* Quick label picker portal */}
-        {hook.quickLabelPicker &&
+        {!readOnly && hook.quickLabelPicker &&
           createPortal(
             <FloatingQuickLabelPicker
               anchorEl={hook.quickLabelPicker.anchorEl}
@@ -608,7 +749,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           )}
 
         {/* Global comment popover portal */}
-        {globalCommentPopover &&
+        {!readOnly && globalCommentPopover &&
           createPortal(
             <CommentPopover
               anchorEl={globalCommentPopover.anchorEl}
@@ -616,6 +757,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={true}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
+              skillReferences
               onAskAI={onAskAI}
               askAIContext={{ kind: "general", label: "Document" }}
             />,

@@ -56,12 +56,34 @@ describe("Pi extension startup boundary", () => {
 		expect(browser.startMarkdownAnnotationSession).toBeFunction();
 	});
 
-	test("ships the lazy runtime in the npm package", () => {
+	test("ships the lazy runtime and todo providers in the npm package", () => {
 		const manifest = JSON.parse(
 			readFileSync(join(extensionDirectory, "package.json"), "utf-8"),
 		) as { files?: unknown };
 
 		expect(Array.isArray(manifest.files)).toBe(true);
 		expect(manifest.files).toContain("plannotator-browser-runtime.ts");
+		expect(manifest.files).toContain("todo-providers/");
+	});
+
+	test("requires a Pi host that exposes the resolved project-trust decision", () => {
+		const manifest = JSON.parse(
+			readFileSync(join(extensionDirectory, "package.json"), "utf-8"),
+		) as {
+			peerDependencies?: Record<string, string>;
+			devDependencies?: Record<string, string>;
+		};
+
+		// Deliberate security/API floor: lowering it re-admits the four Pi
+		// advisories and removes the project-trust context API this extension uses.
+		expect(manifest.peerDependencies?.["@earendil-works/pi-coding-agent"]).toBe(">=0.79.1");
+		for (const packageName of [
+			"@earendil-works/pi-coding-agent",
+			"@earendil-works/pi-agent-core",
+			"@earendil-works/pi-ai",
+			"@earendil-works/pi-tui",
+		]) {
+			expect(manifest.devDependencies?.[packageName]).toBe(">=0.79.1");
+		}
 	});
 });

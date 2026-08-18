@@ -10,7 +10,7 @@ tags: ["code-review", "diff", "hooks"]
 
 ## Watch the Demo
 
-<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube.com/embed/a_AT7cEN_9I" title="Plannotator Demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube-nocookie.com/embed/a_AT7cEN_9I" title="Plannotator Demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 
 ## The scenario
 
@@ -102,7 +102,7 @@ When `plannotator review` executes, the entry point in `apps/hook/server/index.t
 
 4. **Blocking wait** — The process calls `server.waitForDecision()`, which returns a promise that only resolves when the user submits feedback or approves. The process blocks here — no polling, no timeout (well, 96 hours). When it resolves, the server shuts down and the feedback string prints to stdout.
 
-The diff itself stays local. The server runs on `localhost`. Nothing is sent to any external service. The raw patch flows from git to the Bun server to the browser, all on your machine.
+The diff content stays local in the base review flow. The raw patch moves from Git to the Bun server to the browser on your machine. Separately, every code-review app load checks GitHub for the latest Plannotator release, with no current opt-out, and local Git review may run `git ls-remote origin` to identify the default branch and a stale baseline. Those requests do not contain the diff and do not give the Plannotator project owner usage analytics, although GitHub or your configured Git host receives ordinary request metadata. Ask AI, review agents, hosted PR review, sharing, and callback links have their own network behavior when you use them.
 
 ## What the diff viewer actually renders
 

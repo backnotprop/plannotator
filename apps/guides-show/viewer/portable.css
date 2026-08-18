@@ -1,0 +1,12 @@
+/* Portable Guided Review page: the document itself scrolls (the in-app guide
+   scrolls inside the review shell). Everything else comes from the review
+   stylesheet so the guide is styled exactly as in Plannotator. */
+html, body { margin: 0; min-height: 100%; }
+/* Do NOT give body an overflow: it would propagate to the viewport (body still
+   does not scroll itself), and the guide's viewport manager, walking up for an
+   overflow-y:auto ancestor, would then observe body instead of the window and
+   never see the real scroll position (#1158 contract). */
+#root { min-height: 100vh; }
+
+/* Controls: no double-tap-to-zoom delay on touch; the page itself still pinch-zooms. */
+button, a, [role="button"] { touch-action: manipulation; }

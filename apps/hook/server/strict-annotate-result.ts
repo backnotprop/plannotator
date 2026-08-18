@@ -24,6 +24,28 @@ export interface AnnotateOutcome {
  */
 export const STRICT_GATE_ERROR_EXIT_CODE = 2;
 
+export interface StrictAnnotateFlags {
+  requireApproval: boolean;
+  resultFile?: string;
+}
+
+/**
+ * True when the invocation carries a strict flag (`--require-approval` /
+ * `--result-file`, neither of which the CLI accepts without `--gate --json`).
+ *
+ * Strict invocations own the exit-code contract below, which is why tolerant
+ * annotate argument resolution is bypassed for them: quietly annotating a
+ * later argument because the first one was a typo would let a gate publish
+ * "approved" for a document the caller never named. A typo must keep exiting
+ * 2 here. This predicate is the single definition both the exit-code path
+ * and the tolerance bypass read, so the two can never drift.
+ */
+export function isStrictAnnotateInvocation(
+  flags: StrictAnnotateFlags,
+): boolean {
+  return flags.requireApproval || !!flags.resultFile;
+}
+
 /**
  * Exit code for an annotate startup failure (missing path, unreachable URL,
  * empty folder, ambiguous name, missing file, oversized file).
@@ -32,13 +54,10 @@ export const STRICT_GATE_ERROR_EXIT_CODE = 2;
  * "the reviewer did not approve", so a startup failure must exit with the gate
  * error code instead — otherwise automation reads a typo'd path as a rejection.
  */
-export function annotateStartupFailureExitCode(strict: {
-  requireApproval: boolean;
-  resultFile?: string;
-}): number {
-  return strict.requireApproval || strict.resultFile
-    ? STRICT_GATE_ERROR_EXIT_CODE
-    : 1;
+export function annotateStartupFailureExitCode(
+  strict: StrictAnnotateFlags,
+): number {
+  return isStrictAnnotateInvocation(strict) ? STRICT_GATE_ERROR_EXIT_CODE : 1;
 }
 
 export function serializeStrictAnnotateResult(

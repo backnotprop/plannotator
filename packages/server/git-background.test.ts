@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -97,6 +105,36 @@ process.exit(1);
     command: `${shellQuote(process.execPath)} ${shellQuote(fakeSsh)}`,
   };
 }
+
+describe.skipIf(process.platform === "win32")("review runtime filesystem seam", () => {
+  for (const fixture of fixtures) {
+    test(`${fixture.name} resolves file metadata and symlink payloads`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "plannotator-runtime-file-"));
+      tempDirs.push(root);
+      const file = join(root, "file.txt");
+      const link = join(root, "file-link");
+      writeFileSync(file, "content\n", "utf-8");
+      symlinkSync("file.txt", link);
+
+      const runtimeModule = await import(pathToFileURL(fixture.modulePath).href);
+      const runtime = runtimeModule[fixture.exportName] as {
+        getFileInfo(basePath: string, path: string): Promise<{
+          path: string;
+          size: number;
+          isFile: boolean;
+          isSymbolicLink: boolean;
+        } | null>;
+        readLink(path: string): Promise<string | null>;
+      };
+      const fileInfo = await runtime.getFileInfo(root, "file.txt");
+      const linkInfo = await runtime.getFileInfo(root, "file-link");
+
+      expect(fileInfo).toMatchObject({ path: file, size: 8, isFile: true, isSymbolicLink: false });
+      expect(linkInfo).toMatchObject({ path: link, isFile: false, isSymbolicLink: true });
+      await expect(runtime.readLink(link)).resolves.toBe("file.txt");
+    });
+  }
+});
 
 function createHttpCredentialFixture(remoteUrl: string): {
   repo: string;

@@ -14,6 +14,8 @@ import {
   findAnchorIndex,
   extractLastRenderedMessage,
   extractRecentRenderedMessages,
+  getRecentRenderedMessages,
+  resolveActiveBranchIndices,
   findDroidSessionLogsForCwd,
   resolveDroidSessionLogForCwd,
   projectSlugFromCwd,
@@ -167,8 +169,63 @@ function queueOp(): string {
   });
 }
 
+/** Bookkeeping entry with no id at all — Claude Code often writes these last. */
+function lastPromptEntry(lastPrompt: string, leafUuid: string): string {
+  return JSON.stringify({ type: "last-prompt", lastPrompt, leafUuid });
+}
+
+/**
+ * Link fixture lines into one parent chain, the way Claude Code records a
+ * conversation. The individual helpers assign random `parentUuid`s, which would
+ * otherwise leave every entry an orphan and make branch resolution untestable.
+ * Entries with no `uuid` (bookkeeping types) are passed through untouched.
+ */
+function linkChain(lines: string[], parentUuid: string | null = null): string[] {
+  let previous = parentUuid;
+  return lines.map((line) => {
+    const entry = JSON.parse(line);
+    if (typeof entry.uuid !== "string") {
+      return JSON.stringify(entry);
+    }
+    entry.parentUuid = previous;
+    previous = entry.uuid;
+    return JSON.stringify(entry);
+  });
+}
+
+/** Last `uuid` in a set of already-linked lines. */
+function tailUuid(lines: string[]): string {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const entry = JSON.parse(lines[i]);
+    if (typeof entry.uuid === "string") {
+      return entry.uuid;
+    }
+  }
+  throw new Error("no id-bearing entry in lines");
+}
+
 function buildLog(...lines: string[]): string {
-  return lines.join("\n");
+  return linkChain(lines).join("\n");
+}
+
+/**
+ * A log recording a `/rewind`. `kept` runs to the rewind target, `abandoned` is
+ * orphaned by the rewind but stays in the file, and `resumed` re-parents back to
+ * the target. File order stays kept → abandoned → resumed, because the
+ * transcript is append-only and the rewind itself writes nothing.
+ */
+function buildRewoundLog(opts: {
+  kept: string[];
+  abandoned: string[];
+  resumed: string[];
+}): string {
+  const kept = linkChain(opts.kept);
+  const forkPoint = tailUuid(kept);
+  return [
+    ...kept,
+    ...linkChain(opts.abandoned, forkPoint),
+    ...linkChain(opts.resumed, forkPoint),
+  ].join("\n");
 }
 
 function droidMessage(
@@ -736,6 +793,200 @@ describe("extractRecentRenderedMessages (picker)", () => {
     const entries = parseSessionLog(log);
     const result = extractRecentRenderedMessages(entries, entries.length, 5);
     expect(result.map((m) => m.text)).toEqual(["World", "Hello"]);
+  });
+});
+
+describe("resolveActiveBranchIndices", () => {
+  test("a linear log puts every id-bearing entry on the branch", () => {
+    const log = buildLog(
+      userPrompt("first"),
+      assistantText("msg_1", "First response"),
+      userPrompt("second"),
+      assistantText("msg_2", "Second response"),
+    );
+    const entries = parseSessionLog(log);
+    expect(resolveActiveBranchIndices(entries)).toEqual(new Set([0, 1, 2, 3]));
+  });
+
+  test("a rewind drops the orphaned entries", () => {
+    const log = buildRewoundLog({
+      kept: [userPrompt("keep me"), assistantText("msg_keep", "Kept")],
+      abandoned: [userPrompt("rewound away"), assistantText("msg_gone", "Orphaned")],
+      resumed: [userPrompt("after rewind")],
+    });
+    const entries = parseSessionLog(log);
+    // Lines 2 and 3 are the abandoned branch; they stay in the file but are
+    // not part of the conversation any more.
+    expect(resolveActiveBranchIndices(entries)).toEqual(new Set([0, 1, 4]));
+  });
+
+  test("walks back from a tail that carries no id", () => {
+    // Claude Code frequently writes a `last-prompt` entry as the final line.
+    const linked = linkChain([
+      userPrompt("first"),
+      assistantText("msg_1", "Response"),
+    ]);
+    const log = [...linked, lastPromptEntry("first", tailUuid(linked))].join("\n");
+    const entries = parseSessionLog(log);
+    expect(resolveActiveBranchIndices(entries)).toEqual(new Set([0, 1]));
+  });
+
+  test("null when entries carry no ids at all", () => {
+    const entries = parseSessionLog(
+      [
+        JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }),
+        JSON.stringify({
+          type: "assistant",
+          message: { id: "m", role: "assistant", content: [{ type: "text", text: "yo" }] },
+        }),
+      ].join("\n"),
+    );
+    expect(resolveActiveBranchIndices(entries)).toBeNull();
+  });
+
+  test("null when the chain dead-ends instead of reaching the root", () => {
+    // Unlinked lines: each helper assigns a random parentUuid that matches
+    // nothing in the file. A partial walk must not be mistaken for a branch.
+    const log = [userPrompt("first"), assistantText("msg_1", "Response")].join("\n");
+    const entries = parseSessionLog(log);
+    expect(resolveActiveBranchIndices(entries)).toBeNull();
+  });
+
+  test("null on a cycle", () => {
+    const a = JSON.stringify({ type: "user", message: { role: "user", content: "a" }, uuid: "u-a", parentUuid: "u-b" });
+    const b = JSON.stringify({ type: "user", message: { role: "user", content: "b" }, uuid: "u-b", parentUuid: "u-a" });
+    expect(resolveActiveBranchIndices(parseSessionLog([a, b].join("\n")))).toBeNull();
+  });
+
+  test("empty log → null", () => {
+    expect(resolveActiveBranchIndices([])).toBeNull();
+  });
+});
+
+describe("extractRecentRenderedMessages — after a rewind", () => {
+  const rewoundLog = () =>
+    buildRewoundLog({
+      kept: [
+        userPrompt("are the remotes named weirdly?"),
+        assistantText("msg_target", "They're inverted from the GitHub convention."),
+      ],
+      abandoned: [
+        userPrompt("nah, use the standard convention"),
+        assistantText("msg_orphan", "Pushed. All three are on 68c1291c."),
+      ],
+      resumed: [userPrompt("/plannotator-last")],
+    });
+
+  test("the default pick is the live message, not the orphan", () => {
+    const entries = parseSessionLog(rewoundLog());
+    const result = extractRecentRenderedMessages(entries, entries.length, 25, {
+      branchIndices: resolveActiveBranchIndices(entries),
+    });
+    expect(result[0].messageId).toBe("msg_target");
+    expect(result.map((m) => m.messageId)).not.toContain("msg_orphan");
+  });
+
+  test("orphaned messages are absent from the picker list", () => {
+    const entries = parseSessionLog(rewoundLog());
+    const result = extractRecentRenderedMessages(entries, entries.length, 25, {
+      branchIndices: resolveActiveBranchIndices(entries),
+    });
+    expect(result).toHaveLength(1);
+  });
+
+  test("without branchIndices the orphan still wins (unchanged file-order read)", () => {
+    // Documents the behavior the Droid path keeps, and the bug this fixes.
+    const entries = parseSessionLog(rewoundLog());
+    const result = extractRecentRenderedMessages(entries, entries.length, 25);
+    expect(result[0].messageId).toBe("msg_orphan");
+  });
+
+  test("line numbers still point at real file positions", () => {
+    const entries = parseSessionLog(rewoundLog());
+    const result = extractRecentRenderedMessages(entries, entries.length, 25, {
+      branchIndices: resolveActiveBranchIndices(entries),
+    });
+    // msg_target is file line 2 (index 1), even though lines 3-4 were skipped.
+    expect(result[0].lineNumbers).toEqual([2]);
+  });
+
+  test("an untrustworthy chain degrades to the file-order read", () => {
+    // resolveActiveBranchIndices returns null here; passing it through must not
+    // filter everything out.
+    const log = [userPrompt("first"), assistantText("msg_1", "Response")].join("\n");
+    const entries = parseSessionLog(log);
+    const result = extractRecentRenderedMessages(entries, entries.length, 25, {
+      branchIndices: resolveActiveBranchIndices(entries),
+    });
+    expect(result.map((m) => m.messageId)).toEqual(["msg_1"]);
+  });
+});
+
+describe("getRecentRenderedMessages — after a /compact", () => {
+  // A compact boundary is written with `parentUuid: null`, so it is a tree
+  // root: the active branch stops there and pre-compaction entries are cut.
+  const compactedLog = () => {
+    const preCompact = linkChain([
+      userPrompt("early question"),
+      assistantText("msg_pre", "Pre-compaction answer"),
+    ]);
+    const boundary = JSON.stringify({
+      type: "system",
+      subtype: "compact_boundary",
+      uuid: "u-compact",
+      parentUuid: null,
+    });
+    const postPrompt = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "/plannotator-last" },
+      uuid: "u-after",
+      parentUuid: "u-compact",
+    });
+    return [...preCompact, boundary, postPrompt].join("\n");
+  };
+
+  test("the active branch stops at the compact boundary", () => {
+    const entries = parseSessionLog(compactedLog());
+    expect(resolveActiveBranchIndices(entries)).toEqual(new Set([2, 3]));
+  });
+
+  test("an empty active branch falls back to the file-order read", () => {
+    // Right after a compaction the branch holds no assistant messages. An
+    // empty result must not escape: callers treat it as "wrong log file" and
+    // walk off to an older session. Fail open to the file-order read instead.
+    const dir = join(tmpdir(), `plannotator-compact-test-${process.pid}`);
+    mkdirSync(dir, { recursive: true });
+    const logPath = join(dir, "session.jsonl");
+    try {
+      writeFileSync(logPath, compactedLog());
+      const result = getRecentRenderedMessages(logPath, 25, {
+        activeBranchOnly: true,
+      });
+      expect(result.map((m) => m.messageId)).toEqual(["msg_pre"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a post-compaction assistant message is preferred once one exists", () => {
+    // Once the compacted conversation has its own assistant message, the
+    // branch read stands on its own and the pre-compaction orphan stays out.
+    const log = [
+      compactedLog(),
+      linkChain([assistantText("msg_post", "Post-compaction answer")], "u-after").join("\n"),
+    ].join("\n");
+    const dir = join(tmpdir(), `plannotator-compact-test2-${process.pid}`);
+    mkdirSync(dir, { recursive: true });
+    const logPath = join(dir, "session.jsonl");
+    try {
+      writeFileSync(logPath, log);
+      const result = getRecentRenderedMessages(logPath, 25, {
+        activeBranchOnly: true,
+      });
+      expect(result.map((m) => m.messageId)).toEqual(["msg_post"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1,4 +1,4 @@
-// Allow side-effect CSS imports (highlight.js themes, overlayscrollbars, etc.)
+// Allow side-effect CSS imports (overlayscrollbars, fontsource, etc.)
 declare module '*.css';
 
 // Image asset imports (sprites, screenshots). Consumers compiling this shipped
@@ -9,6 +9,12 @@ declare module '*.png' {
   export default src;
 }
 declare module '*.webp' {
+  const src: string;
+  export default src;
+}
+// Video asset imports (announcement demo recordings). Inlined as data URIs by
+// the single-file build (assetsInlineLimit), so the import resolves to a string.
+declare module '*.webm' {
   const src: string;
   export default src;
 }

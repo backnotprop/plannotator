@@ -95,7 +95,11 @@ export { SessionManager } from "./session-manager.ts";
 export type { SessionEntry, SessionManagerOptions } from "./session-manager.ts";
 
 // HTTP endpoints
-export { createAIEndpoints, isAIEndpointPath } from "./endpoints.ts";
+export {
+  createAIEndpoints,
+  createBestEffortOnce,
+  isAIEndpointPath,
+} from "./endpoints.ts";
 export type {
   AIEndpoints,
   AIEndpointDeps,

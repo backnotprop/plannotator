@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import {
   getGitDiffFingerprint,
   MAX_REVIEW_FILE_CONTENT_BYTES,
@@ -16,6 +16,9 @@ const runtime: ReviewGitRuntime = {
       cwd: options?.cwd,
       stdout: "pipe",
       stderr: "pipe",
+      stdin: options?.stdin === undefined
+        ? "ignore"
+        : new TextEncoder().encode(options.stdin),
     });
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -27,6 +30,29 @@ const runtime: ReviewGitRuntime = {
   async readTextFile(path) {
     try {
       return await Bun.file(path).text();
+    } catch {
+      return null;
+    }
+  },
+  async getFileInfo(basePath, path) {
+    const fullPath = resolvePath(basePath ?? "", path);
+    try {
+      const fileStat = lstatSync(fullPath);
+      return {
+        path: fullPath,
+        size: fileStat.size,
+        mtimeMs: fileStat.mtimeMs,
+        isFile: fileStat.isFile(),
+        isSymbolicLink: fileStat.isSymbolicLink(),
+        isExecutable: (fileStat.mode & 0o111) !== 0,
+      };
+    } catch {
+      return null;
+    }
+  },
+  async readLink(path) {
+    try {
+      return readlinkSync(path);
     } catch {
       return null;
     }

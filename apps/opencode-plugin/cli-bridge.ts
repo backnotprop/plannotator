@@ -473,7 +473,7 @@ export async function runCliPlanReview(input: {
   planContent: string;
   cwd?: string;
   timeoutSeconds: number | null;
-  abortSignal: AbortSignal;
+  abortSignal?: AbortSignal;
   bridge?: OpenCodeBridgeContext;
 }): Promise<OpenCodePlanReviewResult> {
   const result = await runPlannotatorCli({

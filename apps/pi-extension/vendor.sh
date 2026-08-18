@@ -8,7 +8,7 @@ rm -rf generated
 mkdir -p generated generated/ai/providers
 
 # Modules that MOVED to @plannotator/core — vendor the real impl from core.
-for f in feedback-templates project favicon code-file annotatable external-annotation agent-jobs agent-terminal source-save open-in-apps; do
+for f in feedback-templates project favicon code-file annotatable external-annotation agent-jobs agent-terminal source-save open-in-apps diff-paths diff-files guide guide-format guide-viewer-manifest compress crypto; do
   src="../../packages/core/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done
@@ -29,10 +29,24 @@ for f in config-types storage-types workspace-status-types; do
 done
 
 # Everything else in the original flat list stays sourced from packages/shared.
-for f in prompts review-core diff-paths cli-pagination jj-core gitbutler-core vcs-core review-args draft annotate-history pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common resolve-file annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node url-to-markdown tour annotate-args at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff single-flight source-save-node review-profiles guide guide-store commit-avatars commit-history port-range; do
+for f in prompts review-core generated-files cli-pagination jj-core gitbutler-core vcs-core review-args draft annotate-history pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common markdown-extensions resolve-file file-browser-watch-core annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale; do
   src="../../packages/shared/$f.ts"
-  printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
+  # Shared modules that import browser-safe siblings from @plannotator/core
+  # (e.g. guide-store → core/guide-format): generated/ is flat and vendors the
+  # same core module names, so the bare specifier maps to a flat relative path.
+  printf '// @generated — DO NOT EDIT. Source: packages/shared/%s.ts\n' "$f" | cat - "$src" \
+    | sed "s|from ['\"]@plannotator/core/\\([^'\"]*\\)['\"]|from './\\1.ts'|g" \
+    > "generated/$f.ts"
 done
+
+# call-flow.ts imports the repository-owned npm manifest and lock that are
+# written into the managed runtime. Keep those verified install inputs beside
+# the vendored module so raw-TS Pi distributions use the identical bytes.
+mkdir -p generated/call-flow-runtime
+cp ../../packages/shared/call-flow-runtime/package.json generated/call-flow-runtime/package.json
+cp ../../packages/shared/call-flow-runtime/package-lock.json generated/call-flow-runtime/package-lock.json
+rm -rf generated/call-flow-runtime/packs
+cp -R ../../packages/shared/call-flow-runtime/packs generated/call-flow-runtime/packs
 
 # Vendor review agent modules from packages/server/ — rewrite imports for generated/ layout
 for f in agent-review-message codex-review claude-review review-findings marker-review path-utils review-skill-loader; do
@@ -75,7 +89,21 @@ for f in guide-review; do
     | sed 's|from "\.\./marker-review"|from "./marker-review.ts"|' \
     | sed 's|from "\.\./config"|from "./config.ts"|' \
     | sed 's|from "@plannotator/shared/guide"|from "./guide.ts"|' \
+    | sed 's|from "@plannotator/shared/guide-format"|from "./guide-format.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
+    > "generated/$f.ts"
+done
+
+# guide-share lives in packages/server/guide/ too — the producer half of the
+# guide share hosting contract. Pure Web-API code (fetch, CompressionStream,
+# crypto.subtle) over the shared compress/crypto/guide-format modules, all of
+# which are vendored flat above.
+for f in guide-share; do
+  src="../../packages/server/guide/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/server/guide/%s.ts\n' "$f" | cat - "$src" \
+    | sed 's|from "@plannotator/shared/compress"|from "./compress.ts"|' \
+    | sed 's|from "@plannotator/shared/crypto"|from "./crypto.ts"|' \
+    | sed 's|from "@plannotator/shared/guide-format"|from "./guide-format.ts"|' \
     > "generated/$f.ts"
 done
 

@@ -90,6 +90,9 @@ export interface UseLinkedDocOptions {
   /** Let the host initialize/restore editable document state and optionally
    *  override the markdown displayed for this file. */
   onDocumentLoaded?: (doc: LinkedDocLoadData) => string | undefined;
+  /** Notify the host after any fetched or already-loaded destination has been
+   *  activated, including HTML documents and backlinks to the source. */
+  onDocumentActivated?: (doc: LinkedDocLoadData & { filepath: string }) => void;
   /** Read current host-owned text when caching a linked doc. */
   getDocumentMarkdown?: (filepath: string, fallback?: string) => string | undefined;
   /** Let the host restore any state that was suspended while a linked doc was active. */
@@ -185,6 +188,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     sourceConverted,
     onBeforeNavigate,
     onDocumentLoaded,
+    onDocumentActivated,
     getDocumentMarkdown,
     onAfterBack,
   } = options;
@@ -292,6 +296,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     // annotations intact.
     if (sourceFilePath && data.filepath === sourceFilePath && savedPlanState.current) {
       back();
+      onDocumentActivated?.(data);
       return;
     }
 
@@ -364,6 +369,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     });
     setError(null);
     sidebar.open(targetTab ?? "toc");
+    onDocumentActivated?.(data);
 
     // Re-apply cached annotations after DOM settles
     if (cached?.annotations.length) {
@@ -393,6 +399,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     sourceFilePath,
     onBeforeNavigate,
     onDocumentLoaded,
+    onDocumentActivated,
     getDocumentMarkdown,
     back,
   ]);

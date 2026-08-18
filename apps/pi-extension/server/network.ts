@@ -8,8 +8,9 @@ import { existsSync } from "node:fs";
 import type { Server } from "node:http";
 import { release } from "node:os";
 import { delimiter, join } from "node:path";
-import { loadConfig, resolveUseGlimpse } from "../generated/config.ts";
+import { loadConfig, resolveUrlHost, resolveUseGlimpse } from "../generated/config.ts";
 import { parsePortSelection } from "../generated/port-range.ts";
+import { isAutoUrlHost, resolveAutoHostCached } from "../generated/tailscale.ts";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -114,6 +115,45 @@ export function getServerPort(): {
 
 export function getServerHostname(): string {
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+}
+
+/** True when the advertised-URL host is overridden away from localhost. */
+export function isUrlHostOverridden(): boolean {
+	const host = resolveUrlHost(loadConfig());
+	if (host === undefined) return false;
+	if (isAutoUrlHost(host)) return isRemoteSession() && resolveAutoHostCached() !== undefined;
+	return true;
+}
+
+let warnedLocalUrlHost = false;
+
+/**
+ * Compose the URL advertised to the user for a bound port (issue #657).
+ * Display-only: the PLANNOTATOR_URL_HOST / urlHost override changes what is
+ * printed and opened, never which interface the server listens on
+ * (getServerHostname). Remote sessions only: a local session binds loopback,
+ * so honoring the override would advertise (and auto-open) a URL nothing is
+ * listening on — the override is ignored with a once-per-process warning.
+ * The "auto" sentinel resolves the host from Tailscale (resolveAutoHost).
+ * Same-machine subprocesses must not use this — they get a loopback URL so a
+ * tailnet-only hostname can't break local agent jobs.
+ * Mirrors packages/server/remote.ts — keep the two behaviorally identical.
+ */
+export function buildAdvertisedUrl(port: number): string {
+	const host = resolveUrlHost(loadConfig());
+	if (host === undefined) return `http://localhost:${port}`;
+	if (!isRemoteSession()) {
+		if (!warnedLocalUrlHost) {
+			warnedLocalUrlHost = true;
+			process.stderr.write(
+				`[plannotator] Warning: advertised URL host ${JSON.stringify(host)} ignored — this is a local session, so the server binds loopback and only localhost is reachable. Set PLANNOTATOR_REMOTE=1 to use the override.\n`,
+			);
+		}
+		return `http://localhost:${port}`;
+	}
+	const resolved = isAutoUrlHost(host) ? resolveAutoHostCached() : host;
+	if (resolved === undefined) return `http://localhost:${port}`;
+	return `http://${resolved}:${port}`;
 }
 
 const MAX_RETRIES = 5;

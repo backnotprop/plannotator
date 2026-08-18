@@ -1,7 +1,8 @@
 [install]
 linker = "isolated"
 minimumReleaseAge = 604800  # 7 days in seconds
-minimumReleaseAgeExcludes = ["@pierre/diffs", "@plannotator/atomic-editor", "@plannotator/markdown-editor", "@plannotator/webtui"]
+# OpenCode 2's required session/tool plugin APIs are only in matching next packages; remove these when they reach stable.
+minimumReleaseAgeExcludes = ["@opencode-ai/ai", "@opencode-ai/client", "@opencode-ai/plugin", "@opencode-ai/protocol", "@opencode-ai/schema", "@pierre/diffs", "@pierre/theme", "@pierre/theming", "@plannotator/atomic-editor", "@plannotator/markdown-editor", "@plannotator/webtui"]
 
 [test]
 preload = ["./packages/ui/test-setup/happy-dom.ts"]

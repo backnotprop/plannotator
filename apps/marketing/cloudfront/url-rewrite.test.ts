@@ -37,15 +37,31 @@ describe('marketing CloudFront URL handling', () => {
     );
   });
 
-  test('redirects old blog URLs to their matching Learn pages', () => {
-    const result = run('/blog/plan-diff-see-what-changed/') as {
+  test('redirects the legacy self-hosting guide directly to its canonical Docs page', () => {
+    const result = run('/docs/guides/self-hosting') as {
       statusCode: number;
       headers: Record<string, { value: string }>;
     };
 
     expect(result.statusCode).toBe(301);
     expect(result.headers.location.value).toBe(
-      'https://docs.plannotator.ai/learn/plan-diff-see-what-changed',
+      'https://docs.plannotator.ai/open-source/self-hosting',
+    );
+    expect(run('/docs/guides/self-hosting/')).toEqual(result);
+  });
+
+  test('redirects the old sharing article directly to the current sharing guide', () => {
+    const result = run('/blog/sharing-plans-with-your-team') as {
+      statusCode: number;
+      headers: Record<string, { value: string }>;
+    };
+
+    expect(result.statusCode).toBe(301);
+    expect(result.headers.location.value).toBe(
+      'https://docs.plannotator.ai/open-source/workflows/sharing',
+    );
+    expect(run('/blog/sharing-plans-with-your-team/')).toEqual(
+      result,
     );
   });
 

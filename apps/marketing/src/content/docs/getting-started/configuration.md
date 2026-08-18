@@ -14,6 +14,7 @@ Plannotator is configured through environment variables, hook/plugin configurati
 |----------|---------|-------------|
 | `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port. Useful for port forwarding in remote environments. |
+| `PLANNOTATOR_URL_HOST` | unset (`localhost`) | Display-only hostname for advertised session URLs in remote mode (e.g. a Tailscale MagicDNS name). The runtime-chosen port is always appended; binding is unaffected and local sessions ignore the override. Can also be set via `~/.plannotator/config.json` (`{ "urlHost": "host" }`). |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser or script to open the UI. |
 | `PLANNOTATOR_AI` | enabled | Set to `disabled` to disable Ask AI, Review Agents, and Guided Review. External agents can still open reviews and submit annotations; the annotate agent terminal is separate. |
 | `PLANNOTATOR_SHARE` | enabled | Set to `disabled` to turn off URL sharing entirely. Can also be set via `~/.plannotator/config.json` (`{ "share": "disabled" }`). |

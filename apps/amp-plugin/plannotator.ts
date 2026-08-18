@@ -16,6 +16,10 @@ const DEFAULT_ANNOTATE_FILE_FEEDBACK_PROMPT =
   "# Markdown Annotations\n\n{{fileHeader}}: {{filePath}}\n\n{{feedback}}\n\nPlease address the annotation feedback above.";
 const DEFAULT_ANNOTATE_MESSAGE_FEEDBACK_PROMPT =
   "# Message Annotations\n\n{{feedback}}\n\nPlease address the annotation feedback above.";
+// Mirrors DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT in packages/shared/prompts.ts,
+// which this self-contained plugin cannot import. Keep the two in sync.
+const DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT =
+  "# Approved with Notes\n\nThe artifact is approved. The notes below are non-blocking guidance, not a request for another revision.\n\n{{contextBlock}}{{feedback}}\n\nDo not revise or reopen the artifact solely because of these notes unless the user explicitly requests it. Carry the notes into subsequent work where applicable.";
 
 type CommandContext = PluginCommandContext;
 type ReadyResult = "ready" | "exited" | "timeout";
@@ -198,12 +202,29 @@ export function formatAnnotationFeedback(
   decision: AnnotateDecision,
   options: { kind: "file"; filePath: string } | { kind: "message" },
 ): string | null {
-  if (decision.decision !== "annotated") return null;
+  // Approved-with-notes carries reviewer guidance in `feedback` (#1092); only
+  // dismissed decisions and note-less approvals have nothing to surface.
+  if (decision.decision !== "annotated" && decision.decision !== "approved") return null;
 
   const feedback = decision.feedback?.trim();
   if (!feedback || isNoActionFeedback(feedback)) return null;
 
   const config = loadPlannotatorConfig();
+
+  if (decision.decision === "approved") {
+    const template = getConfiguredPrompt(
+      config,
+      "approvedWithNotes",
+      DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT,
+    );
+    const context = options.kind === "file" ? `File: ${options.filePath}` : "";
+    return resolveTemplate(template, {
+      context,
+      contextBlock: context ? `${context}\n\n` : "",
+      feedback,
+    });
+  }
+
   if (options.kind === "file") {
     const template = getConfiguredPrompt(config, "fileFeedback", DEFAULT_ANNOTATE_FILE_FEEDBACK_PROMPT);
     return resolveTemplate(template, {
@@ -341,7 +362,14 @@ async function handleAnnotateResult(
 
   const decision = parseAnnotateDecision(result.stdout);
   if (decision?.decision === "approved") {
-    await ctx.ui.notify("Approved.");
+    // Approve-with-Notes (#1092): surface the reviewer's notes instead of
+    // silently dropping them. A note-less approval keeps the old behavior.
+    const feedback = formatAnnotationFeedback(decision, options);
+    if (feedback) {
+      await appendFeedback(ctx, feedback);
+    } else {
+      await ctx.ui.notify("Approved.");
+    }
     return;
   }
   if (decision?.decision === "dismissed") {
@@ -890,9 +918,11 @@ type PromptConfig = {
     annotate?: {
       fileFeedback?: unknown;
       messageFeedback?: unknown;
+      approvedWithNotes?: unknown;
       runtimes?: Partial<Record<typeof RUNTIME, {
         fileFeedback?: unknown;
         messageFeedback?: unknown;
+        approvedWithNotes?: unknown;
       }>>;
     };
   };
@@ -938,7 +968,7 @@ export function getPlannotatorDataDir(): string {
 
 function getConfiguredPrompt(
   config: PromptConfig,
-  key: "fileFeedback" | "messageFeedback",
+  key: "fileFeedback" | "messageFeedback" | "approvedWithNotes",
   fallback: string,
 ): string {
   const annotate = config.prompts?.annotate;

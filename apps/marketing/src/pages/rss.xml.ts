@@ -8,7 +8,7 @@ const migratedLinks: Record<string, string> = {
   'local-diff-review-for-coding-agents': 'https://docs.plannotator.ai/learn/local-diff-review-for-coding-agents',
   'plan-diff-see-what-changed': 'https://docs.plannotator.ai/learn/plan-diff-see-what-changed',
   'plannotator-meets-pi': 'https://docs.plannotator.ai/open-source/agents/pi',
-  'sharing-plans-with-your-team': 'https://docs.plannotator.ai/workspaces/review-plans-and-technical-decisions',
+  'sharing-plans-with-your-team': 'https://docs.plannotator.ai/open-source/workflows/sharing',
   welcome: 'https://docs.plannotator.ai/open-source/',
 };
 

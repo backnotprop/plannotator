@@ -3,6 +3,7 @@ import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 import { type QuickLabel, getQuickLabels } from "../utils/quickLabels";
+import { copyTextToClipboard } from "../utils/clipboard";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
@@ -72,19 +73,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       const codeEl = element.querySelector('code');
       textToCopy = codeEl?.textContent || element.textContent || '';
     }
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = textToCopy;
-      textarea.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      textarea.remove();
+    if (await copyTextToClipboard(textToCopy)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   };
 
   // Update position on scroll/resize
@@ -205,7 +197,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           to { opacity: 0; transform: translateY(8px)${translateX}; }
         }
       `}</style>
-      <div className="flex items-center p-1 gap-0.5">
+      <div data-pn-annotation-toolbar-row="true" className="flex items-center p-1 gap-0.5">
         {!hideCopyButton && (
           <>
             <ToolbarButton
@@ -314,6 +306,11 @@ const ToolbarButton = React.forwardRef<HTMLButtonElement, {
 }>(({ onClick, icon, label, className }, ref) => (
   <button
     ref={ref}
+    // Icon-only controls: the markers are inert outside the compact touch
+    // scope, where theme.css grows them to var(--pn-touch-target). Desktop
+    // geometry is unchanged.
+    data-pn-touch-target="true"
+    data-pn-touch-target-icon="true"
     onClick={onClick}
     title={label}
     className={`p-1.5 rounded-md transition-colors ${className}`}

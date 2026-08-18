@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="44" role="img" aria-label="Beta is ending. Sign up for Workspaces.">
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="44" role="img" aria-label="Team sharing is moving to Workspaces. Join the waitlist.">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#191a33"/>
@@ -13,5 +13,5 @@
   <rect x="0.5" y="0.5" width="399" height="43" rx="21.5" fill="none" stroke="#6f66b8" stroke-opacity="0.55"/>
   <rect x="1" y="1" width="398" height="21" rx="21" fill="url(#shine)"/>
   <text x="20" y="30" font-size="19">&#127880;</text>
-  <text x="218" y="28" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6e4f7">Beta is ending &#183; <tspan fill="#f0a64f">Sign up for Workspaces</tspan> &#8594;</text>
+  <text x="218" y="28" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#e6e4f7">Team sharing &#183; <tspan fill="#f0a64f">Join Workspaces waitlist</tspan> &#8594;</text>
 </svg>
