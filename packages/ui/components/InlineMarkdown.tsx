@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { ImageOff } from "lucide-react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
 import { useFenceTheme } from "../hooks/useFenceTheme";
@@ -306,6 +307,53 @@ const CodeFileIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
   </svg>
 );
+
+const MarkdownImage: React.FC<{
+  src: string;
+  alt: string;
+  onImageClick?: (src: string, alt: string) => void;
+}> = ({ src, alt, onImageClick }) => {
+  const [unavailable, setUnavailable] = useState(false);
+
+  if (unavailable) {
+    const accessibleLabel = alt ? `${alt}. Image unavailable` : 'Image unavailable';
+
+    return (
+      <span
+        role="img"
+        aria-label={accessibleLabel}
+        data-image-unavailable="true"
+        className="my-2 flex min-h-20 max-w-full items-center gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 text-muted-foreground"
+      >
+        <ImageOff className="h-5 w-5 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 text-sm leading-snug [overflow-wrap:anywhere]">
+          {alt ? (
+            <>
+              <span className="block font-medium text-foreground">{alt}</span>
+              <span className="mt-0.5 block text-xs">Image unavailable</span>
+            </>
+          ) : (
+            <span className="block font-medium text-foreground">Image unavailable</span>
+          )}
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="max-w-full rounded my-2 cursor-zoom-in"
+      loading="lazy"
+      onError={() => setUnavailable(true)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onImageClick?.(src, alt);
+      }}
+    />
+  );
+};
 
 const InlineMath: React.FC<{ tex: string }> = ({ tex }) => {
   const normalizedTex = normalizeMathTex(tex);
@@ -943,17 +991,13 @@ export const InlineMarkdown: React.FC<{
       const imgSrc = /^(https?:\/\/|data:|blob:)/i.test(src)
         ? src
         : getImageSrc(src, imageBaseDir);
+      const imageKey = key++;
       parts.push(
-        <img
-          key={key++}
+        <MarkdownImage
+          key={`${imageKey}:${imgSrc}`}
           src={imgSrc}
           alt={alt}
-          className="max-w-full rounded my-2 cursor-zoom-in"
-          loading="lazy"
-          onClick={(e) => {
-            e.stopPropagation();
-            onImageClick?.(imgSrc, alt);
-          }}
+          onImageClick={onImageClick}
         />,
       );
       remaining = remaining.slice(match[0].length);
