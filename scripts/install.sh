@@ -33,6 +33,12 @@ VERSION_EXPLICIT=0
 # Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
 VERIFY_ATTESTATION_FLAG=-1
+# Three-layer opt-in for the CallDiff call-flow runtime (large on-disk
+# footprint, default off). The normal path installs it in-app from the review
+# UI; this flag exists for scripted installs.
+# Precedence: --with-call-flow > PLANNOTATOR_INSTALL_CALLDIFF > config.json
+# installCallFlow > default (off).
+WITH_CALL_FLOW_FLAG=-1
 # Guided-install answers. Precedence: CLI flags > wizard (terminal, first run
 # or --reconfigure) > saved prefs from a previous run > defaults (no extras,
 # nothing model-invocable). Empty string = not set by a flag.
@@ -41,19 +47,36 @@ MODEL_INVOCABLE_FLAG=""
 NON_INTERACTIVE=0
 RECONFIGURE=0
 # Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
-# no persistent state elsewhere — no sem sidecar, no agent-terminal runtime, no
+# no persistent state elsewhere — no sem sidecar, no CallDiff or agent-terminal runtime, no
 # skills, hooks, slash commands, or per-agent config (Claude, Codex, OpenCode,
 # Gemini, Kiro). Set by --minimal (1) / --no-minimal (0); -1 = neither flag
 # given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved after arg
 # parsing so a flag overrides the env var in either direction.
 MINIMAL_FLAG=-1
+# Per-agent integration opt-outs (#1178). Skip means do-not-write: when a
+# skipped agent is detected, the installer reports "detected, skipped" and
+# writes nothing to that agent's home; it never removes an integration a
+# previous install already wired. 1 = flag passed. Resolution (flag > env >
+# config skipInstall.<agent> > default off) happens after _config_dir is known.
+SKIP_CODEX_FLAG=0
+SKIP_GEMINI_FLAG=0
+SKIP_KIRO_FLAG=0
+SKIP_OPENCODE_FLAG=0
+# Same shape, but scoped to the skills/slash-command sparse checkout rather
+# than one agent's home: --skip-skills turns the whole fetch into a no-op for
+# every scope it writes (Claude, ~/.agents, OpenCode, Gemini, Kiro), including
+# the extras and the skill-scope cleanup sweeps. Needed by any environment that
+# cannot reach github.com for the tag being installed — the release smoke test
+# installs a synthetic v9.9.9 whose tag has no GitHub counterpart.
+SKIP_SKILLS_FLAG=0
 
 usage() {
     cat <<'USAGE'
 Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
-                  [--minimal | --no-minimal] [--non-interactive]
-                  [--reconfigure] [--help]
+                  [--minimal | --no-minimal] [--skip-codex] [--skip-gemini]
+                  [--skip-kiro] [--skip-opencode] [--skip-skills]
+                  [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
 Options:
@@ -65,6 +88,12 @@ Options:
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
                          via env var or ~/.plannotator/config.json.
+  --with-call-flow       Also install the optional pruned CallDiff core
+                         (about 5 MB on macOS arm64, needs Node.js 22+).
+                         By default it is NOT installed; the review UI offers
+                         a one-click install when Call flow is enabled. Also
+                         enabled by PLANNOTATOR_INSTALL_CALLDIFF=1 or
+                         { "installCallFlow": true } in config.json.
   --extras               Install the extra skills (compound, setup-goal,
                          visual-explainer) via `npx skills add` without asking.
   --no-extras            Skip the extras without asking.
@@ -73,7 +102,7 @@ Options:
                          "none". Skills are user-invoked-only by default.
   --minimal              Install only the plannotator binary (aliased
                          --binary-only). Skips the sem semantic-diff sidecar,
-                         the agent-terminal runtime, and every per-agent
+                         the CallDiff runtime, the agent-terminal runtime, and every per-agent
                          integration (skills, hooks, slash commands, and config
                          for Claude, Codex, OpenCode, Gemini, and Kiro). No
                          persistent state is written outside $HOME/.local/bin
@@ -81,6 +110,35 @@ Options:
                          enabled by exporting PLANNOTATOR_MINIMAL=1.
   --no-minimal           Force a full install even when PLANNOTATOR_MINIMAL is
                          set in the environment.
+  --skip-codex           Do not write the Codex integration (hooks.json /
+                         config.toml under CODEX_HOME) even when Codex is
+                         detected. Never removes an existing integration.
+                         Also enabled by PLANNOTATOR_SKIP_CODEX_INSTALL=1 or
+                         { "skipInstall": { "codex": true } } in
+                         ~/.plannotator/config.json (flag > env var > config).
+  --skip-gemini          Same opt-out for the Gemini CLI integration
+                         (~/.gemini policy, settings hook, commands). Env var:
+                         PLANNOTATOR_SKIP_GEMINI_INSTALL; config key:
+                         skipInstall.gemini.
+  --skip-kiro            Same opt-out for the Kiro CLI integration
+                         (~/.kiro skills and agent). Env var:
+                         PLANNOTATOR_SKIP_KIRO_INSTALL; config key:
+                         skipInstall.kiro.
+  --skip-opencode        Do not write the OpenCode integration (command stubs
+                         under ~/.config/opencode/commands and the OpenCode
+                         plugin cache clear). OpenCode has no detection leg,
+                         so this is a plain do-not-write switch. Env var:
+                         PLANNOTATOR_SKIP_OPENCODE_INSTALL; config key:
+                         skipInstall.opencode.
+  --skip-skills          Do not fetch or write the /plannotator-* skills and
+                         slash commands (the sparse checkout that feeds Claude
+                         Code, ~/.agents, OpenCode, Gemini, and Kiro), the
+                         extras, or the skill-scope cleanup sweeps. Nothing
+                         already installed is removed. The binary, hooks, and
+                         per-agent config still install. Use it where
+                         github.com cannot serve the tag being installed. Env
+                         var: PLANNOTATOR_SKIP_SKILLS_INSTALL; config key:
+                         skipInstall.skills.
   --non-interactive      Never prompt, even in a terminal. Uses flags, then
                          saved answers from a previous run, then the defaults
                          (no extras, nothing model-invocable).
@@ -99,6 +157,12 @@ Provenance verification is off by default. Enable it by any of:
   - passing --verify-attestation
   - exporting PLANNOTATOR_VERIFY_ATTESTATION=1
   - setting { "verifyAttestation": true } in ~/.plannotator/config.json
+When enabled, the attestation bundle is fetched from GitHub's public
+attestations API and verified with `gh attestation verify --bundle`, so no
+gh login is required. The credential-free path needs one JSON tool on PATH
+(node, python3, or jq) to extract the bundle; without one, and whenever the
+public bundle fetch or bundle verification does not complete, gh's
+authenticated fetch runs as the fallback.
 
 The optional semantic-diff sidecar (the 'sem' binary, used by code review) is
 installed after Plannotator itself. Skip it by exporting
@@ -164,6 +228,10 @@ while [ $# -gt 0 ]; do
             VERIFY_ATTESTATION_FLAG=1
             shift
             ;;
+        --with-call-flow)
+            WITH_CALL_FLOW_FLAG=1
+            shift
+            ;;
         --skip-attestation)
             if [ "$VERIFY_ATTESTATION_FLAG" = "1" ]; then
                 echo "--skip-attestation and --verify-attestation are mutually exclusive" >&2
@@ -223,6 +291,26 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             MINIMAL_FLAG=0
+            shift
+            ;;
+        --skip-codex)
+            SKIP_CODEX_FLAG=1
+            shift
+            ;;
+        --skip-gemini)
+            SKIP_GEMINI_FLAG=1
+            shift
+            ;;
+        --skip-kiro)
+            SKIP_KIRO_FLAG=1
+            shift
+            ;;
+        --skip-opencode)
+            SKIP_OPENCODE_FLAG=1
+            shift
+            ;;
+        --skip-skills)
+            SKIP_SKILLS_FLAG=1
             shift
             ;;
         -h|--help)
@@ -287,7 +375,48 @@ fi
 
 if [ "$VERSION" = "latest" ]; then
     echo "Fetching latest version..."
-    latest_tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+
+    # api.github.com caps unauthenticated requests at 60/hour per source IP,
+    # which fails installs behind shared egress IPs (NAT/CGNAT/corporate
+    # proxies) and during repeated/debug runs within an hour. Attach an
+    # Authorization header when a token is available (raises the limit to
+    # 5000/hour); when none is found, fall back to anonymous (unchanged
+    # behavior). Precedence matches `gh`: GITHUB_TOKEN > GH_TOKEN > gh auth token.
+    GH_AUTH_HEADER=()
+    if [ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]; then
+        GH_AUTH_HEADER=(-H "Authorization: Bearer ${GITHUB_TOKEN:-${GH_TOKEN}}")
+    elif command -v gh >/dev/null 2>&1; then
+        # --hostname github.com scopes the fallback to github.com credentials,
+        # so a gh setup whose default host is a GitHub Enterprise server never
+        # leaks a GHES token to api.github.com. On an ancient gh without the
+        # flag, stderr is swallowed and we fall back to anonymous.
+        if _gh_token="$(gh auth token --hostname github.com 2>/dev/null)" && [ -n "$_gh_token" ]; then
+            GH_AUTH_HEADER=(-H "Authorization: Bearer ${_gh_token}")
+        fi
+    fi
+    # A stale/revoked token (expired GITHUB_TOKEN lingering in CI images,
+    # dotfiles, direnv) gets a 401 here and would break an install that
+    # works fine anonymously today. Retry anonymously ONLY on HTTP 401:
+    # requests carrying invalid credentials count against the anonymous
+    # 60/hour per-IP pool, so a blind retry on any failure would double the
+    # burn, and network failures gain nothing from a second attempt.
+    # Note: no -f here, so a 401 body doesn't abort curl before -w prints
+    # the status code. See backnotprop/plannotator#1157.
+    _api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    _api_body=$(curl -sSL -w '\n%{http_code}' "${GH_AUTH_HEADER[@]}" "$_api_url" 2>/dev/null) || true
+    _api_code="${_api_body##*$'\n'}"
+    if [ "$_api_code" = "401" ] && [ ${#GH_AUTH_HEADER[@]} -gt 0 ]; then
+        _api_body=$(curl -sSL -w '\n%{http_code}' "$_api_url" 2>/dev/null) || true
+        _api_code="${_api_body##*$'\n'}"
+    fi
+    if [ "$_api_code" = "200" ]; then
+        latest_tag=$(printf '%s' "$_api_body" | grep '"tag_name"' | cut -d'"' -f4)
+    else
+        latest_tag=""
+    fi
+    # Drop the local token copies; GITHUB_TOKEN / GH_TOKEN themselves remain
+    # in the environment exactly as the user set them.
+    unset _gh_token GH_AUTH_HEADER _api_url _api_body _api_code
 
     if [ -z "$latest_tag" ]; then
         echo "Failed to fetch latest version" >&2
@@ -349,6 +478,177 @@ if [ "$VERIFY_ATTESTATION_FLAG" -ne -1 ]; then
     verify_attestation="$VERIFY_ATTESTATION_FLAG"
 fi
 
+# Resolve the CallDiff call-flow runtime opt-in. Same three-layer shape as
+# verifyAttestation: CLI flag > env var > config.json > default (off). The
+# config grep targets a flat top-level boolean, matching verifyAttestation.
+install_call_flow=0
+if [ -f "$_config_dir/config.json" ]; then
+    if grep -q '"installCallFlow"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
+        install_call_flow=1
+    fi
+fi
+case "${PLANNOTATOR_INSTALL_CALLDIFF:-}" in
+    1|true|yes|TRUE|YES|True|Yes) install_call_flow=1 ;;
+    0|false|no|FALSE|NO|False|No) install_call_flow=0 ;;
+esac
+if [ "$WITH_CALL_FLOW_FLAG" -ne -1 ]; then
+    install_call_flow="$WITH_CALL_FLOW_FLAG"
+fi
+
+# Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
+# as verifyAttestation: CLI flag > env var > config.json > default (off).
+# The config layer first extracts JUST the skipInstall object (from the
+# first "{" after the "skipInstall" key to its first "}" — the object is a
+# flat map of booleans, so the first closing brace ends it) and matches
+# per-agent keys only inside that region. This keeps a "codex": true under
+# some OTHER key from opting anyone out (M2), works whether the JSON is
+# pretty-printed or single-line, and an explicit `"codex": false` inside
+# skipInstall is honored as a veto rather than being ignored. Each resolved
+# skip remembers its source so the detected-but-skipped report can name
+# what the user set.
+skip_codex=0
+skip_codex_source=""
+skip_gemini=0
+skip_gemini_source=""
+skip_kiro=0
+skip_kiro_source=""
+skip_opencode=0
+skip_opencode_source=""
+# skipInstall.skills is not an agent — it opts out of the skills/slash-command
+# checkout for every scope at once — but it shares the same three layers and
+# the same key region, so it rides along in the loop below.
+skip_skills=0
+skip_skills_source=""
+_skip_install_block=""
+if [ -f "$_config_dir/config.json" ]; then
+    _skip_install_block=$(awk '
+        { buf = buf $0 "\n" }
+        END {
+            # Token check: the key must be followed by optional whitespace,
+            # a colon, and the object brace - so a STRING VALUE that merely
+            # contains "skipInstall" cannot anchor the extraction. Non-token
+            # occurrences are skipped and the scan continues.
+            pos = 1
+            while (1) {
+                i = index(substr(buf, pos), "\"skipInstall\"")
+                if (i == 0) exit
+                i = pos + i - 1
+                rest = substr(buf, i + 13)
+                if (match(rest, /^[ \t\r\n]*:[ \t\r\n]*\{/) != 0) {
+                    rest = substr(rest, RLENGTH)
+                    k = index(rest, "}")
+                    if (k == 0) exit
+                    print substr(rest, 1, k)
+                    exit
+                }
+                pos = i + 13
+            }
+        }' "$_config_dir/config.json" 2>/dev/null) || _skip_install_block=""
+fi
+if [ -n "$_skip_install_block" ]; then
+    for _agent in codex gemini kiro opencode skills; do
+        if printf '%s' "$_skip_install_block" | grep -q "\"$_agent\"[[:space:]]*:[[:space:]]*false"; then
+            continue # explicit false is a veto, never a skip
+        fi
+        if printf '%s' "$_skip_install_block" | grep -q "\"$_agent\"[[:space:]]*:[[:space:]]*true"; then
+            case "$_agent" in
+                codex)
+                    skip_codex=1
+                    skip_codex_source="config skipInstall.codex"
+                    ;;
+                gemini)
+                    skip_gemini=1
+                    skip_gemini_source="config skipInstall.gemini"
+                    ;;
+                kiro)
+                    skip_kiro=1
+                    skip_kiro_source="config skipInstall.kiro"
+                    ;;
+                opencode)
+                    skip_opencode=1
+                    skip_opencode_source="config skipInstall.opencode"
+                    ;;
+                skills)
+                    skip_skills=1
+                    skip_skills_source="config skipInstall.skills"
+                    ;;
+            esac
+        fi
+    done
+    unset _agent
+fi
+unset _skip_install_block
+case "${PLANNOTATOR_SKIP_CODEX_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_codex=1
+        skip_codex_source="PLANNOTATOR_SKIP_CODEX_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_codex=0
+        skip_codex_source=""
+        ;;
+esac
+case "${PLANNOTATOR_SKIP_GEMINI_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_gemini=1
+        skip_gemini_source="PLANNOTATOR_SKIP_GEMINI_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_gemini=0
+        skip_gemini_source=""
+        ;;
+esac
+case "${PLANNOTATOR_SKIP_KIRO_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_kiro=1
+        skip_kiro_source="PLANNOTATOR_SKIP_KIRO_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_kiro=0
+        skip_kiro_source=""
+        ;;
+esac
+case "${PLANNOTATOR_SKIP_OPENCODE_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_opencode=1
+        skip_opencode_source="PLANNOTATOR_SKIP_OPENCODE_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_opencode=0
+        skip_opencode_source=""
+        ;;
+esac
+case "${PLANNOTATOR_SKIP_SKILLS_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_skills=1
+        skip_skills_source="PLANNOTATOR_SKIP_SKILLS_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_skills=0
+        skip_skills_source=""
+        ;;
+esac
+if [ "$SKIP_CODEX_FLAG" -eq 1 ]; then
+    skip_codex=1
+    skip_codex_source="--skip-codex"
+fi
+if [ "$SKIP_GEMINI_FLAG" -eq 1 ]; then
+    skip_gemini=1
+    skip_gemini_source="--skip-gemini"
+fi
+if [ "$SKIP_KIRO_FLAG" -eq 1 ]; then
+    skip_kiro=1
+    skip_kiro_source="--skip-kiro"
+fi
+if [ "$SKIP_OPENCODE_FLAG" -eq 1 ]; then
+    skip_opencode=1
+    skip_opencode_source="--skip-opencode"
+fi
+if [ "$SKIP_SKILLS_FLAG" -eq 1 ]; then
+    skip_skills=1
+    skip_skills_source="--skip-skills"
+fi
+
 # Pre-flight: if verification is requested, reject tags older than the first
 # attested release before we download anything. This catches both explicit
 # `--version <old-tag>` and implicit `latest`-resolves-to-old-tag cases with
@@ -394,6 +694,95 @@ if [ "$verify_attestation" -eq 1 ]; then
     # pre-flight already ran and rejected old tags. At this point we know
     # the tag is attested and gh should find a bundle.
     if command -v gh >/dev/null 2>&1; then
+        # Credential-free path first (#1178): the attestations endpoint on
+        # api.github.com is world-readable for public repos, so fetch the
+        # Sigstore bundle anonymously and hand it to gh via --bundle. The
+        # authenticated path fetches the SAME endpoint with an Authorization
+        # header it does not need; dropping the login requirement avoids
+        # forcing a broadly-scoped plaintext token onto headless machines
+        # just to read public data. Single fetch attempt, deliberately never
+        # retried: the unauthenticated API allows 60 requests/hour per IP.
+        # Any failure on this path (no JSON extractor, network, rate limit,
+        # extraction failure, or a gh that cannot handle --bundle) falls
+        # back to gh's own authenticated fetch below — verification itself
+        # is never skipped.
+        #
+        # The response is { "attestations": [ { "bundle": {...}, ... } ] }.
+        # gh --bundle expects the bundle values themselves, one JSON document
+        # per line (the same JSONL format `gh attestation download` writes).
+        # The extraction needs a JSON tool: node, then python3, then jq —
+        # whichever is present. With none of the three, the credential-free
+        # path is unavailable and the fallback runs (M3: the message names
+        # that cause instead of blaming a fetch that never happened).
+        attestation_bundle=""
+        attestation_bundle_dir=""
+        bundle_fallback_reason=""
+        if ! command -v node >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1 && ! command -v jq >/dev/null 2>&1; then
+            bundle_fallback_reason="No JSON extractor found (the credential-free bundle path needs node, python3, or jq)"
+        else
+            _att_json=$(curl -fsSL --connect-timeout 10 --max-time 30 \
+                "https://api.github.com/repos/${REPO}/attestations/sha256:${actual_checksum}" 2>/dev/null) || _att_json=""
+            if [ -z "$_att_json" ]; then
+                bundle_fallback_reason="Could not fetch the attestation bundle from the public API"
+            else
+                # Private temp dir with the bundle inside (M5): no
+                # rename-into-place of a predictable sibling path, and one
+                # rm -rf covers every exit. gh requires a .json/.jsonl
+                # extension on --bundle files. A mktemp failure degrades to
+                # the authenticated fallback, never aborts under set -e.
+                attestation_bundle_dir=$(mktemp -d 2>/dev/null) || attestation_bundle_dir=""
+                if [ -z "$attestation_bundle_dir" ]; then
+                    bundle_fallback_reason="Could not create a temporary directory for the attestation bundle"
+                else
+                    _att_bundle_file="$attestation_bundle_dir/bundle.jsonl"
+                    _att_extract_ok=0
+                    if command -v node >/dev/null 2>&1; then
+                        if printf '%s' "$_att_json" | node -e '
+let d = "";
+process.stdin.on("data", (c) => (d += c));
+process.stdin.on("end", () => {
+  let p;
+  try { p = JSON.parse(d); } catch { process.exit(1); }
+  const atts = Array.isArray(p.attestations) ? p.attestations : [];
+  const lines = atts.map((a) => a && a.bundle).filter(Boolean).map((b) => JSON.stringify(b));
+  if (!lines.length) process.exit(1);
+  process.stdout.write(lines.join("\n") + "\n");
+});
+' > "$_att_bundle_file" 2>/dev/null && [ -s "$_att_bundle_file" ]; then
+                            _att_extract_ok=1
+                        fi
+                    elif command -v python3 >/dev/null 2>&1; then
+                        if printf '%s' "$_att_json" | python3 -c '
+import json, sys
+try:
+    p = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+atts = p.get("attestations") or []
+lines = [json.dumps(a["bundle"], separators=(",", ":")) for a in atts if isinstance(a, dict) and a.get("bundle")]
+if not lines:
+    sys.exit(1)
+sys.stdout.write("\n".join(lines) + "\n")
+' > "$_att_bundle_file" 2>/dev/null && [ -s "$_att_bundle_file" ]; then
+                            _att_extract_ok=1
+                        fi
+                    else
+                        if printf '%s' "$_att_json" | jq -c '.attestations[]?.bundle | select(. != null)' > "$_att_bundle_file" 2>/dev/null && [ -s "$_att_bundle_file" ]; then
+                            _att_extract_ok=1
+                        fi
+                    fi
+                    if [ "$_att_extract_ok" -eq 1 ]; then
+                        attestation_bundle="$_att_bundle_file"
+                    else
+                        bundle_fallback_reason="Could not extract a bundle from the attestations API response"
+                        rm -rf "$attestation_bundle_dir"
+                        attestation_bundle_dir=""
+                    fi
+                    unset _att_bundle_file _att_extract_ok
+                fi
+            fi
+            unset _att_json
+        fi
         # Capture combined output so we can surface gh's actual error message
         # (auth, network, missing attestation, etc.) on failure instead of a
         # generic "verification failed" with no diagnostic detail.
@@ -402,23 +791,83 @@ if [ "$verify_attestation" -eq 1 ]; then
         # git ref the attestation was produced from; --signer-workflow pins
         # the workflow file that signed it. Together they prevent accepting
         # a misattached asset or an attestation from an unrelated workflow.
-        if gh_output=$(gh attestation verify "$tmp_file" \
-            --repo "$REPO" \
-            --source-ref "refs/tags/${latest_tag}" \
-            --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1); then
-            echo "✓ verified build provenance (SLSA)"
+        gh_status=0
+        used_bundle=0
+        if [ -n "$attestation_bundle" ]; then
+            used_bundle=1
+            gh_output=$(gh attestation verify "$tmp_file" \
+                --bundle "$attestation_bundle" \
+                --repo "$REPO" \
+                --source-ref "refs/tags/${latest_tag}" \
+                --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1) || gh_status=$?
+            if [ "$gh_status" -ne 0 ]; then
+                # H1: a --bundle failure is not necessarily a provenance
+                # failure (an older gh rejects the flag outright, a corrupted
+                # bundle write fails parsing, etc.). Retry once through the
+                # exact authenticated path before classifying anything; only
+                # the retry's verdict is reported. A real provenance failure
+                # fails again here, so nothing bad ever slips through.
+                echo "Bundle-based verification did not complete; retrying via gh's authenticated fetch."
+                used_bundle=0
+                gh_status=0
+                gh_output=$(gh attestation verify "$tmp_file" \
+                    --repo "$REPO" \
+                    --source-ref "refs/tags/${latest_tag}" \
+                    --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1) || gh_status=$?
+            fi
+        else
+            echo "${bundle_fallback_reason}; falling back to gh's authenticated fetch."
+            gh_output=$(gh attestation verify "$tmp_file" \
+                --repo "$REPO" \
+                --source-ref "refs/tags/${latest_tag}" \
+                --signer-workflow "backnotprop/plannotator/.github/workflows/release.yml" 2>&1) || gh_status=$?
+        fi
+        if [ -n "$attestation_bundle_dir" ]; then rm -rf "$attestation_bundle_dir"; fi
+        if [ "$gh_status" -eq 0 ]; then
+            if [ "$used_bundle" -eq 1 ]; then
+                echo "✓ verified build provenance (SLSA, credential-free via the public attestations API)"
+            else
+                echo "✓ verified build provenance (SLSA)"
+            fi
         else
             echo "$gh_output" >&2
-            echo "Attestation verification failed!" >&2
-            echo "The binary's SHA256 matched, but no valid signed provenance was found" >&2
-            echo "for ${REPO}. Refusing to install." >&2
+            # Classification precedence: TUF connectivity first, then auth,
+            # then real provenance failure (matches install.cmd).
+            case "$gh_output" in
+                *"Sigstore verifiers"*)
+                    # gh could not initialize the Sigstore trusted root. The
+                    # TUF root is fetched on EVERY run (not embedded, not
+                    # cached), so this is a connectivity failure, not a
+                    # provenance failure — the two mean very different things.
+                    echo "Could not initialize the Sigstore trust root (TUF)." >&2
+                    echo "Provenance verification needs network access on every run; the trusted" >&2
+                    echo "root is fetched per-run, never cached. This is a connectivity failure," >&2
+                    echo "NOT evidence of a bad binary. Refusing to install unverified; retry" >&2
+                    echo "with network access or pass --skip-attestation." >&2
+                    ;;
+                *"gh auth login"*)
+                    # Only reachable on the authenticated path: the bundle
+                    # path was unavailable or did not complete AND gh has no
+                    # login to fetch the attestation itself. Environment
+                    # problem, not a provenance failure.
+                    echo "The credential-free bundle path did not complete and gh is not logged" >&2
+                    echo "in, so the authenticated fallback could not run. Retry with network" >&2
+                    echo "access to api.github.com, run 'gh auth login', or pass --skip-attestation." >&2
+                    ;;
+                *)
+                    echo "Attestation verification failed!" >&2
+                    echo "The binary's SHA256 matched, but no valid signed provenance was found" >&2
+                    echo "for ${REPO}. Refusing to install." >&2
+                    ;;
+            esac
             rm -f "$tmp_file"
             exit 1
         fi
     else
         echo "verifyAttestation is enabled but gh CLI was not found." >&2
-        echo "Install https://cli.github.com (and run 'gh auth login')," >&2
-        echo "or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from" >&2
+        echo "Install https://cli.github.com (no login is needed when the public" >&2
+        echo "attestation bundle fetch succeeds), or unset" >&2
+        echo "PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from" >&2
         echo "~/.plannotator/config.json / pass --skip-attestation." >&2
         rm -f "$tmp_file"
         exit 1
@@ -454,6 +903,8 @@ print_path_advice() {
         echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ${shell_config}"
         echo "  source ${shell_config}"
     fi
+    echo ""
+    echo "To uninstall later: plannotator uninstall"
 }
 
 # Binary-only mode stops here: the binary is installed, so print PATH advice and
@@ -584,8 +1035,22 @@ install_agent_terminal_runtime() {
     fi
 }
 
+# Strictly opt-in: Call flow is off by default, so a default install never
+# downloads even its pruned core. Review-specific packs install in-app.
+install_call_flow_runtime() {
+    if [ "$install_call_flow" -ne 1 ]; then
+        echo "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"
+        return 0
+    fi
+
+    if ! "$INSTALL_DIR/plannotator" install-runtime call-flow; then
+        echo "Call-flow runtime install failed; it remains available as an in-app opt-in install"
+    fi
+}
+
 install_sem_sidecar
 install_agent_terminal_runtime
+install_call_flow_runtime
 
 print_path_advice
 
@@ -609,7 +1074,18 @@ if command -v kiro-cli >/dev/null 2>&1 || [ -d "$HOME/.kiro" ]; then
     kiro_available=1
 fi
 
-if [ "$codex_available" -eq 1 ]; then
+if [ "$codex_available" -eq 1 ] && [ "$skip_codex" -eq 1 ]; then
+    # HONEST three-state reporting (#1178): detected-but-skipped is its own
+    # state, never conflated with "not detected". Skip is do-not-write only:
+    # nothing under $CODEX_DIR is created, updated, or removed on this run.
+    echo ""
+    echo "Codex: detected, skipped (${skip_codex_source})."
+    if [ -f "$CODEX_DIR/hooks.json" ] && grep -q "plannotator" "$CODEX_DIR/hooks.json" 2>/dev/null; then
+        echo "An existing Codex integration at ${CODEX_DIR}/hooks.json was left untouched."
+    fi
+    echo "Note: the shared agent skills in ~/.agents/skills serve multiple agents"
+    echo "(Codex among them) and are still installed."
+elif [ "$codex_available" -eq 1 ]; then
     CODEX_CONFIG="$CODEX_DIR/config.toml"
     CODEX_HOOKS="$CODEX_DIR/hooks.json"
     PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
@@ -824,8 +1300,14 @@ HOOKS_EOF
     echo "Updated plugin hooks at ${PLUGIN_HOOKS}"
 fi
 
-# Clear any cached OpenCode plugin to force fresh download on next run
-rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.cache/opencode/packages/@plannotator" "$HOME/.bun/install/cache/@plannotator" 2>/dev/null || true
+# Clear any cached OpenCode plugin to force fresh download on next run.
+# An OpenCode opt-out (#1178) leaves OpenCode's own cache directory alone;
+# the Bun package cache is a shared cache, not OpenCode's home, and is
+# always cleared.
+if [ "$skip_opencode" -eq 0 ]; then
+    rm -rf "$HOME/.cache/opencode/node_modules/@plannotator" "$HOME/.cache/opencode/packages/@plannotator" 2>/dev/null || true
+fi
+rm -rf "$HOME/.bun/install/cache/@plannotator" 2>/dev/null || true
 
 # Clear Pi jiti cache to force fresh download on next run
 rm -rf /tmp/jiti 2>/dev/null || true
@@ -1091,7 +1573,9 @@ fi
 # Extras install is delegated to the skills CLI (its UI picks the agents).
 # Interactive only — the CLI needs the keyboard, so silent runs and CI get
 # the printed command instead. Never runs when the extras already exist.
-if [ "$extras_choice" = "yes" ] && [ "$extras_present" -eq 0 ]; then
+# The extras ARE skills, so --skip-skills suppresses them too — a saved
+# extras=yes preference must not smuggle a skill install past the opt-out.
+if [ "$skip_skills" -eq 0 ] && [ "$extras_choice" = "yes" ] && [ "$extras_present" -eq 0 ]; then
     if [ "$can_prompt" -eq 1 ] && command -v npx >/dev/null 2>&1; then
         echo "Launching the skills CLI for the extras (pick your agents in its UI)..."
         npx skills add backnotprop/plannotator/apps/skills/extra --global < /dev/tty || \
@@ -1101,14 +1585,29 @@ if [ "$extras_choice" = "yes" ] && [ "$extras_present" -eq 0 ]; then
     fi
 fi
 
+# Skills/commands opt-out. HONEST reporting like the per-agent family: the
+# skipped state is announced, and skip means do-not-write — nothing already on
+# disk in any skill or command scope is fetched, replaced, or removed on this
+# run. Announced here, before the checkout, so the reason precedes the silence.
+if [ "$skip_skills" -eq 1 ]; then
+    echo ""
+    echo "Skills: skipped (${skip_skills_source})."
+    echo "No skills or slash commands were fetched, and none already installed"
+    echo "were changed or removed. The /plannotator-* commands are NOT installed"
+    echo "by this run — re-run without the opt-out to install them."
+fi
+
 # Install skills and slash commands from a sparse checkout (requires git).
 # Hard requirement: without git we cannot install the /plannotator-* skills,
 # so fail loudly instead of leaving a partial install. Hook/config writing
 # above has already run by this point; the Pi update and Gemini config below
 # are skipped on failure and complete when the user re-runs the installer.
-if ! command -v git &>/dev/null; then
+# Nothing is fetched under --skip-skills, so git stops being a requirement
+# there — a git-less machine must still get the binary, hooks, and config.
+if [ "$skip_skills" -eq 0 ] && ! command -v git &>/dev/null; then
     echo "Error: git is required to install Plannotator's skills and slash commands." >&2
     echo "Install git, then run this installer again." >&2
+    echo "To install without them, re-run with --skip-skills." >&2
     exit 1
 fi
 
@@ -1153,14 +1652,76 @@ copy_commands_if_present() {
 # Push-Location/pushd for the same logic; a subshell is bash's
 # equivalent — the parent shell's CWD is inherited in, and any
 # cd inside the subshell disappears when the subshell exits.
+#
+# Do NOT rely on `set -e` in here. POSIX says -e is ignored for every
+# command of an AND-OR list except the last, and every shell we tested
+# (bash 3.2.57, which is what `curl | bash` gets on macOS, plus bash 5.3,
+# dash, zsh, and ksh) carries that suppression into the subshell. Writing
+# it as `if ! ( ... ); then` suppresses -e the same way. So the fetch
+# steps below carry an explicit `|| exit 1`: without them a failed clone
+# ran the whole block anyway, the subshell exited 0 on its trailing `if`,
+# and the installer printed "YOU'RE ALL SET!" with no skills installed.
+# Everything after the checkout stays best-effort on purpose, matching
+# install.cmd, which only checks git clone and lets every xcopy run
+# unchecked. A local cp/mkdir/rm hiccup must not be reported through the
+# "network or git error" message below.
 checkout_failed=0
 (
-    set -e
-    cd "$skills_tmp"
-    git clone --depth 1 --filter=blob:none --sparse \
-        "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null
-    cd repo
-    git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>/dev/null
+    # --skip-skills / PLANNOTATOR_SKIP_SKILLS_INSTALL / skipInstall.skills.
+    # Exit 0 BEFORE the clone so no network call is made and checkout_failed
+    # stays 0 — an opt-out is not a fetch failure and must not trip the guard
+    # below. The report was already printed above the git check.
+    if [ "$skip_skills" -eq 1 ]; then
+        exit 0
+    fi
+
+    cd "$skills_tmp" || exit 1
+    # Capture git's stderr instead of discarding it (#1238): on failure the
+    # real error is surfaced below so incompatibilities self-diagnose instead
+    # of hiding behind the generic "network or git error" message.
+    git_err="$skills_tmp/git-stderr"
+    surface_git_error() {
+        echo "git reported:" >&2
+        tail -n 5 "$git_err" >&2
+    }
+    sparse_clone=1
+    # LC_ALL=C pins git's error strings to English: the capability probe below
+    # matches the literal "unknown option ... sparse" text, and a localized
+    # git (standard Linux NLS builds) would otherwise emit a translated
+    # message the match misses, sending old-git non-English users to a hard
+    # failure instead of the fallback.
+    if ! LC_ALL=C LANGUAGE=C git clone --depth 1 --filter=blob:none --sparse \
+        "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>"$git_err"; then
+        # Capability probe, not a version parse (same philosophy as the
+        # GitButler flag probing in packages/shared/gitbutler-core.ts):
+        # `git clone --sparse` needs git >= 2.25, and an older git (macOS
+        # with stale Xcode CLT ships 2.23) rejects the flag instantly with
+        # "error: unknown option `sparse'" before any network call (#1238).
+        # Fall back to a plain shallow clone — it costs download size, not
+        # correctness: every path the copy steps below read is present in
+        # the full checkout, and `git sparse-checkout set` (equally missing
+        # on that git) is skipped because there is nothing to narrow.
+        if grep -qi "unknown option" "$git_err" && grep -qi "sparse" "$git_err"; then
+            echo "This git does not support 'git clone --sparse' (needs git >= 2.25) — falling back to a plain shallow clone."
+            sparse_clone=0
+            rm -rf repo
+            if ! git clone --depth 1 \
+                "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>"$git_err"; then
+                surface_git_error
+                exit 1
+            fi
+        else
+            surface_git_error
+            exit 1
+        fi
+    fi
+    cd repo || exit 1
+    if [ "$sparse_clone" -eq 1 ]; then
+        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>"$git_err"; then
+            surface_git_error
+            exit 1
+        fi
+    fi
 
     # Core skills -> Claude Code (also serve as /plannotator-* slash commands)
     # and the official OpenAI shared-agent path. SOFT guard: a tag pinned
@@ -1198,18 +1759,19 @@ checkout_failed=0
     # always installed when the checkout provides them. Guard the echo on
     # the same condition as the copy so old pinned tags don't report a
     # success that never happened (ps1/cmd already gate this way).
-    if [ -d "apps/opencode-plugin/commands" ] && [ -n "$(ls -A apps/opencode-plugin/commands 2>/dev/null)" ]; then
+    if [ "$skip_opencode" -eq 0 ] && [ -d "apps/opencode-plugin/commands" ] && [ -n "$(ls -A apps/opencode-plugin/commands 2>/dev/null)" ]; then
         copy_commands_if_present apps/opencode-plugin/commands "$OPENCODE_COMMANDS_DIR"
         echo "Installed OpenCode commands to ${OPENCODE_COMMANDS_DIR}/"
     fi
 
-    # Gemini native TOML commands — only when Gemini is present.
-    if [ -d "$HOME/.gemini" ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
+    # Gemini native TOML commands — only when Gemini is present and not
+    # opted out (#1178; skip_gemini is inherited by this subshell).
+    if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 0 ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
         copy_commands_if_present apps/gemini/commands "$GEMINI_COMMANDS_DIR"
         echo "Installed Gemini commands to ${GEMINI_COMMANDS_DIR}/"
     fi
 
-    if [ "$kiro_available" -eq 1 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
+    if [ "$kiro_available" -eq 1 ] && [ "$skip_kiro" -eq 0 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
         mkdir -p "$KIRO_SKILLS_DIR"
         # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
         copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
@@ -1240,6 +1802,11 @@ fi
 # leaves users with neither the command nor the skill.
 CLAUDE_COMMANDS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/commands"
 for cmd in plannotator-review plannotator-annotate plannotator-last; do
+    # A skills opt-out installed no replacement this run, so it removes
+    # nothing either — skip means do-not-write, never remove.
+    if [ "$skip_skills" -eq 1 ]; then
+        continue
+    fi
     if [ -d "$CLAUDE_SKILLS_DIR/$cmd" ] && [ -f "$CLAUDE_COMMANDS_DIR/$cmd.md" ]; then
         rm -f "$CLAUDE_COMMANDS_DIR/$cmd.md"
         echo "Removed legacy Claude command ${CLAUDE_COMMANDS_DIR}/$cmd.md (replaced by the $cmd skill)"
@@ -1249,14 +1816,24 @@ done
 # plannotator-archive no longer ships as a skill. Remove any stale installed
 # copy from every skill scope so upgraders don't keep a dead skill around.
 for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do
+    # A skills opt-out leaves every skill scope untouched, sweep included.
+    if [ "$skip_skills" -eq 1 ]; then
+        continue
+    fi
+    # A Kiro opt-out leaves ~/.kiro entirely untouched — including this sweep.
+    if [ "$scope" = "$KIRO_SKILLS_DIR" ] && [ "$skip_kiro" -eq 1 ]; then
+        continue
+    fi
     if [ -d "$scope/plannotator-archive" ]; then
         rm -rf "$scope/plannotator-archive"
         echo "Removed stale plannotator-archive skill from ${scope}/plannotator-archive"
     fi
 done
 # The /plannotator-archive OpenCode command was removed too — sweep the stub
-# (only npm-plugin-postinstall users ever had it written here).
-if [ -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md" ]; then
+# (only npm-plugin-postinstall users ever had it written here). An OpenCode
+# opt-out suspends the sweep: skip means do-not-write, never remove.
+# A skills opt-out suspends it for the same reason.
+if [ "$skip_opencode" -eq 0 ] && [ "$skip_skills" -eq 0 ] && [ -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md" ]; then
     rm -f "$OPENCODE_COMMANDS_DIR/plannotator-archive.md"
     echo "Removed stale plannotator-archive command from ${OPENCODE_COMMANDS_DIR}/"
 fi
@@ -1265,6 +1842,12 @@ fi
 # Core skills are removed only once their replacement exists; the stale
 # shared-agent extras were never Codex's and are removed unconditionally.
 for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do
+    # A Codex opt-out leaves $CODEX_DIR entirely untouched — including this
+    # stale-skill cleanup. Skip means do-not-write, never remove. A skills
+    # opt-out installed no replacement, so it suspends the sweep as well.
+    if [ "$skip_codex" -eq 1 ] || [ "$skip_skills" -eq 1 ]; then
+        continue
+    fi
     if [ -d "$STALE_CODEX_SKILLS_DIR/$skill" ]; then
         case "$skill" in
             plannotator-review|plannotator-annotate|plannotator-last)
@@ -1282,7 +1865,10 @@ done
 # sidecar's allow_implicit_invocation to match. Re-applied on every run
 # because installs replace the skill folders wholesale. Source files in the
 # repo never change.
-if [ -n "$invocable_choice" ] && [ "$invocable_choice" != "none" ]; then
+# A skills opt-out installed no skill copies this run, so there is nothing to
+# unlock — and rewriting a PREVIOUS run's SKILL.md would be a write the opt-out
+# promised not to make.
+if [ "$skip_skills" -eq 0 ] && [ -n "$invocable_choice" ] && [ "$invocable_choice" != "none" ]; then
     for skill in $(echo "$invocable_choice" | tr ',' ' '); do
         for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"; do
             skill_md="$scope/$skill/SKILL.md"
@@ -1303,7 +1889,15 @@ fi
 update_pi_extension_if_present
 
 # --- Gemini CLI support (only if Gemini is installed) ---
-if [ -d "$HOME/.gemini" ]; then
+if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 1 ]; then
+    # HONEST three-state reporting (#1178): detected-but-skipped is its own
+    # state. Nothing under ~/.gemini is created, updated, or removed.
+    echo ""
+    echo "Gemini: detected, skipped (${skip_gemini_source})."
+    if [ -f "$HOME/.gemini/settings.json" ] && grep -q '"plannotator"' "$HOME/.gemini/settings.json" 2>/dev/null; then
+        echo "An existing Gemini integration at ~/.gemini/settings.json was left untouched."
+    fi
+elif [ -d "$HOME/.gemini" ]; then
     # Install policy file
     GEMINI_POLICIES_DIR="$HOME/.gemini/policies"
     mkdir -p "$GEMINI_POLICIES_DIR"
@@ -1380,11 +1974,25 @@ echo "=========================================="
 echo "  OPENCODE USERS"
 echo "=========================================="
 echo ""
-echo "Add the plugin to your opencode.json:"
-echo ""
-echo '  "plugin": ["@plannotator/opencode@latest"]'
-echo ""
-echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
+if [ "$skip_opencode" -eq 1 ]; then
+    echo "OpenCode: integration skipped (${skip_opencode_source})."
+    echo "No command stubs were written and OpenCode's plugin cache was left alone."
+    echo "Re-run without the opt-out to install the command stubs."
+elif [ "$skip_skills" -eq 1 ]; then
+    # The stubs ship in the skills checkout, so this run installed none.
+    echo "Add the plugin to your opencode.json:"
+    echo ""
+    echo '  "plugin": ["@plannotator/opencode@latest"]'
+    echo ""
+    echo "Skills were skipped (${skip_skills_source}), so no /plannotator-* command"
+    echo "stubs were installed. Re-run without the opt-out to add them."
+else
+    echo "Add the plugin to your opencode.json:"
+    echo ""
+    echo '  "plugin": ["@plannotator/opencode@latest"]'
+    echo ""
+    echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
+fi
 echo ""
 echo "=========================================="
 echo "  PI USERS"
@@ -1398,27 +2006,47 @@ echo "=========================================="
 echo "  GEMINI CLI USERS"
 echo "=========================================="
 echo ""
-echo "Enable plan mode in Gemini settings, then run:"
-echo ""
-echo "  gemini"
-echo "  /plan"
-echo ""
-echo "Plans will open in your browser for review."
-echo "If settings.json was not auto-configured, see:"
-echo "  ~/.gemini/settings.json (add BeforeTool hook)"
+if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 1 ]; then
+    echo "Gemini was detected, but the integration was skipped (${skip_gemini_source})."
+    echo "No files under ~/.gemini were written or removed. Re-run without the"
+    echo "opt-out to configure plan mode."
+elif [ -d "$HOME/.gemini" ]; then
+    echo "Enable plan mode in Gemini settings, then run:"
+    echo ""
+    echo "  gemini"
+    echo "  /plan"
+    echo ""
+    echo "Plans will open in your browser for review."
+    echo "If settings.json was not auto-configured, see:"
+    echo "  ~/.gemini/settings.json (add BeforeTool hook)"
+else
+    echo "Gemini was not detected. After installing the Gemini CLI, rerun this"
+    echo "installer to configure plan mode."
+fi
 echo ""
 echo "=========================================="
 echo "  CODEX USERS"
 echo "=========================================="
 echo ""
-if [ "$codex_available" -eq 1 ]; then
+if [ "$codex_available" -eq 1 ] && [ "$skip_codex" -eq 1 ]; then
+    echo "Codex was detected, but the integration was skipped (${skip_codex_source})."
+    echo "No files under ${CODEX_DIR} were written or removed. The shared agent"
+    echo "skills in ~/.agents/skills serve multiple agents and are still installed."
+    echo "Re-run without the opt-out to add the Stop hook."
+elif [ "$codex_available" -eq 1 ]; then
     echo "Restart Codex Desktop or CLI after installing."
     echo "Plan review is configured through the Codex Stop hook."
     echo ""
-    echo "Core skills are installed to ~/.agents/skills/:"
-    echo "  \$plannotator-review"
-    echo "  \$plannotator-annotate <file|url|folder>"
-    echo "  \$plannotator-last"
+    if [ "$skip_skills" -eq 1 ]; then
+        echo "Skills were skipped (${skip_skills_source}), so no core skills were"
+        echo "installed to ~/.agents/skills/. The Stop hook works without them;"
+        echo "re-run without the opt-out to add \$plannotator-review and friends."
+    else
+        echo "Core skills are installed to ~/.agents/skills/:"
+        echo "  \$plannotator-review"
+        echo "  \$plannotator-annotate <file|url|folder>"
+        echo "  \$plannotator-last"
+    fi
 else
     echo "Codex was not detected. After installing Codex, rerun this installer to add"
     echo "the Stop hook."
@@ -1428,7 +2056,14 @@ echo "=========================================="
 echo "  KIRO CLI USERS"
 echo "=========================================="
 echo ""
-if [ "$kiro_available" -eq 1 ]; then
+if [ "$kiro_available" -eq 1 ] && [ "$skip_kiro" -eq 1 ]; then
+    echo "Kiro was detected, but the integration was skipped (${skip_kiro_source})."
+    echo "No files under ~/.kiro were written or removed. Re-run without the"
+    echo "opt-out to add Kiro skills."
+elif [ "$kiro_available" -eq 1 ] && [ "$skip_skills" -eq 1 ]; then
+    echo "Kiro was detected, but skills were skipped (${skip_skills_source}), so no"
+    echo "Kiro skills or agent were installed. Re-run without the opt-out to add them."
+elif [ "$kiro_available" -eq 1 ]; then
     echo "Kiro skills are installed to ~/.kiro/skills/"
     echo "The Plannotator agent is installed to ~/.kiro/agents/plannotator.json"
     echo "Launch it: kiro-cli chat --agent plannotator"
@@ -1437,7 +2072,14 @@ else
 fi
 echo ""
 echo "=========================================="
-echo "  CLAUDE CODE USERS: YOU'RE ALL SET!"
+if [ "$skip_skills" -eq 1 ]; then
+    # Never claim the /plannotator-* commands are ready when nothing was
+    # installed — that false banner is exactly what the skills-checkout guard
+    # exists to prevent.
+    echo "  CLAUDE CODE USERS: BINARY INSTALLED"
+else
+    echo "  CLAUDE CODE USERS: YOU'RE ALL SET!"
+fi
 echo "=========================================="
 echo ""
 echo "Install the Claude Code plugin:"
@@ -1447,9 +2089,15 @@ echo ""
 echo "Upgrading from an older version? Also run /plugin marketplace update"
 echo "so the plugin drops its old plannotator:* command entries."
 echo ""
-echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
+if [ "$skip_skills" -eq 1 ]; then
+    echo "Skills were skipped (${skip_skills_source}), so the /plannotator-review,"
+    echo "/plannotator-annotate, and /plannotator-last commands are NOT installed."
+    echo "Re-run the installer without the opt-out to add them."
+else
+    echo "The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!"
+fi
 
-if [ "$extras_choice" != "yes" ]; then
+if [ "$skip_skills" -eq 0 ] && [ "$extras_choice" != "yes" ]; then
     echo ""
     echo "Optional skills (compound planning, setup-goal, visual explainer):"
     echo "  npx skills add backnotprop/plannotator/apps/skills/extra --global"

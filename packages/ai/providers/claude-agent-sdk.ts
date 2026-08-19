@@ -165,6 +165,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   };
   readonly models = [
     { id: 'claude-fable-5', label: 'Fable 5' },
+    { id: 'claude-opus-5', label: 'Opus 5' },
     { id: 'claude-opus-4-8', label: 'Opus 4.8' },
     { id: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M)' },
     { id: 'claude-sonnet-5', label: 'Sonnet 5', default: true },

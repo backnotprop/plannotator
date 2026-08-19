@@ -25,6 +25,11 @@ interface AnnotationToolstripProps {
    * narrow and leaves room for the diff badges.
    */
   iconOnly?: boolean;
+  /**
+   * Hide the drag/pinpoint input group entirely. Live app sessions are
+   * pinpoint-only, so the switch would be a dead control there.
+   */
+  hideInputMethodSwitch?: boolean;
 }
 
 export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
@@ -36,6 +41,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   compact = false,
   showHelpLink = true,
   iconOnly = false,
+  hideInputMethodSwitch = false,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
   const [helpTab, setHelpTab] = useState<'selection' | 'plannotator'>('selection');
@@ -50,6 +56,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
     <>
       <div className={`flex items-center flex-wrap ${compact ? 'gap-1' : 'gap-1.5'}`}>
         {/* Input method group */}
+        {!hideInputMethodSwitch && (
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
             active={inputMethod === 'drag'}
@@ -89,6 +96,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
             }
           />
         </div>
+        )}
 
         {/* Action mode group */}
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
@@ -210,8 +218,8 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
                 width="100%"
                 height="100%"
                 src={helpTab === 'selection'
-                  ? 'https://www.youtube.com/embed/ZNt9jtfx9TY?autoplay=1'
-                  : 'https://www.youtube.com/embed/a_AT7cEN_9I?autoplay=1'
+                  ? 'https://www.youtube-nocookie.com/embed/ZNt9jtfx9TY?autoplay=1'
+                  : 'https://www.youtube-nocookie.com/embed/a_AT7cEN_9I?autoplay=1'
                 }
                 title={helpTab === 'selection' ? 'How Selection Modes Work' : 'How Plannotator Works'}
                 frameBorder="0"
@@ -321,6 +329,7 @@ const ToolstripButton: React.FC<{
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      aria-pressed={active}
       className={`relative flex items-center h-7 rounded-md overflow-hidden ${colorClass}`}
       style={{ width: currentWidth, transition }}
     >

@@ -1,4 +1,8 @@
-import type { DiffResult, ReviewGitRuntime } from "./review-core";
+import {
+  runBoundedTrackedDiff,
+  type DiffResult,
+  type ReviewGitRuntime,
+} from "./review-core";
 import { ensureObjectAvailable } from "./worktree";
 import type {
   PRDiffScopeOption,
@@ -11,6 +15,12 @@ export type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree, PRStackN
 
 function branchNameIsSafe(branch: string): boolean {
   return branch.trim().length > 0 && !branch.startsWith("-") && !branch.includes("\0");
+}
+
+function diffFailureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const failedAt = message.indexOf(" failed: ");
+  return failedAt === -1 ? message : message.slice(failedAt + " failed: ".length);
 }
 
 export function getPRStackInfo(metadata: PRMetadata | undefined): PRStackInfo | null {
@@ -120,9 +130,11 @@ export async function runPRFullStackDiff(
     "--end-of-options",
     `${baseRef}...HEAD`,
   ];
-  const diff = await runtime.runGit(diffArgs, { cwd });
-  if (diff.exitCode !== 0) {
-    const message = diff.stderr.trim() || `git ${diffArgs.join(" ")} failed`;
+  let patch: string;
+  try {
+    patch = await runBoundedTrackedDiff(runtime, diffArgs, cwd);
+  } catch (error) {
+    const message = diffFailureMessage(error) || `git diff failed`;
     return {
       patch: "",
       label: "Full stack diff unavailable",
@@ -131,7 +143,7 @@ export async function runPRFullStackDiff(
   }
 
   return {
-    patch: diff.stdout,
+    patch,
     label: `Full stack diff vs ${baseRef}`,
   };
 }
@@ -198,16 +210,18 @@ export async function runPRLayerLocalDiff(
     return unavailable("Could not resolve the PR base commit in the local checkout.");
   }
 
-  const diff = await runtime.runGit(diffArgsFor(range), { cwd });
-  if (diff.exitCode !== 0) {
-    const message = diff.stderr.trim() || "git diff failed";
+  let patch: string;
+  try {
+    patch = await runBoundedTrackedDiff(runtime, diffArgsFor(range), cwd);
+  } catch (error) {
+    const message = diffFailureMessage(error) || "git diff failed";
     return unavailable(message.split("\n").find((line) => line.trim().length > 0) ?? message);
   }
-  if (!diff.stdout.trim()) {
+  if (!patch.trim()) {
     return unavailable("Local recompute produced an empty diff.");
   }
 
-  return { patch: diff.stdout, label: "PR diff (recomputed locally)" };
+  return { patch, label: "PR diff (recomputed locally)" };
 }
 
 /**

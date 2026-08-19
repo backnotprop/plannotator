@@ -6,7 +6,10 @@ sidebar:
 section: "Guides"
 ---
 
-Plannotator lets you share plans and annotations with teammates via URL. Small plans are encoded entirely in the URL hash — no backend, no accounts, no server stores anything. Large plans can optionally use short URLs via the [paste service](/docs/guides/self-hosting/#3-deploy-the-paste-service).
+> [!NOTE]
+> Open source asynchronous link sharing remains available for compatibility but is moving to deprecated support. [Workspaces](/workspaces/) is the primary direction for team sharing. No removal date has been announced.
+
+Plannotator can share plans and annotations with teammates via URL. Small markdown shares put compressed content in the URL fragment, so no backend stores the share payload. Larger markdown shares and raw HTML can use an encrypted short URL backed by the [paste service](/docs/guides/self-hosting/#3-deploy-the-paste-service).
 
 ## How sharing works
 
@@ -23,7 +26,7 @@ The share URL looks like:
 https://share.plannotator.ai/#eNqrVkrOz0nV...
 ```
 
-All data lives entirely in the URL. The share portal is a static page that reads the hash and renders it — it makes no network requests.
+The shared content lives in the URL fragment and is compressed, not encrypted. Browsers do not include the fragment in the HTTP request to the portal. The portal host still receives a normal page request, and the Plannotator UI checks GitHub for release metadata without sending the shared content.
 
 ## Sharing a plan
 
@@ -67,26 +70,33 @@ When sharing is disabled:
 
 ## Short URLs for large plans
 
-When a plan is too large for a URL (~2KB+ compressed), messaging apps like Slack and WhatsApp may truncate it. Plannotator can create a short link by temporarily storing the compressed plan in a paste service.
+When a markdown plan is too large for a URL (~2KB+ compressed), messaging apps like Slack and WhatsApp may truncate it. Plannotator can create a short link by temporarily storing an encrypted payload in a paste service.
 
 ### How it works
 
 1. Click **Export** → **Share**
 2. If the URL is large, you'll see a notice: "This plan is too large for a URL"
 3. Click **Create short link** to confirm
-4. The compressed plan is temporarily stored, then automatically deleted after the configured TTL
-5. A short URL like `share.plannotator.ai/p/aBcDeFgH` is generated
-6. Both the short URL and the full hash URL are shown — the short URL is safe for messaging apps
+4. The browser encrypts the compressed payload and uploads only the ciphertext
+5. The ciphertext is temporarily stored, then expires after the configured TTL
+6. A short URL like `share.plannotator.ai/p/aBcDeFgH#key=...` is generated
+7. For markdown, both the short URL and the full hash URL are shown. Raw HTML requires the short-link path.
+
+Those confirmation steps describe markdown in the Export modal. Raw HTML cannot use the hash-only path. In a local raw-HTML session, choosing the header's **Copy Share Link** action or using an Approve or Send Feedback callback can create and upload the encrypted short link immediately. A remote raw-HTML session uploads an encrypted short link automatically when the session is created.
 
 ### Privacy & encryption
 
-- Plans are **end-to-end encrypted** (AES-256-GCM) in your browser before upload — the paste service stores only ciphertext it cannot read
-- A single-use encryption key is generated in your browser via the [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/generateKey). The key **never leaves the browser** — it is never sent to the paste service or any server. It exists only in the URL fragment (`#key=...`), which browsers never include in HTTP requests per the HTTP specification. Not even the service operator can decrypt stored plans.
-- Plans are only uploaded when you explicitly click "Create short link" — no data leaves your machine until you confirm
-- Pastes auto-expire and are permanently deleted (hosted: 7 days, self-hosted: configurable via `PASTE_TTL_DAYS`)
-- The paste service is fully open source — you can audit exactly what it does
-- Self-hosters can run their own paste service for complete control — see the [self-hosting guide](/docs/guides/self-hosting/)
-- If the paste service is unavailable, the full hash URL is always available as fallback
+- The browser encrypts the payload with AES-256-GCM before upload. The paste service receives ciphertext, not readable plan, annotation, or raw HTML content.
+- A fresh key is generated with the [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/generateKey). It is placed in the URL fragment and is not included in HTTP requests to the paste service or share portal.
+- Anyone or any service with the complete link has the key and can decrypt the content. Treat the full URL as a secret.
+- Markdown upload from the Export modal happens after you click **Create short link**. Local raw HTML can upload from the header share action or a callback action without that markdown confirmation. Remote raw HTML uploads automatically at session creation.
+- Hosted ciphertext expires after 7 days. Self-hosted retention is configurable with `PASTE_TTL_DAYS`.
+- The paste service is open source and self-hostable. See the [self-hosting guide](/docs/guides/self-hosting/).
+- If the paste service is unavailable, markdown can still use the full hash URL. Raw HTML sharing is unavailable without the short-link path.
+
+### Callback-enabled links
+
+A link creator can configure an `http://` or `https://` callback endpoint and a token. When the recipient chooses **Approve** or **Send Feedback**, the browser posts the action, token, and annotated share URL to that endpoint. For a short link, `annotated_url` can include the complete fragment decryption key. Trust the link creator and callback endpoint with the shared content and key, and use HTTPS to protect the callback in transit.
 
 ## Self-hosting the share portal
 
@@ -94,8 +104,9 @@ By default, share URLs point to `https://share.plannotator.ai`. You can self-hos
 
 ## Privacy model
 
-- Plans and annotations are never sent to any server — the data lives entirely in the URL hash
-- The share portal is a static page — it only reads the hash and renders client-side
-- No analytics, no tracking, no cookies on the share portal
-- Short URLs are opt-in — data is only uploaded when you explicitly click "Create short link" (see [Short URLs for large plans](#short-urls-for-large-plans) for details)
-- Short URLs use end-to-end encryption (AES-256-GCM) — the decryption key is embedded in the URL fragment and never sent to the server. The paste service stores only opaque ciphertext, similar to [PrivateBin](https://privatebin.info/)
+- Hash-only shares do not upload the shared content to the portal. The content is not encrypted and is visible to anyone or any service that receives the complete link.
+- The static portal receives normal request metadata such as IP address and user agent. It has no Plannotator usage analytics or product telemetry, but functional cookies can remember settings and update-dismissal state.
+- The portal performs the automatic GitHub release check every time the app loads. That request contains no plan, annotation, or raw HTML content, and there is currently no opt-out setting.
+- Markdown short links are opt-in. They upload AES-256-GCM ciphertext and keep the decryption key in the URL fragment, similar to [PrivateBin](https://privatebin.info/).
+- Raw HTML uses the short-link path and can upload through local header or callback actions, or automatically when a remote session is created.
+- Sending either kind of link transfers the full URL through your chosen email, chat, ticket, or other service. That service can retain the content or key embedded in the link.

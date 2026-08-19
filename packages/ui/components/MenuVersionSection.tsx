@@ -3,6 +3,7 @@ import { TextShimmer } from './TextShimmer';
 import type { UpdateInfo } from '../hooks/useUpdateCheck';
 import type { Origin } from '@plannotator/core/agents';
 import { isWindows } from '../utils/platform';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 const PI_INSTALL_COMMAND = 'pi install npm:@plannotator/pi-extension';
 
@@ -32,12 +33,11 @@ export const MenuVersionSection: React.FC<MenuVersionSectionProps> = ({
   const hasUpdate = !!updateInfo?.updateAvailable;
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(getInstallCommand(origin, isWSL));
+    if (await copyTextToClipboard(getInstallCommand(origin, isWSL))) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy:', e);
+    } else {
+      console.error('Failed to copy');
     }
   };
 

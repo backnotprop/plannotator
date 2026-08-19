@@ -123,6 +123,34 @@ function gitButlerMismatchNote(ann: CodeAnnotation, current?: FeedbackDiffContex
   return `_Made on ${source} — anchored to that GitButler diff, not the diff above._\n`;
 }
 
+function callFlowInlineCode(value: string): string {
+  return `\`${value.replace(/`/g, '\u02cb')}\``;
+}
+
+/**
+ * Serialize the complete Call Flow selection carried by one review annotation.
+ * The annotation may be inline, file-scoped, or review-scoped; this context
+ * keeps every Shift-clicked step in agent feedback and hosted submission.
+ */
+export function formatCallFlowAnnotationTargets(annotation: CodeAnnotation): string {
+  if (!annotation.callFlowTargets?.length) return '';
+  const rows = annotation.callFlowTargets.map((target) => {
+    let source = 'inferred step';
+    if (target.filePath && target.lineStart && target.lineEnd) {
+      const line = target.lineStart === target.lineEnd
+        ? `L${target.lineStart}`
+        : `L${target.lineStart}-L${target.lineEnd}`;
+      source = `${target.filePath}:${line}`;
+    } else if (target.filePath) {
+      source = target.filePath;
+    } else if (target.rawLine) {
+      source = `raw CallDiff line ${target.rawLine}`;
+    }
+    return `- ${callFlowInlineCode(target.entry)} → ${callFlowInlineCode(target.label)} — ${callFlowInlineCode(source)}`;
+  });
+  return `\n\n**Selected call-flow steps:**\n${rows.join('\n')}`;
+}
+
 function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel = '###', currentDiff?: FeedbackDiffContext): string {
   let output = '';
 
@@ -148,9 +176,8 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
       } else if (prefix) {
         output += `${prefix.trimEnd()}\n`;
       }
-      if (ann.suggestedCode) {
-        output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
-      }
+      output += formatCallFlowAnnotationTargets(ann);
+      output += formatSuggestionBlocks(ann);
       output += '\n';
       continue;
     }
@@ -173,12 +200,51 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     if (ann.reasoning) {
       output += `\n**Reasoning:** ${ann.reasoning}\n`;
     }
-    if (ann.suggestedCode) {
-      output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
-    }
+    output += formatCallFlowAnnotationTargets(ann);
+    output += formatSelectedTextBlock(ann);
+    output += formatSuggestionBlocks(ann);
     output += '\n';
   }
 
+  return output;
+}
+
+/**
+ * The highlighted-text payload for a comment created inside an edit session:
+ * the exact text the reviewer had selected in the editor. When the selection
+ * overlapped the reviewer's own in-progress edits, the line anchor points at
+ * the pristine lines that region replaces (approximate), and the note says so
+ * — otherwise the anchored lines and the highlighted text are the same code.
+ */
+function formatSelectedTextBlock(ann: CodeAnnotation): string {
+  if (!ann.selectedText) return '';
+  let output = '';
+  if (ann.selectedTextFromEdits) {
+    output += `_The highlighted text below includes the reviewer's in-progress edits; the line range above anchors to the current file lines that region replaces (approximate)._\n`;
+  }
+  output += `\n**Highlighted text:**\n\`\`\`\n${ann.selectedText}\n\`\`\`\n`;
+  return output;
+}
+
+/**
+ * The suggestion payload for one annotation: an optional "Replaces:" block
+ * (the exact current lines the suggestion swaps out — the applying agent
+ * must verify these against the file before applying, and skip with a note
+ * if they no longer match) followed by the "Suggested code:" block. Both
+ * SuggestionModal-authored and edit-session-derived suggestions carry
+ * `originalCode`, so both sources export through this one format. A
+ * deletion-only suggestion (no suggestedCode; the annotation text describes
+ * the removal) still emits its "Replaces:" block so the anchor stays
+ * verifiable.
+ */
+function formatSuggestionBlocks(ann: CodeAnnotation): string {
+  let output = '';
+  if ((ann.suggestedCode || ann.text) && ann.originalCode) {
+    output += `\n**Replaces:**\n\`\`\`\n${ann.originalCode}\n\`\`\`\n`;
+  }
+  if (ann.suggestedCode) {
+    output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+  }
   return output;
 }
 
@@ -194,6 +260,7 @@ function renderGeneralComments(annotations: CodeAnnotation[]): string {
     if (ann.reasoning) {
       output += `\n**Reasoning:** ${ann.reasoning}\n`;
     }
+    output += formatCallFlowAnnotationTargets(ann);
     output += '\n';
   }
   return output;

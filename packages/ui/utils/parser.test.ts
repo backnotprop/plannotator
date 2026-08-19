@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations } from "./parser";
+import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations, resolveReferenceLinks } from "./parser";
 import { shouldStripFrontmatter } from "@plannotator/core/annotatable";
 import type { Block } from "../types";
 
@@ -13,6 +13,324 @@ const li = (level: number, ordered: boolean, orderedStart?: number): Block => ({
   orderedStart,
   order: 0,
   startLine: 1,
+});
+
+describe("resolveReferenceLinks (#923)", () => {
+  test("resolves full, collapsed, and shortcut references to inline links", () => {
+    expect(resolveReferenceLinks("[text][id]\n\n[id]: https://e.com")).toBe(
+      "[text](https://e.com)\n\n",
+    );
+    expect(resolveReferenceLinks("[text][]\n\n[text]: https://e.com")).toBe(
+      "[text](https://e.com)\n\n",
+    );
+    expect(resolveReferenceLinks("[text]\n\n[text]: https://e.com")).toBe(
+      "[text](https://e.com)\n\n",
+    );
+  });
+
+  test("matches labels case-insensitively and collapses internal whitespace", () => {
+    expect(resolveReferenceLinks("[Text][My  Ref]\n\n[my ref]: https://e.com")).toBe(
+      "[Text](https://e.com)\n\n",
+    );
+  });
+
+  test("supports the angle-bracket destination form and reference images", () => {
+    expect(resolveReferenceLinks("[x][id]\n\n[id]: <https://e.com>")).toBe(
+      "[x](https://e.com)\n\n",
+    );
+    expect(resolveReferenceLinks("![alt][id]\n\n[id]: /img.png")).toBe(
+      "![alt](/img.png)\n\n",
+    );
+  });
+
+  test("uses the first definition when a label is defined more than once", () => {
+    expect(
+      resolveReferenceLinks("[id]: https://one.com\n[id]: https://two.com\n\n[x][id]"),
+    ).toBe("\n\n\n[x](https://one.com)");
+  });
+
+  test("leaves unknown references and non-reference brackets untouched", () => {
+    expect(resolveReferenceLinks("[text][missing].")).toBe("[text][missing].");
+    // No definitions at all: fast path returns the input unchanged.
+    expect(resolveReferenceLinks("array [0] and [TODO] here")).toBe(
+      "array [0] and [TODO] here",
+    );
+    // A shortcut that does not name a definition stays literal even when other
+    // definitions exist. The definition itself is never consumed by anything
+    // in this document, so it stays visible too (PR #1168: unused definitions
+    // are not blanked).
+    expect(resolveReferenceLinks("[TODO] and [0]\n\n[id]: https://e.com")).toBe(
+      "[TODO] and [0]\n\n[id]: https://e.com",
+    );
+  });
+
+  test("does not double-link an inline link whose text matches a definition", () => {
+    // The inline link uses its own explicit URL and never consumes the
+    // definition, so the definition stays visible (PR #1168).
+    expect(
+      resolveReferenceLinks("[text](https://real.com)\n\n[text]: https://def.com"),
+    ).toBe("[text](https://real.com)\n\n[text]: https://def.com");
+  });
+
+  test("never rewrites references inside fenced code blocks or inline code spans", () => {
+    // Both definitions are only ever "referenced" from inside a protected
+    // region (a fence, an inline code span), so neither reference resolves
+    // and neither definition is consumed — both stay visible verbatim
+    // (PR #1168).
+    expect(resolveReferenceLinks("```\n[a][b]\n```\n\n[b]: https://e.com")).toBe(
+      "```\n[a][b]\n```\n\n[b]: https://e.com",
+    );
+    expect(resolveReferenceLinks("use `[a][b]` here\n\n[b]: https://e.com")).toBe(
+      "use `[a][b]` here\n\n[b]: https://e.com",
+    );
+  });
+
+  test("does not collect a definition that sits inside a fenced code block", () => {
+    // The only `[id]:` is inside code, so `[id]` outside stays a literal shortcut.
+    expect(
+      resolveReferenceLinks("```\n[id]: https://code.com\n```\n\n[id]"),
+    ).toBe("```\n[id]: https://code.com\n```\n\n[id]");
+  });
+
+  test("does not treat prose with an invalid title as a definition", () => {
+    expect(
+      resolveReferenceLinks("[Reminder]: call the bank tomorrow\n\n[Reminder]"),
+    ).toBe("[Reminder]: call the bank tomorrow\n\n[Reminder]");
+  });
+
+  test("does not corrupt bare space-delimited numbers on a resolved line", () => {
+    expect(resolveReferenceLinks("value is 0 and 1 and [x][id]\n\n[id]: https://e.com")).toBe(
+      "value is 0 and 1 and [x](https://e.com)\n\n",
+    );
+  });
+
+  test("blanks definition lines in place so block start-lines stay accurate", () => {
+    const blocks = parseMarkdownToBlocks("[id]: https://e.com\n\n# Heading\n\ntext [x][id]");
+    // The definition line renders nothing; the heading and paragraph keep their
+    // original source line numbers.
+    const heading = blocks.find((b) => b.type === "heading");
+    const paragraph = blocks.find((b) => b.type === "paragraph");
+    expect(heading?.startLine).toBe(3);
+    expect(paragraph?.startLine).toBe(5);
+    expect(paragraph?.content).toBe("text [x](https://e.com)");
+    expect(blocks.some((b) => b.content.includes("[id]: https://e.com"))).toBe(false);
+  });
+
+  test("does not delete a definition-shaped line that continues a paragraph", () => {
+    // CommonMark: a definition cannot interrupt a paragraph. The second line
+    // must survive as content, not be silently blanked.
+    expect(resolveReferenceLinks("The config keys are:\n[timeout]: 30")).toBe(
+      "The config keys are:\n[timeout]: 30",
+    );
+    expect(resolveReferenceLinks("text before\n[id]: url\nmore [x][id]")).toBe(
+      "text before\n[id]: url\nmore [x][id]",
+    );
+  });
+
+  test("collects a definition after a blank line, a code fence, or another definition", () => {
+    expect(resolveReferenceLinks("[a]: https://one.com\n[b]: https://two.com\n\n[x][a] [y][b]")).toBe(
+      "\n\n\n[x](https://one.com) [y](https://two.com)",
+    );
+    expect(resolveReferenceLinks("```\ncode\n```\n[id]: https://e.com\n\n[x][id]")).toBe(
+      "```\ncode\n```\n\n\n[x](https://e.com)",
+    );
+  });
+
+  test("does not clobber a checked task-list item when an [x] definition exists", () => {
+    // The checkbox guard means the task-list `[x]` never resolves as a
+    // reference, so the "x" definition is never consumed and stays visible
+    // (PR #1168).
+    expect(resolveReferenceLinks("- [x] done task\n- [ ] todo\n\n[x]: https://e.com")).toBe(
+      "- [x] done task\n- [ ] todo\n\n[x]: https://e.com",
+    );
+    expect(resolveReferenceLinks("1. [x] done\n\n[x]: https://e.com")).toBe(
+      "1. [x] done\n\n[x]: https://e.com",
+    );
+  });
+
+  test("resolves the shortcut image form", () => {
+    expect(resolveReferenceLinks("![id]\n\n[id]: /img.png")).toBe("![id](/img.png)\n\n");
+  });
+});
+
+describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
+  test("does not rewrite a reference inside a fence indented 4+ spaces (block parser still treats it as code)", () => {
+    // The block parser detects a fence via `trimmed.startsWith('```')` after a
+    // full `.trim()` — ANY indentation still opens a code block. The resolver
+    // must recognize the exact same fence, not just fences within 3 spaces.
+    const md = "    ```\n    [a][b]\n    ```\n\n[b]: https://e.com";
+    // The code content must survive verbatim, and since "b" is never consumed
+    // outside the code fence, the definition itself must remain visible too —
+    // as its own trailing paragraph, not silently dropped.
+    expect(parseMarkdownToBlocks(md).map((b) => b.type)).toEqual(["code", "paragraph"]);
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not rewrite a reference inside a fence nested inside a list item at 4+ spaces", () => {
+    const md = "- outer\n  - inner\n    ```\n    [a][b]\n    ```\n\n[b]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("protects a link definition sitting inside a <details> raw HTML block", () => {
+    const md = "<details>\n<summary>Notes</summary>\n\n[id]: https://from-details.com\n\n</details>";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("protects references and definitions inside a <pre> raw HTML block", () => {
+    const md = "<pre>\n[a][b]\n</pre>\n\n[b]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("a reference used only inside a <details> block never counts as consumed, so the definition stays visible", () => {
+    const md = "<details>\n\n[x][id]\n\n</details>\n\n[id]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not treat a GFM footnote definition ([^label]: ...) as a link reference definition", () => {
+    // A footnote body that is a bare token (looks exactly like a definition
+    // destination) is the real hazard — prose bodies with spaces already fail
+    // the destination shape by accident.
+    const md = "See the note.[^1]\n\n[^1]: https://example.com/footnote";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not clobber a footnote reference ([^1]) that happens to share a label with a real definition", () => {
+    const md = "See[^1] and [x][1]\n\n[^1]: https://footnote.com\n\n[1]: https://real-def.com";
+    expect(resolveReferenceLinks(md)).toBe(
+      "See[^1] and [x](https://real-def.com)\n\n[^1]: https://footnote.com\n\n",
+    );
+  });
+
+  test("leaves an entirely unused link reference definition visible", () => {
+    expect(resolveReferenceLinks("[id]: https://e.com\n\nSome unrelated text.")).toBe(
+      "[id]: https://e.com\n\nSome unrelated text.",
+    );
+  });
+
+  test("leaves a definition visible when its only reference sits inside a fenced code block", () => {
+    const md = "```\n[x][id]\n```\n\n[id]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("still blanks every definition line for a label once it is genuinely consumed, including redefinitions", () => {
+    expect(
+      resolveReferenceLinks("[id]: https://one.com\n[id]: https://two.com\n\n[x][id]"),
+    ).toBe("\n\n\n[x](https://one.com)");
+  });
+
+  test("preserves total line count for a document mixing consumed, unused, and protected definitions", () => {
+    const md = [
+      "# Heading",
+      "",
+      "[used]: https://used.com",
+      "[unused]: https://unused.com",
+      "",
+      "text [x][used]",
+      "",
+      "```",
+      "[y][coded]",
+      "```",
+      "",
+      "[coded]: https://coded.com",
+    ].join("\n");
+    const resolved = resolveReferenceLinks(md);
+    expect(resolved.split("\n").length).toBe(md.split("\n").length);
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks.find((b) => b.type === "heading")?.startLine).toBe(1);
+    // "unused" and "coded" (only referenced inside the fence) must remain
+    // visible; only the genuinely consumed "used" definition is blanked.
+    expect(resolved).toContain("[unused]: https://unused.com");
+    expect(resolved).toContain("[coded]: https://coded.com");
+    expect(resolved).not.toContain("[used]: https://used.com");
+    expect(resolved).toContain("text [x](https://used.com)");
+  });
+
+  test("supports CRLF documents and preserves the CRLF line endings", () => {
+    const md = "[text][id]\r\n\r\n[id]: https://e.com\r\n";
+    expect(resolveReferenceLinks(md)).toBe("[text](https://e.com)\r\n\r\n\r\n");
+  });
+
+  test("leaves an unconsumed CRLF definition visible with its line ending intact", () => {
+    const md = "[id]: https://e.com\r\n\r\nunrelated text\r\n";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("does not exhibit quadratic slowdown on a long run of unmatched '[' characters", () => {
+    const junk = "[".repeat(200_000);
+    const md = `${junk}\n\n[id]: https://e.com`;
+    const start = performance.now();
+    const result = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    // A naive unbounded backtracking scan would take many seconds to minutes
+    // here; a bounded one-pass scan finishes in well under a second.
+    expect(elapsed).toBeLessThan(1500);
+    expect(result.startsWith(junk)).toBe(true);
+  });
+
+  test("caps reference/definition label length so a single pathological label cannot force backtracking", () => {
+    const longLabel = "x".repeat(1500);
+    const md = `[text][${longLabel}]\n\n[${longLabel}]: https://e.com`;
+    // Deliberate safe degradation: a label above the bound is not resolved
+    // and its definition-shaped line is not collected either, so both sides
+    // are left untouched rather than partially/incorrectly rewritten.
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("is idempotent: resolving an already-resolved document is a no-op", () => {
+    const inputs = [
+      "[text][id]\n\n[id]: https://e.com",
+      "![alt][id]\n\n[id]: /img.png",
+      "```\n[a][b]\n```\n\n[b]: https://e.com",
+      "- [x] done\n\n[x]: https://e.com",
+      "<pre>\n[a][b]\n</pre>\n\n[b]: https://e.com",
+      "[id]: https://e.com\n\nunused elsewhere",
+      "See[^1]\n\n[^1]: https://footnote.com",
+    ];
+    for (const md of inputs) {
+      const once = resolveReferenceLinks(md);
+      const twice = resolveReferenceLinks(once);
+      expect(twice).toBe(once);
+    }
+  });
+
+  test("aligns tilde-fence handling with the block parser (neither treats ~~~ as a code fence)", () => {
+    const md = "~~~\n[a][b]\n~~~\n\n[b]: https://e.com";
+    expect(parseMarkdownToBlocks(md).some((b) => b.type === "code")).toBe(false);
+    expect(resolveReferenceLinks(md)).toBe("~~~\n[a](https://e.com)\n~~~\n\n");
+  });
+
+  test("resolves a destination containing a closing parenthesis", () => {
+    expect(resolveReferenceLinks("[x][id]\n\n[id]: https://e.com/a(b)")).toBe(
+      "[x](https://e.com/a(b))\n\n",
+    );
+  });
+
+  test("backslash-escaped brackets never resolve, and their captured (unusable) label leaves the definition visible", () => {
+    const md = "Not a ref: \\[text\\]\\[id\\]\n\n[id]: https://e.com";
+    expect(resolveReferenceLinks(md)).toBe(md);
+  });
+
+  test("a genuinely nested-bracket shortcut does not corrupt the destination pipeline or crash", () => {
+    // Unescaped nested brackets in link text are not legal CommonMark; the
+    // simplified single-pass scanner does not fully recover the intended
+    // reference, but it must never throw and must never do something that
+    // could bypass URL sanitization later.
+    const md = "[outer [inner] text][id]\n\n[id]: https://e.com";
+    expect(() => resolveReferenceLinks(md)).not.toThrow();
+    const result = resolveReferenceLinks(md);
+    expect(result).toContain("https://e.com");
+  });
+
+  test("dangerous destinations still go through sanitizeLinkUrl identically to a hand-written inline link", () => {
+    // resolveReferenceLinks only ever emits `[text](dest)`, so it reuses the
+    // exact same inline-link rendering/sanitization path — it must never
+    // special-case or bypass it.
+    const resolved = resolveReferenceLinks("[x][id]\n\n[id]: javascript:alert(1)");
+    expect(resolved).toBe("[x](javascript:alert(1))\n\n");
+    // The literal string is unchanged (dangerous-protocol stripping happens
+    // downstream in sanitizeLinkUrl at render time), confirming this pass
+    // does not attempt — and therefore cannot get wrong — its own filtering.
+  });
 });
 
 describe("parseMarkdownToBlocks — code fences", () => {
@@ -902,6 +1220,259 @@ describe("parseMarkdownToBlocks — raw HTML blocks", () => {
   });
 });
 
+describe("parseMarkdownToBlocks / resolveReferenceLinks — unclosed-HTML-opener perf (PR #1168 follow-up)", () => {
+  // Root cause: the balanced open/close depth scan for a multi-line HTML
+  // block does not advance the outer index when it fails to find a closing
+  // tag — so a document with many consecutive unclosed openers (e.g.
+  // thousands of bare `<div>` lines with no `</div>` anywhere) makes EVERY
+  // one of them independently re-scan all the way to end-of-document. That
+  // is O(N^2) work for N such lines, a real DoS-shaped hazard well within
+  // the 2MB annotate cap. Both markProtectedLines (used by
+  // resolveReferenceLinks) and parseMarkdownToBlocks's own HTML-block
+  // section duplicate this exact scan, so both must be fixed.
+  const N = 8000;
+  // Generous bound: a linear/bounded fix finishes in well under 100ms for
+  // this input; the pre-fix O(N^2) scan takes multiple seconds (measured
+  // ~2.2s for N=8000 during triage). 800ms leaves large machine-variance
+  // headroom while still failing clearly against the quadratic behavior.
+  const TIME_BOUND_MS = 800;
+
+  test("parseMarkdownToBlocks stays fast with many consecutive unclosed <div> openers", () => {
+    const md = Array.from({ length: N }, () => "<div>").join("\n");
+    const start = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const elapsed = performance.now() - start;
+    expect(blocks).toHaveLength(N);
+    expect(blocks.every((b) => b.type === "html")).toBe(true);
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+  });
+
+  test("resolveReferenceLinks stays fast with many consecutive unclosed <div> openers", () => {
+    const md =
+      Array.from({ length: N }, () => "<div>").join("\n") +
+      "\n\n[x][id]\n\n[id]: https://e.com";
+    const start = performance.now();
+    const result = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    expect(result).toContain("[x](https://e.com)");
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+  });
+
+  test("parity: a real <details>...</details> block stays intact and identically protected/parsed among thousands of unclosed <div> decoys", () => {
+    const decoyCount = 5000;
+    const decoys = Array.from({ length: decoyCount }, () => "<div>").join("\n");
+    const md =
+      `${decoys}\n\n` +
+      "<details>\n<summary>Notes</summary>\n\n[id]: https://from-details.com\n\n</details>" +
+      "\n\nAfter.";
+
+    const start = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const resolved = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+
+    // parseMarkdownToBlocks: the real <details> block is captured whole,
+    // undisturbed by the decoys before it, followed by its own paragraph.
+    const detailsBlock = blocks.find((b) => b.type === "html" && b.content.startsWith("<details>"));
+    expect(detailsBlock).toBeDefined();
+    expect(detailsBlock!.content).toBe(
+      "<details>\n<summary>Notes</summary>\n\n[id]: https://from-details.com\n\n</details>",
+    );
+    const paragraph = blocks.find((b) => b.type === "paragraph" && b.content === "After.");
+    expect(paragraph).toBeDefined();
+
+    // resolveReferenceLinks: the SAME <details> span is protected — the
+    // definition inside it is never consumed by anything, so it stays
+    // visible verbatim, exactly mirroring the block parser's own boundary
+    // for this block (not corrupted, not partially rewritten).
+    expect(resolved).toContain("[id]: https://from-details.com");
+  });
+});
+
+describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML blocks must not be truncated (owner follow-up on 9440be06)", () => {
+  // Regression: a fixed MAX_HTML_BLOCK_SCAN_LINES cap on the balanced
+  // open/close depth scan incorrectly cut off VALID HTML blocks whose
+  // closing tag sits beyond the cap. closeExistsFromLine already rejects a
+  // truly-unclosed opener in O(1) without scanning at all, so a genuinely
+  // closed block — however long — should simply be scanned once to its
+  // real end, not capped. A cap that can truncate valid parsing is not an
+  // acceptable trade-off no matter how generous its value.
+  const N_UNCLOSED = 40_000;
+  const TIME_BOUND_MS = 1500;
+
+  test("a <details> block with its closing tag more than 2000 lines below the opener stays one whole html block", () => {
+    const innerLineCount = 2500; // deliberately past the old 2000-line cap
+    const inner = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    const md = `<details>\n<summary>Big</summary>\n${inner}\n</details>\n\nAfter.`;
+
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(`<details>\n<summary>Big</summary>\n${inner}\n</details>`);
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("After.");
+  });
+
+  test("a raw HTML <table> block with its closing tag more than 2000 lines below the opener stays one whole html block", () => {
+    const rowCount = 2200; // deliberately past the old 2000-line cap
+    const rows = Array.from({ length: rowCount }, (_, i) => `<tr><td>${i}</td></tr>`).join("\n");
+    const md = `<table>\n${rows}\n</table>\n\nAfter table.`;
+
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(`<table>\n${rows}\n</table>`);
+    expect(blocks[1].type).toBe("paragraph");
+    expect(blocks[1].content).toBe("After table.");
+  });
+
+  test("a link definition inside a long (>2000-line) <details> block stays protected by resolveReferenceLinks, and never wins over a real outside definition", () => {
+    const innerLineCount = 2500;
+    const filler = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    // Same label defined both inside the (protected) details block and
+    // outside it. If the interior is genuinely protected, the inside
+    // definition is never collected at all, so the outside one — the only
+    // real candidate — wins and resolves the reference. If protection were
+    // to end early (the truncation bug), the inside definition would be
+    // collected FIRST (first-definition-wins) and incorrectly win instead,
+    // and would incorrectly be blanked as "consumed" too.
+    const md =
+      `<details>\n<summary>Big</summary>\n${filler}\n\n[id]: https://inside-details.com\n\n</details>` +
+      `\n\n[id]: https://outside.com\n\ntext [x][id]`;
+    const resolved = resolveReferenceLinks(md);
+    expect(resolved).toContain(`[id]: https://inside-details.com`); // stays visible, untouched
+    expect(resolved).toContain("text [x](https://outside.com)"); // outside definition wins
+    expect(resolved).not.toContain("[id]: https://outside.com\n"); // the real (consumed) one is blanked
+  });
+
+  test("40k unclosed <div> openers (no close anywhere) stay fast, with parity between parser and resolver", () => {
+    const decoys = Array.from({ length: N_UNCLOSED }, () => "<div>").join("\n");
+    const md = `${decoys}\n\n[x][id]\n\n[id]: https://e.com`;
+
+    const parseStart = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const parseElapsed = performance.now() - parseStart;
+
+    const resolveStart = performance.now();
+    const resolved = resolveReferenceLinks(md);
+    const resolveElapsed = performance.now() - resolveStart;
+
+    expect(parseElapsed).toBeLessThan(TIME_BOUND_MS);
+    expect(resolveElapsed).toBeLessThan(TIME_BOUND_MS);
+
+    // Parity: every decoy is its own single-line html block to the parser...
+    expect(blocks.filter((b) => b.type === "html")).toHaveLength(N_UNCLOSED);
+    // ...and every decoy line is likewise individually protected (never
+    // rewritten) by the resolver — same boundary, both call sites agree.
+    expect(resolved).toContain("[x](https://e.com)");
+    expect(resolved.split("\n").filter((l) => l === "<div>")).toHaveLength(N_UNCLOSED);
+  });
+
+  test("a long valid <details> block survives even when preceded by thousands of unclosed <div> decoys", () => {
+    const decoyCount = 5000;
+    const decoys = Array.from({ length: decoyCount }, () => "<div>").join("\n");
+    const innerLineCount = 2500;
+    const inner = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    const md = `${decoys}\n\n<details>\n<summary>Big</summary>\n${inner}\n</details>\n\nAfter.`;
+
+    const start = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+
+    const detailsBlock = blocks.find((b) => b.type === "html" && b.content.startsWith("<details>"));
+    expect(detailsBlock).toBeDefined();
+    expect(detailsBlock!.content).toBe(`<details>\n<summary>Big</summary>\n${inner}\n</details>`);
+    const paragraph = blocks.find((b) => b.type === "paragraph" && b.content === "After.");
+    expect(paragraph).toBeDefined();
+  });
+});
+
+describe("parseMarkdownToBlocks / resolveReferenceLinks — linear matching-close index (owner follow-up on a55db2b9)", () => {
+  // Owner-flagged regression: removing the fixed cap fixed truncation but
+  // reintroduced O(N^2) for a different adversarial shape — N unclosed
+  // `<div>` openers followed by a SINGLE trailing `</div>`.
+  // closeExistsFromLine's "does a close exist anywhere" pre-check is true
+  // for every one of the N openers (the trailing close exists), so every
+  // one of them still independently scans forward — most all the way to
+  // end-of-document — before giving up. Measured (pre-fix): 5000 → ~1.0s,
+  // 10000 → ~4.1s (textbook ~4x per doubling). Fixed by replacing the
+  // scan entirely with a per-tag-name prefix-sum + "next smaller-or-equal
+  // element" index (a classic O(N) monotonic-stack construction, built once
+  // per tag name and cached per document), so every opener's closing
+  // position — whether it exists, and exactly where if so, however far away
+  // — is an O(1) lookup with no scanning at all.
+  const N = 40_000;
+  const TIME_BOUND_MS = 1500;
+
+  test("N unclosed <div> openers followed by one trailing </div> stay fast", () => {
+    const md = Array.from({ length: N }, () => "<div>").join("\n") + "\n</div>";
+
+    const parseStart = performance.now();
+    const blocks = parseMarkdownToBlocks(md);
+    const parseElapsed = performance.now() - parseStart;
+    expect(parseElapsed).toBeLessThan(TIME_BOUND_MS);
+
+    // Only the LAST opener (immediately preceding the trailing close) can
+    // actually pair with it — every earlier opener's cumulative depth
+    // overshoots and never returns to its own baseline, so it stays an
+    // unclosed, single-line block. N-1 singles + 1 paired block = N blocks.
+    expect(blocks).toHaveLength(N);
+    expect(blocks.slice(0, N - 1).every((b) => b.type === "html" && b.content === "<div>")).toBe(
+      true,
+    );
+    expect(blocks[N - 1].type).toBe("html");
+    expect(blocks[N - 1].content).toBe("<div>\n</div>");
+  });
+
+  test("resolveReferenceLinks stays fast and agrees with the parser on the same N-openers-plus-one-close document", () => {
+    const md =
+      Array.from({ length: N }, () => "<div>").join("\n") +
+      "\n</div>\n\n[x][id]\n\n[id]: https://e.com";
+
+    const start = performance.now();
+    const resolved = resolveReferenceLinks(md);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(TIME_BOUND_MS);
+    expect(resolved).toContain("[x](https://e.com)");
+    // Every decoy line and the paired <div>/</div> stay literal (protected),
+    // exactly mirroring the parser's block boundaries above.
+    expect(resolved.split("\n").filter((l) => l === "<div>")).toHaveLength(N);
+    expect(resolved).toContain("</div>");
+  });
+
+  test("nested same-tag blocks still balance correctly (depth, not just presence, matters)", () => {
+    const md =
+      "<details>\n<summary>Outer</summary>\n<details>\n<summary>Inner</summary>\n</details>\nouter tail\n</details>";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(md);
+  });
+
+  test("mixed tag types nest independently — a <table> inside a <details> does not confuse the details/details matcher", () => {
+    const md =
+      "<details>\n<summary>Notes</summary>\n<table>\n<tr><td>1</td></tr>\n</table>\nafter table\n</details>\n\nAfter.";
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("html");
+    expect(blocks[0].content).toBe(
+      "<details>\n<summary>Notes</summary>\n<table>\n<tr><td>1</td></tr>\n</table>\nafter table\n</details>",
+    );
+    expect(blocks[1].content).toBe("After.");
+  });
+
+  test("a valid >2000-line <details> block still survives (no truncating cap reintroduced)", () => {
+    const innerLineCount = 3000;
+    const inner = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
+    const md = `<details>\n<summary>Big</summary>\n${inner}\n</details>\n\nAfter.`;
+    const blocks = parseMarkdownToBlocks(md);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].content).toBe(`<details>\n<summary>Big</summary>\n${inner}\n</details>`);
+  });
+});
+
 describe("computeListIndices", () => {
   test("all unordered → all null", () => {
     const blocks = [li(0, false), li(0, false), li(0, false)];
@@ -1029,6 +1600,75 @@ describe("extractFrontmatter — contentStartLine", () => {
   });
 });
 
+describe("extractFrontmatter — block scalars", () => {
+  test("folded (>-) joins wrapped lines with spaces", () => {
+    const md = `---
+description: >-
+  one two
+  three four
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three four");
+  });
+
+  test("folded (>) treats a blank line as a paragraph break", () => {
+    const md = `---
+description: >
+  one two
+  three four
+
+  five six
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three four\nfive six");
+  });
+
+  test("literal (|) preserves newlines", () => {
+    const md = `---
+note: |
+  line one
+  line two
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.note).toBe("line one\nline two");
+  });
+
+  test("block scalar does not swallow the next key", () => {
+    const md = `---
+description: >-
+  one two
+  three
+name: bar
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three");
+    expect(frontmatter?.name).toBe("bar");
+  });
+
+  test("CRLF line endings do not leak \\r into the value", () => {
+    const md = "---\r\ndescription: >-\r\n  one two\r\n  three\r\n---\r\n# Hi";
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.description).toBe("one two three");
+  });
+
+  test("plain single-line values and arrays still parse", () => {
+    const md = `---
+name: foo
+tags:
+  - a
+  - b
+---
+# Hi`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.name).toBe("foo");
+    expect(frontmatter?.tags).toEqual(["a", "b"]);
+  });
+});
+
 describe("parseMarkdownToBlocks — startLine accuracy", () => {
   test("basic blocks get correct startLine", () => {
     const md = "# Heading\n\nParagraph\n\n- Item";
@@ -1109,6 +1749,71 @@ describe("exportAnnotations — line labels", () => {
     const anns = [{ blockId: math.id, type: "COMMENT", text: "clarify", originalText: "x + y", startOffset: 0 }];
     const output = exportAnnotations(mathBlocks, anns);
     expect(output).toContain("(lines 3–5)");
+  });
+});
+
+describe("exportAnnotations — multi-target raw-HTML comments", () => {
+  // HTML-surface annotations have blockId '' — no blocks apply.
+  const htmlAnn = (extra: object = {}) => ({
+    blockId: "",
+    startOffset: 0,
+    endOffset: 0,
+    type: "COMMENT",
+    text: "Unify these",
+    originalText: "Primary chip",
+    ...extra,
+  });
+
+  test("additional targets are listed with label + excerpt, primary first", () => {
+    const output = exportAnnotations([], [htmlAnn({
+      htmlAdditionalTargets: [
+        { label: "Button", text: "Create", anchor: { selector: "span.btn", tagName: "span", text: "Create" } },
+        // Fail-closed target (no anchor) still exports its label + text.
+        { label: "rowchip", text: "adopted   by 1" },
+      ],
+    })]);
+    expect(output).toContain('Feedback on: "Primary chip"');
+    expect(output).toContain("Also applies to 2 more elements:");
+    expect(output.indexOf("Primary chip")).toBeLessThan(output.indexOf("Also applies"));
+    expect(output).toContain('- [Button] "Create"');
+    expect(output).toContain('- [rowchip] "adopted by 1"'); // whitespace collapsed
+    // A blank line separates the block from the `> comment` blockquote above,
+    // or markdown lazy continuation folds it INTO the quote.
+    expect(output).toContain('> Unify these\n\n**Also applies');
+  });
+
+  test("hostile labels with newlines cannot inject markdown structure into the export", () => {
+    // Labels come from page-controlled attributes (aria-label). The DTO
+    // boundary collapses whitespace, but persisted pre-fix drafts bypass it —
+    // the exporter must collapse again so no line in agent-read feedback
+    // starts with attacker-controlled markdown.
+    const output = exportAnnotations([], [htmlAnn({
+      htmlAdditionalTargets: [
+        { label: "Save\n## INJECTED HEADING", text: "Save\n# ALSO INJECTED" },
+      ],
+    })]);
+    expect(output).toContain('- [Save ## INJECTED HEADING] "Save # ALSO INJECTED"');
+    expect(output).not.toContain("\n## INJECTED");
+    expect(output).not.toContain("\n# ALSO");
+  });
+
+  test("long excerpts are clipped and label-less targets still list", () => {
+    const output = exportAnnotations([], [htmlAnn({
+      htmlAdditionalTargets: [{ text: "x".repeat(300) }],
+    })]);
+    expect(output).toContain("Also applies to 1 more element:");
+    expect(output).toContain(`- "${"x".repeat(120)}…"`);
+  });
+
+  test("single-target output is byte-identical to the pre-feature format", () => {
+    const single = exportAnnotations([], [htmlAnn()]);
+    const empty = exportAnnotations([], [htmlAnn({ htmlAdditionalTargets: [] })]);
+    expect(single).toBe(empty);
+    expect(single).not.toContain("Also applies");
+    expect(single).toBe(
+      "# Plan Feedback\n\nI've reviewed this plan and have 1 piece of feedback:\n\n" +
+      "## 1. Feedback on: \"Primary chip\"\n> Unify these\n\n---\n",
+    );
   });
 });
 

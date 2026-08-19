@@ -10,6 +10,8 @@ Plannotator embeds an AI chat sidebar directly in live review sessions. In plan 
 
 The AI sees the relevant review context automatically: the current plan and previous plan version for plan review, the active document and source metadata for annotate, or the full diff for code review. AI chat history stays separate from approve, deny, and send-annotations output unless you manually copy text into normal feedback.
 
+Ask AI is an optional network feature. When you send the first question, Plannotator passes that question and the relevant review context to the provider you selected, using the provider's locally installed and authenticated client. The Plannotator project does not proxy or collect those conversations; the selected provider's privacy and retention terms apply.
+
 ## Supported providers
 
 ### Claude (via Claude Agent SDK)
@@ -18,9 +20,18 @@ Requires the `claude` CLI installed and authenticated. Uses Claude Code's full s
 
 **Models:**
 
-- Sonnet 4.6 (default)
+- Sonnet 5 (default)
+- Fable 5
+- Opus 5
+- Opus 4.8
+- Sonnet 4.6
+- Opus 4.7
 - Opus 4.6
 - Haiku 4.5
+
+Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6 are also offered in `(1M)` context
+variants. The 5-series models use their 1M context window by default, so they
+have no separate variant.
 
 ### Codex (via Codex SDK)
 
@@ -71,7 +82,7 @@ A session is created lazily on your first question. Until then, no resources are
 
 ## Permission requests
 
-When using Claude, the AI may request permission to use tools like Read, Glob, Grep, or WebSearch. When this happens, an approval card appears inline in the chat. You can approve or deny each request individually.
+Claude Ask AI allows Read, Glob, Grep, WebSearch, and scoped read-only Git commands by default. WebSearch queries are sent to Anthropic's search service and may return content from third-party websites without a separate Plannotator approval. Other tool requests appear as inline approval cards that you can approve or deny.
 
 Codex sessions run in a sandboxed read-only mode, so permission requests do not apply.
 

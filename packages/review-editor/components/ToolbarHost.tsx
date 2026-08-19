@@ -19,6 +19,7 @@ import { formatLineRange, formatTokenContext } from '../utils/formatLineRange';
 
 export interface ToolbarHostHandle {
   handleLineSelectionEnd: (range: SelectedLineRange | null) => void;
+  openLineAnnotation: (range: SelectedLineRange) => void;
   handleTokenClick: (props: DiffTokenEventBaseProps, event: MouseEvent) => void;
   startEdit: (annotation: CodeAnnotation) => void;
 }
@@ -45,7 +46,7 @@ interface ToolbarHostProps {
     conventionalLabel?: ConventionalLabel | null,
     decorations?: ConventionalDecoration[],
   ) => void;
-  // AI props (optional — only DiffViewer wires these today)
+  // AI props (optional — DiffViewer and external source-selection bridges wire these)
   aiAvailable?: boolean;
   onAskAI?: (question: string) => void;
   isAILoading?: boolean;
@@ -99,18 +100,38 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     ref,
     () => ({
       handleLineSelectionEnd: toolbar.handleLineSelectionEnd,
+      openLineAnnotation: toolbar.openLineAnnotation,
       handleTokenClick: toolbar.handleTokenClick,
       startEdit: toolbar.startEdit,
     }),
-    [toolbar.handleLineSelectionEnd, toolbar.handleTokenClick, toolbar.startEdit],
+    [toolbar.handleLineSelectionEnd, toolbar.openLineAnnotation, toolbar.handleTokenClick, toolbar.startEdit],
   );
 
   const handleCloseCodeModal = useCallback(() => toolbar.setShowCodeModal(false), [toolbar.setShowCodeModal]);
-  const handleCollapseCommentModal = useCallback(() => toolbar.setShowCommentModal(false), [toolbar.setShowCommentModal]);
+  const handleCollapseCommentModal = useCallback(() => {
+    if (toolbar.expandedComposerRequired) {
+      toolbar.handleDismiss();
+      return;
+    }
+    toolbar.setShowCommentModal(false);
+  }, [toolbar.expandedComposerRequired, toolbar.handleDismiss, toolbar.setShowCommentModal]);
   const handleCancelCommentModal = useCallback(() => {
     toolbar.setShowCommentModal(false);
     toolbar.handleCancel();
   }, [toolbar.handleCancel, toolbar.setShowCommentModal]);
+  const handleEditSuggestion = useCallback(() => {
+    if (!toolbar.suggestedCode && toolbar.selectedOriginalCode) {
+      toolbar.setSuggestedCode(toolbar.selectedOriginalCode);
+    }
+    toolbar.setShowCommentModal(false);
+    toolbar.setShowCodeModal(true);
+  }, [
+    toolbar.selectedOriginalCode,
+    toolbar.setShowCodeModal,
+    toolbar.setShowCommentModal,
+    toolbar.setSuggestedCode,
+    toolbar.suggestedCode,
+  ]);
   const handleExpandedAskAI = useCallback((question: string) => {
     if (!onAskAI) return;
     onAskAI(question);
@@ -176,6 +197,10 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
           onSubmit={toolbar.handleSubmitAnnotation}
           onCollapse={handleCollapseCommentModal}
           onCancel={handleCancelCommentModal}
+          autoFocus={!toolbar.expandedComposerRequired}
+          collapsible={!toolbar.expandedComposerRequired}
+          onEditSuggestion={toolbar.expandedComposerRequired ? handleEditSuggestion : undefined}
+          hasSuggestedCode={toolbar.suggestedCode.trim().length > 0}
         />
       )}
 

@@ -4,7 +4,7 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
 import { encodeApiFilePath } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 
@@ -642,6 +642,12 @@ export async function markGhFilesViewed(
 
 // --- Submit PR Review ---
 
+/**
+ * Submit one atomic GitHub review.
+ *
+ * GitHub either accepts the complete review or this rejects before reporting
+ * success, so no narrowed retry result is needed.
+ */
 export async function submitGhPRReview(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -649,7 +655,7 @@ export async function submitGhPRReview(
   action: "approve" | "comment",
   body: string,
   fileComments: PRReviewFileComment[],
-): Promise<void> {
+): Promise<PRReviewSubmissionResult> {
   const payload = JSON.stringify({
     commit_id: headSha,
     body,
@@ -675,6 +681,8 @@ export async function submitGhPRReview(
     const message = result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
     throw new Error(`Failed to submit PR review: ${message}`);
   }
+
+  return { status: "complete" };
 }
 
 // --- Stack Tree (GraphQL) ---

@@ -16,8 +16,8 @@ import {
 	HEARTBEAT_INTERVAL_MS,
 	type StorableAnnotation,
 	type ExternalAnnotationEvent,
-} from "../generated/external-annotation.js";
-import { json, parseBody } from "./helpers.js";
+} from "../generated/external-annotation.ts";
+import { json, parseBody } from "./helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Route prefix

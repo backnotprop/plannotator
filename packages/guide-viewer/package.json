@@ -1,0 +1,36 @@
+{
+  "name": "@plannotator/guide-viewer",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Guided Review renderer shared by the Plannotator review app and portable guide exports.",
+  "exports": {
+    ".": "./index.ts",
+    "./types": "./types.ts",
+    "./diffParser": "./diffParser.ts",
+    "./renderInlineMarkdown": "./renderInlineMarkdown.tsx",
+    "./renderMarkdownProse": "./renderMarkdownProse.tsx",
+    "./host": "./host.tsx",
+    "./GuideView": "./GuideView.tsx",
+    "./GuideSectionCard": "./GuideSectionCard.tsx",
+    "./GuideFileCard": "./GuideFileCard.tsx",
+    "./GuideViewportManager": "./GuideViewportManager.tsx",
+    "./GuideSkeleton": "./GuideSkeleton.tsx",
+    "./GuideViewer": "./GuideViewer.tsx"
+  },
+  "files": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
+  "dependencies": {
+    "@plannotator/core": "workspace:*",
+    "lucide-react": "^1.14.0"
+  },
+  "peerDependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "typescript": "~5.8.2"
+  }
+}

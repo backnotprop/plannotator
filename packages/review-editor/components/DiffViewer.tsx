@@ -13,12 +13,16 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { FileHeader } from './FileHeader';
+import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
+import { OversizedFileNotice } from './OversizedFileNotice';
+import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import type { AnnotationScrollTarget } from '../types';
 import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
+import { hashString } from '../utils/hashString';
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -30,6 +34,10 @@ import {
   retryScrollToSearchMatch,
   swapActiveSearchHighlight,
 } from '../utils/reviewSearchHighlight';
+import {
+  resolveLineSelectionBehavior,
+  type LineSelectionSource,
+} from '../utils/lineSelectionBehavior';
 
 interface PierreDiffContentProps {
   filePath: string;
@@ -45,6 +53,10 @@ interface PierreDiffContentProps {
   mergedAnnotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   pendingSelection: SelectedLineRange | null;
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
+  /** In-flight selection deltas. Only wired when Pierre needs the host to
+   *  repaint (see the options block below); undefined leaves the option off
+   *  the object entirely. */
+  onLineSelectionChange?: (range: SelectedLineRange | null) => void;
   onGutterUtilityClick: (range: SelectedLineRange) => void;
   renderAnnotation: (annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => React.ReactNode;
   onTokenClick?: (props: DiffTokenEventBaseProps, event: MouseEvent) => void;
@@ -66,6 +78,7 @@ const PierreDiffContent = React.memo(({
   mergedAnnotations,
   pendingSelection,
   onLineSelectionEnd,
+  onLineSelectionChange,
   onGutterUtilityClick,
   renderAnnotation,
   onTokenClick,
@@ -95,6 +108,13 @@ const PierreDiffContent = React.memo(({
         enableGutterUtility: true,
         onGutterUtilityClick,
         onLineSelectionEnd,
+        // A defined `selectedLines` prop puts Pierre in controlled-selection
+        // mode, where `InteractionManager.updateSelection` only stores a
+        // proposed range and leaves the painted highlight to whatever the host
+        // hands back. Without a change handler a second drag therefore never
+        // repaints. Spread conditionally so surfaces that don't need it keep an
+        // options object with no such key at all.
+        ...(onLineSelectionChange ? { onLineSelectionChange } : {}),
         // Pierre's renderer-options builder drops onToken* before it evaluates
         // shouldUseTokenTransformer, so passing the handlers alone never wraps
         // tokens (no data-char) and code-nav/token events never fire. Enable
@@ -126,6 +146,7 @@ const PierreDiffContent = React.memo(({
   prev.mergedAnnotations === next.mergedAnnotations &&
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
+  prev.onLineSelectionChange === next.onLineSelectionChange &&
   prev.onGutterUtilityClick === next.onGutterUtilityClick &&
   prev.renderAnnotation === next.renderAnnotation &&
   prev.onTokenClick === next.onTokenClick &&
@@ -160,6 +181,8 @@ interface DiffViewerProps {
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
+  /** Compact coarse-pointer shell. Keeps range selection separate from writing. */
+  compactTouchLayout?: boolean;
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
   onAddFileComment: (text: string) => void;
@@ -168,12 +191,21 @@ interface DiffViewerProps {
   onDeleteAnnotation: (id: string) => void;
   isViewed?: boolean;
   onToggleViewed?: () => void;
+  /** Chrome preference (#1277): false hides the header Viewed button; the `V`
+   *  shortcut and viewed state are unaffected. */
+  showViewedControls?: boolean;
+  /** Marked `linguist-generated` in `.gitattributes` (#1317) — shows the
+   * header "generated" tag. The single-file surface never collapses for it:
+   * opening a file as its own tab is already an explicit request to see it. */
+  isGenerated?: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   isStaged?: boolean;
   isStaging?: boolean;
   onStage?: () => void;
   canStage?: boolean;
+  /** Same preference for the header Git Add button (`A` shortcut still works). */
+  showStageControls?: boolean;
   stageError?: string | null;
   searchQuery?: string;
   searchMatches?: ReviewSearchMatch[];
@@ -215,6 +247,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   selectedAnnotationId,
   scrollTargetAnnotation,
   pendingSelection,
+  compactTouchLayout = false,
   onLineSelection,
   onAddAnnotation,
   onAddFileComment,
@@ -223,12 +256,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onDeleteAnnotation,
   isViewed = false,
   onToggleViewed,
+  showViewedControls = true,
+  isGenerated = false,
   collapsed = false,
   onToggleCollapsed,
   isStaged = false,
   isStaging = false,
   onStage,
   canStage = false,
+  showStageControls = true,
   stageError,
   searchQuery = '',
   searchMatches = [],
@@ -243,7 +279,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   aiHistoryMessages = [],
   onCodeNavRequest,
 }) => {
-  const pierreTheme = usePierreTheme({ fontFamily, fontSize });
+  const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
   // Worker-pool highlighting: keep the pool's theme pair in step with the UI
   // theme. (No mount gating here — the single-file panel renders one diff;
   // a main-thread fallback frame at startup is invisible.)
@@ -310,8 +346,28 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 
-  // Parse patch into FileDiffMetadata for @pierre/diffs FileDiff component
-  const fileDiff = useMemo(() => getSingularPatch(patch), [patch]);
+  // Parse patch into FileDiffMetadata for @pierre/diffs FileDiff component.
+  //
+  // Pinned to @pierre/diffs 1.3.2: `FileDiff.render` DEFAULTS an unset
+  // `fileDiff.cacheKey` to the file's NAME (`prevName:name` for renames), and
+  // `areDiffTargetsEqual` — the only identity check its render/highlight
+  // caches make — compares nothing but that key. Two different diffs of the
+  // same path therefore look IDENTICAL to Pierre, and the second one is
+  // silently served the first one's cached render.
+  //
+  // This FileDiff instance survives (`key={filePath}`) across both the
+  // partial -> full-content swap below AND diff-type / base / whitespace
+  // switches, so every diff object handed to it must mint its own
+  // content-derived key. Hash, not `patch.length`: the worker highlight cache
+  // is a singleton that outlives remounts, so a same-length different-content
+  // patch must not collide either. See AllFilesCodeView, which mints the same
+  // shape of key for the all-files surface (which is why that surface was
+  // never affected by this bug).
+  const fileDiff = useMemo(() => {
+    const parsed = getSingularPatch(patch);
+    parsed.cacheKey = `${filePath}#${hashString(patch)}`;
+    return parsed;
+  }, [patch, filePath]);
 
   // Fetch full file contents for expandable context
   const [fileContents, setFileContents] = useState<{ forPath: string; old: string | null; new: string | null } | null>(null);
@@ -353,7 +409,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         oldFile: fileContents.old != null ? { name: oldPath || filePath, contents: fileContents.old } : undefined,
         newFile: fileContents.new != null ? { name: filePath, contents: fileContents.new } : undefined,
       });
-      return result || fileDiff;
+      if (!result || result.isPartial) return fileDiff;
+      // A DIFFERENT key from the partial diff above (`#full`), still derived
+      // from the patch content so it also changes across diff-type / base
+      // switches. Without it Pierre keeps painting the partial render forever:
+      // gap bars with no chevrons and dead expansion clicks, at every file
+      // size. (See the cacheKey note on `fileDiff`.)
+      result.cacheKey = `${filePath}#full#${hashString(patch)}`;
+      return result;
     } catch {
       return fileDiff;
     }
@@ -584,9 +647,38 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
 
-  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
+  const handleLineSelectionInteraction = useCallback((
+    source: LineSelectionSource,
+    range: SelectedLineRange | null,
+  ) => {
+    // A cleared selection is never something to preserve. AllFilesCodeView
+    // early-returns on a null range; single-file has to route it to the toolbar
+    // host so an open composer (including the Ask AI window) closes with it —
+    // that call also publishes the null selection upwards.
+    if (range == null) {
+      toolbarHostRef.current?.handleLineSelectionEnd(null);
+      return;
+    }
+    if (resolveLineSelectionBehavior({ source, compactTouchLayout }) === 'preserve-selection') {
+      onLineSelection(range);
+      return;
+    }
     toolbarHostRef.current?.handleLineSelectionEnd(range);
-  }, []);
+  }, [compactTouchLayout, onLineSelection]);
+
+  // Compact touch keeps a dragged range on screen instead of opening the
+  // composer, so `pendingSelection` is non-null for the whole time the reviewer
+  // may drag again — and a non-null `selectedLines` is exactly what puts Pierre
+  // in controlled-selection mode. Feed the in-flight range back so the second
+  // drag repaints and the finger stays tracked. Desktop never enters that state
+  // through a preserved range, and gets no handler at all.
+  const handlePierreLineSelectionChange = useCallback((range: SelectedLineRange | null) => {
+    onLineSelection(range);
+  }, [onLineSelection]);
+
+  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
+    handleLineSelectionInteraction('gutter-comment-action', range);
+  }, [handleLineSelectionInteraction]);
 
   useEffect(() => {
     const root = diffContentRef.current;
@@ -613,8 +705,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, []);
 
   const handlePierreLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
-    toolbarHostRef.current?.handleLineSelectionEnd(range);
-  }, []);
+    handleLineSelectionInteraction('range-gesture', range);
+  }, [handleLineSelectionInteraction]);
 
   // Token interaction handlers (code area clicks)
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
@@ -652,6 +744,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     [annotations],
   );
 
+  // Files over the review size cap arrive as a contents-free stub, which
+  // renders as an empty body. Say so instead of showing a bare header.
+  const isOversizedStub = useMemo(() => isOversizedReviewStubPatch(patch), [patch]);
+
+  // The general fallback under that specific case: any OTHER hunkless binary
+  // chunk (a genuine binary file, or a stub shape the marker does not cover)
+  // still renders an empty body and still has to say why. Gated on the marker
+  // so a marker-carrying stub is explained exactly once, by the message above.
+  const isContentlessBinary = useMemo(
+    () => !isOversizedStub && isContentlessBinaryPatch(patch),
+    [patch, isOversizedStub],
+  );
+
   // Replay a selected line/range comment's anchor as the controlled highlight so
   // clicking it (inline card or sidebar) lights up its lines. A live compose
   // selection (pendingSelection) wins while the toolbar is open; file-scoped
@@ -671,7 +776,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         status={status}
         oldPath={oldPath}
         isViewed={isViewed}
+        isGenerated={isGenerated}
         onToggleViewed={onToggleViewed}
+        showViewedControl={showViewedControls}
         collapseToggle={onToggleCollapsed && (
           <svg
             className={`mr-1.5 h-3.5 w-3.5 flex-none text-muted-foreground transition-transform ${collapsed ? '-rotate-90' : 'rotate-0'}`}
@@ -688,6 +795,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         isStaging={isStaging}
         onStage={onStage}
         canStage={canStage}
+        showStageControl={showStageControls}
         stageError={stageError}
         onFileComment={setFileCommentAnchor}
       />
@@ -695,8 +803,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       {!collapsed && <OverlayScrollArea
         className={`flex-1 min-h-0 relative ${isDraggingSplit ? 'select-none' : ''}`}
         overflowX="scroll"
+        overflowY="auto"
         onViewportReady={onViewportReady}
       >
+        {/* Specific first, general second, and never both: whichever applies,
+            a card with no hunks to draw says why instead of reading as empty. */}
+        {isOversizedStub && <OversizedFileNotice />}
+        {isContentlessBinary && <BinaryFileNotice />}
         <FileCommentBanner
           comments={fileComments}
           selectedAnnotationId={selectedAnnotationId}
@@ -730,6 +843,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               mergedAnnotations={mergedAnnotations}
               pendingSelection={pendingSelection ?? selectedAnnotationRange}
               onLineSelectionEnd={handlePierreLineSelectionEnd}
+              onLineSelectionChange={compactTouchLayout ? handlePierreLineSelectionChange : undefined}
               onGutterUtilityClick={handleGutterUtilityClick}
               renderAnnotation={renderAnnotation}
               onTokenClick={handleTokenClick}

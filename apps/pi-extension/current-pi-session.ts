@@ -26,6 +26,8 @@ export type CurrentPiSessionRegistration = {
 };
 
 export type PiSessionIdentity = {
+	/** In-process extension runtime identity; changes on reload even when the Pi session ID does not. */
+	runtimeToken?: symbol;
 	sessionId?: string;
 	sessionFile?: string;
 	sessionName?: string;
@@ -33,6 +35,35 @@ export type PiSessionIdentity = {
 };
 
 const globalStore = globalThis as PlannotatorGlobal;
+
+/**
+ * Whether a captured `ctx` still belongs to a live session.
+ *
+ * Pi invalidates an extension's `ctx` — and the `pi` API object it was created
+ * from — the moment its session is replaced or disposed (`/new`, `/reload`,
+ * fork, resume, `/quit`, and print-mode teardown all land there). Every guarded
+ * accessor on both objects then throws "This extension ctx is stale after
+ * session replacement or reload...".
+ *
+ * Pi exposes no `ctx.isStale` flag. The sanctioned signals are the
+ * `session_shutdown` event, which fires just before invalidation, and the
+ * `withSession` callback, which only applies to a replacement the extension
+ * itself requested. Neither helps a timer or a promise continuation that is
+ * already in flight, so probe: read one cheap guarded getter and treat a throw
+ * as "this session is gone". `ctx.mode` is a plain property read with no
+ * session work behind it, so this is safe to call from a hot poll.
+ *
+ * On hosts predating the guard nothing ever throws and this always reports
+ * alive, which is exactly the old behaviour.
+ */
+export function isCtxAlive(ctx: Pick<ExtensionContext, "mode">): boolean {
+	try {
+		void ctx.mode;
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 function getStore(): CurrentPiSessionStore {
 	globalStore.__plannotatorCurrentPiSession ??= {};
@@ -43,8 +74,9 @@ function getErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-export function getPiSessionIdentity(ctx: ExtensionContext): PiSessionIdentity {
+export function getPiSessionIdentity(ctx: ExtensionContext, runtimeToken = getStore().current?.token): PiSessionIdentity {
 	return {
+		runtimeToken,
 		sessionId: ctx.sessionManager.getSessionId(),
 		sessionFile: ctx.sessionManager.getSessionFile(),
 		sessionName: ctx.sessionManager.getSessionName(),
@@ -54,6 +86,7 @@ export function getPiSessionIdentity(ctx: ExtensionContext): PiSessionIdentity {
 
 function isDifferentSession(origin: PiSessionIdentity, current: PiSessionIdentity | undefined): boolean {
 	if (!current) return false;
+	if (origin.runtimeToken && current.runtimeToken) return origin.runtimeToken !== current.runtimeToken;
 	if (origin.sessionId && current.sessionId) return origin.sessionId !== current.sessionId;
 	if (origin.sessionFile && current.sessionFile) return origin.sessionFile !== current.sessionFile;
 	return false;
@@ -70,7 +103,7 @@ function setCurrentPiSession(token: symbol, pi: ExtensionAPI, ctx?: ExtensionCon
 		current.notify = (message, type = "info") => {
 			ctx.ui.notify(message, type);
 		};
-		current.identity = getPiSessionIdentity(ctx);
+		current.identity = getPiSessionIdentity(ctx, token);
 	}
 	getStore().current = current;
 }

@@ -6,6 +6,7 @@
  * and authoritative Git object-to-object diffs.
  */
 
+import { lstat, readlink } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import {
@@ -19,6 +20,8 @@ import {
   getEmptyTreeSha,
   getWorkingTreeDiffFromBase,
   hashFingerprintPart,
+  MAX_REVIEW_FILE_CONTENT_BYTES,
+  runBoundedTrackedDiff,
   validateFilePath,
 } from "./review-core";
 
@@ -38,6 +41,32 @@ const STATUS_TIMEOUT_MS = 30_000;
 const VERSION_TIMEOUT_MS = 5_000;
 const OBJECT_ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 const STATUS_CACHE_MS = 1_000;
+
+/**
+ * GitButler has shipped two spellings of the global JSON output flag:
+ * 0.21.x accepts only `--format json` (gitbutlerapp/gitbutler#14061) while
+ * 0.22.0+ accepts only `--json` (gitbutlerapp/gitbutler#15026), and each
+ * release rejects the other spelling as an unknown argument. The primary
+ * spelling matches GITBUTLER_MIN_VERSION; when a status call fails with
+ * clap's unexpected-argument rejection for the exact flag we passed, the
+ * other spelling is tried once. Any other failure propagates unchanged.
+ */
+interface GitButlerStatusSyntax {
+  args: readonly string[];
+  /** The flag clap names in its unexpected-argument rejection. */
+  flag: string;
+  label: string;
+}
+
+const GITBUTLER_STATUS_SYNTAXES: readonly [GitButlerStatusSyntax, GitButlerStatusSyntax] = [
+  { args: ["--format", "json", "status"], flag: "--format", label: "but --format json status" },
+  { args: ["--json", "status"], flag: "--json", label: "but --json status" },
+];
+
+/** Narrow sniff for clap rejecting exactly the JSON flag this syntax passed. */
+function isUnexpectedArgumentRejection(result: GitCommandResult, flag: string): boolean {
+  return result.exitCode !== 0 && result.stderr.includes(`unexpected argument '${flag}'`);
+}
 
 /** Runtime operations needed by the shared GitButler provider. */
 export interface ReviewGitButlerRuntime extends ReviewGitRuntime {
@@ -64,7 +93,7 @@ export interface GitButlerStack {
   branches: GitButlerBranch[];
 }
 
-/** Validated subset of `but --format json status`. */
+/** Validated subset of `but --format json status` (0.21.x) / `but --json status` (0.22.0+). */
 export interface GitButlerStatus {
   mergeBase: GitButlerCommit;
   stacks: GitButlerStack[];
@@ -150,12 +179,15 @@ function parseStack(value: unknown, path: string): GitButlerStack {
 }
 
 /** Parse and validate the status fields Plannotator relies on. Unknown fields are allowed. */
-export function parseGitButlerStatus(output: string): GitButlerStatus {
+export function parseGitButlerStatus(
+  output: string,
+  commandLabel = GITBUTLER_STATUS_SYNTAXES[0].label,
+): GitButlerStatus {
   let decoded: unknown;
   try {
     decoded = JSON.parse(output);
   } catch {
-    throw new GitButlerContractError("GitButler returned invalid JSON from `but --format json status`.");
+    throw new GitButlerContractError(`GitButler returned invalid JSON from \`${commandLabel}\`.`);
   }
 
   const root = requireRecord(decoded, "root");
@@ -199,6 +231,8 @@ function versionAtLeast(actual: ParsedVersion, minimum: ParsedVersion): boolean 
 }
 
 const versionChecks = new WeakMap<ReviewGitButlerRuntime, Promise<void>>();
+/** Index into GITBUTLER_STATUS_SYNTAXES of the spelling this runtime's CLI last accepted. */
+const statusSyntaxPreferences = new WeakMap<ReviewGitButlerRuntime, 0 | 1>();
 const statusCaches = new WeakMap<
   ReviewGitButlerRuntime,
   Map<string, { expiresAt: number; inFlight: boolean; status: Promise<GitButlerStatus> }>
@@ -252,17 +286,42 @@ async function loadStatus(runtime: ReviewGitButlerRuntime, cwd: string): Promise
   if (existing && (existing.inFlight || existing.expiresAt > now)) return existing.status;
 
   const status = (async () => {
-    const result = await runtime.runBut(["--format", "json", "status"], {
+    const preferredIndex = statusSyntaxPreferences.get(runtime) ?? 0;
+    let syntaxIndex = preferredIndex;
+    let syntax = GITBUTLER_STATUS_SYNTAXES[syntaxIndex];
+    let result = await runtime.runBut([...syntax.args], {
       cwd,
       timeoutMs: STATUS_TIMEOUT_MS,
     });
+    if (isUnexpectedArgumentRejection(result, syntax.flag)) {
+      // This CLI does not know this spelling of the JSON flag; try the other
+      // spelling exactly once. Only clap's unexpected-argument rejection for
+      // the flag we passed triggers the retry — a real status failure must
+      // keep failing loudly below.
+      syntaxIndex = preferredIndex === 0 ? 1 : 0;
+      const fallback = GITBUTLER_STATUS_SYNTAXES[syntaxIndex];
+      const retried = await runtime.runBut([...fallback.args], {
+        cwd,
+        timeoutMs: STATUS_TIMEOUT_MS,
+      });
+      if (isUnexpectedArgumentRejection(retried, fallback.flag)) {
+        throw new GitButlerContractError(
+          `GitButler rejected both \`${syntax.label}\` and \`${fallback.label}\`; ` +
+          `Plannotator requires GitButler ${GITBUTLER_MIN_VERSION} or newer.`,
+        );
+      }
+      syntax = fallback;
+      result = retried;
+    }
     if (result.exitCode !== 0) {
       const detail = result.stderr.trim();
       throw new GitButlerContractError(
-        `GitButler status failed${detail ? `: ${detail}` : ` with exit code ${result.exitCode}`}`,
+        `GitButler status (\`${syntax.label}\`) failed${detail ? `: ${detail}` : ` with exit code ${result.exitCode}`}`,
       );
     }
-    return parseGitButlerStatus(result.stdout);
+    const parsed = parseGitButlerStatus(result.stdout, syntax.label);
+    statusSyntaxPreferences.set(runtime, syntaxIndex);
+    return parsed;
   })();
   const entry = { expiresAt: 0, inFlight: true, status };
   cache.set(cwd, entry);
@@ -595,13 +654,14 @@ async function diffObjects(
     "--end-of-options",
     `${base}..${tip}`,
   ];
-  const result = await runtime.runGit(args, { cwd });
-  if (result.exitCode !== 0) {
+  try {
+    return await runBoundedTrackedDiff(runtime, args, cwd);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     throw new GitButlerContractError(
-      `Git failed while building the GitButler diff${result.stderr.trim() ? `: ${result.stderr.trim()}` : "."}`,
+      `Git failed while building the GitButler diff: ${message}`,
     );
   }
-  return result.stdout;
 }
 
 function errorResult(diffType: DiffType, error: unknown): DiffResult {
@@ -691,8 +751,27 @@ async function gitShow(
   path: string,
   cwd: string,
 ): Promise<string | null> {
-  const result = await runtime.runGit(["show", "--end-of-options", `${ref}:${path}`], { cwd });
+  const object = `${ref}:${path}`;
+  const size = await runtime.runGit(["cat-file", "-s", "--", object], { cwd });
+  if (size.exitCode !== 0 || Number(size.stdout.trim()) > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+  const result = await runtime.runGit(["show", "--end-of-options", object], { cwd });
   return result.exitCode === 0 ? result.stdout : null;
+}
+
+async function readWorkingTreeFile(
+  runtime: ReviewGitButlerRuntime,
+  root: string,
+  path: string,
+): Promise<string | null> {
+  const fullPath = resolve(root, path);
+  try {
+    const fileStat = await lstat(fullPath);
+    if (fileStat.isSymbolicLink()) return await readlink(fullPath);
+    if (!fileStat.isFile() || fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+  } catch {
+    return null;
+  }
+  return runtime.readTextFile(fullPath);
 }
 
 /** Resolve full old/new file content for expandable GitButler diffs. */
@@ -717,7 +796,7 @@ export async function getGitButlerFileContentsForDiff(
     await validateWorkspaceMergeBase(runtime, status.mergeBase.commitId, root);
     return {
       oldContent: await gitShow(runtime, status.mergeBase.commitId, oldFilePath, root),
-      newContent: await runtime.readTextFile(resolve(root, filePath)),
+      newContent: await readWorkingTreeFile(runtime, root, filePath),
     };
   }
 

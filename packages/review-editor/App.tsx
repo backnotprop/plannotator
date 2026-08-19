@@ -16,26 +16,36 @@ import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { EslintCheckAdvert } from '@plannotator/shared/eslint-check-types';
+import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
+import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
-import {
-  markLookAndFeelAnnouncementSeen,
-  needsLookAndFeelAnnouncement,
-} from '@plannotator/ui/utils/lookAndFeelAnnouncement';
-import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta } from '@plannotator/ui/types';
+import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
+import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
+import type { SuggestionHunk } from './edit/deriveSuggestions';
+import type { EditSelectionComment } from './edit/useEditSession';
 import { useAIChat } from './hooks/useAIChat';
 import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
-import { extractLinesFromPatch } from './utils/patchParser';
-import { isTypingTarget, useReviewSearch, type ReviewSearchMatch } from './hooks/useReviewSearch';
+import { useCallFlowAnalysis } from './hooks/useCallFlowAnalysis';
+import { useCallFlowInstall } from './hooks/useCallFlowInstall';
+import { useCallFlowAutoInstall } from './hooks/useCallFlowAutoInstall';
+import { extractLinesFromPatch, isLineRangeInPatch } from './utils/patchParser';
+import { resolveCallFlowAnnotationPlacement } from './utils/callFlowAnnotations';
+import {
+  shouldHandleReviewSearchShortcut,
+  isTypingTarget,
+  useReviewSearch,
+  type ReviewSearchMatch,
+} from './hooks/useReviewSearch';
 import { useEditorAnnotations } from '@plannotator/ui/hooks/useEditorAnnotations';
 import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotations';
 import { useAgentJobs, jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
@@ -44,12 +54,18 @@ import { buildReviewAgentInstructions } from '@plannotator/ui/utils/reviewAgentI
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { FolderTree } from 'lucide-react';
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
-import { ReviewHeaderMenu } from './components/ReviewHeaderMenu';
+import {
+  ReviewHeaderMenu,
+  type CompactReviewAction,
+  type CompactReviewDestination,
+} from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarTab } from './components/ReviewSidebar';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
+import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
+import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { FileTree } from './components/FileTree';
 import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
@@ -68,7 +84,12 @@ import {
   type ReviewSubmission,
   type SubmissionTarget,
 } from './components/ReviewSubmissionDialog';
-import { ReviewStateProvider, type ReviewState } from './dock/ReviewStateContext';
+import {
+  buildContextualAIHandlers,
+  ReviewStateProvider,
+  type LineAnnotationComposeRequest,
+  type ReviewState,
+} from './dock/ReviewStateContext';
 import { JobLogsProvider } from './dock/JobLogsContext';
 import { reviewPanelComponents } from './dock/reviewPanelComponents';
 import { ReviewDockTabRenderer } from './dock/ReviewDockTabRenderer';
@@ -84,6 +105,7 @@ import {
   REVIEW_PR_ARTIFACTS_PANEL_ID,
   REVIEW_SEMANTIC_DIFF_PANEL_ID,
   REVIEW_ESLINT_CHECK_PANEL_ID,
+  REVIEW_CALL_FLOW_PANEL_ID,
   REVIEW_ALL_FILES_PANEL_ID,
   REVIEW_CODE_NAV_PANEL_ID,
 } from './dock/reviewPanelTypes';
@@ -94,22 +116,51 @@ import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
 import { useCommitsView } from './hooks/useCommitsView';
 import { ReviewSetupDialog } from './components/ReviewSetupDialog';
-import { needsReviewSetup, markReviewSetupSeen } from './utils/reviewSetup';
+import { initializeReviewSetup, markReviewSetupSeen } from './utils/reviewSetup';
+import { resolvePanelView } from './utils/resolvePanelView';
+import { isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
 import { GuideIntroDialog } from './components/GuideIntroDialog';
 import { needsGuideIntro, markGuideIntroSeen, needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
+import { EditModeAnnouncementDialog } from './components/EditModeAnnouncementDialog';
+import {
+  editModeAnnouncementCanShow,
+  enableEditSuggestionsFromAnnouncement,
+  markEditModeAnnouncementSeen,
+  needsEditModeAnnouncement,
+} from './utils/editModeAnnouncement';
+import { ExternalLineAnnotationComposer } from './components/ExternalLineAnnotationComposer';
 import { DestinationSpotlight } from './components/DestinationSpotlight';
 import { needsDestinationSpotlight, markDestinationSpotlightSeen } from './utils/destinationSpotlight';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey } from '@plannotator/ui/utils/platform';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { TourDialog } from './components/tour/TourDialog';
 import { DEMO_TOUR_ID } from './demoTour';
 import { GuideScreen } from './components/guide/GuideScreen';
 import { DEMO_GUIDE_ID } from './demoGuide';
 import { buildPRArtifacts } from './utils/prArtifacts';
+import {
+  submitPlatformReviewTargets,
+} from './utils/platformReviewSubmission';
+import {
+  loadReviewSubmissionRecovery,
+  restoreReviewSubmission,
+  saveReviewSubmissionRecovery,
+  type ReviewSubmissionRecovery,
+  type ReviewRecoveryStorage,
+} from './utils/reviewSubmissionRecovery';
 
 declare const __APP_VERSION__: string;
+
+function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 
 interface DiffData {
   files: DiffFile[];
@@ -127,6 +178,7 @@ interface DiffData {
   prDiffScopeOptions?: PRDiffScopeOption[];
   semanticDiff?: SemanticDiffAdvert;
   eslintCheck?: EslintCheckAdvert;
+  callFlow?: CallFlowAdvert;
 }
 
 function getFileTabTitle(filePath: string): string {
@@ -164,7 +216,80 @@ function orderFilesBySections(files: DiffFile[], sections?: SinceBaseSections | 
 /** Hint shown following the cursor while hovering a sidebar/panel resize handle. */
 const RESIZE_HANDLE_TOOLTIP = 'Click to close · Drag to resize';
 
+interface CompactReviewOverlayProps {
+  title: string;
+  onClose: () => void;
+  context?: React.ReactNode;
+  children: React.ReactNode;
+}
+
+/** Full-stage transient surface used for review navigation on touch layouts. */
+function CompactReviewOverlay({ title, onClose, context, children }: CompactReviewOverlayProps) {
+  return (
+    <section
+      data-pn-review-transient-overlay
+      role="dialog"
+      aria-label={title}
+      className="absolute inset-0 z-40 flex min-w-0 flex-col bg-background"
+    >
+      <div className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-border/50 px-3">
+        <h2 className="shrink-0 text-sm font-semibold text-foreground">{title}</h2>
+        {context && <div className="min-w-0 flex-1 overflow-hidden">{context}</div>}
+        <button
+          data-pn-touch-target
+          data-pn-touch-target-icon
+          autoFocus
+          type="button"
+          onClick={onClose}
+          className="ml-auto inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label={`Close ${title.toLowerCase()}`}
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-1 [&>aside]:!w-full [&>aside]:!border-r-0">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+interface ReviewNavigatorContainerProps {
+  isCompactTouchLayout: boolean;
+  onClose: () => void;
+  context?: React.ReactNode;
+  resizeHandle: React.ReactNode;
+  children: React.ReactNode;
+}
+
+function ReviewNavigatorContainer({
+  isCompactTouchLayout,
+  onClose,
+  context,
+  resizeHandle,
+  children,
+}: ReviewNavigatorContainerProps) {
+  if (isCompactTouchLayout) {
+    return (
+      <CompactReviewOverlay title="Review navigation" onClose={onClose} context={context}>
+        {children}
+      </CompactReviewOverlay>
+    );
+  }
+
+  return (
+    <div className="contents group/sidebar">
+      {children}
+      {resizeHandle}
+    </div>
+  );
+}
+
 const ReviewApp: React.FC = () => {
+  useViewportEnvironment();
+  const isCompactTouchLayout = useCompactTouchLayout();
   const { resolvedMode } = useTheme();
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -200,29 +325,45 @@ const ReviewApp: React.FC = () => {
   // on item version bumps) and early-declared callbacks read the CURRENT value
   // at call time instead of a stale closure capture.
   const isAllFilesActiveRef = useRef(isAllFilesActive);
-
   isAllFilesActiveRef.current = isAllFilesActive;
-
   const [isSemanticDiffActive, setIsSemanticDiffActive] = useState(false);
   const [isEslintCheckActive, setIsEslintCheckActive] = useState(false);
+  const [isCallFlowActive, setIsCallFlowActive] = useState(false);
   const [isPROverviewActive, setIsPROverviewActive] = useState(false);
   const [isPRArtifactsActive, setIsPRArtifactsActive] = useState(false);
-
   const [semanticDiffAvailable, setSemanticDiffAvailable] = useState(false);
-
   const [eslintCheckAdvert, setEslintCheckAdvert] = useState<EslintCheckAdvert>({ available: false });
   const [showEslintConsent, setShowEslintConsent] = useState(false);
   const eslintConsentGranted = useRef(false);
-
+  const [callFlowAdvert, setCallFlowAdvert] = useState<CallFlowAdvert>({
+    enabled: false,
+    available: false,
+    state: 'disabled',
+    provider: 'calldiff',
+  });
+  const apiModeRef = useRef(false);
+  const analysisSettingsInitialized = useRef(false);
   const [isDiffPanelActive, setIsDiffPanelActive] = useState(false);
   const [allFilesVisibleFile, setAllFilesVisibleFile] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
+  const [lineAnnotationComposeRequest, setLineAnnotationComposeRequest] =
+    useState<LineAnnotationComposeRequest | null>(null);
+  const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showWorktreeDialog, setShowWorktreeDialog] = useState(false);
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const diffStyle = useConfigValue('diffStyle');
+  const [compactDiffStyle, setCompactDiffStyle] = useState<'split' | 'unified'>('unified');
+  const effectiveDiffStyle = isCompactTouchLayout ? compactDiffStyle : diffStyle;
+  const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
+    if (isCompactTouchLayout) {
+      setCompactDiffStyle(style);
+      return;
+    }
+    configStore.set('diffStyle', style);
+  }, [isCompactTouchLayout]);
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
   const diffLineDiffType = useConfigValue('diffLineDiffType');
@@ -233,8 +374,15 @@ const ReviewApp: React.FC = () => {
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
   const diffTabSize = useConfigValue('diffTabSize');
-  // Global plan-look preference; surfaced here only by the shared 0.20.0
-  // look-and-feel announcement (the grid/clean chooser applies to plan review).
+  const reviewShowViewedControls = useConfigValue('reviewShowViewedControls');
+  const reviewShowStageControls = useConfigValue('reviewShowStageControls');
+  // EXPERIMENTAL: edit code in place to author suggestions (default OFF).
+  const editSuggestionsEnabled = useConfigValue('editSuggestions');
+  const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
+  const callFlowEnabled = useConfigValue('callFlowEnabled');
+  const confirmedAnalysisSettings = useRef({ semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled });
+  // Global plan-look preference. Code review can resolve this shared first-use
+  // choice even though the visual result applies to plan/document surfaces.
   const gridEnabled = useConfigValue('gridEnabled');
 
   // Load custom diff font and override --font-mono for surrounding review elements
@@ -255,6 +403,27 @@ const ReviewApp: React.FC = () => {
 
   const reviewSidebar = useSidebar<ReviewSidebarTab>(false, 'annotations');
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
+  const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
+  const isNavigatorOpen = isCompactTouchLayout ? isCompactNavigatorOpen : isFileTreeOpen;
+  const isCompactTransientSurfaceOpen = isCompactTouchLayout && (isCompactNavigatorOpen || reviewSidebar.isOpen);
+  const toggleNavigator = useCallback(() => {
+    if (isCompactTouchLayout) {
+      setIsCompactNavigatorOpen((isOpen) => {
+        if (!isOpen) reviewSidebar.close();
+        return !isOpen;
+      });
+      return;
+    }
+    setIsFileTreeOpen((isOpen) => !isOpen);
+  }, [isCompactTouchLayout, reviewSidebar.close]);
+
+  useEffect(() => {
+    if (isCompactTouchLayout && reviewSidebar.isOpen) {
+      setIsCompactNavigatorOpen(false);
+    } else if (!isCompactTouchLayout) {
+      setIsCompactNavigatorOpen(false);
+    }
+  }, [isCompactTouchLayout, reviewSidebar.isOpen]);
   // Guided Review screen takeover — file tree + center dock hidden (dock stays
   // mounted, just CSS-hidden; see the dock wrapper below), right sidebar untouched.
   const [guideOpen, setGuideOpen] = useState(false);
@@ -272,11 +441,41 @@ const ReviewApp: React.FC = () => {
     // site that forgets the synchronous clear.
     setGuideRevealFile(null);
   }, [guideOpen, activeGuideJobId]);
+  // Reveal entry point for jumps originating inside the guide itself (section
+  // file chips) — same fresh-token contract as the sidebar reveal sites below
+  // so repeat jumps to the same file re-fire the expand/focus/scroll effects.
+  const handleGuideRevealFile = useCallback((filePath: string) => {
+    setGuideRevealFile(prev => ({ path: filePath, token: (prev?.token ?? 0) + 1 }));
+  }, []);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [copyRawDiffStatus, setCopyRawDiffStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [hideViewedFiles, setHideViewedFiles] = useState(false);
+  // Generated-files sidecar (#1317): repo-relative paths marked
+  // `linguist-generated` in `.gitattributes`. Their diffs seed collapsed on
+  // the all-files surface (GitHub-style) and their headers carry a
+  // "generated" tag. Presentation-only — the diff data is never filtered.
+  const [generatedFiles, setGeneratedFiles] = useState<Set<string>>(new Set());
+  // Generated files the user explicitly expanded — session-local so an
+  // expansion survives re-renders, dock panel remounts, and identity
+  // re-seeds until the page reloads.
+  const [expandedGeneratedFiles, setExpandedGeneratedFiles] = useState<Set<string>>(new Set());
+  const handleGeneratedFileCollapsedChange = useCallback((filePath: string, collapsed: boolean) => {
+    setExpandedGeneratedFiles(prev => {
+      const expanded = !collapsed;
+      if (prev.has(filePath) === expanded) return prev;
+      const next = new Set(prev);
+      if (expanded) next.add(filePath);
+      else next.delete(filePath);
+      return next;
+    });
+  }, []);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  // Unknown until /api/diff responds. Keeping this tri-state prevents provider
+  // discovery from starting before the server reports that AI is enabled.
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
+  const aiUIEnabled = aiEnabled === true;
+  const guideVisible = aiUIEnabled && guideOpen;
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [reviewMode, setReviewMode] = useState<string | null>(null);
@@ -306,18 +505,26 @@ const ReviewApp: React.FC = () => {
   // Echoed on every freshness probe so the server can answer per-client:
   // "your snapshot moved" is independent of whether the VCS changed.
   const [snapshotId, setSnapshotId] = useState<string | undefined>(undefined);
+  const semanticDiffUsable = semanticDiffEnabled && semanticDiffAvailable;
+  const callFlowAvailable = callFlowEnabled && callFlowAdvert.available;
+  const { state: callFlowAnalysis, retry: retryCallFlowAnalysis } = useCallFlowAnalysis(snapshotId, callFlowAvailable);
   const [isFetchingBase, setIsFetchingBase] = useState(false);
   // Which left panel is showing. The persisted value (Settings / first-run
   // dialog, written through the coupled setters in config/reviewView)
-  // decides what a review OPENS on; the header toggle is a pure session
-  // control layered over it — it NEVER writes config. Changing the default
-  // is an explicit Settings/setup-dialog act, not a side effect of looking
-  // at another view mid-review.
+  // decides what a review OPENS on unless a last-used view is recorded; the
+  // header toggle is a session control layered over both — it NEVER writes
+  // the persisted view/diff pair. Changing the default is an explicit
+  // Settings/setup-dialog act, not a side effect of looking at another view
+  // mid-review; the toggle only records its choice as the last-used memo.
   const persistedPanelView = useConfigValue('reviewPanelView');
+  const lastUsedPanelView = useConfigValue('reviewPanelViewLastUsed');
   const [sessionPanelView, setSessionPanelView] = useState<'sections' | 'commits' | 'tree' | null>(null);
-  const panelView: 'sections' | 'commits' | 'tree' = sessionPanelView ?? persistedPanelView;
+  const panelView: 'sections' | 'commits' | 'tree' = sessionPanelView ?? lastUsedPanelView ?? persistedPanelView;
   const selectPanelView = useCallback((view: 'sections' | 'commits' | 'tree') => {
     setSessionPanelView(view);
+    // Commits is session-only by design (never an opening view), so it is
+    // never recorded — picking it leaves last-used at its previous value.
+    if (view !== 'commits') configStore.set('reviewPanelViewLastUsed', view);
   }, []);
   // First-run review-setup chooser (panel view + tree default diff).
   const [showReviewSetup, setShowReviewSetup] = useState(false);
@@ -350,6 +557,13 @@ const ReviewApp: React.FC = () => {
   // Declared this early because the global keyboard handler consults it.
   const commitsCapable = !prMetadata && reviewMode !== 'workspace' && gitContext?.vcsType === 'git';
   const showCommitsPanel = commitsCapable && panelView === 'commits';
+  // The diff the session was reviewing before the Commits view's commit
+  // clicks (or its HEAD auto-select) took over the single session-global
+  // diff — captured on the first non-commit → commit switch, restored when
+  // the panel view leaves Commits for the Tree, and cleared by any applied
+  // non-commit switch (see fetchDiffSwitch). Ref, not state: it never drives
+  // a render, and capture happens inside event handlers.
+  const preCommitDiffRef = useRef<CommitViewRestoreTarget | null>(null);
 
   const prStackCallbacksRef = useRef<import('./hooks/usePRStack').PRStackCallbacks | null>(null);
   const {
@@ -365,8 +579,7 @@ const ReviewApp: React.FC = () => {
   });
   const [showDestinationMenu, setShowDestinationMenu] = useState(false);
   // One-time spotlight pointing first-time PR reviewers at the destination
-  // switcher. Renders only after the first-run dialog chain (guide intro →
-  // look-and-feel → review setup) has fully cleared.
+  // switcher. Renders only after the first-run dialog chain has fully cleared.
   const destToggleRef = useRef<HTMLButtonElement | null>(null);
   const [showDestSpotlight, setShowDestSpotlight] = useState(needsDestinationSpotlight);
   const dismissDestSpotlight = useCallback(() => {
@@ -378,6 +591,11 @@ const ReviewApp: React.FC = () => {
   const [platformUser, setPlatformUser] = useState<string | null>(null);
   const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment'; plan: ReviewSubmission } | null>(null);
   const [platformGeneralComment, setPlatformGeneralComment] = useState('');
+  const [platformReviewRecovery, setPlatformReviewRecovery] = useState<{
+    rootPrUrl: string;
+    recovery: ReviewSubmissionRecovery;
+  } | null>(null);
+  const [platformRecoveryPersistsRefresh, setPlatformRecoveryPersistsRefresh] = useState(false);
   const [platformOpenPR, setPlatformOpenPR] = useState(() => {
     const platformSetting = storage.getItem('plannotator-platform-open-pr');
     if (platformSetting !== null) return platformSetting !== 'false';
@@ -421,6 +639,7 @@ const ReviewApp: React.FC = () => {
 
   const clearPendingSelection = useCallback(() => {
     setPendingSelection(null);
+    setLineAnnotationComposeRequest(null);
   }, []);
 
   // VS Code editor annotations (only polls when inside VS Code webview)
@@ -433,7 +652,7 @@ const ReviewApp: React.FC = () => {
   // The same !!origin proxy is used elsewhere in this file (draft hook, feedback guard, conditional UI)
   // so this should be addressed as a broader refactor.
   const { externalAnnotations, updateExternalAnnotation, deleteExternalAnnotation } = useExternalAnnotations<CodeAnnotation>({ enabled: !!origin });
-  const agentJobs = useAgentJobs({ enabled: !!origin });
+  const agentJobs = useAgentJobs({ enabled: !!origin && aiUIEnabled });
 
   // Tour dialog state — opens as an overlay instead of a dock panel
   const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
@@ -455,12 +674,13 @@ const ReviewApp: React.FC = () => {
   // Sync activeFileIndex from dockview's active panel (wired in handleDockReady)
 
   const openDiffFile = useCallback((filePath: string) => {
-    const file = files.find(candidate => candidate.path === filePath);
+    const file = files.find(candidate => candidate.path === filePath || candidate.oldPath === filePath);
     if (!file) return;
+    const resolvedFilePath = file.path;
     semanticDiffAutoFallbackPending.current = false;
 
     if (!dockApi) {
-      const fileIndex = files.findIndex(candidate => candidate.path === filePath);
+      const fileIndex = files.findIndex(candidate => candidate.path === resolvedFilePath);
       if (fileIndex !== -1) {
         setActiveFileIndex(fileIndex);
       }
@@ -470,11 +690,11 @@ const ReviewApp: React.FC = () => {
     const existing = dockApi.getPanel(REVIEW_DIFF_PANEL_ID);
     if (existing) {
       const existingFilePath = getReviewDiffPanelFilePath(existing.params);
-      if (existingFilePath === filePath) {
+      if (existingFilePath === resolvedFilePath) {
         if (dockApi.activePanel?.id !== REVIEW_DIFF_PANEL_ID) {
           existing.api.setActive();
         }
-        const fileIndex = files.findIndex(candidate => candidate.path === filePath);
+        const fileIndex = files.findIndex(candidate => candidate.path === resolvedFilePath);
         if (fileIndex !== -1) {
           setActiveFileIndex(fileIndex);
         }
@@ -482,23 +702,44 @@ const ReviewApp: React.FC = () => {
         return;
       }
 
-      setPendingSelection(null);
-      existing.api.updateParameters({ filePath });
+      clearPendingSelection();
+      existing.api.updateParameters({ filePath: resolvedFilePath });
       existing.api.setTitle(getFileTabTitle(file.path));
       existing.api.setActive();
     } else {
-      setPendingSelection(null);
+      clearPendingSelection();
       dockApi.addPanel({
         id: REVIEW_DIFF_PANEL_ID,
         component: REVIEW_PANEL_TYPES.DIFF,
         title: getFileTabTitle(file.path),
-        params: { filePath },
+        params: { filePath: resolvedFilePath },
       });
     }
 
-    setActiveFileIndex(files.findIndex(candidate => candidate.path === filePath));
+    setActiveFileIndex(files.findIndex(candidate => candidate.path === resolvedFilePath));
     needsInitialDiffPanel.current = false;
-  }, [dockApi, files]);
+  }, [dockApi, files, clearPendingSelection]);
+
+  const isCallFlowNodeInPatch = useCallback((node: CallFlowNode): boolean => {
+    if (!node.file || !node.line) return false;
+    const file = files.find((candidate) => candidate.path === node.file || candidate.oldPath === node.file);
+    if (!file) return false;
+    const end = node.endLine && node.endLine >= node.line ? node.endLine : node.line;
+    return isLineRangeInPatch(file.patch, node.line, end, node.status === 'removed' ? 'old' : 'new');
+  }, [files]);
+
+  const handleRequestLineAnnotation = useCallback((filePath: string, range: SelectedLineRange) => {
+    const file = files.find(candidate => candidate.path === filePath || candidate.oldPath === filePath);
+    if (!file) return;
+
+    setPendingSelection(range);
+    nextLineAnnotationComposeRequestId.current += 1;
+    setLineAnnotationComposeRequest({
+      id: nextLineAnnotationComposeRequestId.current,
+      filePath: file.path,
+      range,
+    });
+  }, [files]);
 
   const handleRevealSearchMatch = useCallback((match: ReviewSearchMatch) => {
     // Respect the surface the user is in. When the all-files panel is active,
@@ -592,10 +833,9 @@ const ReviewApp: React.FC = () => {
   // module (utils/reviewAgentInstructions.ts) so it's easy to edit independently.
   const handleCopyAgentInstructions = useCallback(async () => {
     const payload = buildReviewAgentInstructions(window.location.origin);
-    try {
-      await navigator.clipboard.writeText(payload);
+    if (await copyTextToClipboard(payload)) {
       toast.success('Agent instructions copied');
-    } catch {
+    } else {
       toast.error('Failed to copy');
     }
   }, []);
@@ -610,24 +850,34 @@ const ReviewApp: React.FC = () => {
     available: aiAvailable,
     origin,
   });
-  // The 0.20.0 release / look-and-feel announcement also runs in code review.
-  // Seen-state is a shared cookie (host-scoped), so dismissing it in either app
-  // suppresses it in the other — it appears once across both.
+  // Explicit provider activation: runs deferred (Codex) model discovery on a
+  // user gesture and merges the refreshed metadata, so the model picker and
+  // reasoning-effort control populate past the static fallback. Never called
+  // on load — that would reintroduce the eager `codex app-server` spawn.
+  const activateAIProvider = useAIProviderActivation({
+    onCapabilities: (providers, defaultProvider) => {
+      setAiProviders(providers);
+      setAiDefaultProvider(defaultProvider);
+    },
+  });
+  // The explicit choice marker is shared, so resolving this in either app
+  // suppresses the chooser everywhere without release-version milestones.
   const [showLookAndFeel, setShowLookAndFeel] = useState(needsLookAndFeelAnnouncement);
   const dismissLookAndFeel = useCallback(() => {
-    markLookAndFeelAnnouncementSeen();
+    configStore.set('gridEnabled', gridEnabled);
+    markLookAndFeelChoiceResolved();
     setShowLookAndFeel(false);
-  }, []);
+  }, [gridEnabled]);
   // One-time guided-review intro dialog + header Guide-button hint. The hint
   // (shimmer + dot) is independent of the dialog: it runs until the first
   // Guide click, even for users who dismissed the dialog without reading.
   const [showGuideIntro, setShowGuideIntro] = useState(needsGuideIntro);
   const [guideHintActive, setGuideHintActive] = useState(needsGuideHint);
-  // FIRST in the dialog chain (guide intro → look-and-feel → review setup).
-  // The intro only shows when a Guide button exists to point at
+  // FIRST in the dialog chain (guide intro → look-and-feel → review setup →
+  // edit mode). The intro only shows when a Guide button exists to point at
   // (hasSearchableFiles) — on an empty diff it is skipped WITHOUT consuming
   // the one-shot cookie, so the next session with files shows it. The other
-  // two dialogs' gates must use this same visibility (not the raw
+  // chain dialogs' gates must use this same visibility (not the raw
   // showGuideIntro), or an empty diff would block them forever.
   //
   // Eligibility is LATCHED at the first post-load render (dialogs only mount
@@ -639,7 +889,7 @@ const ReviewApp: React.FC = () => {
   if (!isLoading && guideIntroEligibleRef.current === null) {
     guideIntroEligibleRef.current = hasSearchableFiles;
   }
-  const guideIntroVisible = showGuideIntro && guideIntroEligibleRef.current === true;
+  const guideIntroVisible = aiUIEnabled && showGuideIntro && guideIntroEligibleRef.current === true;
   // Ack the hint on ANY path that opens the guide — keyboard shortcut,
   // job-completion auto-open, job cards — not just the header button's own
   // onClick; otherwise the shimmer resumes after the user closes a guide
@@ -649,6 +899,29 @@ const ReviewApp: React.FC = () => {
     markGuideHintSeen();
     setGuideHintActive(false);
   }, [guideOpen, guideHintActive]);
+  // One-time Edit Mode (edit-to-suggest) announcement. LAST in the dialog
+  // chain (guide intro → look-and-feel → review setup → edit mode) — the
+  // chain dialogs never stack. Skipped forever when the user already enabled
+  // the setting from Settings (latched at mount so enabling from the dialog
+  // itself doesn't unmount it mid-click).
+  const [editModeIntroPending, setEditModeIntroPending] = useState(
+    () => needsEditModeAnnouncement() && !configStore.get('editSuggestions'),
+  );
+  const editModeIntroVisible = editModeAnnouncementCanShow({
+    announcementPending: editModeIntroPending,
+    isLoading,
+    guideIntroVisible,
+    lookAndFeelVisible: showLookAndFeel,
+    reviewSetupVisible: showReviewSetup,
+  });
+  const dismissEditModeIntro = useCallback(() => {
+    markEditModeAnnouncementSeen();
+    setEditModeIntroPending(false);
+  }, []);
+  const enableEditModeIntro = useCallback(() => {
+    enableEditSuggestionsFromAnnouncement();
+    setEditModeIntroPending(false);
+  }, []);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -691,7 +964,9 @@ const ReviewApp: React.FC = () => {
       existing.api.setTitle(`References: ${request.symbol}`);
       existing.api.setActive();
     } else {
-      const refPanel = isSemanticDiffActive
+      const refPanel = isCallFlowActive
+        ? REVIEW_CALL_FLOW_PANEL_ID
+        : isSemanticDiffActive
         ? REVIEW_SEMANTIC_DIFF_PANEL_ID
         : isAllFilesActive
         ? REVIEW_ALL_FILES_PANEL_ID
@@ -704,10 +979,16 @@ const ReviewApp: React.FC = () => {
         initialHeight: 250,
       });
     }
-  }, [codeNav.resolve, dockApi, isAllFilesActive, isSemanticDiffActive, gitContext, agentCwd]);
+  }, [codeNav.resolve, dockApi, isAllFilesActive, isCallFlowActive, isSemanticDiffActive, gitContext, agentCwd]);
 
-  // Check AI capabilities on mount
+  // Check AI capabilities only after /api/diff confirms AI is enabled.
   useEffect(() => {
+    if (!aiUIEnabled) {
+      setAiAvailable(false);
+      setAiProviders([]);
+      setAiDefaultProvider(null);
+      return;
+    }
     fetch('/api/ai/capabilities')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -719,15 +1000,26 @@ const ReviewApp: React.FC = () => {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [aiUIEnabled]);
 
   // Provider/model/effort selection logic lives in the shared hook above; the
   // app only composes the session reset (the hook can't own it — see the cycle
   // note in useAIProviderConfig).
   const handleAIConfigChange = useCallback((config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => {
+    // Switching the picker to a provider is an explicit gesture — activate it
+    // so its deferred model discovery (Codex) refreshes the advertised list.
+    if (config.providerId) activateAIProvider(config.providerId);
     applyConfigChange(config);
     resetAISession();
-  }, [applyConfigChange, resetAISession]);
+  }, [activateAIProvider, applyConfigChange, resetAISession]);
+
+  // Opening the Ask AI sidebar tab with a provider selected is the other
+  // explicit gesture that should surface the provider's real model list.
+  const aiSurfaceOpen = reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai';
+  useEffect(() => {
+    if (!aiAvailable || !aiSurfaceOpen) return;
+    activateAIProvider(aiConfig.providerId);
+  }, [aiAvailable, aiSurfaceOpen, aiConfig.providerId, activateAIProvider]);
 
   // File-aware Ask AI: the all-files surface resolves the owning file itself
   // (its toolbar selection lives in a file the single-file panel may never
@@ -850,6 +1142,7 @@ const ReviewApp: React.FC = () => {
         setIsAllFilesActive(false);
         setIsSemanticDiffActive(false);
         setIsEslintCheckActive(false);
+        setIsCallFlowActive(false);
         setIsPROverviewActive(false);
         setIsPRArtifactsActive(false);
         setIsDiffPanelActive(false);
@@ -858,6 +1151,7 @@ const ReviewApp: React.FC = () => {
       setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
       setIsSemanticDiffActive(panel.id === REVIEW_SEMANTIC_DIFF_PANEL_ID);
       setIsEslintCheckActive(panel.id === REVIEW_ESLINT_CHECK_PANEL_ID);
+      setIsCallFlowActive(panel.id === REVIEW_CALL_FLOW_PANEL_ID);
       setIsPROverviewActive(panel.id === REVIEW_PR_OVERVIEW_PANEL_ID);
       setIsPRArtifactsActive(panel.id === REVIEW_PR_ARTIFACTS_PANEL_ID);
       setIsDiffPanelActive(isReviewDiffPanelId(panel.id));
@@ -1005,6 +1299,17 @@ const ReviewApp: React.FC = () => {
     [prMetadata, activeWorktreePath],
   );
 
+  // A `saved:{id}` guide has no AgentJobInfo, so GuideScreen's context match
+  // passes trivially (unknown ids are tolerated by design, for the demo path).
+  // Without this, switching PR or worktree while a saved guide is open would
+  // leave it mounted over the NEW context's diff with a stale `moved` flag.
+  // Clear it on any review-context switch — simplest and predictable; the
+  // user can reopen it from the Previous guides list. Live job ids are left
+  // alone: GuideScreen's own matchesContext already handles them.
+  useEffect(() => {
+    setActiveGuideJobId(prev => (prev?.startsWith('saved:') ? null : prev));
+  }, [prMetadata?.url, activeWorktreePath]);
+
   // Auto-open tour dialog when a tour job completes — scoped to the current
   // review context, same rule and same deferred-open semantics as the guide
   // effect below (an away-context tour stays unmarked so it opens when the
@@ -1112,7 +1417,7 @@ const ReviewApp: React.FC = () => {
   const openSemanticDiffPanel = useCallback((options?: { autoFallbackOnError?: boolean }) => {
     if (!dockApi) return;
     semanticDiffAutoFallbackPending.current = options?.autoFallbackOnError === true;
-    if (!semanticDiffAvailable) {
+    if (!semanticDiffUsable) {
       openAllFilesPanel();
       return;
     }
@@ -1123,7 +1428,43 @@ const ReviewApp: React.FC = () => {
       component: REVIEW_PANEL_TYPES.SEMANTIC_DIFF,
       title: 'Semantic diff',
     });
-  }, [dockApi, openAllFilesPanel, semanticDiffAvailable]);
+  }, [dockApi, openAllFilesPanel, semanticDiffUsable]);
+
+  const openCallFlowPanel = useCallback(() => {
+    if (!dockApi || !callFlowEnabled) return;
+    const existing = dockApi.getPanel(REVIEW_CALL_FLOW_PANEL_ID);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    dockApi.addPanel({
+      id: REVIEW_CALL_FLOW_PANEL_ID,
+      component: REVIEW_PANEL_TYPES.CALL_FLOW,
+      title: 'Call flow',
+    });
+  }, [callFlowEnabled, dockApi]);
+
+  const openEslintCheckPanel = useCallback(() => {
+    if (!dockApi || !eslintCheckAdvert.available) return;
+    const existing = dockApi.getPanel(REVIEW_ESLINT_CHECK_PANEL_ID);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    dockApi.addPanel({
+      id: REVIEW_ESLINT_CHECK_PANEL_ID,
+      component: REVIEW_PANEL_TYPES.ESLINT_CHECK,
+      title: 'ESLint',
+    });
+  }, [dockApi, eslintCheckAdvert.available]);
+
+  const requestEslintCheck = useCallback(() => {
+    if (eslintConsentGranted.current) {
+      openEslintCheckPanel();
+      return;
+    }
+    setShowEslintConsent(true);
+  }, [openEslintCheckPanel]);
 
   const handleSemanticDiffUnavailable = useCallback(() => {
     semanticDiffAutoFallbackPending.current = false;
@@ -1160,54 +1501,137 @@ const ReviewApp: React.FC = () => {
     }
   }, [dockApi, isSemanticDiffActive, openAllFilesPanel]);
 
-  const openEslintCheckPanel = useCallback(() => {
-    if (!dockApi || !eslintCheckAdvert.available) return;
-
-    const existing = dockApi.getPanel(REVIEW_ESLINT_CHECK_PANEL_ID);
-
-    if (existing) {
-      existing.api.setActive();
-      return;
-    }
-
-    dockApi.addPanel({
-      id: REVIEW_ESLINT_CHECK_PANEL_ID,
-      component: REVIEW_PANEL_TYPES.ESLINT_CHECK,
-      title: 'ESLint',
-    });
-  }, [dockApi, eslintCheckAdvert.available]);
-
-  const requestEslintCheck = useCallback(() => {
-    if (eslintConsentGranted.current) {
-      openEslintCheckPanel();
-      return;
-    }
-
-    setShowEslintConsent(true);
-  }, [openEslintCheckPanel]);
-
   const applyEslintCheckAdvert = useCallback((advert?: EslintCheckAdvert) => {
     if (!advert) return;
-
     setEslintCheckAdvert(advert);
-
     if (!advert.available) {
       dockApi?.getPanel(REVIEW_ESLINT_CHECK_PANEL_ID)?.api.close();
       if (isEslintCheckActive) openAllFilesPanel();
     }
   }, [dockApi, isEslintCheckActive, openAllFilesPanel]);
 
+  const applyCallFlowAdvert = useCallback((callFlow?: CallFlowAdvert) => {
+    if (!callFlow) return;
+    setCallFlowAdvert(callFlow);
+  }, []);
+
+  // Re-advertise both capabilities through the read-only endpoint. Keeping
+  // this separate from the settings mutation prevents install completion
+  // from superseding a concurrent toggle write.
+  const refreshAnalysisAdverts = useCallback(async (): Promise<void> => {
+    const response = await fetch('/api/review-analysis', { method: 'GET' });
+    if (!response.ok) throw new Error('Analysis capabilities could not be refreshed.');
+    const data = await response.json() as {
+      semanticDiff?: SemanticDiffAdvert;
+      callFlow?: CallFlowAdvert;
+      superseded?: boolean;
+    };
+    if (data.superseded) throw new Error('The review changed while capabilities were refreshed.');
+    if (data.callFlow?.state === 'unavailable' && data.callFlow.installable) {
+      throw new Error(data.callFlow.message ?? 'The Call flow install is not visible yet.');
+    }
+    applySemanticDiffAdvert(data.semanticDiff);
+    applyCallFlowAdvert(data.callFlow);
+    retryCallFlowAnalysis();
+  }, [applyCallFlowAdvert, applySemanticDiffAdvert, retryCallFlowAnalysis]);
+
+  const callFlowInstall = useCallFlowInstall(refreshAnalysisAdverts);
+  // Call flow is off by default. Enabling it in Settings is the explicit
+  // consent gesture for its server-authored managed install; an enabled saved
+  // preference keeps that consent across review sessions without another
+  // startup dialog.
+  useCallFlowAutoInstall(callFlowEnabled, true, callFlowAdvert, callFlowInstall);
+  const callFlowSetupPending = callFlowEnabled
+    && callFlowAdvert.installable === true
+    && callFlowAdvert.installPlan !== undefined
+    && callFlowInstall.status.state !== 'error';
+  const callFlowNavLoading = callFlowAnalysis.status !== 'ready' && (
+    callFlowAnalysis.status === 'loading'
+    || callFlowInstall.status.state === 'running'
+    || callFlowSetupPending
+  );
+  const callFlowNavError = callFlowInstall.status.state === 'error';
+
+  useEffect(() => {
+    if (!semanticDiffEnabled) {
+      dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
+      if (isSemanticDiffActive) openAllFilesPanel();
+    }
+    if (!callFlowEnabled) {
+      dockApi?.getPanel(REVIEW_CALL_FLOW_PANEL_ID)?.api.close();
+      if (isCallFlowActive) openAllFilesPanel();
+    }
+  }, [callFlowEnabled, dockApi, isCallFlowActive, isSemanticDiffActive, openAllFilesPanel, semanticDiffEnabled]);
+
+  // Turning Call flow on opens its panel. Without this the only sign anything
+  // happened is a new sidebar row, so a user who just opted in (intro dialog
+  // or Settings) sees nothing and cannot find the install they were promised.
+  // Only on the off -> on transition, so it never fights a user who closed it.
+  const callFlowWasEnabled = useRef(callFlowEnabled);
+  useEffect(() => {
+    const turnedOn = callFlowEnabled && !callFlowWasEnabled.current;
+    callFlowWasEnabled.current = callFlowEnabled;
+    if (turnedOn) openCallFlowPanel();
+  }, [callFlowEnabled, openCallFlowPanel]);
+
+  // The shared config store persists both toggles for future sessions. This
+  // review-specific handshake also re-advertises capabilities immediately so
+  // enabling either layer can take effect without reloading the current review.
+  useEffect(() => {
+    if (isLoading || !apiModeRef.current) return;
+    if (!analysisSettingsInitialized.current) {
+      analysisSettingsInitialized.current = true;
+      confirmedAnalysisSettings.current = { semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled };
+      return;
+    }
+    const previous = confirmedAnalysisSettings.current;
+    const requested = { semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled };
+    const controller = new AbortController();
+    fetch('/api/review-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Analysis settings could not be applied.');
+        return response.json() as Promise<{
+          semanticDiff?: SemanticDiffAdvert;
+          callFlow?: CallFlowAdvert;
+          superseded?: boolean;
+        }>;
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        if (data.superseded) return;
+        confirmedAnalysisSettings.current = requested;
+        applySemanticDiffAdvert(data.semanticDiff);
+        applyCallFlowAdvert(data.callFlow);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (configStore.get('semanticDiffEnabled') !== previous.semanticDiff) {
+          configStore.set('semanticDiffEnabled', previous.semanticDiff);
+        }
+        if (configStore.get('callFlowEnabled') !== previous.callFlow) {
+          configStore.set('callFlowEnabled', previous.callFlow);
+        }
+        toast.error(error instanceof Error ? error.message : 'Analysis settings could not be applied.');
+      });
+    return () => controller.abort();
+  }, [applyCallFlowAdvert, applySemanticDiffAdvert, callFlowEnabled, isLoading, semanticDiffEnabled]);
+
   // Open the All files overview on first load. Semantic diff stays available via
   // the file-tree nav entry, but it's no longer the default landing view.
   useEffect(() => {
     if (!dockApi || !needsInitialDiffPanel.current || files.length === 0) return;
     needsInitialDiffPanel.current = false;
-    // PR reviews land on the combined PR Overview by default; other reviews
-    // open the all-files diff. (prMetadata is set in the same /api/diff handler
-    // tick as files, so it's already populated here for PRs.)
-    if (prMetadata) openPROverviewPanel();
+    // Wide PR reviews keep the combined overview landing. Compact-touch
+    // sessions arrive directly in the review artifact; PR context remains one
+    // tap away in the transient navigator.
+    if (prMetadata && !isCompactTouchLayout) openPROverviewPanel();
     else openAllFilesPanel();
-  }, [dockApi, files, openAllFilesPanel, openPROverviewPanel, prMetadata]);
+  }, [dockApi, files, isCompactTouchLayout, openAllFilesPanel, openPROverviewPanel, prMetadata]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -1216,11 +1640,18 @@ const ReviewApp: React.FC = () => {
       // Bail while the guide takeover is open (file tree isn't rendered) and
       // don't intercept in the Commits view (its rail has no search input) —
       // in both cases capturing the key would mutate hidden state or no-op.
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !isTypingTarget(e.target)) {
+      // Let the same shortcut reselect the current query when search already
+      // has focus, while preserving native shortcuts in every other input.
+      if (
+        (e.metaKey || e.ctrlKey)
+        && e.key.toLowerCase() === 'f'
+        && shouldHandleReviewSearchShortcut(e.target, searchInputRef.current)
+      ) {
         if (guideOpen) return;
         if (hasSearchableFiles && !showCommitsPanel) {
           e.preventDefault();
-          setIsFileTreeOpen(true);
+          if (isCompactTouchLayout) setIsCompactNavigatorOpen(true);
+          else setIsFileTreeOpen(true);
           openSearch();
         }
         return;
@@ -1239,6 +1670,10 @@ const ReviewApp: React.FC = () => {
           setShowDestinationMenu(false);
         } else if (showExportModal) {
           setShowExportModal(false);
+        } else if (isCompactTouchLayout && isCompactNavigatorOpen) {
+          setIsCompactNavigatorOpen(false);
+        } else if (isCompactTouchLayout && reviewSidebar.isOpen) {
+          reviewSidebar.close();
         } else if (isSearchOpen) {
           if (searchQuery) {
             clearSearch();
@@ -1252,14 +1687,18 @@ const ReviewApp: React.FC = () => {
       // Cmd/Ctrl+B to toggle file tree
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !isTypingTarget(e.target)) {
         e.preventDefault();
-        setIsFileTreeOpen(prev => !prev);
+        toggleNavigator();
       }
       // Cmd/Ctrl+Shift+G to toggle the guided review takeover — gated on the
       // same hasSearchableFiles condition as the header badge so the shortcut
       // and badge agree on availability.
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'g' && !isTypingTarget(e.target)) {
-        if (hasSearchableFiles) {
+        if (aiUIEnabled && hasSearchableFiles) {
           e.preventDefault();
+          if (isCompactTouchLayout && !guideOpen) {
+            setIsCompactNavigatorOpen(false);
+            reviewSidebar.close();
+          }
           setGuideOpen(prev => !prev);
         }
       }
@@ -1274,7 +1713,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen]);
+  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator]);
 
 
   // Load diff content - try API first, fall back to demo
@@ -1287,6 +1726,7 @@ const ReviewApp: React.FC = () => {
       .then((data: {
         rawPatch: string;
         gitRef: string;
+        aiEnabled?: boolean;
         aiReviewContext?: string;
         origin?: Origin;
         mode?: string;
@@ -1310,17 +1750,21 @@ const ReviewApp: React.FC = () => {
         isWSL?: boolean;
         semanticDiff?: SemanticDiffAdvert;
         eslintCheck?: EslintCheckAdvert;
+        callFlow?: CallFlowAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
+        generatedFiles?: string[];
         baseBehindRemote?: boolean;
         snapshotId?: string;
-        serverConfig?: { displayName?: string; gitUser?: string };
+        serverConfig?: Record<string, unknown> & { displayName?: string; gitUser?: string };
       }) => {
+        apiModeRef.current = true;
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
         setSnapshotId(data.snapshotId);
+        setAiEnabled(data.aiEnabled !== false);
         const apiFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
         setDiffData({
           files: apiFiles,
@@ -1332,6 +1776,9 @@ const ReviewApp: React.FC = () => {
           gitContext: data.gitContext,
           diffOptions: data.diffOptions,
           sharingEnabled: data.sharingEnabled,
+          semanticDiff: data.semanticDiff,
+          eslintCheck: data.eslintCheck,
+          callFlow: data.callFlow,
         });
         setFiles(apiFiles);
         setReviewMode(data.mode ?? null);
@@ -1370,14 +1817,17 @@ const ReviewApp: React.FC = () => {
         if (data.isWSL) setIsWSL(true);
         setSemanticDiffAvailable(data.semanticDiff?.available === true);
         setEslintCheckAdvert(data.eslintCheck ?? { available: false });
+        if (data.callFlow) setCallFlowAdvert(data.callFlow);
         setSections(data.sections ?? null);
         setCommitInfo(data.commitInfo ?? null);
+        setGeneratedFiles(new Set(data.generatedFiles ?? []));
         setBaseBehindRemote(data.baseBehindRemote === true);
         // First-run: offer the review-view chooser for a plain local git
-        // session (not workspace/PR/jj/p4), once. On this first showing we
-        // RESET to the recommended default (Git status + All changes), overriding
-        // any prior diff-type/panel preference — the user's explicit choice in
-        // the dialog then sticks. Applied to the live session on dismiss.
+        // session (not workspace/PR/jj/p4), once. An unseen reviewer's panel
+        // is initialized to Tree while inheriting the resolved diff default;
+        // the seen gate leaves returning reviewers' persisted and last-used
+        // views untouched. The user's explicit choice in the dialog then
+        // sticks. Applied to the live session on dismiss.
         //
         // Only when since-base is actually AVAILABLE (base ref resolves). On a
         // repo where getGitContext omits it (trunk / no origin/HEAD), forcing
@@ -1390,15 +1840,15 @@ const ReviewApp: React.FC = () => {
         );
         if (
           data.gitContext && data.mode !== 'workspace' && !data.prMetadata &&
-          data.gitContext.vcsType === 'git' && sinceBaseAvailable && needsReviewSetup()
+          data.gitContext.vcsType === 'git' && sinceBaseAvailable && initializeReviewSetup()
         ) {
-          setReviewPanelView('sections'); // coupled setter — also sets since-base
           reviewSetupIsFirstRun.current = true;
           setShowReviewSetup(true);
         }
       })
       .catch(() => {
         // Not in API mode - use demo content
+        setAiEnabled(true);
         const demoFiles = parseDiffToFiles(DEMO_DIFF);
         setDiffData({
           files: demoFiles,
@@ -1408,6 +1858,14 @@ const ReviewApp: React.FC = () => {
         setFiles(demoFiles);
         setWorkspaceDiffOptions(null);
         setSemanticDiffAvailable(false);
+        setCallFlowAdvert({
+          enabled: configStore.get('callFlowEnabled'),
+          available: false,
+          state: 'unsupported',
+          provider: 'calldiff',
+          reason: 'demo-mode',
+          message: 'Call flow requires a live Git review session.',
+        });
       })
       .finally(() => setIsLoading(false));
   }, []);
@@ -1415,6 +1873,7 @@ const ReviewApp: React.FC = () => {
   // Handle line selection from diff viewer
   const handleLineSelection = useCallback((range: SelectedLineRange | null) => {
     setPendingSelection(range);
+    if (range === null) setLineAnnotationComposeRequest(null);
   }, []);
 
   const handleAddAnnotationForFile = useCallback((
@@ -1452,8 +1911,95 @@ const ReviewApp: React.FC = () => {
       decorations,
     };
     setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
-    setPendingSelection(null);
-  }, [pendingSelection, identity, withPRContext]);
+    clearPendingSelection();
+  }, [pendingSelection, identity, withPRContext, clearPendingSelection]);
+
+  const handleAddCallFlowAnnotation = useCallback((
+    targets: readonly CallFlowAnnotationTarget[],
+    text: string,
+  ): boolean => {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+
+    // The review can refresh while a composer is open. Resolve the strongest
+    // native anchor against the current patch, but retain every selected Call
+    // Flow step: out-of-hunk and source-less rows become file/review feedback
+    // instead of disappearing or masquerading as postable inline comments.
+    const placement = resolveCallFlowAnnotationPlacement(targets, files);
+    if (!placement) return false;
+    const annotation: CodeAnnotation = {
+      id: generateId(),
+      type: 'comment',
+      scope: placement.scope,
+      filePath: placement.filePath,
+      lineStart: placement.lineStart,
+      lineEnd: placement.lineEnd,
+      side: placement.side,
+      text: trimmed,
+      callFlowTargets: [...placement.targets],
+      createdAt: Date.now(),
+      author: identity,
+    };
+    setAnnotations((previous) => [...previous, withPRContext(annotation)]);
+    return true;
+  }, [files, identity, withPRContext]);
+
+  // Sink for the experimental edit-to-suggestion flow: a completed edit
+  // session delivers one hunk per contiguous changed region, each becoming a
+  // normal suggestion annotation (same shape SuggestionModal produces —
+  // type 'comment' carrying suggestedCode/originalCode) so it flows through
+  // rendering, sidebar, and feedback export unchanged. The browser never
+  // writes files; the agent applies these suggestions.
+  const handleAddSuggestionsForFile = useCallback((filePath: string, hunks: SuggestionHunk[]) => {
+    if (hunks.length === 0) return;
+    const now = Date.now();
+    setAnnotations(prev => [
+      ...prev,
+      ...hunks.map((hunk) => withPRContext({
+        id: generateId(),
+        type: 'comment' as CodeAnnotationType,
+        scope: 'line' as const,
+        filePath,
+        lineStart: hunk.lineStart,
+        lineEnd: hunk.lineEnd,
+        side: 'new' as const,
+        // A fully-emptied file derives an empty suggestion; the export
+        // template skips falsy suggestedCode, so describe it in text instead.
+        text: hunk.suggestedCode === '' ? 'Suggested change: remove these lines.' : undefined,
+        suggestedCode: hunk.suggestedCode === '' ? undefined : hunk.suggestedCode,
+        originalCode: hunk.originalCode === '' ? undefined : hunk.originalCode,
+        createdAt: now,
+        author: identity,
+      })),
+    ]);
+  }, [identity, withPRContext]);
+
+  // Sink for the edit session's "Make annotation" selection action: a plain
+  // line-scoped comment whose anchor was mapped from the edited buffer to
+  // PRISTINE new-side coordinates at selection time (edit/selectionAnchor.ts),
+  // so it renders and exports correctly whether the session later completes
+  // or is discarded. `selectedText` preserves what was actually highlighted;
+  // `selectedTextFromEdits` flags an approximate anchor (selection overlapped
+  // in-session edits) so the export can label it honestly.
+  const handleAddEditorCommentForFile = useCallback((filePath: string, comment: EditSelectionComment) => {
+    const trimmed = comment.text.trim();
+    if (!trimmed) return;
+    const newAnnotation: CodeAnnotation = {
+      id: generateId(),
+      type: 'comment',
+      scope: 'line',
+      filePath,
+      lineStart: comment.lineStart,
+      lineEnd: comment.lineEnd,
+      side: 'new',
+      text: trimmed,
+      selectedText: comment.selectedText || undefined,
+      ...(comment.exact ? {} : { selectedTextFromEdits: true }),
+      createdAt: Date.now(),
+      author: identity,
+    };
+    setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
+  }, [identity, withPRContext]);
 
   const handleAddAnnotation = useCallback((
     type: CodeAnnotationType,
@@ -1617,9 +2163,15 @@ const ReviewApp: React.FC = () => {
     ? activeDiffBase.slice('commit:'.length)
     : null;
 
+  // The view actually RENDERED for the current selection — a latent
+  // 'sections'/'commits' selection the session can't offer resolves to the
+  // tree, so the toggle highlights the panel on screen. Surfaces that render
+  // by view must read this, never the raw panelView.
+  const effectivePanelView = resolvePanelView(panelView, { sectionsAvailable, commitsCapable });
+
   // The all-files surface mirrors whichever left panel is showing: sections
   // order when the sections view is active, tree order otherwise.
-  const allFilesOrder: 'tree' | 'list' = sectionsAvailable && panelView === 'sections' ? 'list' : 'tree';
+  const allFilesOrder: 'tree' | 'list' = effectivePanelView === 'sections' ? 'list' : 'tree';
 
   // Git add/staging logic
   const handleFileViewedFromStage = useCallback(
@@ -1703,6 +2255,7 @@ const ReviewApp: React.FC = () => {
     viewedFiles?: string[]; error?: string;
     semanticDiff?: SemanticDiffAdvert;
     eslintCheck?: EslintCheckAdvert;
+    callFlow?: CallFlowAdvert;
     agentCwd?: string | null;
   }) {
     const isPRSwitch = !!data.prMetadata;
@@ -1719,7 +2272,7 @@ const ReviewApp: React.FC = () => {
       const preserved = currentFile ? nextFiles.findIndex(f => f.path === currentFile.path) : -1;
       setActiveFileIndex(preserved >= 0 ? preserved : 0);
     }
-    setPendingSelection(null);
+    clearPendingSelection();
     updatePRSession({
       ...(data.prMetadata && { prMetadata: data.prMetadata }),
       ...(data.prStackInfo !== undefined && { prStackInfo: data.prStackInfo }),
@@ -1738,6 +2291,7 @@ const ReviewApp: React.FC = () => {
     setDiffError(data.error || null);
     applySemanticDiffAdvert(data.semanticDiff);
     applyEslintCheckAdvert(data.eslintCheck);
+    applyCallFlowAdvert(data.callFlow);
     // The PR's local checkout changes on switch (and warms in later). Use the
     // server's value when present; otherwise clear it on a switch so the Open-in
     // button can't keep pointing at the previous PR's checkout (the 5s freshness
@@ -1792,8 +2346,10 @@ const ReviewApp: React.FC = () => {
         error?: string;
         semanticDiff?: SemanticDiffAdvert;
         eslintCheck?: EslintCheckAdvert;
+        callFlow?: CallFlowAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
+        generatedFiles?: string[];
         baseBehindRemote?: boolean;
         superseded?: boolean;
       };
@@ -1801,13 +2357,23 @@ const ReviewApp: React.FC = () => {
       // A newer switch superseded this one server-side — ignore this stale
       // body so it can't overwrite the newer result (last-response-wins).
       if (data.superseded) return true;
+      // Leave-Commits restore memo: any APPLIED switch to a non-commit diff
+      // (the restore itself, the Git-status since-base reset, a manual
+      // DiffTypePicker escape, a worktree switch) ends the commit family, so
+      // the memo it would restore is spent. The superseded early-return above
+      // never reaches this clear, so a stale response can't drop a memo a
+      // newer commit switch still needs — correct by construction. Failed
+      // switches never get here either, keeping the memo for a later retry.
+      if (!isCommitDiffType(data.diffType)) preCommitDiffRef.current = null;
       setSnapshotId(data.snapshotId);
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
       applySemanticDiffAdvert(data.semanticDiff);
       applyEslintCheckAdvert(data.eslintCheck);
+      applyCallFlowAdvert(data.callFlow);
       setSections(data.sections ?? null);
       setCommitInfo(data.commitInfo ?? null);
+      setGeneratedFiles(new Set(data.generatedFiles ?? []));
       setBaseBehindRemote(data.baseBehindRemote === true);
 
       if (options?.preserveFile) {
@@ -1837,7 +2403,7 @@ const ReviewApp: React.FC = () => {
         // Line numbers can shift when whitespace handling changes, so a
         // selection anchored to the old patch is stale — clear it (the
         // non-preserve branch below already does).
-        setPendingSelection(null);
+        clearPendingSelection();
         // The refetched sidecar already reflects this session's staging;
         // stale overrides would fight the fresh snapshot.
         resetStagedFiles();
@@ -1853,7 +2419,7 @@ const ReviewApp: React.FC = () => {
           setCommittedBase(data.base);
         }
         setActiveFileIndex(0);
-        setPendingSelection(null);
+        clearPendingSelection();
         resetStagedFiles();
       }
       // Merge only the refreshable/per-cwd fields. This runs for in-place
@@ -1885,7 +2451,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert, applyEslintCheckAdvert]);
+  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert, applyCallFlowAdvert, clearPendingSelection]);
 
   // Switch the base branch the current diff compares against.
   // Only triggers a refetch when the active mode actually uses a base.
@@ -1928,20 +2494,25 @@ const ReviewApp: React.FC = () => {
   }, [diffType, activeWorktreePath, fetchDiffSwitch, gitContext]);
 
   // Toggling to Sections means "show me the since-base review" — if another
-  // mode is active, switch the LIVE diff back along with the view. No config
-  // writes: the toggle is session-only, so there is no persisted view/diff
-  // pair to keep consistent here (Settings and the setup dialog, which do
-  // persist, enforce the sections ⟺ since-base coupling via the shared
-  // setters in config/reviewView).
+  // mode is active, switch the LIVE diff back along with the view. No writes
+  // to the persisted view/diff pair: the toggle only records the last-used
+  // memo (via selectPanelView), so there is no pair to keep consistent here
+  // (Settings and the setup dialog, which do persist, enforce the
+  // sections ⟺ since-base coupling via the shared setters in
+  // config/reviewView).
   const handleSwitchToSections = useCallback(() => {
     selectPanelView('sections');
     if (activeDiffBase !== 'since-base') void handleDiffSwitch('since-base');
   }, [selectPanelView, activeDiffBase, handleDiffSwitch]);
 
-  // Unified toggle handler for all three panel views. Only Sections carries a
-  // diff coupling (it can render nothing but since-base); Commits and Tree
-  // switch the view alone and leave the active diff as-is — Tree can render
-  // any diff, including a clicked commit's.
+  // Unified toggle handler for all three panel views. Sections carries a
+  // diff coupling (it can render nothing but since-base); Commits switches
+  // the view alone (its session machine then owns the diff via commit
+  // clicks / HEAD auto-select); and Tree restores the pre-Commits diff when
+  // it's the exit from the Commits view — the commit click hijacked the
+  // single session-global diff, so leaving the view brings back what the
+  // session was reviewing before. Outside that exit, Tree still leaves the
+  // active diff as-is (it can render any diff).
   const handlePanelViewSelect = useCallback((view: 'sections' | 'commits' | 'tree') => {
     if (view === 'commits') {
       // The Commits rail has no search input, so an open search would become
@@ -1955,8 +2526,33 @@ const ReviewApp: React.FC = () => {
       handleSwitchToSections();
       return;
     }
+    if (
+      view === 'tree' && panelView === 'commits' &&
+      // A commit diff on screen is the normal exit. The in-flight arm covers
+      // exiting while a commit switch (typically the HEAD auto-select right
+      // after entry) hasn't landed yet — the memo is captured synchronously
+      // before that fetch, so memo + loading means a commit diff is inbound;
+      // issuing the restore now supersedes it server-side (epoch guard) and
+      // its stale body is ignored client-side.
+      (isCommitDiffType(diffType) || (isLoadingDiff && preCommitDiffRef.current !== null))
+    ) {
+      // Restore through fetchDiffSwitch with the memo's FULL diff type (not
+      // handleDiffSwitch, which would re-compose the current worktree prefix
+      // over an already-composed one). No memo — the page reloaded while a
+      // commit diff was active; refs don't survive — falls back to the
+      // session default, same resolution handleWorktreeSwitch applies. A
+      // failed switch keeps the commit diff on screen with the normal
+      // diffError and the memo intact (no retry loop; the next exit — or a
+      // manual picker switch — is the recovery path).
+      const target = resolveCommitExitDiff(preCommitDiffRef.current, {
+        preferredDefault: configStore.get('defaultDiffType'),
+        diffOptions: gitContext?.diffOptions ?? [],
+        activeWorktreePath,
+      });
+      void fetchDiffSwitch(target.diffType, target.base ?? undefined);
+    }
     selectPanelView(view);
-  }, [handleSwitchToSections, selectPanelView, searchQuery, isSearchOpen, clearSearch, closeSearch]);
+  }, [handleSwitchToSections, selectPanelView, searchQuery, isSearchOpen, clearSearch, closeSearch, panelView, diffType, isLoadingDiff, gitContext, activeWorktreePath, fetchDiffSwitch]);
 
   // Open a commit's own diff (vs its first parent) in the center dock. The
   // switch resets the dock to the all-files surface via the existing
@@ -1974,8 +2570,19 @@ const ReviewApp: React.FC = () => {
       openAllFilesPanel();
       return;
     }
+    // First entry into the commit family (covers both user clicks and the
+    // HEAD auto-select, which routes through this same handler): remember the
+    // diff the session came from so leaving the Commits view can restore it.
+    // Walking further commits must not overwrite the memo with another commit
+    // diff — the exit target is where the REVIEW was, not the previous stop
+    // on the rail. A capture whose switch then fails or is superseded leaves
+    // a memo with no commit diff active; harmless, since the memo is only
+    // read while one is, and re-entry recaptures over it.
+    if (!isCommitDiffType(diffType)) {
+      preCommitDiffRef.current = { diffType, base: selectedBase };
+    }
     void fetchDiffSwitch(fullDiffType);
-  }, [activeWorktreePath, diffType, fetchDiffSwitch, openAllFilesPanel]);
+  }, [activeWorktreePath, diffType, selectedBase, fetchDiffSwitch, openAllFilesPanel]);
 
   // The Commits-view session machine (log + poll + HEAD auto-select + center
   // veil) lives in the hook so its invariants stay in one file; App supplies
@@ -1991,6 +2598,29 @@ const ReviewApp: React.FC = () => {
     diffError,
     onOpenCommit: handleSelectCommit,
   });
+
+  // Reload un-trap: the server keeps ONE session-global diff, so a page
+  // loaded while a commit:<sha> diff is active is served that commit — but
+  // the opening panel view is never Commits (deliberately not persisted, and
+  // the restore memo above is client memory that didn't survive either), so
+  // the session would open on the tree stuck showing a historical commit
+  // with no marked picker option and no restore path. Snap it back to the
+  // session default once, on load only — a commit diff the USER opens later
+  // in this session must never be snapped, hence the one-shot ref that burns
+  // on the first settled load regardless of what it observed.
+  const snappedCommitDiffOnLoad = useRef(false);
+  useEffect(() => {
+    if (snappedCommitDiffOnLoad.current || isLoading || !diffData) return;
+    snappedCommitDiffOnLoad.current = true;
+    if (!isCommitDiffType(diffType)) return;
+    if (panelView === 'commits') return; // defensive: unreachable on load
+    const target = resolveCommitExitDiff(null, {
+      preferredDefault: configStore.get('defaultDiffType'),
+      diffOptions: gitContext?.diffOptions ?? [],
+      activeWorktreePath,
+    });
+    void fetchDiffSwitch(target.diffType);
+  }, [isLoading, diffData, diffType, panelView, gitContext, activeWorktreePath, fetchDiffSwitch]);
 
   // Self-heal a conflicted persisted pair: reviewPanelView=sections with a
   // non-since-base defaultDiffType. Every UI writer enforces the coupling
@@ -2013,8 +2643,9 @@ const ReviewApp: React.FC = () => {
     healedPanelPairOnLoad.current = true;
     if (configStore.get('defaultDiffType') !== 'since-base') {
       // Re-assert the pair through the coupled setter (repairs cookie +
-      // config.json), then bring the live session along.
-      setReviewPanelView('sections');
+      // config.json), then bring the live session along. This is a repair,
+      // not a user choice — it must not overwrite the last-used memo.
+      setReviewPanelView('sections', { recordLastUsed: false });
       if (activeDiffBase !== 'since-base') void handleDiffSwitch('since-base');
     }
   }, [isLoading, diffData, sectionsCapable, persistedPanelView, activeDiffBase, handleDiffSwitch]);
@@ -2256,6 +2887,14 @@ const ReviewApp: React.FC = () => {
       setSelectedAnnotationId(null);
       return;
     }
+    // Call-Flow-native feedback has no honest inline diff destination. Return
+    // it to the analysis surface instead of opening an unrelated file row and
+    // issuing a scroll request that cannot resolve.
+    if (annotation.callFlowTargets?.length && (annotation.scope ?? 'line') !== 'line') {
+      openCallFlowPanel();
+      setSelectedAnnotationId(id);
+      return;
+    }
     // While the guide takeover is open, the dock's active file is meaningless
     // (guide renders its own per-section diffs) — skip the dock file-switch
     // mutation so leaving the guide doesn't land on an unexpected file, and
@@ -2272,7 +2911,7 @@ const ReviewApp: React.FC = () => {
     }
     setSelectedAnnotationId(id);
     setScrollTargetAnnotation(prev => ({ id, token: (prev?.token ?? 0) + 1 }));
-  }, [files, handleFileSwitch, prMetadata, prDiffScope, guideOpen]);
+  }, [files, handleFileSwitch, prMetadata, prDiffScope, guideOpen, openCallFlowPanel]);
 
   // Diff context bundled into local-mode feedback headers so the receiving
   // agent knows which diff the annotations are anchored to. Uses committedBase
@@ -2314,7 +2953,9 @@ const ReviewApp: React.FC = () => {
     // focus claim at the source instead of threading `guideOpen` through every
     // dock panel. Guide-side DiffViewers arbitrate focus among themselves.
     focusedFilePath: guideOpen ? null : (files[activeFileIndex]?.path ?? null),
-    diffStyle,
+    diffStyle: effectiveDiffStyle,
+    onDiffStyleChange: handleDiffStyleChange,
+    isCompactTouchLayout,
     diffOverflow,
     diffIndicators,
     lineDiffType: diffLineDiffType,
@@ -2344,8 +2985,13 @@ const ReviewApp: React.FC = () => {
     scrollTargetAnnotation,
     pendingSelection,
     onLineSelection: handleLineSelection,
+    onRequestLineAnnotation: handleRequestLineAnnotation,
+    onAddCallFlowAnnotation: handleAddCallFlowAnnotation,
     onAddAnnotation: handleAddAnnotation,
     onAddAnnotationForFile: handleAddAnnotationForFile,
+    editSuggestionsEnabled,
+    onAddSuggestionsForFile: handleAddSuggestionsForFile,
+    onAddEditorCommentForFile: handleAddEditorCommentForFile,
     onAddFileComment: handleAddFileComment,
     onAddFileCommentForFile: handleAddFileCommentForFile,
     onEditAnnotation: handleEditAnnotation,
@@ -2357,16 +3003,23 @@ const ReviewApp: React.FC = () => {
     onAddDescriptionAnnotation: handleAddDescriptionAnnotation,
     onSelectDescriptionAnnotation: handleSelectDescriptionAnnotation,
     onDeleteDescriptionAnnotation: handleDeleteDescriptionAnnotation,
-    onAskAIForDescription: handleAskAIForDescription,
+    ...buildContextualAIHandlers(aiAvailable, {
+      onAskAIForDescription: handleAskAIForDescription,
+      onAskAIForComment: handleAskAIForComment,
+    }),
     commentAnnotations: visibleCommentAnnotations,
     selectedCommentAnnotationId,
     onAddCommentAnnotation: handleAddCommentAnnotation,
     onSelectCommentAnnotation: handleSelectCommentAnnotation,
     onDeleteCommentAnnotation: handleDeleteCommentAnnotation,
-    onAskAIForComment: handleAskAIForComment,
     commentScrollTarget,
     viewedFiles,
     onToggleViewed: handleToggleViewed,
+    generatedFiles,
+    expandedGeneratedFiles,
+    onGeneratedFileCollapsedChange: handleGeneratedFileCollapsedChange,
+    showViewedControls: reviewShowViewedControls,
+    showStageControls: reviewShowStageControls,
     stagedFiles,
     stagingFile,
     onStage: stageFile,
@@ -2374,6 +3027,7 @@ const ReviewApp: React.FC = () => {
     canStagePath: isPathStageable,
     currentWorktreePath: activeWorktreePath,
     guideRevealFile,
+    onGuideRevealFile: handleGuideRevealFile,
     stageError,
     searchQuery: isSearchPending ? '' : debouncedSearchQuery,
     isSearchPending,
@@ -2410,14 +3064,20 @@ const ReviewApp: React.FC = () => {
     onAllFilesCollapsedChange: setAllFilesAllCollapsed,
     commitInfo,
     isSemanticDiffActive,
-    semanticDiffAvailable,
+    semanticDiffAvailable: semanticDiffUsable,
     onSemanticDiffUnavailable: handleSemanticDiffUnavailable,
     onSemanticDiffLoadError: handleSemanticDiffLoadError,
     onSemanticDiffLoadSuccess: handleSemanticDiffLoadSuccess,
-
+    callFlowAvailable,
+    callFlowAdvert,
+    callFlowAnalysis,
+    retryCallFlowAnalysis,
+    isCallFlowNodeInPatch,
+    isCallFlowActive,
+    openCallFlowPanel,
+    callFlowInstall,
     snapshotId: snapshotId ?? null,
     eslintCheckAvailable: eslintCheckAdvert.available,
-
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
@@ -2425,7 +3085,7 @@ const ReviewApp: React.FC = () => {
     codeNavIsLoading: codeNav.isLoading,
     codeNavActiveSymbol: codeNav.activeSymbol,
   }), [
-    files, diffData?.rawPatch, activeFileIndex, guideOpen, diffStyle, diffOverflow, diffIndicators,
+    files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
     diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions,
     allAnnotations, externalAnnotations,
@@ -2434,18 +3094,22 @@ const ReviewApp: React.FC = () => {
     visibleCommentAnnotations, selectedCommentAnnotationId, handleAddCommentAnnotation,
     handleSelectCommentAnnotation, handleDeleteCommentAnnotation, handleAskAIForComment, commentScrollTarget,
     selectedAnnotationId, scrollTargetAnnotation, pendingSelection, handleLineSelection,
+    handleRequestLineAnnotation, handleAddCallFlowAnnotation,
     handleAddAnnotation, handleAddFileComment, handleAddFileCommentForFile, handleEditAnnotation,
     handleSelectAnnotation, handleNavigateToAnnotation, handleDeleteAnnotation, viewedFiles,
-    handleToggleViewed, stagedFiles, stagingFile, stageFile,
-    canStageFiles, isPathStageable, activeWorktreePath, guideRevealFile, stageError, isSearchPending, debouncedSearchQuery,
+    generatedFiles, expandedGeneratedFiles, handleGeneratedFileCollapsedChange,
+    handleToggleViewed, reviewShowViewedControls, reviewShowStageControls, stagedFiles, stagingFile, stageFile,
+    canStageFiles, isPathStageable, activeWorktreePath, guideRevealFile, handleGuideRevealFile, stageError, isSearchPending, debouncedSearchQuery,
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch, searchMatches,
     aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
     handleAskAI, handleAskAIForFile, handleViewAIResponse, handleClickAIMarker,
     aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
-    handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffAvailable,
-    snapshotId, eslintCheckAdvert.available,
+    handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
+    callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
+    snapshotId, eslintCheckAdvert.available,
+    editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);
 
@@ -2455,16 +3119,23 @@ const ReviewApp: React.FC = () => {
   // Copy raw diff to clipboard
   const handleCopyDiff = useCallback(async () => {
     if (!diffData) return;
-    try {
-      await navigator.clipboard.writeText(diffData.rawPatch);
+    if (await copyTextToClipboard(diffData.rawPatch)) {
       setCopyRawDiffStatus('success');
       setTimeout(() => setCopyRawDiffStatus('idle'), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
       setCopyRawDiffStatus('error');
       setTimeout(() => setCopyRawDiffStatus('idle'), 2000);
     }
   }, [diffData]);
+
+  const handleToggleReviewViewedControls = useCallback(() => {
+    configStore.set('reviewShowViewedControls', !reviewShowViewedControls);
+  }, [reviewShowViewedControls]);
+
+  const handleToggleReviewStageControls = useCallback(() => {
+    configStore.set('reviewShowStageControls', !reviewShowStageControls);
+  }, [reviewShowStageControls]);
 
   const feedbackMarkdown = useMemo(() => {
     // Only include the code-review section when there ARE code annotations —
@@ -2495,14 +3166,15 @@ const ReviewApp: React.FC = () => {
       setShowNoAnnotationsDialog(true);
       return;
     }
-    try {
-      await navigator.clipboard.writeText(feedbackMarkdown);
+    if (await copyTextToClipboard(feedbackMarkdown)) {
       setCopyFeedback('Feedback copied!');
       setTimeout(() => setCopyFeedback(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+      toast.success('Feedback copied');
+    } else {
+      console.error('Failed to copy');
       setCopyFeedback('Failed to copy');
       setTimeout(() => setCopyFeedback(null), 2000);
+      toast.error('Failed to copy');
     }
   }, [totalAnnotationCount, feedbackMarkdown]);
 
@@ -2514,7 +3186,7 @@ const ReviewApp: React.FC = () => {
     }
     setIsSendingFeedback(true);
     try {
-      const agentSwitchSettings = getAgentSwitchSettings();
+      const agentSwitchSettings = getAgentSwitchSettings('review');
       const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
 
       const res = await fetch('/api/feedback', {
@@ -2591,6 +3263,9 @@ const ReviewApp: React.FC = () => {
 
     try {
       if (!prMetadata) throw new Error('PR metadata unavailable');
+      if (plan.targets.some(target => target.status === 'blocked')) {
+        throw new Error(`Automatic retry is blocked until the ${mrLabel} is inspected.`);
+      }
 
       const bodyForTarget = (target: SubmissionTarget) => buildPlatformReviewBody(
         action,
@@ -2614,34 +3289,28 @@ const ReviewApp: React.FC = () => {
         }];
       }
 
-      const openUrls: string[] = [];
-      const results = await Promise.allSettled(
-        targets.map(async (target): Promise<SubmissionTarget> => {
-          if (target.status === 'success') return target;
-          try {
-            const prRes = await fetch('/api/pr-action', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action,
-                body: bodyForTarget(target),
-                fileComments: target.fileComments,
-                targetPrUrl: target.prUrl || undefined,
-              }),
-            });
-            const prData = await prRes.json() as { ok?: boolean; prUrl?: string; error?: string };
-            if (!prRes.ok || prData.error) {
-              return { ...target, status: 'failed', error: prData.error ?? 'Failed to submit' };
-            }
-            if (prData.prUrl) openUrls.push(prData.prUrl);
-            return { ...target, status: 'success' };
-          } catch (err) {
-            return { ...target, status: 'failed', error: err instanceof Error ? err.message : 'Network error' };
-          }
-        }),
-      );
-      const updatedTargets = results.map((r, i) => r.status === 'fulfilled' ? r.value : { ...targets[i], status: 'failed' as const, error: 'Unexpected error' });
-      const allOk = updatedTargets.every(t => t.status === 'success');
+      const attempt = await submitPlatformReviewTargets({
+        targets,
+        action,
+        generalComment: generalComment ?? '',
+        bodyForTarget,
+      });
+      const updatedTargets = attempt.targets;
+      const allOk = attempt.allComplete;
+      const recovery = attempt.recovery;
+      const openUrls = attempt.openUrls;
+      setPlatformReviewRecovery(recovery
+        ? { rootPrUrl: prMetadata.url, recovery }
+        : null);
+      const recoveryStorage = getReviewRecoveryStorage();
+      const persistsRefresh = recoveryStorage
+        ? saveReviewSubmissionRecovery(
+          recoveryStorage,
+          prMetadata.url,
+          recovery,
+        )
+        : false;
+      setPlatformRecoveryPersistsRefresh(recovery !== null && persistsRefresh);
 
       if (!allOk) {
         setPlatformCommentDialog(prev => prev ? {
@@ -2658,7 +3327,7 @@ const ReviewApp: React.FC = () => {
         for (const url of openUrls) window.open(url, '_blank');
       }
 
-      const agentSwitchSettings = getAgentSwitchSettings();
+      const agentSwitchSettings = getAgentSwitchSettings('review');
       const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
       const prLinks = openUrls.join(', ');
       const statusMessage = action === 'approve'
@@ -2694,9 +3363,35 @@ const ReviewApp: React.FC = () => {
     // inline review comments — seed them into the review body instead (quoted),
     // where the user can edit before submitting. Also means a review with only
     // prose notes still has something to post.
-    setPlatformGeneralComment(buildProseFeedback(visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body));
+    const seededGeneralComment = buildProseFeedback(
+      visibleDescriptionAnnotations,
+      visibleCommentAnnotations,
+      prContext?.body,
+    );
+    const rootPrUrl = prMetadata?.url;
+    const inMemoryRecovery = rootPrUrl && platformReviewRecovery?.rootPrUrl === rootPrUrl
+      ? platformReviewRecovery.recovery
+      : null;
+    const recoveryStorage = getReviewRecoveryStorage();
+    const storedRecovery = rootPrUrl && recoveryStorage
+      ? loadReviewSubmissionRecovery(recoveryStorage, rootPrUrl)
+      : null;
+    const recovery = inMemoryRecovery ?? storedRecovery;
+    if (recovery) {
+      setPlatformReviewRecovery({ rootPrUrl: rootPrUrl ?? '', recovery });
+      if (storedRecovery) {
+        setPlatformRecoveryPersistsRefresh(true);
+      }
+      setPlatformGeneralComment(recovery.generalComment);
+      setPlatformCommentDialog({
+        action: recovery.action,
+        plan: restoreReviewSubmission(plan, recovery),
+      });
+      return;
+    }
+    setPlatformGeneralComment(seededGeneralComment);
     setPlatformCommentDialog({ action, plan });
-  }, [allAnnotations, visibleEditorAnnotations, files, prMetadata, visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body]);
+  }, [allAnnotations, visibleEditorAnnotations, files, prMetadata, visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body, platformReviewRecovery]);
 
   // Double-tap Option/Alt to toggle review destination (PR mode only)
   useEffect(() => {
@@ -2749,8 +3444,9 @@ const ReviewApp: React.FC = () => {
         if (submitted || isPlatformActioning) return;
         const isApproveAction = platformCommentDialog.action === 'approve';
         const hasTargets = platformCommentDialog.plan.targets.length > 0;
+        const retryBlocked = platformCommentDialog.plan.targets.some(target => target.status === 'blocked');
         const canSubmit = isApproveAction || hasTargets || platformGeneralComment.trim();
-        if (!canSubmit) return;
+        if (!canSubmit || retryBlocked) return;
         e.preventDefault();
         handlePlatformAction(platformCommentDialog.action, platformCommentDialog.plan, platformGeneralComment);
         return;
@@ -2792,10 +3488,116 @@ const ReviewApp: React.FC = () => {
     handleApprove, handleSendFeedback, handlePlatformAction
   ]);
 
+  // Cmd/Ctrl+Shift+Y keyboard shortcut to copy feedback, mirroring the
+  // Copy Feedback button in the header.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'y' || isTypingTarget(e.target)) return;
+
+      if (platformCommentDialog || showExportModal || showNoAnnotationsDialog || showApproveWarning || showExitWarning) return;
+
+      e.preventDefault();
+      handleCopyFeedback();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    platformCommentDialog, showExportModal, showNoAnnotationsDialog, showApproveWarning, showExitWarning,
+    handleCopyFeedback
+  ]);
+
+  const completeNavigatorSelection = (action: () => unknown): void => {
+    action();
+    if (isCompactTouchLayout) setIsCompactNavigatorOpen(false);
+  };
+
+  const compactNavigatorContext = isCompactTouchLayout && prMetadata ? (
+    <StackedPRLabel
+      metadata={prMetadata}
+      mrNumberLabel={mrNumberLabel}
+      stackInfo={prStackInfo}
+      stackTree={prStackTree}
+      scope={prDiffScope}
+      scopeOptions={prDiffScopeOptions}
+      isSwitchingScope={isSwitchingPRScope}
+      onSelectScope={(scope) => completeNavigatorSelection(() => handlePRDiffScopeSelect(scope))}
+      onNavigatePR={(url) => completeNavigatorSelection(() => handlePRSwitch(url))}
+    />
+  ) : undefined;
+
+  const fileTreeResizeHandle = (
+    <ResizeHandle
+      {...fileTreeResize.handleProps}
+      className="z-10"
+      side="left"
+      hideHoverTrack
+      tooltip={RESIZE_HANDLE_TOOLTIP}
+      onCollapse={() => setIsFileTreeOpen(false)}
+    />
+  );
+
+  const compactReviewDestination: CompactReviewDestination | undefined =
+    isCompactTouchLayout && origin && prMetadata
+      ? {
+          value: reviewDestination,
+          platform: prMetadata.platform,
+          platformLabel,
+          onChange: (destination) => {
+            if (showDestSpotlight) dismissDestSpotlight();
+            setReviewDestination(destination);
+            storage.setItem('plannotator-review-dest', destination);
+            setPlatformActionError(null);
+          },
+        }
+      : undefined;
+
+  const compactActionBusy = isSendingFeedback || isApproving || isExiting || isPlatformActioning;
+  const compactReviewActions: CompactReviewAction[] = !isCompactTouchLayout
+    ? []
+    : !origin
+      ? [{
+          id: 'copy',
+          label: copyFeedback === 'Feedback copied!' ? 'Feedback copied' : 'Copy feedback',
+          onSelect: handleCopyFeedback,
+        }]
+      : [
+          {
+            id: 'exit',
+            label: 'Exit review',
+            onSelect: () => totalAnnotationCount > 0 ? setShowExitWarning(true) : handleExit(),
+            disabled: compactActionBusy,
+          },
+          ...(totalAnnotationCount > 0
+            ? [{
+                id: 'feedback' as const,
+                label: platformMode ? 'Post comments' : 'Send feedback',
+                subtitle: `${totalAnnotationCount} annotation${totalAnnotationCount === 1 ? '' : 's'}`,
+                onSelect: () => platformMode ? openPlatformDialog('comment') : handleSendFeedback(),
+                disabled: compactActionBusy,
+              }]
+            : []),
+          {
+            id: 'approve',
+            label: 'Approve',
+            subtitle: platformMode && platformUser && prMetadata?.author === platformUser
+              ? `You can't approve your own ${mrLabel}`
+              : totalAnnotationCount > 0
+                ? `${totalAnnotationCount} unsent annotation${totalAnnotationCount === 1 ? '' : 's'}`
+                : undefined,
+            onSelect: () => {
+              if (platformMode) openPlatformDialog('approve');
+              else if (totalAnnotationCount > 0) setShowApproveWarning(true);
+              else handleApprove();
+            },
+            disabled: compactActionBusy || !!(platformMode && platformUser && prMetadata?.author === platformUser),
+          },
+        ];
+
   if (isLoading) {
     return (
-      <ThemeProvider defaultTheme="dark">
-        <div className="h-screen flex items-center justify-center bg-background">
+      <ThemeProvider defaultTheme="dark" manageFavicon>
+        <div className="pn-app-viewport flex items-center justify-center bg-background">
           <div className="text-muted-foreground text-sm">Loading diff...</div>
         </div>
       </ThemeProvider>
@@ -2803,32 +3605,48 @@ const ReviewApp: React.FC = () => {
   }
 
   return (
-    <ThemeProvider defaultTheme="dark">
+    <ThemeProvider defaultTheme="dark" manageFavicon>
       <TooltipProvider delayDuration={200} skipDelayDuration={100}>
       <ReviewStateProvider value={reviewStateValue}>
       <JobLogsProvider value={jobLogsValue}>
       {isSwitchingPRScope && <PRSwitchOverlay />}
-      <div className="h-screen flex flex-col bg-background overflow-hidden">
+      <div
+        className="pn-app-viewport flex flex-col bg-background overflow-hidden"
+        data-pn-compact-touch-layout={isCompactTouchLayout ? 'true' : undefined}
+        data-pn-compact-review-shell={isCompactTouchLayout || undefined}
+        data-pn-browser-canvas="background"
+      >
         {/* Header */}
-        <header className="py-1 flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 lg:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
-          <div className="min-w-0 flex flex-1 items-center gap-2 lg:gap-3">
+        <header className={isCompactTouchLayout
+          ? 'min-h-[52px] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
+          : 'py-1 flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 lg:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
+        }>
+          <div className={isCompactTouchLayout
+            ? 'contents'
+            : 'min-w-0 flex flex-1 items-center gap-2 lg:gap-3'
+          }>
             {shouldShowFileTree && (
               <>
                 <button
-                  onClick={() => setIsFileTreeOpen(prev => !prev)}
+                  data-pn-touch-target={isCompactTouchLayout || undefined}
+                  data-pn-touch-target-icon={isCompactTouchLayout || undefined}
+                  onClick={toggleNavigator}
                   className={`h-7 w-7 flex shrink-0 items-center justify-center rounded-md transition-all focus-visible:outline-none ${
-                    isFileTreeOpen
+                    isNavigatorOpen
                       ? 'text-primary'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   }`}
-                  title={isFileTreeOpen ? 'Hide file tree' : 'Show file tree'}
+                  title={isNavigatorOpen ? 'Close review navigation' : 'Open review navigation'}
+                  aria-label={isNavigatorOpen ? 'Close review navigation' : 'Open review navigation'}
+                  aria-expanded={isNavigatorOpen}
                 >
                   <FolderTree className="w-3.5 h-3.5" />
                 </button>
                 <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
               </>
             )}
-            {hasSearchableFiles && (
+            {isCompactTouchLayout && !shouldShowFileTree && <span aria-hidden />}
+            {!isCompactTouchLayout && aiUIEnabled && hasSearchableFiles && (
               <>
                 <button
                   onClick={() => {
@@ -2856,7 +3674,10 @@ const ReviewApp: React.FC = () => {
               </>
             )}
             {prMetadata ? (
-              <div className="min-w-0 flex flex-1 items-center gap-2 lg:gap-3 overflow-hidden">
+              <div className={isCompactTouchLayout
+                ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
+                : 'min-w-0 flex flex-1 items-center gap-2 lg:gap-3 overflow-hidden'
+              }>
                 <span
                   className="min-w-0 max-w-[160px] xl:max-w-[240px] text-xs text-muted-foreground/60 hidden sm:inline-flex items-center gap-1"
                   title={displayRepo}
@@ -2871,20 +3692,25 @@ const ReviewApp: React.FC = () => {
                   onSelect={handlePRSwitch}
                   disabled={isSwitchingPRScope}
                 />
-                <StackedPRLabel
-                  metadata={prMetadata}
-                  mrNumberLabel={mrNumberLabel}
-                  stackInfo={prStackInfo}
-                  stackTree={prStackTree}
-                  scope={prDiffScope}
-                  scopeOptions={prDiffScopeOptions}
-                  isSwitchingScope={isSwitchingPRScope}
-                  onSelectScope={handlePRDiffScopeSelect}
-                  onNavigatePR={handlePRSwitch}
-                />
+                {!isCompactTouchLayout && (
+                  <StackedPRLabel
+                    metadata={prMetadata}
+                    mrNumberLabel={mrNumberLabel}
+                    stackInfo={prStackInfo}
+                    stackTree={prStackTree}
+                    scope={prDiffScope}
+                    scopeOptions={prDiffScopeOptions}
+                    isSwitchingScope={isSwitchingPRScope}
+                    onSelectScope={handlePRDiffScopeSelect}
+                    onNavigatePR={handlePRSwitch}
+                  />
+                )}
               </div>
             ) : repoInfo ? (
-              <div className="min-w-0 flex flex-1 items-center gap-2 lg:gap-3 overflow-hidden">
+              <div className={isCompactTouchLayout
+                ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
+                : 'min-w-0 flex flex-1 items-center gap-2 lg:gap-3 overflow-hidden'
+              }>
                 {repoInfo.branch && (
                   <span
                     className="text-xs font-mono text-foreground truncate"
@@ -2902,19 +3728,27 @@ const ReviewApp: React.FC = () => {
                 </span>
               </div>
             ) : (
-              <span className="text-xs text-muted-foreground/70">Review</span>
+              <span className={isCompactTouchLayout
+                ? 'min-w-0 text-center text-xs text-muted-foreground/70'
+                : 'text-xs text-muted-foreground/70'
+              }>Review</span>
             )}
           </div>
 
-          <div className="min-w-0 w-full min-[480px]:w-auto flex flex-wrap min-[480px]:flex-nowrap shrink-0 items-center justify-end gap-1 lg:gap-2">
+          <div className={isCompactTouchLayout
+            ? 'contents'
+            : 'min-w-0 w-full min-[480px]:w-auto flex flex-wrap min-[480px]:flex-nowrap shrink-0 items-center justify-end gap-1 lg:gap-2'
+          }>
             {/* Split/Unified toggle + diff options moved to the dock tab strip
                 (rightHeaderActionsComponent → ReviewDockRightActions). */}
-            {origin ? (
+            {!isCompactTouchLayout && (origin ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
                 {prMetadata && (
                   <div className="relative">
                     <button
+                      data-pn-touch-target={isCompactTouchLayout || undefined}
+                      data-pn-touch-target-icon={isCompactTouchLayout || undefined}
                       ref={destToggleRef}
                       onClick={() => {
                         // Opening the menu is discovery — the spotlight has
@@ -2940,6 +3774,7 @@ const ReviewApp: React.FC = () => {
                         <div className="fixed inset-0 z-40" onClick={() => setShowDestinationMenu(false)} />
                         <div className="absolute right-0 top-full mt-1 py-1 bg-popover border border-border rounded-lg shadow-xl z-50 min-w-[160px]">
                           <button
+                            data-pn-touch-target={isCompactTouchLayout || undefined}
                             onClick={() => {
                               setReviewDestination('platform');
                               storage.setItem('plannotator-review-dest', 'platform');
@@ -2956,6 +3791,7 @@ const ReviewApp: React.FC = () => {
                             <div className="text-muted-foreground/60">Post to {mrLabel}</div>
                           </button>
                           <button
+                            data-pn-touch-target={isCompactTouchLayout || undefined}
                             onClick={() => {
                               setReviewDestination('agent');
                               storage.setItem('plannotator-review-dest', 'agent');
@@ -2971,13 +3807,13 @@ const ReviewApp: React.FC = () => {
                             <div className="font-medium">Agent</div>
                             <div className="text-muted-foreground/60">Send to session</div>
                           </button>
-                          <div className="border-t border-border/50 mt-1 pt-1 px-3 py-1">
+                          {!isCompactTouchLayout && <div className="border-t border-border/50 mt-1 pt-1 px-3 py-1">
                             <span className="text-[10px] text-muted-foreground/40">
                               <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm">{altKey}</kbd>
                               <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm ml-0.5">{altKey}</kbd>
                               <span className="ml-1.5">to toggle</span>
                             </span>
-                          </div>
+                          </div>}
                         </div>
                       </>
                     )}
@@ -2985,7 +3821,7 @@ const ReviewApp: React.FC = () => {
                 )}
 
                 {/* GitHub error message */}
-                {platformActionError && (
+                {!isCompactTouchLayout && platformActionError && (
                   <div
                     className="text-xs text-destructive px-2 py-1 bg-destructive/10 rounded border border-destructive/20 max-w-[200px] truncate"
                     title={platformActionError}
@@ -2994,7 +3830,7 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
-                {reviewMode === 'workspace' && diffError && (
+                {!isCompactTouchLayout && reviewMode === 'workspace' && diffError && (
                   <div
                     className="text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25 max-w-[240px] truncate"
                     title={diffError}
@@ -3010,7 +3846,7 @@ const ReviewApp: React.FC = () => {
                     request is non-blocking on purpose: it can park for
                     minutes behind a cold clone, and the reviewer keeps
                     working with the partial diff meanwhile. */}
-                {prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope && (
+                {!isCompactTouchLayout && prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope && (
                   <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
                     <span className="hidden md:inline" title={`${prMetadata?.platform === 'gitlab' ? 'GitLab' : 'GitHub'} omitted diff content for some files because this PR is too large`}>
                       Partial diff
@@ -3047,7 +3883,7 @@ const ReviewApp: React.FC = () => {
                 {/* Diff staleness notice — files changed since this snapshot
                     was computed (agent editing mid-review). Non-blocking; the
                     user refreshes when ready. */}
-                {diffFreshness.isStale && !isLoadingDiff && (
+                {!isCompactTouchLayout && diffFreshness.isStale && !isLoadingDiff && (
                   <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
                     <span className="hidden md:inline">Diff out of date</span>
                     <span className="md:hidden">Stale</span>
@@ -3073,7 +3909,7 @@ const ReviewApp: React.FC = () => {
                     remote, so the "since main" comparison is against stale
                     GitHub state. Fetch catches the tracking ref up and
                     recomputes the diff in place. */}
-                {baseBehindRemote && !prMetadata && !isLoadingDiff && (
+                {!isCompactTouchLayout && baseBehindRemote && !prMetadata && !isLoadingDiff && (
                   <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
                     <span className="hidden md:inline">Baseline is behind GitHub</span>
                     <span className="md:hidden">Base behind</span>
@@ -3163,6 +3999,8 @@ const ReviewApp: React.FC = () => {
               </>
             ) : (
               <button
+                data-pn-touch-target={isCompactTouchLayout || undefined}
+                data-pn-touch-target-icon={isCompactTouchLayout || undefined}
                 onClick={handleCopyFeedback}
                 className="px-2 py-1 md:px-2.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors flex items-center gap-1.5"
                 title="Copy feedback for LLM"
@@ -3183,30 +4021,34 @@ const ReviewApp: React.FC = () => {
                   </>
                 )}
               </button>
-            )}
+            ))}
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
 
             {/* Sidebar tab toggles */}
-            <button
-              onClick={() => reviewSidebar.toggleTab('annotations')}
-              className={`relative p-1.5 rounded-md transition-all ${
-                reviewSidebar.isOpen && reviewSidebar.activeTab === 'annotations'
-                  ? 'bg-primary/15 text-primary'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              }`}
-              title="Annotations"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-              </svg>
-              {totalAnnotationCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground px-0.5">
-                  {totalAnnotationCount > 99 ? '99+' : totalAnnotationCount}
-                </span>
-              )}
-            </button>
-            {aiAvailable && (
+            {!isCompactTouchLayout && (
+              <button
+                data-pn-touch-target={isCompactTouchLayout || undefined}
+                data-pn-touch-target-icon={isCompactTouchLayout || undefined}
+                onClick={() => reviewSidebar.toggleTab('annotations')}
+                className={`relative p-1.5 rounded-md transition-all ${
+                  reviewSidebar.isOpen && reviewSidebar.activeTab === 'annotations'
+                    ? 'bg-primary/15 text-primary'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+                title="Annotations"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                </svg>
+                {totalAnnotationCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground px-0.5">
+                    {totalAnnotationCount > 99 ? '99+' : totalAnnotationCount}
+                  </span>
+                )}
+              </button>
+            )}
+            {!isCompactTouchLayout && aiAvailable && (
               <button
                 onClick={() => reviewSidebar.toggleTab('ai')}
                 className={`relative p-1.5 rounded-md transition-all ${
@@ -3222,7 +4064,7 @@ const ReviewApp: React.FC = () => {
                 )}
               </button>
             )}
-            {agentJobs.capabilities?.available && (
+            {!isCompactTouchLayout && agentJobs.capabilities?.available && (
               <button
                 onClick={() => reviewSidebar.toggleTab('agents')}
                 className={`relative p-1.5 rounded-md transition-all ${
@@ -3246,10 +4088,25 @@ const ReviewApp: React.FC = () => {
               onOpenReviewSetup={sectionsCapable ? () => { reviewSetupIsFirstRun.current = false; setShowReviewSetup(true); } : undefined}
               onOpenExport={() => setShowExportModal(true)}
               onCopyAgentInstructions={handleCopyAgentInstructions}
-              onToggleFileTree={() => setIsFileTreeOpen(prev => !prev)}
+              onToggleFileTree={toggleNavigator}
               onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
-              isFileTreeOpen={isFileTreeOpen}
+              onOpenGuide={isCompactTouchLayout && aiUIEnabled && hasSearchableFiles ? () => {
+                if (guideHintActive) {
+                  markGuideHintSeen();
+                  setGuideHintActive(false);
+                }
+                reviewSidebar.close();
+                setIsCompactNavigatorOpen(false);
+                setGuideOpen(true);
+              } : undefined}
+              onOpenAnnotations={isCompactTouchLayout ? () => reviewSidebar.open('annotations') : undefined}
+              onOpenAI={isCompactTouchLayout && aiAvailable ? () => reviewSidebar.open('ai') : undefined}
+              onOpenAgents={isCompactTouchLayout && agentJobs.capabilities?.available ? () => reviewSidebar.open('agents') : undefined}
+              compactDestination={compactReviewDestination}
+              compactActions={compactReviewActions}
+              isFileTreeOpen={isNavigatorOpen}
               isSidebarOpen={reviewSidebar.isOpen}
+              compactTouchLayout={isCompactTouchLayout}
               agentInstructionsEnabled={!!origin}
               appVersion={appVersion}
               updateInfo={updateInfo}
@@ -3259,47 +4116,99 @@ const ReviewApp: React.FC = () => {
           </div>
         </header>
 
+        {isCompactTouchLayout && (
+          platformActionError ? (
+            <div className="shrink-0 border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {platformActionError}
+            </div>
+          ) : reviewMode === 'workspace' && diffError ? (
+            <div className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
+              {files.length > 0 ? 'Some workspace changes could not be loaded.' : 'Workspace changes could not be loaded.'}
+            </div>
+          ) : prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope ? (
+            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
+              <span className="min-w-0 truncate">The platform omitted part of this diff.</span>
+              {prPatchUpgradeAvailable && (
+                <button
+                  data-pn-touch-target
+                  type="button"
+                  onClick={handleLoadFullDiff}
+                  disabled={isLoadingFullDiff}
+                  className="shrink-0 font-medium underline underline-offset-2 disabled:opacity-60"
+                >
+                  {isLoadingFullDiff ? 'Loading…' : 'Load full diff'}
+                </button>
+              )}
+            </div>
+          ) : diffFreshness.isStale && !isLoadingDiff ? (
+            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
+              <span>Diff out of date</span>
+              <button data-pn-touch-target type="button" onClick={handleRefreshStaleDiff} className="font-medium underline underline-offset-2">Refresh</button>
+            </div>
+          ) : baseBehindRemote && !prMetadata && !isLoadingDiff ? (
+            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
+              <span>Baseline is behind the remote.</span>
+              <button data-pn-touch-target type="button" onClick={handleFetchBase} disabled={isFetchingBase} className="font-medium underline underline-offset-2 disabled:opacity-60">
+                {isFetchingBase ? 'Fetching…' : 'Fetch'}
+              </button>
+            </div>
+          ) : null
+        )}
+
         {/* Main content */}
-        <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
-          {!guideOpen && shouldShowFileTree && isFileTreeOpen && sectionsAvailable && panelView === 'sections' && (
-            <div className="contents group/sidebar">
+        <div className={`relative flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
+          {!guideOpen && shouldShowFileTree && isNavigatorOpen && sectionsAvailable && panelView === 'sections' && (
+            <ReviewNavigatorContainer
+              isCompactTouchLayout={isCompactTouchLayout}
+              onClose={() => setIsCompactNavigatorOpen(false)}
+              context={compactNavigatorContext}
+              resizeHandle={fileTreeResizeHandle}
+            >
               <SectionsPanel
                 files={files}
                 sections={sections!}
                 width={fileTreeResize.width}
-                activeFileIndex={isAllFilesActive || isSemanticDiffActive || isEslintCheckActive || isPROverviewActive ? -1 : activeFileIndex}
+                activeFileIndex={isAllFilesActive || isSemanticDiffActive || isEslintCheckActive || isCallFlowActive || isPROverviewActive ? -1 : activeFileIndex}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
-                onSelectFile={handleFilePreview}
-                onDoubleClickFile={handleFilePinned}
+                onSelectFile={(index) => completeNavigatorSelection(() => handleFilePreview(index))}
+                onDoubleClickFile={(index) => completeNavigatorSelection(() => handleFilePinned(index))}
                 enableKeyboardNav={!showExportModal && hasSearchableFiles}
                 annotations={allAnnotations}
                 viewedFiles={viewedFiles}
                 onToggleViewed={handleToggleViewed}
                 hideViewedFiles={hideViewedFiles}
                 onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
+                showViewedControls={reviewShowViewedControls}
+                onToggleShowViewedControls={handleToggleReviewViewedControls}
                 stagedFiles={stagedFiles}
                 stagingFile={stagingFile}
                 canStage={canStageFiles}
                 onStageFile={stageFile}
+                showStageControls={reviewShowStageControls}
+                onToggleShowStageControls={handleToggleReviewStageControls}
                 isLoadingDiff={isLoadingDiff}
                 availableBranches={gitContext?.availableBranches}
                 selectedBase={selectedBase ?? undefined}
                 detectedBase={gitContext?.defaultBranch || gitContext?.compareTarget?.fallback}
-                onSelectBase={handleBaseSelect}
+                onSelectBase={(base) => completeNavigatorSelection(() => handleBaseSelect(base))}
                 compareTarget={gitContext?.compareTarget}
                 recentCommits={gitContext?.recentCommits}
                 onSelectPanelView={handlePanelViewSelect}
                 showCommitsOption={commitsCapable}
-                onSelectAllFiles={openAllFilesPanel}
+                onSelectAllFiles={() => completeNavigatorSelection(openAllFilesPanel)}
                 isAllFilesActive={isAllFilesActive}
-                onSelectSemanticDiff={() => openSemanticDiffPanel()}
+                onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
                 isSemanticDiffActive={isSemanticDiffActive}
-                semanticDiffAvailable={semanticDiffAvailable}
-
-                onSelectEslintCheck={eslintCheckAdvert.available ? requestEslintCheck : undefined}
+                semanticDiffAvailable={semanticDiffUsable}
+                onSelectEslintCheck={eslintCheckAdvert.available ? () => completeNavigatorSelection(requestEslintCheck) : undefined}
                 isEslintCheckActive={isEslintCheckActive}
                 eslintCheckFileCount={eslintCheckAdvert.fileCount}
-
+                onSelectCallFlow={() => completeNavigatorSelection(openCallFlowPanel)}
+                isCallFlowActive={isCallFlowActive}
+                callFlowEnabled={callFlowEnabled}
+                callFlowCount={callFlowAnalysis.status === 'ready' ? callFlowAnalysis.data.summary.changedNodes : undefined}
+                callFlowLoading={callFlowNavLoading}
+                callFlowError={callFlowNavError}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
                 copyRawDiffStatus={copyRawDiffStatus}
@@ -3314,14 +4223,17 @@ const ReviewApp: React.FC = () => {
                 searchGroups={hasSearchableFiles ? searchGroups : []}
                 searchMatches={hasSearchableFiles ? searchMatches : []}
                 activeSearchMatchId={hasSearchableFiles ? activeSearchMatchId : null}
-                onSelectSearchMatch={hasSearchableFiles ? handleSelectSearchMatch : undefined}
+                onSelectSearchMatch={hasSearchableFiles ? (match) => completeNavigatorSelection(() => handleSelectSearchMatch(match)) : undefined}
                 onStepSearchMatch={hasSearchableFiles ? stepSearchMatch : undefined}
               />
-              <ResizeHandle {...fileTreeResize.handleProps} className="z-10" side="left" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsFileTreeOpen(false)} />
-            </div>
+            </ReviewNavigatorContainer>
           )}
-          {!guideOpen && shouldShowFileTree && isFileTreeOpen && showCommitsPanel && (
-            <div className="contents group/sidebar">
+          {!guideOpen && shouldShowFileTree && isNavigatorOpen && showCommitsPanel && (
+            <ReviewNavigatorContainer
+              isCompactTouchLayout={isCompactTouchLayout}
+              onClose={() => setIsCompactNavigatorOpen(false)}
+              resizeHandle={fileTreeResizeHandle}
+            >
               <CommitsPanel
                 width={fileTreeResize.width}
                 commits={commitsView.commits}
@@ -3331,64 +4243,76 @@ const ReviewApp: React.FC = () => {
                 isLoadingMore={commitsView.isLoadingMore}
                 error={commitsView.error}
                 activeCommitSha={activeCommitSha}
-                onSelectCommit={handleSelectCommit}
+                onSelectCommit={(sha) => completeNavigatorSelection(() => handleSelectCommit(sha))}
                 onShowMore={commitsView.showMore}
                 onRetry={commitsView.refresh}
                 onSelectPanelView={handlePanelViewSelect}
                 showSectionsOption={sectionsCapable}
               />
-              <ResizeHandle {...fileTreeResize.handleProps} className="z-10" side="left" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsFileTreeOpen(false)} />
-            </div>
+            </ReviewNavigatorContainer>
           )}
-          {!guideOpen && shouldShowFileTree && isFileTreeOpen && !(sectionsAvailable && panelView === 'sections') && !showCommitsPanel && (
-            <div className="contents group/sidebar">
+          {!guideOpen && shouldShowFileTree && isNavigatorOpen && !(sectionsAvailable && panelView === 'sections') && !showCommitsPanel && (
+            <ReviewNavigatorContainer
+              isCompactTouchLayout={isCompactTouchLayout}
+              onClose={() => setIsCompactNavigatorOpen(false)}
+              context={compactNavigatorContext}
+              resizeHandle={fileTreeResizeHandle}
+            >
               <FileTree
                 files={files}
                 activeFileIndex={activeFileIndex}
-                onSelectPROverview={openPROverviewPanel}
+                onSelectPROverview={() => completeNavigatorSelection(openPROverviewPanel)}
                 isPROverviewActive={isPROverviewActive}
                 prOverviewNumber={prMetadata ? mrNumberLabel : undefined}
                 prOverviewTitle={prMetadata?.title}
-                onSelectPRArtifacts={prMetadata ? openPRArtifactsPanel : undefined}
+                onSelectPRArtifacts={prMetadata ? () => completeNavigatorSelection(openPRArtifactsPanel) : undefined}
                 isPRArtifactsActive={isPRArtifactsActive}
                 prArtifactCount={prMetadata ? prArtifacts.length : undefined}
-                onSelectSemanticDiff={() => openSemanticDiffPanel()}
+                onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
                 isSemanticDiffActive={isSemanticDiffActive}
-                semanticDiffAvailable={semanticDiffAvailable}
-
-                onSelectEslintCheck={eslintCheckAdvert.available ? requestEslintCheck : undefined}
+                semanticDiffAvailable={semanticDiffUsable}
+                onSelectEslintCheck={eslintCheckAdvert.available ? () => completeNavigatorSelection(requestEslintCheck) : undefined}
                 isEslintCheckActive={isEslintCheckActive}
                 eslintCheckFileCount={eslintCheckAdvert.fileCount}
-
-                onSelectAllFiles={openAllFilesPanel}
+                onSelectCallFlow={() => completeNavigatorSelection(openCallFlowPanel)}
+                isCallFlowActive={isCallFlowActive}
+                callFlowEnabled={callFlowEnabled}
+                callFlowCount={callFlowAnalysis.status === 'ready' ? callFlowAnalysis.data.summary.changedNodes : undefined}
+                callFlowLoading={callFlowNavLoading}
+                callFlowError={callFlowNavError}
+                onSelectAllFiles={() => completeNavigatorSelection(openAllFilesPanel)}
                 isAllFilesActive={isAllFilesActive}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
-                onSelectFile={handleFilePreview}
-                onDoubleClickFile={handleFilePinned}
+                onSelectFile={(index) => completeNavigatorSelection(() => handleFilePreview(index))}
+                onDoubleClickFile={(index) => completeNavigatorSelection(() => handleFilePinned(index))}
                 annotations={allAnnotations}
                 viewedFiles={viewedFiles}
                 onToggleViewed={handleToggleViewed}
                 hideViewedFiles={hideViewedFiles}
                 onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
+                showViewedControls={reviewShowViewedControls}
+                onToggleShowViewedControls={handleToggleReviewViewedControls}
                 enableKeyboardNav={!showExportModal && hasSearchableFiles}
                 diffOptions={reviewMode === 'workspace' ? (workspaceDiffOptions ?? undefined) : gitContext?.diffOptions}
                 activeDiffType={activeDiffBase}
-                onSelectDiff={handleDiffSwitch}
+                onSelectDiff={(diffType) => completeNavigatorSelection(() => handleDiffSwitch(diffType))}
                 isLoadingDiff={isLoadingDiff}
                 width={fileTreeResize.width}
                 worktrees={gitContext?.worktrees}
                 activeWorktreePath={activeWorktreePath}
-                onSelectWorktree={handleWorktreeSwitch}
+                onSelectWorktree={(path) => completeNavigatorSelection(() => handleWorktreeSwitch(path))}
                 currentBranch={gitContext?.currentBranch}
                 availableBranches={prMetadata ? undefined : gitContext?.availableBranches}
                 selectedBase={prMetadata ? undefined : selectedBase ?? undefined}
                 detectedBase={prMetadata ? undefined : gitContext?.defaultBranch || gitContext?.compareTarget?.fallback}
-                onSelectBase={prMetadata ? undefined : handleBaseSelect}
+                onSelectBase={prMetadata ? undefined : (base) => completeNavigatorSelection(() => handleBaseSelect(base))}
                 compareTarget={gitContext?.compareTarget}
                 recentCommits={prMetadata ? undefined : gitContext?.recentCommits}
                 jjEvologs={prMetadata ? undefined : gitContext?.jjEvologs}
                 detectedEvoBase={prMetadata ? undefined : gitContext?.jjEvologs?.[1]?.commitId}
                 stagedFiles={stagedFiles}
+                showStageControls={reviewShowStageControls}
+                onToggleShowStageControls={handleToggleReviewStageControls}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
                 copyRawDiffStatus={copyRawDiffStatus}
@@ -3403,25 +4327,30 @@ const ReviewApp: React.FC = () => {
                 searchGroups={hasSearchableFiles ? searchGroups : []}
                 searchMatches={hasSearchableFiles ? searchMatches : []}
                 activeSearchMatchId={hasSearchableFiles ? activeSearchMatchId : null}
-                onSelectSearchMatch={hasSearchableFiles ? handleSelectSearchMatch : undefined}
+                onSelectSearchMatch={hasSearchableFiles ? (match) => completeNavigatorSelection(() => handleSelectSearchMatch(match)) : undefined}
                 onStepSearchMatch={hasSearchableFiles ? stepSearchMatch : undefined}
                 repoRoot={prMetadata ? null : (activeWorktreePath ?? agentCwd ?? gitContext?.cwd ?? null)}
+                panelView={effectivePanelView}
                 onSwitchToSections={sectionsCapable ? handleSwitchToSections : undefined}
                 onSwitchToCommits={commitsCapable ? () => handlePanelViewSelect('commits') : undefined}
+                onSwitchToTree={() => handlePanelViewSelect('tree')}
                 sinceBaseSections={activeDiffBase === 'since-base' ? sections : null}
                 onStageFile={canStageFiles ? stageFile : undefined}
                 stagingFile={stagingFile}
               />
-              <ResizeHandle {...fileTreeResize.handleProps} className="z-10" side="left" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsFileTreeOpen(false)} />
-            </div>
+            </ReviewNavigatorContainer>
           )}
 
           {/* Guide takeover — peer of the file tree / center dock, not a
               replacement for either in the tree: the dock below stays
               mounted (just CSS-hidden) so its layout/scroll state survives
               toggling the guide open and closed. */}
-          {guideOpen && (
-            <div className="flex-1 min-w-0 overflow-y-auto">
+          {guideVisible && (
+            <div
+              className="flex-1 min-w-0 overflow-y-auto"
+              inert={isCompactTransientSurfaceOpen || undefined}
+              aria-hidden={isCompactTransientSurfaceOpen || undefined}
+            >
               <GuideScreen
                 activeGuideJobId={activeGuideJobId}
                 jobs={agentJobs.jobs}
@@ -3430,12 +4359,17 @@ const ReviewApp: React.FC = () => {
                 killJob={agentJobs.killJob}
                 onClose={() => setGuideOpen(false)}
                 onOpenFixedGuide={handleOpenGuide}
+                onOpenSavedGuide={handleOpenGuide}
               />
             </div>
           )}
 
           {/* Center dock area */}
-          <div className={`flex-1 min-w-0 overflow-hidden relative ${guideOpen ? 'hidden' : ''}`}>
+          <div
+            className={`flex-1 min-w-0 overflow-hidden relative ${guideVisible ? 'hidden' : ''}`}
+            inert={isCompactTransientSurfaceOpen || undefined}
+            aria-hidden={isCompactTransientSurfaceOpen || undefined}
+          >
             {/* Commit navigation veil: while a commit switch is in flight (or
                 the view was just entered and HEAD auto-select hasn't landed),
                 cover the stale previous diff instead of letting it sit there
@@ -3539,10 +4473,13 @@ const ReviewApp: React.FC = () => {
           {/* Resize Handle + Sidebar */}
           {reviewSidebar.isOpen && (
             <div className="contents group/sidebar">
-              <ResizeHandle {...panelResize.handleProps} className="z-10" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => reviewSidebar.close()} />
+              {!isCompactTouchLayout && (
+                <ResizeHandle {...panelResize.handleProps} className="z-10" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => reviewSidebar.close()} />
+              )}
               <ReviewSidebar
                 isOpen
                 onClose={reviewSidebar.close}
+                presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}
                 files={files}
@@ -3551,7 +4488,7 @@ const ReviewApp: React.FC = () => {
                 onNavigateToAnnotation={handleNavigateToAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
                 feedbackMarkdown={feedbackMarkdown}
-                width={panelResize.width}
+                width={isCompactTouchLayout ? undefined : panelResize.width}
                 editorAnnotations={visibleEditorAnnotations}
                 onDeleteEditorAnnotation={deleteEditorAnnotation}
                 descriptionAnnotations={visibleDescriptionAnnotations}
@@ -3586,12 +4523,27 @@ const ReviewApp: React.FC = () => {
                 externalAnnotations={externalAnnotations}
                 onOpenJobDetail={handleOpenJobDetail}
                 onOpenGuide={handleOpenGuide}
-                guideLaunchable={hasSearchableFiles}
+                guideLaunchable={aiUIEnabled && hasSearchableFiles}
                 canOpenGuideJob={jobMatchesCurrentContext}
               />
             </div>
           )}
         </div>
+
+        <ConfirmDialog
+          isOpen={showEslintConsent}
+          onClose={() => setShowEslintConsent(false)}
+          onConfirm={() => {
+            eslintConsentGranted.current = true;
+            setShowEslintConsent(false);
+            openEslintCheckPanel();
+          }}
+          title="Run Project ESLint?"
+          message="This runs the reviewed project's local ESLint configuration and plugins with your user permissions."
+          confirmText="Run ESLint"
+          cancelText="Cancel"
+          showCancel
+        />
 
         {/* Export Modal */}
         {showExportModal && (
@@ -3618,8 +4570,8 @@ const ReviewApp: React.FC = () => {
               </div>
               <div className="p-4 border-t border-border flex justify-end gap-2">
                 <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(feedbackMarkdown);
+                  onClick={() => {
+                    void copyTextToClipboard(feedbackMarkdown);
                   }}
                   className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-colors"
                 >
@@ -3649,25 +4601,12 @@ const ReviewApp: React.FC = () => {
               !!gitContext && gitContext.vcsType === 'git' && !prMetadata &&
               reviewMode !== 'workspace' && !sectionsCapable
             }
+            // The compact shell renders a session-only unified diff, so the
+            // Display tab hides the Split/Unified control rather than writing
+            // the desktop preference from a phone.
+            isCompactTouchLayout={isCompactTouchLayout}
           />
         </div>
-
-        <ConfirmDialog
-          isOpen={showEslintConsent}
-          onClose={() => setShowEslintConsent(false)}
-          onConfirm={() => {
-            eslintConsentGranted.current = true;
-            setShowEslintConsent(false);
-            openEslintCheckPanel();
-          }}
-          title="Run Project ESLint?"
-          message="This runs the reviewed project's local ESLint configuration and plugins with your user permissions."
-          subMessage="Plannotator checks only supported files in this review, runs ESLint without --fix, and does not install packages or invoke package scripts. Project configuration and plugins are executable code and may still modify files or perform other actions with your user permissions."
-          confirmText="Run ESLint"
-          cancelText="Cancel"
-          variant="warning"
-          showCancel
-        />
 
         {/* Worktree info dialog */}
         {(gitContext?.cwd || agentCwd) && prMetadata && (
@@ -3682,7 +4621,7 @@ const ReviewApp: React.FC = () => {
                 <div>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">Path</span>
                   <button
-                    onClick={() => navigator.clipboard.writeText((agentCwd || gitContext?.cwd)!)}
+                    onClick={() => { void copyTextToClipboard((agentCwd || gitContext?.cwd)!); }}
                     className="mt-1 w-full text-left font-mono text-xs bg-muted/50 border border-border/50 rounded-md px-3 py-2 text-foreground hover:bg-muted transition-colors cursor-pointer break-all"
                     title="Click to copy"
                   >
@@ -3738,10 +4677,10 @@ const ReviewApp: React.FC = () => {
           showCancel
         />
 
-        {/* 0.20.0 look-and-feel / release announcement. Shared with the plan
-            editor via a host-scoped cookie, so it shows once across both apps.
+        {/* First-use Grid/Clean choice. Its explicit-choice marker is shared
+            with the plan editor, so resolving it in either app suppresses it everywhere.
             Second in the dialog chain (guide intro → look-and-feel → review
-            setup) — the three never stack. */}
+            setup → edit mode) — the chain dialogs never stack. */}
         <LookAndFeelAnnouncementDialog
           isOpen={showLookAndFeel && !guideIntroVisible}
           gridEnabled={gridEnabled}
@@ -3750,8 +4689,8 @@ const ReviewApp: React.FC = () => {
         />
 
         {/* One-time guided-review intro. First in the dialog chain, ahead of
-            the look-and-feel announcement and the review setup — the three
-            never stack. */}
+            the look-and-feel chooser, review setup, and edit-mode
+            announcement — the chain dialogs never stack. */}
         {guideIntroVisible && (
           <GuideIntroDialog
             isOpen
@@ -3763,9 +4702,9 @@ const ReviewApp: React.FC = () => {
         )}
 
         {/* First-run review-view chooser (panel view + tree default diff).
-            Last in the dialog chain (guide intro → look-and-feel → review
-            setup) so the three never stack. On dismiss, apply the chosen
-            default to the current session. */}
+            Third in the dialog chain (guide intro → look-and-feel → review
+            setup → edit mode) so the chain dialogs never stack. On dismiss,
+            apply the chosen default to the current session. */}
         {showReviewSetup && !showLookAndFeel && !guideIntroVisible && (
           <ReviewSetupDialog
             isOpen
@@ -3785,16 +4724,29 @@ const ReviewApp: React.FC = () => {
           />
         )}
 
+        {/* One-time Edit Mode (edit-to-suggest) announcement. LAST in the
+            dialog chain (guide intro → look-and-feel → review setup
+            → edit mode) — editModeAnnouncementCanShow gates on every earlier dialog, so the
+            chain dialogs never stack. */}
+        {editModeIntroVisible && (
+          <EditModeAnnouncementDialog
+            isOpen
+            onEnable={enableEditModeIntro}
+            onDismiss={dismissEditModeIntro}
+          />
+        )}
+
         {/* One-time PR feedback-destination spotlight. Strictly AFTER the
             first-run dialog chain (guide intro → look-and-feel → review
-            setup): it only mounts once none of the three is showing, so it
-            never stacks with them. PR mode only — the switcher it points at
-            doesn't render otherwise. */}
-        {showDestSpotlight && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && (
+            setup → edit mode): it only mounts once none of the four is
+            showing, so it never stacks with them. PR mode only — the switcher
+            it points at doesn't render otherwise. */}
+        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && (
           <DestinationSpotlight
             targetRef={destToggleRef}
             platformLabel={platformLabel}
             mrLabel={mrLabel}
+            compactTouchLayout={isCompactTouchLayout}
             onDismiss={dismissDestSpotlight}
           />
         )}
@@ -3839,6 +4791,7 @@ const ReviewApp: React.FC = () => {
           }}
           onCancel={() => setPlatformCommentDialog(null)}
           isSubmitting={isPlatformActioning}
+          recoveryPersistsRefresh={platformRecoveryPersistsRefresh}
           mrLabel={mrLabel}
           platformLabel={platformLabel}
         />
@@ -3846,6 +4799,26 @@ const ReviewApp: React.FC = () => {
 
       {/* Tour dialog overlay */}
       <TourDialog jobId={tourDialogJobId} onClose={() => setTourDialogJobId(null)} />
+
+      {lineAnnotationComposeRequest && (() => {
+        const targetFile = files.find(file => file.path === lineAnnotationComposeRequest.filePath);
+        if (!targetFile) return null;
+        return (
+          <ExternalLineAnnotationComposer
+            key={lineAnnotationComposeRequest.id}
+            request={lineAnnotationComposeRequest}
+            file={targetFile}
+            onLineSelection={handleLineSelection}
+            onAddAnnotationForFile={handleAddAnnotationForFile}
+            onEditAnnotation={handleEditAnnotation}
+            aiAvailable={aiAvailable}
+            onAskAIForFile={handleAskAIForFile}
+            isAILoading={aiIsCreatingSession || aiIsStreaming}
+            onViewAIResponse={handleViewAIResponse}
+            aiHistoryMessages={getAIHistoryForFile(targetFile.path)}
+          />
+        );
+      })()}
 
       {/* Dev-only: open a fully-formed demo tour without running the agent.
           Stripped from production builds via import.meta.env.DEV. */}

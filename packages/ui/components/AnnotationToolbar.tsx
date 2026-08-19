@@ -3,6 +3,7 @@ import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 import { type QuickLabel, getQuickLabels } from "../utils/quickLabels";
+import { copyTextToClipboard } from "../utils/clipboard";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
@@ -32,6 +33,10 @@ interface AnnotationToolbarProps {
   onQuickLabel?: (label: QuickLabel) => void;
   /** Text to copy when the button is clicked */
   copyText?: string;
+  /** Comment-only surfaces (HTML / live-app viewer): hide the Delete action.
+   *  Markdown surfaces keep the full toolbar. Quick labels are already gated
+   *  by the presence of onQuickLabel. */
+  commentOnly?: boolean;
   /** Hide the copy button (set when a keyboard copy handler exists) */
   hideCopyButton?: boolean;
   /** Close toolbar when element scrolls out of viewport */
@@ -51,6 +56,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onRequestComment,
   onQuickLabel,
   copyText,
+  commentOnly = false,
   hideCopyButton = false,
   closeOnScrollOut = false,
   isExiting = false,
@@ -72,19 +78,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       const codeEl = element.querySelector('code');
       textToCopy = codeEl?.textContent || element.textContent || '';
     }
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = textToCopy;
-      textarea.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      textarea.remove();
+    if (await copyTextToClipboard(textToCopy)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   };
 
   // Update position on scroll/resize
@@ -123,7 +120,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing) return;
+      if (e.defaultPrevented || e.isComposing) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
 
       // When picker is open, let FloatingQuickLabelPicker own all keyboard input
@@ -205,7 +202,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           to { opacity: 0; transform: translateY(8px)${translateX}; }
         }
       `}</style>
-      <div className="flex items-center p-1 gap-0.5">
+      <div data-pn-annotation-toolbar-row="true" className="flex items-center p-1 gap-0.5">
         {!hideCopyButton && (
           <>
             <ToolbarButton
@@ -217,12 +214,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             <div className="w-px h-5 bg-border mx-0.5" />
           </>
         )}
-        <ToolbarButton
-          onClick={() => handleTypeSelect(AnnotationType.DELETION)}
-          icon={<TrashIcon />}
-          label="Delete"
-          className="text-destructive hover:bg-destructive/10"
-        />
+        {!commentOnly && (
+          <ToolbarButton
+            onClick={() => handleTypeSelect(AnnotationType.DELETION)}
+            icon={<TrashIcon />}
+            label="Delete"
+            className="text-destructive hover:bg-destructive/10"
+          />
+        )}
         <ToolbarButton
           onClick={() => handleTypeSelect(AnnotationType.COMMENT)}
           icon={<CommentIcon />}
@@ -314,6 +313,11 @@ const ToolbarButton = React.forwardRef<HTMLButtonElement, {
 }>(({ onClick, icon, label, className }, ref) => (
   <button
     ref={ref}
+    // Icon-only controls: the markers are inert outside the compact touch
+    // scope, where theme.css grows them to var(--pn-touch-target). Desktop
+    // geometry is unchanged.
+    data-pn-touch-target="true"
+    data-pn-touch-target-icon="true"
     onClick={onClick}
     title={label}
     className={`p-1.5 rounded-md transition-colors ${className}`}

@@ -39,6 +39,8 @@ gh attestation verify "%USERPROFILE%\.local\bin\plannotator.exe" ^
   --signer-workflow backnotprop/plannotator/.github/workflows/release.yml
 ```
 
+**No gh login?** The attestations endpoint is world-readable for public repositories, so you can verify without authenticating: compute the binary's SHA256, fetch `https://api.github.com/repos/backnotprop/plannotator/attestations/sha256:<digest>` with plain `curl`, write each `attestations[].bundle` value to a file (one JSON document per line), and pass it via `--bundle <file>` alongside the same `--repo`/`--source-ref`/`--signer-workflow` flags. This is exactly what the installer's automatic verification does. Note the unauthenticated API allows 60 requests per hour per IP, and `gh` still needs network access to fetch the Sigstore trust root on every run.
+
 For air-gapped or no-auth environments, see GitHub's docs on [verifying attestations offline](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/verifying-attestations-offline).
 
 ## Automatic verification during install
@@ -66,7 +68,7 @@ mkdir -p ~/.plannotator
 echo '{ "verifyAttestation": true }' > ~/.plannotator/config.json
 ```
 
-When enabled, the installer requires `gh` CLI installed and authenticated (`gh auth login`). If `gh` is missing or the check fails, the install hard-fails so you don't silently skip verification. To force-skip for a single install, pass `--skip-attestation` (bash/cmd) or `-SkipAttestation` (PowerShell).
+When enabled, the installer requires the `gh` CLI but **not** a `gh auth login`: it fetches the attestation bundle from GitHub's public attestations API (a single unauthenticated request) and verifies with `gh attestation verify --bundle`, pinning the same source ref and signer workflow as the manual commands above. On macOS/Linux the bundle extraction needs one JSON tool on PATH (node, python3, or jq); Windows uses PowerShell. If the bundle path is unavailable or does not complete, the installer falls back to gh's own authenticated fetch, which is where a login still helps. Verification always needs network access because the Sigstore trust root is fetched on every run; that failure is reported as a connectivity problem, distinct from a real provenance failure. Either way the install hard-fails rather than silently skipping verification. To force-skip for a single install, pass `--skip-attestation` (bash/cmd) or `-SkipAttestation` (PowerShell).
 
 ## Supported versions
 

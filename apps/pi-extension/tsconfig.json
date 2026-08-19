@@ -11,6 +11,6 @@
     "moduleDetection": "force",
     "types": ["node"]
   },
-  "include": ["*.ts", "server/**/*.ts"],
+  "include": ["*.ts", "server/**/*.ts", "todo-providers/**/*.ts"],
   "exclude": ["**/*.test.ts"]
 }

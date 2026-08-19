@@ -48,4 +48,81 @@ const formattedDate = date.toLocaleDateString('en-US', {
     </div>
     <Footer />
   </div>
+  <dialog id="img-lightbox" aria-label="Enlarged image">
+    <img alt="" />
+  </dialog>
+  <script is:inline>
+    // Click a post image to view it full-size in a native <dialog>.
+    (function () {
+      var dialog = document.getElementById('img-lightbox');
+      if (!dialog || !dialog.showModal) return;
+      var dialogImg = dialog.querySelector('img');
+      document.querySelectorAll('.prose img').forEach(function (img) {
+        img.classList.add('lightboxable');
+        img.addEventListener('click', function () {
+          dialogImg.src = img.src;
+          dialogImg.alt = img.alt || '';
+          dialog.showModal();
+        });
+      });
+      // Native <dialog> handles Escape; this covers click-anywhere-to-close.
+      dialog.addEventListener('click', function () {
+        dialog.close();
+      });
+    })();
+  </script>
+  <style is:global>
+    /* Blog-only readability bump (~10% over the shared .prose scale).
+       article.prose outranks .prose, so both breakpoints are restated. */
+    article.prose {
+      font-size: 0.96rem;
+    }
+    article.prose h1 { font-size: 1.65rem; }
+    article.prose h2 { font-size: 1.375rem; }
+    article.prose h3 { font-size: 1.1rem; }
+    article.prose h4 { font-size: 0.96rem; }
+    @media (min-width: 768px) {
+      article.prose {
+        font-size: 1.05rem;
+      }
+    }
+    .prose img.lightboxable {
+      cursor: zoom-in;
+    }
+    #img-lightbox {
+      /* Re-assert UA centering; the global reset zeroes dialog margins,
+         which shifts the box top-left. Size to the image exactly so the
+         click-to-close surface has no dead area around it. */
+      margin: auto;
+      inset: 0;
+      width: fit-content;
+      height: fit-content;
+      padding: 0;
+      border: none;
+      background: transparent;
+      max-width: 96vw;
+      max-height: 96vh;
+      cursor: zoom-out;
+    }
+    #img-lightbox img {
+      display: block;
+      max-width: 96vw;
+      max-height: 96vh;
+      width: auto;
+      height: auto;
+      border-radius: 6px;
+    }
+    #img-lightbox::backdrop {
+      background: rgba(0, 0, 0, 0.82);
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      #img-lightbox[open] {
+        animation: lightbox-in 120ms ease-out;
+      }
+      @keyframes lightbox-in {
+        from { opacity: 0; transform: scale(0.97); }
+        to { opacity: 1; transform: scale(1); }
+      }
+    }
+  </style>
 </Base>

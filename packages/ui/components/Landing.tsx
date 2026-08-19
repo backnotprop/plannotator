@@ -50,7 +50,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium mb-6">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              For Claude Code & OpenCode
+              For Claude Code &amp; OpenCode
             </div>
 
             <div className="flex items-center gap-6 mb-4">
@@ -197,8 +197,8 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
               <div>
                 <h3 className="font-semibold mb-1">Runs locally.</h3>
                 <p className="text-muted-foreground text-sm">
-                  Local plugin. No network requests. Plannotator runs entirely
-                  in your browser. Plans never leave your machine.
+                  Reviews and saved data stay local by default. Every load checks
+                  GitHub for updates, with no current opt-out, but sends no review content.
                 </p>
               </div>
             </div>
@@ -219,11 +219,11 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold mb-1">Share privately.</h3>
+                <h3 className="font-semibold mb-1">Know what a link contains.</h3>
                 <p className="text-muted-foreground text-sm">
-                  Collaborate without a backend. Plans and annotations compress
-                  into the URL itself — share a link. No accounts, no database,
-                  no third parties. Inspired by{" "}
+                  Small shares contain compressed, unencrypted content in the
+                  URL fragment. Short links upload encrypted ciphertext. Anyone
+                  with the full link can read the shared content. Inspired by{" "}
                   <a
                     href="https://github.com/antonmedv/textarea"
                     target="_blank"
@@ -418,7 +418,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
             </li>
             <li className="flex items-center gap-2">
               <span className="text-primary">•</span>
-              URL sharing via deflate compression — no backend required
+              Hash-based URL sharing, with an optional encrypted paste service
             </li>
           </ul>
 

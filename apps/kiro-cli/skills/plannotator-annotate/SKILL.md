@@ -13,3 +13,5 @@ PLANNOTATOR_ORIGIN=kiro-cli plannotator annotate $ARGUMENTS
 ```
 
 `$ARGUMENTS` should be a markdown or plain-text config file path (.md, .txt, .yaml, .json, .toml, .ini, .csv, .log, …), folder path, html file path, or URL.
+
+If the command reports that the arguments could not be resolved to a file, URL, or folder, work out which target the user means and re-run the command yourself with that concrete path or URL.

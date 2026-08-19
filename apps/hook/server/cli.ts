@@ -1,4 +1,113 @@
+import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
+
 const HELP_FLAGS = new Set(["--help", "-h"]);
+
+export interface ParsedStrictAnnotateOptions {
+  requireApproval: boolean;
+  resultFile?: string;
+  remainingArgs: string[];
+}
+
+export interface ParsedUninstallOptions {
+  purge: boolean;
+  yes: boolean;
+  dryRun: boolean;
+}
+
+/**
+ * Parse the deliberately small, non-overlapping uninstall flag surface.
+ */
+export function parseUninstallOptions(
+  args: readonly string[],
+): ParsedUninstallOptions {
+  let purge = false;
+  let yes = false;
+  let dryRun = false;
+
+  for (const arg of args) {
+    if (arg === "--purge") {
+      if (purge) throw new Error("--purge may only be specified once");
+      purge = true;
+    } else if (arg === "--yes" || arg === "-y") {
+      if (yes) throw new Error("--yes/-y may only be specified once");
+      yes = true;
+    } else if (arg === "--dry-run") {
+      if (dryRun) throw new Error("--dry-run may only be specified once");
+      dryRun = true;
+    } else {
+      throw new Error(`Unknown uninstall option: ${arg}`);
+    }
+  }
+
+  return { purge, yes, dryRun };
+}
+
+/**
+ * Normal uninstall accepts y/yes. Purge intentionally requires an exact,
+ * explicit word so an accidental return key cannot destroy local data.
+ */
+export function isUninstallConfirmationAccepted(
+  answer: string,
+  purge: boolean,
+): boolean {
+  const normalized = answer.trim().toLowerCase();
+  return purge
+    ? normalized === "purge"
+    : normalized === "y" || normalized === "yes";
+}
+
+export function parseStrictAnnotateOptions(
+  args: string[],
+): ParsedStrictAnnotateOptions {
+  let requireApproval = false;
+  let resultFile: string | undefined;
+  const remainingArgs: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--require-approval") {
+      if (requireApproval) {
+        throw new Error("--require-approval may only be specified once");
+      }
+      requireApproval = true;
+      continue;
+    }
+    if (arg === "--result-file") {
+      if (resultFile !== undefined) {
+        throw new Error("--result-file may only be specified once");
+      }
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("Missing value for --result-file");
+      }
+      resultFile = value;
+      index += 1;
+      continue;
+    }
+    remainingArgs.push(arg);
+  }
+
+  if (!requireApproval && resultFile === undefined) {
+    return { requireApproval: false, remainingArgs };
+  }
+  if (remainingArgs[0] !== "annotate") {
+    throw new Error(
+      "--require-approval and --result-file are only valid with annotate",
+    );
+  }
+  if (!remainingArgs.includes("--gate") || !remainingArgs.includes("--json")) {
+    throw new Error(
+      "--require-approval and --result-file require --gate --json",
+    );
+  }
+  if (remainingArgs.includes("--hook")) {
+    throw new Error(
+      "--require-approval and --result-file cannot be used with --hook",
+    );
+  }
+
+  return { requireApproval, resultFile, remainingArgs };
+}
 
 /** True when any token is a help flag (`--help` / `-h`). */
 export function hasHelpFlag(args: string[]): boolean {
@@ -32,13 +141,19 @@ export function formatTopLevelHelp(): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [PR_URL]",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook]",
-    "  plannotator annotate-last [--stdin] [--gate] [--json] [--hook]",
+    "  plannotator review [--git | --gitbutler] [--tailscale] [PR_URL]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator copilot-last [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",
     "  plannotator archive",
+    "  plannotator guide list",
+    "  plannotator guide export --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--out <file.html>]",
+    "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
+    "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
+    "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
     "",
     "Run 'plannotator <command> --help' for command-specific usage.",
@@ -57,7 +172,7 @@ export function formatTopLevelHelp(): string {
 const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--local | --no-local] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--local | --no-local] [--tailscale] [PR_URL]",
     "",
     "Review local VCS changes or a GitHub/GitLab pull request in the browser.",
     "",
@@ -66,6 +181,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "  --gitbutler   Force GitButler as the VCS (requires but 0.21.0+)",
     "  --local       For PR review, prepare a local checkout for full file access (default)",
     "  --no-local    For PR review, skip the local checkout (diff only)",
+    "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  PR_URL        GitHub PR or GitLab MR URL to review",
     "",
     "Examples:",
@@ -76,26 +192,46 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   annotate: [
     "Usage:",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json] [--hook]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
     "",
     "Options:",
     "  --markdown    Convert HTML input to markdown instead of rendering it raw",
     "  --no-jina     Fetch URLs with fetch+Turndown instead of Jina Reader",
+    "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
     "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",
+    "  --require-approval",
+    "                Exit 1 unless the reviewer approves (requires --gate --json;",
+    "                usage/startup errors exit 2)",
+    "  --result-file <path>",
+    "                Atomically publish the stdout JSON (requires --gate --json)",
   ].join("\n"),
   "annotate-last": [
     "Usage:",
-    "  plannotator annotate-last [--stdin] [--gate] [--json] [--hook]",
-    "  plannotator last [--stdin] [--gate] [--json] [--hook]",
+    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
     "",
     "Annotate the last assistant message from the current agent session.",
     "",
     "Options:",
     "  --stdin       Read the message content from stdin instead of session logs",
+    "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
+    "  --gate        Add an Approve button (review-gate UX)",
+    "  --json        Emit a structured decision JSON on stdout",
+    "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",
+  ].join("\n"),
+  "copilot-last": [
+    "Usage:",
+    "  plannotator copilot-last [--gate] [--json] [--hook]",
+    "",
+    "Annotate the last assistant message from the live GitHub Copilot CLI session,",
+    "read from its session-state events.jsonl. Normally invoked by the Copilot",
+    "plugin's /plannotator-last command.",
+    "",
+    "Options:",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
     "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",
@@ -116,6 +252,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "",
     "Open a read-only browser for saved plan decisions in ~/.plannotator/plans/.",
   ].join("\n"),
+  guide: GUIDE_CLI_USAGE,
   "improve-context": [
     "Usage:",
     "  plannotator improve-context",
@@ -134,6 +271,21 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Options:",
     "  --open [N]    Reopen session #N (default 1) in the browser",
     "  --clean       Remove stale session entries",
+  ].join("\n"),
+  uninstall: [
+    "Usage:",
+    "  plannotator uninstall [--purge] [--yes | -y] [--dry-run]",
+    "",
+    "Remove Plannotator-installed components. Local plans, history, drafts,",
+    "settings, and other Plannotator data are preserved by default.",
+    "",
+    "Options:",
+    "  --purge       Also permanently delete known local Plannotator data",
+    "  --yes, -y     Skip the interactive confirmation (required without a TTY)",
+    "  --dry-run     Preview recognized removal work without changing anything",
+    "",
+    "Purge data is local-only: it is not stored on a Plannotator server and",
+    "cannot be recovered after purge. Unrecognized custom files are preserved.",
   ].join("\n"),
 };
 
@@ -172,6 +324,7 @@ export function formatInteractiveNoArgClarification(): string {
     "  plannotator last",
     "  plannotator archive",
     "  plannotator sessions",
+    "  plannotator uninstall",
     "",
     "Run 'plannotator --help' for top-level usage.",
   ].join("\n");

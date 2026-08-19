@@ -1,8 +1,13 @@
 /**
  * Agent Switch Settings Utility
  *
- * Manages settings for automatic agent switching after plan approval.
- * Supports built-in agents (build), disabled, or custom agent names.
+ * Manages settings for automatic agent switching after plan approval and after
+ * sending code review feedback. Supports discovered agents, disabled, or custom
+ * agent names.
+ *
+ * The stored value is shared across surfaces, but the default when nothing is
+ * stored is surface-specific: plan approval keeps its historical hand-off to the
+ * build agent, while review feedback stays on the current agent.
  *
  * Uses cookies (not localStorage) because each hook invocation runs on a
  * random port, and localStorage is scoped by origin including port.
@@ -28,14 +33,32 @@ export const AGENT_OPTIONS: { value: string; label: string; description: string 
   { value: 'disabled', label: 'Disabled', description: 'Stay on current agent after approval' },
 ];
 
-const DEFAULT_SETTINGS: AgentSwitchSettings = {
+/** UI surface asking for the setting — only affects the unset default. */
+export type AgentSwitchSurface = 'plan' | 'review';
+
+const PLAN_DEFAULT_SETTINGS: AgentSwitchSettings = {
   switchTo: 'build',
 };
 
+const REVIEW_DEFAULT_SETTINGS: AgentSwitchSettings = {
+  switchTo: 'disabled',
+};
+
 /**
- * Get current agent switch settings from storage
+ * Default used when the user has never picked an agent switch setting.
+ * Plan approval hands off to the build agent (historical behavior); review
+ * feedback stays on the current agent.
  */
-export function getAgentSwitchSettings(): AgentSwitchSettings {
+export function getAgentSwitchDefaults(surface: AgentSwitchSurface = 'plan'): AgentSwitchSettings {
+  return surface === 'review' ? REVIEW_DEFAULT_SETTINGS : PLAN_DEFAULT_SETTINGS;
+}
+
+/**
+ * Get current agent switch settings from storage.
+ * An explicit user choice applies to every surface; only the unset default
+ * varies by surface.
+ */
+export function getAgentSwitchSettings(surface: AgentSwitchSurface = 'plan'): AgentSwitchSettings {
   const stored = storage.getItem(STORAGE_KEY);
   const customName = storage.getItem(CUSTOM_NAME_KEY) || undefined;
 
@@ -43,7 +66,7 @@ export function getAgentSwitchSettings(): AgentSwitchSettings {
   if (stored) {
     return { switchTo: stored, customName };
   }
-  return DEFAULT_SETTINGS;
+  return getAgentSwitchDefaults(surface);
 }
 
 /**
@@ -67,5 +90,8 @@ export function getEffectiveAgentName(settings: AgentSwitchSettings): string | u
   if (settings.switchTo === 'custom' && settings.customName) {
     return settings.customName;
   }
-  return settings.switchTo; // 'build' or fallback
+  if (settings.switchTo === 'custom') {
+    return undefined;
+  }
+  return settings.switchTo;
 }

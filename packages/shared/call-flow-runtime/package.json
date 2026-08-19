@@ -1,0 +1,19 @@
+{
+  "name": "plannotator-call-flow-runtime",
+  "version": "0.4.1-plannotator.2",
+  "private": true,
+  "description": "Managed offline runtime for Plannotator call-flow analysis",
+  "dependencies": {
+    "@types/node": "24.2.0",
+    "calldiff": "file:calldiff-a3194d20ca91ef6a314273d634e9b9c0db1c2707.tar.gz",
+    "tree-sitter": "0.25.1",
+    "tree-sitter-javascript": "0.25.0",
+    "tree-sitter-typescript": "0.23.2",
+    "typescript": "5.9.2"
+  },
+  "overrides": {
+    "tree-sitter-typescript": {
+      "tree-sitter": "$tree-sitter"
+    }
+  }
+}

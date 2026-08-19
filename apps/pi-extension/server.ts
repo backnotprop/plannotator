@@ -10,21 +10,21 @@ export type {
 	DiffOption,
 	DiffType,
 	GitContext,
-} from "./generated/review-core.js";
-export type { WorkspaceDiffType } from "./generated/review-workspace.js";
-export type { VcsSelection } from "./server/vcs.js";
+} from "./generated/review-core.ts";
+export type { WorkspaceDiffType } from "./generated/review-workspace.ts";
+export type { VcsSelection } from "./server/vcs.ts";
 export {
 	type AnnotateServerResult,
 	startAnnotateServer,
-} from "./server/serverAnnotate.js";
+} from "./server/serverAnnotate.ts";
 export {
 	type PlanServerResult,
 	startPlanReviewServer,
-} from "./server/serverPlan.js";
+} from "./server/serverPlan.ts";
 export {
 	type ReviewServerResult,
 	startReviewServer,
-} from "./server/serverReview.js";
+} from "./server/serverReview.ts";
 export {
 	canStageFiles,
 	detectManagedVcs,
@@ -42,4 +42,4 @@ export {
 	runVcsDiff,
 	stageFile,
 	unstageFile,
-} from "./server/vcs.js";
+} from "./server/vcs.ts";

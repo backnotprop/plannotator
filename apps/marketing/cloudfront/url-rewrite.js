@@ -24,7 +24,7 @@ function handler(event) {
     '/docs/guides/opencode-migration-0-19-1': 'https://docs.plannotator.ai/open-source/agents/opencode',
     '/docs/guides/opencode': 'https://docs.plannotator.ai/open-source/agents/opencode',
     '/docs/guides/remote-and-devcontainers': 'https://docs.plannotator.ai/open-source/troubleshooting#remote-ssh-and-development-containers',
-    '/docs/guides/self-hosting': 'https://docs.plannotator.ai/open-source/workflows/sharing#use-your-own-share-services',
+    '/docs/guides/self-hosting': 'https://docs.plannotator.ai/open-source/self-hosting',
     '/docs/guides/sharing-and-collaboration': 'https://docs.plannotator.ai/open-source/workflows/sharing',
     '/docs/guides/troubleshooting': 'https://docs.plannotator.ai/open-source/troubleshooting',
     '/docs/integrations/external-annotations-api': 'https://docs.plannotator.ai/open-source/reference/external-annotations',
@@ -39,7 +39,7 @@ function handler(event) {
     '/blog/local-diff-review-for-coding-agents': 'https://docs.plannotator.ai/learn/local-diff-review-for-coding-agents',
     '/blog/plan-diff-see-what-changed': 'https://docs.plannotator.ai/learn/plan-diff-see-what-changed',
     '/blog/plannotator-meets-pi': 'https://docs.plannotator.ai/open-source/agents/pi',
-    '/blog/sharing-plans-with-your-team': 'https://docs.plannotator.ai/workspaces/review-plans-and-technical-decisions',
+    '/blog/sharing-plans-with-your-team': 'https://docs.plannotator.ai/open-source/workflows/sharing',
     '/blog/welcome': 'https://docs.plannotator.ai/open-source/'
   };
 

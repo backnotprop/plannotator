@@ -34,6 +34,8 @@ Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain
 
 The agent runs `plannotator annotate <arg>` under the hood. The annotation UI opens in the browser. When you submit, feedback is returned to the agent as structured output.
 
+You do not have to pass a bare path. Extra words around a path are fine (`/plannotator-annotate look at docs/spec.md please` opens `docs/spec.md`), and a purely natural-language request (`/plannotator-annotate the aim doc`) hands off to the agent, which works out the file you mean and re-runs the command with a concrete target. If several of your words each name a real file, Plannotator errors and lists the candidates instead of guessing, so name exactly one target per invocation.
+
 ### Standalone CLI (outside an agent session)
 
 ```bash
@@ -138,7 +140,7 @@ Switches stdout to a structured decision object so hooks can route programmatica
 { "decision": "approved" | "annotated" | "dismissed", "feedback": "..." }
 ```
 
-`feedback` is only present when `decision === "annotated"`.
+`feedback` is present for `annotated` decisions, and for `approved` decisions when the reviewer approved with notes (`--gate --json` only). Approval notes are non-blocking guidance — they are not a request for another revision.
 
 ### `--hook`
 
@@ -153,7 +155,7 @@ This is the recommended flag for hook integrations. If both `--hook` and `--json
 | *(none)* | 2-button | n/a | empty | feedback (plaintext) |
 | `--gate` | 3-button | `The user approved.` | empty | feedback (plaintext) |
 | `--json` | 2-button | n/a | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
-| `--gate --json` | 3-button | `{"decision":"approved"}` | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
+| `--gate --json` | 3-button | `{"decision":"approved"}`, or `{"decision":"approved","feedback":"..."}` when approved with notes | `{"decision":"dismissed"}` | `{"decision":"annotated","feedback":"..."}` |
 | `--hook` | 3-button | empty | empty | `{"decision":"block","reason":"..."}` |
 
 **Key property:** `--gate` plaintext output is unambiguous across three decisions. Use `--json` when you want machine-readable decision objects. Use `--hook` when wiring into Claude Code or Codex hooks directly.

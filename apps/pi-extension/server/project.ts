@@ -5,8 +5,8 @@
 
 import { execSync } from "node:child_process";
 import { basename } from "node:path";
-import { sanitizeTag } from "../generated/project.js";
-import { parseRemoteUrl, getDirName } from "../generated/repo.js";
+import { sanitizeTag } from "../generated/project.ts";
+import { parseRemoteUrl, getDirName } from "../generated/repo.ts";
 
 /** Run a git command and return stdout (empty string on error). */
 function git(cmd: string): string {

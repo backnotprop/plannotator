@@ -6,6 +6,23 @@ sidebar:
 section: "Guides"
 ---
 
+## Installer fails with "Failed to fetch latest version"
+
+The installer queries the GitHub API (`api.github.com`) to resolve the latest release tag. Unauthenticated API requests are capped at **60 per hour per source IP** - not per user - so the install fails (with `Failed to fetch latest version` on macOS/Linux/WSL, `Failed to get latest version` on Windows) on shared egress IPs (corporate proxies, NAT/CGNAT, CI runners) or when retrying within the same hour.
+
+Provide a token and the installer attaches it to that API call automatically. A personal access token raises the limit to 5,000/hour; the built-in `GITHUB_TOKEN` in GitHub Actions gets 1,000/hour per repository. The repository is public, so a token with no scopes is sufficient - prefer a fine-grained or zero-scope token over a broad classic PAT. The installer reads, in order:
+
+1. `GITHUB_TOKEN` env var
+2. `GH_TOKEN` env var
+3. `gh auth token` for github.com (when the `gh` CLI is installed and authenticated; a GitHub Enterprise default host is never used for this call)
+
+```bash
+export GITHUB_TOKEN=ghp_xxx
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Or run `gh auth login` once - no env var needed. To pin a specific version instead (which skips the API call entirely), pass `--version vX.Y.Z` on macOS/Linux (`curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version vX.Y.Z`) or `-Version vX.Y.Z` with the PowerShell installer. Only the version-resolution call is authenticated; release downloads and `git clone` are unaffected. See [issue #1156](https://github.com/backnotprop/plannotator/issues/1156).
+
 ## Lost a Plannotator tab?
 
 If you accidentally close a Plannotator browser tab, the server is still running in the background. You can find and reopen it:
@@ -36,7 +53,7 @@ Stale sessions from crashed processes are cleaned up automatically. You can also
 
 ## Where does Plannotator store data?
 
-All local data lives under `~/.plannotator/`:
+Plannotator-managed files live under `~/.plannotator/` by default:
 
 | Directory | What's in it |
 |-----------|-------------|
@@ -45,7 +62,7 @@ All local data lives under `~/.plannotator/`:
 | `drafts/` | Auto-saved annotation drafts. If a server crashes mid-review, your in-progress annotations are recovered on the next session. |
 | `sessions/` | Temporary session files for active servers. Cleaned up automatically when a server exits. |
 
-Plan saving is enabled by default. You can change the save directory or disable it entirely in the Plannotator UI settings (gear icon).
+Plan saving is enabled by default. You can change the save directory or disable it entirely in the Plannotator UI settings (gear icon). Functional browser cookies store some UI preferences separately from this directory.
 
 ## Browser doesn't open
 

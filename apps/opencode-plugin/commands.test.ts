@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { handleAnnotateCommand, handleAnnotateLastCommand } from "./commands";
+import { OpenCodePromptDeliveryError } from "./prompt-delivery-error";
 
 // Inject the annotate-server stub through CommandDeps rather than
 // `mock.module`. Bun's module mocks are process-global and cannot be unset,
@@ -54,6 +55,102 @@ afterEach(() => {
 });
 
 describe("handleAnnotateCommand", () => {
+  test("advertises approval notes only when an OpenCode session is available", async () => {
+    const projectRoot = makeTempDir();
+    const filePath = path.join(projectRoot, "plan.md");
+    writeFileSync(filePath, "# Plan\n");
+
+    const withSession = makeDeps();
+    withSession.directory = projectRoot;
+    await handleAnnotateCommand(
+      { properties: { arguments: "plan.md --gate", sessionID: "session-123" } },
+      withSession,
+    );
+    expect(startAnnotateServerMock.mock.calls[0]?.[0].approvalNotesSupported).toBe(true);
+
+    startAnnotateServerMock.mockClear();
+    const withoutSession = makeDeps();
+    withoutSession.directory = projectRoot;
+    await handleAnnotateCommand(
+      { properties: { arguments: "plan.md --gate" } },
+      withoutSession,
+    );
+    expect(startAnnotateServerMock.mock.calls[0]?.[0].approvalNotesSupported).toBe(false);
+  });
+
+  test("injects approved feedback as non-blocking notes with file context", async () => {
+    const projectRoot = makeTempDir();
+    const filePath = path.join(projectRoot, "plan.md");
+    writeFileSync(filePath, "# Plan\n");
+    const deps: any = makeDeps();
+    deps.directory = projectRoot;
+    deps.startAnnotateServer = mock(async (options: any) => ({
+      port: 0,
+      url: "http://localhost",
+      isRemote: false,
+      options,
+      waitForDecision: async () => ({
+        approved: true,
+        feedback: "Keep the retry bounded.",
+        annotations: [{ id: "a1" }],
+      }),
+      stop: () => {},
+    }));
+
+    await handleAnnotateCommand(
+      { properties: { arguments: "plan.md --gate", sessionID: "session-123" } },
+      deps,
+    );
+
+    expect(deps.client.session.prompt).toHaveBeenCalledTimes(1);
+    const prompt = deps.client.session.prompt.mock.calls[0]?.[0].body.parts[0].text;
+    expect(prompt).toContain("artifact is approved");
+    expect(prompt).toContain("non-blocking guidance");
+    expect(prompt).toContain(`File: ${filePath}`);
+    expect(prompt).toContain("Keep the retry bounded.");
+    expect(prompt).not.toContain("Please address");
+  });
+
+  test("logs and rejects when approved file notes cannot be injected", async () => {
+    const projectRoot = makeTempDir();
+    const filePath = path.join(projectRoot, "plan.md");
+    writeFileSync(filePath, "# Plan\n");
+    const deps: any = makeDeps();
+    deps.directory = projectRoot;
+    deps.client.session.prompt = mock(async () => {
+      throw new Error("session busy");
+    });
+    deps.startAnnotateServer = mock(async () => ({
+      port: 0,
+      url: "http://localhost",
+      isRemote: false,
+      waitForDecision: async () => ({
+        approved: true,
+        feedback: "Keep the retry bounded.",
+        annotations: [{ id: "a1" }],
+      }),
+      stop: () => {},
+    }));
+
+    try {
+      await handleAnnotateCommand(
+        { properties: { arguments: "plan.md --gate", sessionID: "session-123" } },
+        deps,
+      );
+      throw new Error("Expected prompt delivery to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(OpenCodePromptDeliveryError);
+      expect(error).toHaveProperty(
+        "message",
+        "Could not deliver approved annotation notes to the OpenCode session.",
+      );
+    }
+    expect(deps.client.app.log).toHaveBeenCalledWith({
+      level: "error",
+      message: expect.stringContaining("Could not deliver approved annotation notes"),
+    });
+  });
+
   test("strips wrapping quotes from HTML paths and forwards pasteApiUrl", async () => {
     const projectRoot = makeTempDir();
     const docsDir = path.join(projectRoot, "docs");
@@ -132,6 +229,41 @@ describe("handleAnnotateCommand", () => {
 });
 
 describe("handleAnnotateLastCommand", () => {
+  test("returns approved feedback and advertises support for an active session", async () => {
+    const deps: any = makeDeps();
+    deps.client.session.messages = mock(async (_input: unknown) => ({
+      data: [
+        {
+          info: { role: "assistant" },
+          parts: [{ type: "text", text: "Latest assistant message" }],
+        },
+      ],
+    }));
+    deps.startAnnotateServer = mock(async (options: any) => ({
+      port: 0,
+      url: "http://localhost",
+      isRemote: false,
+      options,
+      waitForDecision: async () => ({
+        approved: true,
+        feedback: "Retain this caveat.",
+        annotations: [{ id: "a1" }],
+      }),
+      stop: () => {},
+    }));
+
+    const outcome = await handleAnnotateLastCommand(
+      { properties: { sessionID: "session-123", arguments: "--gate" } },
+      deps,
+    );
+
+    expect(deps.startAnnotateServer.mock.calls[0]?.[0].approvalNotesSupported).toBe(true);
+    expect(outcome).toEqual({
+      approved: true,
+      feedback: "Retain this caveat.",
+    });
+  });
+
   test("forwards pasteApiUrl for annotate-last sessions", async () => {
     const deps = makeDeps();
     deps.client.session.messages = mock(async (_input: unknown) => ({

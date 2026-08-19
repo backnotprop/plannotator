@@ -63,9 +63,18 @@ Version pinning is fully supported from **v0.17.2 onwards**. v0.17.2 is the firs
 </details>
 
 <details>
+<summary><strong>Optional Call flow runtime (not installed by default)</strong></summary>
+
+Code review's **Call flow** layer uses a pinned, pruned CallDiff runtime and needs Node.js 22 or newer, so it is never installed by default. The normal path is in-app: the Call flow toggle names the changed languages and estimated total, and enabling it consents to one background install of the core (about 5 MB on macOS arm64) plus only the needed grammar packs. There is no second confirmation. If a later review introduces another language, installed languages are still analyzed while that pack installs automatically and a quiet skipped-files notice reports progress. Each target gets one automatic attempt per review session; after a failure, the panel shows a Retry action. The panel's **Languages** list shows cumulative installed size and supports installing a pack ahead of need.
+
+For scripted or headless installs, `--with-call-flow` (PowerShell: `-WithCallFlow`), `PLANNOTATOR_INSTALL_CALLDIFF=1`, `{ "installCallFlow": true }`, and `plannotator install-runtime call-flow` install the core; review-specific packs remain selectable in the UI. `--minimal` always excludes it.
+
+</details>
+
+<details>
 <summary><strong>Binary-only install (nothing but the CLI)</strong></summary>
 
-Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, Gemini, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.
+Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no CallDiff runtime, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, Gemini, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --minimal
@@ -80,6 +89,118 @@ curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd --mi
 ```
 
 For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the environment instead of passing the flag; pass `--no-minimal` to force a full install even when that variable is set.
+
+</details>
+
+<details>
+<summary><strong>Skipping individual agent integrations</strong></summary>
+
+Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex
+```
+
+PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode`. Windows CMD: same `--skip-*` flags as bash.
+
+For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`) or persist the choice in `~/.plannotator/config.json`:
+
+```json
+{ "skipInstall": { "codex": true } }
+```
+
+Precedence: flag over environment variable over config file.
+
+</details>
+
+<details>
+<summary><strong>Skipping the skills and slash commands</strong></summary>
+
+The `/plannotator-*` skills and slash commands are fetched with a sparse `git clone` of the release tag. `--skip-skills` turns that fetch into a no-op: nothing is written to `~/.claude/skills`, `~/.agents/skills`, the OpenCode or Gemini command directories, or `~/.kiro`, the extras are not offered, and the skill-scope cleanup sweeps stay suspended. The binary, hooks, and per-agent config still install, and git stops being a hard requirement. Use it where the tag being installed cannot be fetched from GitHub, or where you manage the skills yourself.
+
+```bash
+curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-skills
+```
+
+PowerShell: `-SkipSkills`. Windows CMD: `--skip-skills`. For unattended runs set `PLANNOTATOR_SKIP_SKILLS_INSTALL=1`, or persist it:
+
+```json
+{ "skipInstall": { "skills": true } }
+```
+
+Same precedence: flag over environment variable over config file. The installer reports `Skills: skipped (...)` and stops claiming the `/plannotator-*` commands are ready, so a skipped run is never mistaken for a complete one.
+
+</details>
+
+## Uninstall
+
+`plannotator uninstall` removes recognized installed components while
+preserving local Plannotator data by default:
+
+```bash
+plannotator uninstall
+```
+
+This removes the conventional binary, the managed `sem` and agent-terminal
+runtimes, installer-provided skills and commands, managed hook/config entries,
+recognizable global integrations, and detected host plugins. Shared settings
+are changed only when their Plannotator entries can be identified safely;
+custom files and separately installed optional skills are preserved.
+
+To remove known local plans, history, drafts, guides, settings, and other
+Plannotator data too, use:
+
+```bash
+plannotator uninstall --purge
+```
+
+Purge requires typing `purge` at the prompt. The CLI warns that this data is
+local-only: it is not stored on a Plannotator server and cannot be recovered
+after purge. `--yes` (or `-y`) skips confirmation for automation, and is
+required when no interactive terminal is available. `--dry-run` previews the
+recognized removal set without changing anything.
+Host integrations are always part of uninstall. If a broken or unavailable
+host prevents safe cleanup, the command names the blocking plugin manager or
+configuration, gives exact manual cleanup instructions, and stops before
+deleting the binary. Complete that cleanup and rerun uninstall.
+
+The purge removes only known Plannotator entries from the configured data
+directory. Unknown top-level files are preserved rather than guessed at, and
+custom external plan-save paths or project-local integrations are never
+deleted. Malformed host config is treated as a fail-safe error. If a host
+plugin manager is unavailable or a shared config cannot be edited safely, the
+command reports the exact manual follow-up and preserves
+the CLI and its Windows PATH entry so you can fix the problem and retry. If
+Windows PATH restoration itself fails, the CLI remains on disk and the output
+gives its full path for retry and manual PATH repair.
+Purge also refuses broad targets (filesystem roots, the home directory, or the
+shared temporary directory), symlinked data directories, and non-directory
+paths. Existing targets are compared by filesystem identity, so case aliases,
+symlinks, hardlinks, and bind mounts cannot bypass the root/home/ancestor
+checks. The identity and containment guards are revalidated after awaited host
+commands, immediately before data removal, so a swapped directory is refused.
+For a symlinked dedicated directory, set `PLANNOTATOR_DATA_DIR` to its
+resolved target and retry.
+
+Pi-only installations that do not include the `plannotator` CLI should use:
+
+```bash
+pi remove npm:@plannotator/pi-extension
+```
+
+<details>
+<summary><strong>Installing behind a rate-limited IP</strong></summary>
+
+The installer queries the GitHub API (`api.github.com`) to resolve the latest release tag. Unauthenticated API requests are capped at **60 per hour per source IP**, so installs can fail on shared egress IPs (corporate proxies, NAT/CGNAT, CI runners) or when retrying/debugging within the same hour, with an opaque `Failed to fetch latest version` error.
+
+If you hit this, export a token before running the installer - it reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` (github.com credentials only) when the `gh` CLI is authenticated. A personal access token raises the limit to 5,000/hour; the built-in `GITHUB_TOKEN` in GitHub Actions gets 1,000/hour per repository. The repository is public, so a token with no scopes is sufficient - prefer a fine-grained or zero-scope token over a broad classic PAT:
+
+```bash
+export GITHUB_TOKEN=ghp_xxx
+curl -fsSL https://plannotator.ai/install.sh | bash
+```
+
+Or authenticate once with `gh auth login` - no env var needed, the installer picks the token up automatically. Only the version-resolution API call is authenticated; release downloads and `git clone` are unaffected. See [Troubleshooting](/docs/guides/troubleshooting/) for details.
 
 </details>
 
@@ -268,7 +389,7 @@ Or try it without installing:
 pi -e npm:@plannotator/pi-extension
 ```
 
-Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator` or `Ctrl+Alt+P`. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
+Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator-plan-mode` or `Ctrl+Alt+P`. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
 
 See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
 

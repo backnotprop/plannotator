@@ -13,7 +13,7 @@
 
 import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview } from "./pr-gitlab";
-import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem } from "./pr-types";
+import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
 // pr-provider as a single facade. Browser code imports from pr-types
@@ -58,6 +58,7 @@ export async function fetchPRFileContent(
   return fetchGlFileContent(runtime, ref, sha, filePath);
 }
 
+/** Submit a platform review and preserve any provider-specific partial result. */
 export async function submitPRReview(
   runtime: PRRuntime,
   ref: PRRef,
@@ -65,7 +66,7 @@ export async function submitPRReview(
   action: "approve" | "comment",
   body: string,
   fileComments: PRReviewFileComment[],
-): Promise<void> {
+): Promise<PRReviewSubmissionResult> {
   if (ref.platform === "github") return submitGhPRReview(runtime, ref, headSha, action, body, fileComments);
   return submitGlMRReview(runtime, ref, headSha, action, body, fileComments);
 }
