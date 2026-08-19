@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useTheme } from './ThemeProvider';
 import { THEME_MODES } from './themeModes';
 import { themesForHalf, type ThemeHalf } from '../utils/themeRegistry';
+import { configStore } from '../config/configStore';
+import { useConfigValue } from '../config/useConfig';
+import { faviconDataUrl, type FaviconStyle } from '@plannotator/core/favicon';
 
 interface ThemeTabProps {
   onPreview?: () => void;
@@ -13,10 +16,44 @@ const HALVES: { id: ThemeHalf; label: string }[] = [
   { id: 'dark', label: 'Dark' },
 ];
 
+const FAVICON_STYLES: { id: FaviconStyle; label: string }[] = [
+  { id: 'totman', label: 'Totman' },
+  { id: 'classic', label: 'Classic P' },
+];
+
 const SyntaxLinesIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
   </svg>
+);
+
+/**
+ * The favicon style choices. Rendered in both layouts, so it lives in one place.
+ * The compact layout drops the visible "Favicon" heading the full layout has, so
+ * the group carries its own accessible name and two unlabelled image buttons are
+ * never all a screen reader gets.
+ */
+const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected }) => (
+  <div className="flex gap-1" role="group" aria-label="Favicon style">
+    {FAVICON_STYLES.map(({ id, label }) => (
+      <button
+        key={id}
+        type="button"
+        aria-pressed={selected === id}
+        onClick={() => configStore.set('faviconStyle', id)}
+        className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+          selected === id
+            ? 'bg-primary text-primary-foreground'
+            : 'bg-muted text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <span className="flex items-center gap-1.5">
+          <img src={faviconDataUrl(id)} alt="" className="w-5 h-5 rounded-sm shrink-0" />
+          {label}
+        </span>
+      </button>
+    ))}
+  </div>
 );
 
 export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
@@ -28,7 +65,9 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
     setHalfTheme,
     availableThemes,
     preferredMode,
+    manageFavicon,
   } = useTheme();
+  const faviconStyle = useConfigValue('faviconStyle');
 
   // Which half the grid assigns to. Follows the mode you are actually seeing,
   // so opening Settings in dark mode edits the dark half first.
@@ -68,6 +107,7 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
           {THEME_MODES.map(({ id, label, Icon }) => (
             <button
               key={id}
+              type="button"
               onClick={() => setMode(id)}
               className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 mode === id
@@ -82,12 +122,23 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
             </button>
           ))}
         </div>
+        {!compact && manageFavicon && (
+          <div className="space-y-1.5 pt-1">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Favicon</label>
+            <FaviconStyleControl selected={faviconStyle} />
+          </div>
+        )}
         {!compact && (
           <p className="text-[11px] text-muted-foreground/70">
             System follows your OS and switches between the two themes below.
           </p>
         )}
-        {compact && <div className="ml-auto">{summary}</div>}
+        {compact && (
+          <>
+            {manageFavicon && <FaviconStyleControl selected={faviconStyle} />}
+            <div className="ml-auto">{summary}</div>
+          </>
+        )}
       </div>
 
       {/* Theme pair */}

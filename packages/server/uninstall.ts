@@ -748,6 +748,7 @@ function removeInstallerData(
   const sidecarPaths = [
     join(state.dataDir, "vendor", "sem"),
     join(state.dataDir, "vendor", "agent-terminal"),
+    join(state.dataDir, "vendor", "call-flow"),
   ];
   const hadManagedSidecar = sidecarPaths.some(pathExists);
   for (const path of sidecarPaths) {
@@ -756,7 +757,7 @@ function removeInstallerData(
   if (hadManagedSidecar) {
     removeEmptyOwnedParent(
       join(state.dataDir, "vendor"),
-      ["sem", "agent-terminal"],
+      ["sem", "agent-terminal", "call-flow"],
       request,
       state,
     );
@@ -794,7 +795,7 @@ function purgeLocalData(
           name === "vendor" &&
           directoryContainsOnly(
             join(state.dataDir, "vendor"),
-            ["sem", "agent-terminal"],
+            ["sem", "agent-terminal", "call-flow"],
           )
         ),
     );

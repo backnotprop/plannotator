@@ -49,7 +49,13 @@ import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useAnnotationHighlighter } from '../hooks/useAnnotationHighlighter';
 import { useVimSelection } from '../hooks/useVimSelection';
-import { useScrollViewport } from '../hooks/useScrollViewport';
+import {
+  getScrollViewportIntersectionRoot,
+  getScrollViewportRect,
+  getScrollViewportTop,
+  scrollViewportTo,
+  useScrollViewport,
+} from '../hooks/useScrollViewport';
 import { decodeAnchorHash } from '../utils/anchors';
 import { VimModeOverlay } from './VimModeOverlay';
 
@@ -255,6 +261,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
   };
   const containerRef = useRef<HTMLDivElement>(null);
+  // The element that actually scrolls; shared by the Vim scroll math, the
+  // sticky-header observer, and the reticle geometry.
+  const scrollViewport = useScrollViewport();
   // The badge cluster (repo chips / diff badge) is absolutely positioned in the
   // card's top padding. One row fits; a second row (diff badge) or mobile
   // wrapping outgrows the padding and lands on the document's first heading.
@@ -520,6 +529,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   }, []);
   const vim = useVimSelection({
     containerRef,
+    scrollViewport,
     enabled: vimModeActive,
     hudEnabled: vimHudEnabled,
     blocked: vimBlocked,
@@ -594,16 +604,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // Detect when sticky action bar is "stuck" to show card background.
   // The IntersectionObserver root must be the actual scroll element — the
   // OverlayScrollArea viewport — not the <main> host, which doesn't scroll.
-  const stickyScrollViewport = useScrollViewport();
   useEffect(() => {
-    if (!stickyActions || !stickySentinelRef.current || !stickyScrollViewport) return;
+    if (!stickyActions || !stickySentinelRef.current || !scrollViewport) return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsStuck(!entry.isIntersecting),
-      { root: stickyScrollViewport, threshold: 0 }
+      { root: getScrollViewportIntersectionRoot(scrollViewport), threshold: 0 }
     );
     observer.observe(stickySentinelRef.current);
     return () => observer.disconnect();
-  }, [stickyActions, stickyScrollViewport]);
+  }, [stickyActions, scrollViewport]);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -620,7 +629,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     if (!anchor) return false;
 
     const container = containerRef.current;
-    if (!container || !stickyScrollViewport) return false;
+    if (!container || !scrollViewport) return false;
 
     const target = document.getElementById(anchor);
     if (!target || !container.contains(target)) return false;
@@ -632,27 +641,27 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const headerOffset = stickyActionsEl
       ? stickyActionsEl.getBoundingClientRect().height + stickyTop
       : 0;
-    const containerRect = stickyScrollViewport.getBoundingClientRect();
+    const containerRect = getScrollViewportRect(scrollViewport);
     const targetRect = target.getBoundingClientRect();
     const relativeTop = targetRect.top - containerRect.top;
-    const offsetPosition = stickyScrollViewport.scrollTop + relativeTop - headerOffset;
+    const offsetPosition = getScrollViewportTop(scrollViewport) + relativeTop - headerOffset;
 
-    stickyScrollViewport.scrollTo({
+    scrollViewportTo(scrollViewport, {
       top: Math.max(0, offsetPosition),
       behavior: 'smooth',
     });
     return true;
-  }, [stickyScrollViewport]);
+  }, [scrollViewport]);
 
   useEffect(() => {
-    if (!stickyScrollViewport || !locationHash || lastAutoScrolledHashRef.current === locationHash) return;
+    if (!scrollViewport || !locationHash || lastAutoScrolledHashRef.current === locationHash) return;
     const timer = window.setTimeout(() => {
       if (scrollToAnchor(locationHash)) {
         lastAutoScrolledHashRef.current = locationHash;
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [blocks, locationHash, scrollToAnchor, stickyScrollViewport]);
+  }, [blocks, locationHash, scrollToAnchor, scrollViewport]);
 
   // Use the native copy event so clipboard writes are synchronous (Safari
   // rejects the async navigator.clipboard API outside the user-gesture window).
@@ -774,6 +783,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const handleViewerCommentClose = useCallback(() => {
     setViewerCommentPopover(null);
   }, []);
+
+  const commentDraftScope = linkedDocInfo?.filepath ?? sourceInfo ?? markdown.slice(0, 120);
 
   const codePathValidation = useValidatedCodePaths(markdown, codePathBaseDir, disableCodePathValidation);
 
@@ -1151,9 +1162,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               contextText={hookCommentPopover.contextText}
               isGlobal={false}
               initialText={hookCommentPopover.initialText}
+              draftKey={`plan:${commentDraftScope}:${hookCommentPopover.draftKey}`}
               onSubmit={hookCommentSubmit}
               onClose={hookCommentClose}
               allowImages={allowImages}
+              skillReferences
               onAskAI={onAskAI}
               askAIContext={{
                 kind: 'selection',
@@ -1169,9 +1182,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             contextText={viewerCommentPopover.contextText}
             isGlobal={viewerCommentPopover.isGlobal}
             initialText={viewerCommentPopover.initialText}
+            draftKey={`plan:${commentDraftScope}:${
+              viewerCommentPopover.isGlobal
+                ? 'global'
+                : `code-block:${viewerCommentPopover.codeBlock?.block.id ?? viewerCommentPopover.contextText}`
+            }`}
             onSubmit={handleViewerCommentSubmit}
             onClose={handleViewerCommentClose}
             allowImages={allowImages}
+            skillReferences
             onAskAI={onAskAI}
             askAIContext={{
               kind: viewerCommentPopover.isGlobal ? 'general' : 'selection',

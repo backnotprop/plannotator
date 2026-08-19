@@ -98,6 +98,18 @@ afterAll(async () => {
 });
 
 describe('useAIProviderConfig persistence', () => {
+  test.skipIf(!hasDom)('does not persist an automatically resolved provider or fallback model', async () => {
+    const getResult = await mountHarness(fallbackOnlyProviders);
+
+    expect(getResult().aiConfig.providerId).toBe('codex-local');
+    expect(getResult().aiConfig.model).toBe('gpt-5.6-sol');
+
+    const persisted = getAIProviderSettings();
+    expect(persisted.providerId).toBeNull();
+    expect(persisted.providerByOrigin).toEqual({});
+    expect(persisted.preferredModels['codex-local']).toBeUndefined();
+  });
+
   test.skipIf(!hasDom)('a resolver-derived fallback model is not persisted over the saved preference', async () => {
     // The user's real Codex model preference, saved from a prior session —
     // not present in the pre-activation fallback list.

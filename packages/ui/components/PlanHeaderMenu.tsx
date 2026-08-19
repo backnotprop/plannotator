@@ -34,6 +34,17 @@ interface PlanHeaderMenuProps {
   obsidianConfigured: boolean;
   bearConfigured: boolean;
   octarineConfigured: boolean;
+  compactTouchLayout?: boolean;
+  compactSessionActions?: CompactPlanAction[];
+  compactDocumentActions?: CompactPlanAction[];
+}
+
+export interface CompactPlanAction {
+  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'done' | 'edit' | 'tools' | 'annotations' | 'ai' | 'review';
+  label: string;
+  subtitle?: string;
+  onSelect: () => void;
+  disabled?: boolean;
 }
 
 export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
@@ -57,6 +68,9 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   obsidianConfigured,
   bearConfigured,
   octarineConfigured,
+  compactTouchLayout = false,
+  compactSessionActions = [],
+  compactDocumentActions = [],
 }) => {
   const { theme, setTheme } = useTheme();
 
@@ -68,13 +82,20 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
   return (
     <ActionMenu
       panelWidth="wide"
+      panelClassName={compactTouchLayout
+        ? 'absolute top-full right-0 mt-1 w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-4.5rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]'
+        : undefined
+      }
       renderTrigger={({ isOpen, toggleMenu }) => (
         <button
+          id={compactTouchLayout ? 'pn-compact-plan-options-trigger' : undefined}
+          data-pn-touch-target={compactTouchLayout || undefined}
+          data-pn-touch-target-icon={compactTouchLayout || undefined}
           onClick={() => {
             if (!isOpen && showUpdateDot) updateInfo?.dismiss();
             toggleMenu();
           }}
-          className={`relative flex items-center gap-1.5 p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-colors ${
+          className={`relative flex items-center justify-center gap-1.5 rounded-md text-xs font-medium transition-colors ${compactTouchLayout ? 'h-11 w-11 p-0' : 'p-1.5 md:px-2.5 md:py-1'} ${
             isOpen
               ? 'bg-muted text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -99,11 +120,34 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
     >
       {({ closeMenu }) => (
         <>
+          {compactTouchLayout && compactSessionActions.length > 0 && (
+            <>
+              <CompactActionSection
+                label="Review"
+                actions={compactSessionActions}
+                closeMenu={closeMenu}
+              />
+              <ActionMenuDivider />
+            </>
+          )}
+
+          {compactTouchLayout && compactDocumentActions.length > 0 && (
+            <>
+              <CompactActionSection
+                label="Document"
+                actions={compactDocumentActions}
+                closeMenu={closeMenu}
+              />
+              <ActionMenuDivider />
+            </>
+          )}
+
           <div className="px-3 py-2 space-y-1.5">
             <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
               {THEME_MODES.map(({ id, label, Icon }) => (
                 <button
+                  data-pn-touch-target={compactTouchLayout || undefined}
                   key={id}
                   onClick={() => {
                     closeMenu();
@@ -240,6 +284,92 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
         </>
       )}
     </ActionMenu>
+  );
+};
+
+const CompactActionSection = ({
+  label,
+  actions,
+  closeMenu,
+}: {
+  label: string;
+  actions: CompactPlanAction[];
+  closeMenu: () => void;
+}) => (
+  <div className="py-1">
+    <div className="px-3 py-1">
+      <ActionMenuSectionLabel>{label}</ActionMenuSectionLabel>
+    </div>
+    {actions.map((action) => (
+      <ActionMenuItem
+        key={action.id}
+        onClick={() => {
+          closeMenu();
+          action.onSelect();
+        }}
+        disabled={action.disabled}
+        icon={<CompactPlanActionIcon kind={action.id} />}
+        label={action.label}
+        subtitle={action.subtitle}
+      />
+    ))}
+  </div>
+);
+
+const CompactPlanActionIcon = ({ kind }: { kind: CompactPlanAction['id'] }) => {
+  if (kind === 'review') {
+    return (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 11l2 2 4-4m6 3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    );
+  }
+  if (kind === 'annotations') {
+    return (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+      </svg>
+    );
+  }
+  if (kind === 'ai') {
+    return (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 3zM18.5 13l.8 2.7L22 16.5l-2.7.8-.8 2.7-.8-2.7-2.7-.8 2.7-.8.8-2.7zM5 13l.7 2.3L8 16l-2.3.7L5 19l-.7-2.3L2 16l2.3-.7L5 13z" />
+      </svg>
+    );
+  }
+  if (kind === 'approve' || kind === 'done') {
+    return (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+      </svg>
+    );
+  }
+  if (kind === 'feedback') {
+    return (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+      </svg>
+    );
+  }
+  if (kind === 'copy') {
+    return (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+      </svg>
+    );
+  }
+  if (kind === 'edit' || kind === 'tools') {
+    return (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
   );
 };
 

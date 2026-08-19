@@ -15,6 +15,35 @@ describe('review entry assets', () => {
     },
   );
 
+  // The portal mounts the same @plannotator/editor App as the hook, so it needs
+  // the identical shell: without it the mobile layout's safe-area tokens are
+  // inert and the document scrolls behind the app's own scroll ownership.
+  test.each(['apps/hook/index.html', 'apps/review/index.html', 'apps/portal/index.html'])(
+    '%s leaves scrolling to the visible-viewport application shell',
+    (path) => {
+      const html = read(path);
+      expect(html).toContain('viewport-fit=cover');
+      expect(html).toContain('<body class="overflow-hidden overscroll-none antialiased">');
+      expect(html).toContain('<div id="root" class="h-full overflow-hidden"></div>');
+      expect(html).not.toContain('min-h-screen');
+    },
+  );
+
+  test('the plan surface extends its active canvas behind mobile browser controls', () => {
+    const editor = read('packages/editor/App.tsx');
+    const theme = read('packages/ui/theme.css');
+
+    expect(editor).toContain("const browserCanvas = isHtmlSurface || gridEnabled ? 'background' : 'card';");
+    expect(editor).toContain('data-pn-browser-canvas={browserCanvas}');
+    expect(editor).toContain("data-pn-document-scroll={usesDocumentScroll ? 'true' : undefined}");
+    expect(editor).toContain('sticky={!usesDocumentScroll}');
+    expect(editor).toContain('stickyActions={uiPrefs.stickyActionsEnabled && !usesDocumentScroll}');
+    expect(editor).toContain("overflowY={usesDocumentScroll ? 'visible' : 'auto'}");
+    expect(theme).toContain('html:has([data-pn-browser-canvas="card"])');
+    expect(theme).toContain('html:has([data-pn-document-scroll="true"])');
+    expect(theme).toContain('background-color: var(--card);');
+  });
+
   test('the app bundles its default fonts and syntax highlighting', () => {
     const editorCss = read('packages/editor/index.css');
     expect(editorCss).toContain('@import "@fontsource-variable/inter";');

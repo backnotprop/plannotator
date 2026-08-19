@@ -1,11 +1,14 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
-import React, { act, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+import React, { act, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { SelectedLineRange } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 
 let codeViewMounts = 0;
 let codeViewUnmounts = 0;
 let scrollTargets: Array<Record<string, unknown>> = [];
+let lastCodeViewProps: Record<string, unknown> | null = null;
+let toolbarSelections: Array<SelectedLineRange | null> = [];
 
 // Captured BEFORE the mocks below replace the specifiers, so this file can put
 // the real modules back when it is done. `mock.module` is process global and
@@ -23,6 +26,7 @@ let scrollTargets: Array<Record<string, unknown>> = [];
 // any stub exists.
 const realPierreDiffs = { ...(await import('@pierre/diffs')) };
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
+const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
 
 mock.module('../workerPool', () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
@@ -30,6 +34,8 @@ mock.module('../workerPool', () => ({
 }));
 
 mock.module('../hooks/usePierreTheme', () => ({
+  buildLineBgOverrides: () => '',
+  resolveSyntaxTheme: realResolveSyntaxTheme,
   usePierreTheme: () => ({ type: 'light', css: '' }),
 }));
 
@@ -57,6 +63,7 @@ mock.module('@pierre/diffs/react', () => ({
     ref: React.ForwardedRef<unknown>,
   ) {
     const itemsRef = useRef(new Map((props.initialItems ?? []).map((item) => [item.id, item])));
+    lastCodeViewProps = props as unknown as Record<string, unknown>;
     useEffect(() => {
       codeViewMounts += 1;
       return () => {
@@ -98,7 +105,15 @@ mock.module('@pierre/diffs/react', () => ({
 }));
 
 mock.module('./ToolbarHost', () => ({
-  ToolbarHost: React.forwardRef(function MockToolbarHost() {
+  ToolbarHost: React.forwardRef(function MockToolbarHost(_props, ref) {
+    useImperativeHandle(ref, () => ({
+      handleLineSelectionEnd: (range: SelectedLineRange | null) => {
+        toolbarSelections.push(range);
+      },
+      openLineAnnotation: () => {},
+      handleTokenClick: () => {},
+      startEdit: () => {},
+    }));
     return null;
   }),
 }));
@@ -153,6 +168,8 @@ afterEach(async () => {
   codeViewMounts = 0;
   codeViewUnmounts = 0;
   scrollTargets = [];
+  lastCodeViewProps = null;
+  toolbarSelections = [];
 });
 
 // Hand the real @pierre/diffs back to the process. Only the two library
@@ -216,5 +233,182 @@ describe('AllFilesCodeView guide mount state', () => {
     expect(scrollTargets.filter((target) => target.type === 'position')).toEqual([
       { type: 'position', position: 120 },
     ]);
+  });
+
+});
+
+describe('AllFilesCodeView compact-touch line selection', () => {
+  // Stands in for App: a published range comes straight back down as
+  // `pendingSelection`. That loop is load-bearing — CodeView's selection is
+  // controlled, and the reconcile effect clears the highlight whenever
+  // pendingSelection is null, so a statically-null prop would wipe the range
+  // the preserve branch just painted.
+  function Harness({ compactTouchLayout, onSelection }: {
+    compactTouchLayout: boolean;
+    onSelection?: (range: SelectedLineRange | null) => void;
+  }) {
+    const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
+    return view({
+      compactTouchLayout,
+      pendingSelection,
+      onLineSelection: (range) => {
+        onSelection?.(range);
+        setPendingSelection(range);
+      },
+    });
+  }
+
+  async function mount(
+    compactTouchLayout: boolean,
+    onSelection?: (range: SelectedLineRange | null) => void,
+  ) {
+    host = document.createElement('div');
+    host.style.height = '400px';
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<Harness compactTouchLayout={compactTouchLayout} onSelection={onSelection} />);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+  }
+
+  function getSelectionCallbacks() {
+    const options = lastCodeViewProps?.options as {
+      onLineSelectionEnd?: (
+        range: SelectedLineRange | null,
+        context: { item: { id: string; type: 'diff' } },
+      ) => void;
+      onGutterUtilityClick?: (
+        range: SelectedLineRange,
+        context: { item: { id: string; type: 'diff' } },
+      ) => void;
+    };
+    const item = (lastCodeViewProps?.initialItems as Array<{ id: string; type: 'diff' }>)[0];
+    return { options, item };
+  }
+
+  test.skipIf(!hasDom)('preserves a dragged range, then opens the composer from the gutter action', async () => {
+    const observedSelections: Array<SelectedLineRange | null> = [];
+    const range: SelectedLineRange = { start: 4, end: 8, side: 'additions' };
+    await mount(true, (selection) => observedSelections.push(selection));
+    const { options, item } = getSelectionCallbacks();
+
+    await act(async () => {
+      options.onLineSelectionEnd?.(range, { item });
+    });
+
+    expect(observedSelections.at(-1)).toEqual(range);
+    expect(toolbarSelections).toEqual([]);
+    // Publishing the range upward is only half of "preserved": CodeView's
+    // selection is controlled here, so the highlight only survives if the range
+    // is also handed back down. Without this the composer would stay shut on a
+    // range nothing paints.
+    expect(lastCodeViewProps?.selectedLines).toEqual({ id: item.id, range });
+
+    await act(async () => {
+      options.onGutterUtilityClick?.(range, { item });
+    });
+
+    expect(toolbarSelections).toEqual([range]);
+  });
+
+  test.skipIf(!hasDom)('keeps the incumbent desktop selection-to-composer transition', async () => {
+    const range: SelectedLineRange = { start: 4, end: 8, side: 'additions' };
+    await mount(false);
+    const { options, item } = getSelectionCallbacks();
+
+    await act(async () => {
+      options.onLineSelectionEnd?.(range, { item });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(toolbarSelections).toEqual([range]);
+  });
+});
+
+describe('AllFilesCodeView readOnly (portable guide host)', () => {
+  // The portable Guided Review viewer renders this component with no server
+  // and no review state behind it (decision record D2/D4). These guard the
+  // three things read-only must switch off without changing what the diff
+  // LOOKS like: selection affordances, the window keydown handler, and the
+  // /api/file-content augmentation fetch.
+  async function mount(overrides: Partial<React.ComponentProps<typeof AllFilesCodeView>>) {
+    // A second mount inside one test replaces the previous tree instead of leaking it.
+    if (root) await act(async () => root?.unmount());
+    host?.remove();
+    host = document.createElement('div');
+    host.style.height = '400px';
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await render(overrides);
+  }
+
+  test.skipIf(!hasDom)('turns off line and gutter selection only in read-only mode', async () => {
+    await mount({ readOnly: true });
+    let options = lastCodeViewProps?.options as Record<string, unknown>;
+    expect(options.enableLineSelection).toBe(false);
+    expect(options.enableGutterUtility).toBe(false);
+
+    // The default-on half catches an inverted `!readOnly` breaking the in-app reviewer.
+    await mount({});
+    options = lastCodeViewProps?.options as Record<string, unknown>;
+    expect(options.enableLineSelection).toBe(true);
+    expect(options.enableGutterUtility).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('never fetches file content when an item mounts', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify({ oldContent: 'a', newContent: 'b' }), { status: 200 }));
+    }) as typeof fetch;
+    try {
+      await mount({ readOnly: true, isActive: true });
+      const options = lastCodeViewProps?.options as { onPostRender?: (...args: unknown[]) => void };
+      const item = { id: 'target.ts', type: 'diff' };
+      await act(async () => {
+        options.onPostRender?.(document.createElement('div'), {}, 'mount', { item });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(calls.filter((url) => url.includes('/api/file-content'))).toHaveLength(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test.skipIf(!hasDom)('control: a live host does fetch file content on item mount', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return Promise.resolve(new Response(JSON.stringify({ oldContent: null, newContent: null }), { status: 200 }));
+    }) as typeof fetch;
+    try {
+      await mount({ isActive: true });
+      const options = lastCodeViewProps?.options as { onPostRender?: (...args: unknown[]) => void };
+      await act(async () => {
+        options.onPostRender?.(document.createElement('div'), {}, 'mount', { item: { id: 'target.ts', type: 'diff' } });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(calls.filter((url) => url.includes('/api/file-content'))).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test.skipIf(!hasDom)('does not install the window keydown handler', async () => {
+    const originalAdd = window.addEventListener;
+    const keydownAdds: number[] = [];
+    window.addEventListener = ((type: string, ...rest: unknown[]) => {
+      if (type === 'keydown') keydownAdds.push(1);
+      return (originalAdd as unknown as (...a: unknown[]) => unknown).call(window, type, ...rest);
+    }) as typeof window.addEventListener;
+    try {
+      await mount({ readOnly: true, isActive: true });
+      expect(keydownAdds).toHaveLength(0);
+    } finally {
+      window.addEventListener = originalAdd;
+    }
   });
 });

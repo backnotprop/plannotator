@@ -58,10 +58,12 @@ function createContext(options: { cwd?: string; entries?: SessionEntry[] } = {})
 	return {
 		cwd: options.cwd ?? process.cwd(),
 		hasUI: false,
+		isProjectTrusted: () => true,
 		isIdle: () => true,
 		model: undefined,
 		modelRegistry: { find: () => undefined },
 		sessionManager: {
+			getBranch: () => entries,
 			getEntries: () => entries,
 			getSessionFile: () => undefined,
 			getSessionId: () => "test-session",
@@ -139,7 +141,7 @@ describe("Plannotator phase tool ownership", () => {
 		await runtime.run("session_start", context);
 		expect(runtime.getActiveTools()).toEqual(["inspect", "search"]);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual([
 			"inspect",
 			"search",
@@ -150,7 +152,7 @@ describe("Plannotator phase tool ownership", () => {
 		]);
 
 		runtime.setActiveTools(["search", "external_new", "plannotator_submit_plan"]);
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual(["search", "external_new"]);
 	});
 
@@ -160,7 +162,7 @@ describe("Plannotator phase tool ownership", () => {
 		const context = createContext({ cwd });
 		await runtime.run("session_start", context);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual([
 			"read",
 			"bash",
@@ -172,7 +174,7 @@ describe("Plannotator phase tool ownership", () => {
 			"plannotator_submit_plan",
 		]);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual(["read", "bash", "edit", "write"]);
 	});
 
@@ -182,7 +184,7 @@ describe("Plannotator phase tool ownership", () => {
 		const context = createContext({ cwd });
 		await runtime.run("session_start", context);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual([
 			"read",
 			"bash",
@@ -192,7 +194,7 @@ describe("Plannotator phase tool ownership", () => {
 			"plannotator_submit_plan",
 		]);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual(["read", "bash", "grep"]);
 	});
 
@@ -204,7 +206,7 @@ describe("Plannotator phase tool ownership", () => {
 		const context = createContext({ cwd });
 		await runtime.run("session_start", context);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual([
 			"read",
 			"bash",
@@ -212,7 +214,7 @@ describe("Plannotator phase tool ownership", () => {
 			"plannotator_submit_plan",
 		]);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual(["read", "bash"]);
 	});
 
@@ -224,7 +226,7 @@ describe("Plannotator phase tool ownership", () => {
 		const context = createContext({ cwd });
 		await runtime.run("session_start", context);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		const planningTools = runtime.getActiveTools();
 		expect(planningTools).toContain("my_planning_tool");
 		expect(planningTools).toContain("plannotator_submit_plan");
@@ -233,7 +235,7 @@ describe("Plannotator phase tool ownership", () => {
 			phaseAddedTools: ["my_planning_tool", "plannotator_submit_plan"],
 		});
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		const exitTools = runtime.getActiveTools();
 		expect(exitTools).not.toContain("my_planning_tool");
 		expect(exitTools).not.toContain("plannotator_submit_plan");
@@ -250,7 +252,7 @@ describe("Plannotator phase tool ownership", () => {
 		const context = createContext({ cwd });
 		await runtime.run("session_start", context);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual([
 			"read",
 			"bash",
@@ -258,7 +260,7 @@ describe("Plannotator phase tool ownership", () => {
 			"my_planning_tool",
 		]);
 
-		await runtime.commands.get("plannotator")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect(runtime.getActiveTools()).toEqual(["read", "bash"]);
 	});
 

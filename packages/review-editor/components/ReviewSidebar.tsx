@@ -12,7 +12,7 @@ import { AITab } from './AITab';
 import { AgentsTab, type AgentLaunchParams, type AgentLaunchResult } from '@plannotator/ui/components/AgentsTab';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
-import type { AIChatEntry } from '../hooks/useAIChat';
+import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
@@ -25,6 +25,7 @@ export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
 interface ReviewSidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  presentation?: 'panel' | 'overlay';
   activeTab: ReviewSidebarTab;
   annotations: CodeAnnotation[];
   files: DiffFile[];
@@ -58,7 +59,7 @@ interface ReviewSidebarProps {
   activeFilePath?: string;
   scrollToQuestionId?: string | null;
   onAskGeneral?: (question: string) => void;
-  aiPermissionRequests?: import('../hooks/useAIChat').PendingPermission[];
+  aiPermissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
   aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
@@ -131,6 +132,7 @@ function compareCodeAnnotations(a: CodeAnnotation, b: CodeAnnotation): number {
 export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   isOpen,
   onClose,
+  presentation = 'panel',
   activeTab,
   annotations,
   files,
@@ -254,14 +256,30 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       >
         <CommentMeta
           leading={
-            isGeneralScope ? (
+            isGeneralScope && annotation.callFlowTargets?.length ? (
+              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
+              </span>
+            ) : isGeneralScope ? (
               <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 general
               </span>
             ) : isFileScope ? (
-              <FileNameChip path={annotation.filePath} />
+              <span className="inline-flex items-center gap-1.5">
+                <FileNameChip path={annotation.filePath} />
+                {annotation.callFlowTargets?.length ? (
+                  <span className="text-[9px] text-primary/80">
+                    flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
+                  </span>
+                ) : null}
+              </span>
             ) : (
               <span className="text-[10px] font-mono text-muted-foreground">
+                {annotation.callFlowTargets?.length ? (
+                  <span className="mr-1 text-primary/80">
+                    flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'} ·
+                  </span>
+                ) : null}
                 {annotation.lineStart === annotation.lineEnd
                   ? `L${annotation.lineStart}`
                   : `L${annotation.lineStart}-${annotation.lineEnd}`}
@@ -379,9 +397,21 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   });
 
   return (
-    <aside className="border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
+    <aside
+      data-pn-review-transient-overlay={presentation === 'overlay' || undefined}
+      role={presentation === 'overlay' ? 'dialog' : undefined}
+      aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
+      className={presentation === 'overlay'
+        ? 'absolute inset-0 z-40 flex min-w-0 flex-col bg-background'
+        : 'border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0'
+      }
+      style={presentation === 'overlay' ? undefined : { width: width ?? 288 }}
+    >
         {/* Header */}
-        <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
+        <div
+          className={`px-3 flex items-center border-b border-border/50 ${presentation === 'overlay' ? 'min-h-[52px]' : ''}`}
+          style={presentation === 'overlay' ? undefined : { height: 'var(--panel-header-h)' }}
+        >
           <div className="flex items-center gap-2 w-full min-w-0">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
               {activeTab === 'annotations' ? 'Annotations' : activeTab === 'ai' ? 'AI' : 'Review Agents'}
@@ -401,6 +431,21 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {aiMessages.length}
               </span>
             )}
+            {presentation === 'overlay' && (
+              <button
+                data-pn-touch-target
+                data-pn-touch-target-icon
+                autoFocus
+                type="button"
+                onClick={onClose}
+                className="ml-auto inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Close review sidebar"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
@@ -417,7 +462,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                     </svg>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Click on lines to add annotations
+                    {presentation === 'overlay' ? 'Tap a line to add an annotation' : 'Click on lines to add annotations'}
                   </p>
                 </div>
               ) : (
@@ -570,6 +615,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         {activeTab === 'annotations' && feedbackMarkdown && totalCount > 0 && (
           <div className="p-2 border-t border-border/50">
             <button
+              data-pn-touch-target={presentation === 'overlay' || undefined}
               onClick={handleQuickCopy}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs font-medium transition-all text-muted-foreground hover:text-foreground hover:bg-muted/50"
             >

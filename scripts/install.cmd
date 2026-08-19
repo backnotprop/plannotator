@@ -12,6 +12,11 @@ REM Three-layer opt-in for SLSA provenance verification.
 REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
+REM Opt-in install of the pruned CallDiff call-flow core (default off; the
+REM review UI offers a one-click install). Precedence: --with-call-flow >
+REM PLANNOTATOR_INSTALL_CALLDIFF > config installCallFlow > default (off).
+REM -1 = flag not set (fall through); 1 = enable.
+set "WITH_CALL_FLOW_FLAG=-1"
 REM Guided-install answers. Precedence: CLI flags > wizard (interactive, first
 REM run or --reconfigure) > saved prefs from a previous run > defaults.
 set "EXTRAS_FLAG="
@@ -71,6 +76,11 @@ if /i "%~1"=="--skip-attestation" (
         exit /b 1
     )
     set "VERIFY_ATTESTATION_FLAG=0"
+    shift
+    goto parse_args
+)
+if /i "%~1"=="--with-call-flow" (
+    set "WITH_CALL_FLOW_FLAG=1"
     shift
     goto parse_args
 )
@@ -175,7 +185,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -446,6 +456,21 @@ if /i "!PLANNOTATOR_VERIFY_ATTESTATION!"=="no"   set "VERIFY_ATTESTATION=0"
 REM Layer 1: CLI flag (overrides everything).
 if "!VERIFY_ATTESTATION_FLAG!"=="1" set "VERIFY_ATTESTATION=1"
 if "!VERIFY_ATTESTATION_FLAG!"=="0" set "VERIFY_ATTESTATION=0"
+
+REM Resolve the CallDiff call-flow runtime opt-in. Same three-layer shape as
+REM verifyAttestation: CLI flag > env var > config.json > default (off).
+set "INSTALL_CALL_FLOW=0"
+if exist "!_CONFIG_DIR!\config.json" (
+    findstr /r /c:"\"installCallFlow\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "INSTALL_CALL_FLOW=1"
+)
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="1"     set "INSTALL_CALL_FLOW=1"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="true"  set "INSTALL_CALL_FLOW=1"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="yes"   set "INSTALL_CALL_FLOW=1"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="0"     set "INSTALL_CALL_FLOW=0"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="false" set "INSTALL_CALL_FLOW=0"
+if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="no"    set "INSTALL_CALL_FLOW=0"
+if "!WITH_CALL_FLOW_FLAG!"=="1" set "INSTALL_CALL_FLOW=1"
 
 REM Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
 REM as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >
@@ -822,6 +847,7 @@ if "!MINIMAL!"=="1" (
 
 call :InstallSemSidecar
 call :InstallAgentTerminalRuntime
+call :InstallCallFlowRuntime
 
 call :PrintPathAdvice
 
@@ -1124,6 +1150,10 @@ set "KIRO_AGENTS_DIR=%USERPROFILE%\.kiro\agents"
 set "OPENCODE_COMMANDS_DIR=%USERPROFILE%\.config\opencode\commands"
 set "GEMINI_COMMANDS_DIR=%USERPROFILE%\.gemini\commands"
 set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
+REM git's stderr is captured OUTSIDE SKILLS_TMP (which is removed before the
+REM failure message prints) so a failed clone can show the real git error
+REM (#1238) instead of only the generic "network or git error" line.
+set "GIT_ERR_FILE=%TEMP%\plannotator-git-stderr-%RANDOM%.txt"
 mkdir "!SKILLS_TMP!" >nul 2>&1
 
 REM Opt-out: jump past the clone so no network call is made and
@@ -1131,10 +1161,42 @@ REM CHECKOUT_FAILED stays 0 - an opt-out is not a fetch failure and must not
 REM trip the guard below. Reported above, next to the git check.
 if "!SKIP_SKILLS!"=="1" goto skills_checkout_done
 
-git clone --depth 1 --filter=blob:none --sparse "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>&1
-if !ERRORLEVEL! equ 0 (
+set "CLONE_OK=0"
+set "SPARSE_CLONE=1"
+REM LC_ALL=C pins git's error strings to English for the capability probe
+REM below: a localized git would emit a translated "unknown option" message
+REM the findstr match misses, sending old-git non-English users to a hard
+REM failure instead of the fallback. Saved and restored around the probe.
+set "PLANNOTATOR_SAVED_LC_ALL=!LC_ALL!"
+set "LC_ALL=C"
+git clone --depth 1 --filter=blob:none --sparse "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>"!GIT_ERR_FILE!"
+if !ERRORLEVEL! equ 0 set "CLONE_OK=1"
+set "LC_ALL=!PLANNOTATOR_SAVED_LC_ALL!"
+set "PLANNOTATOR_SAVED_LC_ALL="
+
+REM Capability probe, not a version parse (same philosophy as the GitButler
+REM flag probing in packages/shared/gitbutler-core.ts): `git clone --sparse`
+REM needs git >= 2.25, and an older git rejects the flag instantly with
+REM "error: unknown option `sparse'" before any network call (#1238). Fall
+REM back to a plain shallow clone - it costs download size, not correctness:
+REM every path the copy steps below read is present in the full checkout, and
+REM `git sparse-checkout set` (equally missing on that git) is skipped
+REM because there is nothing to narrow.
+set "SPARSE_UNSUPPORTED=0"
+if "!CLONE_OK!"=="0" (
+    findstr /i /c:"unknown option" "!GIT_ERR_FILE!" >nul 2>&1 && findstr /i /c:"sparse" "!GIT_ERR_FILE!" >nul 2>&1 && set "SPARSE_UNSUPPORTED=1"
+)
+if "!SPARSE_UNSUPPORTED!"=="1" (
+    echo This git does not support "git clone --sparse" ^(needs git ^>= 2.25^) - falling back to a plain shallow clone.
+    set "SPARSE_CLONE=0"
+    if exist "!SKILLS_TMP!\repo" rmdir /s /q "!SKILLS_TMP!\repo" >nul 2>&1
+    git clone --depth 1 "https://github.com/!REPO!.git" --branch "!TAG!" "!SKILLS_TMP!\repo" >nul 2>"!GIT_ERR_FILE!"
+    if !ERRORLEVEL! equ 0 set "CLONE_OK=1"
+)
+
+if "!CLONE_OK!"=="1" (
     pushd "!SKILLS_TMP!\repo"
-    git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
+    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
 
     REM Claude Code reads apps\skills\claude\* (injection `!`plannotator ... $ARGUMENTS``
     REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
@@ -1218,9 +1280,15 @@ rmdir /s /q "!SKILLS_TMP!" >nul 2>&1
 
 if "!CHECKOUT_FAILED!"=="1" (
     echo Error: unable to fetch !REPO! at !TAG! ^(network or git error^). 1>&2
+    if exist "!GIT_ERR_FILE!" (
+        echo git reported: 1>&2
+        type "!GIT_ERR_FILE!" 1>&2
+        del /q "!GIT_ERR_FILE!" >nul 2>&1
+    )
     echo Something went wrong - run the installer again. 1>&2
     exit /b 1
 )
+del /q "!GIT_ERR_FILE!" >nul 2>&1
 
 REM Claude Code commands are deprecated in favor of skills. Remove a legacy
 REM command file only once its replacement skill is actually on disk - running
@@ -1520,6 +1588,23 @@ if /i "!PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL!"=="yes" (
 "!INSTALL_PATH!" install-runtime agent-terminal
 if !ERRORLEVEL! neq 0 (
     echo Skipping agent terminal runtime install ^(plannotator install-runtime failed^)
+)
+goto :eof
+
+REM ======================================================================
+REM Opt-in CallDiff core install. Call flow is off by default, so a default
+REM install never downloads even the pruned core. Review-specific packs
+REM install in-app. Non-fatal when the opt-in install fails.
+REM ======================================================================
+:InstallCallFlowRuntime
+if not "!INSTALL_CALL_FLOW!"=="1" (
+    echo Call-flow analysis: available as an in-app opt-in install ^(enable Call flow in review Settings^), or run: plannotator install-runtime call-flow
+    goto :eof
+)
+
+"!INSTALL_PATH!" install-runtime call-flow
+if !ERRORLEVEL! neq 0 (
+    echo Call-flow runtime install failed; it remains available as an in-app opt-in install
 )
 goto :eof
 

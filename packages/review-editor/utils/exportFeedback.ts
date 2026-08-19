@@ -123,6 +123,34 @@ function gitButlerMismatchNote(ann: CodeAnnotation, current?: FeedbackDiffContex
   return `_Made on ${source} — anchored to that GitButler diff, not the diff above._\n`;
 }
 
+function callFlowInlineCode(value: string): string {
+  return `\`${value.replace(/`/g, '\u02cb')}\``;
+}
+
+/**
+ * Serialize the complete Call Flow selection carried by one review annotation.
+ * The annotation may be inline, file-scoped, or review-scoped; this context
+ * keeps every Shift-clicked step in agent feedback and hosted submission.
+ */
+export function formatCallFlowAnnotationTargets(annotation: CodeAnnotation): string {
+  if (!annotation.callFlowTargets?.length) return '';
+  const rows = annotation.callFlowTargets.map((target) => {
+    let source = 'inferred step';
+    if (target.filePath && target.lineStart && target.lineEnd) {
+      const line = target.lineStart === target.lineEnd
+        ? `L${target.lineStart}`
+        : `L${target.lineStart}-L${target.lineEnd}`;
+      source = `${target.filePath}:${line}`;
+    } else if (target.filePath) {
+      source = target.filePath;
+    } else if (target.rawLine) {
+      source = `raw CallDiff line ${target.rawLine}`;
+    }
+    return `- ${callFlowInlineCode(target.entry)} → ${callFlowInlineCode(target.label)} — ${callFlowInlineCode(source)}`;
+  });
+  return `\n\n**Selected call-flow steps:**\n${rows.join('\n')}`;
+}
+
 function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel = '###', currentDiff?: FeedbackDiffContext): string {
   let output = '';
 
@@ -148,6 +176,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
       } else if (prefix) {
         output += `${prefix.trimEnd()}\n`;
       }
+      output += formatCallFlowAnnotationTargets(ann);
       output += formatSuggestionBlocks(ann);
       output += '\n';
       continue;
@@ -171,6 +200,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     if (ann.reasoning) {
       output += `\n**Reasoning:** ${ann.reasoning}\n`;
     }
+    output += formatCallFlowAnnotationTargets(ann);
     output += formatSelectedTextBlock(ann);
     output += formatSuggestionBlocks(ann);
     output += '\n';
@@ -230,6 +260,7 @@ function renderGeneralComments(annotations: CodeAnnotation[]): string {
     if (ann.reasoning) {
       output += `\n**Reasoning:** ${ann.reasoning}\n`;
     }
+    output += formatCallFlowAnnotationTargets(ann);
     output += '\n';
   }
   return output;

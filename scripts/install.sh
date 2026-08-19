@@ -33,6 +33,12 @@ VERSION_EXPLICIT=0
 # Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
 VERIFY_ATTESTATION_FLAG=-1
+# Three-layer opt-in for the CallDiff call-flow runtime (large on-disk
+# footprint, default off). The normal path installs it in-app from the review
+# UI; this flag exists for scripted installs.
+# Precedence: --with-call-flow > PLANNOTATOR_INSTALL_CALLDIFF > config.json
+# installCallFlow > default (off).
+WITH_CALL_FLOW_FLAG=-1
 # Guided-install answers. Precedence: CLI flags > wizard (terminal, first run
 # or --reconfigure) > saved prefs from a previous run > defaults (no extras,
 # nothing model-invocable). Empty string = not set by a flag.
@@ -41,7 +47,7 @@ MODEL_INVOCABLE_FLAG=""
 NON_INTERACTIVE=0
 RECONFIGURE=0
 # Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
-# no persistent state elsewhere — no sem sidecar, no agent-terminal runtime, no
+# no persistent state elsewhere — no sem sidecar, no CallDiff or agent-terminal runtime, no
 # skills, hooks, slash commands, or per-agent config (Claude, Codex, OpenCode,
 # Gemini, Kiro). Set by --minimal (1) / --no-minimal (0); -1 = neither flag
 # given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved after arg
@@ -82,6 +88,12 @@ Options:
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
                          via env var or ~/.plannotator/config.json.
+  --with-call-flow       Also install the optional pruned CallDiff core
+                         (about 5 MB on macOS arm64, needs Node.js 22+).
+                         By default it is NOT installed; the review UI offers
+                         a one-click install when Call flow is enabled. Also
+                         enabled by PLANNOTATOR_INSTALL_CALLDIFF=1 or
+                         { "installCallFlow": true } in config.json.
   --extras               Install the extra skills (compound, setup-goal,
                          visual-explainer) via `npx skills add` without asking.
   --no-extras            Skip the extras without asking.
@@ -90,7 +102,7 @@ Options:
                          "none". Skills are user-invoked-only by default.
   --minimal              Install only the plannotator binary (aliased
                          --binary-only). Skips the sem semantic-diff sidecar,
-                         the agent-terminal runtime, and every per-agent
+                         the CallDiff runtime, the agent-terminal runtime, and every per-agent
                          integration (skills, hooks, slash commands, and config
                          for Claude, Codex, OpenCode, Gemini, and Kiro). No
                          persistent state is written outside $HOME/.local/bin
@@ -214,6 +226,10 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             VERIFY_ATTESTATION_FLAG=1
+            shift
+            ;;
+        --with-call-flow)
+            WITH_CALL_FLOW_FLAG=1
             shift
             ;;
         --skip-attestation)
@@ -460,6 +476,23 @@ esac
 # Layer 1: CLI flag (overrides everything).
 if [ "$VERIFY_ATTESTATION_FLAG" -ne -1 ]; then
     verify_attestation="$VERIFY_ATTESTATION_FLAG"
+fi
+
+# Resolve the CallDiff call-flow runtime opt-in. Same three-layer shape as
+# verifyAttestation: CLI flag > env var > config.json > default (off). The
+# config grep targets a flat top-level boolean, matching verifyAttestation.
+install_call_flow=0
+if [ -f "$_config_dir/config.json" ]; then
+    if grep -q '"installCallFlow"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
+        install_call_flow=1
+    fi
+fi
+case "${PLANNOTATOR_INSTALL_CALLDIFF:-}" in
+    1|true|yes|TRUE|YES|True|Yes) install_call_flow=1 ;;
+    0|false|no|FALSE|NO|False|No) install_call_flow=0 ;;
+esac
+if [ "$WITH_CALL_FLOW_FLAG" -ne -1 ]; then
+    install_call_flow="$WITH_CALL_FLOW_FLAG"
 fi
 
 # Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
@@ -1002,8 +1035,22 @@ install_agent_terminal_runtime() {
     fi
 }
 
+# Strictly opt-in: Call flow is off by default, so a default install never
+# downloads even its pruned core. Review-specific packs install in-app.
+install_call_flow_runtime() {
+    if [ "$install_call_flow" -ne 1 ]; then
+        echo "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"
+        return 0
+    fi
+
+    if ! "$INSTALL_DIR/plannotator" install-runtime call-flow; then
+        echo "Call-flow runtime install failed; it remains available as an in-app opt-in install"
+    fi
+}
+
 install_sem_sidecar
 install_agent_terminal_runtime
+install_call_flow_runtime
 
 print_path_advice
 
@@ -1610,7 +1657,7 @@ copy_commands_if_present() {
 # command of an AND-OR list except the last, and every shell we tested
 # (bash 3.2.57, which is what `curl | bash` gets on macOS, plus bash 5.3,
 # dash, zsh, and ksh) carries that suppression into the subshell. Writing
-# it as `if ! ( ... ); then` suppresses -e the same way. So the four fetch
+# it as `if ! ( ... ); then` suppresses -e the same way. So the fetch
 # steps below carry an explicit `|| exit 1`: without them a failed clone
 # ran the whole block anyway, the subshell exited 0 on its trailing `if`,
 # and the installer printed "YOU'RE ALL SET!" with no skills installed.
@@ -1629,10 +1676,52 @@ checkout_failed=0
     fi
 
     cd "$skills_tmp" || exit 1
-    git clone --depth 1 --filter=blob:none --sparse \
-        "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>/dev/null || exit 1
+    # Capture git's stderr instead of discarding it (#1238): on failure the
+    # real error is surfaced below so incompatibilities self-diagnose instead
+    # of hiding behind the generic "network or git error" message.
+    git_err="$skills_tmp/git-stderr"
+    surface_git_error() {
+        echo "git reported:" >&2
+        tail -n 5 "$git_err" >&2
+    }
+    sparse_clone=1
+    # LC_ALL=C pins git's error strings to English: the capability probe below
+    # matches the literal "unknown option ... sparse" text, and a localized
+    # git (standard Linux NLS builds) would otherwise emit a translated
+    # message the match misses, sending old-git non-English users to a hard
+    # failure instead of the fallback.
+    if ! LC_ALL=C LANGUAGE=C git clone --depth 1 --filter=blob:none --sparse \
+        "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>"$git_err"; then
+        # Capability probe, not a version parse (same philosophy as the
+        # GitButler flag probing in packages/shared/gitbutler-core.ts):
+        # `git clone --sparse` needs git >= 2.25, and an older git (macOS
+        # with stale Xcode CLT ships 2.23) rejects the flag instantly with
+        # "error: unknown option `sparse'" before any network call (#1238).
+        # Fall back to a plain shallow clone — it costs download size, not
+        # correctness: every path the copy steps below read is present in
+        # the full checkout, and `git sparse-checkout set` (equally missing
+        # on that git) is skipped because there is nothing to narrow.
+        if grep -qi "unknown option" "$git_err" && grep -qi "sparse" "$git_err"; then
+            echo "This git does not support 'git clone --sparse' (needs git >= 2.25) — falling back to a plain shallow clone."
+            sparse_clone=0
+            rm -rf repo
+            if ! git clone --depth 1 \
+                "https://github.com/${REPO}.git" --branch "$latest_tag" repo 2>"$git_err"; then
+                surface_git_error
+                exit 1
+            fi
+        else
+            surface_git_error
+            exit 1
+        fi
+    fi
     cd repo || exit 1
-    git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>/dev/null || exit 1
+    if [ "$sparse_clone" -eq 1 ]; then
+        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>"$git_err"; then
+            surface_git_error
+            exit 1
+        fi
+    fi
 
     # Core skills -> Claude Code (also serve as /plannotator-* slash commands)
     # and the official OpenAI shared-agent path. SOFT guard: a tag pinned

@@ -10,11 +10,14 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { isUrlHostOverridden } from "./remote";
+import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
-import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
+import { listReferenceSkills, readReferenceSkillContent } from "./review-skill-loader";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -152,15 +155,70 @@ export function handleDraftDelete(contentKey: string, req?: Request): Response {
   return Response.json({ ok: true });
 }
 
+/**
+ * List global agent skills for comment skill references. Used by plan +
+ * annotate servers. Takes no client input (fixed roots only) and degrades to an
+ * empty catalog on any failure so the composer never breaks.
+ */
+export function handleReferenceSkills(): Response {
+  try {
+    return Response.json({ skills: listReferenceSkills() });
+  } catch (err) {
+    console.error(
+      `[plannotator] Skill catalog failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return Response.json({ skills: [] });
+  }
+}
+
+/**
+ * Serve a referenced skill's SKILL.md contents for feedback injection
+ * (`?name=<skill>`). Used by plan + annotate servers. The name is matched
+ * against discovered skills only — it is never used as a path — so traversal
+ * and absolute-path inputs answer 404, never a file outside the skill roots.
+ */
+export function handleReferenceSkillContent(req: Request): Response {
+  try {
+    const name = new URL(req.url).searchParams.get("name") ?? "";
+    const skill = readReferenceSkillContent(name);
+    if (!skill) {
+      return Response.json({ error: "Skill not found" }, { status: 404 });
+    }
+    return Response.json({ skill });
+  } catch (err) {
+    console.error(
+      `[plannotator] Skill content failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return Response.json({ error: "Skill content failed" }, { status: 500 });
+  }
+}
+
 /** Return the shared JSON response for an unmatched API route. */
 export function handleApiNotFound(path: string): Response {
   return Response.json({ error: "Not found", path }, { status: 404 });
 }
 
-/** Serve the app favicon. Used by all 3 servers. */
+/**
+ * Serve the app favicon. Used by all 3 servers (plus goal-setup).
+ *
+ * Reads the persisted style so a classic user's first painted frame is already
+ * classic. Without this the static route always answered Totman and the
+ * preference only landed once React mounted, i.e. a visible flash on every load.
+ *
+ * The route is one URL with two possible payloads, so the response declares its
+ * real type and is not cached: the entry HTML's <link rel="icon"> deliberately
+ * carries no `type`/`sizes` (see apps/hook/index.html), leaving Content-Type the
+ * single source of truth, and a day-long cache would re-paint the old icon after
+ * a switch. loadConfig() is a small unmemoized JSON read, once per page load.
+ */
 export function handleFavicon(): Response {
+  if (getServerConfig(null).favicon === "classic") {
+    return new Response(CLASSIC_FAVICON_SVG, {
+      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "no-cache" },
+    });
+  }
   return new Response(FAVICON_PNG_BYTES, {
-    headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
+    headers: { "Content-Type": "image/png", "Cache-Control": "no-cache" },
   });
 }
 
@@ -210,11 +268,16 @@ export async function handleServerReady(
   if (isRemote) {
     // With an advertised-URL host override the link is directly reachable
     // (e.g. over a tailnet), so the port-forwarding advice would be wrong.
-    process.stderr.write(
-      isUrlHostOverridden()
-        ? `\n  Plannotator session ready — open on your device:\n  ${url}\n\n`
-        : `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
-    );
+    if (isUrlHostOverridden()) {
+      process.stderr.write(`\n  Plannotator session ready — open on your device:\n  ${url}\n\n`);
+      // The URL makes a device hop; a QR skips the retyping (TTY only). Only
+      // for overridden hosts: a QR of a localhost URL scans to nowhere.
+      writeUrlQr(url);
+    } else {
+      process.stderr.write(
+        `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
+      );
+    }
   } else if (isCodexDesktopHost()) {
     process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);
   }

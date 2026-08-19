@@ -176,6 +176,9 @@ describe("default uninstall", () => {
     writeText(
       join(dataDir, "vendor", "agent-terminal", "webtui-0.0.9", "server.js"),
     );
+    writeText(
+      join(dataDir, "vendor", "call-flow", "calldiff-0.4.1", "package.json"),
+    );
     writeText(join(dataDir, "vendor", "other-tool", "keep.txt"));
     writeText(join(dataDir, "install-prefs"), "full\n");
     writeText(join(dataDir, "migrations", "legacy"));
@@ -390,6 +393,7 @@ describe("default uninstall", () => {
     expect(readJson(join(dataDir, "config.json"))).toEqual({ theme: "dark" });
     expect(existsSync(join(dataDir, "vendor", "sem"))).toBe(false);
     expect(existsSync(join(dataDir, "vendor", "agent-terminal"))).toBe(false);
+    expect(existsSync(join(dataDir, "vendor", "call-flow"))).toBe(false);
     expect(existsSync(join(dataDir, "vendor", "other-tool", "keep.txt"))).toBe(true);
     expect(existsSync(join(dataDir, "install-prefs"))).toBe(true);
     expect(existsSync(join(dataDir, "migrations"))).toBe(true);

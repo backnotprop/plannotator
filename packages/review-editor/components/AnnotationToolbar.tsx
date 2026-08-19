@@ -9,6 +9,10 @@ import { ConventionalLabelPicker, type LabelDef } from './ConventionalLabelPicke
 import type { ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { useDraggable } from '@plannotator/ui/hooks/useDraggable';
+import {
+  hasPrimaryCoarsePointer,
+  useVisibleViewportBounds,
+} from '@plannotator/ui/hooks/useViewportEnvironment';
 
 interface AnnotationToolbarProps {
   toolbarState: ToolbarState;
@@ -75,6 +79,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onViewAIResponse,
   aiHistoryMessages = [],
 }) => {
+  const coarsePointer = hasPrimaryCoarsePointer();
+  const visibleBounds = useVisibleViewportBounds(coarsePointer ? 16 : 0);
+  const horizontalInset = coarsePointer ? Math.min(160, visibleBounds.width / 2) : 150;
   const suggestedCodeRef = useRef<HTMLTextAreaElement>(null);
   const handleTabIndent = useTabIndent(setSuggestedCode);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(toolbarRef);
@@ -110,13 +117,31 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       ref={toolbarRef}
       className="review-toolbar"
       style={dragPosition
-        ? { position: 'fixed', top: dragPosition.top, left: dragPosition.left, zIndex: 1000 }
+        ? {
+            position: 'fixed',
+            top: dragPosition.top,
+            left: dragPosition.left,
+            zIndex: 1000,
+            maxHeight: visibleBounds.height,
+            overflowY: 'auto',
+          }
         : {
             position: 'fixed',
-            top: Math.min(toolbarState.position.top, window.innerHeight - 200),
-            left: Math.max(150, Math.min(toolbarState.position.left, window.innerWidth - 150)),
+            top: Math.max(
+              visibleBounds.top,
+              Math.min(toolbarState.position.top, visibleBounds.bottom - 200),
+            ),
+            left: Math.max(
+              visibleBounds.left + horizontalInset,
+              Math.min(
+                toolbarState.position.left,
+                visibleBounds.right - horizontalInset,
+              ),
+            ),
             transform: 'translateX(-50%)',
             zIndex: 1000,
+            maxHeight: visibleBounds.height,
+            overflowY: 'auto',
           }
       }
     >
@@ -133,7 +158,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           dragHandleProps={dragHandleProps}
         />
       ) : (
-        <div className="w-80 max-w-[calc(100vw-2rem)] flex flex-col">
+        <div
+          className="w-80 max-w-full flex flex-col"
+          style={{ width: Math.min(320, visibleBounds.width) }}
+        >
           <div className="flex items-center justify-between mb-2" {...dragHandleProps}>
             <span className="text-xs text-muted-foreground">
               {isEditing
@@ -174,14 +202,16 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           )}
 
           <textarea
+            data-pn-mobile-editable="true"
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             placeholder="Leave feedback..."
-            className="w-full min-h-[4.5rem] max-h-[calc(100vh-16rem)] px-3 py-2 bg-muted rounded-lg text-xs leading-6 resize-y border-0 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
+            className="w-full min-h-[4.5rem] max-h-[calc(var(--pn-viewport-height,100vh)-16rem)] px-3 py-2 bg-muted rounded-lg text-xs leading-6 resize-y border-0 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
             rows={3}
-            autoFocus
+            autoFocus={!coarsePointer}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
+                e.stopPropagation();
                 onDismiss();
               } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
                 onSubmit();
@@ -211,7 +241,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 placeholder="Enter code suggestion..."
                 className="suggested-code-input"
                 rows={4}
-                autoFocus
+                autoFocus={!coarsePointer}
                 spellCheck={false}
                 onKeyDown={(e) => {
                   if (e.key === 'Tab') {

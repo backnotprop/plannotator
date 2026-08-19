@@ -1,0 +1,1 @@
+{"name":"plannotator-call-flow-pack-python","version":"1.0.0","private":true,"dependencies":{"tree-sitter":"0.25.1","tree-sitter-python":"0.25.0"}}

@@ -11,6 +11,10 @@ param(
     [Alias("BinaryOnly")]
     [switch]$Minimal,
     [switch]$NoMinimal,
+    # Opt-in install of the pruned CallDiff call-flow core (default off;
+    # the review UI offers a one-click install). Mirrors install.sh's
+    # --with-call-flow.
+    [switch]$WithCallFlow,
     [switch]$SkipCodex,
     [switch]$SkipGemini,
     [switch]$SkipKiro,
@@ -42,7 +46,7 @@ if ($Minimal -and $NoMinimal) {
 }
 
 # Binary-only mode. Installs just the plannotator binary and no persistent state
-# elsewhere - no sem sidecar, agent-terminal runtime, skills, hooks, or per-agent
+# elsewhere - no sem sidecar, CallDiff or agent-terminal runtime, skills, hooks, or per-agent
 # config. Precedence: -Minimal / -NoMinimal switch > PLANNOTATOR_MINIMAL env var
 # > default (off). Mirrors install.sh's --minimal / --no-minimal.
 $minimal = $false
@@ -176,6 +180,10 @@ Write-Host "Installing plannotator $latestTag..."
 # can fail fast without wasting bandwidth if the requested tag predates
 # provenance support. Precedence: CLI flag > env var > config file > default.
 $verifyAttestationResolved = $false
+# CallDiff call-flow runtime opt-in. Same three-layer shape:
+# -WithCallFlow > PLANNOTATOR_INSTALL_CALLDIFF > config installCallFlow >
+# default (off).
+$installCallFlowResolved = $false
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
 # Unset PLANNOTATOR_DATA_DIR: an existing ~/.plannotator (legacy default)
@@ -283,6 +291,25 @@ function Install-AgentTerminalRuntime {
     }
 }
 
+# Strictly opt-in: Call flow is off by default, so a default install never
+# downloads even its pruned core. Review-specific packs install in-app.
+function Install-CallFlowRuntime {
+    if (-not $installCallFlowResolved) {
+        Write-Host "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"
+        return
+    }
+
+    $plannotatorPath = Join-Path $installDir "plannotator.exe"
+    try {
+        & $plannotatorPath install-runtime call-flow
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Call-flow runtime install failed; it remains available as an in-app opt-in install"
+        }
+    } catch {
+        Write-Host "Call-flow runtime install failed ($($_.Exception.Message)); it remains available as an in-app opt-in install"
+    }
+}
+
 $configPath = Join-Path $configDir "config.json"
 $cfg = $null
 if (Test-Path $configPath) {
@@ -293,6 +320,9 @@ if (Test-Path $configPath) {
         # greps for a literal boolean.
         if ($cfg.verifyAttestation -is [bool] -and $cfg.verifyAttestation) {
             $verifyAttestationResolved = $true
+        }
+        if ($cfg.installCallFlow -is [bool] -and $cfg.installCallFlow) {
+            $installCallFlowResolved = $true
         }
     } catch {
         # Malformed config - ignore, fall through to other layers.
@@ -314,6 +344,17 @@ if ($envVerify) {
 # script (lines ~13-16), so at most one of these branches can fire.
 if ($VerifyAttestation) { $verifyAttestationResolved = $true }
 if ($SkipAttestation)   { $verifyAttestationResolved = $false }
+
+# CallDiff runtime opt-in, layers 2 and 1 (config was read above).
+$envInstallCallFlow = $env:PLANNOTATOR_INSTALL_CALLDIFF
+if ($envInstallCallFlow) {
+    if ($envInstallCallFlow -match '^(1|true|yes)$') {
+        $installCallFlowResolved = $true
+    } elseif ($envInstallCallFlow -match '^(0|false|no)$') {
+        $installCallFlowResolved = $false
+    }
+}
+if ($WithCallFlow) { $installCallFlowResolved = $true }
 
 # Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
 # as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >
@@ -620,7 +661,7 @@ function Show-PathAdvice {
 # Binary-only mode stops here (see the $minimal resolution near the top): the
 # binary is installed, so add it to PATH and exit before any sidecar download,
 # agent integration, skill checkout, config write, or cleanup runs. Only the
-# binary and its PATH entry are added - none of the sem sidecar, agent-terminal
+# binary and its PATH entry are added - none of the sem sidecar, CallDiff, agent-terminal
 # runtime, or per-agent skills, hooks, or config.
 if ($minimal) {
     Show-PathAdvice
@@ -632,6 +673,7 @@ if ($minimal) {
 
 Install-SemSidecar
 Install-AgentTerminalRuntime
+Install-CallFlowRuntime
 
 Show-PathAdvice
 
@@ -1047,6 +1089,13 @@ function Copy-SkillIfPresent {
     }
 }
 
+# Captured tail of git's stderr from the most recent failed clone attempt,
+# surfaced with the "network or git error" message below so the real failure
+# self-diagnoses instead of being swallowed (#1238). Read before $skillsTmp
+# is removed.
+$gitStderrTail = @()
+$sparseClone = $true
+
 try {
     # Scoped Continue preference: on PowerShell < 7.2 (and profiles that
     # restore the old behavior), redirecting a native command's stderr under
@@ -1054,9 +1103,38 @@ try {
     # terminating error, and git prints its normal "Cloning into ..."
     # progress on stderr, so the clone "failed" on the message announcing it
     # started (#1162). Real failures stay detectable: the clone is verified
-    # by Test-Path below, never by a throw.
+    # by Test-Path below, never by a throw. Stderr goes to a file instead of
+    # $null (#1238) so failures can be diagnosed.
+    $gitErrFile = Join-Path $skillsTmp "git-stderr.txt"
     if (-not $skipSkillsResolved) {
-        & { $local:ErrorActionPreference = 'Continue'; git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$null }
+        # LC_ALL=C pins git's error strings to English for the capability
+        # probe below: a localized git would emit a translated "unknown
+        # option" message the match misses, sending old-git non-English
+        # users to a hard failure instead of the fallback. Saved/restored
+        # around the call because $env: changes are process-wide. Kept on
+        # one line for the install.test.ts scoped-git-call scanner.
+        & { $local:ErrorActionPreference = 'Continue'; $prevLcAll = $env:LC_ALL; $env:LC_ALL = 'C'; git clone --depth 1 --filter=blob:none --sparse "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$gitErrFile; if ($null -eq $prevLcAll) { Remove-Item Env:LC_ALL -ErrorAction SilentlyContinue } else { $env:LC_ALL = $prevLcAll } }
+        if (-not (Test-Path "$skillsTmp\repo")) {
+            $cloneErr = ""
+            if (Test-Path $gitErrFile) { $cloneErr = [System.IO.File]::ReadAllText($gitErrFile) }
+            # Capability probe, not a version parse (same philosophy as the
+            # GitButler flag probing in packages/shared/gitbutler-core.ts):
+            # `git clone --sparse` needs git >= 2.25, and an older git rejects
+            # the flag instantly with "error: unknown option `sparse'" before
+            # any network call (#1238). Fall back to a plain shallow clone -
+            # it costs download size, not correctness: every path the copy
+            # steps below read is present in the full checkout, and
+            # `git sparse-checkout set` (equally missing on that git) is
+            # skipped because there is nothing to narrow.
+            if ($cloneErr -match '(?i)unknown option' -and $cloneErr -match '(?i)sparse') {
+                Write-Host "This git does not support 'git clone --sparse' (needs git >= 2.25) - falling back to a plain shallow clone."
+                $sparseClone = $false
+                & { $local:ErrorActionPreference = 'Continue'; git clone --depth 1 "https://github.com/$repo.git" --branch $latestTag "$skillsTmp\repo" 2>$gitErrFile }
+            }
+        }
+        if ((-not (Test-Path "$skillsTmp\repo")) -and (Test-Path $gitErrFile)) {
+            $gitStderrTail = @(Get-Content $gitErrFile -ErrorAction SilentlyContinue | Select-Object -Last 5)
+        }
     }
     # git is a native executable - it does not throw under
     # $ErrorActionPreference=Stop on non-zero exit. Guard with
@@ -1076,8 +1154,12 @@ try {
         try {
             # Same scoped Continue as the clone above: sparse-checkout may
             # write advice to stderr, which must not become a terminating
-            # error on PowerShell < 7.2 (#1162).
-            & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null }
+            # error on PowerShell < 7.2 (#1162). Skipped entirely on the
+            # plain-clone fallback (#1238): that git has no sparse-checkout
+            # subcommand, and the full checkout needs no narrowing.
+            if ($sparseClone) {
+                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null }
+            }
 
             # Claude Code and Codex consume different skill bodies. Claude Code
             # reads apps/skills/claude/* (dynamic-context injection
@@ -1168,6 +1250,10 @@ Remove-Item -Recurse -Force $skillsTmp -ErrorAction SilentlyContinue
 
 if ($checkoutFailed) {
     Write-Host "Error: unable to fetch $repo at $latestTag (network or git error)."
+    if ($gitStderrTail.Count -gt 0) {
+        Write-Host "git reported:"
+        foreach ($line in $gitStderrTail) { Write-Host "  $line" }
+    }
     Write-Host "Something went wrong - run the installer again."
     exit 1
 }

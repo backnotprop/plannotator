@@ -11,10 +11,13 @@
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
-import React, { act, useState } from 'react';
+import React, { act, useCallback, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { usePlanDiff, type VersionInfo } from '@plannotator/ui/hooks/usePlanDiff';
-import { usePlanDiffViewAutoExit } from './hooks/usePlanDiffViewAutoExit';
+import {
+  usePlanDiffNavigationAutoExit,
+  usePlanDiffViewAutoExit,
+} from './hooks/usePlanDiffViewAutoExit';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -30,6 +33,12 @@ interface HarnessApi {
   hasPreviousVersion: boolean;
   activate: () => void;
   switchDoc: (doc: DocState) => void;
+}
+
+interface NavigationHarnessApi {
+  isPlanDiffActive: boolean;
+  activate: () => void;
+  setContentsVisible: (visible: boolean) => void;
 }
 
 const DOC_WITH_BASELINE: DocState = {
@@ -89,6 +98,25 @@ function Harness({
   return null;
 }
 
+function NavigationHarness({
+  apiRef,
+}: {
+  apiRef: { current: NavigationHarnessApi | null };
+}) {
+  const [isPlanDiffActive, setIsPlanDiffActive] = useState(false);
+  const [contentsVisible, setContentsVisible] = useState(true);
+  const exitPlanDiff = useCallback(() => setIsPlanDiffActive(false), []);
+
+  usePlanDiffNavigationAutoExit(contentsVisible, exitPlanDiff);
+
+  apiRef.current = {
+    isPlanDiffActive,
+    activate: () => setIsPlanDiffActive(true),
+    setContentsVisible,
+  };
+  return null;
+}
+
 async function mountHarness(htmlSurface = false): Promise<{ current: () => HarnessApi }> {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -107,6 +135,22 @@ async function mountHarness(htmlSurface = false): Promise<{ current: () => Harne
   };
 }
 
+async function mountNavigationHarness(): Promise<{ current: () => NavigationHarnessApi }> {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  containers.push(container);
+  const root = createRoot(container);
+  roots.push(root);
+  const apiRef: { current: NavigationHarnessApi | null } = { current: null };
+  await act(async () => root.render(<NavigationHarness apiRef={apiRef} />));
+  return {
+    current: () => {
+      if (!apiRef.current) throw new Error('Navigation harness not mounted');
+      return apiRef.current;
+    },
+  };
+}
+
 afterEach(async () => {
   for (const root of roots) await act(async () => root.unmount());
   roots = [];
@@ -115,6 +159,17 @@ afterEach(async () => {
 });
 
 describe('usePlanDiffViewAutoExit', () => {
+  test.skipIf(!hasDom)('does not close a newly activated diff for an unchanged remembered Contents tab', async () => {
+    const harness = await mountNavigationHarness();
+
+    await act(async () => harness.current().activate());
+    expect(harness.current().isPlanDiffActive).toBe(true);
+
+    await act(async () => harness.current().setContentsVisible(false));
+    await act(async () => harness.current().setContentsVisible(true));
+    expect(harness.current().isPlanDiffActive).toBe(false);
+  });
+
   test.skipIf(!hasDom)('exits diff view when the active document switches to one with no baseline', async () => {
     const harness = await mountHarness();
 

@@ -10,6 +10,7 @@
  */
 
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
+import { isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 import {
@@ -131,6 +132,20 @@ export const SETTINGS = {
     },
     toServer: (v: ThemePair) => ({ theme: { mode: v.mode, light: v.light, dark: v.dark } }),
   },
+  faviconStyle: {
+    defaultValue: 'totman' as FaviconStyle,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-favicon');
+      return isFaviconStyle(v) ? v : undefined;
+    },
+    toCookie: (v: FaviconStyle) => storage.setItem('plannotator-favicon', v),
+    serverKey: 'favicon',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = sc.favicon;
+      return isFaviconStyle(v) ? v : undefined;
+    },
+    toServer: (v: FaviconStyle) => ({ favicon: v }),
+  },
 
   gridEnabled: {
     // Default ON: plans open in the classic grid / floating-card look. The UI 2.0
@@ -202,6 +217,54 @@ export const SETTINGS = {
       return v === 'tree' || v === 'sections' ? v : undefined;
     },
     toCookie: (v: string) => storage.setItem('plannotator-review-panel-view', v),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  // The view the user last SELECTED via the in-review header toggle. Layered
+  // between the session state and the persisted reviewPanelView default, so a
+  // new session opens on what the user was actually using. Cookie-only.
+  // null = no last-used recorded (fall through to reviewPanelView).
+  //
+  // 'commits' is never recorded here for the same reason reviewPanelView
+  // rejects it: the Commits view is session-only and never an opening view.
+  reviewPanelViewLastUsed: {
+    defaultValue: null as 'sections' | 'tree' | null,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-review-panel-view-last-used');
+      return v === 'tree' || v === 'sections' ? v : undefined;
+    },
+    toCookie: (v: 'sections' | 'tree' | null) => {
+      // The null default seeds through here on first load — "unrecorded" has
+      // no cookie representation, so write nothing.
+      if (v === 'sections' || v === 'tree') {
+        storage.setItem('plannotator-review-panel-view-last-used', v);
+      }
+    },
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  // Compact left-panel preferences. These are deliberately cookie-only: they
+  // shape the local file-list chrome without changing review semantics or the
+  // repository state, and should follow the reviewer across review sessions.
+  reviewShowViewedControls: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-review-show-viewed-controls');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-review-show-viewed-controls', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  reviewShowStageControls: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-review-show-stage-controls');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-review-show-stage-controls', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
@@ -413,6 +476,36 @@ export const SETTINGS = {
     serverKey: undefined,
     fromServer: undefined,
     toServer: undefined,
+  },
+  semanticDiffEnabled: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-semantic-diff-enabled');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-semantic-diff-enabled', String(value)),
+    serverKey: 'reviewAnalysis',
+    fromServer: (serverConfig: Record<string, unknown>) => {
+      const value = (serverConfig.reviewAnalysis as Record<string, unknown> | undefined)?.semanticDiff;
+      return typeof value === 'boolean' ? value : undefined;
+    },
+    toServer: (value: boolean) => ({ reviewAnalysis: { semanticDiff: value } }),
+  },
+  callFlowEnabled: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-call-flow-enabled');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-call-flow-enabled', String(value)),
+    serverKey: 'reviewAnalysis',
+    fromServer: (serverConfig: Record<string, unknown>) => {
+      const value = (serverConfig.reviewAnalysis as Record<string, unknown> | undefined)?.callFlow;
+      return typeof value === 'boolean' ? value : undefined;
+    },
+    toServer: (value: boolean) => ({ reviewAnalysis: { callFlow: value } }),
   },
   conventionalComments: {
     defaultValue: false as boolean,

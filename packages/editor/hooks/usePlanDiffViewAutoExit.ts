@@ -28,3 +28,19 @@ export function usePlanDiffViewAutoExit(
     }
   }, [active, hasPreviousVersion, exitPlanDiff]);
 }
+
+/**
+ * Exits the diff only when navigation moves into the document-contents view.
+ *
+ * `diffActive` is intentionally not an input. A desktop sidebar may already
+ * remember the Contents tab while closed; activating the diff must not cause
+ * that unchanged navigation state to close it in the same commit phase.
+ */
+export function usePlanDiffNavigationAutoExit(
+  contentsVisible: boolean,
+  exitPlanDiff: () => void,
+): void {
+  useEffect(() => {
+    if (contentsVisible) exitPlanDiff();
+  }, [contentsVisible, exitPlanDiff]);
+}

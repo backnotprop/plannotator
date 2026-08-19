@@ -48,7 +48,7 @@ describe.if(hasDom)('HtmlViewer Vim HUD bridge', () => {
           selectedAnnotationId={null}
           mode="selection"
           inputMethod="drag"
-          onAnnotationRestoreComplete={(missingIds) => reports.push(missingIds)}
+          onUnanchoredChange={(missingIds) => reports.push(missingIds)}
         />,
       );
     });
@@ -64,14 +64,8 @@ describe.if(hasDom)('HtmlViewer Vim HUD bridge', () => {
 
     act(() => dispatchBridgeMessage({ type: 'plannotator-bridge-ready' }));
     act(() => dispatchBridgeMessage({
-      type: 'plannotator-bridge-mark-applied',
-      id: 'still-here',
-      success: true,
-    }));
-    act(() => dispatchBridgeMessage({
-      type: 'plannotator-bridge-mark-applied',
-      id: 'removed-text',
-      success: false,
+      type: 'plannotator-bridge-unanchored',
+      ids: ['removed-text'],
     }));
 
     expect(reports).toEqual([['removed-text']]);

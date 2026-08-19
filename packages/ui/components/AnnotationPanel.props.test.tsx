@@ -3,7 +3,8 @@
  *   - readOnly hides every mutation affordance (delete/edit on all card kinds)
  *   - renderCardFooter renders a per-card slot whose interactions do NOT
  *     select the card
- * Both default to today's behavior (mutable, no footer).
+ *   - embedded presentation leaves stage geometry and chrome to its host
+ * All default to today's behavior (mutable panel, no footer).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
@@ -77,7 +78,11 @@ describe('AnnotationPanel consumer props', () => {
     expect(document.querySelector('button[title="Edit annotation"]')).toBeNull();
   });
 
-  test.skipIf(!hasDom)('readOnly hides direct-edit discard and host mutation slots', async () => {
+  test.skipIf(!hasDom)('readOnly hides direct-edit discard but keeps the host footer slot', async () => {
+    // The footer's contents are host-owned and may be pure read affordances
+    // (a replies list, a copy link) — view-only panels losing them was the
+    // Workspaces regression behind the 0.30.0 change. Built-in mutation
+    // affordances stay hidden; the host gates its own footer contents.
     await mount(
       <AnnotationPanel
         {...baseProps}
@@ -93,7 +98,8 @@ describe('AnnotationPanel consumer props', () => {
       />,
     );
     expect(document.body.textContent).not.toContain('Discard');
-    expect(document.body.textContent).not.toContain('Reply');
+    expect(document.querySelector('[data-annotation-card-footer="true"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('Reply');
   });
 
   test.skipIf(!hasDom)('renderCardFooter renders per-card and does not select the card', async () => {
@@ -128,5 +134,14 @@ describe('AnnotationPanel consumer props', () => {
   test.skipIf(!hasDom)('no footer prop → no slot rendered', async () => {
     await mount(<AnnotationPanel {...baseProps} />);
     expect(document.querySelector('[data-annotation-card-footer="true"]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('embedded presentation keeps the timeline and omits panel chrome', async () => {
+    await mount(<AnnotationPanel {...baseProps} presentation="embedded" />);
+    const panel = document.querySelector<HTMLElement>('[data-annotation-panel="true"]');
+    expect(panel?.className).toContain('h-full min-h-0 w-full flex-1');
+    expect(document.body.textContent).not.toContain('Annotations');
+    expect(document.querySelector('[data-annotation-id="a1"]')).not.toBeNull();
+    expect(document.querySelector('.fixed.inset-0')).toBeNull();
   });
 });

@@ -6,13 +6,15 @@
     ".": "./App.tsx",
     "./styles": "./index.css",
     "./shortcuts": "./shortcuts.ts",
-    "./worker-pool": "./workerPool.tsx"
+    "./worker-pool": "./workerPool.tsx",
+    "./components/*": "./components/*.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist-mono": "5.2.7",
     "@fontsource-variable/inter": "^5.2.8",
     "@pierre/diffs": "1.3.2",
+    "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "lucide-react": "^1.14.0",

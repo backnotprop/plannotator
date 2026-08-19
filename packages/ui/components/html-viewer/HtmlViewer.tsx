@@ -24,11 +24,25 @@ import {
 } from "../../utils/vimHud";
 import { AnnotationToolbar } from "../AnnotationToolbar";
 import { AttachmentsButton } from "../AttachmentsButton";
-import { CommentPopover, type CommentAskAIHandler } from "../CommentPopover";
-import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
+import {
+  CommentPopover,
+  type CommentAskAIHandler,
+  type CommentTargetChip,
+} from "../CommentPopover";
 import { VimKeyHud } from "../VimKeyHud";
 import type { ViewerHandle } from "../Viewer";
-import { useHtmlAnnotation } from "./useHtmlAnnotation";
+import {
+  computeComposerYield,
+  distanceToRect,
+  type ComposerYieldState,
+} from "./composerYield";
+import { buildSyncNumbering } from "./annotationNumbering";
+import {
+  MAX_PAGE_URL_LENGTH,
+  rejectsLiveMessage,
+  useHtmlAnnotation,
+  type HtmlLiveSession,
+} from "./useHtmlAnnotation";
 import {
   THEME_TOKENS,
   buildSrcdocInjection,
@@ -58,20 +72,6 @@ function isBridgeReadyMessage(value: unknown): boolean {
     && value !== null
     && "type" in value
     && value.type === `${PREFIX}ready`;
-}
-
-interface MarkAppliedMessage {
-  id: string;
-  success: boolean;
-}
-
-function parseMarkAppliedMessage(value: unknown): MarkAppliedMessage | null {
-  return isRecord(value)
-    && value.type === `${PREFIX}mark-applied`
-    && typeof value.id === "string"
-    && typeof value.success === "boolean"
-    ? { id: value.id, success: value.success }
-    : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -142,6 +142,17 @@ function parseVimBridgeCopy(value: unknown): string | null {
 /** Inputs for the sandboxed raw-HTML viewer and its parent-side annotation UI. */
 export interface HtmlViewerProps {
   rawHtml: string;
+  /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
+   *  rawHtml. The caller must also set `fullViewport` and `liveSession`. */
+  src?: string;
+  /** Live session credentials paired with `src`: proxy origin + per-session
+   *  token, validated on every inbound message and stamped on every post. */
+  liveSession?: HtmlLiveSession;
+  /** Current page (pathname + search) in a live multi-page session. Restore
+   *  filters annotations to this page; changing it re-applies the filter. */
+  currentPageUrl?: string;
+  /** Live-mode page navigation reports (ready pageUrl + page-change). */
+  onPageChange?: (pageUrl: string) => void;
   annotations: Annotation[];
   onAddAnnotation: (ann: Annotation) => void;
   onSelectAnnotation: (id: string | null) => void;
@@ -149,6 +160,18 @@ export interface HtmlViewerProps {
   mode: EditorMode;
   /** Input method: 'drag' = text selection, 'pinpoint' = click an element. */
   inputMethod: InputMethod;
+  /** Interact/Annotate toggle for HTML and live-app surfaces. While false
+   *  the bridge keeps clicks native (no pinpoint capture, no hover outline)
+   *  and clicks/forms/navigation reach the page untouched. Text
+   *  drag-selection commenting stays live in BOTH modes, and committed
+   *  markers stay visible and clickable in BOTH modes. Default true (armed)
+   *  on both surface kinds. */
+  annotateModeActive?: boolean;
+  /** Esc final rung (bridge-side or the parent-side listener here): the user
+   *  asked to leave Annotate for Interact. The host owns the mode state. */
+  onAnnotateModeExit?: () => void;
+  /** Mod+Shift+A pressed while focus lived inside the iframe. */
+  onAnnotateModeToggle?: () => void;
   /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
   vimModeEnabled?: boolean;
   /** Replace the iframe-local compact badge with the shared live key HUD. */
@@ -174,10 +197,13 @@ export interface HtmlViewerProps {
   /** Toggle the diff-highlighted view on/off. */
   onToggleDiff?: () => void;
   onAskAI?: CommentAskAIHandler;
-  /** Reports annotations whose text anchors could not be restored in a fresh iframe. */
-  onAnnotationRestoreComplete?: (missingIds: string[]) => void;
   /** Disable every annotation mutation entry point while preserving reading and navigation. */
   readOnly?: boolean;
+  /** Reports the full set of annotation ids with no live representation on
+   *  the page (fail-closed anchors hide markers rather than guess). Called
+   *  with the complete current set whenever it changes, including back to
+   *  empty on recovery. Fires in readOnly mode too. */
+  onUnanchoredChange?: (ids: string[]) => void;
   /** Accessible iframe title. */
   title?: string;
 }
@@ -190,12 +216,19 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
       rawHtml,
+      src,
+      liveSession,
+      currentPageUrl,
+      onPageChange,
       annotations,
       onAddAnnotation,
       onSelectAnnotation,
       selectedAnnotationId,
       mode,
       inputMethod,
+      annotateModeActive = true,
+      onAnnotateModeExit,
+      onAnnotateModeToggle,
       vimModeEnabled = false,
       vimHudEnabled = false,
       vimHudKeyPanelEnabled = true,
@@ -210,8 +243,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       diffActive,
       onToggleDiff,
       onAskAI,
-      onAnnotationRestoreComplete,
       readOnly = false,
+      onUnanchoredChange,
       title = "HTML Plan Viewer",
     },
     ref,
@@ -228,19 +261,50 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [vimHudCommand, setVimHudCommand] = useState<VimHudCommand | null>(null);
     const [vimHelpOpen, setVimHelpOpen] = useState(false);
     const vimHudSequenceRef = useRef(0);
-    const annotationRestorePendingRef = useRef<Set<string>>(new Set());
-    const annotationRestoreMissingRef = useRef<Set<string>>(new Set());
     const vimHudActive = !readOnly && vimModeEnabled && vimHudEnabled;
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
     } | null>(null);
 
+    // Live proxied-app mode: the iframe navigates a real origin, so the
+    // srcdoc pipeline is skipped entirely and its messages carry credentials.
+    const liveMode = !!src;
+    const liveSessionRef = useRef<HtmlLiveSession | null>(liveSession ?? null);
+    liveSessionRef.current = liveSession ?? null;
+    const onPageChangeRef = useRef(onPageChange);
+    onPageChangeRef.current = onPageChange;
+    const onAnnotateModeExitRef = useRef(onAnnotateModeExit);
+    onAnnotateModeExitRef.current = onAnnotateModeExit;
+    const onAnnotateModeToggleRef = useRef(onAnnotateModeToggle);
+    onAnnotateModeToggleRef.current = onAnnotateModeToggle;
+
+    /** Single choke point for direct-to-bridge posts: live sessions get the
+     *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
+    const postToBridge = useCallback((msg: Record<string, unknown>) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win) return;
+      const live = liveSessionRef.current;
+      if (live) {
+        // Browsers silently drop posts whose targetOrigin does not match the
+        // receiving window (mid-navigation frames); some DOM environments
+        // throw instead, so align with the browser semantics explicitly.
+        try {
+          win.postMessage({ ...msg, token: live.token }, live.origin);
+        } catch {
+          // Dropped, matching browser behavior for unmatched target origins.
+        }
+      } else {
+        win.postMessage(msg, "*");
+      }
+    }, []);
+
     // Host theming is opt-in per document (Plannotator-generated artifacts tag
     // themselves); arbitrary HTML renders untouched, like a standalone tab.
-    const hostTheme = useMemo(() => hasHostThemeOptIn(rawHtml), [rawHtml]);
+    const hostTheme = useMemo(() => !liveMode && hasHostThemeOptIn(rawHtml), [liveMode, rawHtml]);
 
     const srcdoc = useMemo(() => {
+      if (liveMode) return undefined; // src mode: the proxy injects the bridge
       const injection = buildSrcdocInjection({
         tokens: readThemeTokens(),
         isLight: isLightTheme(),
@@ -248,11 +312,51 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
       });
       return injectIntoHead(rawHtml, injection);
-    }, [rawHtml, hostTheme, diffActive]);
+    }, [liveMode, rawHtml, hostTheme, diffActive]);
 
     const handleResize = useCallback((height: number) => {
+      if (liveMode) return; // live surfaces are full-viewport; height is ignored
       setIframeHeight(height);
+    }, [liveMode]);
+
+    // Composer yield while shift-selecting (multi-target drafts): fade the
+    // composer as the pointer approaches, click-through when over it. Pointer
+    // positions arrive from parent mousemoves AND from the bridge (the iframe
+    // consumes moves over the page, so the bridge relays them).
+    const [composerYield, setComposerYield] = useState<ComposerYieldState>("none");
+    const composerYieldRef = useRef(composerYield);
+    composerYieldRef.current = composerYield;
+    const shiftHeldRef = useRef(false);
+
+    const handleYieldPointer = useCallback((clientX: number, clientY: number) => {
+      if (!shiftHeldRef.current) return;
+      const popover = document.querySelector("[data-comment-popover]");
+      if (!popover) return;
+      const rect = popover.getBoundingClientRect();
+      const next = computeComposerYield(
+        composerYieldRef.current,
+        distanceToRect(clientX, clientY, rect),
+      );
+      if (next !== composerYieldRef.current) setComposerYield(next);
     }, []);
+
+    const handleBridgePointer = useCallback(
+      (x: number, y: number, shift: boolean) => {
+        // The bridge is the only observer of Shift while the pointer lives
+        // inside the sandbox (parent keydowns don't fire there, and window
+        // blur clears our local flag when focus enters the iframe) — so the
+        // relayed shift state arms/disarms the yield directly.
+        shiftHeldRef.current = shift;
+        if (!shift) {
+          setComposerYield("none");
+          return;
+        }
+        const iframeRect = iframeRef.current?.getBoundingClientRect();
+        if (!iframeRect) return;
+        handleYieldPointer(iframeRect.left + x, iframeRect.top + y);
+      },
+      [handleYieldPointer],
+    );
 
     const hook = useHtmlAnnotation({
       iframeRef,
@@ -263,25 +367,92 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       selectedAnnotationId,
       mode,
       onResize: handleResize,
+      live: liveSession,
+      onPageChange,
+      onBridgePointer: handleBridgePointer,
+      onUnanchoredChange,
     });
+
+    const multiSelectActive = !readOnly && !!hook.commentPopover && hook.draftTargets.length > 0;
+
+    // Track Shift while a multi-select draft composer is open; releasing it
+    // (or losing window focus) always restores the composer.
+    useEffect(() => {
+      if (!multiSelectActive) {
+        shiftHeldRef.current = false;
+        setComposerYield("none");
+        return;
+      }
+      const down = (e: KeyboardEvent) => {
+        if (e.key === "Shift") shiftHeldRef.current = true;
+      };
+      const release = () => {
+        shiftHeldRef.current = false;
+        setComposerYield("none");
+      };
+      const up = (e: KeyboardEvent) => {
+        if (e.key === "Shift") release();
+      };
+      const move = (e: MouseEvent) => {
+        // Parent-side pointer (over app chrome or the composer itself).
+        if (e.shiftKey) shiftHeldRef.current = true;
+        handleYieldPointer(e.clientX, e.clientY);
+      };
+      window.addEventListener("keydown", down);
+      window.addEventListener("keyup", up);
+      window.addEventListener("blur", release);
+      window.addEventListener("mousemove", move);
+      return () => {
+        window.removeEventListener("keydown", down);
+        window.removeEventListener("keyup", up);
+        window.removeEventListener("blur", release);
+        window.removeEventListener("mousemove", move);
+      };
+    }, [multiSelectActive, handleYieldPointer]);
+
+    // Chip data for the composer: semantic label + short excerpt per target.
+    const targetChips = useMemo<CommentTargetChip[] | undefined>(() => {
+      if (!hook.draftTargets.length) return undefined;
+      return hook.draftTargets.map((t) => ({
+        key: t.key,
+        label: t.label,
+        excerpt: t.text.replace(/\s+/g, " ").trim().slice(0, 80),
+      }));
+    }, [hook.draftTargets]);
 
     useEffect(() => {
       function handler(e: MessageEvent<unknown>) {
         if (e.source !== iframeRef.current?.contentWindow) return;
+        // Live sessions verify origin + token before reading anything.
+        const live = liveSessionRef.current;
+        if (live && rejectsLiveMessage(live, e.origin, e.data)) return;
         if (isBridgeReadyMessage(e.data)) {
           setIframeReadyVersion((version) => version + 1);
           setVimBridgePhase("inactive");
           setVimHudCommand(null);
           setVimHelpOpen(false);
+          // Live ready carries the page identity (validated like page-change)
+          // so reloads and cross-page navigations re-anchor the restore filter.
+          if (live && isRecord(e.data)) {
+            const pageUrl = e.data.pageUrl;
+            if (
+              typeof pageUrl === "string"
+              && pageUrl.length > 0
+              && pageUrl.length <= MAX_PAGE_URL_LENGTH
+            ) {
+              onPageChangeRef.current?.(pageUrl);
+            }
+          }
           return;
         }
-        const markApplied = parseMarkAppliedMessage(e.data);
-        if (markApplied && annotationRestorePendingRef.current.has(markApplied.id)) {
-          annotationRestorePendingRef.current.delete(markApplied.id);
-          if (!markApplied.success) annotationRestoreMissingRef.current.add(markApplied.id);
-          if (annotationRestorePendingRef.current.size === 0) {
-            onAnnotationRestoreComplete?.([...annotationRestoreMissingRef.current]);
-          }
+        // Interact/Annotate mode messages ride the same authenticated path:
+        // live sessions already rejected wrong-origin/tokenless data above.
+        if (isRecord(e.data) && e.data.type === `${PREFIX}annotate-exit`) {
+          onAnnotateModeExitRef.current?.();
+          return;
+        }
+        if (isRecord(e.data) && e.data.type === `${PREFIX}annotate-toggle`) {
+          onAnnotateModeToggleRef.current?.();
           return;
         }
         const vimCopy = parseVimBridgeCopy(e.data);
@@ -321,7 +492,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       }
       window.addEventListener("message", handler);
       return () => window.removeEventListener("message", handler);
-    }, [onAnnotationRestoreComplete, readOnly, vimHudActive, vimModeEnabled]);
+    }, [readOnly, vimHudActive, vimModeEnabled]);
 
     useEffect(() => {
       if (vimHudActive) return;
@@ -332,9 +503,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
     const handleVimHelpOpenChange = useCallback((open: boolean) => {
       setVimHelpOpen(open);
-      iframeRef.current?.contentWindow?.postMessage(
+      postToBridge(
         { type: `${PREFIX}set-vim-help`, open },
-        "*",
       );
     }, []);
 
@@ -349,9 +519,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       if (document.activeElement === iframe) return false;
       iframe.focus({ preventScroll: true });
       if (document.activeElement !== iframe) return false;
-      iframe.contentWindow?.postMessage(
+      postToBridge(
         { type: `${PREFIX}focus-vim` },
-        "*",
       );
       return true;
     }, [readOnly, vimModeEnabled]);
@@ -362,51 +531,125 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       focusDocument: focusVimDocument,
     });
 
+    // Restore filter for live multi-page sessions: only annotations made on
+    // the current page (or without page identity) are pushed for restoration.
+    // Numbering (sync-annotations) still ships the FULL list: numbers are
+    // parent-authoritative and global across pages, matching export.
+    const forCurrentPage = useCallback(
+      (anns: Annotation[]) =>
+        anns.filter((a) => !a.pageUrl || a.pageUrl === currentPageUrl),
+      [currentPageUrl],
+    );
+
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
-      const restorableAnnotations = annotations.filter(
-        (annotation) => annotation.type !== AnnotationType.GLOBAL_COMMENT,
-      );
-      annotationRestorePendingRef.current = new Set(
-        restorableAnnotations.map((annotation) => annotation.id),
-      );
-      annotationRestoreMissingRef.current = new Set();
-      if (restorableAnnotations.length === 0) {
-        onAnnotationRestoreComplete?.([]);
-        return;
+      const restorable = forCurrentPage(annotations);
+      if (restorable.length > 0) {
+        hook.applyAnnotations(restorable);
       }
-      hook.applyAnnotations(restorableAnnotations);
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Live page navigation with a ready iframe: explicitly clear the previous
+    // page's marks, then re-apply the filtered set. Relying on dead anchors to
+    // hide pins would risk cross-page text-search false matches and waste
+    // reconcile budget.
+    const lastAppliedPageRef = useRef<string | undefined>(currentPageUrl);
+    useEffect(() => {
+      if (lastAppliedPageRef.current === currentPageUrl) return;
+      lastAppliedPageRef.current = currentPageUrl;
+      if (iframeReadyVersion === 0) return;
+      postToBridge({ type: `${PREFIX}clear-marks` });
+      const restorable = forCurrentPage(annotations);
+      if (restorable.length > 0) {
+        hook.applyAnnotations(restorable);
+      }
+      // clear-marks drops the bridge's synced numbering; re-establish it so
+      // restored markers keep their export-matching global numbers.
+      postToBridge({
+        type: `${PREFIX}sync-annotations`,
+        annotations: buildSyncNumbering(annotations),
+      });
+    }, [currentPageUrl, iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Placed-marker numbering is parent-authoritative and matches the
+    // numbers exportAnnotations writes into the submitted feedback: the full
+    // list INCLUDING globals is numbered by ARRAY position (the export's
+    // effective order — its sort keys tie for raw-HTML annotations), and
+    // globals then ship no entry (no page location) — see buildSyncNumbering
+    // for the contract. Renumbers on delete; the bridge's own registration
+    // order is only a pre-sync fallback.
+    useEffect(() => {
+      if (iframeReadyVersion === 0) return;
+      postToBridge(
+        { type: `${PREFIX}sync-annotations`, annotations: buildSyncNumbering(annotations) },
+      );
+    }, [iframeReadyVersion, annotations]);
 
     // Tell the bridge the current input method (drag vs pinpoint). Re-posts on
     // ready (fresh iframe) and whenever the user switches it in the toolstrip.
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
-      iframeRef.current?.contentWindow?.postMessage(
+      postToBridge(
         { type: `${PREFIX}set-input-method`, method: inputMethod },
-        "*",
       );
     }, [iframeReadyVersion, inputMethod]);
+
+    // Tell the bridge whether Annotate is armed. Same re-post pattern as
+    // set-input-method, so the mode survives live page changes / HMR reloads
+    // and bridge re-injection without ever reloading the iframe.
+    useEffect(() => {
+      if (iframeReadyVersion === 0) return;
+      postToBridge(
+        { type: `${PREFIX}set-annotate-mode`, active: annotateModeActive },
+      );
+    }, [iframeReadyVersion, annotateModeActive]);
+
+    // Parent-side Esc rung: with focus outside the iframe the bridge never
+    // sees the keydown. Any open composer/toolbar/picker still closes first —
+    // their state is read from this render's closure, so an Esc that closed
+    // one this same keydown is not double-consumed here.
+    useEffect(() => {
+      if (readOnly || !annotateModeActive || !onAnnotateModeExit) return;
+      const overlayOpen =
+        !!hook.toolbarState || !!hook.commentPopover || !!hook.quickLabelPicker || !!globalCommentPopover;
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || e.defaultPrevented) return;
+        if (overlayOpen) return;
+        // A text field or dialog owns its own Escape.
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+        if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return;
+        onAnnotateModeExit();
+      };
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+    }, [
+      readOnly,
+      annotateModeActive,
+      onAnnotateModeExit,
+      hook.toolbarState,
+      hook.commentPopover,
+      hook.quickLabelPicker,
+      globalCommentPopover,
+    ]);
 
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
       const iframe = iframeRef.current;
-      iframe?.contentWindow?.postMessage(
+      postToBridge(
         {
           type: `${PREFIX}set-vim-mode`,
           enabled: !readOnly && vimModeEnabled,
           hudEnabled: vimHudEnabled,
           mode,
         },
-        "*",
       );
-      if (!readOnly && vimModeEnabled && iframe === document.activeElement) {
+      if (!readOnly && vimModeEnabled && iframe && iframe === document.activeElement) {
         // The initial parent focus can land before the sandbox bridge is ready.
         // Reassert it after configuration so raw HTML enters BLOCK immediately,
         // matching the Markdown surface instead of waiting for the first key.
-        iframe.contentWindow?.postMessage(
+        postToBridge(
           { type: `${PREFIX}focus-vim` },
-          "*",
         );
       }
     }, [iframeReadyVersion, mode, readOnly, vimHudEnabled, vimModeEnabled]);
@@ -424,9 +667,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         && (document.activeElement === document.body || document.activeElement === null)
       ) {
         iframeRef.current?.focus({ preventScroll: true });
-        iframeRef.current?.contentWindow?.postMessage(
+        postToBridge(
           { type: `${PREFIX}focus-vim` },
-          "*",
         );
       }
     }, [hook.commentPopover, hook.quickLabelPicker, hook.toolbarState, readOnly, vimModeEnabled]);
@@ -434,14 +676,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
       function sendTheme() {
-        iframeRef.current?.contentWindow?.postMessage(
+        postToBridge(
           {
             type: `${PREFIX}theme`,
             tokens: buildThemeTokenPayload(readThemeTokens(), hostTheme),
             isLight: isLightTheme(),
             hostTheme,
           },
-          "*",
         );
       }
       sendTheme();
@@ -456,7 +697,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     useImperativeHandle(ref, () => ({
       removeHighlight: hook.removeHighlight,
       clearAllHighlights: hook.clearAllHighlights,
-      applySharedAnnotations: hook.applyAnnotations,
+      // Shared/draft restores respect the live page filter too.
+      applySharedAnnotations: (anns: Annotation[]) =>
+        hook.applyAnnotations(forCurrentPage(anns)),
     }));
 
     const handleGlobalCommentSubmit = useCallback(
@@ -547,6 +790,20 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             data-print-region="article"
             className={fullViewport ? "relative overflow-hidden w-full flex-1" : "relative bg-card rounded-xl shadow-xl overflow-hidden w-full"}
           >
+            {/* Armed affordance: a subtle accent ring floats over the iframe
+                while Annotate is armed (hosts that wire the toggle only).
+                Overlaid + pointer-transparent, so it never shifts layout and
+                never eats a click; an inset shadow on the article itself
+                would paint UNDER the covering iframe. */}
+            {!readOnly && annotateModeActive && (onAnnotateModeExit || onAnnotateModeToggle) && (
+              <div
+                aria-hidden
+                data-print-hide
+                data-annotate-armed-ring
+                className="pointer-events-none absolute inset-0 z-10"
+                style={{ boxShadow: "inset 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent)" }}
+              />
+            )}
             {/* Full-viewport mode has no card chrome, so float the same controls
                 over the top-right of the iframe (with a backdrop so they read over
                 any HTML). The selection toolbar is portaled separately. */}
@@ -558,10 +815,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 {actionButtons}
               </div>
             )}
+            {/* Live proxied-app mode navigates a real loopback origin: no
+                sandbox (the user's own app needs cookies, storage, and
+                same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
             <iframe
               ref={iframeRef}
-              srcDoc={srcdoc}
-              sandbox="allow-scripts"
+              {...(src ? { src } : { srcDoc: srcdoc, sandbox: "allow-scripts" })}
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,
@@ -618,9 +877,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               positionMode="center-above"
               element={hook.toolbarState.element}
               copyText={hook.toolbarState.selectionText}
+              // HTML/live surfaces are comment-only: no Delete, no quick
+              // labels (onQuickLabel deliberately not passed). The markdown
+              // surface keeps the full toolbar.
+              commentOnly
               onAnnotate={hook.handleAnnotate}
               onRequestComment={hook.handleRequestComment}
-              onQuickLabel={hook.handleQuickLabel}
               onClose={hook.handleToolbarClose}
             />,
             document.body,
@@ -634,26 +896,22 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               contextText={hook.commentPopover.contextText}
               initialText={hook.commentPopover.initialText}
               isGlobal={false}
+              draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
               onClose={hook.handleCommentClose}
+              skillReferences
               onAskAI={onAskAI}
               askAIContext={{
                 kind: "selection",
                 label: "Selected HTML",
                 text: hook.commentPopover.selectedText ?? hook.commentPopover.contextText,
               }}
-            />,
-            document.body,
-          )}
-
-        {/* Quick label picker portal */}
-        {!readOnly && hook.quickLabelPicker &&
-          createPortal(
-            <FloatingQuickLabelPicker
-              anchorEl={hook.quickLabelPicker.anchorEl}
-              cursorHint={hook.quickLabelPicker.cursorHint}
-              onSelect={hook.handleFloatingQuickLabel}
-              onDismiss={hook.handleQuickLabelPickerDismiss}
+              targetChips={targetChips}
+              onRemoveTargetChip={targetChips ? hook.removeDraftTarget : undefined}
+              onHoverTargetChip={targetChips ? hook.flashDraftTarget : undefined}
+              refocusToken={targetChips ? hook.composerFocusToken : undefined}
+              captureStrayKeys={multiSelectActive}
+              yieldState={multiSelectActive ? composerYield : undefined}
             />,
             document.body,
           )}
@@ -667,6 +925,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={true}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
+              skillReferences
               onAskAI={onAskAI}
               askAIContext={{ kind: "general", label: "Document" }}
             />,

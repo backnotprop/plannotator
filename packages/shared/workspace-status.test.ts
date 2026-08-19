@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -205,18 +205,44 @@ describe("workspace status", () => {
 		expect(status.totals.deletions).toBe(1);
 	});
 
-	test("resolves git metadata paths when watching a repository subdirectory", () => {
+	test("uses only bounded exact git metadata targets even when refs is large", () => {
 		const repo = tempRepo();
 		const subdir = join(repo, "docs", "sub");
 		mkdirSync(subdir, { recursive: true });
 		writeFileSync(join(subdir, "plan.md"), "# Plan\n");
 		git(repo, "add", "-A");
 		git(repo, "commit", "-m", "init");
+		for (let i = 0; i < 64; i++) {
+			const refDir = join(repo, ".git", "refs", "remotes", `remote-${i}`);
+			mkdirSync(refDir, { recursive: true });
+			writeFileSync(join(refDir, "topic"), `${"0".repeat(40)}\n`);
+		}
 
 		const paths = getGitMetadataWatchPaths(subdir);
 		const realRepo = realpathSync(repo);
+		const gitDir = join(realRepo, ".git");
 
-		expect(paths).toContain(join(realRepo, ".git", "refs"));
+		expect(new Set(paths)).toEqual(new Set([
+			join(gitDir, "HEAD"),
+			join(gitDir, "index"),
+			join(gitDir, "logs", "HEAD"),
+			join(gitDir, "packed-refs"),
+			join(gitDir, "refs", "heads", "main"),
+		]));
+		expect(paths).not.toContain(join(gitDir, "refs"));
+		expect(paths.every((path) => !existsSync(path) || statSync(path).isFile())).toBe(true);
+	});
+
+	test("keeps the exact current branch target when its ref is packed", () => {
+		const repo = tempRepo();
+		writeFileSync(join(repo, "plan.md"), "# Plan\n");
+		git(repo, "add", "-A");
+		git(repo, "commit", "-m", "init");
+		git(repo, "pack-refs", "--all", "--prune");
+
+		const currentRef = join(realpathSync(repo), ".git", "refs", "heads", "main");
+		expect(existsSync(currentRef)).toBe(false);
+		expect(getGitMetadataWatchPaths(repo)).toContain(currentRef);
 	});
 
 	test("counts staged and unstaged changes when the net diff against HEAD is empty", async () => {

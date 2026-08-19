@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   formatInteractiveNoArgClarification,
   formatSubcommandHelp,
@@ -28,7 +30,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator --help");
     expect(output).toContain("plannotator --version, -v");
     expect(output).toContain("plannotator [--browser <name>]");
-    expect(output).toContain("plannotator review [--git | --gitbutler] [PR_URL]");
+    expect(output).toContain("plannotator review [--git | --gitbutler] [--tailscale] [PR_URL]");
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
@@ -85,6 +87,7 @@ describe("CLI subcommand help", () => {
       "copilot-last",
       "setup-goal",
       "archive",
+      "guide",
       "sessions",
       "uninstall",
       "improve-context",
@@ -324,4 +327,64 @@ describe("interactive no-arg invocation", () => {
     expect(output).toContain("plannotator uninstall");
     expect(output).toContain("Run 'plannotator --help' for top-level usage.");
   });
+});
+
+describe("guide subcommand through the entrypoint", () => {
+  // Guards the argv hand-off in apps/hook/server/index.ts: the entrypoint
+  // strips the annotate gate flags (`--json` among them) from the whole argv
+  // before dispatching, and `plannotator guide share --json` must still print
+  // the JSON record the guide CLI owns rather than the bare URL.
+  //
+  // The entrypoint imports the built app HTML (`../dist/*.html`) at module
+  // load, so it will not even start without those files, and the CI test job
+  // does not run `bun run build:hook`. The guide subcommand never serves them,
+  // so the test stands in placeholders for whichever one is missing and removes
+  // exactly those again afterwards; a real build is left alone.
+  test("guide share --json prints the JSON record, wherever --json sits", async () => {
+    const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { FIXTURE_V1_PR } = await import("@plannotator/shared/guide-format-fixtures");
+    const workDir = mkdtempSync(join(tmpdir(), "plannotator-guide-entry-"));
+    const distDir = resolve(import.meta.dir, "../dist");
+    const stubbed = ["index.html", "review.html"].map((name) => join(distDir, name)).filter((path) => !existsSync(path));
+    if (stubbed.length > 0) {
+      mkdirSync(distDir, { recursive: true });
+      for (const path of stubbed) writeFileSync(path, "<!doctype html><title>test stub</title>");
+    }
+    const host = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        const u = new URL(req.url);
+        if (u.pathname === "/api/g" && req.method === "POST") {
+          return Response.json({ id: "HostId0123456789abcdef", url: `${u.origin}/g/HostId0123456789abcdef`, deleteToken: "host-del-tok" }, { status: 201 });
+        }
+        return new Response("nope", { status: 404 });
+      },
+    });
+    try {
+      writeFileSync(join(workDir, "snap.json"), JSON.stringify(FIXTURE_V1_PR));
+      const entry = resolve(import.meta.dir, "index.ts");
+      const env = { ...process.env, PLANNOTATOR_DATA_DIR: join(workDir, "data"), PLANNOTATOR_GUIDE_SHARE_URL: `http://127.0.0.1:${host.port}` };
+      delete env.PLANNOTATOR_SHARE;
+      for (const argv of [
+        ["guide", "share", "--snapshot", "snap.json", "--json"],
+        ["guide", "share", "--json", "--snapshot", "snap.json"],
+      ]) {
+        const proc = Bun.spawn(["bun", "run", entry, ...argv], { cwd: workDir, env, stdout: "pipe", stderr: "pipe" });
+        const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+        expect(code, stderr).toBe(0);
+        const record = JSON.parse(stdout) as { id: string; url: string; deleteToken: string };
+        expect(record.id).toBe("HostId0123456789abcdef");
+        expect(record.deleteToken).toBe("host-del-tok");
+        expect(record.url).toContain("#key=");
+        expect(stderr).toContain("plannotator guide unshare HostId0123456789abcdef --token host-del-tok");
+      }
+    } finally {
+      host.stop(true);
+      rmSync(workDir, { recursive: true, force: true });
+      for (const path of stubbed) rmSync(path, { force: true });
+    }
+  }, 30_000);
 });

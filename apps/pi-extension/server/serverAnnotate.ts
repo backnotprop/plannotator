@@ -6,9 +6,10 @@ import { randomUUID } from "node:crypto";
 
 import { contentHash, deleteDraft } from "../generated/draft.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
-import { computeAnnotateHistory, deriveAnnotateHistorySlug, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
+import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
 import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, type PromptRuntime } from "../generated/config.ts";
+import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.ts";
 import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.ts";
@@ -25,6 +26,8 @@ import {
 	handleDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleReferenceSkillsRequest,
+	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
 	readDraftGenerationFromUrl,
 	handleSaveNotesRequest,
@@ -47,8 +50,8 @@ import {
 	resolveAllowedDocPath,
 	type FolderAnnotateHistory,
 } from "./reference.ts";
-import { handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
-import { resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
+import { closeAllFileBrowserWatchers, handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
+import { getExtraMarkdownExtensions, resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
@@ -286,12 +289,18 @@ export async function startAnnotateServer(options: {
 	// when rendering HTML. Only single local files (not URLs/folders/messages).
 	const annotateProjectName = options.project ?? "_unknown";
 	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+	// Single local file sessions are the only ones this eager gate covers.
+	// URL and agent-message sessions never write session content to the data
+	// dir. Folder sessions do participate in per-file version history, but
+	// lazily through /api/doc (see computeFolderAnnotateHistory below), not
+	// here. The durable submit records stay single-local-file only.
+	const singleFileLocalAnnotate =
+		(options.mode || "annotate") === "annotate" && !/^https?:\/\//i.test(options.filePath);
 	let annotateHistory: AnnotateHistoryResult | null = null;
 	{
 		const historyContent = options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
 		const eligible =
-			(options.mode || "annotate") === "annotate" &&
-			!/^https?:\/\//i.test(options.filePath) &&
+			singleFileLocalAnnotate &&
 			historyContent.length > 0 &&
 			annotateHistoryEnabled;
 		// History is an enhancement, never a gate: a read-only/full data dir
@@ -321,6 +330,55 @@ export async function startAnnotateServer(options: {
 		folderAnnotateHistoryCache.set(resolvedFilePath, result);
 		return result;
 	}
+
+	// Durable submit records (#678): the caller consuming waitForDecision() may
+	// be gone (agent-side timeout) by the time the reviewer clicks submit —
+	// settling the promise then deleting the draft would leave the submitted
+	// feedback existing nowhere. persistAnnotateSubmission writes the record to
+	// {DATA_DIR}/history/{project}/{slug}/submissions/{timestamp}.md (next to
+	// the file's annotate version history) BEFORE the draft delete.
+	//
+	// annotateHistory opt-out policy: PLANNOTATOR_ANNOTATE_HISTORY=0 means "do
+	// not write annotated content to the data dir", and submitted feedback
+	// quotes that content, so the record is skipped and the legacy submit
+	// behavior (draft deleted) is preserved unchanged. A missing/timed-out
+	// consumer is not detectable in-process (the server cannot know its caller
+	// stopped reading), so there is no narrower condition to key off.
+	//
+	// Scope: identical to the version-history gate above — single local files
+	// only. annotate-last / URL / folder sessions never wrote submit
+	// records and still do not: their submissions quote agent messages or
+	// fetched pages, which this record was never meant to persist. (Folder
+	// sessions do write lazy per-file version history via /api/doc; that is
+	// a separate, documented pipeline with its own gate.)
+	//
+	// Returns whether the draft delete may proceed: true when the record was
+	// written, when there was no user content to lose, or when the session
+	// does not persist; false only when a durable write was expected and
+	// failed — the draft then stays behind as the recovery copy.
+	const persistSubmittedDecision = (
+		feedback: unknown,
+		annotations: unknown,
+		approved: boolean,
+	): boolean => {
+		// Defensive: /api/feedback does not type-validate its body (unlike
+		// /api/approve), and a malformed value must degrade to the legacy
+		// behavior (settle + delete draft + 200), never throw into a 500.
+		const feedbackText = typeof feedback === "string" ? feedback : "";
+		const annotationList = Array.isArray(annotations) ? annotations : [];
+		if (!feedbackText.trim() && annotationList.length === 0) return true; // contentless (e.g. bare approve)
+		if (!annotateHistoryEnabled) return true; // opt-out: stateless annotate sessions
+		if (!singleFileLocalAnnotate) return true; // stateless modes stay stateless
+		return (
+			persistAnnotateSubmission({
+				project: annotateProjectName,
+				sessionPath: resolvePath(options.filePath),
+				feedback: feedbackText,
+				annotations: annotationList,
+				approved,
+			}) !== null
+		);
+	};
 
 	// Detect repo info (cached for this session)
 	const repoInfo = getRepoInfo();
@@ -524,6 +582,10 @@ export async function startAnnotateServer(options: {
 				pasteApiUrl,
 				repoInfo,
 				projectRoot: options.folderPath || process.cwd(),
+				// Extra extensions the user registered as markdown (#1307).
+				// The renderer needs them to linkify relative/wiki links to
+				// sibling docs the same way it linkifies .md ones.
+				markdownExtensions: getExtraMarkdownExtensions(),
 				serverConfig: getServerConfig(gitUser),
 				agentTerminal: agentTerminalCapability,
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
@@ -618,11 +680,12 @@ export async function startAnnotateServer(options: {
 			handleShareHtml(res, url);
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.theme !== undefined) toSave.theme = body.theme;
+				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
 				json(res, { ok: true });
@@ -754,6 +817,10 @@ export async function startAnnotateServer(options: {
 			await handleDocExistsRequest(res, req, { rootPaths: getReferenceRootPaths() });
 		} else if (url.pathname === "/api/obsidian/vaults") {
 			handleObsidianVaultsRequest(res);
+		} else if (url.pathname === "/api/skills" && req.method === "GET") {
+			handleReferenceSkillsRequest(res);
+		} else if (url.pathname === "/api/skills/content" && req.method === "GET") {
+			handleReferenceSkillContentRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
@@ -801,7 +868,14 @@ export async function startAnnotateServer(options: {
 					sendAlreadyDecided(res);
 					return;
 				}
-				deleteDraft(draftKey, readDraftGenerationFromBody(body));
+				// Approve-with-notes carries user content — make it durable before
+				// the draft (the reviewer's only other copy) is deleted (#678).
+				const approvalDurable = persistSubmittedDecision(
+					(body.feedback as string | undefined) || "",
+					(body.annotations as unknown[] | undefined) || [],
+					true,
+				);
+				if (approvalDurable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
 				clientLease.cancel();
 				json(res, { ok: true });
 			} catch (err) {
@@ -820,7 +894,15 @@ export async function startAnnotateServer(options: {
 					sendAlreadyDecided(res);
 					return;
 				}
-				deleteDraft(draftKey, readDraftGenerationFromBody(body));
+				// Make the submitted feedback durable BEFORE deleting the draft:
+				// the decision promise's consumer may have timed out, and this
+				// record is then the only surviving copy (#678).
+				const feedbackDurable = persistSubmittedDecision(
+					(body.feedback as string) || "",
+					(body.annotations as unknown[]) || [],
+					false,
+				);
+				if (feedbackDurable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
 				clientLease.cancel();
 				json(res, { ok: true });
 			} catch (err) {
@@ -855,6 +937,9 @@ export async function startAnnotateServer(options: {
 		stop: () => {
 			// try/finally: a throwing dispose must never leave the listener bound.
 			try {
+				// First: watchers hold the embedded host process alive, and a
+				// throwing disposal below must not strand them.
+				closeAllFileBrowserWatchers();
 				clientLease.cancel();
 				// Long-lived host process: an unclosed lease stream would keep its
 				// heartbeat timer and socket alive past the session, and would keep

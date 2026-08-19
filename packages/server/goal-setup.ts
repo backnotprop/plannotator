@@ -24,6 +24,7 @@ import {
   handleUpload,
 } from "./shared-handlers";
 import { detectGitUser, getServerConfig, saveConfig } from "./config";
+import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { isWSL } from "./browser";
 
 export { handleServerReady as handleGoalSetupServerReady } from "./shared-handlers";
@@ -133,6 +134,7 @@ export async function startGoalSetupServer(
                 displayName?: string;
                 diffOptions?: Record<string, unknown>;
                 theme?: Record<string, unknown>;
+                favicon?: FaviconStyle;
                 conventionalComments?: boolean;
                 conventionalLabels?: unknown[] | null;
               };
@@ -145,6 +147,9 @@ export async function startGoalSetupServer(
               }
               if (body.theme !== undefined) {
                 toSave.theme = body.theme;
+              }
+              if (isFaviconStyle(body.favicon)) {
+                toSave.favicon = body.favicon;
               }
               if (body.conventionalComments !== undefined) {
                 toSave.conventionalComments = body.conventionalComments;

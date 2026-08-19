@@ -333,6 +333,7 @@ describe("install.sh", () => {
     const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
     const semInstall = script.indexOf("install_sem_sidecar\n");
     const agentTerminal = script.indexOf("install_agent_terminal_runtime\n");
+    const callFlow = script.indexOf("install_call_flow_runtime\n");
     const codexBlock = script.indexOf(
       "# --- Codex CLI / Desktop app support",
     );
@@ -345,6 +346,7 @@ describe("install.sh", () => {
     // Everything the reporter called "trash" runs strictly after the exit gate.
     expect(semInstall).toBeGreaterThan(minimalExit);
     expect(agentTerminal).toBeGreaterThan(minimalExit);
+    expect(callFlow).toBeGreaterThan(minimalExit);
     expect(codexBlock).toBeGreaterThan(minimalExit);
     expect(skillsCheckout).toBeGreaterThan(minimalExit);
     // The gate really exits rather than falling through.
@@ -677,12 +679,14 @@ describe("install.ps1", () => {
     );
     const minimalExit = script.indexOf("if ($minimal) {");
     const semInstall = script.indexOf("Install-SemSidecar\n");
+    const callFlow = script.indexOf("Install-CallFlowRuntime\n");
     const pathAdvice = script.indexOf("function Show-PathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(pathAdvice).toBeGreaterThan(binaryInstalled);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
     expect(semInstall).toBeGreaterThan(minimalExit);
+    expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
     expect(gateBody).toContain("exit 0");
@@ -967,11 +971,13 @@ describe("install.cmd", () => {
     );
     const minimalExit = script.indexOf('if "!MINIMAL!"=="1" (');
     const semInstall = script.indexOf("call :InstallSemSidecar");
+    const callFlow = script.indexOf("call :InstallCallFlowRuntime");
     const printPathAdvice = script.indexOf(":PrintPathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
     expect(semInstall).toBeGreaterThan(minimalExit);
+    expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through, and reuses :PrintPathAdvice.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
     expect(gateBody).toContain("call :PrintPathAdvice");
@@ -1589,6 +1595,72 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain("PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL");
   });
 
+  test("the CallDiff runtime is strictly opt-in: default sequence never installs it", () => {
+    const cmdScript = readScript("install.cmd");
+
+    // install.sh: the install call is gated on the resolved opt-in, which
+    // defaults to 0, and the default path prints the in-app install note.
+    expect(sh).toContain("install_call_flow=0");
+    expect(sh).toContain('if [ "$install_call_flow" -ne 1 ]; then');
+    expect(sh).toContain("available as an in-app opt-in install");
+    expect(sh).toContain('"$INSTALL_DIR/plannotator" install-runtime call-flow');
+
+    // install.ps1: same shape via $installCallFlowResolved (default $false).
+    expect(ps).toContain("$installCallFlowResolved = $false");
+    expect(ps).toContain("if (-not $installCallFlowResolved) {");
+    expect(ps).toContain("available as an in-app opt-in install");
+    expect(ps).toContain("& $plannotatorPath install-runtime call-flow");
+
+    // install.cmd: same shape via INSTALL_CALL_FLOW (default 0).
+    expect(cmdScript).toContain('set "INSTALL_CALL_FLOW=0"');
+    expect(cmdScript).toContain('if not "!INSTALL_CALL_FLOW!"=="1" (');
+    expect(cmdScript).toContain("available as an in-app opt-in install");
+    expect(cmdScript).toContain('"!INSTALL_PATH!" install-runtime call-flow');
+  });
+
+  test("the CallDiff opt-in resolves flag > env > config in every installer", () => {
+    const cmdScript = readScript("install.cmd");
+
+    // Flag layer.
+    expect(sh).toContain("--with-call-flow)");
+    expect(ps).toContain("[switch]$WithCallFlow");
+    expect(cmdScript).toContain('if /i "%~1"=="--with-call-flow" (');
+
+    // Env layer.
+    expect(sh).toContain("PLANNOTATOR_INSTALL_CALLDIFF");
+    expect(ps).toContain("PLANNOTATOR_INSTALL_CALLDIFF");
+    expect(cmdScript).toContain("PLANNOTATOR_INSTALL_CALLDIFF");
+
+    // Config layer (flat top-level boolean, matching verifyAttestation).
+    expect(sh).toContain('"installCallFlow"');
+    expect(ps).toContain("$cfg.installCallFlow");
+    expect(cmdScript).toContain('\\"installCallFlow\\"');
+
+    // In each script the flag assignment comes after the env resolution so
+    // the flag wins, mirroring the verifyAttestation layering.
+    const shEnv = sh.indexOf('PLANNOTATOR_INSTALL_CALLDIFF:-');
+    const shFlag = sh.indexOf('install_call_flow="$WITH_CALL_FLOW_FLAG"');
+    expect(shEnv).toBeGreaterThan(0);
+    expect(shFlag).toBeGreaterThan(shEnv);
+    const psEnv = ps.indexOf("$env:PLANNOTATOR_INSTALL_CALLDIFF");
+    const psFlag = ps.indexOf("if ($WithCallFlow) { $installCallFlowResolved = $true }");
+    expect(psEnv).toBeGreaterThan(0);
+    expect(psFlag).toBeGreaterThan(psEnv);
+    const cmdEnv = cmdScript.indexOf('if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="1"');
+    const cmdFlag = cmdScript.indexOf('if "!WITH_CALL_FLOW_FLAG!"=="1" set "INSTALL_CALL_FLOW=1"');
+    expect(cmdEnv).toBeGreaterThan(0);
+    expect(cmdFlag).toBeGreaterThan(cmdEnv);
+  });
+
+  test("the removed CallDiff skip opt-out is gone from every installer", () => {
+    const cmdScript = readScript("install.cmd");
+    // Opting out of a default-off install is meaningless; the env var was
+    // deleted rather than kept for back-compat.
+    expect(sh).not.toContain("PLANNOTATOR_SKIP_CALLDIFF_INSTALL");
+    expect(ps).not.toContain("PLANNOTATOR_SKIP_CALLDIFF_INSTALL");
+    expect(cmdScript).not.toContain("PLANNOTATOR_SKIP_CALLDIFF_INSTALL");
+  });
+
   test("install.sh and help text use vX.Y.Z placeholder not v0.17.1", () => {
     // Regression guard: the docs and --help text previously used v0.17.1
     // as a concrete pinned-version example. That tag predates provenance
@@ -1909,8 +1981,11 @@ describe("install shared behavior", () => {
     // on stderr, so without the scope the skill install failed on the line
     // announcing the clone had started. See #1162. Failure detection must
     // stay exit-code/Test-Path based, never throw-based.
+    // The sparse-probe clone also pins LC_ALL=C inside the same scoped
+    // block (the "unknown option" capability match is English-only), so its
+    // expected prefix carries the env save alongside the preference.
     expect(ps).toContain(
-      "& { $local:ErrorActionPreference = 'Continue'; git clone",
+      "& { $local:ErrorActionPreference = 'Continue'; $prevLcAll = $env:LC_ALL; $env:LC_ALL = 'C'; git clone",
     );
     expect(ps).toContain(
       "& { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set",
@@ -1971,9 +2046,69 @@ const FAKE_BINARY_SHA256 = createHash("sha256").update(FAKE_BINARY).digest("hex"
 const ATTESTATION_FIXTURE = join(scriptsDir, "fixtures", "attestations-response.json");
 
 type GhBehavior = "reject-bundle" | "fail-all" | "pass-all";
+type GitBehavior = "fail" | "sparse-unsupported" | "network-error";
+
+// git shim that behaves like git 2.23 (macOS with stale Xcode CLT, #1238):
+// `clone --sparse` dies instantly on "unknown option" (exit 129, before any
+// network call), a plain shallow clone succeeds and fake-creates the paths
+// the installer's copy steps read, and `sparse-checkout` is not a command.
+// Backslashes in the clone destination are normalized so the same shim also
+// serves the install.ps1 region driver (PS normalizes `\` on Unix; a literal
+// backslash dir name would not round-trip through Test-Path).
+const GIT_SPARSE_UNSUPPORTED_SHIM = `#!/bin/bash
+if [ "$1" = "clone" ]; then
+  for a in "$@"; do
+    if [ "$a" = "--sparse" ]; then
+      echo "error: unknown option \\\`sparse'" >&2
+      echo "usage: git clone [<options>] [--] <repo> [<dir>]" >&2
+      exit 129
+    fi
+  done
+  dest=""
+  for a in "$@"; do dest="$a"; done
+  dest="\${dest//\\\\//}"
+  mkdir -p "$dest"
+  for skill in plannotator-review plannotator-annotate plannotator-last; do
+    mkdir -p "$dest/apps/skills/claude/$skill" "$dest/apps/skills/core/$skill"
+    printf 'name: %s\\n' "$skill" > "$dest/apps/skills/claude/$skill/SKILL.md"
+    printf 'name: %s\\n' "$skill" > "$dest/apps/skills/core/$skill/SKILL.md"
+  done
+  mkdir -p "$dest/apps/opencode-plugin/commands"
+  printf 'stub\\n' > "$dest/apps/opencode-plugin/commands/plannotator-review.md"
+  exit 0
+fi
+if [ "$1" = "sparse-checkout" ]; then
+  echo "git: 'sparse-checkout' is not a git command. See 'git --help'." >&2
+  exit 1
+fi
+exit 0
+`;
+
+// git shim for a genuine (network) clone failure with a distinctive stderr
+// the installer must now surface instead of swallowing (#1238).
+const GIT_NETWORK_ERROR_SHIM = `#!/bin/bash
+if [ "$1" = "clone" ]; then
+  echo "Cloning into 'repo'..." >&2
+  echo "fatal: unable to access 'https://github.com/backnotprop/plannotator.git/': Could not resolve host: github.com" >&2
+  exit 128
+fi
+exit 1
+`;
+
+function gitShimBody(git: GitBehavior): string {
+  switch (git) {
+    case "sparse-unsupported":
+      return GIT_SPARSE_UNSUPPORTED_SHIM;
+    case "network-error":
+      return GIT_NETWORK_ERROR_SHIM;
+    case "fail":
+      return "#!/bin/bash\nexit 1\n";
+  }
+}
 
 function setupInstallSandbox(opts: {
   gh: GhBehavior;
+  git?: GitBehavior;
   codexHome?: boolean;
   plannotatorConfig?: string;
 }) {
@@ -2023,10 +2158,12 @@ exit 1`
         : "exit 0";
   writeFileSync(join(stub, "gh"), `#!/bin/bash\n${ghBody}\n`, { mode: 0o755 });
 
-  // Stub git that fails instantly on clone, so the skills checkout never
-  // reaches the network and the run terminates deterministically right
-  // after the agent-integration blocks whose output the tests assert on.
-  writeFileSync(join(stub, "git"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
+  // Stub git. Default ("fail"): fails instantly on clone, so the skills
+  // checkout never reaches the network and the run terminates
+  // deterministically right after the agent-integration blocks whose output
+  // the tests assert on. The #1238 behaviors emulate an old git without
+  // --sparse and a genuine network failure.
+  writeFileSync(join(stub, "git"), gitShimBody(opts.git ?? "fail"), { mode: 0o755 });
 
   // Real node for the bundle extraction.
   const nodeBin = Bun.which("node");
@@ -2134,6 +2271,48 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(out).toContain("Codex: detected, skipped (config skipInstall.codex).");
       expect(out).not.toContain("Created Codex hooks at");
       expect(existsSync(join(sandbox.home, ".codex", "hooks.json"))).toBe(false);
+    });
+
+    test("#1238: a git without clone --sparse falls back to a plain shallow clone and still installs the skills", () => {
+      // git 2.23 (macOS with stale Xcode CLT) rejects --sparse instantly on
+      // "unknown option" before any network call. The installer must probe
+      // that from the captured stderr, retry as a plain shallow clone, skip
+      // `git sparse-checkout set` (equally missing on that git — the shim
+      // hard-fails it to prove it is never run), and complete the install.
+      const sandbox = setupInstallSandbox({ gh: "pass-all", git: "sparse-unsupported" });
+      const { code, out } = runInstallSh(sandbox, [
+        "--version", "v99.9.9", "--non-interactive", "--no-extras",
+      ]);
+      expect(out).toContain(
+        "This git does not support 'git clone --sparse' (needs git >= 2.25)",
+      );
+      expect(out).toContain("falling back to a plain shallow clone");
+      expect(out).toContain("Installed Claude Code skills to");
+      expect(out).toContain("Installed shared agent skills to");
+      // The misleading terminal failure from the issue must be gone entirely.
+      expect(out).not.toContain("network or git error");
+      expect(code).toBe(0);
+      // The downstream copy steps work identically from the full checkout.
+      for (const skill of CORE_SKILLS) {
+        expect(existsSync(join(sandbox.home, ".claude", "skills", skill, "SKILL.md"))).toBe(true);
+        expect(existsSync(join(sandbox.home, ".agents", "skills", skill, "SKILL.md"))).toBe(true);
+      }
+    });
+
+    test("#1238: a genuine clone failure surfaces git's captured stderr next to the generic message", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", git: "network-error" });
+      const { code, out } = runInstallSh(sandbox, [
+        "--version", "v99.9.9", "--non-interactive", "--no-extras",
+      ]);
+      // The real diagnostic is no longer swallowed by 2>/dev/null...
+      expect(out).toContain("git reported:");
+      expect(out).toContain("Could not resolve host: github.com");
+      // ...and the existing hard-fail contract for genuine errors holds.
+      expect(out).toContain("network or git error");
+      expect(code).toBe(1);
+      expect(existsSync(join(sandbox.home, ".claude", "skills", "plannotator-review"))).toBe(false);
+      // A network failure is not a capability miss: no fallback attempt.
+      expect(out).not.toContain("falling back to a plain shallow clone");
     });
   },
 );
@@ -2295,3 +2474,90 @@ describe.skipIf(!pwshBin)("attestation bundle scanner under PowerShell (M7)", ()
     }, PWSH_SCANNER_TIMEOUT_MS);
   }
 });
+
+// ---------------------------------------------------------------------------
+// #1238 under PowerShell: the install.ps1 skills-checkout region, extracted
+// and driven the same way the M7 scanner region is, against the same git
+// shims the bash functional tests use. The shims are bash scripts, so these
+// run on Unix hosts with pwsh (the copy-step fidelity on Windows is covered
+// by the bash functional tests plus the shared source-scan suite).
+// ---------------------------------------------------------------------------
+
+function extractPs1SkillsCheckoutRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf("$checkoutFailed = $false");
+  const end = ps.indexOf("# Claude Code commands are deprecated");
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the skills checkout region in install.ps1");
+  }
+  return ps.slice(start, end);
+}
+
+function runPs1SkillsCheckout(git: GitBehavior): { code: number; out: string; home: string } {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps1-checkout-test-"));
+  const home = join(root, "home");
+  const stub = join(root, "stub-bin");
+  mkdirSync(join(home, "tmp"), { recursive: true });
+  mkdirSync(stub, { recursive: true });
+  writeFileSync(join(stub, "git"), gitShimBody(git), { mode: 0o755 });
+
+  const driver = [
+    `$ErrorActionPreference = "Stop"`,
+    `$repo = "backnotprop/plannotator"`,
+    `$latestTag = "v9.9.9"`,
+    `$skipSkillsResolved = $false`,
+    `$skipKiroResolved = $true`,
+    `$skipOpencodeResolved = $true`,
+    `$skipGeminiResolved = $true`,
+    `$kiroAvailable = $false`,
+    `$claudeSkillsDir = Join-Path "${home}" ".claude/skills"`,
+    `$agentsSkillsDir = Join-Path "${home}" ".agents/skills"`,
+    extractPs1SkillsCheckoutRegion(),
+    `exit 0`,
+  ].join("\n");
+  const driverPath = join(root, "driver.ps1");
+  writeFileSync(driverPath, driver);
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: {
+      PATH: `${stub}:/usr/bin:/bin`,
+      HOME: home,
+      USERPROFILE: home,
+      TMPDIR: join(home, "tmp"),
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    code: r.exitCode,
+    out: r.stdout.toString() + r.stderr.toString(),
+    home,
+  };
+}
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "install.ps1 skills checkout on old git (#1238)",
+  () => {
+    test("a git without clone --sparse falls back to a plain shallow clone and still installs the skills", () => {
+      const { code, out, home } = runPs1SkillsCheckout("sparse-unsupported");
+      expect(out).toContain(
+        "This git does not support 'git clone --sparse' (needs git >= 2.25)",
+      );
+      expect(out).toContain("falling back to a plain shallow clone");
+      expect(out).toContain("Installed Claude Code skills to");
+      expect(out).not.toContain("network or git error");
+      expect(code).toBe(0);
+      expect(
+        existsSync(join(home, ".claude", "skills", "plannotator-review", "SKILL.md")),
+      ).toBe(true);
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("a genuine clone failure surfaces git's captured stderr next to the generic message", () => {
+      const { code, out } = runPs1SkillsCheckout("network-error");
+      expect(out).toContain("git reported:");
+      expect(out).toContain("Could not resolve host: github.com");
+      expect(out).toContain("network or git error");
+      expect(out).not.toContain("falling back to a plain shallow clone");
+      expect(code).toBe(1);
+    }, PWSH_SCANNER_TIMEOUT_MS);
+  },
+);

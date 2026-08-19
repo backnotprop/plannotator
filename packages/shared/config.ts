@@ -11,7 +11,8 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
 import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig } from '@plannotator/core/config-types';
-export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig };
+import { isFaviconStyle, type FaviconStyle } from './favicon';
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -87,6 +88,13 @@ export function mergePromptConfig(
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  /** Optional analysis layers used by code review. */
+  reviewAnalysis?: {
+    /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
+    semanticDiff?: boolean;
+    /** Call-stack impact analysis powered by the optional CallDiff runtime. */
+    callFlow?: boolean;
+  };
   /**
    * Appearance: which mode, plus the palette assigned to each half of the
    * light/dark pair. Written by the UI through POST /api/config, so a choice
@@ -141,6 +149,16 @@ export interface PlannotatorConfig {
    */
   annotateHistory?: boolean;
   /**
+   * Extra file extensions annotate treats as markdown (#1307), e.g.
+   * [".livemd"] for Livebook notebooks. Listed extensions are accepted
+   * everywhere .md is accepted on the annotate path and render as markdown.
+   * Entries must start with a dot and carry no path separators or globs;
+   * invalid entries are dropped and `.env` can never be registered (annotate
+   * copies file contents into the data dir). Resolved by
+   * `resolveMarkdownExtensions` in ./markdown-extensions. Default: none.
+   */
+  markdownExtensions?: string[];
+  /**
    * Persist successful Guided Reviews (guide content + per-section reviewed
    * state) under ~/.plannotator/guides/ (or PLANNOTATOR_DATA_DIR) so they
    * survive closing Plannotator. Set to false to disable writes; already-saved
@@ -168,6 +186,15 @@ export interface PlannotatorConfig {
    * env var value, which takes precedence over this setting.
    */
   share?: "enabled" | "disabled";
+  /**
+   * Base URL of the guide host that `plannotator guide share` and the
+   * in-app "Create share link" upload Guided Reviews to (default
+   * https://guides.show; a self-hosted `apps/guides-show` origin otherwise).
+   * Must be http(s); a trailing slash is trimmed. Mirrors the
+   * PLANNOTATOR_GUIDE_SHARE_URL env var, which takes precedence. Guide sharing
+   * is off entirely while `share` is "disabled".
+   */
+  guideShareUrl?: string;
   /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
@@ -202,10 +229,39 @@ export interface PlannotatorConfig {
    * never read back. Failures are non-fatal.
    */
   todoProvider?: "auto" | "off";
+  /**
+   * Selected favicon style for Plannotator application surfaces:
+   * 'totman' (production brand mascot) or 'classic' (historical dark-navy P tile).
+   */
+  favicon?: FaviconStyle;
 }
 
-const CONFIG_DIR = getPlannotatorDataDir();
-const CONFIG_PATH = join(CONFIG_DIR, "config.json");
+/** Parse the only server-writable call-review analysis flags. */
+export function parseReviewAnalysisConfig(value: unknown): PlannotatorConfig["reviewAnalysis"] | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const result: NonNullable<PlannotatorConfig["reviewAnalysis"]> = {};
+  if (input.semanticDiff !== undefined) {
+    if (typeof input.semanticDiff !== "boolean") return undefined;
+    result.semanticDiff = input.semanticDiff;
+  }
+  if (input.callFlow !== undefined) {
+    if (typeof input.callFlow !== "boolean") return undefined;
+    result.callFlow = input.callFlow;
+  }
+  return result;
+}
+
+// Resolved per call, not at module scope: tests sandbox the data dir by
+// setting PLANNOTATOR_DATA_DIR at runtime, and a module-scope constant would
+// freeze whatever the env held at first import (bun runs every test file in
+// one process).
+function getConfigDir(): string {
+  return getPlannotatorDataDir();
+}
+function getConfigPath(): string {
+  return join(getConfigDir(), "config.json");
+}
 
 /**
  * Load config from ~/.plannotator/config.json.
@@ -213,8 +269,9 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
  */
 export function loadConfig(): PlannotatorConfig {
   try {
-    if (!existsSync(CONFIG_PATH)) return {};
-    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    const configPath = getConfigPath();
+    if (!existsSync(configPath)) return {};
+    const raw = readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch (e) {
@@ -236,16 +293,20 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
     const mergedTheme = (current.theme || partial.theme)
       ? { ...current.theme, ...partial.theme }
       : undefined;
+    const mergedReviewAnalysis = (current.reviewAnalysis || partial.reviewAnalysis)
+      ? { ...current.reviewAnalysis, ...partial.reviewAnalysis }
+      : undefined;
     const mergedPrompts = mergePromptConfig(current.prompts, partial.prompts);
     const merged = {
       ...current,
       ...partial,
       diffOptions: mergedDiffOptions,
       theme: mergedTheme,
+      reviewAnalysis: mergedReviewAnalysis,
       prompts: mergedPrompts,
     };
-    mkdirSync(CONFIG_DIR, { recursive: true });
-    writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+    mkdirSync(getConfigDir(), { recursive: true });
+    writeFileSync(getConfigPath(), JSON.stringify(merged, null, 2) + "\n", "utf-8");
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);
   }
@@ -272,6 +333,8 @@ export function getServerConfig(gitUser: string | null): {
   displayName?: string;
   diffOptions?: DiffOptions;
   theme?: ThemeConfig;
+  favicon?: FaviconStyle;
+  reviewAnalysis: NonNullable<PlannotatorConfig["reviewAnalysis"]>;
   gitUser?: string;
   conventionalComments?: boolean;
   conventionalLabels?: CCLabelConfig[] | null;
@@ -281,6 +344,14 @@ export function getServerConfig(gitUser: string | null): {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
     ...(cfg.theme !== undefined && { theme: cfg.theme }),
+    ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
+    // These values gate server-side work, so always make the resolved defaults
+    // explicit. The client must not revive a stale cookie that disagrees with
+    // the server when the config leaves either optional leaf unset.
+    reviewAnalysis: {
+      semanticDiff: cfg.reviewAnalysis?.semanticDiff !== false,
+      callFlow: cfg.reviewAnalysis?.callFlow === true,
+    },
     gitUser: gitUser ?? undefined,
     ...(cfg.conventionalComments !== undefined && { conventionalComments: cfg.conventionalComments }),
     ...(cfg.conventionalLabels !== undefined && { conventionalLabels: cfg.conventionalLabels }),
@@ -382,11 +453,59 @@ export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): b
  * Priority (highest wins):
  *   PLANNOTATOR_SHARE env var  →  config.share  →  default true
  */
-export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
-  const envVal = process.env.PLANNOTATOR_SHARE;
+export function resolveSharingEnabled(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  const envVal = env.PLANNOTATOR_SHARE;
   if (envVal !== undefined) return envVal !== "disabled";
   if (config.share !== undefined) return config.share !== "disabled";
   return true;
+}
+
+/** Where shared Guided Reviews are uploaded by default (guide share hosting contract, §7). */
+export const DEFAULT_GUIDE_SHARE_URL = "https://guides.show";
+
+/**
+ * Validate and normalize a guide share service URL: http(s) only, credentials,
+ * query and fragment dropped, trailing slashes trimmed so callers can append
+ * `/api/g`. Null when the value must not be used.
+ */
+export function normalizeGuideShareUrl(input: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(input.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  const path = parsed.pathname.replace(/\/+$/, "");
+  return `${parsed.protocol}//${parsed.host}${path}`;
+}
+
+const warnedInvalidGuideShareUrls = new Set<string>();
+
+/**
+ * Resolve the guide host that guide share links are created on.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_GUIDE_SHARE_URL env var  →  config.guideShareUrl  →  https://guides.show
+ *
+ * An empty (but set) env var counts as unset. A value that is not an http(s)
+ * URL warns once per value on stderr and falls back to the default: a share
+ * setting must never break a server launch or a CLI run. Whether sharing is
+ * allowed at all is a separate question (`resolveSharingEnabled`).
+ */
+export function resolveGuideShareUrl(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): string {
+  const envVal = env.PLANNOTATOR_GUIDE_SHARE_URL;
+  const raw = envVal !== undefined && envVal.trim() !== "" ? envVal : config.guideShareUrl;
+  if (typeof raw !== "string" || raw.trim() === "") return DEFAULT_GUIDE_SHARE_URL;
+  const normalized = normalizeGuideShareUrl(raw);
+  if (normalized) return normalized;
+  if (!warnedInvalidGuideShareUrls.has(raw)) {
+    warnedInvalidGuideShareUrls.add(raw);
+    process.stderr.write(
+      `[plannotator] Warning: invalid guide share URL ${JSON.stringify(raw)} — expected an http(s) URL; using ${DEFAULT_GUIDE_SHARE_URL}\n`,
+    );
+  }
+  return DEFAULT_GUIDE_SHARE_URL;
 }
 
 // Bare hostname or IPv4: letters/digits/dots/hyphens, no leading/trailing
@@ -419,6 +538,10 @@ const warnedInvalidUrlHosts = new Set<string>();
  * localhost — a display setting must never crash a server launch. The echoed
  * value is JSON-encoded so an embedded newline cannot forge extra stderr
  * lines (hosts surface "Plannotator session ready" lines as clickable links).
+ *
+ * The sentinel "auto" is returned verbatim (it matches the hostname shape);
+ * the advertised-URL layer resolves it via Tailscale detection
+ * (packages/server/remote.ts and the Pi network.ts mirror).
  */
 export function resolveUrlHost(config: PlannotatorConfig): string | undefined {
   const envVal = process.env.PLANNOTATOR_URL_HOST;

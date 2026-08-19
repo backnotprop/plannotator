@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { stripConflictingPlanModeRules } from "./plan-mode";
+import { composeSystemPrompt, stripConflictingPlanModeRules } from "./plan-mode";
 import {
   isPlanningAgent,
   normalizeWorkflowOptions,
@@ -129,7 +129,7 @@ const serverPlugin = {
           workflowOptions,
         )) return;
 
-        event.system.push({ type: "text", text: getGenericPlanReminder() });
+        pushComposedSystemReminder(event.system, getGenericPlanReminder());
       });
     }
 
@@ -344,19 +344,43 @@ async function runPlanReview(input: {
   });
 }
 
-function replacePlanningSystemParts(
-  system: Array<{ type: "text"; text: string; [key: string]: unknown }>,
+type SystemPart = { type: "text"; text: string; [key: string]: unknown };
+
+/**
+ * Replace the system array with ONE composed text part (#1114): multiple
+ * system parts corrupt Qwen3.x Jinja chat templates, which render each part
+ * as its own system message. Mirrors the V1 entry (index.ts) exactly —
+ * stripped existing text first, then the additions, joined by blank lines.
+ *
+ * Order matters: the existing texts are read and composed BEFORE the array is
+ * truncated. Reordering to `system.length = 0` first silently drops the
+ * host's entire system prompt (the bug class flagged in #1114's review).
+ *
+ * Accepted trade-off: consolidation flattens per-part metadata (e.g.
+ * third-party cache hints) — template integrity beats part-level caching.
+ */
+export function replacePlanningSystemParts(
+  system: SystemPart[],
   additions: string[],
 ): void {
-  const existing = system.flatMap((part) => {
-    const text = stripConflictingPlanModeRules([part.text])[0];
-    return text ? [{ ...part, text }] : [];
-  });
+  const stripped = stripConflictingPlanModeRules(system.map((part) => part.text));
+  const composed = composeSystemPrompt([], [...stripped, ...additions.filter(Boolean)]);
   system.length = 0;
-  system.push(
-    ...existing,
-    ...additions.filter(Boolean).map((text) => ({ type: "text" as const, text })),
-  );
+  system.push(...composed.map((text) => ({ type: "text" as const, text })));
+}
+
+/**
+ * Append a reminder by composing it into a single system part (#1114) instead
+ * of pushing a separate part — same Jinja-template rationale as above, and
+ * the same compose-before-truncate ordering requirement.
+ */
+export function pushComposedSystemReminder(
+  system: SystemPart[],
+  reminder: string,
+): void {
+  const composed = composeSystemPrompt(system.map((part) => part.text), [reminder]);
+  system.length = 0;
+  system.push(...composed.map((text) => ({ type: "text" as const, text })));
 }
 
 function replaceStrictPlanReminder(messages: unknown[]): void {

@@ -10,6 +10,7 @@
 
 import { parsePortSelection } from "@plannotator/shared/port-range";
 import { loadConfig, resolveUrlHost } from "@plannotator/shared/config";
+import { isAutoUrlHost, resolveAutoHostCached } from "@plannotator/shared/tailscale";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -153,7 +154,10 @@ export function getServerHostname(): string {
 
 /** True when the advertised-URL host is overridden away from localhost. */
 export function isUrlHostOverridden(): boolean {
-  return resolveUrlHost(loadConfig()) !== undefined;
+  const host = resolveUrlHost(loadConfig());
+  if (host === undefined) return false;
+  if (isAutoUrlHost(host)) return isRemoteSession() && resolveAutoHostCached() !== undefined;
+  return true;
 }
 
 let warnedLocalUrlHost = false;
@@ -165,6 +169,7 @@ let warnedLocalUrlHost = false;
  * (getServerHostname). Remote sessions only: a local session binds loopback,
  * so honoring the override would advertise (and auto-open) a URL nothing is
  * listening on — the override is ignored with a once-per-process warning.
+ * The "auto" sentinel resolves the host from Tailscale (resolveAutoHost).
  * Same-machine subprocesses must not use this — they get a loopback URL so a
  * tailnet-only hostname can't break local agent jobs.
  */
@@ -180,5 +185,7 @@ export function buildAdvertisedUrl(port: number): string {
     }
     return `http://localhost:${port}`;
   }
-  return `http://${host}:${port}`;
+  const resolved = isAutoUrlHost(host) ? resolveAutoHostCached() : host;
+  if (resolved === undefined) return `http://localhost:${port}`;
+  return `http://${resolved}:${port}`;
 }

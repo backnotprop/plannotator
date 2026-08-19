@@ -1,9 +1,13 @@
 {
   "name": "@plannotator/core",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "type": "module",
   "exports": {
     "./agents": "./agents.ts",
+    "./diff-paths": "./diff-paths.ts",
+    "./diff-files": "./diff-files.ts",
+    "./guide": "./guide.ts",
+    "./guide-format": "./guide-format.ts",
     "./annotatable": "./annotatable.ts",
     "./agent-jobs": "./agent-jobs.ts",
     "./agent-terminal": "./agent-terminal.ts",
@@ -24,9 +28,14 @@
     "./workspace-status-types": "./workspace-status-types.ts",
     "./ai-context": "./ai-context.ts",
     "./types": "./types.ts",
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./guide-format-fixtures": "./guide-format-fixtures.ts",
+    "./guide-viewer-manifest": "./guide-viewer-manifest.ts"
   },
-  "files": ["**/*.ts", "!**/*.test.ts"],
+  "files": [
+    "**/*.ts",
+    "!**/*.test.ts"
+  ],
   "dependencies": {},
   "devDependencies": {
     "typescript": "~5.8.2"

@@ -1,44 +1,56 @@
-import chokidar, { type FSWatcher as ChokidarWatcher } from "chokidar";
-import { existsSync, statSync, watch, type FSWatcher as NodeWatcher } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative } from "node:path";
 
+import {
+	createExactFileWatchListener,
+	createFileBrowserWatchRegistry,
+	type FileBrowserChangeEvent,
+	type FileBrowserWatchRegistry,
+	type FileBrowserWatchTarget,
+	type WatchEntryHandle,
+} from "../generated/file-browser-watch-core.ts";
 import { isFileBrowserExcludedPath } from "../generated/reference-common.ts";
 import { resolveUserPath } from "../generated/resolve-file.ts";
 import { getGitMetadataWatchPaths } from "../generated/workspace-status.ts";
 import { json } from "./helpers.ts";
 
-interface FileBrowserChangeEvent {
-	type: "ready" | "changed";
-	dirPath: string;
-	reason: "files" | "git" | "initial";
-	timestamp: number;
-}
-
-interface WatchEntry {
-	key: string;
-	subscribers: Map<ServerResponse, string>;
-	contentWatcher: ChokidarWatcher | NodeWatcher | null;
-	gitWatcher: ChokidarWatcher | null;
-	debounceTimer: ReturnType<typeof setTimeout> | null;
-}
-
-interface WatchTarget {
-	key: string;
-	watchPath: string;
-	clientDirPath: string;
-	watchGit: boolean;
-	exactFilePath?: string;
-	ignored?: (path: string) => boolean;
-}
+// The watcher engine (deferred warmup, reconnect grace, native recursive
+// backend) lives in the vendored file-browser-watch-core (#1313). This module
+// keeps only the Pi transport: request parsing, the node:http SSE response,
+// and heartbeats.
 
 const HEARTBEAT_MS = 30_000;
-const DEBOUNCE_MS = 180;
-const watchers = new Map<string, WatchEntry>();
 
 function serialize(event: FileBrowserChangeEvent): string {
 	return `data: ${JSON.stringify(event)}\n\n`;
 }
+
+const registry: FileBrowserWatchRegistry<ServerResponse> = createFileBrowserWatchRegistry<ServerResponse>({
+	send: (subscriber, event) => {
+		try {
+			subscriber.write(serialize(event));
+			return true;
+		} catch {
+			return false;
+		}
+	},
+	getGitMetadataWatchPaths,
+});
+
+export { createExactFileWatchListener };
+
+/** Immediate teardown of every live watcher. Server stop and tests. */
+export function closeAllFileBrowserWatchers(): void {
+	registry.closeAll();
+}
+
+/** Tests only. See FileBrowserWatchRegistry.diagnostics/configureForTests. */
+export const __fileBrowserWatchTestHooks = {
+	diagnostics: () => registry.diagnostics(),
+	configure: (overrides: Parameters<FileBrowserWatchRegistry<ServerResponse>["configureForTests"]>[0]) =>
+		registry.configureForTests(overrides),
+};
 
 export function isFileBrowserWatchIgnoredPath(path: string, root: string): boolean {
 	const rel = relative(root, path).replace(/\\/g, "/");
@@ -52,133 +64,6 @@ function isValidDirectory(dirPath: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-function getFileSignature(filePath: string): string {
-	try {
-		const stats = statSync(filePath, { bigint: true });
-		return stats.isDirectory()
-			? "directory"
-			: `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
-	} catch {
-		return "missing";
-	}
-}
-
-export function createExactFileWatchListener(
-	watchPath: string,
-	exactFilePath: string,
-	onChange: () => void,
-): (event: unknown, filename: string | Buffer | null | undefined) => void {
-	let signature = getFileSignature(exactFilePath);
-	return (_event, filename) => {
-		try {
-			const nextSignature = getFileSignature(exactFilePath);
-			// Events on the watched directory itself arrive without a filename, as
-			// null on some platforms and undefined on others (Bun on Linux).
-			const eventMatches = filename == null
-				|| resolve(watchPath, filename.toString()) === exactFilePath;
-			if (eventMatches || nextSignature !== signature) {
-				signature = nextSignature;
-				onChange();
-			}
-		} catch {
-			// A watcher event must never take down the server.
-		}
-	};
-}
-
-function broadcast(entry: WatchEntry, reason: FileBrowserChangeEvent["reason"]): void {
-	for (const [res, clientDirPath] of entry.subscribers) {
-		const payload = serialize({
-			type: "changed",
-			dirPath: clientDirPath,
-			reason,
-			timestamp: Date.now(),
-		});
-		try {
-			res.write(payload);
-		} catch {
-			entry.subscribers.delete(res);
-		}
-	}
-}
-
-function scheduleBroadcast(entry: WatchEntry, reason: "files" | "git"): void {
-	if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
-	entry.debounceTimer = setTimeout(() => {
-		entry.debounceTimer = null;
-		broadcast(entry, reason);
-	}, DEBOUNCE_MS);
-}
-
-function closeWatcher(entry: WatchEntry): void {
-	if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
-	void entry.contentWatcher?.close();
-	void entry.gitWatcher?.close();
-	if (watchers.get(entry.key) === entry) {
-		watchers.delete(entry.key);
-	}
-}
-
-function releaseSubscriber(entry: WatchEntry, res: ServerResponse): void {
-	entry.subscribers.delete(res);
-	if (entry.subscribers.size === 0) closeWatcher(entry);
-}
-
-function ensureWatcher(target: WatchTarget): WatchEntry {
-	const existing = watchers.get(target.key);
-	if (existing) return existing;
-
-	const entry: WatchEntry = {
-		key: target.key,
-		subscribers: new Map(),
-		contentWatcher: null,
-		gitWatcher: null,
-		debounceTimer: null,
-	};
-
-	if (target.exactFilePath) {
-		entry.contentWatcher = watch(
-			target.watchPath,
-			{ persistent: true },
-			createExactFileWatchListener(target.watchPath, target.exactFilePath, () => scheduleBroadcast(entry, "files")),
-		);
-		entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
-	} else {
-		entry.contentWatcher = chokidar.watch(target.watchPath, {
-			ignoreInitial: true,
-			persistent: true,
-			ignored: target.ignored,
-			awaitWriteFinish: {
-				stabilityThreshold: 120,
-				pollInterval: 30,
-			},
-		});
-		entry.contentWatcher.on("all", () => {
-			scheduleBroadcast(entry, "files");
-		});
-		entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
-	}
-
-	const gitWatchPaths = target.watchGit
-		? getGitMetadataWatchPaths(target.watchPath)
-		: [];
-	if (gitWatchPaths.length > 0) {
-		entry.gitWatcher = chokidar.watch(gitWatchPaths, {
-			ignoreInitial: true,
-			persistent: true,
-			awaitWriteFinish: {
-				stabilityThreshold: 80,
-				pollInterval: 30,
-			},
-		});
-		entry.gitWatcher.on("all", () => scheduleBroadcast(entry, "git"));
-		entry.gitWatcher.on("error", () => scheduleBroadcast(entry, "git"));
-	}
-
-	watchers.set(target.key, entry);
-	return entry;
 }
 
 function isValidFileTarget(filePath: string): boolean {
@@ -201,7 +86,7 @@ export function handleFileBrowserStreamRequest(req: IncomingMessage, res: Server
 		return true;
 	}
 
-	const targets = new Map<string, WatchTarget>();
+	const targets = new Map<string, FileBrowserWatchTarget & { clientDirPath: string }>();
 	if (rawDirPaths.length > 0) {
 		for (const rawDirPath of rawDirPaths) {
 			const dirPath = resolveUserPath(rawDirPath);
@@ -241,8 +126,8 @@ export function handleFileBrowserStreamRequest(req: IncomingMessage, res: Server
 		}
 	}
 
-	const subscriptions = [...targets.values()].map((target) => ({
-		entry: ensureWatcher(target),
+	const subscriptions: Array<{ handle: WatchEntryHandle; clientDirPath: string }> = [...targets.values()].map((target) => ({
+		handle: registry.ensure(target),
 		clientDirPath: target.clientDirPath,
 	}));
 	res.writeHead(200, {
@@ -251,28 +136,28 @@ export function handleFileBrowserStreamRequest(req: IncomingMessage, res: Server
 		Connection: "keep-alive",
 	});
 	res.setTimeout(0);
-	for (const { entry, clientDirPath } of subscriptions) {
+	for (const { handle, clientDirPath } of subscriptions) {
 		res.write(serialize({
 			type: "ready",
 			dirPath: clientDirPath,
 			reason: "initial",
 			timestamp: Date.now(),
 		}));
-		entry.subscribers.set(res, clientDirPath);
+		registry.attach(handle, res, clientDirPath);
 	}
 
 	const heartbeat = setInterval(() => {
 		try {
 			res.write(": heartbeat\n\n");
 		} catch {
-			for (const { entry } of subscriptions) releaseSubscriber(entry, res);
+			for (const { handle } of subscriptions) registry.release(handle, res);
 			clearInterval(heartbeat);
 		}
 	}, HEARTBEAT_MS);
 
 	res.on("close", () => {
 		clearInterval(heartbeat);
-		for (const { entry } of subscriptions) releaseSubscriber(entry, res);
+		for (const { handle } of subscriptions) registry.release(handle, res);
 	});
 	return true;
 }
