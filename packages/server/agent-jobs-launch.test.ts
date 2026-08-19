@@ -145,3 +145,33 @@ describe("POST /api/agents/jobs — reviewProfileId launch plumbing", () => {
     handler.killAll();
   });
 });
+
+describe("POST /api/agents/jobs — guide launch review plumbing (portable export)", () => {
+  test("launchReview is handed to onJobComplete but never appears on the broadcast job", async () => {
+    const launchReview = { rawPatch: "diff --git a/x b/x\n", gitRef: "HEAD", source: { kind: "local" as const } };
+    let seenMeta: Record<string, unknown> | undefined;
+    let done: (() => void) | undefined;
+    const completed = new Promise<void>((resolve) => { done = resolve; });
+    const handler = createAgentJobHandler({
+      mode: "review",
+      getServerUrl: () => "http://localhost:1234",
+      getCwd: () => "/tmp",
+      async buildCommand() {
+        return { command: ["true"], launchReview };
+      },
+      async onJobComplete(_job, meta) {
+        seenMeta = meta as Record<string, unknown>;
+        done?.();
+      },
+    });
+
+    const res = await handler.handle(post({ provider: "guide" }), JOBS_URL);
+    expect(res?.status).toBe(201);
+    const { job } = await res!.json();
+    // The patch must not ride the SSE-broadcast job object.
+    expect("launchReview" in job).toBe(false);
+    await completed;
+    expect(seenMeta?.launchReview).toEqual(launchReview);
+    handler.killAll();
+  });
+});

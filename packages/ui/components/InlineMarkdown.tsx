@@ -4,6 +4,7 @@ import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePa
 import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
 import { useFenceTheme } from "../hooks/useFenceTheme";
 import { transformPlainText } from "../utils/inlineTransforms";
+import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -877,7 +878,7 @@ export const InlineMarkdown: React.FC<{
       // targets are opaque doc ids, not paths. null → today's rendering.
       const resolution = resolveLinkedDoc?.(target) ?? null;
       const display = resolution?.label || storedLabel || target;
-      const targetPath = /\.(mdx?|txt|html?)$/i.test(target)
+      const targetPath = hasLinkedDocExtension(target)
         ? target
         : `${target}.md`;
 
@@ -1009,7 +1010,7 @@ export const InlineMarkdown: React.FC<{
       // Fragment is stripped before handing to onOpenLinkedDoc (overlay has
       // no anchor-scroll support today).
       const isLocalDoc =
-        /\.(mdx?|txt|html?)(#.*)?$/i.test(linkUrl) &&
+        hasLinkedDocExtension(linkUrl, { allowFragment: true }) &&
         !linkUrl.startsWith("http://") &&
         !linkUrl.startsWith("https://");
       const isCodeFile = !isLocalDoc && isCodeFilePath(linkUrl);

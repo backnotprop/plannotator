@@ -10,9 +10,11 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { isUrlHostOverridden } from "./remote";
+import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
-import { FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
 import { listReferenceSkills, readReferenceSkillContent } from "./review-skill-loader";
@@ -196,10 +198,27 @@ export function handleApiNotFound(path: string): Response {
   return Response.json({ error: "Not found", path }, { status: 404 });
 }
 
-/** Serve the app favicon. Used by all 3 servers. */
+/**
+ * Serve the app favicon. Used by all 3 servers (plus goal-setup).
+ *
+ * Reads the persisted style so a classic user's first painted frame is already
+ * classic. Without this the static route always answered Totman and the
+ * preference only landed once React mounted, i.e. a visible flash on every load.
+ *
+ * The route is one URL with two possible payloads, so the response declares its
+ * real type and is not cached: the entry HTML's <link rel="icon"> deliberately
+ * carries no `type`/`sizes` (see apps/hook/index.html), leaving Content-Type the
+ * single source of truth, and a day-long cache would re-paint the old icon after
+ * a switch. loadConfig() is a small unmemoized JSON read, once per page load.
+ */
 export function handleFavicon(): Response {
+  if (getServerConfig(null).favicon === "classic") {
+    return new Response(CLASSIC_FAVICON_SVG, {
+      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "no-cache" },
+    });
+  }
   return new Response(FAVICON_PNG_BYTES, {
-    headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
+    headers: { "Content-Type": "image/png", "Cache-Control": "no-cache" },
   });
 }
 
@@ -249,11 +268,16 @@ export async function handleServerReady(
   if (isRemote) {
     // With an advertised-URL host override the link is directly reachable
     // (e.g. over a tailnet), so the port-forwarding advice would be wrong.
-    process.stderr.write(
-      isUrlHostOverridden()
-        ? `\n  Plannotator session ready — open on your device:\n  ${url}\n\n`
-        : `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
-    );
+    if (isUrlHostOverridden()) {
+      process.stderr.write(`\n  Plannotator session ready — open on your device:\n  ${url}\n\n`);
+      // The URL makes a device hop; a QR skips the retyping (TTY only). Only
+      // for overridden hosts: a QR of a localhost URL scans to nowhere.
+      writeUrlQr(url);
+    } else {
+      process.stderr.write(
+        `\n  Plannotator session ready — open on your local machine (forward port ${port} if needed):\n  ${url}\n\n`,
+      );
+    }
   } else if (isCodexDesktopHost()) {
     process.stderr.write(`\n  Plannotator session ready:\n  ${url}\n\n`);
   }

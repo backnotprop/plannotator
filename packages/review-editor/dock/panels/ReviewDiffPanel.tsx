@@ -89,6 +89,7 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         selectedAnnotationId={state.selectedAnnotationId}
         scrollTargetAnnotation={state.scrollTargetAnnotation}
         pendingSelection={state.pendingSelection}
+        compactTouchLayout={state.isCompactTouchLayout}
         onLineSelection={state.onLineSelection}
         onAddAnnotation={state.onAddAnnotation}
         onAddFileComment={state.onAddFileComment}
@@ -98,7 +99,9 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         onExplainAnnotation={state.aiAvailable ? state.onExplainAnnotation : undefined}
         agentFindingSources={state.agentFindingSources}
         isViewed={state.viewedFiles.has(file.path)}
+        isGenerated={state.generatedFiles.has(file.path)}
         onToggleViewed={() => state.onToggleViewed(file.path)}
+        showViewedControls={state.showViewedControls}
         isStaged={state.stagedFiles.has(file.path)}
         isStaging={state.stagingFile === file.path}
         onStage={() => state.onStage(file.path)}
@@ -107,6 +110,7 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         // alone would offer a no-op Git Add on them that flips local state.
         // Mirrors the `a` shortcut and the all-files header.
         canStage={state.canStagePath ? state.canStagePath(file.path) : state.canStageFiles}
+        showStageControls={state.showStageControls}
         stageError={state.stageError}
         searchQuery={state.isSearchPending ? '' : state.debouncedSearchQuery}
         searchMatches={searchMatchesForFile}

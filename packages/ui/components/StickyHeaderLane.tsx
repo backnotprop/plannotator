@@ -27,7 +27,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnnotationToolstrip } from './AnnotationToolstrip';
 import { DocBadges } from './DocBadges';
-import { useScrollViewport } from '../hooks/useScrollViewport';
+import {
+  getScrollViewportIntersectionRoot,
+  useScrollViewport,
+} from '../hooks/useScrollViewport';
 import type { EditorMode, InputMethod } from '../types';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
 
@@ -172,7 +175,11 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     if (!sentinelRef.current || !scrollViewport) return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsStuck(!entry.isIntersecting),
-      { root: scrollViewport, rootMargin: '80px 0px 0px 0px', threshold: 0 }
+      {
+        root: getScrollViewportIntersectionRoot(scrollViewport),
+        rootMargin: '80px 0px 0px 0px',
+        threshold: 0,
+      }
     );
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();

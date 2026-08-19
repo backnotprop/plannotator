@@ -627,6 +627,14 @@
    * the surface/sidebar-aware components expect. Themes that pin explicit
    * values (e.g. "simple") override these. */
   :root {
+    /* Mobile browser environment. Safe areas are CSS-owned because they are
+     * available before React mounts; the observed viewport values are written
+     * by useViewportEnvironment and fall back cleanly in the utilities below. */
+    --pn-safe-top: env(safe-area-inset-top, 0px);
+    --pn-safe-right: env(safe-area-inset-right, 0px);
+    --pn-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --pn-safe-left: env(safe-area-inset-left, 0px);
+    --pn-touch-target: 2.75rem;
     --surface-0: color-mix(in oklch, var(--muted) 40%, var(--background));
     --surface-1: var(--muted);
     --surface-2: color-mix(in oklch, var(--muted) 70%, var(--foreground));
@@ -702,6 +710,227 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-feature-settings: "ss01", "ss02", "cv01";
+}
+
+/* Safari extends the page canvas beneath its floating browser controls. The
+ * plan document is a card-colored nested scroller, so leaving the outer canvas
+ * on `--background` produces an opaque dark band around those controls. Match
+ * the browser canvas to the active surface while preserving the incumbent
+ * background for grid, HTML, Review, loading, and non-editor consumers. */
+html:has([data-pn-browser-canvas="card"]),
+body:has([data-pn-browser-canvas="card"]) {
+  background-color: var(--card);
+}
+
+html:has([data-pn-browser-canvas="background"]),
+body:has([data-pn-browser-canvas="background"]) {
+  background-color: var(--background);
+}
+
+/* Mobile Safari only collapses its browser controls for page scrolling; it
+ * deliberately leaves them expanded when a gesture scrolls a nested element.
+ * Plan opts compact coarse-pointer layouts into document scrolling while the
+ * fixed application-stage architecture remains unchanged everywhere else. */
+html:has([data-pn-document-scroll="true"]),
+body:has([data-pn-document-scroll="true"]) {
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: auto;
+}
+
+body:has([data-pn-document-scroll="true"]) > #root {
+  height: auto;
+  overflow: visible;
+}
+
+.pn-app-viewport[data-pn-document-scroll="true"] {
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* The application stage owns the top and lateral safe areas. Bottom-edge
+ * surfaces opt into `.pn-safe-bottom` themselves so the home-indicator inset
+ * is never counted twice. The ordered height declarations preserve desktop
+ * behavior and old-browser support before the observer publishes a value. */
+.pn-app-viewport {
+  box-sizing: border-box;
+  height: 100vh;
+  height: 100dvh;
+  height: var(--pn-viewport-height, 100vh);
+  padding-top: var(--pn-safe-top);
+  padding-right: var(--pn-safe-right);
+  padding-left: var(--pn-safe-left);
+}
+
+.pn-safe-top {
+  padding-top: var(--pn-safe-top);
+}
+
+.pn-safe-inline {
+  padding-right: var(--pn-safe-right);
+  padding-left: var(--pn-safe-left);
+}
+
+.pn-safe-bottom {
+  padding-bottom: var(--pn-safe-bottom);
+}
+
+.pn-viewport-bounded {
+  max-height: calc(
+    var(--pn-viewport-height, 100vh) - var(--pn-safe-top) - var(--pn-safe-bottom)
+  );
+}
+
+/* Portaled overlays cannot inherit the application root's safe-area padding.
+ * This utility gives them the same observed visible stage without assuming
+ * that the software keyboard is a rectangular bottom inset. */
+.pn-visible-viewport-overlay {
+  position: fixed;
+  top: var(--pn-viewport-offset-top, 0px);
+  left: var(--pn-viewport-offset-left, 0px);
+  box-sizing: border-box;
+  width: var(--pn-viewport-width, 100vw);
+  height: var(--pn-viewport-height, 100vh);
+  padding-top: max(1rem, var(--pn-safe-top));
+  padding-right: max(1rem, var(--pn-safe-right));
+  padding-bottom: max(1rem, var(--pn-safe-bottom));
+  padding-left: max(1rem, var(--pn-safe-left));
+}
+
+/* Full-stage compact surfaces (for example the Plan navigator) use the same
+ * observed visual viewport as portaled dialogs without inheriting their 1rem
+ * ornamental margin. The stage owns its safe areas and contains scroll-chain
+ * gestures so the document beneath it does not move at a list boundary. */
+.pn-visible-viewport-stage {
+  position: fixed;
+  top: var(--pn-viewport-offset-top, 0px);
+  left: var(--pn-viewport-offset-left, 0px);
+  box-sizing: border-box;
+  width: var(--pn-viewport-width, 100vw);
+  height: var(--pn-viewport-height, 100vh);
+  padding-top: var(--pn-safe-top);
+  padding-right: var(--pn-safe-right);
+  padding-bottom: var(--pn-safe-bottom);
+  padding-left: var(--pn-safe-left);
+  overscroll-behavior: contain;
+}
+
+/* The navigator reuses information-dense desktop browser content, but its
+ * interactive rows become physical controls on touch. Scope both the 44px
+ * target and the TOC's legible type lift to the compact stage only. */
+[data-pn-plan-navigator="true"] button {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+[data-pn-plan-navigator="true"] nav button {
+  font-size: 0.8125rem;
+}
+
+[data-pn-plan-navigator="true"] .file-browser-filter-field {
+  height: var(--pn-touch-target);
+}
+
+[data-pn-plan-navigator="true"] .file-browser-filter-clear {
+  min-inline-size: var(--pn-touch-target);
+}
+
+/* Compact Plan auxiliary stages reuse dense desktop panel contents, but every
+ * nested action remains a physical touch control. This selector is stage-only,
+ * so the incumbent desktop panel geometry stays pixel-identical. */
+[data-pn-compact-plan-stage="true"] button {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+/* Existing expanded composers keep their 85dvh desktop proportion. Compact
+ * and touch layouts use the full safe visible stage so the keyboard cannot
+ * strand the footer below an ornamental desktop margin. */
+.pn-responsive-composer-dialog {
+  width: 100%;
+  height: min(36rem, 85vh);
+  height: min(36rem, 85dvh);
+  max-width: 42rem;
+  max-height: 100%;
+}
+
+@media (pointer: coarse), (max-width: 639px), (max-height: 419px) {
+  .pn-responsive-composer-dialog {
+    height: 100%;
+  }
+
+  /* Code review often promotes a line selection straight into the expanded
+   * composer. Keep its idle surface proportional to the content instead of
+   * covering the whole phone; once the keyboard reduces the visible viewport,
+   * the same cap naturally yields to all available space. Plan's explicit
+   * expanded-composer treatment remains unchanged. */
+  .pn-responsive-composer-dialog.pn-review-composer-dialog {
+    height: min(28rem, 100%);
+  }
+}
+
+/* iOS zooms focused text controls below 16px. Scope the correction to
+ * user-authored primary inputs so labels, counters, and diff text stay at the
+ * established desktop scale. The mirror selector keeps skill-token glyphs
+ * metrically identical to the transparent textarea above it. */
+@media (pointer: coarse), (max-width: 639px) {
+  [data-pn-mobile-editable],
+  [data-pn-mobile-editable-mirror] {
+    font-size: 1rem !important;
+  }
+}
+
+/* Shared controls keep their incumbent visual density but gain a physical
+ * 44px target inside the canonical compact touch shell. The root marker comes
+ * from the same JS media query that owns scroll and shell composition, so a
+ * secondary touchscreen cannot reclassify a fine-primary-pointer desktop.
+ * Selecting from `html` also reaches portaled controls outside the app root. */
+html:has([data-pn-compact-touch-layout='true']) [data-pn-touch-target] {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-touch-target][data-pn-touch-target-icon] {
+  min-inline-size: var(--pn-touch-target);
+}
+
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-compact-diff-options]
+  button {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+/* The selection toolbar packs its controls at desktop density (2px gaps), so
+ * 44px targets alone would still leave adjacent destructive and comment
+ * actions a mis-tap apart. Space them only inside the compact scope. */
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-annotation-toolbar-row] {
+  gap: 0.5rem;
+}
+
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-touch-target]:not(:disabled):not([aria-disabled='true']):active {
+  filter: brightness(0.92);
+  transition: filter 100ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has([data-pn-compact-touch-layout='true'])
+    [data-pn-touch-target]:not(:disabled):not([aria-disabled='true']):active {
+    filter: brightness(0.9);
+    transition: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .plan-look-choice-option[aria-pressed='false']:hover {
+    border-color: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+    background: color-mix(in srgb, var(--muted) 35%, transparent);
+  }
 }
 
 .math-inline {

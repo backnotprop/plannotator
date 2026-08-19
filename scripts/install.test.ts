@@ -333,6 +333,7 @@ describe("install.sh", () => {
     const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
     const semInstall = script.indexOf("install_sem_sidecar\n");
     const agentTerminal = script.indexOf("install_agent_terminal_runtime\n");
+    const callFlow = script.indexOf("install_call_flow_runtime\n");
     const codexBlock = script.indexOf(
       "# --- Codex CLI / Desktop app support",
     );
@@ -345,6 +346,7 @@ describe("install.sh", () => {
     // Everything the reporter called "trash" runs strictly after the exit gate.
     expect(semInstall).toBeGreaterThan(minimalExit);
     expect(agentTerminal).toBeGreaterThan(minimalExit);
+    expect(callFlow).toBeGreaterThan(minimalExit);
     expect(codexBlock).toBeGreaterThan(minimalExit);
     expect(skillsCheckout).toBeGreaterThan(minimalExit);
     // The gate really exits rather than falling through.
@@ -677,12 +679,14 @@ describe("install.ps1", () => {
     );
     const minimalExit = script.indexOf("if ($minimal) {");
     const semInstall = script.indexOf("Install-SemSidecar\n");
+    const callFlow = script.indexOf("Install-CallFlowRuntime\n");
     const pathAdvice = script.indexOf("function Show-PathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(pathAdvice).toBeGreaterThan(binaryInstalled);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
     expect(semInstall).toBeGreaterThan(minimalExit);
+    expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
     expect(gateBody).toContain("exit 0");
@@ -967,11 +971,13 @@ describe("install.cmd", () => {
     );
     const minimalExit = script.indexOf('if "!MINIMAL!"=="1" (');
     const semInstall = script.indexOf("call :InstallSemSidecar");
+    const callFlow = script.indexOf("call :InstallCallFlowRuntime");
     const printPathAdvice = script.indexOf(":PrintPathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
     expect(semInstall).toBeGreaterThan(minimalExit);
+    expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through, and reuses :PrintPathAdvice.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
     expect(gateBody).toContain("call :PrintPathAdvice");
@@ -1587,6 +1593,72 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain('"!INSTALL_PATH!" install-runtime agent-terminal');
     expect(cmdScript).toContain("Skipping agent terminal runtime install");
     expect(cmdScript).toContain("PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL");
+  });
+
+  test("the CallDiff runtime is strictly opt-in: default sequence never installs it", () => {
+    const cmdScript = readScript("install.cmd");
+
+    // install.sh: the install call is gated on the resolved opt-in, which
+    // defaults to 0, and the default path prints the in-app install note.
+    expect(sh).toContain("install_call_flow=0");
+    expect(sh).toContain('if [ "$install_call_flow" -ne 1 ]; then');
+    expect(sh).toContain("available as an in-app opt-in install");
+    expect(sh).toContain('"$INSTALL_DIR/plannotator" install-runtime call-flow');
+
+    // install.ps1: same shape via $installCallFlowResolved (default $false).
+    expect(ps).toContain("$installCallFlowResolved = $false");
+    expect(ps).toContain("if (-not $installCallFlowResolved) {");
+    expect(ps).toContain("available as an in-app opt-in install");
+    expect(ps).toContain("& $plannotatorPath install-runtime call-flow");
+
+    // install.cmd: same shape via INSTALL_CALL_FLOW (default 0).
+    expect(cmdScript).toContain('set "INSTALL_CALL_FLOW=0"');
+    expect(cmdScript).toContain('if not "!INSTALL_CALL_FLOW!"=="1" (');
+    expect(cmdScript).toContain("available as an in-app opt-in install");
+    expect(cmdScript).toContain('"!INSTALL_PATH!" install-runtime call-flow');
+  });
+
+  test("the CallDiff opt-in resolves flag > env > config in every installer", () => {
+    const cmdScript = readScript("install.cmd");
+
+    // Flag layer.
+    expect(sh).toContain("--with-call-flow)");
+    expect(ps).toContain("[switch]$WithCallFlow");
+    expect(cmdScript).toContain('if /i "%~1"=="--with-call-flow" (');
+
+    // Env layer.
+    expect(sh).toContain("PLANNOTATOR_INSTALL_CALLDIFF");
+    expect(ps).toContain("PLANNOTATOR_INSTALL_CALLDIFF");
+    expect(cmdScript).toContain("PLANNOTATOR_INSTALL_CALLDIFF");
+
+    // Config layer (flat top-level boolean, matching verifyAttestation).
+    expect(sh).toContain('"installCallFlow"');
+    expect(ps).toContain("$cfg.installCallFlow");
+    expect(cmdScript).toContain('\\"installCallFlow\\"');
+
+    // In each script the flag assignment comes after the env resolution so
+    // the flag wins, mirroring the verifyAttestation layering.
+    const shEnv = sh.indexOf('PLANNOTATOR_INSTALL_CALLDIFF:-');
+    const shFlag = sh.indexOf('install_call_flow="$WITH_CALL_FLOW_FLAG"');
+    expect(shEnv).toBeGreaterThan(0);
+    expect(shFlag).toBeGreaterThan(shEnv);
+    const psEnv = ps.indexOf("$env:PLANNOTATOR_INSTALL_CALLDIFF");
+    const psFlag = ps.indexOf("if ($WithCallFlow) { $installCallFlowResolved = $true }");
+    expect(psEnv).toBeGreaterThan(0);
+    expect(psFlag).toBeGreaterThan(psEnv);
+    const cmdEnv = cmdScript.indexOf('if /i "!PLANNOTATOR_INSTALL_CALLDIFF!"=="1"');
+    const cmdFlag = cmdScript.indexOf('if "!WITH_CALL_FLOW_FLAG!"=="1" set "INSTALL_CALL_FLOW=1"');
+    expect(cmdEnv).toBeGreaterThan(0);
+    expect(cmdFlag).toBeGreaterThan(cmdEnv);
+  });
+
+  test("the removed CallDiff skip opt-out is gone from every installer", () => {
+    const cmdScript = readScript("install.cmd");
+    // Opting out of a default-off install is meaningless; the env var was
+    // deleted rather than kept for back-compat.
+    expect(sh).not.toContain("PLANNOTATOR_SKIP_CALLDIFF_INSTALL");
+    expect(ps).not.toContain("PLANNOTATOR_SKIP_CALLDIFF_INSTALL");
+    expect(cmdScript).not.toContain("PLANNOTATOR_SKIP_CALLDIFF_INSTALL");
   });
 
   test("install.sh and help text use vX.Y.Z placeholder not v0.17.1", () => {

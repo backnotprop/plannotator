@@ -49,7 +49,13 @@ import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useAnnotationHighlighter } from '../hooks/useAnnotationHighlighter';
 import { useVimSelection } from '../hooks/useVimSelection';
-import { useScrollViewport } from '../hooks/useScrollViewport';
+import {
+  getScrollViewportIntersectionRoot,
+  getScrollViewportRect,
+  getScrollViewportTop,
+  scrollViewportTo,
+  useScrollViewport,
+} from '../hooks/useScrollViewport';
 import { decodeAnchorHash } from '../utils/anchors';
 import { VimModeOverlay } from './VimModeOverlay';
 
@@ -602,7 +608,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     if (!stickyActions || !stickySentinelRef.current || !scrollViewport) return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsStuck(!entry.isIntersecting),
-      { root: scrollViewport, threshold: 0 }
+      { root: getScrollViewportIntersectionRoot(scrollViewport), threshold: 0 }
     );
     observer.observe(stickySentinelRef.current);
     return () => observer.disconnect();
@@ -635,12 +641,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const headerOffset = stickyActionsEl
       ? stickyActionsEl.getBoundingClientRect().height + stickyTop
       : 0;
-    const containerRect = scrollViewport.getBoundingClientRect();
+    const containerRect = getScrollViewportRect(scrollViewport);
     const targetRect = target.getBoundingClientRect();
     const relativeTop = targetRect.top - containerRect.top;
-    const offsetPosition = scrollViewport.scrollTop + relativeTop - headerOffset;
+    const offsetPosition = getScrollViewportTop(scrollViewport) + relativeTop - headerOffset;
 
-    scrollViewport.scrollTo({
+    scrollViewportTo(scrollViewport, {
       top: Math.max(0, offsetPosition),
       behavior: 'smooth',
     });
@@ -777,6 +783,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const handleViewerCommentClose = useCallback(() => {
     setViewerCommentPopover(null);
   }, []);
+
+  const commentDraftScope = linkedDocInfo?.filepath ?? sourceInfo ?? markdown.slice(0, 120);
 
   const codePathValidation = useValidatedCodePaths(markdown, codePathBaseDir, disableCodePathValidation);
 
@@ -1154,6 +1162,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               contextText={hookCommentPopover.contextText}
               isGlobal={false}
               initialText={hookCommentPopover.initialText}
+              draftKey={`plan:${commentDraftScope}:${hookCommentPopover.draftKey}`}
               onSubmit={hookCommentSubmit}
               onClose={hookCommentClose}
               allowImages={allowImages}
@@ -1173,6 +1182,11 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             contextText={viewerCommentPopover.contextText}
             isGlobal={viewerCommentPopover.isGlobal}
             initialText={viewerCommentPopover.initialText}
+            draftKey={`plan:${commentDraftScope}:${
+              viewerCommentPopover.isGlobal
+                ? 'global'
+                : `code-block:${viewerCommentPopover.codeBlock?.block.id ?? viewerCommentPopover.contextText}`
+            }`}
             onSubmit={handleViewerCommentSubmit}
             onClose={handleViewerCommentClose}
             allowImages={allowImages}

@@ -79,6 +79,7 @@ export interface Annotation {
     displayMode: boolean;
   }>; // math elements covered by a mixed text+formula selection
   prUrl?: string; // code-review PR mode: the PR this note belongs to, so it isn't shown/exported against another PR after an in-place switch
+  pageUrl?: string; // set only by live app annotate sessions: the page (pathname + search) the annotation was made on; restore filters to the current page and export groups by page
   htmlAnchor?: HtmlElementAnchor; // raw-HTML pinpoint: serialized element anchor for reliable restoration
   htmlAdditionalTargets?: HtmlAnnotationTarget[]; // raw-HTML shift-click multi-select: extra elements this one comment covers (primary stays htmlAnchor/originalText)
   // web-highlighter metadata for cross-element selections
@@ -155,6 +156,32 @@ export type CodeAnnotationType = 'comment' | 'suggestion' | 'concern';
 // must branch on scope, never read those sentinels as a real path or row.
 export type CodeAnnotationScope = 'line' | 'file' | 'general';
 
+/**
+ * One inferred step selected from the Call Flow analysis surface.
+ *
+ * Source location is optional because CallDiff can surface structural steps
+ * without a concrete line. `CodeAnnotation` uses an in-patch located target
+ * as its native inline anchor when one exists; otherwise the annotation is
+ * file- or review-scoped while this target remains its durable Call Flow
+ * anchor. Raw output selections use a one-based `rawLine` instead of a source
+ * location. This lets every rendered Call Flow row and raw line participate in
+ * feedback without pretending an out-of-hunk or diagnostic line can be posted
+ * as an inline source comment.
+ */
+interface CallFlowAnnotationTargetBase {
+  treePath: string;
+  entry: string;
+  label: string;
+  side: 'old' | 'new';
+}
+
+export type CallFlowAnnotationTarget = CallFlowAnnotationTargetBase & (
+  | { filePath: string; lineStart: number; lineEnd: number; rawLine?: undefined }
+  | { filePath: string; lineStart?: undefined; lineEnd?: undefined; rawLine?: undefined }
+  | { rawLine: number; filePath?: undefined; lineStart?: undefined; lineEnd?: undefined }
+  | { rawLine?: undefined; filePath?: undefined; lineStart?: undefined; lineEnd?: undefined }
+);
+
 /** Conventional Comments label — see https://conventionalcomments.org */
 export type ConventionalLabel =
   | 'praise'
@@ -214,6 +241,13 @@ export interface CodeAnnotation {
    *  line anchor maps to the pristine lines those edits replace, so it is
    *  approximate and the export labels it as such. */
   selectedTextFromEdits?: boolean;
+  /**
+   * Complete Call Flow selection for an annotation authored from that
+   * surface. When any target maps to the patch, one target also supplies this
+   * annotation's primary inline anchor; otherwise the annotation is file- or
+   * review-scoped. Target order always preserves the user's selection order.
+   */
+  callFlowTargets?: CallFlowAnnotationTarget[];
   createdAt: number;
   author?: string;
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API

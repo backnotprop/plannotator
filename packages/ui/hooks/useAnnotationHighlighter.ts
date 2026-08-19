@@ -27,6 +27,7 @@ export interface CommentPopoverState {
   selectedText?: string;
   initialText?: string;
   source?: any;
+  draftKey: string;
 }
 
 export interface QuickLabelPickerState {
@@ -45,6 +46,21 @@ type MathAnnotationSource = {
 
 const isMathAnnotationSource = (source: any): source is MathAnnotationSource =>
   source?.kind === 'math';
+
+function commentDraftTargetKey(source: any, selectedText: string): string {
+  if (isMathAnnotationSource(source)) {
+    return `math:${source.blockId}:${source.text}`;
+  }
+  const start = source?.startMeta;
+  const end = source?.endMeta;
+  const startKey = start
+    ? `${start.parentTagName}:${start.parentIndex}:${start.textOffset}`
+    : 'unknown';
+  const endKey = end
+    ? `${end.parentTagName}:${end.parentIndex}:${end.textOffset}`
+    : 'unknown';
+  return `selection:${startKey}:${endKey}:${selectedText}`;
+}
 
 type MathAnnotationTarget = {
   element: HTMLElement;
@@ -859,6 +875,7 @@ export function useAnnotationHighlighter({
               contextText: source.text.slice(0, 80),
               selectedText: source.text,
               source,
+              draftKey: commentDraftTargetKey(source, source.text),
             });
           } else if (effectiveMode === 'quickLabel') {
             pendingSourceRef.current = source;
@@ -944,6 +961,7 @@ export function useAnnotationHighlighter({
           contextText: source.text.slice(0, 80),
           selectedText: source.text,
           source,
+          draftKey: commentDraftTargetKey(source, source.text),
         });
         return;
       }
@@ -1061,6 +1079,7 @@ export function useAnnotationHighlighter({
         contextText: source.text.slice(0, 80),
         selectedText: source.text,
         source,
+        draftKey: commentDraftTargetKey(source, source.text),
       });
       return;
     }
@@ -1204,6 +1223,7 @@ export function useAnnotationHighlighter({
       selectedText: toolbarState.selectionText,
       initialText: initialChar,
       source: toolbarState.source,
+      draftKey: commentDraftTargetKey(toolbarState.source, toolbarState.selectionText),
     });
     setToolbarState(null);
   };

@@ -9,6 +9,7 @@ import { getPlanVersion, getVersionCount, listVersions } from "../generated/stor
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
 import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, type PromptRuntime } from "../generated/config.ts";
+import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.ts";
 import { getAnnotateReferenceRootPaths } from "../generated/annotate-reference-roots-node.ts";
@@ -49,8 +50,8 @@ import {
 	resolveAllowedDocPath,
 	type FolderAnnotateHistory,
 } from "./reference.ts";
-import { handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
-import { resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
+import { closeAllFileBrowserWatchers, handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
+import { getExtraMarkdownExtensions, resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
@@ -288,10 +289,11 @@ export async function startAnnotateServer(options: {
 	// when rendering HTML. Only single local files (not URLs/folders/messages).
 	const annotateProjectName = options.project ?? "_unknown";
 	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
-	// Single local file sessions are the only ones the annotate-history contract
-	// covers: URL / folder / agent-message sessions never write session content
-	// to the data dir. Both the version history below and the durable submit
-	// records share this gate.
+	// Single local file sessions are the only ones this eager gate covers.
+	// URL and agent-message sessions never write session content to the data
+	// dir. Folder sessions do participate in per-file version history, but
+	// lazily through /api/doc (see computeFolderAnnotateHistory below), not
+	// here. The durable submit records stay single-local-file only.
 	const singleFileLocalAnnotate =
 		(options.mode || "annotate") === "annotate" && !/^https?:\/\//i.test(options.filePath);
 	let annotateHistory: AnnotateHistoryResult | null = null;
@@ -344,10 +346,11 @@ export async function startAnnotateServer(options: {
 	// stopped reading), so there is no narrower condition to key off.
 	//
 	// Scope: identical to the version-history gate above — single local files
-	// only. annotate-last / URL / folder sessions were stateless before this
-	// record existed and STAY stateless: their submissions quote agent messages
-	// or fetched pages, which the documented annotateHistory contract never
-	// covered writing to disk.
+	// only. annotate-last / URL / folder sessions never wrote submit
+	// records and still do not: their submissions quote agent messages or
+	// fetched pages, which this record was never meant to persist. (Folder
+	// sessions do write lazy per-file version history via /api/doc; that is
+	// a separate, documented pipeline with its own gate.)
 	//
 	// Returns whether the draft delete may proceed: true when the record was
 	// written, when there was no user content to lose, or when the session
@@ -579,6 +582,10 @@ export async function startAnnotateServer(options: {
 				pasteApiUrl,
 				repoInfo,
 				projectRoot: options.folderPath || process.cwd(),
+				// Extra extensions the user registered as markdown (#1307).
+				// The renderer needs them to linkify relative/wiki links to
+				// sibling docs the same way it linkifies .md ones.
+				markdownExtensions: getExtraMarkdownExtensions(),
 				serverConfig: getServerConfig(gitUser),
 				agentTerminal: agentTerminalCapability,
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
@@ -673,11 +680,12 @@ export async function startAnnotateServer(options: {
 			handleShareHtml(res, url);
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.theme !== undefined) toSave.theme = body.theme;
+				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
 				json(res, { ok: true });
@@ -929,6 +937,9 @@ export async function startAnnotateServer(options: {
 		stop: () => {
 			// try/finally: a throwing dispose must never leave the listener bound.
 			try {
+				// First: watchers hold the embedded host process alive, and a
+				// throwing disposal below must not strand them.
+				closeAllFileBrowserWatchers();
 				clientLease.cancel();
 				// Long-lived host process: an unclosed lease stream would keep its
 				// heartbeat timer and socket alive past the session, and would keep

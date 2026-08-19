@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { startAnnotateServer } from "./annotate";
+import { getServerConfig, loadConfig } from "./config";
 import { deriveAnnotateHistorySlug } from "@plannotator/shared/annotate-history";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
@@ -82,6 +83,64 @@ describe("annotate server: /api/save-notes wiring", () => {
       const response = await fetch(`${server.url}/not-a-real-route`);
       expect(response.headers.get("content-type")).toContain("text/html");
       expect(await response.text()).toContain("Plannotator");
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("annotate server: /api/config favicon persistence", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+  let savedDataDir: string | undefined;
+  let tempDir: string;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    delete process.env.PLANNOTATOR_PORT;
+    delete process.env.PLANNOTATOR_REMOTE;
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-annotate-config-test-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+    if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("persists classic favicon via POST /api/config and ignores unknown values", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "test.md"),
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const validResponse = await fetch(`${server.url}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ favicon: "classic" }),
+      });
+      expect(validResponse.status).toBe(200);
+      expect(loadConfig().favicon).toBe("classic");
+      expect(getServerConfig(null).favicon).toBe("classic");
+
+      const invalidResponse = await fetch(`${server.url}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ favicon: "unknown" }),
+      });
+      expect(invalidResponse.status).toBe(200);
+      // "unknown" was not written into config, so "classic" is retained
+      expect(loadConfig().favicon).toBe("classic");
+      expect(getServerConfig(null).favicon).toBe("classic");
     } finally {
       server.stop();
     }
@@ -1224,6 +1283,39 @@ describe("annotate server: client lease", () => {
     }
   });
 
+  test("a tailnet-published session neither advertises nor serves the lease even when the CLI predicate allowed it", async () => {
+    // --tailscale forces local mode, so the CLI-side predicate reads the
+    // session as local and passes clientLeaseSupported: true — but clients
+    // reach it through the serve proxy, and a proxy disconnect longer than
+    // the grace would auto-dismiss a live review. The server must force the
+    // capability off, exactly like a remote session.
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    const sandboxDataDir = mkdtempSync(join(tmpdir(), "plannotator-lease-tailnet-"));
+    process.env.PLANNOTATOR_DATA_DIR = sandboxDataDir;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-tailnet.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      tailnetPublished: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as { clientLease?: { enabled: boolean } };
+      expect(plan.clientLease).toEqual({ enabled: false });
+      const stream = await fetch(`${server.url}/api/annotate/client-lease`);
+      expect(stream.status).toBe(404);
+    } finally {
+      server.stop();
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(sandboxDataDir, { recursive: true, force: true });
+    }
+  });
+
   test("returns 404 for the client-lease stream when the capability is disabled", async () => {
     const server = await startAnnotateServer({
       markdown: "# Test",
@@ -1727,5 +1819,172 @@ describe("annotate server: durable submit records (#678)", () => {
       server.stop();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("annotate server: live app mode (annotate-app)", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  function startFakeApp() {
+    return Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response("<html><head><title>app</title></head><body>app</body></html>", {
+          headers: { "Content-Type": "text/html" },
+        }),
+    });
+  }
+
+  async function startLiveServer(targetUrl: string, extra?: { tailnetPublished?: boolean }) {
+    return startAnnotateServer({
+      markdown: "",
+      filePath: targetUrl,
+      htmlContent: MINIMAL_HTML,
+      mode: "annotate-app",
+      sourceInfo: targetUrl,
+      liveApp: {
+        targetUrl,
+        bridgeScript: "/* bridge body */",
+        bridgeBootstrap: "/* bootstrap body */",
+        annotationCss: ".pn-live {}",
+      },
+      ...extra,
+    });
+  }
+
+  test("/api/plan returns the live payload and the proxy serves the composed bridge", async () => {
+    const app = startFakeApp();
+    const targetUrl = `http://127.0.0.1:${app.port}`;
+    const server = await startLiveServer(targetUrl);
+
+    try {
+      const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, unknown>;
+      expect(plan.mode).toBe("annotate-app");
+      expect(plan.filePath).toBe(targetUrl);
+      expect(plan.targetUrl).toBe(targetUrl);
+      expect(plan.liveToken).toMatch(/^[0-9a-f]{32}$/);
+      expect(plan.sharingEnabled).toBe(false);
+      expect(plan.convertHtml).toBe(false);
+      // appUrl is the live loopback proxy under its LOCALHOST spelling (so
+      // the framed app is same-site with the editor and shares the dev
+      // app's host-only localhost cookies), never an advertised-host URL.
+      expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/$/);
+      // No srcdoc payloads, no version fields.
+      expect(plan.rawHtml).toBeUndefined();
+      expect(plan.renderAs).toBeUndefined();
+      expect(plan.previousPlan).toBeUndefined();
+      expect(plan.versionInfo).toBeUndefined();
+      expect(plan.diffCurrent).toBeUndefined();
+      // Agent terminal stays unavailable for live sessions.
+      expect((plan.agentTerminal as { enabled: boolean }).enabled).toBe(false);
+
+      // The proxy serves the composed bridge body: config prelude with the
+      // session token and both editor origin forms (localhost first), then
+      // bootstrap, then bridge.
+      const appUrl = plan.appUrl as string;
+      const bridge = await (await fetch(`${appUrl}__plannotator__/bridge.js`)).text();
+      expect(bridge).toContain(String(plan.liveToken));
+      const localhostAt = bridge.indexOf(`http://localhost:${server.port}`);
+      const loopbackAt = bridge.indexOf(`http://127.0.0.1:${server.port}`);
+      expect(localhostAt).toBeGreaterThanOrEqual(0);
+      expect(loopbackAt).toBeGreaterThan(localhostAt);
+      expect(bridge).toContain(".pn-live {}");
+      expect(bridge.indexOf("/* bootstrap body */")).toBeLessThan(bridge.indexOf("/* bridge body */"));
+
+      // The proxied page carries the injected bridge script tag.
+      const page = await (await fetch(appUrl)).text();
+      expect(page).toContain('<script src="/__plannotator__/bridge.js"></script>');
+    } finally {
+      server.stop();
+      app.stop(true);
+    }
+  });
+
+  test("a pathful target URL keeps its path and query in appUrl", async () => {
+    // Annotating http://localhost:5173/admin/settings must open that page,
+    // not the app root.
+    const app = startFakeApp();
+    const targetUrl = `http://127.0.0.1:${app.port}/admin/settings?tab=2`;
+    const server = await startLiveServer(targetUrl);
+    try {
+      const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
+      expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/admin\/settings\?tab=2$/);
+      // The advertised page is reachable through the proxy under the
+      // localhost Host spelling.
+      const res = await fetch(plan.appUrl);
+      expect(res.status).toBe(200);
+    } finally {
+      server.stop();
+      app.stop(true);
+    }
+  });
+
+  test("version endpoints report no history for live sessions", async () => {
+    const app = startFakeApp();
+    const server = await startLiveServer(`http://127.0.0.1:${app.port}`);
+    try {
+      const versions = (await (await fetch(`${server.url}/api/plan/versions`)).json()) as {
+        slug: string | null;
+        versions: unknown[];
+      };
+      expect(versions.slug).toBeNull();
+      expect(versions.versions).toEqual([]);
+      const version = await fetch(`${server.url}/api/plan/version?v=1`);
+      expect(version.status).toBe(404);
+    } finally {
+      server.stop();
+      app.stop(true);
+    }
+  });
+
+  test("stop() closes the proxy port with the server", async () => {
+    const app = startFakeApp();
+    const server = await startLiveServer(`http://127.0.0.1:${app.port}`);
+    const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
+    // Reachable while running.
+    expect((await fetch(plan.appUrl)).status).toBe(200);
+    server.stop();
+    await Bun.sleep(50);
+    let closed = false;
+    try {
+      await fetch(plan.appUrl, { signal: AbortSignal.timeout(1000) });
+    } catch {
+      closed = true;
+    }
+    expect(closed).toBe(true);
+    app.stop(true);
+  });
+
+  test("remote mode rejects live app sessions outright", async () => {
+    process.env.PLANNOTATOR_REMOTE = "1";
+    await expect(startLiveServer("http://127.0.0.1:65500")).rejects.toThrow(
+      "Live app annotation is unavailable in remote mode",
+    );
+  });
+
+  test("tailnet-published sessions reject live app sessions outright", async () => {
+    // --tailscale keeps the annotate server loopback-bound but publishes it
+    // across the tailnet through the serve proxy; a live proxy would relay
+    // the user's authenticated dev app to every tailnet peer, so it is the
+    // same hard-off as remote mode, keyed on tailnetPublished.
+    await expect(
+      startLiveServer("http://127.0.0.1:65500", { tailnetPublished: true }),
+    ).rejects.toThrow("Live app annotation is unavailable in tailnet-published sessions");
   });
 });

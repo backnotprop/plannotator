@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import type { SourceSaveCapability } from "@plannotator/core/source-save";
 
 const hasDom = typeof document !== "undefined";
 
@@ -11,16 +12,21 @@ if (hasDom) {
 }
 
 const storageModule = hasDom ? await import("@plannotator/ui/utils/storage") : null;
+const fileTreeModule = hasDom ? await import("@plannotator/ui/hooks/useFileBrowser") : null;
 const appModule = hasDom ? await import("./App") : null;
 const App = appModule?.default as typeof import("./App")["default"];
 const originalFetch = globalThis.fetch;
 const originalEventSource = globalThis.EventSource;
+const originalMatchMedia = hasDom ? window.matchMedia : undefined;
 
 interface PlanResponse {
   readonly plan: string;
   readonly origin: "codex";
-  readonly mode: "archive" | "annotate";
+  readonly mode: "archive" | "annotate" | "annotate-folder";
   readonly filePath?: string;
+  readonly sourceSave?: SourceSaveCapability;
+  readonly gate?: boolean;
+  readonly projectRoot?: string;
   readonly archivePlans?: readonly [{
     readonly filename: string;
     readonly status: "approved";
@@ -59,6 +65,8 @@ class SilentEventSource {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let requestedRoutes: string[] = [];
+let aiCapabilitiesAvailable = false;
+let documentLoadGate: Promise<void> | null = null;
 
 const noteSettings = new Map<string, string>();
 
@@ -76,9 +84,38 @@ function configureNotesApps(): void {
   noteSettings.set("plannotator-default-notes-app", "obsidian");
 }
 
+function useCompactTouchMedia(): void {
+  if (!hasDom) return;
+  window.matchMedia = ((query: string): MediaQueryList => ({
+    matches: query.includes("max-width") || query.includes("pointer: coarse"),
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  })) as typeof window.matchMedia;
+}
+
+function useSingleFileTree(): void {
+  fileTreeModule?.setFileTreeBackend({
+    loadTree: async () => Response.json({
+      tree: [{ name: "alpha.md", path: "alpha.md", type: "file" }],
+    }),
+    loadVaultTree: async () => Response.json({ error: "Unavailable" }, { status: 404 }),
+    watchTrees: () => undefined,
+  });
+}
+
 function findButton(label: string): HTMLButtonElement | undefined {
   return Array.from(document.querySelectorAll("button"))
     .find((button) => button.textContent?.trim() === label);
+}
+
+function findButtonContaining(label: string): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll("button"))
+    .find((button) => button.textContent?.includes(label));
 }
 
 function responseFor(planResponse: PlanResponse): typeof fetch {
@@ -99,7 +136,13 @@ function responseFor(planResponse: PlanResponse): typeof fetch {
       return Response.json({ markdown: planResponse.plan, filepath: "saved.md" });
     }
     if (url.pathname === "/api/ai/capabilities") {
-      return Response.json({ available: false, providers: [] });
+      return Response.json(aiCapabilitiesAvailable
+        ? {
+            available: true,
+            defaultProvider: "codex",
+            providers: [{ id: "codex", name: "Codex", models: [] }],
+          }
+        : { available: false, providers: [] });
     }
     if (url.pathname === "/api/open-in/apps") {
       return Response.json({
@@ -109,6 +152,15 @@ function responseFor(planResponse: PlanResponse): typeof fetch {
     }
     if (url.pathname === "/api/draft") {
       return Response.json({ error: "Not found" }, { status: 404 });
+    }
+    if (url.pathname === "/api/doc") {
+      await documentLoadGate;
+      const filepath = url.searchParams.get("path");
+      return Response.json({
+        markdown: "# Selected file\n\nLoaded from the compact navigator.",
+        filepath,
+        renderAs: "markdown",
+      });
     }
     if (url.pathname === "/api/save-notes") {
       return Response.json({
@@ -151,8 +203,12 @@ afterEach(async () => {
   host = null;
   globalThis.fetch = originalFetch;
   globalThis.EventSource = originalEventSource;
+  if (hasDom && originalMatchMedia) window.matchMedia = originalMatchMedia;
   noteSettings.clear();
+  aiCapabilitiesAvailable = false;
+  documentLoadGate = null;
   storageModule?.resetStorageBackend();
+  fileTreeModule?.resetFileTreeBackend();
   if (hasDom) document.body.replaceChildren();
 });
 
@@ -248,6 +304,7 @@ describe.if(hasDom)("App document permissions", () => {
     });
 
     expect(document.body.textContent).toContain("Writable document");
+    expect(document.querySelector("[data-pn-compact-plan-completion]")).toBeNull();
     expect(document.querySelector('button[title="Add global comment"]')).not.toBeNull();
     expect(document.querySelector('button[title="Attachments"]')).not.toBeNull();
 
@@ -267,5 +324,177 @@ describe.if(hasDom)("App document permissions", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(requestedRoutes).toContain("POST /api/save-notes");
+  });
+
+  test("compact touch presents a reading-first file surface without mutating desktop preferences", async () => {
+    configureNotesApps();
+    noteSettings.set("plannotator-input-method", "pinpoint");
+    aiCapabilitiesAvailable = true;
+    useCompactTouchMedia();
+    await mountApp({
+      plan: "# Mobile document\n\nA paragraph to annotate and edit.",
+      origin: "codex",
+      mode: "annotate",
+      filePath: "/repo/docs/mobile.md",
+      sourceSave: {
+        enabled: true,
+        kind: "local-text-file",
+        scope: "single-file",
+        path: "/repo/docs/mobile.md",
+        basename: "mobile.md",
+        language: "markdown",
+        hash: "sha256:mobile",
+        mtimeMs: 1_000,
+        size: 52,
+        eol: "lf",
+      },
+      gate: true,
+      sharingEnabled: false,
+      serverConfig: {},
+    });
+
+    expect(document.querySelector("[data-pn-compact-document-title]")?.textContent).toBe("mobile.md");
+    expect(document.querySelector("[data-pn-compact-annotate-entry]")?.textContent).toContain("Pinpoint");
+    for (const label of ["Wide", "Focus", "Edit", "Markup", "Comment", "Redline", "Label"]) {
+      expect(findButton(label)).toBeUndefined();
+    }
+
+    const annotateEntry = document.querySelector<HTMLButtonElement>("[data-pn-compact-annotate-entry]");
+    if (!annotateEntry) throw new Error("Compact annotation entry did not render");
+    await act(async () => annotateEntry.click());
+    expect(findButtonContaining("Select text")).not.toBeUndefined();
+    expect(findButtonContaining("Pinpoint")).not.toBeUndefined();
+
+    await act(async () => findButtonContaining("Select text")?.click());
+    expect(document.querySelector("[data-pn-compact-annotate-entry]")?.textContent).toContain("Select text");
+    expect(noteSettings.get("plannotator-input-method")).toBe("pinpoint");
+
+    const optionsButton = document.querySelector<HTMLButtonElement>('button[aria-label="Options"]');
+    if (!optionsButton) throw new Error("Options menu trigger did not render");
+    await act(async () => optionsButton.click());
+    for (let attempt = 0; attempt < 20 && !findButtonContaining("Ask AI"); attempt += 1) {
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    }
+    expect(findButtonContaining("Annotations")).not.toBeUndefined();
+    expect(findButtonContaining("Ask AI")).not.toBeUndefined();
+    expect(findButtonContaining("Review and finish")).not.toBeUndefined();
+    expect(findButton("Close session")).toBeUndefined();
+    expect(findButton("Approve")).toBeUndefined();
+    expect(findButtonContaining("Edit document")).not.toBeUndefined();
+
+    await act(async () => findButtonContaining("Annotations")?.click());
+    expect(document.querySelector('[data-pn-compact-plan-stage="true"]')?.getAttribute("aria-label")).toBe("Annotations");
+    expect(document.body.textContent).toContain("No annotations yet");
+    const closeAnnotations = document.querySelector<HTMLButtonElement>('button[aria-label="Close Annotations"]');
+    if (!closeAnnotations) throw new Error("Compact Annotations close control did not render");
+    await act(async () => closeAnnotations.click());
+    expect(document.querySelector('[data-pn-compact-plan-stage="true"]')).toBeNull();
+
+    await act(async () => optionsButton.click());
+    await act(async () => findButtonContaining("Ask AI")?.click());
+    expect(document.querySelector('[data-pn-compact-plan-stage="true"]')?.getAttribute("aria-label")).toBe("Ask AI");
+    expect(document.querySelector('textarea[placeholder="Ask about this document..."]')?.getAttribute("data-pn-mobile-editable")).toBe("true");
+    const closeAI = document.querySelector<HTMLButtonElement>('button[aria-label="Close Ask AI"]');
+    if (!closeAI) throw new Error("Compact Ask AI close control did not render");
+    await act(async () => closeAI.click());
+
+    const completion = document.querySelector("[data-pn-compact-plan-completion]");
+    expect(completion?.textContent).toContain("Ready to finish?");
+    const reviewTrigger = document.querySelector<HTMLButtonElement>("#pn-compact-plan-review-trigger");
+    if (!reviewTrigger) throw new Error("End-of-document review trigger did not render");
+    await act(async () => reviewTrigger.click());
+    expect(document.querySelector('[data-pn-compact-plan-stage="true"]')?.getAttribute("aria-label")).toBe("Review");
+    expect(findButton("Close session")).not.toBeUndefined();
+    expect(findButton("Approve")).not.toBeUndefined();
+    const closeReview = document.querySelector<HTMLButtonElement>('button[aria-label="Close Review"]');
+    if (!closeReview) throw new Error("Compact Review close control did not render");
+    await act(async () => closeReview.click());
+
+    await act(async () => optionsButton.click());
+    await act(async () => findButtonContaining("Edit document")?.click());
+    const editControls = document.querySelector("[data-pn-compact-edit-controls]");
+    expect(editControls?.textContent).toContain("Editing mobile.md");
+    expect(findButton("Saved")).not.toBeUndefined();
+    expect(findButton("Done")).not.toBeUndefined();
+    expect(document.querySelector("[data-pn-compact-plan-completion]")).toBeNull();
+  });
+
+  test("compact review sends the incumbent approval request", async () => {
+    configureNotesApps();
+    useCompactTouchMedia();
+    await mountApp({
+      plan: "# Mobile decision\n\nReview this plan.",
+      origin: "codex",
+      mode: "annotate",
+      filePath: "/repo/docs/decision.md",
+      gate: true,
+      sharingEnabled: false,
+      serverConfig: {},
+    });
+
+    const reviewTrigger = document.querySelector<HTMLButtonElement>("#pn-compact-plan-review-trigger");
+    if (!reviewTrigger) throw new Error("Compact review trigger did not render");
+    await act(async () => reviewTrigger.click());
+    const approve = findButton("Approve");
+    if (!approve) throw new Error("Compact review did not expose Approve");
+    requestedRoutes = [];
+    await act(async () => {
+      approve.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(requestedRoutes).toContain("POST /api/approve");
+  });
+
+  test("compact folder selection closes the navigator after the async document activation", async () => {
+    configureNotesApps();
+    useCompactTouchMedia();
+    useSingleFileTree();
+    await mountApp({
+      plan: "",
+      origin: "codex",
+      mode: "annotate-folder",
+      filePath: "/repo",
+      projectRoot: "/repo",
+      sharingEnabled: false,
+      serverConfig: {},
+    });
+
+    for (let attempt = 0; attempt < 20 && !findButton("Choose a file"); attempt += 1) {
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    }
+    const chooseFile = findButton("Choose a file");
+    if (!chooseFile) throw new Error("Folder arrival did not expose Choose a file");
+    await act(async () => chooseFile.click());
+
+    for (let attempt = 0; attempt < 20 && !findButtonContaining("alpha"); attempt += 1) {
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    }
+    const alphaFile = findButtonContaining("alpha");
+    if (!alphaFile) throw new Error("Folder tree did not load alpha.md");
+    expect(document.querySelector("[data-pn-plan-navigator]")).not.toBeNull();
+
+    let releaseDocumentLoad: (() => void) | undefined;
+    documentLoadGate = new Promise<void>((resolve) => {
+      releaseDocumentLoad = resolve;
+    });
+    await act(async () => {
+      alphaFile.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const pendingNavigator = document.querySelector<HTMLElement>("[data-pn-plan-navigator]");
+    expect(pendingNavigator).not.toBeNull();
+    expect(pendingNavigator?.textContent).toContain("Opening alpha.md…");
+    expect(alphaFile.disabled).toBe(true);
+    expect(alphaFile.getAttribute("aria-busy")).toBe("true");
+
+    await act(async () => {
+      releaseDocumentLoad?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(document.querySelector("[data-pn-plan-navigator]")).toBeNull();
+    expect(document.body.textContent).toContain("Selected file");
+    expect(document.querySelector("[data-pn-compact-document-title]")?.textContent).toBe("alpha.md");
   });
 });

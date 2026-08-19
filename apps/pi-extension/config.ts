@@ -25,7 +25,12 @@ export interface PhaseProfile {
   thinking?: ThinkingLevel | null;
   activeTools?: string[] | null;
   statusLabel?: string | null;
-  systemPrompt?: string | null;
+  /**
+   * Phase framing template, delivered ONCE as a conversation message when the
+   * phase is entered. Plannotator never modifies Pi's system prompt (#922);
+   * the obsolete `systemPrompt` config key is ignored with a warning.
+   */
+  instructions?: string | null;
 }
 
 export interface PlannotatorConfig {
@@ -39,12 +44,17 @@ export interface LoadedPlannotatorConfig {
   warnings: string[];
 }
 
+export interface LoadPlannotatorConfigOptions {
+  /** Whether Pi approved project-local inputs for this working directory. */
+  projectTrusted: boolean;
+}
+
 export interface ResolvedPhaseProfile {
   model?: PhaseModelRef;
   thinking?: ThinkingLevel;
   activeTools?: string[];
   statusLabel?: string;
-  systemPrompt?: string;
+  instructions?: string;
 }
 
 export interface PromptVariables {
@@ -137,7 +147,7 @@ function normalizeProfile(raw: unknown): PhaseProfile | null | undefined {
   if ("thinkingLevel" in raw && profile.thinking === undefined) profile.thinking = normalizeThinking(raw.thinkingLevel);
   if ("activeTools" in raw) profile.activeTools = normalizeTools(raw.activeTools);
   if ("statusLabel" in raw) profile.statusLabel = normalizeLabel(raw.statusLabel);
-  if ("systemPrompt" in raw) profile.systemPrompt = normalizePrompt(raw.systemPrompt);
+  if ("instructions" in raw) profile.instructions = normalizePrompt(raw.instructions);
 
   return profile;
 }
@@ -157,7 +167,7 @@ function mergeProfile(base: PhaseProfile | null | undefined, override: PhaseProf
     thinking: override.thinking !== undefined ? override.thinking : base.thinking,
     activeTools: override.activeTools !== undefined ? override.activeTools : base.activeTools,
     statusLabel: override.statusLabel !== undefined ? override.statusLabel : base.statusLabel,
-    systemPrompt: override.systemPrompt !== undefined ? override.systemPrompt : base.systemPrompt,
+    instructions: override.instructions !== undefined ? override.instructions : base.instructions,
   };
 
   return merged;
@@ -208,11 +218,40 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
     if (Object.keys(phases).length > 0) config.phases = phases;
   }
 
+  // Plannotator no longer modifies Pi's system prompt (#922). The old
+  // systemPrompt key is ignored; say so once instead of silently dropping it.
+  const obsoleteScopes: string[] = [];
+  if (isRecord(raw.defaults) && "systemPrompt" in raw.defaults) obsoleteScopes.push("defaults");
+  if (isRecord(raw.phases)) {
+    for (const phase of PHASES) {
+      const phaseRaw = raw.phases[phase];
+      if (isRecord(phaseRaw) && "systemPrompt" in phaseRaw) obsoleteScopes.push(`phases.${phase}`);
+    }
+  }
+  if (obsoleteScopes.length > 0) {
+    warnings.push(
+      `Ignoring obsolete "systemPrompt" under ${obsoleteScopes.join(", ")} in ${path}: Plannotator no longer modifies the system prompt. Rename the key to "instructions" to deliver the text as a phase-entry message instead.`,
+    );
+  }
+
   return { config, warnings };
 }
 
-export function loadPlannotatorConfig(cwd: string): LoadedPlannotatorConfig {
+export function loadPlannotatorConfig(
+  cwd: string,
+  options: LoadPlannotatorConfigOptions,
+): LoadedPlannotatorConfig {
   const warnings: string[] = [];
+
+  // The bundled config carries the planning rules and phase instructions. A
+  // packaging regression that drops it would otherwise silently produce a
+  // rule-less planning phase, so its absence is worth a warning (user global
+  // and project configs stay optional and silent).
+  if (!existsSync(INTERNAL_CONFIG_PATH)) {
+    warnings.push(
+      `Built-in config missing at ${INTERNAL_CONFIG_PATH}: phase instructions and planning tools will not apply. Reinstall the extension.`,
+    );
+  }
 
   const internal = loadConfigSource(INTERNAL_CONFIG_PATH);
   warnings.push(...internal.warnings);
@@ -222,7 +261,9 @@ export function loadPlannotatorConfig(cwd: string): LoadedPlannotatorConfig {
   warnings.push(...globalConfig.warnings);
 
   const projectPath = join(cwd, ".pi", "plannotator.json");
-  const projectConfig = loadConfigSource(projectPath);
+  const projectConfig = options.projectTrusted
+    ? loadConfigSource(projectPath)
+    : { config: {}, warnings: [] };
   warnings.push(...projectConfig.warnings);
 
   const merged = mergeConfig(mergeConfig(internal.config, globalConfig.config), projectConfig.config);
@@ -242,7 +283,7 @@ export function resolvePhaseProfile(config: PlannotatorConfig, phase: PhaseName)
     thinking: resolveThinking(defaults.thinking, phaseConfig.thinking),
     activeTools: resolveTools(defaults.activeTools, phaseConfig.activeTools),
     statusLabel: resolveString(defaults.statusLabel, phaseConfig.statusLabel),
-    systemPrompt: resolveString(defaults.systemPrompt, phaseConfig.systemPrompt),
+    instructions: resolveString(defaults.instructions, phaseConfig.instructions),
   };
 }
 

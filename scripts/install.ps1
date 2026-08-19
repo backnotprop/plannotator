@@ -11,6 +11,10 @@ param(
     [Alias("BinaryOnly")]
     [switch]$Minimal,
     [switch]$NoMinimal,
+    # Opt-in install of the pruned CallDiff call-flow core (default off;
+    # the review UI offers a one-click install). Mirrors install.sh's
+    # --with-call-flow.
+    [switch]$WithCallFlow,
     [switch]$SkipCodex,
     [switch]$SkipGemini,
     [switch]$SkipKiro,
@@ -42,7 +46,7 @@ if ($Minimal -and $NoMinimal) {
 }
 
 # Binary-only mode. Installs just the plannotator binary and no persistent state
-# elsewhere - no sem sidecar, agent-terminal runtime, skills, hooks, or per-agent
+# elsewhere - no sem sidecar, CallDiff or agent-terminal runtime, skills, hooks, or per-agent
 # config. Precedence: -Minimal / -NoMinimal switch > PLANNOTATOR_MINIMAL env var
 # > default (off). Mirrors install.sh's --minimal / --no-minimal.
 $minimal = $false
@@ -176,6 +180,10 @@ Write-Host "Installing plannotator $latestTag..."
 # can fail fast without wasting bandwidth if the requested tag predates
 # provenance support. Precedence: CLI flag > env var > config file > default.
 $verifyAttestationResolved = $false
+# CallDiff call-flow runtime opt-in. Same three-layer shape:
+# -WithCallFlow > PLANNOTATOR_INSTALL_CALLDIFF > config installCallFlow >
+# default (off).
+$installCallFlowResolved = $false
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
 # Unset PLANNOTATOR_DATA_DIR: an existing ~/.plannotator (legacy default)
@@ -283,6 +291,25 @@ function Install-AgentTerminalRuntime {
     }
 }
 
+# Strictly opt-in: Call flow is off by default, so a default install never
+# downloads even its pruned core. Review-specific packs install in-app.
+function Install-CallFlowRuntime {
+    if (-not $installCallFlowResolved) {
+        Write-Host "Call-flow analysis: available as an in-app opt-in install (enable Call flow in review Settings), or run: plannotator install-runtime call-flow"
+        return
+    }
+
+    $plannotatorPath = Join-Path $installDir "plannotator.exe"
+    try {
+        & $plannotatorPath install-runtime call-flow
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Call-flow runtime install failed; it remains available as an in-app opt-in install"
+        }
+    } catch {
+        Write-Host "Call-flow runtime install failed ($($_.Exception.Message)); it remains available as an in-app opt-in install"
+    }
+}
+
 $configPath = Join-Path $configDir "config.json"
 $cfg = $null
 if (Test-Path $configPath) {
@@ -293,6 +320,9 @@ if (Test-Path $configPath) {
         # greps for a literal boolean.
         if ($cfg.verifyAttestation -is [bool] -and $cfg.verifyAttestation) {
             $verifyAttestationResolved = $true
+        }
+        if ($cfg.installCallFlow -is [bool] -and $cfg.installCallFlow) {
+            $installCallFlowResolved = $true
         }
     } catch {
         # Malformed config - ignore, fall through to other layers.
@@ -314,6 +344,17 @@ if ($envVerify) {
 # script (lines ~13-16), so at most one of these branches can fire.
 if ($VerifyAttestation) { $verifyAttestationResolved = $true }
 if ($SkipAttestation)   { $verifyAttestationResolved = $false }
+
+# CallDiff runtime opt-in, layers 2 and 1 (config was read above).
+$envInstallCallFlow = $env:PLANNOTATOR_INSTALL_CALLDIFF
+if ($envInstallCallFlow) {
+    if ($envInstallCallFlow -match '^(1|true|yes)$') {
+        $installCallFlowResolved = $true
+    } elseif ($envInstallCallFlow -match '^(0|false|no)$') {
+        $installCallFlowResolved = $false
+    }
+}
+if ($WithCallFlow) { $installCallFlowResolved = $true }
 
 # Resolve the per-agent integration opt-outs (#1178). Same three-layer shape
 # as verifyAttestation: CLI flag > env var > config skipInstall.<agent> >
@@ -620,7 +661,7 @@ function Show-PathAdvice {
 # Binary-only mode stops here (see the $minimal resolution near the top): the
 # binary is installed, so add it to PATH and exit before any sidecar download,
 # agent integration, skill checkout, config write, or cleanup runs. Only the
-# binary and its PATH entry are added - none of the sem sidecar, agent-terminal
+# binary and its PATH entry are added - none of the sem sidecar, CallDiff, agent-terminal
 # runtime, or per-agent skills, hooks, or config.
 if ($minimal) {
     Show-PathAdvice
@@ -632,6 +673,7 @@ if ($minimal) {
 
 Install-SemSidecar
 Install-AgentTerminalRuntime
+Install-CallFlowRuntime
 
 Show-PathAdvice
 

@@ -1,3 +1,8 @@
+import {
+  getScrollViewportRect,
+  offsetScrollViewport,
+} from '../hooks/useScrollViewport';
+
 /**
  * Keep the Vim cursor clear of the HUD bands that hug the viewport edges.
  *
@@ -131,11 +136,11 @@ export function scrollVimTargetIntoView(
     return;
   }
 
-  const viewportRect = viewport.getBoundingClientRect();
+  const viewportRect = getScrollViewportRect(viewport);
   const targetRect = element.getBoundingClientRect();
   if (targetRect.height === 0 && targetRect.width === 0) return;
 
-  const margin = resolveVimScrollMargin(viewport.clientHeight);
+  const margin = resolveVimScrollMargin(viewportRect.height);
   const stickyBottom = viewport
     .querySelector<HTMLElement>('[data-sticky-actions]')
     ?.getBoundingClientRect().bottom;
@@ -153,10 +158,10 @@ export function scrollVimTargetIntoView(
     : margin;
 
   const delta = computeVimScrollDelta(
-    { top: viewportRect.top, height: viewport.clientHeight },
+    { top: viewportRect.top, height: viewportRect.height },
     { top: targetRect.top, bottom: targetRect.bottom },
     { topMargin, bottomMargin },
   );
   if (delta === 0) return;
-  viewport.scrollTop += delta;
+  offsetScrollViewport(viewport, delta);
 }

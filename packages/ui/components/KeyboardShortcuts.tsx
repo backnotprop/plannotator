@@ -84,9 +84,17 @@ const inputMethodShortcuts: ShortcutSection = {
   ],
 };
 
+const documentViewShortcuts: ShortcutSection = {
+  title: 'View',
+  shortcuts: [
+    { keys: [modKey, '.'], desc: 'Toggle focus mode', hint: 'Collapses the Contents sidebar and the right-hand panel together; press again to restore whatever was open before. Markdown documents only; HTML pages keep their own layout.' },
+  ],
+};
+
 const annotationShortcuts: ShortcutSection = {
   title: 'Annotations',
   shortcuts: [
+    { keys: [shiftKey, '1-4'], desc: 'Switch annotation mode', hint: '1 Markup, 2 Comment, 3 Redline, 4 Label — matches the toolstrip order' },
     { keys: ['a-z'], desc: 'Start typing comment', hint: 'When the annotation toolbar is open, any letter key opens the comment editor with that character' },
     { keys: [altKey, '1-0'], desc: 'Apply quick label', hint: 'Instantly applies the Nth preset label (0 = 10th). When the label picker is open, bare digits also work.' },
     { keys: [modKey, enter], desc: 'Submit comment' },
@@ -108,6 +116,7 @@ const imageAnnotatorShortcuts: ShortcutSection = {
 };
 
 const sharedPlanEditorShortcuts: ShortcutSection[] = [
+  documentViewShortcuts,
   inputMethodShortcuts,
   annotationShortcuts,
   imageAnnotatorShortcuts,

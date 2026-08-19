@@ -1,11 +1,12 @@
+import { getScrollViewportRect } from '../hooks/useScrollViewport';
+import { createTextRange } from './domSelection';
+
 /**
  * Semantic document targeting shared by pointer Pinpoint and Vim navigation.
  *
  * The graph is rebuilt from the live rendered document whenever a consumer
  * needs it. Callers persist stable keys, never DOM nodes, across renders.
  */
-import { createTextRange } from './domSelection';
-
 /** Elements that never participate in document targeting. */
 const SKIP_SELECTORS = [
   '.annotation-toolbar',
@@ -362,7 +363,9 @@ export function findInitialSemanticTarget(
   graph: SemanticTargetGraph,
   scrollViewport?: HTMLElement | null,
 ): SemanticTarget | null {
-  const viewportRect = (scrollViewport ?? graph.container).getBoundingClientRect();
+  const viewportRect = scrollViewport
+    ? getScrollViewportRect(scrollViewport)
+    : graph.container.getBoundingClientRect();
   const centerY = viewportRect.top + viewportRect.height / 2;
   return graph.blockKeys
     .map((key) => resolveSemanticTarget(graph, key))

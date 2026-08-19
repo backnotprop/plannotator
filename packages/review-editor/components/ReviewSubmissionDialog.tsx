@@ -1,8 +1,19 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
 import { CopyButton } from './CopyButton';
-import { exportReviewFeedback, formatConventionalPrefix } from '../utils/exportFeedback';
+import {
+  exportReviewFeedback,
+  formatCallFlowAnnotationTargets,
+  formatConventionalPrefix,
+} from '../utils/exportFeedback';
+import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@plannotator/ui/components/ui/dialog';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,6 +89,7 @@ function buildAnnotationFileComments(
     .map(ann => {
       const ccPrefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
       let body = ccPrefix + (ann.text ?? '');
+      body += formatCallFlowAnnotationTargets(ann);
       if (ann.suggestedCode) {
         body += `\n\n\`\`\`suggestion\n${ann.suggestedCode}\n\`\`\``;
       }
@@ -101,8 +113,12 @@ function buildFileScopedBody(annotations: CodeAnnotation[]): string {
   const parts: string[] = [];
   for (const a of annotations) {
     const scope = a.scope ?? 'line';
-    if (scope === 'file' && a.text) parts.push(`**${a.filePath}:** ${a.text}`);
-    else if (scope === 'general' && a.text) parts.push(a.text);
+    const callFlowContext = formatCallFlowAnnotationTargets(a);
+    if (scope === 'file' && (a.text || callFlowContext)) {
+      parts.push(`**${a.filePath}:** ${a.text ?? ''}${callFlowContext}`.trim());
+    } else if (scope === 'general' && (a.text || callFlowContext)) {
+      parts.push(`${a.text ?? ''}${callFlowContext}`.trim());
+    }
   }
   return parts.join('\n\n');
 }
@@ -308,6 +324,8 @@ export function ReviewSubmissionDialog({
   mrLabel,
   platformLabel,
 }: ReviewSubmissionDialogProps) {
+  const isCompactTouchLayout = useCompactTouchLayout();
+  const generalCommentRef = useRef<HTMLTextAreaElement>(null);
   if (!isOpen) return null;
 
   const isApprove = action === 'approve';
@@ -320,20 +338,33 @@ export function ReviewSubmissionDialog({
   const bodyLocked = hasPartial || hasBlocked;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl w-full max-w-md shadow-2xl p-6">
-        <h3 className="font-semibold mb-1">
+    <Dialog
+      open={isOpen}
+      disablePointerDismissal
+      onOpenChange={(open) => {
+        if (!open && !isSubmitting) onCancel();
+      }}
+    >
+      <DialogContent
+        hideClose
+        initialFocus={isCompactTouchLayout || bodyLocked ? false : () => generalCommentRef.current}
+        backdropClassName="bg-background/80 backdrop-blur-sm"
+        className="!max-h-full max-w-md rounded-xl bg-card p-0 text-foreground shadow-2xl transition-none"
+      >
+        <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
+        <DialogTitle className="font-semibold mb-1">
           {isApprove ? `Approve ${mrLabel}` : 'Post Review Comments'}
-        </h3>
-        <p className="text-sm text-muted-foreground mb-3">
+        </DialogTitle>
+        <DialogDescription className="text-sm text-muted-foreground mb-3">
           {isApprove
             ? 'Add a general comment to the approval (optional).'
             : 'Review what will be posted.'}
-        </p>
+        </DialogDescription>
 
         {/* General comment */}
         <textarea
-          autoFocus={!bodyLocked}
+          ref={generalCommentRef}
+          data-pn-mobile-editable
           value={generalComment}
           onChange={e => onGeneralCommentChange(e.target.value)}
           placeholder="Leave a comment..."
@@ -510,7 +541,7 @@ export function ReviewSubmissionDialog({
         )}
 
         {/* Open PR checkbox */}
-        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4 cursor-pointer select-none">
+        <label data-pn-touch-target className="flex items-center gap-2 text-sm text-muted-foreground mb-4 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={platformOpenPR}
@@ -521,8 +552,9 @@ export function ReviewSubmissionDialog({
         </label>
 
         {/* Actions */}
-        <div className="flex justify-end gap-2">
+        <div className="sticky bottom-0 -mx-4 -mb-4 flex justify-end gap-2 border-t border-border/50 bg-card px-4 pb-4 pt-3 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6">
           <button
+            data-pn-touch-target
             onClick={onCancel}
             disabled={isSubmitting}
             className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
@@ -530,6 +562,7 @@ export function ReviewSubmissionDialog({
             {hasPartial || hasBlocked ? 'Close' : 'Cancel'}
           </button>
           <button
+            data-pn-touch-target
             onClick={onConfirm}
             disabled={isSubmitting || hasBlocked || (!hasTargets && !isApprove && !generalComment.trim()) || allSucceeded}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-opacity ${
@@ -553,7 +586,8 @@ export function ReviewSubmissionDialog({
                     : 'Post Comments'}
           </button>
         </div>
-      </div>
-    </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

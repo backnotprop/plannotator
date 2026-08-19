@@ -1178,8 +1178,40 @@ export const exportAnnotations = (
     output += `I've reviewed this ${subject} and have ${annotations.length} piece${annotations.length > 1 ? 's' : ''} of feedback:\n\n`;
   }
 
-  sortedAnns.forEach((ann, index) => {
-    output += `## ${index + 1}. `;
+  // Live app sessions stamp annotations with the page they were made on.
+  // When any exported annotation carries a pageUrl, entries are grouped under
+  // per-page headings in order of first appearance; annotations without one
+  // (e.g. globals) come first under no heading. Numbers stay GLOBAL: each
+  // entry keeps the number of its position in the ungrouped order, matching
+  // the on-page marker numbering, so grouped sections may show
+  // non-contiguous numbers. With no pageUrl anywhere the output is
+  // byte-identical to the ungrouped export.
+  const hasPageGroups = sortedAnns.some(
+    (a: any) => typeof a.pageUrl === 'string' && a.pageUrl.length > 0,
+  );
+  const annotationNumbers = new Map<any, number>(
+    sortedAnns.map((ann, index) => [ann, index + 1]),
+  );
+  let emitOrder = sortedAnns;
+  if (hasPageGroups) {
+    const unpaged = sortedAnns.filter((a: any) => !a.pageUrl);
+    const pageOrder: string[] = [];
+    for (const ann of sortedAnns) {
+      if (ann.pageUrl && !pageOrder.includes(ann.pageUrl)) pageOrder.push(ann.pageUrl);
+    }
+    emitOrder = [
+      ...unpaged,
+      ...pageOrder.flatMap((page) => sortedAnns.filter((a: any) => a.pageUrl === page)),
+    ];
+  }
+
+  let lastEmittedPage: string | null = null;
+  emitOrder.forEach((ann) => {
+    if (hasPageGroups && ann.pageUrl && ann.pageUrl !== lastEmittedPage) {
+      output += `### Page: ${ann.pageUrl}\n\n`;
+      lastEmittedPage = ann.pageUrl;
+    }
+    output += `## ${annotationNumbers.get(ann)}. `;
 
     // Add diff context label if annotation was created in diff view
     if (ann.diffContext) {

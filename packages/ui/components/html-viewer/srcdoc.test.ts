@@ -2617,6 +2617,83 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  test("unanchored ids are reported on change: restore failures, late deaths, recovery, and clear", async () => {
+    // The fail-closed transparency contract (onUnanchoredChange): the bridge
+    // names WHICH annotations currently have no live representation — total
+    // restore failures (whose records are removed) and records whose every
+    // target died — re-reporting the full set only when it changes.
+    const reports: string[][] = [];
+    const listener = (e: MessageEvent) => {
+      const d = bridgeMessageData(e);
+      if (d && d.type === "plannotator-bridge-unanchored") reports.push(d.ids as string[]);
+    };
+    window.addEventListener("message", listener);
+    try {
+      document.body.innerHTML = "<p>Anchored copy</p>";
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id: "live-ann",
+        originalText: "Anchored copy",
+        annotationType: "comment",
+      });
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id: "ghost-ann",
+        originalText: "Text this page never contained",
+        annotationType: "comment",
+      });
+      await flushOverlay();
+      // Only the total restore failure reports; the resolved one does not.
+      expect(reports.at(-1)).toEqual(["ghost-ann"]);
+
+      // Change-only: an idle re-render must not repeat the report. (Bridge
+      // emissions deliver async like all postMessage traffic, so the flush
+      // guarantees any duplicate would have arrived before the count check.)
+      const countAfterRestore = reports.length;
+      postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+      await flushOverlay();
+      expect(reports.length).toBe(countAfterRestore);
+
+      // A re-restore that now resolves clears the failed id.
+      document.body.innerHTML =
+        "<p>Anchored copy</p><p>Text this page never contained</p>";
+      postBridge({
+        type: "plannotator-bridge-find-and-mark",
+        id: "ghost-ann",
+        originalText: "Text this page never contained",
+        annotationType: "comment",
+      });
+      await flushOverlay();
+      expect(reports.at(-1)).toEqual([]);
+
+      // Late death: both texts vanish, both records go dead after the
+      // generation-gated re-search fails.
+      document.body.innerHTML = "<p>Unrelated content</p>";
+      advancePastDeadSearchBackoff();
+      bumpDomGeneration();
+      postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+      await flushOverlay();
+      expect(reports.at(-1)).toEqual(["ghost-ann", "live-ann"]);
+
+      // Partial recovery: one text returns, the other stays dead.
+      document.body.innerHTML = "<p>Anchored copy</p>";
+      advancePastDeadSearchBackoff();
+      bumpDomGeneration();
+      postBridge({ type: "plannotator-bridge-sync-annotations", annotations: [] });
+      await flushOverlay();
+      expect(reports.at(-1)).toEqual(["ghost-ann"]);
+
+      // clear-marks empties the report along with the records.
+      postBridge({ type: "plannotator-bridge-clear-marks" });
+      await flushOverlay();
+      expect(reports.at(-1)).toEqual([]);
+    } finally {
+      window.removeEventListener("message", listener);
+      postBridge({ type: "plannotator-bridge-clear-marks" });
+      document.body.replaceChildren();
+    }
+  });
+
   test("mutation-heavy pages: failed re-searches back off on the wall clock and are budgeted per pass (A)", async () => {
     // A page that mutates every frame advances domGeneration every frame, so
     // the generation gate alone would re-run the whole-document sweep per

@@ -28,7 +28,77 @@ permissions:
   contents: read
 
 jobs:
+  # Deploy remains automatic, but only after the exact commit has passed the
+  # repository's full Test workflow. The workflows start together on a main
+  # push; this job waits for Test instead of allowing deployment to race it.
+  verify:
+    name: Require successful Test run
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Wait for Test on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          deadline=$((SECONDS + 2400))
+          previous_state=""
+
+          while (( SECONDS < deadline )); do
+            run_json="$(gh api --method GET \
+              "repos/${REPOSITORY}/actions/workflows/test.yml/runs" \
+              -f head_sha="$COMMIT_SHA" \
+              -f per_page=100)"
+
+            # Manual Test runs are an explicit recovery path when the original
+            # push run was skipped or cannot be recovered. Ignore PR runs and
+            # retain the exact-SHA requirement enforced by the API query.
+            run="$(jq -c '
+              [.workflow_runs[]
+                | select(
+                    .head_sha == env.COMMIT_SHA and
+                    (.event == "push" or .event == "workflow_dispatch")
+                  )]
+              | sort_by(.created_at)
+              | last // {}
+            ' <<<"$run_json")"
+
+            trigger="$(jq -r '.event // ""' <<<"$run")"
+            status="$(jq -r '.status // "missing"' <<<"$run")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$run")"
+            run_url="$(jq -r '.html_url // ""' <<<"$run")"
+            state="${trigger}:${status}:${conclusion}"
+
+            if [[ "$state" != "$previous_state" ]]; then
+              if [[ -n "$run_url" ]]; then
+                echo "Test workflow for ${COMMIT_SHA}: ${state} (${run_url})"
+              else
+                echo "Test workflow for ${COMMIT_SHA}: ${state}"
+              fi
+              previous_state="$state"
+            fi
+
+            if [[ "$status" == "completed" ]]; then
+              if [[ "$conclusion" == "success" ]]; then
+                exit 0
+              fi
+              echo "Test workflow did not succeed for ${COMMIT_SHA}: ${conclusion} (${run_url})" >&2
+              exit 1
+            fi
+
+            sleep 15
+          done
+
+          echo "Timed out waiting for the Test workflow on ${COMMIT_SHA}." >&2
+          exit 1
+
   detect-changes:
+    needs: verify
     runs-on: ubuntu-latest
     outputs:
       marketing: ${{ steps.changes.outputs.marketing }}
@@ -37,62 +107,69 @@ jobs:
       waitlist: ${{ steps.changes.outputs.waitlist }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Check for changes
         id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET: ${{ inputs.target }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            if [[ "${{ inputs.target }}" == "all" || "${{ inputs.target }}" == "marketing" ]]; then
-              echo "marketing=true" >> $GITHUB_OUTPUT
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$TARGET" == "all" || "$TARGET" == "marketing" ]]; then
+              echo "marketing=true" >> "$GITHUB_OUTPUT"
             else
-              echo "marketing=false" >> $GITHUB_OUTPUT
+              echo "marketing=false" >> "$GITHUB_OUTPUT"
             fi
-            if [[ "${{ inputs.target }}" == "all" || "${{ inputs.target }}" == "portal" ]]; then
-              echo "portal=true" >> $GITHUB_OUTPUT
+            if [[ "$TARGET" == "all" || "$TARGET" == "portal" ]]; then
+              echo "portal=true" >> "$GITHUB_OUTPUT"
             else
-              echo "portal=false" >> $GITHUB_OUTPUT
+              echo "portal=false" >> "$GITHUB_OUTPUT"
             fi
-            if [[ "${{ inputs.target }}" == "all" || "${{ inputs.target }}" == "paste" ]]; then
-              echo "paste=true" >> $GITHUB_OUTPUT
+            if [[ "$TARGET" == "all" || "$TARGET" == "paste" ]]; then
+              echo "paste=true" >> "$GITHUB_OUTPUT"
             else
-              echo "paste=false" >> $GITHUB_OUTPUT
+              echo "paste=false" >> "$GITHUB_OUTPUT"
             fi
-            if [[ "${{ inputs.target }}" == "all" || "${{ inputs.target }}" == "waitlist" ]]; then
-              echo "waitlist=true" >> $GITHUB_OUTPUT
+            if [[ "$TARGET" == "all" || "$TARGET" == "waitlist" ]]; then
+              echo "waitlist=true" >> "$GITHUB_OUTPUT"
             else
-              echo "waitlist=false" >> $GITHUB_OUTPUT
+              echo "waitlist=false" >> "$GITHUB_OUTPUT"
             fi
           else
             # For push events, check what changed
-            git fetch origin ${{ github.event.before }} --depth=1 2>/dev/null || true
+            git fetch origin "$BEFORE_SHA" --depth=1 2>/dev/null || true
 
-            MARKETING_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^(apps/marketing/|packages/)' || true)
-            PORTAL_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^(apps/portal/|packages/)' || true)
-            PASTE_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^apps/paste-service/' || true)
-            WAITLIST_CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null | grep -E '^apps/waitlist-service/' || true)
+            MARKETING_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^(apps/marketing/|packages/)' || true)
+            PORTAL_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^(apps/portal/|packages/)' || true)
+            PASTE_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^apps/paste-service/' || true)
+            WAITLIST_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^apps/waitlist-service/' || true)
 
             if [[ -n "$MARKETING_CHANGED" ]]; then
-              echo "marketing=true" >> $GITHUB_OUTPUT
+              echo "marketing=true" >> "$GITHUB_OUTPUT"
             else
-              echo "marketing=false" >> $GITHUB_OUTPUT
+              echo "marketing=false" >> "$GITHUB_OUTPUT"
             fi
 
             if [[ -n "$PORTAL_CHANGED" ]]; then
-              echo "portal=true" >> $GITHUB_OUTPUT
+              echo "portal=true" >> "$GITHUB_OUTPUT"
             else
-              echo "portal=false" >> $GITHUB_OUTPUT
+              echo "portal=false" >> "$GITHUB_OUTPUT"
             fi
 
             if [[ -n "$PASTE_CHANGED" ]]; then
-              echo "paste=true" >> $GITHUB_OUTPUT
+              echo "paste=true" >> "$GITHUB_OUTPUT"
             else
-              echo "paste=false" >> $GITHUB_OUTPUT
+              echo "paste=false" >> "$GITHUB_OUTPUT"
             fi
 
             if [[ -n "$WAITLIST_CHANGED" ]]; then
-              echo "waitlist=true" >> $GITHUB_OUTPUT
+              echo "waitlist=true" >> "$GITHUB_OUTPUT"
             else
-              echo "waitlist=false" >> $GITHUB_OUTPUT
+              echo "waitlist=false" >> "$GITHUB_OUTPUT"
             fi
           fi
 
@@ -106,13 +183,15 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build marketing
         run: bun run build:marketing
@@ -152,13 +231,15 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build portal
         run: bun run build:portal
@@ -187,13 +268,15 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Deploy to Cloudflare
         working-directory: apps/paste-service
@@ -211,13 +294,15 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Deploy to Cloudflare
         working-directory: apps/waitlist-service

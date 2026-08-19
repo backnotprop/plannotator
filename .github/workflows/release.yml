@@ -10,29 +10,58 @@ on:
   workflow_dispatch:
     inputs:
       dry-run:
-        description: Validate build and npm publish without uploading
+        description: Package only; disable only when dispatching a v* tag to publish
         type: boolean
         default: true
 
 permissions:
   contents: read
 
-env:
-  DRY_RUN: ${{ !(startsWith(github.ref, 'refs/tags/') || inputs.dry-run == 'false') }}
-
 jobs:
+  # A release tag must identify a commit already contained in main. This runs
+  # independently of the build graph so an invalid tag cannot attest, publish,
+  # or create a GitHub release even if the build itself succeeds.
+  release-eligibility:
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs['dry-run'] == 'false'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require release commit to be on main
+        shell: bash
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          release_commit="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          if ! git merge-base --is-ancestor "$release_commit" refs/remotes/origin/main; then
+            echo "Release tag ${GITHUB_REF_NAME} points to ${release_commit}, which is not contained in main." >&2
+            exit 1
+          fi
+
+      - name: Require tag to match release manifests
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/check-release-version.mjs --tag "$RELEASE_TAG"
+
   test:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
+          no-cache: true
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
@@ -58,13 +87,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
+          no-cache: true
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build UI
         run: |
@@ -148,6 +180,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Download binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -158,6 +192,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Smoke-test binary
         if: runner.os != 'Windows'
@@ -670,17 +705,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
+          no-cache: true
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Generate Pi extension shared copies
         shell: bash
@@ -706,6 +745,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Download binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -851,15 +892,17 @@ jobs:
     # never get id-token: write granted, closing the trusted-contributor
     # compromise window where a malicious build step could mint a
     # repo-identity OIDC token. The attestation is produced against the
-    # same binaries the build job uploaded; attest-build-provenance
-    # publishes the signed bundle to GitHub's attestation store, so the
-    # release job downstream doesn't need any new artifact handling.
+    # same binaries the build job uploaded. It rechecks the security gate's
+    # subject digests, preserves attest-build-provenance for native binaries,
+    # and adds the release-wide CycloneDX predicate for every shipped subject.
     needs:
+      - release-eligibility
       - build
       - smoke-binaries
       - pi-extension-ai-runtime-windows
       - install-script-smoke
-    if: startsWith(github.ref, 'refs/tags/')
+      - release-security
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs['dry-run'] == 'false'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -871,6 +914,31 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: binaries
+          digest-mismatch: error
+
+      - name: Download npm package subjects
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-packages
+          path: npm-packages
+          digest-mismatch: error
+
+      - name: Download validated subject evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-security-subjects
+          path: release-security-subjects
+          digest-mismatch: error
+
+      - name: Download public release SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-sbom
+          path: release-sbom
+          digest-mismatch: error
+
+      - name: Revalidate gated release subjects
+        run: sha256sum --check --strict release-security-subjects/subject-checksums.sha256
 
       - name: Generate SLSA build provenance attestation
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
@@ -889,19 +957,45 @@ jobs:
             plannotator-paste-win32-x64.exe
             plannotator-paste-win32-arm64.exe
 
+      # actions/attest is the current official general attestation action.
+      # Its sbom-path mode supersedes the deprecated actions/attest-sbom
+      # wrapper and binds the CycloneDX predicate to the shipped subjects,
+      # not to the SBOM file itself.
+      - name: Generate release SBOM attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            plannotator-darwin-arm64
+            plannotator-darwin-x64
+            plannotator-linux-x64
+            plannotator-linux-arm64
+            plannotator-win32-x64.exe
+            plannotator-win32-arm64.exe
+            plannotator-paste-darwin-arm64
+            plannotator-paste-darwin-x64
+            plannotator-paste-linux-x64
+            plannotator-paste-linux-arm64
+            plannotator-paste-win32-x64.exe
+            plannotator-paste-win32-arm64.exe
+            npm-packages/plannotator-opencode.tgz
+            npm-packages/plannotator-pi-extension.tgz
+          sbom-path: release-sbom/${{ needs.release-security.outputs.sbom-name }}
+
   release:
-    # Depends on `attest` so the signed provenance exists before the
+    # Depends on `attest` so the signed provenance and SBOM attestation exist before the
     # GitHub Release is published — otherwise there'd be a window where
     # users could pull the binary and `gh attestation verify` would
     # race-fail. `needs: attest` implicitly requires `build` too.
     needs: attest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs['dry-run'] == 'false'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -909,10 +1003,20 @@ jobs:
           name: binaries
           path: artifacts
 
+      - name: Download release SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-sbom
+          path: artifacts
+          digest-mismatch: error
+
       - name: List artifacts
         run: ls -la artifacts/
 
       - name: Create GitHub Release
+        # zizmor: ignore[superfluous-actions] The pinned action preserves the
+        # existing release behavior. Owner: maintainers; reassess replacement
+        # with gh by 2027-08-11.
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: artifacts/*
@@ -920,7 +1024,9 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
 
-  npm-publish:
+  # PRs and manual dry-runs stop here. This job executes repository build code,
+  # so it must never receive an npm token or permission to mint an OIDC token.
+  npm-package:
     needs:
       - build
       - smoke-binaries
@@ -929,21 +1035,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
+          no-cache: true
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build packages
         run: |
@@ -952,22 +1061,131 @@ jobs:
           bun run build:opencode
           bun run build:pi
 
-      - name: Publish @plannotator/opencode
+      - name: Create package artifact directory
+        run: mkdir -p npm-packages
+
+      - name: Pack @plannotator/opencode
         working-directory: apps/opencode-plugin
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-opencode.tgz"
+
+      - name: Pack @plannotator/pi-extension
+        working-directory: apps/pi-extension
+        run: bun pm pack --filename "$GITHUB_WORKSPACE/npm-packages/plannotator-pi-extension.tgz"
+
+      - name: Upload npm package artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-packages
+          path: npm-packages/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  # Credential-free release inventory and vulnerability gate. This job runs on
+  # PRs and dry-runs against the exact binaries and npm tarballs produced above,
+  # but it cannot attest, publish, deploy, or mint an OIDC token.
+  release-security:
+    needs:
+      - build
+      - npm-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release-metadata.outputs.version }}
+      sbom-name: ${{ steps.release-metadata.outputs.sbom-name }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+          no-cache: true
+
+      - name: Download binary subjects
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries
+          path: release-subjects
+          digest-mismatch: error
+
+      - name: Download npm package subjects
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-packages
+          path: release-subjects/npm-packages
+          digest-mismatch: error
+
+      - name: Define release evidence names
+        id: release-metadata
         run: |
-          bun pm pack
-          if [[ "$DRY_RUN" == "false" ]]; then
-            npm publish *.tgz --provenance --access public
-          fi
+          version="$(jq -r .version package.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sbom-name=plannotator-${version}-release-sbom.cdx.json" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SBOM and enforce Grype policy
+        env:
+          PLANNOTATOR_RELEASE_SUBJECTS_DIR: ${{ github.workspace }}/release-subjects
+          PLANNOTATOR_RELEASE_SECURITY_DIR: ${{ runner.temp }}/plannotator-release-security
+        run: scripts/release-security/run-release-security.sh
+
+      - name: Upload public release SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sbom
+          path: ${{ runner.temp }}/plannotator-release-security/public/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload validated subject evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-security-subjects
+          path: |
+            ${{ runner.temp }}/plannotator-release-security/evidence/release-subjects.json
+            ${{ runner.temp }}/plannotator-release-security/evidence/subject-checksums.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Preserve private scanner evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-security-evidence
+          path: ${{ runner.temp }}/plannotator-release-security/evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Publish only the tarballs produced by the credential-free job. Automatic
+  # tag releases are unchanged; a manual publish must also target a v* tag.
+  npm-publish:
+    needs:
+      - release-eligibility
+      - npm-package
+      - release-security
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs['dry-run'] == 'false'))
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Download npm package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-packages
+          path: npm-packages
+          digest-mismatch: error
+
+      - name: Publish @plannotator/opencode
+        run: npm publish ./npm-packages/plannotator-opencode.tgz --ignore-scripts --provenance --access public
 
       - name: Publish @plannotator/pi-extension
-        working-directory: apps/pi-extension
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          bun pm pack
-          if [[ "$DRY_RUN" == "false" ]]; then
-            npm publish *.tgz --provenance --access public
-          fi
+        run: npm publish ./npm-packages/plannotator-pi-extension.tgz --ignore-scripts --provenance --access public

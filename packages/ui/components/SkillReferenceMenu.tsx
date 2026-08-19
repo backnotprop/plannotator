@@ -9,6 +9,8 @@ const ROOT_LABELS: Record<SkillCatalogEntry['root'], string> = {
 };
 
 interface SkillReferenceMenuProps {
+  /** Id referenced by the focused textarea's aria-controls attribute. */
+  id: string;
   items: SkillCatalogEntry[];
   /** Explicitly activated row, or null — the menu opens with nothing active. */
   activeIndex: number | null;
@@ -79,6 +81,7 @@ function computeMenuPlacement(
  * a purely visual affordance; a pointer click inserts directly.
  */
 export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
+  id,
   items,
   activeIndex,
   onSelect,
@@ -140,6 +143,8 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
   return (
     <div
       ref={menuRef}
+      id={id}
+      role="listbox"
       data-skill-menu="true"
       data-skill-menu-placement={placement.direction}
       data-popover-layer="true"
@@ -157,6 +162,10 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
           <button
             key={item.name}
             type="button"
+            id={`${id}-option-${index}`}
+            role="option"
+            aria-selected={index === activeIndex}
+            tabIndex={-1}
             data-skill-item={item.name}
             data-skill-item-active={index === activeIndex ? 'true' : undefined}
             // Insert on pointerdown so the textarea never loses focus. A

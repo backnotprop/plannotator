@@ -18,6 +18,14 @@ function nextHtmlAnnId(): string {
   return `html-ann-${Date.now().toString(36)}-${(htmlAnnSeq++).toString(36)}`;
 }
 
+function htmlCommentDraftKey(
+  text: string,
+  anchor?: HtmlElementAnchor | null,
+  targetKey?: string,
+): string {
+  return `html-selection:${targetKey ?? JSON.stringify(anchor ?? null)}:${text}`;
+}
+
 interface BridgeSelectionMessage {
   type: `${typeof PREFIX}selection`;
   text: string;
@@ -65,7 +73,31 @@ type BridgeMessage =
   | { type: `${typeof PREFIX}selection-rect`; rect: BridgeRect }
   | { type: `${typeof PREFIX}keytype`; key: string }
   | { type: `${typeof PREFIX}mark-click`; id: string }
-  | { type: `${typeof PREFIX}resize`; height: number };
+  | { type: `${typeof PREFIX}unanchored`; ids: string[] }
+  | { type: `${typeof PREFIX}resize`; height: number }
+  | { type: `${typeof PREFIX}page-change`; pageUrl: string };
+
+/** Live proxied-app session credentials: the proxy origin messages must come
+ * from, and the per-session token every message must echo. */
+export interface HtmlLiveSession {
+  origin: string;
+  token: string;
+}
+
+/** Cap for live-mode page identity strings (mirrors the bridge's slice). */
+export const MAX_PAGE_URL_LENGTH = 2048;
+
+/** True when a live-session message event fails the origin or token check.
+ * Exported for protocol tests. */
+export function rejectsLiveMessage(
+  live: HtmlLiveSession,
+  origin: string,
+  data: unknown,
+): boolean {
+  if (origin !== live.origin) return true;
+  if (!isRecord(data) || data.token !== live.token) return true;
+  return false;
+}
 
 /** Dependencies and callbacks for the sandboxed HTML annotation bridge. */
 export interface UseHtmlAnnotationOptions {
@@ -78,15 +110,44 @@ export interface UseHtmlAnnotationOptions {
   selectedAnnotationId: string | null;
   mode: EditorMode;
   onResize?: (height: number) => void;
+  /** Live proxied-app session: reject messages that fail the origin or token
+   *  check before parsing, and stamp token + concrete targetOrigin on every
+   *  outbound post. Absent for srcdoc sessions (behavior unchanged). */
+  live?: HtmlLiveSession;
+  /** Live-mode page navigation reports (validated, capped at 2048 chars). */
+  onPageChange?: (pageUrl: string) => void;
   /** Validated pointer positions relayed from inside the iframe while a
    *  pinpoint draft is open (iframe-local viewport coordinates), with the
    *  Shift state observed by the iframe (the parent cannot see modifiers
    *  held while the pointer lives in the sandbox). Drives the composer-yield
    *  fade in the host component. */
   onBridgePointer?: (x: number, y: number, shift: boolean) => void;
+  /** Reports the full set of annotation ids that currently have NO live
+   *  representation on the page — every target dead, or the restore never
+   *  resolved (fail-closed anchors hide markers rather than guess). Called
+   *  with the complete current set whenever it changes, including back to
+   *  empty on recovery. Delivered in readOnly mode too: view-only surfaces
+   *  are exactly where silently missing markers would go unnoticed. */
+  onUnanchoredChange?: (ids: string[]) => void;
 }
 
-function postToIframe(iframe: HTMLIFrameElement | null, msg: Record<string, unknown>) {
+function postToIframe(
+  iframe: HTMLIFrameElement | null,
+  msg: Record<string, unknown>,
+  live?: HtmlLiveSession | null,
+) {
+  if (live) {
+    // Live proxied-app sessions: token on every message, concrete targetOrigin.
+    // Browsers silently DROP a post whose targetOrigin does not match the
+    // receiving window (mid-navigation frames); some DOM environments throw
+    // instead, so align with the browser semantics explicitly.
+    try {
+      iframe?.contentWindow?.postMessage({ ...msg, token: live.token }, live.origin);
+    } catch {
+      // Dropped, matching browser behavior for unmatched target origins.
+    }
+    return;
+  }
   iframe?.contentWindow?.postMessage(msg, "*");
 }
 
@@ -258,9 +319,28 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       return typeof value.id === "string" && value.id.length <= 256
         ? { type: value.type, id: value.id }
         : null;
+    case `${PREFIX}unanchored`: {
+      // Bounded like the bridge's own emission (512 ids, 256 chars each); any
+      // out-of-contract entry rejects the whole report — the real bridge
+      // never sends one, so a violation means a forged message.
+      if (!Array.isArray(value.ids) || value.ids.length > 512) return null;
+      const unanchoredIds: string[] = [];
+      for (const entry of value.ids) {
+        if (typeof entry !== "string" || entry.length > 256) return null;
+        unanchoredIds.push(entry);
+      }
+      return { type: value.type, ids: unanchoredIds };
+    }
     case `${PREFIX}resize`:
       return typeof value.height === "number" && Number.isFinite(value.height)
         ? { type: value.type, height: value.height }
+        : null;
+    case `${PREFIX}page-change`:
+      // Live-mode SPA navigation report. Bounded like every bridge string.
+      return typeof value.pageUrl === "string"
+        && value.pageUrl.length > 0
+        && value.pageUrl.length <= MAX_PAGE_URL_LENGTH
+        ? { type: value.type, pageUrl: value.pageUrl }
         : null;
     default:
       return null;
@@ -281,7 +361,10 @@ export function useHtmlAnnotation({
   selectedAnnotationId,
   mode,
   onResize,
+  live,
+  onPageChange,
   onBridgePointer,
+  onUnanchoredChange,
 }: UseHtmlAnnotationOptions): Omit<
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement"
@@ -328,8 +411,23 @@ export function useHtmlAnnotation({
   onAddRef.current = onAddAnnotation;
   const onSelectRef = useRef(onSelectAnnotation);
   onSelectRef.current = onSelectAnnotation;
+  const onUnanchoredChangeRef = useRef(onUnanchoredChange);
+  onUnanchoredChangeRef.current = onUnanchoredChange;
+  const liveRef = useRef<HtmlLiveSession | null>(live ?? null);
+  liveRef.current = live ?? null;
+  const onPageChangeRef = useRef(onPageChange);
+  onPageChangeRef.current = onPageChange;
 
   const anchorRef = useRef<HTMLDivElement | null>(null);
+
+  /** Post into the iframe with the live token + targetOrigin when a live
+   *  session is active; srcdoc posts keep targetOrigin "*" and no token. */
+  const post = useCallback(
+    (msg: Record<string, unknown>) => {
+      postToIframe(iframeRef.current, msg, liveRef.current);
+    },
+    [iframeRef],
+  );
 
   /**
    * Remove one draft target. Removing the primary promotes the next remaining
@@ -345,7 +443,7 @@ export function useHtmlAnnotation({
       const targets = draftTargetsRef.current;
       const index = targets.findIndex((t) => t.key === key);
       if (index < 0) return;
-      postToIframe(iframeRef.current, { type: `${PREFIX}remove-target`, key });
+      post({ type: `${PREFIX}remove-target`, key });
       const remaining = targets.filter((t) => t.key !== key);
       if (remaining.length === 0) {
         // Final target removed — the draft is cancelled (bridge side already
@@ -369,7 +467,7 @@ export function useHtmlAnnotation({
       setDraftTargets(remaining);
       setComposerFocusToken((t) => t + 1);
     },
-    [iframeRef],
+    [post],
   );
 
   const getOrCreateAnchor = useCallback(() => {
@@ -406,12 +504,24 @@ export function useHtmlAnnotation({
   useEffect(() => {
     function handler(e: MessageEvent<unknown>) {
       if (e.source !== iframeRef.current?.contentWindow) return;
+      // Live sessions verify origin + session token BEFORE parsing. The
+      // existing caps stay exactly as they are: live content is friendlier
+      // but the trust boundary does not relax.
+      const liveSession = liveRef.current;
+      if (liveSession && rejectsLiveMessage(liveSession, e.origin, e.data)) return;
       const message = parseBridgeMessage(e.data);
       if (!message) return;
 
       const type = message.type;
 
-      if (!enabledRef.current && type !== `${PREFIX}mark-click` && type !== `${PREFIX}resize`) {
+      if (
+        !enabledRef.current
+        && type !== `${PREFIX}mark-click`
+        && type !== `${PREFIX}unanchored`
+        && type !== `${PREFIX}resize`
+        // Page identity is navigation state, not an annotation mutation.
+        && type !== `${PREFIX}page-change`
+      ) {
         return;
       }
 
@@ -422,25 +532,20 @@ export function useHtmlAnnotation({
         const anchor = positionAnchor(message.rect);
         if (!anchor) return;
 
-        const currentMode = message.modeOverride ?? modeRef.current;
+        // HTML and live-app surfaces are COMMENT-ONLY: redline (auto-DELETION)
+        // and quickLabel are markdown-surface features, so both the host's
+        // mode and any bridge-posted modeOverride clamp to the plain selection
+        // flow here (a hostile page can post modeOverride, so the clamp sits
+        // at the trust boundary, not in the host). Persisted DELETION
+        // annotations still restore through applyAnnotations — only CREATION
+        // is comment-only.
+        const requestedMode = message.modeOverride ?? modeRef.current;
+        const currentMode =
+          requestedMode === "redline" || requestedMode === "quickLabel"
+            ? "selection"
+            : requestedMode;
 
-        if (currentMode === "redline") {
-          const id = nextHtmlAnnId();
-          postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "deletion" });
-          onAddRef.current?.({
-            id,
-            blockId: "",
-            startOffset: 0,
-            endOffset: 0,
-            type: AnnotationType.DELETION,
-            originalText: message.text,
-            author: getIdentity(),
-            createdA: Date.now(),
-            htmlAnchor: message.anchor,
-          });
-          pendingTextRef.current = "";
-          pendingAnchorRef.current = null;
-        } else if (
+        if (
           currentMode === "comment"
           // Pinpoint click-to-pin: the click already chose the target, so skip
           // the intermediate toolbar and go straight to the comment composer.
@@ -453,6 +558,7 @@ export function useHtmlAnnotation({
             anchorEl: anchor,
             contextText: message.text,
             selectedText: message.text,
+            draftKey: htmlCommentDraftKey(message.text, message.anchor, message.targetKey),
           });
           // Pinpoint drafts arm shift-click multi-select: the clicked element
           // becomes the primary target of the (single) draft comment. The
@@ -468,16 +574,11 @@ export function useHtmlAnnotation({
                 anchor: message.anchor ?? null,
               },
             ]);
-            postToIframe(iframeRef.current, {
+            post({
               type: `${PREFIX}arm-multi-select`,
               key: message.targetKey,
             });
           }
-        } else if (currentMode === "quickLabel") {
-          setQuickLabelPicker({
-            anchorEl: anchor,
-            cursorHint: { x: parseFloat(anchor.style.left), y: parseFloat(anchor.style.top) },
-          });
         } else {
           setToolbarState({
             element: anchor,
@@ -557,15 +658,29 @@ export function useHtmlAnnotation({
         // the typing) — otherwise the iframe keeps focus and the bridge eats keys.
         iframeRef.current?.blur();
         setToolbarState(null);
-        setCommentPopover({ anchorEl: anchor, contextText: text, selectedText: text, initialText: key });
+        setCommentPopover({
+          anchorEl: anchor,
+          contextText: text,
+          selectedText: text,
+          initialText: key,
+          draftKey: htmlCommentDraftKey(text, pendingAnchorRef.current),
+        });
       }
 
       if (type === `${PREFIX}mark-click`) {
         onSelectRef.current?.(message.id);
       }
 
+      if (type === `${PREFIX}unanchored`) {
+        onUnanchoredChangeRef.current?.(message.ids);
+      }
+
       if (type === `${PREFIX}resize`) {
         onResize?.(message.height);
+      }
+
+      if (type === `${PREFIX}page-change`) {
+        onPageChangeRef.current?.(message.pageUrl);
       }
     }
 
@@ -577,7 +692,7 @@ export function useHtmlAnnotation({
         anchorRef.current = null;
       }
     };
-  }, [iframeRef, positionAnchor, onResize, getOrCreateAnchor, applyTargetRemoval]);
+  }, [post, iframeRef, positionAnchor, onResize, getOrCreateAnchor, applyTargetRemoval]);
 
   useEffect(() => {
     if (enabled) return;
@@ -589,22 +704,22 @@ export function useHtmlAnnotation({
     pendingAnchorRef.current = null;
     anchorRef.current?.remove();
     anchorRef.current = null;
-    postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
-  }, [enabled, iframeRef]);
+    post({ type: `${PREFIX}cancel-selection` });
+  }, [enabled, post]);
 
   useEffect(() => {
     if (selectedAnnotationId) {
-      postToIframe(iframeRef.current, {
+      post({
         type: `${PREFIX}scroll-to`,
         id: selectedAnnotationId,
       });
     } else {
-      postToIframe(iframeRef.current, {
+      post({
         type: `${PREFIX}focus-mark`,
         id: null,
       });
     }
-  }, [selectedAnnotationId, iframeRef]);
+  }, [selectedAnnotationId, post]);
 
   const handleAnnotate = useCallback(
     (type: AnnotationType) => {
@@ -613,7 +728,7 @@ export function useHtmlAnnotation({
       if (!text || type !== AnnotationType.DELETION) return;
 
       const id = nextHtmlAnnId();
-      postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "deletion" });
+      post({ type: `${PREFIX}create-mark`, id, annotationType: "deletion" });
       onAddRef.current?.({
         id,
         blockId: "",
@@ -630,7 +745,7 @@ export function useHtmlAnnotation({
       pendingTextRef.current = "";
       pendingAnchorRef.current = null;
     },
-    [iframeRef],
+    [post],
   );
 
   const handleRequestComment = useCallback(
@@ -640,7 +755,13 @@ export function useHtmlAnnotation({
       if (!text) return;
       const anchor = anchorRef.current ?? getOrCreateAnchor();
       setToolbarState(null);
-      setCommentPopover({ anchorEl: anchor, contextText: text, selectedText: text, initialText: initialChar });
+      setCommentPopover({
+        anchorEl: anchor,
+        contextText: text,
+        selectedText: text,
+        initialText: initialChar,
+        draftKey: htmlCommentDraftKey(text, pendingAnchorRef.current),
+      });
     },
     [getOrCreateAnchor],
   );
@@ -665,7 +786,7 @@ export function useHtmlAnnotation({
           : undefined;
 
       const id = nextHtmlAnnId();
-      postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "comment" });
+      post({ type: `${PREFIX}create-mark`, id, annotationType: "comment" });
       onAddRef.current?.({
         id,
         blockId: "",
@@ -686,16 +807,16 @@ export function useHtmlAnnotation({
       pendingTextRef.current = "";
       pendingAnchorRef.current = null;
     },
-    [iframeRef],
+    [post],
   );
 
   const handleCommentClose = useCallback(() => {
-    postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
+    post({ type: `${PREFIX}cancel-selection` });
     setCommentPopover(null);
     setDraftTargets([]);
     pendingTextRef.current = "";
     pendingAnchorRef.current = null;
-  }, [iframeRef]);
+  }, [post]);
 
   const removeDraftTarget = useCallback(
     (key: string) => {
@@ -707,17 +828,17 @@ export function useHtmlAnnotation({
 
   const flashDraftTarget = useCallback(
     (key: string) => {
-      postToIframe(iframeRef.current, { type: `${PREFIX}flash-target`, key });
+      post({ type: `${PREFIX}flash-target`, key });
     },
-    [iframeRef],
+    [post],
   );
 
   const handleToolbarClose = useCallback(() => {
-    postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
+    post({ type: `${PREFIX}cancel-selection` });
     setToolbarState(null);
     pendingTextRef.current = "";
     pendingAnchorRef.current = null;
-  }, [iframeRef]);
+  }, [post]);
 
   const applyQuickLabel = useCallback(
     (label: QuickLabel, clearState: () => void) => {
@@ -725,7 +846,7 @@ export function useHtmlAnnotation({
       const text = pendingTextRef.current;
       if (!text) return;
       const id = nextHtmlAnnId();
-      postToIframe(iframeRef.current, { type: `${PREFIX}create-mark`, id, annotationType: "comment" });
+      post({ type: `${PREFIX}create-mark`, id, annotationType: "comment" });
       onAddRef.current?.({
         id,
         blockId: "",
@@ -744,7 +865,7 @@ export function useHtmlAnnotation({
       pendingTextRef.current = "";
       pendingAnchorRef.current = null;
     },
-    [iframeRef],
+    [post],
   );
 
   const handleQuickLabel = useCallback(
@@ -758,22 +879,22 @@ export function useHtmlAnnotation({
   );
 
   const handleQuickLabelPickerDismiss = useCallback(() => {
-    postToIframe(iframeRef.current, { type: `${PREFIX}cancel-selection` });
+    post({ type: `${PREFIX}cancel-selection` });
     setQuickLabelPicker(null);
     pendingTextRef.current = "";
     pendingAnchorRef.current = null;
-  }, [iframeRef]);
+  }, [post]);
 
   const removeHighlight = useCallback(
     (id: string) => {
-      postToIframe(iframeRef.current, { type: `${PREFIX}remove-mark`, id });
+      post({ type: `${PREFIX}remove-mark`, id });
     },
-    [iframeRef],
+    [post],
   );
 
   const clearAllHighlights = useCallback(() => {
-    postToIframe(iframeRef.current, { type: `${PREFIX}clear-marks` });
-  }, [iframeRef]);
+    post({ type: `${PREFIX}clear-marks` });
+  }, [post]);
 
   const applyAnnotations = useCallback(
     (anns: Annotation[]) => {
@@ -786,7 +907,7 @@ export function useHtmlAnnotation({
           .map((t) => t.anchor)
           .filter((a): a is HtmlElementAnchor => !!a)
           .slice(0, MAX_ADDITIONAL_TARGETS);
-        postToIframe(iframeRef.current, {
+        post({
           type: `${PREFIX}find-and-mark`,
           id: ann.id,
           originalText: ann.originalText,
@@ -798,7 +919,7 @@ export function useHtmlAnnotation({
         });
       }
     },
-    [iframeRef],
+    [post],
   );
 
   return {

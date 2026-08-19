@@ -23,6 +23,8 @@ import {
 	AGENT_HEARTBEAT_COMMENT,
 	AGENT_HEARTBEAT_INTERVAL_MS,
 } from "../generated/agent-jobs.ts";
+import { resolveGuideLaunchInstructions } from "../generated/guide-instructions-store.ts";
+import type { GuideLaunchReview } from "../generated/guide-format.ts";
 import { formatClaudeLogEvent } from "../generated/claude-review.ts";
 import {
 	MARKER_ENGINES,
@@ -123,9 +125,14 @@ export interface AgentJobHandlerOptions {
 		 *  AgentJobInfo so guide persistence labels the envelope with the context
 		 *  the guide was generated against (see AgentJobInfo.guideContext). */
 		guideContext?: AgentJobInfo["guideContext"];
+		/** Launch-time review (patch + labels + source) the guide describes (guide
+		 *  provider only). Kept server-side like changedFilesSnapshot — NEVER on
+		 *  AgentJobInfo, which is broadcast over SSE — and handed to
+		 *  onJobComplete for persistence beside the guide (portable export). */
+		launchReview?: GuideLaunchReview;
 	} | null>;
 	/** Called when a job completes successfully — parse results and push annotations. */
-	onJobComplete?: (job: AgentJobInfo, meta: { outputPath?: string; stdout?: string; cwd?: string; changedFilesSnapshot?: string[] }) => void | Promise<void>;
+	onJobComplete?: (job: AgentJobInfo, meta: { outputPath?: string; stdout?: string; cwd?: string; changedFilesSnapshot?: string[]; launchReview?: GuideLaunchReview }) => void | Promise<void>;
 }
 
 /**
@@ -156,6 +163,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 	const jobs = new Map<string, { info: AgentJobInfo; proc: ChildProcess | null }>();
 	const jobOutputPaths = new Map<string, string>();
 	const jobChangedFilesSnapshots = new Map<string, string[]>();
+	const jobLaunchReviews = new Map<string, GuideLaunchReview>();
 	const subscribers = new Set<ServerResponse>();
 	let version = 0;
 
@@ -224,7 +232,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 		command: string[],
 		label: string,
 		outputPath?: string,
-		spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"] },
+		spawnOptions?: { captureStdout?: boolean; stdinPrompt?: string; cwd?: string; prompt?: string; engine?: string; model?: string; effort?: string; reasoningEffort?: string; fastMode?: boolean; thinking?: string; prUrl?: string; diffScope?: string; diffContext?: AgentJobInfo["diffContext"]; reviewProfileId?: string; reviewProfileLabel?: string; changedFilesSnapshot?: string[]; guideContext?: AgentJobInfo["guideContext"]; launchReview?: GuideLaunchReview },
 	): AgentJobInfo {
 		const source = jobSource(id);
 
@@ -285,6 +293,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 			if (outputPath) jobOutputPaths.set(id, outputPath);
 			if (spawnOptions?.cwd) jobOutputPaths.set(`${id}:cwd`, spawnOptions.cwd);
 			if (spawnOptions?.changedFilesSnapshot) jobChangedFilesSnapshots.set(id, spawnOptions.changedFilesSnapshot);
+			if (spawnOptions?.launchReview) jobLaunchReviews.set(id, spawnOptions.launchReview);
 			broadcast({ type: "job:started", job: { ...info } });
 
 			// --- Stdout capture (Claude/Cursor stream-json) ---
@@ -384,6 +393,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 				const jobOutputPath = jobOutputPaths.get(id);
 				const jobCwd = jobOutputPaths.get(`${id}:cwd`);
 				const changedFilesSnapshot = jobChangedFilesSnapshots.get(id);
+				const launchReview = jobLaunchReviews.get(id);
 				if (exitCode === 0 && options.onJobComplete) {
 					try {
 						await options.onJobComplete(entry.info, {
@@ -391,6 +401,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 							stdout: captureStdout ? stdoutBuf : undefined,
 							cwd: jobCwd,
 							changedFilesSnapshot,
+							launchReview,
 						});
 					} catch (err) {
 						// Claude/Codex REVIEW jobs stay fail-open by design: annotations may
@@ -415,6 +426,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 				jobOutputPaths.delete(id);
 				jobOutputPaths.delete(`${id}:cwd`);
 				jobChangedFilesSnapshots.delete(id);
+				jobLaunchReviews.delete(id);
 				broadcast({ type: "job:completed", job: { ...entry.info } });
 			});
 
@@ -458,6 +470,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 		jobOutputPaths.delete(id);
 		jobOutputPaths.delete(`${id}:cwd`);
 		jobChangedFilesSnapshots.delete(id);
+		jobLaunchReviews.delete(id);
 		broadcast({ type: "job:completed", job: { ...entry.info } });
 		return true;
 	}
@@ -579,7 +592,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 					const KNOWN_JOB_FIELDS = new Set([
 						"provider", "command", "label",
 						"engine", "model", "reasoningEffort", "effort", "thinking", "fastMode",
-						"reviewProfileId", "repairOf",
+						"reviewProfileId", "repairOf", "instructions",
 					]);
 					if (body && typeof body === "object") {
 						const unknown = Object.keys(body).filter((k) => !KNOWN_JOB_FIELDS.has(k));
@@ -633,6 +646,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 					let jobReviewProfileLabel: string | undefined;
 					let jobChangedFilesSnapshot: string[] | undefined;
 					let jobGuideContext: AgentJobInfo["guideContext"] | undefined;
+					let jobLaunchReview: GuideLaunchReview | undefined;
 					const jobId = crypto.randomUUID();
 					if (options.buildCommand) {
 						// Thread config from POST body to buildCommand
@@ -645,6 +659,13 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						if (body.fastMode === true) config.fastMode = true;
 						if (typeof body.reviewProfileId === "string") config.reviewProfileId = body.reviewProfileId;
 						if (typeof body.repairOf === "string") config.repairOf = body.repairOf;
+						// Guide extra instructions (#1265): explicit launch text wins,
+						// else the server-stored standing instructions apply; neither
+						// yields text and launches build the exact same prompts as before.
+						const launchInstructions = provider === "guide"
+							? resolveGuideLaunchInstructions(body.instructions)
+							: undefined;
+						if (launchInstructions !== undefined) config.instructions = launchInstructions;
 						const built = await options.buildCommand(provider, Object.keys(config).length > 0 ? config : undefined);
 						if (built) {
 							command = built.command;
@@ -667,6 +688,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 							jobReviewProfileLabel = built.reviewProfileLabel;
 							jobChangedFilesSnapshot = built.changedFilesSnapshot;
 							jobGuideContext = built.guideContext;
+							jobLaunchReview = built.launchReview;
 						}
 					}
 
@@ -693,6 +715,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						reviewProfileLabel: jobReviewProfileLabel,
 						changedFilesSnapshot: jobChangedFilesSnapshot,
 						guideContext: jobGuideContext,
+						launchReview: jobLaunchReview,
 					});
 					json(res, { job }, 201);
 				} catch (err) {

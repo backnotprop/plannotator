@@ -139,6 +139,12 @@ export interface GitCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /**
+   * Set when `maxOutputBytes` was reached and the runtime stopped reading. The
+   * command was killed, so `exitCode` reports the signal, not the command's own
+   * verdict, and `stdout` is a prefix — never a usable result.
+   */
+  truncated?: boolean;
 }
 
 /** Per-command execution policy understood by every review Git runtime. */
@@ -149,6 +155,14 @@ export interface GitCommandOptions {
   stdin?: string;
   /** Whether the command may ask the user for credentials. Defaults to `"allow"`. */
   interaction?: "allow" | "forbid";
+  /**
+   * Hard ceiling on buffered stdout. The runtime stops reading and kills the
+   * command once the limit is passed, so a command that can emit an unbounded
+   * tree (a whole-repository diff) bounds real memory growth instead of being
+   * rejected after it has already been held in full. The result is flagged
+   * `truncated`. Omitted means no ceiling.
+   */
+  maxOutputBytes?: number;
   /**
    * Extra Git configuration for this one command, injected through the
    * `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`
@@ -1128,6 +1142,7 @@ async function getUntrackedFileDiffs(
   cwd?: string,
   options?: GitDiffOptions,
   failurePolicy: UntrackedFailurePolicy = "best-effort",
+  includeBinaryPayloads = false,
 ): Promise<{ diff: string; paths: string[] }> {
   // git ls-files scopes to the CWD subtree and returns CWD-relative paths,
   // unlike git diff HEAD which always covers the full repo with root-relative
@@ -1193,7 +1208,11 @@ async function getUntrackedFileDiffs(
         // Preserve the existing best-effort/strict behavior below: Git reports
         // the authoritative read error for files that disappear mid-snapshot.
       }
-      if (fileInfo?.isFile && fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES) {
+      if (
+        !includeBinaryPayloads
+        && fileInfo?.isFile
+        && fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES
+      ) {
         const mode = fileInfo.isExecutable ? "100755" : "100644";
         const oldToken = formatPatchPathToken("a", file);
         const newToken = formatPatchPathToken("b", file);
@@ -1212,6 +1231,7 @@ async function getUntrackedFileDiffs(
         [
           "diff",
           "--no-ext-diff",
+          ...(includeBinaryPayloads ? ["--binary", "--full-index"] : []),
           ...(options?.hideWhitespace ? ["-w"] : []),
           "--no-index",
           `--src-prefix=${srcPrefix}`,
@@ -1276,6 +1296,76 @@ export async function getWorkingTreeDiffFromBase(
     untrackedFailurePolicy,
   );
   return removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
+}
+
+/**
+ * Build the exact, applyable patch used to materialize immutable analysis snapshots.
+ *
+ * The ordinary review patch remains bounded and human-readable. This separate
+ * machine patch includes Git binary payloads and full object ids so a binary
+ * file elsewhere in the review cannot make `git apply --binary` reject the
+ * synthetic snapshot.
+ */
+export async function getGitSnapshotMaterializationPatch(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  defaultBranch: string = "main",
+  externalCwd?: string,
+): Promise<string | null> {
+  let cwd = externalCwd;
+  let effectiveDiffType = diffType as string;
+  const worktree = parseWorktreeDiffType(effectiveDiffType);
+  if (effectiveDiffType.startsWith("worktree:")) {
+    if (!worktree) throw new Error("Could not parse the worktree snapshot.");
+    cwd = worktree.path;
+    effectiveDiffType = worktree.subType;
+  }
+  if (
+    effectiveDiffType !== "since-base"
+    && effectiveDiffType !== "uncommitted"
+    && effectiveDiffType !== "staged"
+    && effectiveDiffType !== "unstaged"
+  ) {
+    return null;
+  }
+
+  const binaryDiff = async (args: string[]): Promise<string> =>
+    assertGitSuccess(await runtime.runGit(args, { cwd }), args).stdout;
+  const common = [
+    "diff",
+    "--no-ext-diff",
+    "--binary",
+    "--full-index",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+  ];
+  const untracked = async (): Promise<{ diff: string; paths: string[] }> =>
+    getUntrackedFileDiffs(runtime, "a/", "b/", cwd, undefined, "strict", true);
+
+  if (effectiveDiffType === "staged") {
+    return binaryDiff([...common, "--staged"]);
+  }
+  if (effectiveDiffType === "unstaged") {
+    const files = await untracked();
+    const tracked = await binaryDiff(common);
+    return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
+  }
+
+  const hasHead = (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd })).exitCode === 0;
+  const files = await untracked();
+  if (!hasHead) return files.diff;
+  if (effectiveDiffType === "uncommitted") {
+    const tracked = await binaryDiff([...common, "HEAD"]);
+    return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
+  }
+
+  const mergeBaseResult = await runtime.runGit(
+    ["merge-base", "--end-of-options", defaultBranch, "HEAD"],
+    { cwd },
+  );
+  const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : "HEAD";
+  const tracked = await binaryDiff([...common, "--end-of-options", mergeBase]);
+  return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
 }
 
 /**
@@ -1375,22 +1465,29 @@ export function parseWorktreeDiffType(
   // it can't be recognized by the single lastIndexOf(':') split below. Split
   // on the LAST ':commit:' occurrence (a path that itself ends in ':commit'
   // followed by a hex segment would be misread — accepted pathological edge).
+  // An empty worktree path is never valid: it would resolve to an empty cwd,
+  // and Bun.spawn({ cwd: "" }) silently runs git in the SERVER's own directory
+  // rather than the target repo — leaking an unrelated checkout's diff. Treat a
+  // missing path as unparseable so callers fall back to their real cwd.
+  const finalize = (path: string, subType: string) =>
+    path === "" ? null : { path, subType };
+
   const commitIdx = rest.lastIndexOf(":commit:");
   if (commitIdx !== -1) {
     const maybeCommit = rest.slice(commitIdx + 1);
     if (parseCommitDiffType(maybeCommit)) {
-      return { path: rest.slice(0, commitIdx), subType: maybeCommit };
+      return finalize(rest.slice(0, commitIdx), maybeCommit);
     }
   }
   const lastColon = rest.lastIndexOf(":");
   if (lastColon !== -1) {
     const maybeSub = rest.slice(lastColon + 1);
     if (WORKTREE_SUB_TYPES.has(maybeSub)) {
-      return { path: rest.slice(0, lastColon), subType: maybeSub };
+      return finalize(rest.slice(0, lastColon), maybeSub);
     }
   }
 
-  return { path: rest, subType: "uncommitted" };
+  return finalize(rest, "uncommitted");
 }
 
 export async function runGitDiff(

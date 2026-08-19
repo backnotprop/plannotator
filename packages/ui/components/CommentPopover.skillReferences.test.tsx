@@ -139,6 +139,19 @@ function activeRow(): Element | null {
   return document.querySelector('[data-skill-item-active]');
 }
 
+function assertOpenAutocompleteTextbox(el: HTMLTextAreaElement): Element {
+  expect(el.hasAttribute('role')).toBe(false);
+  expect(el.getAttribute('aria-autocomplete')).toBe('list');
+  expect(el.getAttribute('aria-haspopup')).toBe('listbox');
+  expect(el.hasAttribute('aria-expanded')).toBe(false);
+  const controls = el.getAttribute('aria-controls');
+  expect(controls).not.toBeNull();
+  expect(el.getAttribute('aria-owns')).toBe(controls);
+  const listbox = document.getElementById(controls!);
+  expect(listbox?.getAttribute('role')).toBe('listbox');
+  return listbox!;
+}
+
 describe('CommentPopover skill references — no-preselection keyboard state machine', () => {
   test.skipIf(!hasDom)(
     'THE regression: bare $ opens the full catalog with NOTHING active; Enter stays a newline',
@@ -177,6 +190,43 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
       const enter = await press(el, 'Enter');
       expect(enter.defaultPrevented).toBe(false);
       expect(el.value).toBe('use /an');
+    },
+  );
+
+  test.skipIf(!hasDom)(
+    'the textarea exposes the open listbox and only identifies an explicitly active option',
+    async () => {
+      await mountPopover();
+      const el = textarea();
+      expect(el.hasAttribute('role')).toBe(false);
+      expect(el.getAttribute('aria-autocomplete')).toBe('list');
+      expect(el.getAttribute('aria-haspopup')).toBe('listbox');
+      expect(el.hasAttribute('aria-expanded')).toBe(false);
+      expect(el.hasAttribute('aria-controls')).toBe(false);
+      expect(el.hasAttribute('aria-owns')).toBe(false);
+      expect(el.hasAttribute('aria-activedescendant')).toBe(false);
+
+      await type(el, 'use /anim');
+      const listbox = assertOpenAutocompleteTextbox(el);
+      const options = listbox.querySelectorAll('[role="option"]');
+      expect(options.length).toBe(1);
+      for (const option of options) {
+        expect(option.getAttribute('aria-selected')).toBe('false');
+        expect(option.getAttribute('tabindex')).toBe('-1');
+      }
+      expect(el.hasAttribute('aria-activedescendant')).toBe(false);
+
+      await press(el, 'ArrowDown');
+      const active = activeRow();
+      expect(active?.getAttribute('role')).toBe('option');
+      expect(active?.getAttribute('aria-selected')).toBe('true');
+      expect(el.getAttribute('aria-activedescendant')).toBe(active?.id);
+
+      await press(el, 'Escape');
+      expect(el.hasAttribute('aria-expanded')).toBe(false);
+      expect(el.hasAttribute('aria-controls')).toBe(false);
+      expect(el.hasAttribute('aria-owns')).toBe(false);
+      expect(el.hasAttribute('aria-activedescendant')).toBe(false);
     },
   );
 
@@ -457,6 +507,8 @@ describe('CommentPopover skill references — no-preselection keyboard state mac
       expect(document.querySelector('[data-skill-human-only-notice]')).toBeNull();
       expect(document.querySelector('[data-skill-ref-overlay]')).toBeNull();
       expect(el.classList.contains('pn-ref-input')).toBe(false);
+      expect(el.hasAttribute('role')).toBe(false);
+      expect(el.hasAttribute('aria-expanded')).toBe(false);
       await type(el, 'use $');
       expect(menu()).toBeNull();
       await type(el, 'use $plannotator-rev');

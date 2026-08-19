@@ -1,3 +1,4 @@
+import { getScrollViewportRect } from '../hooks/useScrollViewport';
 import { getAnnotatableTextNodes } from './domSelection';
 
 /** A durable cursor location measured within one rendered Markdown block. */
@@ -132,7 +133,9 @@ function getViewportCenterY(
   container: HTMLElement,
   scrollViewport?: HTMLElement | null,
 ): number {
-  const rect = (scrollViewport ?? container).getBoundingClientRect();
+  const rect = scrollViewport
+    ? getScrollViewportRect(scrollViewport)
+    : container.getBoundingClientRect();
   return rect.top + rect.height / 2;
 }
 

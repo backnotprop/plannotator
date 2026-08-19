@@ -9,13 +9,32 @@ import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import type { CallbackConfig } from '@plannotator/ui/utils/callback';
 import type { UIPreferences } from '@plannotator/ui/utils/uiPreferences';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
+import type { CompactPlanAction } from '@plannotator/ui/components/PlanHeaderMenu';
 
 interface AppHeaderProps {
-  /** HTML annotate surface: show a Hide/Show annotation-tools toggle in the header,
-   *  so hiding leaves the rendered HTML completely free of overlay controls. */
+  /** Mobile document-scroll surfaces let Safari own the top edge and scroll
+   * this header with the page. Desktop keeps the incumbent sticky header. */
+  sticky?: boolean;
+  /** HTML annotate surface (raw HTML or live app): shows the pen toggle. */
   htmlSurface?: boolean;
+  /** Interact/Annotate toggle for HTML and live-app surfaces: armed means
+   *  clicks annotate; unarmed hands the page back its native interaction
+   *  (text drag-selection commenting stays live either way). */
+  htmlAnnotateArmed?: boolean;
+  onToggleHtmlAnnotate?: () => void;
+  /** Floating tools (sidebar tongue tabs + comment/attachments cluster) are
+   *  fully removed from the DOM while hidden; this button is the way back. */
   htmlToolsHidden?: boolean;
   onToggleHtmlTools?: () => void;
+  /** Compact touch layouts replace the brand mark with a task-focused entry
+   * into the full-stage document navigator. Desktop never receives it. */
+  compactTouchLayout?: boolean;
+  compactNavigatorAvailable?: boolean;
+  compactNavigatorOpen?: boolean;
+  onCompactNavigatorToggle?: () => void;
+  compactDocumentTitle?: string;
+  compactSessionActions?: CompactPlanAction[];
+  compactDocumentActions?: CompactPlanAction[];
   // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
@@ -94,9 +113,19 @@ interface AppHeaderProps {
 }
 
 export const AppHeader = React.memo<AppHeaderProps>(({
+  sticky = true,
   htmlSurface,
+  htmlAnnotateArmed,
+  onToggleHtmlAnnotate,
   htmlToolsHidden,
   onToggleHtmlTools,
+  compactTouchLayout = false,
+  compactNavigatorAvailable = false,
+  compactNavigatorOpen = false,
+  onCompactNavigatorToggle,
+  compactDocumentTitle,
+  compactSessionActions,
+  compactDocumentActions,
   isApiMode,
   annotateMode,
   archiveMode,
@@ -163,24 +192,38 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   octarineConfigured,
 }) => {
   return (
-    <header data-app-header="true" className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-[50]">
-      <div className="flex items-center gap-2">
-        <AppHeaderLogo />
-        {htmlSurface && onToggleHtmlTools && (
-          <button
-            type="button"
-            onClick={onToggleHtmlTools}
-            className="ml-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-1.5 py-1 rounded cursor-pointer"
-            title={htmlToolsHidden ? 'Show annotation tools' : 'Hide annotation tools'}
-          >
-            {htmlToolsHidden ? 'Show tools' : 'Hide tools'}
-          </button>
+    <header
+      data-app-header="true"
+      className={`${compactTouchLayout ? 'h-[52px] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center px-1' : 'h-12 flex items-center justify-between px-2 md:px-4'} border-b border-border/50 bg-card/50 backdrop-blur-xl z-[50] ${sticky ? 'sticky top-0' : 'relative'}`}
+    >
+      <div className={compactTouchLayout ? 'flex items-center justify-start' : 'flex items-center gap-2'}>
+        {compactTouchLayout ? (
+          compactNavigatorAvailable && onCompactNavigatorToggle ? (
+            <CompactPlanNavigatorTrigger
+              open={compactNavigatorOpen}
+              onToggle={onCompactNavigatorToggle}
+            />
+          ) : (
+            <span className="block h-11 w-11" aria-hidden="true" />
+          )
+        ) : (
+          <AppHeaderLogo />
         )}
       </div>
 
-      <div className="flex items-center gap-1 md:gap-2">
+      {compactTouchLayout && (
+        <div
+          data-pn-compact-document-title="true"
+          className="min-w-0 px-2 text-center text-sm font-medium tracking-tight text-foreground"
+          title={compactDocumentTitle}
+        >
+          <span className="block truncate">{compactDocumentTitle || 'Plan'}</span>
+        </div>
+      )}
+
+      <div className={`flex items-center gap-1 md:gap-2 ${compactTouchLayout ? 'justify-end' : ''}`}>
         {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
-        {callbackConfig && !isApiMode && isSharedSession && (
+        {!compactTouchLayout && callbackConfig && !isApiMode && isSharedSession && (
           <>
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
             <FeedbackButton
@@ -198,7 +241,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {isApiMode && !linkedDocIsActive && archiveMode && (
+        {!compactTouchLayout && isApiMode && !linkedDocIsActive && archiveMode && (
           <>
             <button
               onClick={onArchiveCopy}
@@ -220,7 +263,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {isApiMode && !linkedDocIsActive && goalSetupMode && (
+        {!compactTouchLayout && isApiMode && !linkedDocIsActive && goalSetupMode && (
           <>
             <ExitButton
               onClick={onGoalSetupExit}
@@ -241,7 +284,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {isApiMode && (!linkedDocIsActive || annotateMode) && !archiveMode && !goalSetupMode && (
+        {!compactTouchLayout && isApiMode && (!linkedDocIsActive || annotateMode) && !archiveMode && !goalSetupMode && (
           <>
             {annotateMode ? (
               <>
@@ -304,8 +347,62 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
+        {/* Interact/Annotate toggle — HTML and live-app surfaces only. A PEN
+            icon (deliberately not a speech bubble: the annotations-panel
+            button beside it is already a bubble, and the two must be
+            distinguishable at a glance — also distinct from the AI sparkles).
+            Always the same icon: armed shows the accent color plus a visible
+            border; unarmed is muted with a TRANSPARENT border of the same
+            width, so the button's box is pixel-identical in both states. */}
+        {/* Show/hide tools — removes ALL floating chrome (sidebar tongue tabs +
+            the comment/attachments cluster) from the DOM, leaving nothing over
+            the page. Sits left of the pen; this button is the only way back,
+            so it never hides itself. Eye = tools visible, eye-off = hidden. */}
+        {!compactTouchLayout && htmlSurface && onToggleHtmlTools && (
+          <button
+            type="button"
+            data-html-tools-toggle
+            onClick={onToggleHtmlTools}
+            aria-pressed={!!htmlToolsHidden}
+            className="p-1.5 rounded-md border border-transparent text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted"
+            title={htmlToolsHidden ? 'Show tools' : 'Hide tools'}
+          >
+            {htmlToolsHidden ? (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            )}
+          </button>
+        )}
+
+        {!compactTouchLayout && htmlSurface && onToggleHtmlAnnotate && (
+          <button
+            type="button"
+            data-html-annotate-toggle
+            onClick={onToggleHtmlAnnotate}
+            aria-pressed={!!htmlAnnotateArmed}
+            className={`p-1.5 rounded-md border text-xs font-medium transition-all cursor-pointer ${
+              htmlAnnotateArmed
+                ? 'border-primary/60 bg-primary/15 text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+            }`}
+            title={htmlAnnotateArmed
+              ? 'Annotate mode: click an element or select text to comment. Esc to interact'
+              : 'Interact mode: clicks reach the page (text selection still comments). Click to annotate'}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.862 4.487zm0 0L19.5 7.125" />
+            </svg>
+          </button>
+        )}
+
         {/* Annotations panel toggle */}
-        {!goalSetupMode && (
+        {!compactTouchLayout && !goalSetupMode && (
           <button
             onClick={onAnnotationPanelToggle}
             className={`relative p-1.5 rounded-md text-xs font-medium transition-all ${
@@ -325,7 +422,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             )}
           </button>
         )}
-        {!goalSetupMode && aiAvailable && (
+        {!compactTouchLayout && !goalSetupMode && aiAvailable && (
           <button
             onClick={onAIChatToggle}
             className={`relative p-1.5 rounded-md text-xs font-medium transition-all ${
@@ -379,11 +476,45 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           obsidianConfigured={!archiveMode && !goalSetupMode && obsidianConfigured}
           bearConfigured={!archiveMode && !goalSetupMode && bearConfigured}
           octarineConfigured={!archiveMode && !goalSetupMode && octarineConfigured}
+          compactTouchLayout={compactTouchLayout}
+          compactSessionActions={compactSessionActions}
+          compactDocumentActions={compactDocumentActions}
         />
       </div>
     </header>
   );
 });
+
+export const CompactPlanNavigatorTrigger = ({
+  open,
+  onToggle,
+}: {
+  open: boolean;
+  onToggle: () => void;
+}) => (
+  <button
+    id="pn-compact-plan-navigator-trigger"
+    type="button"
+    onClick={onToggle}
+    data-pn-touch-target="true"
+    data-pn-touch-target-icon="true"
+    data-pn-compact-navigator-trigger="true"
+    className={`flex h-11 w-11 items-center justify-center rounded-lg text-sm font-semibold tracking-tight outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 ${
+      open
+        ? 'bg-primary/15 text-primary'
+        : 'text-foreground hover:bg-muted'
+    }`}
+    aria-label={open ? 'Close plan navigator' : 'Open plan navigator'}
+    aria-expanded={open}
+    aria-controls="pn-compact-plan-navigator"
+    title={open ? 'Close navigator' : 'Navigate plan'}
+  >
+    <svg className="h-[18px] w-[18px] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 6h14M5 12h14M5 18h9" />
+    </svg>
+    <span className="sr-only">Plan navigation</span>
+  </button>
+);
 
 const AppHeaderLogo = () => (
   <div className="flex items-center gap-2 md:gap-3">

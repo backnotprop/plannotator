@@ -4,7 +4,11 @@ import {
   useState,
   type RefObject,
 } from 'react';
-import { useScrollViewport } from '../hooks/useScrollViewport';
+import {
+  addScrollViewportListener,
+  getScrollViewportRect,
+  useScrollViewport,
+} from '../hooks/useScrollViewport';
 import type { SemanticTarget } from '../utils/blockTargeting';
 import {
   createRangeBetweenTextPositions,
@@ -186,7 +190,9 @@ export function VimTargetReticle({
         return;
       }
       const containerRect = container.getBoundingClientRect();
-      const viewportTop = scrollViewport?.getBoundingClientRect().top ?? containerRect.top;
+      const viewportTop = scrollViewport
+        ? getScrollViewportRect(scrollViewport).top
+        : containerRect.top;
       const stickyBottom = container
         .querySelector<HTMLElement>('[data-sticky-actions]')
         ?.getBoundingClientRect()
@@ -205,7 +211,9 @@ export function VimTargetReticle({
 
     update();
     window.addEventListener('resize', scheduleUpdate, { passive: true });
-    scrollViewport?.addEventListener('scroll', scheduleUpdate, { passive: true });
+    const removeScrollListener = scrollViewport
+      ? addScrollViewportListener(scrollViewport, scheduleUpdate)
+      : undefined;
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? null
       : new ResizeObserver(scheduleUpdate);
@@ -214,7 +222,7 @@ export function VimTargetReticle({
     return () => {
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener('resize', scheduleUpdate);
-      scrollViewport?.removeEventListener('scroll', scheduleUpdate);
+      removeScrollListener?.();
       resizeObserver?.disconnect();
     };
   }, [containerRef, restoredState, scrollViewport, target]);

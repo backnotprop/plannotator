@@ -9,7 +9,8 @@ import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.ts";
-import { FAVICON_PNG_BYTES } from "../generated/favicon.ts";
+import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../generated/favicon.ts";
+import { getServerConfig } from "../generated/config.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
@@ -229,10 +230,23 @@ export function readDraftGenerationFromBody(body: unknown): number | undefined {
 
 export { readDraftGenerationFromUrl };
 
+/**
+ * Serve the app favicon. Mirrors packages/server/shared-handlers.ts
+ * handleFavicon() exactly: the persisted style decides the payload, the response
+ * declares its real type, and it is not cached because one URL now has two
+ * possible bodies. See that file for the full reasoning.
+ */
 export function handleFavicon(res: Res): void {
+	if (getServerConfig(null).favicon === "classic") {
+		send(res, Buffer.from(CLASSIC_FAVICON_SVG, "utf-8"), 200, {
+			"Content-Type": "image/svg+xml",
+			"Cache-Control": "no-cache",
+		});
+		return;
+	}
 	send(res, Buffer.from(FAVICON_PNG_BYTES), 200, {
 		"Content-Type": "image/png",
-		"Cache-Control": "public, max-age=86400",
+		"Cache-Control": "no-cache",
 	});
 }
 

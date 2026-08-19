@@ -38,6 +38,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       pendingSelection={state.pendingSelection}
       reviewBase={state.reviewBase}
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
+      compactTouchLayout={state.isCompactTouchLayout}
       onLineSelection={state.onLineSelection}
       onAddAnnotationForFile={state.onAddAnnotationForFile}
       onEditAnnotation={state.onEditAnnotation}
@@ -48,9 +49,14 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       onAddFileCommentForFile={state.onAddFileCommentForFile}
       viewedFiles={state.viewedFiles}
       onToggleViewed={state.onToggleViewed}
+      generatedFiles={state.generatedFiles}
+      expandedGeneratedFiles={state.expandedGeneratedFiles}
+      onGeneratedFileCollapsedChange={state.onGeneratedFileCollapsedChange}
+      showViewedControls={state.showViewedControls}
       stagedFiles={state.stagedFiles}
       onStage={state.onStage}
       canStageFiles={state.canStageFiles}
+      showStageControls={state.showStageControls}
       canStagePath={state.canStagePath}
       stagingFile={state.stagingFile}
       stageError={state.stageError}

@@ -213,7 +213,7 @@ Then finish the step for your agent:
 | **Gemini CLI** | Nothing. The hook, policy, and slash commands are configured automatically. Requires Gemini CLI 0.36.0+. | [README](apps/gemini/README.md) |
 | **Kiro CLI** | Nothing. Skills and an example agent are installed automatically. Try `kiro-cli chat --agent plannotator`. | [README](apps/kiro-cli/README.md) |
 | **OpenCode** | Add `"plugin": ["@plannotator/opencode@latest"]` to `opencode.json`. Restart OpenCode. | [README](apps/opencode-plugin/README.md) |
-| **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator`. | [README](apps/pi-extension/README.md) |
+| **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator-plan-mode`. | [README](apps/pi-extension/README.md) |
 
 Full walkthroughs live in the [installation docs](https://docs.plannotator.ai/open-source/start/installation).
 
@@ -385,7 +385,38 @@ Host your-server
 
 ## Security
 
-Every released binary ships with a SHA256 sidecar. [SLSA provenance](https://slsa.dev/) attestations are available from v0.17.2.
+Every released binary ships with a SHA256 sidecar. [SLSA provenance](https://slsa.dev/) attestations are available from v0.17.2. The current release workflow also attaches a CycloneDX JSON SBOM, evaluates it with a fresh Grype database before anything is attested or published, and creates a GitHub/Sigstore SBOM attestation for the shipped binaries and npm tarballs.
+
+The SBOM is intentionally labeled as a release-wide Syft inventory of the monorepo's locked build inputs and dependencies. It is not an exact per-binary runtime inventory: Bun standalone executables do not expose their bundled JavaScript package metadata to Syft. The canonical [installation and verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) cover the existing installer path; the exact new SBOM commands are included below and must be copied to that Mintlify page before the first SBOM-enabled release.
+
+The release gate rejects scanner-side ignored matches and treats unknown applicability conservatively as runtime when evaluating CISA KEV and fixable Critical findings. Its explicit Grype configuration, complete JSON results, database status, and repository policy decision remain available as workflow evidence.
+
+To verify a released Linux x64 binary, its existing provenance, and the new SBOM evidence directly:
+
+```bash
+tag=vX.Y.Z
+version="${tag#v}"
+mkdir -p /tmp/plannotator-release-verify
+gh release download "$tag" --repo backnotprop/plannotator \
+  --pattern 'plannotator-linux-x64*' \
+  --pattern "plannotator-${version}-release-sbom.cdx.json*" \
+  --dir /tmp/plannotator-release-verify
+
+(cd /tmp/plannotator-release-verify && sha256sum --check plannotator-linux-x64.sha256)
+(cd /tmp/plannotator-release-verify && sha256sum --check "plannotator-${version}-release-sbom.cdx.json.sha256")
+
+gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+  --repo backnotprop/plannotator --source-ref "refs/tags/$tag" \
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+  --predicate-type https://slsa.dev/provenance/v1
+
+gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+  --repo backnotprop/plannotator --source-ref "refs/tags/$tag" \
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+  --predicate-type https://cyclonedx.org/bom
+```
+
+These are separate claims over the same artifact digest: provenance identifies its builder/source/workflow, while the CycloneDX predicate describes the release-wide inventory. The release runbook also canonicalizes the downloaded SBOM and attested predicate with `jq -S` and compares them.
 
 To verify on install:
 
@@ -399,7 +430,7 @@ Requires the `gh` CLI, but no login: the installer fetches the attestation bundl
 { "verifyAttestation": true }
 ```
 
-See the [verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
+Installer verification remains opt-in and verifies SLSA build provenance; normal installation does not require `gh`. See the [canonical installation docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
 
 ---
 

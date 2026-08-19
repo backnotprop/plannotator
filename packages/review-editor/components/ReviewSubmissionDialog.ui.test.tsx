@@ -34,6 +34,10 @@ let host: HTMLElement | null = null;
 async function renderSubmission(
   submission: ReviewSubmission,
   generalComment = '',
+  options: {
+    isSubmitting?: boolean;
+    onCancel?: () => void;
+  } = {},
 ): Promise<void> {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -49,8 +53,8 @@ async function renderSubmission(
         platformOpenPR={false}
         onPlatformOpenPRChange={() => {}}
         onConfirm={() => {}}
-        onCancel={() => {}}
-        isSubmitting={false}
+        onCancel={options.onCancel ?? (() => {})}
+        isSubmitting={options.isSubmitting ?? false}
         recoveryPersistsRefresh
         mrLabel="MR"
         platformLabel="GitLab"
@@ -78,6 +82,33 @@ afterEach(async () => {
 });
 
 describe('ReviewSubmissionDialog submission outcomes', () => {
+  test.skipIf(!hasDom)('keeps the dialog inside the observed viewport and marks its primary input for mobile Safari', async () => {
+    await renderSubmission({ targets: [baseTarget], orphans: [] });
+
+    expect(document.querySelector('.pn-visible-viewport-overlay')).not.toBeNull();
+    expect(document.querySelector('textarea')?.hasAttribute('data-pn-mobile-editable')).toBe(true);
+    expect(actionButton()?.hasAttribute('data-pn-touch-target')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('ignores Escape while a platform submission is in flight', async () => {
+    let cancelCount = 0;
+    await renderSubmission(
+      { targets: [baseTarget], orphans: [] },
+      '',
+      {
+        isSubmitting: true,
+        onCancel: () => { cancelCount += 1; },
+      },
+    );
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(cancelCount).toBe(0);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
   test.skipIf(!hasDom)('renders all-success as complete and disables another submission', async () => {
     await renderSubmission({
       targets: [{ ...baseTarget, status: 'success' }],

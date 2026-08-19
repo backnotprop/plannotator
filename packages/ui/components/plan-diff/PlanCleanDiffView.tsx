@@ -330,6 +330,7 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
           contextText={commentPopover.contextText}
           isGlobal={false}
           initialText={commentPopover.initialText}
+          draftKey={`plan-diff:${commentPopover.index}:${commentPopover.diffContext}:${commentPopover.contextText}`}
           onSubmit={handleCommentSubmit}
           onClose={handleCommentClose}
           skillReferences

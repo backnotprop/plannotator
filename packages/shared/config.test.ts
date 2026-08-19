@@ -1,4 +1,7 @@
-import { describe, expect, test, beforeEach, afterAll, spyOn } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   resolveAIEnabled,
   resolveCursorSandbox,
@@ -9,8 +12,37 @@ import {
   resolveTodoProviderEnabled,
   resolveUrlHost,
   isValidUrlHost,
+  parseReviewAnalysisConfig,
+  loadConfig,
+  saveConfig,
+  getServerConfig,
+  resolveGuideShareUrl,
+  resolveSharingEnabled,
+  DEFAULT_GUIDE_SHARE_URL,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
+
+describe("parseReviewAnalysisConfig", () => {
+  test("accepts independent boolean analysis flags", () => {
+    expect(parseReviewAnalysisConfig({ semanticDiff: false })).toEqual({ semanticDiff: false });
+    expect(parseReviewAnalysisConfig({ callFlow: true })).toEqual({ callFlow: true });
+    expect(parseReviewAnalysisConfig({ semanticDiff: true, callFlow: false })).toEqual({
+      semanticDiff: true,
+      callFlow: false,
+    });
+  });
+
+  test("rejects non-object and non-boolean settings", () => {
+    expect(parseReviewAnalysisConfig(null)).toBeUndefined();
+    expect(parseReviewAnalysisConfig([])).toBeUndefined();
+    expect(parseReviewAnalysisConfig({ semanticDiff: "false" })).toBeUndefined();
+    expect(parseReviewAnalysisConfig({ callFlow: 1 })).toBeUndefined();
+  });
+
+  test("ignores unknown keys instead of persisting them", () => {
+    expect(parseReviewAnalysisConfig({ callFlow: true, futureFlag: true })).toEqual({ callFlow: true });
+  });
+});
 
 describe("resolveAIEnabled", () => {
   test("defaults to enabled", () => {
@@ -307,4 +339,85 @@ describe("config.json boolean coercion", () => {
       });
     });
   }
+});
+
+describe("favicon config persistence", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-config-test-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (originalDataDir !== undefined) {
+      process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    } else {
+      delete process.env.PLANNOTATOR_DATA_DIR;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("persists and reads valid favicon styles via saveConfig and getServerConfig", () => {
+    saveConfig({ favicon: "classic" });
+    expect(loadConfig().favicon).toBe("classic");
+    expect(getServerConfig(null).favicon).toBe("classic");
+
+    saveConfig({ favicon: "totman" });
+    expect(loadConfig().favicon).toBe("totman");
+    expect(getServerConfig(null).favicon).toBe("totman");
+  });
+
+  test("omits unknown favicon styles from getServerConfig", () => {
+    const unknownFavicon = "unknown" as unknown as PlannotatorConfig["favicon"];
+    saveConfig({ favicon: unknownFavicon });
+    expect(loadConfig().favicon).toBe(unknownFavicon);
+    expect(getServerConfig(null).favicon).toBeUndefined();
+  });
+});
+
+describe("resolveGuideShareUrl", () => {
+  test("defaults to guides.show; config key is honored; env wins", () => {
+    expect(resolveGuideShareUrl({}, {})).toBe(DEFAULT_GUIDE_SHARE_URL);
+    expect(resolveGuideShareUrl({ guideShareUrl: "https://guides.example.test" }, {})).toBe("https://guides.example.test");
+    expect(resolveGuideShareUrl({ guideShareUrl: "https://guides.example.test" }, { PLANNOTATOR_GUIDE_SHARE_URL: "http://localhost:8788" })).toBe("http://localhost:8788");
+    // An empty (but set) env var counts as unset.
+    expect(resolveGuideShareUrl({ guideShareUrl: "https://guides.example.test" }, { PLANNOTATOR_GUIDE_SHARE_URL: "" })).toBe("https://guides.example.test");
+  });
+
+  test("trailing slashes, query and fragment are trimmed so /api/g can be appended", () => {
+    expect(resolveGuideShareUrl({}, { PLANNOTATOR_GUIDE_SHARE_URL: "https://guides.example.test/" })).toBe("https://guides.example.test");
+    expect(resolveGuideShareUrl({}, { PLANNOTATOR_GUIDE_SHARE_URL: "https://guides.example.test/sub/dir//?x=1#frag" })).toBe("https://guides.example.test/sub/dir");
+    expect(resolveGuideShareUrl({}, { PLANNOTATOR_GUIDE_SHARE_URL: "  https://guides.example.test  " })).toBe("https://guides.example.test");
+  });
+
+  test("non-http(s) or unparsable values warn once and fall back to the default", () => {
+    const writes: string[] = [];
+    const spy = spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      for (const v of ["ftp://guides.example.test", "javascript:alert(1)", "not a url", "guides.example.test"]) {
+        expect(resolveGuideShareUrl({}, { PLANNOTATOR_GUIDE_SHARE_URL: v })).toBe(DEFAULT_GUIDE_SHARE_URL);
+        expect(resolveGuideShareUrl({ guideShareUrl: v }, {})).toBe(DEFAULT_GUIDE_SHARE_URL);
+      }
+      expect(resolveGuideShareUrl({ guideShareUrl: 42 as unknown as string }, {})).toBe(DEFAULT_GUIDE_SHARE_URL);
+    } finally {
+      spy.mockRestore();
+    }
+    const warnings = writes.filter((w) => w.includes("invalid guide share URL"));
+    // Once per distinct value, not once per call.
+    expect(warnings.length).toBe(4);
+  });
+});
+
+describe("resolveSharingEnabled", () => {
+  test("env wins over config; default enabled", () => {
+    expect(resolveSharingEnabled({}, {})).toBe(true);
+    expect(resolveSharingEnabled({ share: "disabled" }, {})).toBe(false);
+    expect(resolveSharingEnabled({ share: "disabled" }, { PLANNOTATOR_SHARE: "enabled" })).toBe(true);
+    expect(resolveSharingEnabled({}, { PLANNOTATOR_SHARE: "disabled" })).toBe(false);
+  });
 });

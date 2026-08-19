@@ -85,6 +85,10 @@ function createHarness(cwd: string) {
 	const ctx = {
 		cwd,
 		hasUI: false,
+		isProjectTrusted: () => {
+			assertActive();
+			return true;
+		},
 		get mode() {
 			assertActive();
 			return "print";
@@ -96,6 +100,7 @@ function createHarness(cwd: string) {
 		model: { provider: "test", id: "original-model" },
 		modelRegistry: { find: (provider: string, id: string) => ({ provider, id }) },
 		sessionManager: {
+			getBranch: () => [],
 			getEntries: () => [],
 			getSessionId: () => "test-session",
 			getSessionFile: () => "session.json",

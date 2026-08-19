@@ -300,7 +300,7 @@ describe('SkillReferenceMenu adaptive placement', () => {
     },
   );
 
-  test.skipIf(!hasDom)('a window resize recomputes placement and re-clamps', async () => {
+  test.skipIf(!hasDom)('a keyboard-short viewport promotes the anchored composer to its bounded overlay', async () => {
     setInnerHeight(768);
     await mountPopover();
     const el = textarea();
@@ -308,12 +308,14 @@ describe('SkillReferenceMenu adaptive placement', () => {
     stubGeometry({ top: 150, bottom: 250 });
     await remeasure();
     expect(assertMenuInsideViewport().direction).toBe('below'); // 504px below fits the cap
-    // Shrink the window: below collapses to 56px, above (136px) is roomier.
+    // Below the shared 420px keyboard threshold, the entire anchored composer
+    // yields to its existing expanded overlay instead of preserving a tiny,
+    // menu-clamped popover.
     setInnerHeight(320);
     await remeasure();
-    const { direction, maxListHeight } = assertMenuInsideViewport();
-    expect(direction).toBe('above');
-    expect(maxListHeight).toBe(150 - GAP - MARGIN);
+    await act(async () => new Promise(resolve => requestAnimationFrame(() => resolve(undefined))));
+    expect(document.querySelector('.pn-visible-viewport-overlay')).not.toBeNull();
+    expect(document.querySelector('button[title="Collapse"]')).toBeNull();
   });
 
   test.skipIf(!hasDom)('a scroll recomputes placement (capture listener, like the popover)', async () => {
