@@ -90,7 +90,18 @@ function emitAnnotateDecision(rawOutput, heading) {
     const parsed = JSON.parse(output);
     if (parsed && typeof parsed === "object") {
       if (parsed.decision === "approved") {
-        process.stdout.write("Approved.\n");
+        // Approve-with-Notes (#1092): `approved` may carry reviewer notes in
+        // `feedback`. Only a note-less approval is a plain "Approved."
+        const feedback = typeof parsed.feedback === "string" ? parsed.feedback.trim() : "";
+        if (!feedback) {
+          process.stdout.write("Approved.\n");
+          return;
+        }
+        // Mirrors DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT in
+        // packages/shared/prompts.ts. Keep the two in sync.
+        process.stdout.write(
+          `# Approved with Notes\n\nThe artifact is approved. The notes below are non-blocking guidance, not a request for another revision.\n\n${feedback}\n\nDo not revise or reopen the artifact solely because of these notes unless the user explicitly requests it. Carry the notes into subsequent work where applicable.\n`,
+        );
         return;
       }
 

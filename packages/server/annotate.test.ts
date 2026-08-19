@@ -15,10 +15,11 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import { startAnnotateServer } from "./annotate";
+import { getServerConfig, loadConfig } from "./config";
 import { deriveAnnotateHistorySlug } from "@plannotator/shared/annotate-history";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
@@ -82,6 +83,64 @@ describe("annotate server: /api/save-notes wiring", () => {
       const response = await fetch(`${server.url}/not-a-real-route`);
       expect(response.headers.get("content-type")).toContain("text/html");
       expect(await response.text()).toContain("Plannotator");
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("annotate server: /api/config favicon persistence", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+  let savedDataDir: string | undefined;
+  let tempDir: string;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    delete process.env.PLANNOTATOR_PORT;
+    delete process.env.PLANNOTATOR_REMOTE;
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-annotate-config-test-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+    if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("persists classic favicon via POST /api/config and ignores unknown values", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "test.md"),
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const validResponse = await fetch(`${server.url}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ favicon: "classic" }),
+      });
+      expect(validResponse.status).toBe(200);
+      expect(loadConfig().favicon).toBe("classic");
+      expect(getServerConfig(null).favicon).toBe("classic");
+
+      const invalidResponse = await fetch(`${server.url}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ favicon: "unknown" }),
+      });
+      expect(invalidResponse.status).toBe(200);
+      // "unknown" was not written into config, so "classic" is retained
+      expect(loadConfig().favicon).toBe("classic");
+      expect(getServerConfig(null).favicon).toBe("classic");
     } finally {
       server.stop();
     }
@@ -1136,5 +1195,796 @@ describe("annotate server: approval notes", () => {
     } finally {
       server.stop();
     }
+  });
+});
+
+describe("annotate server: client lease", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  /**
+   * Connect to the client-lease stream and wait for its first byte (the
+   * ready comment). Returns a `disconnect()` that aborts the underlying
+   * fetch — plain `reader.cancel()` only stops local reads and does not
+   * propagate a close to the server's `ReadableStream.cancel()`, whereas
+   * aborting the request closes the connection the way an abandoned browser
+   * tab actually would.
+   */
+  async function connectClientLease(url: string): Promise<{ disconnect: () => Promise<void> }> {
+    const controller = new AbortController();
+    const response = await fetch(`${url}/api/annotate/client-lease`, { signal: controller.signal });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Timed out waiting for ready comment")), 1000);
+      }),
+    ]);
+    expect(first.done).toBe(false);
+    return {
+      disconnect: async () => {
+        controller.abort();
+        await reader.cancel().catch(() => {});
+      },
+    };
+  }
+
+  /**
+   * Track whether a promise has settled without racing it against a timer —
+   * a `Promise.race` between an already-resolved sentinel and a promise that
+   * may or may not have settled is nondeterministic. Attaching `.then` up
+   * front and reading a flag afterward is reliable regardless of timing.
+   */
+  function trackSettled<T>(promise: Promise<T>): () => boolean {
+    let settled = false;
+    promise.then(() => {
+      settled = true;
+    });
+    return () => settled;
+  }
+
+  test("advertises the effective client-lease capability in /api/plan", async () => {
+    for (const clientLeaseSupported of [true, false]) {
+      const server = await startAnnotateServer({
+        markdown: "# Test",
+        filePath: join(tmpdir(), "client-lease-capability.md"),
+        htmlContent: MINIMAL_HTML,
+        gate: true,
+        approvalNotesSupported: true,
+        clientLeaseSupported,
+      });
+
+      try {
+        const response = await fetch(`${server.url}/api/plan`);
+        const plan = await response.json() as { clientLease?: { enabled: boolean; reconnectGraceMs?: number } };
+        if (clientLeaseSupported) {
+          expect(plan.clientLease).toEqual({ enabled: true, reconnectGraceMs: 30_000 });
+        } else {
+          expect(plan.clientLease).toEqual({ enabled: false });
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  });
+
+  test("a tailnet-published session neither advertises nor serves the lease even when the CLI predicate allowed it", async () => {
+    // --tailscale forces local mode, so the CLI-side predicate reads the
+    // session as local and passes clientLeaseSupported: true — but clients
+    // reach it through the serve proxy, and a proxy disconnect longer than
+    // the grace would auto-dismiss a live review. The server must force the
+    // capability off, exactly like a remote session.
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    const sandboxDataDir = mkdtempSync(join(tmpdir(), "plannotator-lease-tailnet-"));
+    process.env.PLANNOTATOR_DATA_DIR = sandboxDataDir;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-tailnet.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      tailnetPublished: true,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/plan`);
+      const plan = await response.json() as { clientLease?: { enabled: boolean } };
+      expect(plan.clientLease).toEqual({ enabled: false });
+      const stream = await fetch(`${server.url}/api/annotate/client-lease`);
+      expect(stream.status).toBe(404);
+    } finally {
+      server.stop();
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(sandboxDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test("returns 404 for the client-lease stream when the capability is disabled", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-disabled.md"),
+      htmlContent: MINIMAL_HTML,
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/annotate/client-lease`);
+      expect(response.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("resolves the decision as dismissed after the last client disconnects and the grace period elapses", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-expiry.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 50 },
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const isSettled = trackSettled(decision);
+      const client = await connectClientLease(server.url);
+
+      // Still connected — no expiry.
+      await Bun.sleep(20);
+      expect(isSettled()).toBe(false);
+
+      await client.disconnect();
+
+      expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a reconnect before the grace deadline cancels the pending expiry", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-reconnect.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 80 },
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const isSettled = trackSettled(decision);
+
+      const firstClient = await connectClientLease(server.url);
+      await firstClient.disconnect();
+
+      // Reconnect well before the 80ms grace deadline.
+      await Bun.sleep(20);
+      const secondClient = await connectClientLease(server.url);
+
+      // Even past the original deadline, the reconnect cancelled the pending expiry.
+      await Bun.sleep(100);
+      expect(isSettled()).toBe(false);
+
+      // A fresh disconnect starts its own full grace window.
+      await secondClient.disconnect();
+      expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("an explicit approval wins over a later client-lease expiry", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-explicit-decision.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 60 },
+    });
+
+    try {
+      const client = await connectClientLease(server.url);
+
+      const approve = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "Looks good.", annotations: [] }),
+      });
+      expect(approve.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Looks good.",
+        annotations: [],
+      });
+
+      // Disconnecting after the explicit decision must not overwrite it once
+      // the grace period elapses — the approval already cancelled tracking.
+      await client.disconnect();
+      await Bun.sleep(120);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Looks good.",
+        annotations: [],
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a decision arriving after the lease expired is rejected instead of reported as applied", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-late-decision.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 30 },
+    });
+
+    try {
+      const client = await connectClientLease(server.url);
+      await client.disconnect();
+      expect(await server.waitForDecision()).toEqual({
+        feedback: "",
+        annotations: [],
+        exit: true,
+      });
+
+      // A tab that never saw the dismissal must not be told its decision was
+      // applied: the caller already received `dismissed`.
+      for (const [path, init] of [
+        [
+          "/api/approve",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: "Looks good.", annotations: [] }),
+          },
+        ],
+        [
+          "/api/feedback",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: "Please change this.", annotations: [] }),
+          },
+        ],
+        ["/api/exit", { method: "POST" }],
+      ] as const) {
+        const response = await fetch(`${server.url}${path}`, init);
+        expect(response.status).toBe(409);
+      }
+
+      expect(await server.waitForDecision()).toEqual({
+        feedback: "",
+        annotations: [],
+        exit: true,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("stopping the server ends live lease streams", async () => {
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "client-lease-stop.md"),
+      htmlContent: MINIMAL_HTML,
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+    });
+
+    const response = await fetch(`${server.url}/api/annotate/client-lease`);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toBe(": ready\n\n");
+
+    server.stop();
+
+    // The stream must complete rather than stay open on a server that is gone.
+    const next = await reader.read();
+    expect(next.done).toBe(true);
+  });
+});
+
+describe("annotate server: durable submit records (#678)", () => {
+  // The decision promise's consumer (the invoking CLI/agent) can time out
+  // before the reviewer submits; the submit then settled the promise with
+  // nobody listening, deleted the draft, and the feedback existed nowhere.
+  // These tests pin the fix: a durable record is written to
+  // history/{project}/{slug}/submissions/ BEFORE the draft is deleted, the
+  // annotate-history opt-out suppresses the record (stateless sessions keep
+  // legacy behavior), and a failed durable write keeps the draft behind as
+  // the recovery copy.
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+  let savedHistoryFlag: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    savedHistoryFlag = process.env.PLANNOTATOR_ANNOTATE_HISTORY;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+    // Force the toggle on unless a test explicitly flips it off — a real
+    // ~/.plannotator/config.json must never change the outcome.
+    process.env.PLANNOTATOR_ANNOTATE_HISTORY = "1";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+    if (savedHistoryFlag === undefined) delete process.env.PLANNOTATOR_ANNOTATE_HISTORY;
+    else process.env.PLANNOTATOR_ANNOTATE_HISTORY = savedHistoryFlag;
+  });
+
+  // History lives in the real data dir (DATA_DIR is cached at module import),
+  // so each test uses a unique project namespace and afterAll removes it.
+  const mintedProjects: string[] = [];
+  function uniqueProject(label: string): string {
+    const project = `_annotate_submission_test_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    mintedProjects.push(project);
+    return project;
+  }
+
+  afterAll(() => {
+    const historyDir = join(getPlannotatorDataDir(), "history");
+    for (const project of mintedProjects) {
+      rmSync(join(historyDir, project), { recursive: true, force: true });
+    }
+  });
+
+  function submissionsDir(project: string, docPath: string): string {
+    return join(
+      getPlannotatorDataDir(),
+      "history",
+      project,
+      deriveAnnotateHistorySlug(resolve(docPath)),
+      "submissions",
+    );
+  }
+
+  // The project name is baked into the markdown so every test gets a unique
+  // content-hashed draft key — drafts live in the real data dir and identical
+  // markdown across tests would collide on one draft file.
+  async function startServer(project: string, docPath: string) {
+    const markdown = `# Doc ${project}\n\nBody\n`;
+    writeFileSync(docPath, markdown, "utf-8");
+    return startAnnotateServer({
+      markdown,
+      filePath: docPath,
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+  }
+
+  test("feedback submit writes a durable record and only then deletes the draft", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-durable-"));
+    const docPath = join(dir, "doc.md");
+    const project = uniqueProject("feedback");
+    const server = await startServer(project, docPath);
+
+    try {
+      // Auto-saved draft exists before submit (the recovery copy).
+      const saved = await fetch(`${server.url}/api/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ annotations: [{ id: "a1" }] }),
+      });
+      expect(saved.status).toBe(200);
+
+      const response = await fetch(`${server.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback: "## Feedback\n\nPlease fix X in the second paragraph.",
+          annotations: [{ id: "a1" }],
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+
+      // Durable record: one markdown file next to the file's version history.
+      const recordDir = submissionsDir(project, docPath);
+      const records = readdirSync(recordDir).filter((f) => f.endsWith(".md"));
+      expect(records.length).toBe(1);
+      const content = readFileSync(join(recordDir, records[0]), "utf-8");
+      expect(content).toContain("Please fix X in the second paragraph.");
+      expect(content).toContain("- Decision: feedback");
+      expect(content).toContain(`- Source: ${resolve(docPath)}`);
+
+      // Draft is gone AFTER the record exists.
+      const draft = await fetch(`${server.url}/api/draft`);
+      expect(draft.status).toBe(404);
+    } finally {
+      server.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("approve with notes persists a record; a bare approve writes nothing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-approve-"));
+
+    // Approve-with-notes carries user content -> record.
+    const notesDoc = join(dir, "notes.md");
+    const notesProject = uniqueProject("approve-notes");
+    const notesServer = await startServer(notesProject, notesDoc);
+    try {
+      const response = await fetch(`${notesServer.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "LGTM, but rename the helper.", annotations: [] }),
+      });
+      expect(response.status).toBe(200);
+      const recordDir = submissionsDir(notesProject, notesDoc);
+      const records = readdirSync(recordDir).filter((f) => f.endsWith(".md"));
+      expect(records.length).toBe(1);
+      const content = readFileSync(join(recordDir, records[0]), "utf-8");
+      expect(content).toContain("LGTM, but rename the helper.");
+      expect(content).toContain("- Decision: approved (with notes)");
+    } finally {
+      notesServer.stop();
+    }
+
+    // Bare approve is contentless -> nothing to persist.
+    const bareDoc = join(dir, "bare.md");
+    const bareProject = uniqueProject("approve-bare");
+    const bareServer = await startServer(bareProject, bareDoc);
+    try {
+      const response = await fetch(`${bareServer.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(200);
+      expect(existsSync(submissionsDir(bareProject, bareDoc))).toBe(false);
+    } finally {
+      bareServer.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("annotateHistory disabled: no content is written and the draft is deleted (legacy behavior)", async () => {
+    process.env.PLANNOTATOR_ANNOTATE_HISTORY = "0";
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-optout-"));
+    const docPath = join(dir, "doc.md");
+    const project = uniqueProject("opt-out");
+    const server = await startServer(project, docPath);
+
+    try {
+      await fetch(`${server.url}/api/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ annotations: [{ id: "a1" }] }),
+      });
+
+      const response = await fetch(`${server.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "Secret excerpt", annotations: [{ id: "a1" }] }),
+      });
+      expect(response.status).toBe(200);
+
+      // The opt-out means "no annotate content in the data dir": no version
+      // snapshot AND no submission record — the project dir never appears.
+      expect(existsSync(join(getPlannotatorDataDir(), "history", project))).toBe(false);
+      // Legacy behavior preserved: the draft is still deleted on submit.
+      const draft = await fetch(`${server.url}/api/draft`);
+      expect(draft.status).toBe(404);
+    } finally {
+      server.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("previously-stateless modes stay stateless: annotate-last and URL sessions write no record", async () => {
+    // Before #678 these modes never touched the data dir; the durable record
+    // must not widen the documented annotateHistory contract to them — their
+    // submissions quote agent messages or fetched pages.
+    const lastProject = uniqueProject("last-message");
+    const lastServer = await startAnnotateServer({
+      markdown: `# Agent message ${lastProject}\n\nQuoted agent output.\n`,
+      filePath: "last-message",
+      htmlContent: MINIMAL_HTML,
+      project: lastProject,
+      mode: "annotate-last",
+    });
+    try {
+      const response = await fetch(`${lastServer.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "Quoting the agent: do Y instead.", annotations: [] }),
+      });
+      expect(response.status).toBe(200);
+      expect(existsSync(join(getPlannotatorDataDir(), "history", lastProject))).toBe(false);
+    } finally {
+      lastServer.stop();
+    }
+
+    const urlProject = uniqueProject("url");
+    const urlServer = await startAnnotateServer({
+      markdown: `# Fetched page ${urlProject}\n\nPage content.\n`,
+      filePath: "https://example.com/some/page",
+      htmlContent: MINIMAL_HTML,
+      project: urlProject,
+    });
+    try {
+      const response = await fetch(`${urlServer.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "The fetched page says Z.", annotations: [] }),
+      });
+      expect(response.status).toBe(200);
+      expect(existsSync(join(getPlannotatorDataDir(), "history", urlProject))).toBe(false);
+    } finally {
+      urlServer.stop();
+    }
+  });
+
+  test("a malformed feedback body degrades to legacy behavior, never a 500", async () => {
+    // /api/feedback does no body type validation; pre-#678 a non-string
+    // feedback flowed through settle() untouched and returned 200. The
+    // durable-record guard must not turn that into a thrown 500.
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-malformed-"));
+    const docPath = join(dir, "doc.md");
+    const project = uniqueProject("malformed");
+    const server = await startServer(project, docPath);
+
+    try {
+      await fetch(`${server.url}/api/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ annotations: [{ id: "a1" }] }),
+      });
+
+      const response = await fetch(`${server.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: 42, annotations: [] }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      // Legacy behavior: draft deleted, no record (nothing persistable).
+      const draft = await fetch(`${server.url}/api/draft`);
+      expect(draft.status).toBe(404);
+      expect(existsSync(submissionsDir(project, docPath))).toBe(false);
+    } finally {
+      server.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a failed durable write keeps the draft as the recovery copy", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-submit-unwritable-"));
+    const docPath = join(dir, "doc.md");
+    const project = uniqueProject("unwritable");
+    // Plant a FILE where the project's history directory must go: every
+    // mkdir under it fails, so both the startup snapshot and the submission
+    // write degrade. (afterAll's recursive+force rm removes the file too.)
+    const historyRoot = join(getPlannotatorDataDir(), "history");
+    mkdirSync(historyRoot, { recursive: true });
+    writeFileSync(join(historyRoot, project), "not a directory", "utf-8");
+    const server = await startServer(project, docPath);
+
+    try {
+      await fetch(`${server.url}/api/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ annotations: [{ id: "a1" }] }),
+      });
+
+      const response = await fetch(`${server.url}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "Please fix X", annotations: [{ id: "a1" }] }),
+      });
+      // The decision itself still succeeds — persistence is an enhancement.
+      expect(response.status).toBe(200);
+
+      // But the draft survives: with no durable record written, it is the
+      // only remaining copy of the reviewer's work.
+      const draft = await fetch(`${server.url}/api/draft`);
+      expect(draft.status).toBe(200);
+
+      // Cleanup: don't leave this test's draft behind in the real data dir.
+      await fetch(`${server.url}/api/draft`, { method: "DELETE" });
+    } finally {
+      server.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("annotate server: live app mode (annotate-app)", () => {
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  function startFakeApp() {
+    return Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response("<html><head><title>app</title></head><body>app</body></html>", {
+          headers: { "Content-Type": "text/html" },
+        }),
+    });
+  }
+
+  async function startLiveServer(targetUrl: string, extra?: { tailnetPublished?: boolean }) {
+    return startAnnotateServer({
+      markdown: "",
+      filePath: targetUrl,
+      htmlContent: MINIMAL_HTML,
+      mode: "annotate-app",
+      sourceInfo: targetUrl,
+      liveApp: {
+        targetUrl,
+        bridgeScript: "/* bridge body */",
+        bridgeBootstrap: "/* bootstrap body */",
+        annotationCss: ".pn-live {}",
+      },
+      ...extra,
+    });
+  }
+
+  test("/api/plan returns the live payload and the proxy serves the composed bridge", async () => {
+    const app = startFakeApp();
+    const targetUrl = `http://127.0.0.1:${app.port}`;
+    const server = await startLiveServer(targetUrl);
+
+    try {
+      const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, unknown>;
+      expect(plan.mode).toBe("annotate-app");
+      expect(plan.filePath).toBe(targetUrl);
+      expect(plan.targetUrl).toBe(targetUrl);
+      expect(plan.liveToken).toMatch(/^[0-9a-f]{32}$/);
+      expect(plan.sharingEnabled).toBe(false);
+      expect(plan.convertHtml).toBe(false);
+      // appUrl is the live loopback proxy under its LOCALHOST spelling (so
+      // the framed app is same-site with the editor and shares the dev
+      // app's host-only localhost cookies), never an advertised-host URL.
+      expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/$/);
+      // No srcdoc payloads, no version fields.
+      expect(plan.rawHtml).toBeUndefined();
+      expect(plan.renderAs).toBeUndefined();
+      expect(plan.previousPlan).toBeUndefined();
+      expect(plan.versionInfo).toBeUndefined();
+      expect(plan.diffCurrent).toBeUndefined();
+      // Agent terminal stays unavailable for live sessions.
+      expect((plan.agentTerminal as { enabled: boolean }).enabled).toBe(false);
+
+      // The proxy serves the composed bridge body: config prelude with the
+      // session token and both editor origin forms (localhost first), then
+      // bootstrap, then bridge.
+      const appUrl = plan.appUrl as string;
+      const bridge = await (await fetch(`${appUrl}__plannotator__/bridge.js`)).text();
+      expect(bridge).toContain(String(plan.liveToken));
+      const localhostAt = bridge.indexOf(`http://localhost:${server.port}`);
+      const loopbackAt = bridge.indexOf(`http://127.0.0.1:${server.port}`);
+      expect(localhostAt).toBeGreaterThanOrEqual(0);
+      expect(loopbackAt).toBeGreaterThan(localhostAt);
+      expect(bridge).toContain(".pn-live {}");
+      expect(bridge.indexOf("/* bootstrap body */")).toBeLessThan(bridge.indexOf("/* bridge body */"));
+
+      // The proxied page carries the injected bridge script tag.
+      const page = await (await fetch(appUrl)).text();
+      expect(page).toContain('<script src="/__plannotator__/bridge.js"></script>');
+    } finally {
+      server.stop();
+      app.stop(true);
+    }
+  });
+
+  test("a pathful target URL keeps its path and query in appUrl", async () => {
+    // Annotating http://localhost:5173/admin/settings must open that page,
+    // not the app root.
+    const app = startFakeApp();
+    const targetUrl = `http://127.0.0.1:${app.port}/admin/settings?tab=2`;
+    const server = await startLiveServer(targetUrl);
+    try {
+      const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
+      expect(plan.appUrl).toMatch(/^http:\/\/localhost:\d+\/admin\/settings\?tab=2$/);
+      // The advertised page is reachable through the proxy under the
+      // localhost Host spelling.
+      const res = await fetch(plan.appUrl);
+      expect(res.status).toBe(200);
+    } finally {
+      server.stop();
+      app.stop(true);
+    }
+  });
+
+  test("version endpoints report no history for live sessions", async () => {
+    const app = startFakeApp();
+    const server = await startLiveServer(`http://127.0.0.1:${app.port}`);
+    try {
+      const versions = (await (await fetch(`${server.url}/api/plan/versions`)).json()) as {
+        slug: string | null;
+        versions: unknown[];
+      };
+      expect(versions.slug).toBeNull();
+      expect(versions.versions).toEqual([]);
+      const version = await fetch(`${server.url}/api/plan/version?v=1`);
+      expect(version.status).toBe(404);
+    } finally {
+      server.stop();
+      app.stop(true);
+    }
+  });
+
+  test("stop() closes the proxy port with the server", async () => {
+    const app = startFakeApp();
+    const server = await startLiveServer(`http://127.0.0.1:${app.port}`);
+    const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { appUrl: string };
+    // Reachable while running.
+    expect((await fetch(plan.appUrl)).status).toBe(200);
+    server.stop();
+    await Bun.sleep(50);
+    let closed = false;
+    try {
+      await fetch(plan.appUrl, { signal: AbortSignal.timeout(1000) });
+    } catch {
+      closed = true;
+    }
+    expect(closed).toBe(true);
+    app.stop(true);
+  });
+
+  test("remote mode rejects live app sessions outright", async () => {
+    process.env.PLANNOTATOR_REMOTE = "1";
+    await expect(startLiveServer("http://127.0.0.1:65500")).rejects.toThrow(
+      "Live app annotation is unavailable in remote mode",
+    );
+  });
+
+  test("tailnet-published sessions reject live app sessions outright", async () => {
+    // --tailscale keeps the annotate server loopback-bound but publishes it
+    // across the tailnet through the serve proxy; a live proxy would relay
+    // the user's authenticated dev app to every tailnet peer, so it is the
+    // same hard-off as remote mode, keyed on tailnetPublished.
+    await expect(
+      startLiveServer("http://127.0.0.1:65500", { tailnetPublished: true }),
+    ).rejects.toThrow("Live app annotation is unavailable in tailnet-published sessions");
   });
 });

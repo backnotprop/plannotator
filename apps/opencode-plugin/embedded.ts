@@ -17,7 +17,7 @@ export interface EmbeddedPlanReviewInput {
   pasteApiUrl?: string;
   htmlContent: string;
   timeoutSeconds: number | null;
-  abortSignal: AbortSignal;
+  abortSignal?: AbortSignal;
   logReady: (url: string, isRemote: boolean, port: number) => void;
 }
 
@@ -69,7 +69,7 @@ export async function deliverEmbeddedAnnotateMessagePrompt(input: {
 export async function runEmbeddedPlanReview(
   input: EmbeddedPlanReviewInput,
 ): Promise<EmbeddedPlanReviewResult> {
-  input.abortSignal.throwIfAborted();
+  input.abortSignal?.throwIfAborted();
   const { startPlannotatorServer, handleServerReady } = await loadPlanServer();
   const server = await startPlannotatorServer({
     plan: input.planContent,

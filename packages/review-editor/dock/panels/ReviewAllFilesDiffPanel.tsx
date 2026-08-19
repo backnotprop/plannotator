@@ -38,6 +38,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       pendingSelection={state.pendingSelection}
       reviewBase={state.reviewBase}
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
+      compactTouchLayout={state.isCompactTouchLayout}
       onLineSelection={state.onLineSelection}
       onAddAnnotationForFile={state.onAddAnnotationForFile}
       onEditAnnotation={state.onEditAnnotation}
@@ -46,9 +47,14 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       onAddFileCommentForFile={state.onAddFileCommentForFile}
       viewedFiles={state.viewedFiles}
       onToggleViewed={state.onToggleViewed}
+      generatedFiles={state.generatedFiles}
+      expandedGeneratedFiles={state.expandedGeneratedFiles}
+      onGeneratedFileCollapsedChange={state.onGeneratedFileCollapsedChange}
+      showViewedControls={state.showViewedControls}
       stagedFiles={state.stagedFiles}
       onStage={state.onStage}
       canStageFiles={state.canStageFiles}
+      showStageControls={state.showStageControls}
       canStagePath={state.canStagePath}
       stagingFile={state.stagingFile}
       stageError={state.stageError}
@@ -74,6 +80,12 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       getAIHistoryForFile={state.getAIHistoryForFile}
       defaultCollapsed={!!commitInfo}
       leadingContent={leadingContent}
+      // EXPERIMENTAL edit-to-suggestion mode. This plain all-files panel is
+      // the ONLY surface that opts in (Guided Review's viewport manager
+      // evicts CodeViews, which would destroy an active editor session).
+      enableEditSuggestions={state.editSuggestionsEnabled}
+      onAddSuggestionsForFile={state.onAddSuggestionsForFile}
+      onAddEditorCommentForFile={state.onAddEditorCommentForFile}
     />
   );
 };

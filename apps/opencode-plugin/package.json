@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/opencode",
-  "version": "0.25.0",
+  "version": "0.27.4",
   "type": "module",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
@@ -22,7 +22,11 @@
     "ai-agent",
     "coding-agent"
   ],
+  "//": "OpenCode 1 loads main, while OpenCode 2 loads exports[.]. Do not add ./server: OpenCode 1 checks it before main and would load the V2 adapter.",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/server.js"
+  },
   "files": [
     "dist",
     "commands",
@@ -31,18 +35,17 @@
     "review-editor.html"
   ],
   "scripts": {
-    "build": "mkdir -p dist && cp ../hook/dist/index.html ./plannotator.html && cp ../review/dist/index.html ./review-editor.html && bun build embedded.ts --outfile dist/embedded.js --target bun --external @opencode-ai/plugin && bun build index.ts --outfile dist/index.js --target node",
+    "build": "mkdir -p dist && cp ../hook/dist/index.html ./plannotator.html && cp ../review/dist/index.html ./review-editor.html && bun build embedded.ts --outfile dist/embedded.js --target bun --external @opencode-ai/plugin && bun build index.ts --outfile dist/index.js --target node && bun build server.ts --outfile dist/server.js --target node --external @opencode-ai/plugin",
+    "smoke:v2": "bun fixtures/v2-installed-smoke.ts",
     "postinstall": "mkdir -p ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands && cp ./commands/*.md ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands/ 2>/dev/null || true",
     "prepublishOnly": "bun run build"
   },
-  "dependencies": {
-    "@opencode-ai/plugin": "^1.1.10"
-  },
   "devDependencies": {
+    "@opencode-ai/plugin": "0.0.0-next-16775",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*"
   },
-  "peerDependencies": {
+  "engines": {
     "bun": ">=1.0.0"
   }
 }

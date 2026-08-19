@@ -1,10 +1,15 @@
 import React, { useCallback } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 
-const ANNOTATION_SELECTORS = [
+export const ANNOTATION_SELECTORS = [
   '.annotation-toolbar',
   '[data-comment-popover="true"]',
   '[data-floating-picker="true"]',
+  // Transient hidden textarea created by the legacy clipboard fallback
+  // (packages/ui/utils/clipboard.ts). It briefly steals focus during copy;
+  // without this guard the focus-out close reason would dismiss the popout
+  // whenever a copy button inside it falls back to execCommand.
+  '[data-clipboard-fallback="true"]',
 ];
 
 interface PopoutDialogProps {

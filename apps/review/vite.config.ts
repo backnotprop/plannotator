@@ -33,6 +33,10 @@ export default defineConfig({
   plugins: [demoFileContentPlugin(), react(), tailwindcss(), viteSingleFile()],
   resolve: {
     alias: {
+      // Drop the dead Oniguruma WASM (~622 KB base64, inlined twice here: main
+      // thread + worker). See build/shiki-wasm-stub.ts. `resolve.alias` is
+      // shared with the worker build below; `plugins` would not be.
+      'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
       '@': path.resolve(__dirname, '.'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
@@ -42,9 +46,10 @@ export default defineConfig({
     }
   },
   // The Pierre highlight worker (?worker&inline) contains a dynamic
-  // import("shiki/wasm") branch; iife (Vite's default worker format) can't
-  // code-split, so emit the worker as ES with dynamic imports collapsed into
-  // the single inlined bundle.
+  // import("shiki/wasm") branch (aliased to a stub above, but still a dynamic
+  // import edge); iife (Vite's default worker format) can't code-split, so
+  // emit the worker as ES with dynamic imports collapsed into the single
+  // inlined bundle.
   worker: {
     format: 'es',
     rollupOptions: {

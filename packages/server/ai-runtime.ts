@@ -1,5 +1,6 @@
 import {
   createAIEndpoints,
+  createBestEffortOnce,
   createProvider,
   ProviderRegistry,
   SessionManager,
@@ -25,6 +26,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   const registry = new ProviderRegistry();
   const sessionManager = new SessionManager();
   const modelDiscovery: Promise<void>[] = [];
+  const providerInitializers = new Map<string, () => Promise<void>>();
 
   try {
     await import("@plannotator/ai/providers/claude-agent-sdk");
@@ -48,10 +50,13 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
         cwd,
         ...(codexPath ? { codexExecutablePath: codexPath } : {}),
       });
-      registry.register(provider);
+      const providerId = registry.register(provider);
       if ("fetchModels" in provider) {
-        modelDiscovery.push(
-          (provider as { fetchModels: () => Promise<void> }).fetchModels().catch(() => {}),
+        providerInitializers.set(
+          providerId,
+          createBestEffortOnce(
+            () => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
+          ),
         );
       }
     }
@@ -101,6 +106,9 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     getCwd: options.getCwd,
     beforeCapabilities: async () => {
       await Promise.allSettled(modelDiscovery);
+    },
+    beforeProviderSession: async (providerId) => {
+      await providerInitializers.get(providerId)?.();
     },
   });
 

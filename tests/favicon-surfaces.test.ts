@@ -2,9 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
-import { FAVICON_PNG_BYTES } from "../packages/core/favicon";
+import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../packages/core/favicon";
 
-const APP_FAVICON_LINK =
+// The two server-served entry points declare no type/sizes: their /favicon.png
+// is answered by handleFavicon(), which picks PNG or the classic SVG from the
+// persisted style, so the response Content-Type is the only truthful
+// declaration. A re-added type="image/png" would be a lie for classic users.
+const SERVED_FAVICON_LINK = '<link rel="icon" href="/favicon.png">';
+// The portal is a static site with no Plannotator server, so its favicon really
+// is always the 64px PNG the vite plugin emits and it keeps the typed hints.
+const STATIC_FAVICON_LINK =
   '<link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">';
 const MARKETING_FAVICON_LINK =
   '<link rel="icon" type="image/png" sizes="256x256" href="/favicon.png">';
@@ -102,13 +109,15 @@ async function readRepoFile(path: string): Promise<Buffer> {
 
 describe("favicon surfaces", () => {
   test("every product HTML entry point references the expected favicon", async () => {
-    for (const path of [
-      "apps/hook/index.html",
-      "apps/review/index.html",
-      "apps/portal/index.html",
-    ]) {
-      expect((await readRepoFile(path)).toString()).toContain(APP_FAVICON_LINK);
+    for (const path of ["apps/hook/index.html", "apps/review/index.html"]) {
+      const html = (await readRepoFile(path)).toString();
+      expect(html).toContain(SERVED_FAVICON_LINK);
+      expect(html).not.toContain('rel="icon" type=');
     }
+
+    expect((await readRepoFile("apps/portal/index.html")).toString()).toContain(
+      STATIC_FAVICON_LINK,
+    );
 
     expect((await readRepoFile("apps/marketing/src/layouts/Base.astro")).toString()).toContain(
       MARKETING_FAVICON_LINK,
@@ -130,6 +139,15 @@ describe("favicon surfaces", () => {
     expect(stats.transparentPixels).toBeGreaterThan(0);
     expect(stats.partialAlphaPixels).toBeGreaterThan(0);
     expect(stats.opaquePixels).toBeGreaterThan(0);
+  });
+
+  test("the optional classic style is the archival pre-Totman asset", () => {
+    // The second thing /favicon.png can now answer with, so it belongs in this
+    // enumeration alongside the production PNG. Pinned to the exact bytes that
+    // shipped at 5b91c543^.
+    expect(createHash("sha256").update(CLASSIC_FAVICON_SVG).digest("hex")).toBe(
+      "27d33cff3d4515801f48e1cbaceec777ba802a7d341b22b2c0444d82b303cb49",
+    );
   });
 
   test("the marketing site ships the selected production 256px asset", async () => {

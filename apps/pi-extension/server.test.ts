@@ -471,6 +471,276 @@ describe("pi annotate approval notes", () => {
   });
 });
 
+describe("pi annotate client lease", () => {
+  /**
+   * Connect to the client-lease SSE stream and wait for the ready comment.
+   * Returns a `disconnect()` that aborts the underlying request — a plain
+   * `reader.cancel()` only stops local reads and does not close the
+   * connection the server observes, whereas aborting the fetch closes the
+   * socket the way an abandoned browser tab actually would (triggering the
+   * node:http response's "close" event).
+   */
+  async function connectClientLease(url: string): Promise<{ disconnect: () => Promise<void> }> {
+    const controller = new AbortController();
+    const response = await fetch(`${url}/api/annotate/client-lease`, { signal: controller.signal });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Timed out waiting for ready comment")), 1000);
+      }),
+    ]);
+    expect(first.done).toBe(false);
+    return {
+      disconnect: async () => {
+        controller.abort();
+        await reader.cancel().catch(() => {});
+      },
+    };
+  }
+
+  /** Track whether a promise has settled, without racing it against a timer. */
+  function trackSettled<T>(promise: Promise<T>): () => boolean {
+    let settled = false;
+    promise.then(() => {
+      settled = true;
+    });
+    return () => settled;
+  }
+
+  test("advertises the effective client-lease capability in /api/plan", async () => {
+    for (const clientLeaseSupported of [true, false]) {
+      delete process.env.PLANNOTATOR_PORT;
+      const server = await startAnnotateServer({
+        markdown: "# Test",
+        filePath: join(makeTempDir("plannotator-pi-client-lease-capability-"), "test.md"),
+        htmlContent: "<!doctype html><html><body>annotate</body></html>",
+        origin: "pi",
+        gate: true,
+        approvalNotesSupported: true,
+        clientLeaseSupported,
+      });
+
+      try {
+        const response = await fetch(`${server.url}/api/plan`);
+        const plan = await response.json() as { clientLease?: { enabled: boolean; reconnectGraceMs?: number } };
+        if (clientLeaseSupported) {
+          expect(plan.clientLease).toEqual({ enabled: true, reconnectGraceMs: 30_000 });
+        } else {
+          expect(plan.clientLease).toEqual({ enabled: false });
+        }
+      } finally {
+        server.stop();
+      }
+    }
+  });
+
+  test("returns 404 for the client-lease stream when the capability is disabled", async () => {
+    delete process.env.PLANNOTATOR_PORT;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(makeTempDir("plannotator-pi-client-lease-disabled-"), "test.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      origin: "pi",
+    });
+
+    try {
+      const response = await fetch(`${server.url}/api/annotate/client-lease`);
+      expect(response.status).toBe(404);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("resolves the decision as dismissed after the last client disconnects and the grace period elapses", async () => {
+    delete process.env.PLANNOTATOR_PORT;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(makeTempDir("plannotator-pi-client-lease-expiry-"), "test.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      origin: "pi",
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 50 },
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const isSettled = trackSettled(decision);
+      const client = await connectClientLease(server.url);
+
+      // Still connected — no expiry.
+      await Bun.sleep(20);
+      expect(isSettled()).toBe(false);
+
+      await client.disconnect();
+
+      expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a reconnect before the grace deadline cancels the pending expiry", async () => {
+    delete process.env.PLANNOTATOR_PORT;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(makeTempDir("plannotator-pi-client-lease-reconnect-"), "test.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      origin: "pi",
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 80 },
+    });
+
+    try {
+      const decision = server.waitForDecision();
+      const isSettled = trackSettled(decision);
+
+      const firstClient = await connectClientLease(server.url);
+      await firstClient.disconnect();
+
+      // Reconnect well before the 80ms grace deadline.
+      await Bun.sleep(20);
+      const secondClient = await connectClientLease(server.url);
+
+      // Even past the original deadline, the reconnect cancelled the pending expiry.
+      await Bun.sleep(100);
+      expect(isSettled()).toBe(false);
+
+      // A fresh disconnect starts its own full grace window.
+      await secondClient.disconnect();
+      expect(await decision).toEqual({ feedback: "", annotations: [], exit: true });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("an explicit approval wins over a later client-lease expiry", async () => {
+    delete process.env.PLANNOTATOR_PORT;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(makeTempDir("plannotator-pi-client-lease-explicit-"), "test.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      origin: "pi",
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 60 },
+    });
+
+    try {
+      const client = await connectClientLease(server.url);
+
+      const approve = await fetch(`${server.url}/api/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "Looks good.", annotations: [] }),
+      });
+      expect(approve.status).toBe(200);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Looks good.",
+        annotations: [],
+      });
+
+      // Disconnecting after the explicit decision must not overwrite it once
+      // the grace period elapses — the approval already cancelled tracking.
+      await client.disconnect();
+      await Bun.sleep(120);
+      expect(await server.waitForDecision()).toEqual({
+        approved: true,
+        feedback: "Looks good.",
+        annotations: [],
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a decision arriving after the lease expired is rejected instead of reported as applied", async () => {
+    delete process.env.PLANNOTATOR_PORT;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(makeTempDir("plannotator-pi-client-lease-late-"), "test.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      origin: "pi",
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+      clientLeaseTestOverrides: { graceMs: 30 },
+    });
+
+    try {
+      const client = await connectClientLease(server.url);
+      await client.disconnect();
+      expect(await server.waitForDecision()).toEqual({
+        feedback: "",
+        annotations: [],
+        exit: true,
+      });
+
+      for (const [path, init] of [
+        [
+          "/api/approve",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: "Looks good.", annotations: [] }),
+          },
+        ],
+        [
+          "/api/feedback",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: "Please change this.", annotations: [] }),
+          },
+        ],
+        ["/api/exit", { method: "POST" }],
+      ] as const) {
+        const response = await fetch(`${server.url}${path}`, init);
+        expect(response.status).toBe(409);
+      }
+
+      expect(await server.waitForDecision()).toEqual({
+        feedback: "",
+        annotations: [],
+        exit: true,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("stopping the server ends live lease streams", async () => {
+    delete process.env.PLANNOTATOR_PORT;
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(makeTempDir("plannotator-pi-client-lease-stop-"), "test.md"),
+      htmlContent: "<!doctype html><html><body>annotate</body></html>",
+      origin: "pi",
+      gate: true,
+      approvalNotesSupported: true,
+      clientLeaseSupported: true,
+    });
+
+    const response = await fetch(`${server.url}/api/annotate/client-lease`);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toBe(": ready\n\n");
+
+    server.stop();
+
+    const next = await reader.read();
+    expect(next.done).toBe(true);
+  });
+});
+
 describe("pi review server", () => {
   const testIfJj = hasJj() ? test : test.skip;
   const testIfUnix = process.platform === "win32" ? test.skip : test;

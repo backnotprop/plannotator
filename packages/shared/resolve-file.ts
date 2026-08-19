@@ -14,17 +14,26 @@ import { isAbsolute, join, resolve, win32 } from "path";
 import { existsSync, readdirSync, type Dirent } from "fs";
 import { readdir } from "node:fs/promises";
 
-import { ANNOTATABLE_TEXT_REGEX } from "./annotatable";
+import { buildAnnotatableTextRegex } from "./annotatable";
+import { getExtraMarkdownExtensions } from "./markdown-extensions";
 import { CODE_FILE_REGEX as CODE_FILE_BASENAME_REGEX } from "./code-file";
 export { CODE_FILE_REGEX, isCodeFilePath } from "./code-file";
+export { MAX_ANNOTATABLE_FILE_BYTES } from "./annotatable";
+/**
+ * Extension predicates re-exported here are the CONFIG-AWARE ones (#1307):
+ * they honor the user's `markdownExtensions` on top of the built-in set. The
+ * pure built-in constants stay in @plannotator/core/annotatable for browser
+ * code; server code must go through these so a configured `.livemd` is
+ * accepted everywhere `.md` is.
+ */
 export {
-	ANNOTATABLE_TEXT_REGEX,
-	ANNOTATABLE_DOC_REGEX,
-	ANNOTATABLE_EXTENSIONS_HINT,
-	MAX_ANNOTATABLE_FILE_BYTES,
+	getAnnotatableTextRegex,
+	getAnnotatableDocRegex,
+	getAnnotatableExtensionsHint,
+	getExtraMarkdownExtensions,
 	isAnnotatableTextPath,
 	isAnnotatableDocPath,
-} from "./annotatable";
+} from "./markdown-extensions";
 
 const WINDOWS_DRIVE_PATH_PATTERNS = [
 	/^\/cygdrive\/([a-zA-Z])\/(.+)$/,
@@ -204,11 +213,12 @@ function resolveAbsolutePath(
 /**
  * The set of files single-file annotate resolution accepts. Wider than
  * markdown proper (#1029): any unambiguously plain-text format renders the
- * way .txt does. HTML is excluded — it has its own resolution branch at the
- * call sites.
+ * way .txt does, plus the user's configured extra markdown extensions
+ * (#1307). HTML is excluded — it has its own resolution branch at the call
+ * sites.
  */
-function isSearchableMarkdownPath(input: string): boolean {
-	return ANNOTATABLE_TEXT_REGEX.test(input.trim());
+function isSearchableMarkdownPath(input: string, extra: readonly string[]): boolean {
+	return buildAnnotatableTextRegex(extra).test(input.trim());
 }
 
 /** Check if a path looks like a Windows absolute path (e.g. C:\ or C:/) */
@@ -269,14 +279,21 @@ function walkFiles(
 	}
 }
 
-function walkMarkdownFiles(dir: string, root: string, results: string[], ignoredDirs: string[]): void {
+function walkMarkdownFiles(
+	dir: string,
+	root: string,
+	results: string[],
+	ignoredDirs: string[],
+	extra: readonly string[],
+): void {
+	const matcher = buildAnnotatableTextRegex(extra);
 	try {
 		walkFiles(
 			dir,
 			root,
 			results,
 			ignoredDirs,
-			(name) => ANNOTATABLE_TEXT_REGEX.test(name),
+			(name) => matcher.test(name),
 			{ visitedFiles: 0, limit: getFileBrowserMaxFiles() },
 		);
 	} catch {
@@ -460,6 +477,7 @@ export async function resolveCodeFile(
 function resolveMarkdownFileCore(
 	input: string,
 	projectRoot: string,
+	extra: readonly string[],
 ): ResolveResult {
 	const normalizedInput = normalizeUserPathInput(input);
 	const searchInput = normalizeSeparators(normalizedInput);
@@ -467,7 +485,7 @@ function resolveMarkdownFileCore(
 	const targetLookupKey = getLookupKey(searchInput, isBareFilename);
 
 	// Restrict to annotatable plain-text files (markdown + config formats)
-	if (!isSearchableMarkdownPath(normalizedInput)) {
+	if (!isSearchableMarkdownPath(normalizedInput, extra)) {
 		return { kind: "not_found", input };
 	}
 
@@ -496,7 +514,7 @@ function resolveMarkdownFileCore(
 
 	// 3. Case-insensitive search (only scan markdown files)
 	const allFiles: string[] = [];
-	walkMarkdownFiles(projectRoot, projectRoot, allFiles, IGNORED_DIRS);
+	walkMarkdownFiles(projectRoot, projectRoot, allFiles, IGNORED_DIRS, extra);
 	const matches: string[] = [];
 
 	for (const match of allFiles) {
@@ -530,15 +548,20 @@ function resolveMarkdownFileCore(
  *
  * @param input - User-provided path (absolute, relative, or bare filename)
  * @param projectRoot - Project root directory to search within
+ * @param options.extraMarkdownExtensions - Configured extra markdown
+ *   extensions (#1307). Defaults to the process-wide set resolved from
+ *   `config.json`; pass an explicit list to resolve against a specific one.
  */
 export function resolveMarkdownFile(
 	input: string,
 	projectRoot: string,
+	options?: { extraMarkdownExtensions?: readonly string[] },
 ): ResolveResult {
 	const originalInput = input.trim();
 	const unquotedInput = stripWrappingQuotes(originalInput);
+	const extra = options?.extraMarkdownExtensions ?? getExtraMarkdownExtensions();
 
-	const primary = resolveMarkdownFileCore(unquotedInput, projectRoot);
+	const primary = resolveMarkdownFileCore(unquotedInput, projectRoot, extra);
 	if (primary.kind === "found") {
 		return primary;
 	}
@@ -555,7 +578,7 @@ export function resolveMarkdownFile(
 		return { kind: "not_found", input: originalInput };
 	}
 
-	const fallback = resolveMarkdownFileCore(normalizedInput, projectRoot);
+	const fallback = resolveMarkdownFileCore(normalizedInput, projectRoot, extra);
 	if (fallback.kind === "found") {
 		return fallback;
 	}

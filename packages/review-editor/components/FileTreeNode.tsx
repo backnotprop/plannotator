@@ -2,6 +2,7 @@ import React from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
 import { ViewedControl, ChangeTypeLetter, StageControl, AnnotationBadge, DiffCounts, CommittedDot } from './FileRowBits';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 
 interface FileTreeNodeProps {
   node: TreeNode;
@@ -12,6 +13,7 @@ interface FileTreeNodeProps {
   onDoubleClickFile?: (index: number) => void;
   viewedFiles: Set<string>;
   onToggleViewed?: (filePath: string) => void;
+  showViewedControls?: boolean;
   hideViewedFiles: boolean;
   getAnnotationCount: (filePath: string) => number;
   /** EFFECTIVE staged set from useGitAdd (sidecar + session overrides).
@@ -26,6 +28,7 @@ interface FileTreeNodeProps {
   getSectionEntry?: (filePath: string) => { group: 'committed' | 'changes' | 'untracked'; staged: boolean } | undefined;
   onStageFile?: (filePath: string) => void;
   stagingFile?: string | null;
+  showStageControls?: boolean;
 }
 
 function hasVisibleChildren(
@@ -54,6 +57,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   onDoubleClickFile,
   viewedFiles,
   onToggleViewed,
+  showViewedControls = true,
   hideViewedFiles,
   getAnnotationCount,
   stagedFiles,
@@ -62,6 +66,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   getSectionEntry,
   onStageFile,
   stagingFile,
+  showStageControls = true,
 }) => {
   const paddingLeft = 4 + node.depth * 8;
 
@@ -111,6 +116,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             onDoubleClickFile={onDoubleClickFile}
             viewedFiles={viewedFiles}
             onToggleViewed={onToggleViewed}
+            showViewedControls={showViewedControls}
             hideViewedFiles={hideViewedFiles}
             getAnnotationCount={getAnnotationCount}
             stagedFiles={stagedFiles}
@@ -119,6 +125,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             getSectionEntry={getSectionEntry}
             onStageFile={onStageFile}
             stagingFile={stagingFile}
+            showStageControls={showStageControls}
           />
         ))}
       </>
@@ -162,20 +169,24 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
               stage control (since-base mode only) and letter are always shown.
               Name inherits the row font; letter/counts stay the small size. */}
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} forceVisible={isActive} />
-            {sinceBaseMode && (isStageable || isStaged) ? (
-              <StageControl
-                isStaged={isStaged}
-                isStaging={stagingFile === node.path}
-                onStage={onStageFile ? () => onStageFile(node.path) : undefined}
-              />
-            ) : sinceBaseMode && sectionEntry?.group === 'committed' ? (
-              <CommittedDot />
-            ) : sinceBaseMode && onStageFile ? (
-              <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-            ) : isStaged && !sinceBaseMode ? (
-              <span className="text-[10px] text-primary font-medium flex items-center justify-center w-4 flex-shrink-0" title="Staged (git add)">+</span>
-            ) : null}
+            {showViewedControls && (
+              <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} forceVisible={isActive} />
+            )}
+            {showStageControls && (
+              sinceBaseMode && (isStageable || isStaged) ? (
+                <StageControl
+                  isStaged={isStaged}
+                  isStaging={stagingFile === node.path}
+                  onStage={onStageFile ? () => onStageFile(node.path) : undefined}
+                />
+              ) : sinceBaseMode && sectionEntry?.group === 'committed' ? (
+                <CommittedDot />
+              ) : sinceBaseMode && onStageFile ? (
+                <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+              ) : isStaged && !sinceBaseMode ? (
+                <span className="text-[10px] text-primary font-medium flex items-center justify-center w-4 flex-shrink-0" title="Staged (git add)">+</span>
+              ) : null
+            )}
             <ChangeTypeLetter status={node.file!.status} oldPath={node.file!.oldPath} untracked={isUntracked} />
             <span className="truncate">{node.name}</span>
             <AnnotationBadge count={annotationCount} />
@@ -186,20 +197,20 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
         <ContextMenu.Positioner className="z-50">
           <ContextMenu.Popup className="min-w-[160px] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           <ContextMenu.Item
-            onClick={() => navigator.clipboard.writeText(node.path)}
+            onClick={() => { void copyTextToClipboard(node.path); }}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
           >
             Copy path
           </ContextMenu.Item>
           <ContextMenu.Item
-            onClick={() => navigator.clipboard.writeText(node.name)}
+            onClick={() => { void copyTextToClipboard(node.name); }}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
           >
             Copy filename
           </ContextMenu.Item>
           {repoRoot && (
             <ContextMenu.Item
-              onClick={() => navigator.clipboard.writeText(`${repoRoot.replace(/\/$/, '')}/${node.path}`)}
+              onClick={() => { void copyTextToClipboard(`${repoRoot.replace(/\/$/, '')}/${node.path}`); }}
               className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
             >
               Copy full path

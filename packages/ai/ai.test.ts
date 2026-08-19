@@ -6,12 +6,17 @@ import {
   registerProviderFactory,
   createProvider,
 } from "./provider.ts";
-import { AI_ENDPOINT_PATHS, createAIEndpoints } from "./endpoints.ts";
+import {
+  AI_ENDPOINT_PATHS,
+  createAIEndpoints,
+  createBestEffortOnce,
+} from "./endpoints.ts";
 import type {
   AIProvider,
   AISession,
   AIMessage,
   AIContext,
+  CreateSessionOptions,
 } from "./types.ts";
 import {
   buildWindowsCommandScriptSpawnCommand,
@@ -77,6 +82,40 @@ function mockProvider(name = "mock"): AIProvider {
     dispose() {},
   };
 }
+
+describe("createBestEffortOnce", () => {
+  test("coalesces concurrent calls and caches completion", async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const initialize = createBestEffortOnce(async () => {
+      calls++;
+      await gate;
+    });
+
+    const first = initialize();
+    const second = initialize();
+    expect(calls).toBe(1);
+    release();
+    await Promise.all([first, second]);
+    await initialize();
+    expect(calls).toBe(1);
+  });
+
+  test("swallows initialization failure and does not retry", async () => {
+    let calls = 0;
+    const initialize = createBestEffortOnce(async () => {
+      calls++;
+      throw new Error("discovery failed");
+    });
+
+    await expect(initialize()).resolves.toBeUndefined();
+    await expect(initialize()).resolves.toBeUndefined();
+    expect(calls).toBe(1);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Command path helpers
@@ -577,6 +616,80 @@ describe("AI endpoints", () => {
     expect(data.providers[0].capabilities.fork).toBe(true);
   });
 
+  test("capabilities does not activate providers", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let activated = false;
+    reg.register(mockProvider("codex-sdk"), "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        activated = true;
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(activated).toBe(false);
+  });
+
+  test("capabilities?activate= runs the provider initializer and reports refreshed models", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const activations: string[] = [];
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async (providerId) => {
+        activations.push(providerId);
+        provider.models = [
+          { id: "discovered-model", label: "Discovered", default: true },
+        ];
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities?activate=codex"),
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(activations).toEqual(["codex"]);
+    expect(data.providers[0].models).toEqual([
+      { id: "discovered-model", label: "Discovered", default: true },
+    ]);
+  });
+
+  test("capabilities?activate= ignores unknown provider ids", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let activated = false;
+    reg.register(mockProvider("codex-sdk"), "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        activated = true;
+      },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities?activate=missing"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(activated).toBe(false);
+  });
+
   test("capabilities waits for pending provider discovery", async () => {
     const reg = new ProviderRegistry();
     const sm = new SessionManager();
@@ -680,6 +793,192 @@ describe("AI endpoints", () => {
       })
     );
     expect(createRes.status).toBe(200);
+  });
+
+  test("session creation activates only the resolved provider before createSession", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const events: string[] = [];
+    reg.register(mockProvider("claude-agent-sdk"), "claude");
+    reg.register({
+      ...mockProvider("codex-sdk"),
+      async createSession() {
+        events.push("create");
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    }, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async (providerId) => {
+        events.push(`activate:${providerId}`);
+      },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          providerId: "codex",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(events).toEqual(["activate:codex", "create"]);
+  });
+
+  test("session creation replaces the static default with the discovered default", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let createdModel: string | undefined;
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+      async createSession(options: CreateSessionOptions) {
+        createdModel = options.model;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        provider.models = [
+          { id: "discovered-model", label: "Discovered", default: true },
+        ];
+      },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          providerId: "codex",
+          model: "static-model",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(createdModel).toBe("discovered-model");
+  });
+
+  test("session creation honors a requested model the provider still offers", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let createdModel: string | undefined;
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+      async createSession(options: CreateSessionOptions) {
+        createdModel = options.model;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        provider.models = [
+          { id: "discovered-default", label: "Default", default: true },
+          { id: "discovered-alt", label: "Alt" },
+        ];
+      },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          providerId: "codex",
+          model: "discovered-alt",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(createdModel).toBe("discovered-alt");
+  });
+
+  test("session creation snaps an unlisted model to the discovered default on every session", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const createdModels: Array<string | undefined> = [];
+    const provider = {
+      ...mockProvider("codex-sdk"),
+      models: [{ id: "static-model", label: "Static", default: true }],
+      async createSession(options: CreateSessionOptions) {
+        createdModels.push(options.model);
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    };
+    reg.register(provider, "codex");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      beforeProviderSession: async () => {
+        provider.models = [
+          { id: "discovered-model", label: "Discovered", default: true },
+        ];
+      },
+    });
+
+    // Two sessions with the stale pre-discovery fallback id: the second one
+    // runs after activation already happened, and must not pin the stale id
+    // just because it no longer matches the pre-activation default.
+    for (let i = 0; i < 2; i++) {
+      const res = await endpoints["/api/ai/session"](
+        new Request("http://localhost/api/ai/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: { mode: "plan-review", plan: { plan: "# Test" } },
+            providerId: "codex",
+            model: "static-model",
+          }),
+        }),
+      );
+      expect(res.status).toBe(200);
+    }
+
+    expect(createdModels).toEqual(["discovered-model", "discovered-model"]);
+  });
+
+  test("session creation passes the requested model through when the provider reports no models", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    let createdModel: string | undefined;
+    reg.register({
+      ...mockProvider("mock"),
+      async createSession(options: CreateSessionOptions) {
+        createdModel = options.model;
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    });
+
+    const endpoints = createAIEndpoints({ registry: reg, sessionManager: sm });
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          model: "anything-goes",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(createdModel).toBe("anything-goes");
   });
 
   test("session creation clamps client-supplied cost controls", async () => {
@@ -886,6 +1185,32 @@ describe("resolveSDKModel", () => {
 
   test("maps the [1m] context variant by family", () => {
     expect(resolveSDKModel("claude-sonnet-4-6[1m]", bedrockEnv)).toBe(SONNET_ARN);
+  });
+
+  // Opus 5 is a bare alias like every other picker entry: it must NOT be
+  // mistaken for a cloud identifier (no `arn:` / `anthropic.` prefix), and the
+  // family matcher must still route it to the configured Opus ARN on
+  // Bedrock/Vertex. A matcher that keyed on "opus-4" would silently drop it.
+  test("maps the bare Opus 5 alias to the configured Opus ARN", () => {
+    expect(resolveSDKModel("claude-opus-5", bedrockEnv)).toBe(OPUS_ARN);
+    expect(
+      resolveSDKModel("claude-opus-5", {
+        CLAUDE_CODE_USE_VERTEX: "true",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: OPUS_ARN,
+      }),
+    ).toBe(OPUS_ARN);
+  });
+
+  test("off Bedrock/Vertex: returns the Opus 5 alias unchanged", () => {
+    expect(resolveSDKModel("claude-opus-5", {})).toBe("claude-opus-5");
+  });
+
+  // Fable has no ANTHROPIC_DEFAULT_*_MODEL env var of its own (Claude Code
+  // only defines OPUS/SONNET/HAIKU), so on Bedrock it falls through to
+  // ANTHROPIC_MODEL rather than matching a family. Pinned so the fallthrough
+  // stays deliberate rather than looking like a missed family branch.
+  test("falls back to ANTHROPIC_MODEL for the Fable alias on Bedrock", () => {
+    expect(resolveSDKModel("claude-fable-5", bedrockEnv)).toBe(OPUS_ARN);
   });
 
   test("passes through an identifier that is already an ARN", () => {

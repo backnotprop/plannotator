@@ -9,6 +9,7 @@ import {
 	type PRMetadata,
 	type PRRef,
 	type PRReviewFileComment,
+	type PRReviewSubmissionResult,
 	type PRRuntime,
 	type PRStackTree,
 	type PRListItem,
@@ -85,13 +86,14 @@ export function fetchPRContext(ref: PRRef) {
 export function fetchPRFileContent(ref: PRRef, sha: string, filePath: string) {
 	return fetchPRFileContentCore(prRuntime, ref, sha, filePath);
 }
+/** Submit a review through the Pi Node.js command runtime. */
 export function submitPRReview(
 	ref: PRRef,
 	headSha: string,
 	action: "approve" | "comment",
 	body: string,
 	fileComments: PRReviewFileComment[],
-) {
+): Promise<PRReviewSubmissionResult> {
 	return submitPRReviewCore(
 		prRuntime,
 		ref,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { createPortal } from 'react-dom';
 import type { ImageAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
@@ -6,6 +6,15 @@ import { submitHint } from '../utils/platform';
 import { useDraggable } from '../hooks/useDraggable';
 import { SparklesIcon } from './SparklesIcon';
 import { hasUnsavedCommentContent } from '../utils/commentContent';
+import { useSkillReferenceAutocomplete } from '../hooks/useSkillReferenceAutocomplete';
+import { HumanOnlySkillNotice, SkillReferenceMenu } from './SkillReferenceMenu';
+import type { SkillReferenceToken } from '../utils/skillReferences';
+import {
+  hasPrimaryCoarsePointer,
+  shouldUseExpandedComposer,
+  useVisibleViewportBounds,
+  type VisibleViewportBounds,
+} from '../hooks/useViewportEnvironment';
 
 export interface CommentAskAIContext {
   kind: 'general' | 'selection';
@@ -18,6 +27,18 @@ export type CommentAskAIHandler = (
   question: string,
   context: CommentAskAIContext,
 ) => boolean | void | Promise<boolean | void>;
+
+/** One selected target of a multi-target draft comment (HTML pinpoint multi-select). */
+export interface CommentTargetChip {
+  key: string;
+  /** Semantic label (hover-label cascade), e.g. "Button" / "rowchip". */
+  label?: string;
+  /** Short text excerpt of the target element. */
+  excerpt: string;
+}
+
+/** Composer-yield stage while the user is shift-selecting (see composerYield.ts). */
+export type CommentPopoverYieldState = 'none' | 'near' | 'over';
 
 interface CommentPopoverProps {
   /** Element to anchor the popover near (re-reads position on scroll) */
@@ -46,6 +67,24 @@ interface CommentPopoverProps {
   onAskAI?: CommentAskAIHandler;
   askAIContext?: CommentAskAIContext;
   askAIDisabled?: boolean;
+  /** Opt-in: `/` and `$` skill-reference autocomplete (document UI surfaces). Off by default. */
+  skillReferences?: boolean;
+  /** Opt-in (HTML multi-select): selected targets rendered as horizontally
+   *  scrollable chips above the textarea. Absent → byte-identical composer. */
+  targetChips?: CommentTargetChip[];
+  /** Remove a chip's target while composing. */
+  onRemoveTargetChip?: (key: string) => void;
+  /** Chip hover — host flashes the corresponding element in the page. */
+  onHoverTargetChip?: (key: string) => void;
+  /** Opt-in: bump to return focus to the textarea (after a shift-click add/remove). */
+  refocusToken?: number;
+  /** Opt-in: while open, a window-level printable keydown that would otherwise
+   *  go nowhere (focus on <body>) routes into the textarea, so the first
+   *  keystroke after a shift-click is never lost. */
+  captureStrayKeys?: boolean;
+  /** Opt-in composer yield while shift-selecting: 'near' fades the composer,
+   *  'over' makes it near-invisible and click-through. Undefined → no-op. */
+  yieldState?: CommentPopoverYieldState;
 }
 
 const MAX_POPOVER_WIDTH = 384;
@@ -66,19 +105,40 @@ function useCommentDraftSync(draftKey: string | undefined, text: string, images:
   }, [draftKey, text, images]);
 }
 
-function computePosition(anchorRect: DOMRect): { top: number; left: number; flipAbove: boolean; width: number } {
-  const spaceBelow = window.innerHeight - anchorRect.bottom;
-  const flipAbove = spaceBelow < 280;
-  const width = Math.min(MAX_POPOVER_WIDTH, window.innerWidth - 32);
+interface CommentPopoverPosition {
+  top: number;
+  left: number;
+  flipAbove: boolean;
+  width: number;
+  maxHeight: number;
+  requiresExpanded: boolean;
+}
+
+export function computeCommentPopoverPosition(
+  anchorRect: Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left' | 'width'>,
+  bounds: VisibleViewportBounds,
+): CommentPopoverPosition {
+  const spaceBelow = Math.max(0, bounds.bottom - anchorRect.bottom - GAP);
+  const spaceAbove = Math.max(0, anchorRect.top - bounds.top - GAP);
+  const flipAbove = spaceBelow < 280 && spaceAbove > spaceBelow;
+  const width = Math.min(MAX_POPOVER_WIDTH, bounds.width);
 
   const top = flipAbove
     ? anchorRect.top - GAP
     : anchorRect.bottom + GAP;
 
   let left = anchorRect.left + anchorRect.width / 2 - width / 2;
-  left = Math.max(16, Math.min(left, window.innerWidth - width - 16));
+  left = Math.max(bounds.left, Math.min(left, bounds.right - width));
+  const maxHeight = flipAbove ? spaceAbove : spaceBelow;
 
-  return { top, left, flipAbove, width };
+  return {
+    top,
+    left,
+    flipAbove,
+    width,
+    maxHeight,
+    requiresExpanded: maxHeight < 280,
+  };
 }
 
 export const CommentPopover: React.FC<CommentPopoverProps> = ({
@@ -96,12 +156,35 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   onAskAI,
   askAIContext,
   askAIDisabled = false,
+  skillReferences = false,
+  targetChips,
+  onRemoveTargetChip,
+  onHoverTargetChip,
+  refocusToken,
+  captureStrayKeys = false,
+  yieldState,
 }) => {
-  const [mode, setMode] = useState<'popover' | 'dialog'>('popover');
+  const visibleBounds = useVisibleViewportBounds(16);
+  const coarsePointer = hasPrimaryCoarsePointer();
+  const prefersExpandedComposer = shouldUseExpandedComposer({
+    bounds: visibleBounds,
+    coarsePointer,
+  });
+  const [mode, setMode] = useState<'popover' | 'dialog'>(() =>
+    prefersExpandedComposer ? 'dialog' : 'popover'
+  );
+  // Dialog mode has two very different origins. Either the viewport PREFERS an
+  // expanded composer (phones, small windows), or the anchor simply has no room
+  // for a popover and the geometry FORCED it. Only the forced kind can bounce:
+  // collapsing recomputes the same geometry and immediately re-expands, which
+  // ate Escape and made the Collapse button a no-op. Track which one we are in.
+  const [dialogIsForced, setDialogIsForced] = useState(false);
+  // A preference-driven dialog is never the forced kind.
+  const forcedDialog = dialogIsForced && !prefersExpandedComposer;
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
   const [text, setText] = useState(initialDraft?.text ?? initialText);
   const [images, setImages] = useState<ImageAttachment[]>(allowImages ? initialDraft?.images ?? [] : []);
-  const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean; width: number } | null>(null);
+  const [position, setPosition] = useState<CommentPopoverPosition | null>(null);
   // Direction of an open popover that has scrolled out of view, or null when on-screen.
   const [offscreen, setOffscreen] = useState<'above' | 'below' | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -110,6 +193,18 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const hasUnsavedContentRef = useRef(hasUnsavedContent);
   hasUnsavedContentRef.current = hasUnsavedContent;
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(popoverRef);
+  const openingFocusRef = useRef<HTMLElement | null>(
+    typeof document !== 'undefined'
+      && document.activeElement instanceof HTMLElement
+      && document.activeElement !== document.body
+      && document.activeElement !== document.documentElement
+      ? document.activeElement
+      : anchorEl ?? null,
+  );
+
+  useEffect(() => {
+    if (prefersExpandedComposer && mode === 'popover') setMode('dialog');
+  }, [mode, prefersExpandedComposer]);
 
   useEffect(() => {
     const nextDraft = draftKey ? draftStore.get(draftKey) : undefined;
@@ -127,23 +222,29 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   useEffect(() => { resetDrag(); }, [anchorEl, anchorRect, resetDrag]);
   useEffect(() => { if (mode === 'popover') resetDrag(); }, [mode, resetDrag]);
 
-  // Track anchor position on scroll/resize (popover mode only, not after user drag)
+  // Track anchor position on scroll and observed viewport changes (popover
+  // mode only, not after user drag).
   useEffect(() => {
     if (mode !== 'popover' || wasDragged) return;
 
     const update = () => {
       const rect = anchorEl?.getBoundingClientRect() ?? anchorRect;
-      if (rect) setPosition(computePosition(rect));
+      if (!rect) return;
+      const nextPosition = computeCommentPopoverPosition(rect, visibleBounds);
+      if (nextPosition.requiresExpanded) {
+        setDialogIsForced(true);
+        setMode('dialog');
+        return;
+      }
+      setPosition(nextPosition);
     };
 
     update();
     window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
     return () => {
       window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
     };
-  }, [anchorEl, anchorRect, mode, wasDragged]);
+  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged]);
 
   // Surface a "jump back" arrow when an open popover scrolls out of view.
   // Re-measures whenever the popover repositions (position updates every scroll
@@ -154,14 +255,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       const el = popoverRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      if (rect.bottom < 8) setOffscreen('above');
-      else if (rect.top > window.innerHeight - 8) setOffscreen('below');
+      if (rect.bottom < visibleBounds.top) setOffscreen('above');
+      else if (rect.top > visibleBounds.bottom) setOffscreen('below');
       else setOffscreen(null);
     };
     measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [position, dragPosition, mode]);
+  }, [position, dragPosition, mode, visibleBounds]);
 
   const scrollToPopover = useCallback(() => {
     anchorEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -172,19 +271,56 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   // renders after `position` is measured, and WebKit fires 0ms timers ahead of
   // that commit, so an effect keyed on mode alone can run before the textarea
   // exists and never focus it (e.g. in WKWebView hosts like Glimpse).
+  const shouldAutoFocus = !coarsePointer || initialText.length > 0 || isGlobal;
   const focusOnMountRef = useCallback((el: HTMLTextAreaElement | null) => {
     textareaRef.current = el;
-    if (!el) return;
+    if (!el || !shouldAutoFocus) return;
     setTimeout(() => {
       if (!el.isConnected) return;
       el.focus();
       el.selectionStart = el.selectionEnd = el.value.length;
     }, 0);
+  }, [shouldAutoFocus]);
+
+  // A touch-opened composer deliberately does not focus the textarea (and
+  // summon the software keyboard), but hardware-keyboard users still need a
+  // coherent focus target and Escape dismissal.
+  useEffect(() => {
+    if (mode !== 'dialog' || shouldAutoFocus) return;
+    const timer = setTimeout(() => {
+      if (!popoverRef.current?.isConnected) return;
+      popoverRef.current.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [mode, shouldAutoFocus]);
+
+  const restoreOpeningFocus = useCallback(() => {
+    const target = openingFocusRef.current;
+    requestAnimationFrame(() => {
+      if (!target?.isConnected) return;
+      target.focus({ preventScroll: true });
+    });
   }, []);
+
+  const handleClose = useCallback(
+    (focusDisposition: 'restore-opener' | 'preserve-pointer-target' = 'restore-opener') => {
+      if (draftKey) {
+        if (hasUnsavedCommentContent(text, allowImages ? images : [])) {
+          draftStore.set(draftKey, { text, images: allowImages ? images : [] });
+        } else {
+          draftStore.delete(draftKey);
+        }
+      }
+      onClose();
+      if (focusDisposition === 'restore-opener') restoreOpeningFocus();
+    },
+    [allowImages, draftKey, images, onClose, restoreOpeningFocus, text],
+  );
 
   // Click-outside for popover mode
   useEffect(() => {
     if (mode !== 'popover') return;
+    const shiftSelectionActive = Boolean(targetChips?.length);
 
     const handlePointerDown = (e: PointerEvent) => {
       const target = e.target as Node | null;
@@ -194,20 +330,126 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       const el = target as HTMLElement;
       if (el.closest?.('[data-popover-layer]')) return;
       if (hasUnsavedContentRef.current) return;
-      onClose();
+      // A same-document multi-select target receives pointerdown before click.
+      // Preserve the existing draft so the following Shift-click can extend
+      // it instead of silently replacing it with a new one.
+      if (shiftSelectionActive && e.shiftKey) return;
+      handleClose('preserve-pointer-target');
     };
 
     document.addEventListener('pointerdown', handlePointerDown, true);
     return () => document.removeEventListener('pointerdown', handlePointerDown, true);
-  }, [mode, onClose]);
+  }, [handleClose, mode, targetChips?.length]);
+
+  // Focus choreography (multi-select): after a shift-click adds/removes a
+  // target, focus returns to the textarea so typing continues uninterrupted.
+  // Focus only — the caret stays wherever the user left it mid-edit.
+  const refocusSeenRef = useRef(refocusToken);
+  useEffect(() => {
+    if (refocusToken === undefined || refocusToken === refocusSeenRef.current) return;
+    refocusSeenRef.current = refocusToken;
+    textareaRef.current?.focus();
+  }, [refocusToken]);
+
+  // First-keystroke guard: while the draft is open, a printable keydown that
+  // lands nowhere (focus fell back to <body> after an iframe interaction)
+  // routes into the textarea instead of vanishing. Runs in capture phase so
+  // it claims the key before the app's shortcut dispatcher; the character
+  // lands at the textarea's remembered caret. Note that preventDefault here
+  // does not stop the dispatcher (it deliberately ignores defaultPrevented,
+  // see shortcuts/runtime.ts) — this guard is only safe because the
+  // plan-review scopes bind no bare printable single key. Any future single-
+  // key binding on this surface must be reconciled with this handler.
+  useEffect(() => {
+    if (!captureStrayKeys) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (!e.key || e.key.length !== 1) return;
+      const target = e.target;
+      const strayed =
+        target === null
+        || target === document.body
+        || target === document.documentElement;
+      if (!strayed) return;
+      const el = textareaRef.current;
+      if (!el || document.activeElement === el) return;
+      e.preventDefault();
+      const key = e.key;
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? start;
+      setText((prev) => prev.slice(0, start) + key + prev.slice(end));
+      el.focus();
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = start + 1;
+      });
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [captureStrayKeys]);
+
+  // Composer yield (multi-select): fade near the pointer, click-through over
+  // it. Class-driven so prefers-reduced-motion can kill the transition.
+  const yieldClass = yieldState === undefined
+    ? ''
+    : ` pn-composer-yieldable${yieldState === 'over' ? ' pn-composer-yield-over' : yieldState === 'near' ? ' pn-composer-yield-near' : ''}`;
+  const yieldStyleBlock = yieldState === undefined ? null : (
+    <style>{`
+      .pn-composer-yieldable { transition: opacity 180ms ease; }
+      @media (prefers-reduced-motion: reduce) {
+        .pn-composer-yieldable { transition: none; }
+      }
+      .pn-composer-yield-near { opacity: 0.4; }
+      .pn-composer-yield-over { opacity: 0.05; pointer-events: none; }
+    `}</style>
+  );
+
+  // Selected-target chips (multi-select): horizontally scrollable, primary
+  // first; each removable while composing.
+  const chipsRow = targetChips && targetChips.length > 0 ? (
+    <div
+      data-target-chips="true"
+      className="flex items-center gap-1.5 px-3 pt-2 overflow-x-auto whitespace-nowrap"
+    >
+      {targetChips.map((chip, i) => (
+        <span
+          key={chip.key}
+          data-target-chip={chip.key}
+          data-target-chip-primary={i === 0 ? 'true' : undefined}
+          onMouseEnter={() => onHoverTargetChip?.(chip.key)}
+          className={`inline-flex items-center gap-1 shrink-0 max-w-[180px] rounded-full border px-2 py-0.5 text-[10px] ${
+            i === 0
+              ? 'border-primary/50 bg-primary/10 text-foreground'
+              : 'border-border bg-muted/50 text-muted-foreground'
+          }`}
+        >
+          <span className="font-semibold text-primary">{chip.label || 'Element'}</span>
+          <span className="truncate">{chip.excerpt}</span>
+          {onRemoveTargetChip && (
+            <button
+              type="button"
+              data-target-chip-remove={chip.key}
+              onClick={() => onRemoveTargetChip(chip.key)}
+              title="Remove this target"
+              className="shrink-0 rounded-full p-0.5 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  ) : null;
 
   const handleSubmit = useCallback(() => {
     const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
     if (hasUnsavedContent || canSubmitEmpty) {
       if (draftKey) draftStore.delete(draftKey);
       onSubmit(text, allowImages && images.length > 0 ? images : undefined);
+      restoreOpeningFocus();
     }
-  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent]);
+  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent, restoreOpeningFocus]);
 
   const handleAskAI = useCallback(async () => {
     const question = text.trim();
@@ -235,13 +477,30 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     onClose();
   }, [allowImages, askAIContext, contextText, draftKey, isGlobal, onAskAI, onClose, onDraftChange, text]);
 
+  const skillAc = useSkillReferenceAutocomplete({
+    text,
+    setText,
+    textareaRef,
+    enabled: skillReferences,
+  });
+  const skillListboxId = `skill-reference-listbox-${useId().replace(/:/g, '')}`;
+  const activeSkillOptionId =
+    skillAc.menu?.activeIndex === null || skillAc.menu?.activeIndex === undefined
+      ? undefined
+      : `${skillListboxId}-option-${skillAc.menu.activeIndex}`;
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (skillAc.onKeyDown(e)) return;
     if (e.key === 'Escape') {
       e.stopPropagation();
       if (mode === 'dialog') {
-        setMode('popover');
+        // Collapsing a forced dialog is geometrically impossible, so Escape
+        // closes it (draft-preserving) instead of being swallowed by the
+        // re-expand.
+        if (prefersExpandedComposer || forcedDialog) handleClose();
+        else setMode('popover');
       } else {
-        onClose();
+        handleClose();
       }
       return;
     }
@@ -264,18 +523,40 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   if (mode === 'dialog') {
     return createPortal(
-      <div data-comment-popover="true" className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div
+        data-comment-popover="true"
+        className="pn-visible-viewport-overlay z-[100] flex items-center justify-center"
+      >
         {/* Backdrop */}
-        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
+        <button
+          type="button"
+          aria-label="Dismiss comment"
+          className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+          onClick={() => handleClose()}
+        />
 
         {/* Dialog card */}
+        {/* The expanded dialog deliberately does not yield: it is an explicit
+            full-screen compose surface, and its backdrop wrapper (which carries
+            data-comment-popover) spans the viewport, so proximity is
+            meaningless there. */}
         <div
           ref={popoverRef}
-          className="relative w-full max-w-xl bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
+          role="dialog"
+          aria-modal="true"
+          aria-label={isGlobal ? 'Global comment' : 'Comment'}
+          tabIndex={-1}
+          className="relative w-full max-w-xl max-h-full min-h-0 bg-popover border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
           style={{
             animation: 'comment-dialog-in 0.15s ease-out',
           }}
           onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            e.stopPropagation();
+            handleClose();
+          }}
         >
           <style>{`
             @keyframes comment-dialog-in {
@@ -290,15 +571,17 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               {headerLabel}
             </span>
             <div className="flex items-center gap-1">
+              {!prefersExpandedComposer && !forcedDialog && (
+                <button
+                  onClick={() => { setDialogIsForced(false); setMode('popover'); }}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  title="Collapse"
+                >
+                  <CollapseIcon />
+                </button>
+              )}
               <button
-                onClick={() => setMode('popover')}
-                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                title="Collapse"
-              >
-                <CollapseIcon />
-              </button>
-              <button
-                onClick={onClose}
+                onClick={() => handleClose()}
                 className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                 title="Close"
               >
@@ -307,22 +590,38 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             </div>
           </div>
 
+          {chipsRow}
+
           {/* Textarea */}
-          <div className="px-4 py-3 flex-1">
-            <textarea
-              ref={focusOnMountRef}
+          <div className="relative px-4 py-3 min-h-0 flex-1 overflow-y-auto">
+            {skillAc.menu && (
+              <SkillReferenceMenu
+                id={skillListboxId}
+                items={skillAc.menu.items}
+                activeIndex={skillAc.menu.activeIndex}
+                onSelect={skillAc.select}
+              />
+            )}
+            <ComposerTextarea
+              textareaRef={focusOnMountRef}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => { setText(e.target.value); skillAc.onSelect(); }}
               onKeyDown={handleKeyDown}
+              onSelectCaret={skillAc.onSelect}
               placeholder={isGlobal ? 'Add a global comment...' : 'Add a comment...'}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground resize-none focus:outline-none min-h-48 max-h-96 px-1 py-0.5"
-              style={{ fieldSizing: 'content' } as React.CSSProperties}
+              sizeClassName="min-h-32 max-h-full"
+              skillReferences={skillReferences}
+              tokens={skillAc.referenceTokens}
+              listboxId={skillListboxId}
+              listboxOpen={skillAc.menu !== null}
+              activeOptionId={activeSkillOptionId}
             />
+            <HumanOnlySkillNotice skills={skillAc.humanOnlyReferences} />
           </div>
 
           {/* Footer — DOM order sets tab order (Save first); row-reverse keeps the visual layout unchanged */}
-          <div className="flex flex-row-reverse items-center justify-between px-4 py-3 border-t border-border/50">
-            <div className="flex flex-row-reverse items-center gap-3">
+          <div className="flex flex-row-reverse flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-border/50">
+            <div className="flex flex-row-reverse flex-wrap items-center gap-3">
               <button
                 onClick={handleSubmit}
                 disabled={!canSubmit}
@@ -330,7 +629,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               >
                 {isGlobal ? 'Add' : 'Save'}
               </button>
-              <span className="text-[10px] text-muted-foreground">{submitHint}</span>
+              {!coarsePointer && (
+                <span className="text-[10px] text-muted-foreground">{submitHint}</span>
+              )}
               {onAskAI && (
                 <button
                   onClick={handleAskAI}
@@ -380,13 +681,21 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       <div
         ref={popoverRef}
         data-comment-popover="true"
-      className="fixed z-[100] bg-popover border border-border rounded-xl shadow-2xl flex flex-col"
+      className={`fixed z-[100] bg-popover border border-border rounded-xl shadow-2xl flex flex-col${yieldClass}`}
       style={dragPosition
-        ? { top: dragPosition.top, left: dragPosition.left, width: position.width }
+        ? {
+            top: dragPosition.top,
+            left: dragPosition.left,
+            width: position.width,
+            maxHeight: visibleBounds.height,
+            overflowY: 'auto',
+          }
         : {
             top: position.top,
             left: position.left,
             width: position.width,
+            maxHeight: position.maxHeight,
+            overflowY: 'auto',
             ...(position.flipAbove ? { transform: 'translateY(-100%)' } : {}),
             animation: position.flipAbove
               ? 'comment-popover-in-above 0.15s ease-out'
@@ -405,6 +714,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           to { opacity: 1; transform: translateY(-100%); }
         }
       `}</style>
+      {yieldStyleBlock}
 
       {/* Header (draggable) */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/50" {...dragHandleProps}>
@@ -413,14 +723,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         </span>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setMode('dialog')}
+            onClick={() => { setDialogIsForced(false); setMode('dialog'); }}
             className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title="Expand"
           >
             <ExpandIcon />
           </button>
           <button
-            onClick={onClose}
+            onClick={() => handleClose()}
             className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title="Close"
           >
@@ -429,17 +739,33 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         </div>
       </div>
 
+      {chipsRow}
+
       {/* Textarea */}
-      <div className="px-3 py-2">
-        <textarea
-          ref={focusOnMountRef}
+      <div className="relative px-3 py-2">
+        {skillAc.menu && (
+          <SkillReferenceMenu
+            id={skillListboxId}
+            items={skillAc.menu.items}
+            activeIndex={skillAc.menu.activeIndex}
+            onSelect={skillAc.select}
+          />
+        )}
+        <ComposerTextarea
+          textareaRef={focusOnMountRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); skillAc.onSelect(); }}
           onKeyDown={handleKeyDown}
+          onSelectCaret={skillAc.onSelect}
           placeholder={isGlobal ? 'Add a global comment...' : 'Add a comment...'}
-          className="w-full bg-transparent text-sm placeholder:text-muted-foreground resize-none focus:outline-none max-h-64 min-h-[4.5rem] px-1 py-0.5"
-          style={{ fieldSizing: 'content' } as React.CSSProperties}
+          sizeClassName="max-h-64 min-h-[4.5rem]"
+          skillReferences={skillReferences}
+          tokens={skillAc.referenceTokens}
+          listboxId={skillListboxId}
+          listboxOpen={skillAc.menu !== null}
+          activeOptionId={activeSkillOptionId}
         />
+        <HumanOnlySkillNotice skills={skillAc.humanOnlyReferences} />
       </div>
 
       {/* Footer — same DOM-order/row-reverse pattern as the dialog footer above */}
@@ -452,7 +778,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           >
             {isGlobal ? 'Add' : 'Save'}
           </button>
-          <span className="text-[10px] text-muted-foreground">{submitHint}</span>
+          {!coarsePointer && (
+            <span className="text-[10px] text-muted-foreground">{submitHint}</span>
+          )}
           {onAskAI && (
             <button
               onClick={handleAskAI}
@@ -479,6 +807,167 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       </div>
     </>,
     document.body
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Composer textarea with skill-reference token highlighting
+// ---------------------------------------------------------------------------
+
+/** Classes shared by the textarea and its highlight mirror — font, size,
+ * and box metrics MUST stay identical or the overlay drifts out of alignment. */
+const COMPOSER_TEXT_CLASSES = 'w-full bg-transparent text-sm px-1 py-0.5';
+
+interface ComposerTextareaProps {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  /** Caret observer (skill autocomplete). */
+  onSelectCaret: () => void;
+  placeholder: string;
+  /** Mode-specific min/max height classes. */
+  sizeClassName: string;
+  textareaRef: (el: HTMLTextAreaElement | null) => void;
+  /** Positioned skill-reference occurrences to highlight. */
+  tokens: SkillReferenceToken[];
+  /** Off → render the plain pre-feature textarea, byte-for-byte. */
+  skillReferences: boolean;
+  /** ARIA relationship to the skill-reference listbox. */
+  listboxId: string;
+  listboxOpen: boolean;
+  activeOptionId?: string;
+}
+
+/**
+ * The composer's textarea. With `skillReferences` off this is exactly the
+ * pre-feature `<textarea>`; with it on, inserted skill-reference tokens are
+ * highlighted via a mirrored, aria-hidden overlay rendered BEHIND a
+ * transparent-text textarea (a textarea cannot style substrings). The overlay
+ * shares the exact font/padding/wrapping metrics and mirrors scroll position,
+ * and token spans change ONLY color/background (never font or weight), so the
+ * glyphs the browser lays out in the textarea and the glyphs the overlay
+ * paints coincide. During IME composition the overlay hides and the textarea
+ * text becomes visible again (`.pn-ref-composing`), keeping native
+ * composition rendering (underlines, candidate highlights) intact.
+ */
+const ComposerTextarea: React.FC<ComposerTextareaProps> = ({
+  value,
+  onChange,
+  onKeyDown,
+  onSelectCaret,
+  placeholder,
+  sizeClassName,
+  textareaRef,
+  tokens,
+  skillReferences,
+  listboxId,
+  listboxOpen,
+  activeOptionId,
+}) => {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [composing, setComposing] = useState(false);
+
+  const syncScroll = useCallback((el: HTMLTextAreaElement) => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    overlay.scrollTop = el.scrollTop;
+    overlay.scrollLeft = el.scrollLeft;
+  }, []);
+
+  const innerRef = useRef<HTMLTextAreaElement | null>(null);
+  const attachRef = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      innerRef.current = el;
+      textareaRef(el);
+    },
+    [textareaRef],
+  );
+
+  // Keep the mirror aligned when the value changes without a scroll event
+  // (e.g. programmatic insertion moving the caret into a scrolled region).
+  useEffect(() => {
+    if (innerRef.current) syncScroll(innerRef.current);
+  }, [value, syncScroll]);
+
+  if (!skillReferences) {
+    return (
+      <textarea
+        data-pn-mobile-editable="true"
+        ref={attachRef}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onSelect={onSelectCaret}
+        placeholder={placeholder}
+        className={`${COMPOSER_TEXT_CLASSES} placeholder:text-muted-foreground resize-none focus:outline-none ${sizeClassName}`}
+        style={{ fieldSizing: 'content' } as React.CSSProperties}
+      />
+    );
+  }
+
+  const segments: React.ReactNode[] = [];
+  let pos = 0;
+  tokens.forEach((token, i) => {
+    if (token.start < pos || token.end > value.length) return; // stale tokens for a different value
+    if (token.start > pos) segments.push(value.slice(pos, token.start));
+    // Human-only tokens carry a quiet dotted underline as their inline marker
+    // (text-decoration never affects glyph layout, so overlay alignment is
+    // safe). The accessible explanation lives in HumanOnlySkillNotice below
+    // the textarea — this overlay is aria-hidden.
+    segments.push(
+      <span
+        key={`${token.start}-${i}`}
+        data-skill-ref-token={token.entry.name}
+        data-skill-ref-human-only={token.entry.humanOnly ? 'true' : undefined}
+        className={`text-primary bg-primary/10 rounded-[3px] ${
+          token.entry.humanOnly
+            ? 'underline decoration-dotted decoration-primary/60 underline-offset-2'
+            : ''
+        }`}
+      >
+        {value.slice(token.start, token.end)}
+      </span>,
+    );
+    pos = token.end;
+  });
+  segments.push(value.slice(pos));
+
+  return (
+    <div className="relative">
+      <div
+        ref={overlayRef}
+        aria-hidden="true"
+        data-skill-ref-overlay="true"
+        data-pn-mobile-editable-mirror="true"
+        className={`${COMPOSER_TEXT_CLASSES} ${sizeClassName} pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words`}
+        style={composing ? { visibility: 'hidden' } : undefined}
+      >
+        {segments}
+        {'\n'}
+      </div>
+      <textarea
+        data-pn-mobile-editable="true"
+        aria-label={placeholder}
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
+        aria-controls={listboxOpen ? listboxId : undefined}
+        aria-owns={listboxOpen ? listboxId : undefined}
+        aria-activedescendant={activeOptionId}
+        ref={attachRef}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        onSelect={onSelectCaret}
+        onScroll={(e) => syncScroll(e.currentTarget)}
+        onCompositionStart={() => setComposing(true)}
+        onCompositionEnd={() => setComposing(false)}
+        placeholder={placeholder}
+        className={`${COMPOSER_TEXT_CLASSES} placeholder:text-muted-foreground resize-none focus:outline-none relative pn-ref-input ${
+          composing ? 'pn-ref-composing' : ''
+        } ${sizeClassName}`}
+        style={{ fieldSizing: 'content' } as React.CSSProperties}
+      />
+    </div>
   );
 };
 

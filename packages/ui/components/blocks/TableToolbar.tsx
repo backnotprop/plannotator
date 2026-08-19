@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { buildCsv } from './TableBlock';
+import { copyTextToClipboard } from '../../utils/clipboard';
 
 interface TableToolbarProps {
   element: HTMLElement;
@@ -52,22 +53,20 @@ export const TableToolbar: React.FC<TableToolbarProps> = ({
   }, [element]);
 
   const handleCopyMarkdown = async () => {
-    try {
-      await navigator.clipboard.writeText(markdown);
+    if (await copyTextToClipboard(markdown)) {
       setCopiedMd(true);
       setTimeout(() => setCopiedMd(false), 1500);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
     }
   };
 
   const handleCopyCsv = async () => {
-    try {
-      await navigator.clipboard.writeText(buildCsv(markdown));
+    if (await copyTextToClipboard(buildCsv(markdown))) {
       setCopiedCsv(true);
       setTimeout(() => setCopiedCsv(false), 1500);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
     }
   };
 

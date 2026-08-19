@@ -10,7 +10,7 @@ tags: ["pi", "integration", "plan-mode"]
 
 ## Watch the Demo
 
-<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube.com/embed/XqFun9XCXPw?si=BbjywvxWPONkLRij" title="Plannotator for Pi" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube-nocookie.com/embed/XqFun9XCXPw?si=BbjywvxWPONkLRij" title="Plannotator for Pi" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 
 ## Why Pi
 
@@ -36,7 +36,7 @@ The extension manages a three-phase state machine: **idle** → **planning** →
 
 ### Planning phase
 
-Start plan mode with `pi --plan` or toggle it mid-session with `/plannotator` or `Ctrl+Alt+P`. The extension immediately restricts the agent's available tools:
+Start plan mode with `pi --plan` or toggle it mid-session with `/plannotator-plan-mode` or `Ctrl+Alt+P`. The extension immediately restricts the agent's available tools:
 
 - **Read-only access** — `read`, `grep`, `find`, `ls` all work normally
 - **Bash is gated** — every command is checked against a safety allowlist before execution. `cat`, `git status`, `ls`, `find`, `rg` pass. `rm`, `git commit`, `npm install`, `sudo` don't. The allowlist is pattern-based, not a simple command list — it catches destructive commands even in pipes or subshells.

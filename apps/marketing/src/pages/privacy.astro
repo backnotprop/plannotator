@@ -5,119 +5,103 @@ import Footer from '../components/Footer.astro';
 ---
 <Base
   title="Privacy Policy - Plannotator"
-  description="Plannotator is a local-first, open source project. This privacy policy explains what data may be processed when you use our website and hosted sharing services."
+  description="How Plannotator stores local review data and when its optional features contact hosted services or third parties."
 >
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
     <div class="max-w-3xl mx-auto px-8 pt-20 pb-16">
       <article class="prose">
         <h1>Privacy Policy</h1>
-        <p class="text-sm text-muted-foreground">Last updated: April 15, 2026</p>
+        <p class="text-sm text-muted-foreground">Last updated: July 31, 2026</p>
 
-        <p>Plannotator is a local-first, open source project. The core Plannotator experience runs on your machine.</p>
-        <p>This Privacy Policy explains what data may be processed when you use:</p>
+        <p><strong>Plannotator does not collect usage telemetry or analytics.</strong> Plans, documents, diffs, annotations, drafts, history, and configuration stay on your machine by default. Some features contact GitHub, your Git remote, a URL you ask Plannotator to fetch, an AI provider, or a hosted sharing service. Those boundaries are described below.</p>
+
+        <h2>1. What this policy covers</h2>
+        <p>This policy covers the open source Plannotator application, <a href="https://plannotator.ai">plannotator.ai</a>, <a href="https://share.plannotator.ai">share.plannotator.ai</a>, the hosted short-link service, and the Workspaces waitlist in this repository.</p>
+        <p>It does not control third-party AI providers, Git hosts, websites you fetch, services through which you send a share link, or self-hosted deployments. Those services apply their own terms and privacy practices.</p>
+
+        <h2>2. Data that stays local by default</h2>
+        <p>The open source application runs a local server and opens the review UI in your browser. It stores Plannotator-managed files under <code>~/.plannotator</code> by default, or under <code>PLANNOTATOR_DATA_DIR</code> when configured. These files can include:</p>
         <ul>
-          <li><a href="https://plannotator.ai">https://plannotator.ai</a></li>
-          <li><a href="https://share.plannotator.ai">https://share.plannotator.ai</a></li>
-          <li>any hosted sharing or short-link services we operate</li>
+          <li>plan and annotate version history</li>
+          <li>annotation drafts and saved review decisions</li>
+          <li>configuration, session records, guide history, and diagnostic logs</li>
+        </ul>
+        <p>Some UI preferences are stored as functional browser cookies. Plannotator does not send this local review data to the Plannotator project owner as telemetry or analytics.</p>
+
+        <h2>3. Automatic network requests</h2>
+
+        <h3>GitHub release check</h3>
+        <p>Each time a plan review, annotate, archive, share-portal, or code-review app surface loads, it makes one GET request to GitHub's public latest-release API to check whether a newer Plannotator version exists. The request has no plan, document, diff, annotation, or usage-event payload. The Plannotator project owner does not receive usage analytics from this check. GitHub receives an ordinary web request and may process information such as your IP address, user agent, and request origin under GitHub's privacy practices. There is currently no configuration or environment-variable opt-out. Dismissing an update notice only hides that release notice; it does not stop later checks.</p>
+
+        <h3>Installer downloads</h3>
+        <p>The install scripts download the selected Plannotator binary and checksum from GitHub Releases. When installing the latest version, they first query GitHub's API to resolve the release tag. If available, a token from <code>GITHUB_TOKEN</code>, <code>GH_TOKEN</code>, or <code>gh auth token</code> is sent to that API. Pinning <code>--version</code> skips only the release-resolution API call; the binary and checksum still come from GitHub Releases.</p>
+        <p>A full install can also clone Plannotator from GitHub to install agent integrations, download the optional <code>sem</code> sidecar from the Ataraxy-Labs/sem GitHub repository, ask Pi to install <code>@plannotator/pi-extension</code> from npm, run <code>npx skills add</code> when you select extra skills, and use npm to install the managed agent-terminal runtime. Provenance verification, when enabled, also contacts GitHub through <code>gh</code>. Minimal mode and the applicable skip flags omit their corresponding optional components.</p>
+
+        <h3>Git remote checks during local code review</h3>
+        <p>For a local Git review, Plannotator may run <code>git ls-remote origin</code> in the background to identify the remote default branch and tell you when the local baseline is behind. This contacts the Git host configured as <code>origin</code>, but does not send the local diff. Choosing the in-app Fetch action runs <code>git fetch</code>.</p>
+
+        <h2>4. Features that send data when used</h2>
+
+        <h3>URL annotation and Jina Reader</h3>
+        <p>When you ask Plannotator to annotate a URL, Plannotator requests that URL. Public URLs may first be requested directly for content negotiation and, when Jina is enabled, the URL is also sent to Jina Reader so Jina can fetch and convert it. If Jina fails or is disabled, Plannotator fetches the URL directly. Local and private-network URLs skip Jina. The requested site or Jina receives normal request metadata, and a configured <code>JINA_API_KEY</code> is sent to Jina.</p>
+
+        <h3>GitHub and GitLab reviews</h3>
+        <p>Reviewing a hosted pull request or merge request uses your authenticated <code>gh</code>, <code>glab</code>, and Git configuration to fetch the diff, metadata, comments, checks, repository content, and related remote refs. Plannotator can also query author avatars and refresh review discussions. Posting review comments or changing provider-side viewed state happens only through the corresponding review actions. GitHub, GitLab, or your self-hosted forge processes these requests.</p>
+        <p>In local Git commit review, Plannotator may also look up commit-author avatars. For GitHub remotes it fetches recent commit metadata and matches returned email addresses locally; it does not send the local commit-author email to GitHub for that match. For GitLab remotes it sends commit-author emails to the configured GitLab instance's avatar endpoint: one email per request, up to ten in parallel per lookup round; overflow is retried in later rounds. If an avatar is found, your browser requests the returned image URL from GitHub, GitLab, Gravatar, or another image host.</p>
+
+        <h3>Ask AI and review agents</h3>
+        <p>Ask AI, Guided Review, Code Tour, and review agents use an AI provider or agent CLI that you select and have already configured. A request can include your question, selected text, and relevant plan, document, repository, or diff context. Plannotator does not route this AI content through a Plannotator-operated model proxy, but the selected provider may process or retain it under your account and that provider's policy. Claude Ask AI allows WebSearch by default, so a question can also send a search query to Anthropic's search service and return third-party web results.</p>
+        <p>Review-agent permissions depend on the selected engine. Claude allows file-reading tools and Git or forge command patterns intended for inspection, while denying direct file-writing tools, WebFetch, WebSearch, and general-purpose shells; some allowed Git and forge patterns are broader than a strict read-only subcommand list. Copilot denies its direct write tool and specific high-risk version-control and forge operations, allows Git and forge command families, and auto-denies other shell tools. Codex runs with <code>--approve-for-me</code>, which uses its workspace-write sandbox and automatic approval review. Cursor runs in ask mode with its sandbox enabled by default unless you opt out. OpenCode's plan agent and Pi retain shell access under their own CLI and runtime controls; Pi removes its direct edit and write tools but does not remove Bash. Plannotator tells every engine not to modify files or post comments, but those prompt instructions are not the same as structural enforcement.</p>
+
+        <h3>Share links</h3>
+        <p>Open source asynchronous link sharing remains available for compatibility but is moving to deprecated support. Workspaces is the primary direction for team sharing. No removal date has been announced.</p>
+        <p><strong>URL-fragment shares:</strong> For markdown shares that fit in a URL, Plannotator compresses the shared plan and annotations into the fragment after <code>#</code>. This content is compressed, not encrypted. Browsers do not include the fragment in the HTTP request to the share portal, so the portal host does not receive the shared content through that request. The browser still requests the portal page, and its host receives ordinary request metadata. Anyone or any messaging service that receives the full link can read or retain the shared content.</p>
+        <p><strong>Encrypted short links and raw HTML:</strong> For markdown, clicking Create short link confirms the upload. Plannotator encrypts the share payload with AES-256-GCM before uploading ciphertext to the paste service. The decryption key is placed in the URL fragment and is not included in the paste or portal HTTP request. Anyone with the complete link can decrypt the content. The hosted paste service expires ciphertext after seven days.</p>
+        <p>Raw HTML cannot use a hash-only share. In a local raw-HTML session, invoking the header's Copy Share Link action or a configured Approve or Send Feedback callback action can create and upload the encrypted short link immediately, without the markdown Create short link confirmation. A remote raw-HTML session creates the encrypted short link automatically at session creation so the HTML can be opened from another machine. In remote mode, markdown sessions still print a hash-based link.</p>
+
+        <h3>Callback-enabled links and remote resources</h3>
+        <p>A share-link creator can choose any <code>http://</code> or <code>https://</code> callback endpoint and include a token. If you use the link's Approve or Send Feedback button, the browser posts the action, token, and annotated share URL to that endpoint. For an encrypted short link, <code>annotated_url</code> can contain the complete URL, including the fragment decryption key. Treat the link creator and callback endpoint as trusted with the shared content and key. Prefer HTTPS because HTTP does not provide transport encryption.</p>
+        <p>Plans, documents, raw HTML, and hosted PR descriptions can reference remote images, video, fonts, or other assets. Your browser may request those resources from their hosts when it renders them. The app bundles its default fonts and syntax-highlighting assets, but selecting a hosted code-review font can request Google Fonts or jsDelivr. Opening an in-app help video loads a privacy-enhanced YouTube embed; YouTube receives the request and may store or access data when you interact with the video.</p>
+
+        <h2>5. Website and Workspaces waitlist</h2>
+        <p>Our websites and hosted services use infrastructure such as AWS, Amazon CloudFront, and Cloudflare. These providers may process IP addresses, request headers, timestamps, and similar delivery or security metadata. The marketing site loads fonts from Google Fonts, contributor avatars from GitHub's image hosts, a release badge from Shields.io, repository information through GitHub's API, and privacy-enhanced YouTube embeds on some blog posts. Opening those pages sends ordinary requests to the corresponding third parties. YouTube may also store or access data when you interact with an embedded video.</p>
+        <p>We do not operate advertising trackers, usage analytics, analytics cookies, or product telemetry on these sites. Functional cookies may remember theme, review settings, and a dismissed update notice.</p>
+        <p>Workspaces is a separate hosted product and the primary team-sharing direction. The local-storage statements for the open source application do not describe Workspaces. This public repository contains the current Workspaces waitlist, not the hosted product implementation.</p>
+        <p>If you join the waitlist, we store the information you submit: email address, company, team size, optional note, and whether you identify as a contributor. If you leave company blank and use a non-free email domain, the service can infer a company name from the domain and records that the value was inferred. The service also records IP address, country, user agent, and referrer for rate limiting, abuse prevention, and signup context. Cloudflare Turnstile processes a verification token and related request data. We use waitlist data to manage beta access, contact you about Workspaces, and cross-reference contributor status when requested.</p>
+
+        <h2>6. Retention</h2>
+        <ul>
+          <li>Local Plannotator files remain on your machine until you delete them or use the applicable cleanup controls.</li>
+          <li>Hosted encrypted short-link ciphertext expires after seven days. A self-hosted operator can configure a different period.</li>
+          <li>Workspaces waitlist entries are retained while needed to run the waitlist, contact applicants, and keep basic signup records. You can request deletion.</li>
+          <li>Support emails are retained as needed to respond and keep a record of the conversation.</li>
+          <li>Infrastructure and third-party providers may retain request or security data under their own policies.</li>
         </ul>
 
-        <h2>1. Contact</h2>
+        <h2>7. Your choices</h2>
+        <ul>
+          <li>Set <code>PLANNOTATOR_SHARE=disabled</code> to hide the open source sharing controls.</li>
+          <li>Set <code>PLANNOTATOR_JINA=0</code> or use <code>--no-jina</code> to prevent URL annotation from using Jina. The requested URL is still fetched directly.</li>
+          <li>Set <code>PLANNOTATOR_AI=disabled</code> to disable the in-app AI and review-agent surfaces.</li>
+          <li>Self-host the share portal and paste service, or do not use link sharing.</li>
+          <li>Do not send a share link through a service you do not trust with the content or key in that link.</li>
+          <li>The automatic GitHub release check currently has no opt-out setting.</li>
+        </ul>
+
+        <h2>8. Security</h2>
+        <p>Client-side encryption limits what the paste store receives, but it does not protect a link after you share it. Treat the complete URL as the secret. Compression is not encryption, so hash-only links must also be shared only with trusted recipients and services. A callback recipient can receive a complete annotated short-link URL, including its decryption key, so use only a trusted callback target.</p>
+        <p>No internet service or client-side application can guarantee perfect security. For sensitive or regulated work, review the source and your provider policies, disable optional network features, and self-host where appropriate.</p>
+
+        <h2>9. Contact and privacy requests</h2>
         <p>
           <strong>Michael Ramos</strong><br />
           Email: <a href="mailto:backnotprop@gmail.com">backnotprop@gmail.com</a>
         </p>
+        <p>You may ask for access to, correction of, or deletion of personal information we hold about you. We generally cannot identify or recover hash-fragment content, local files, or encrypted paste content from the decryption key because we do not receive that key.</p>
 
-        <h2>2. What this policy covers</h2>
-        <p>This policy covers our website and hosted sharing services.</p>
-        <p>This policy does <strong>not</strong> cover:</p>
-        <ul>
-          <li>your local use of Plannotator on your own machine, except when you choose to use our hosted sharing features</li>
-          <li>third-party tools or model providers you use locally, such as ChatGPT, Codex, Claude Code, or others</li>
-          <li>self-hosted deployments run by you or your organization</li>
-        </ul>
-
-        <h2>3. How Plannotator works</h2>
-        <p>Plannotator is designed to run locally. We do not host your normal day-to-day planning workflow.</p>
-        <p>Our services are only involved when you use our website or choose to use hosted sharing features.</p>
-        <p>For hosted sharing:</p>
-        <ul>
-          <li>smaller shares may be encoded directly in the URL</li>
-          <li>larger shares may be stored temporarily in encrypted form behind a short link</li>
-          <li>if you self-host the sharing services, your deployment is separate from ours</li>
-        </ul>
-
-        <h2>4. What we collect</h2>
-        <p>We try to collect as little as possible.</p>
-
-        <h3>a. Shared plan data</h3>
-        <p>If you use hosted sharing for larger plans, we may temporarily store an encrypted version of the shared plan so the short link can work.</p>
-        <p>We do not store unencrypted shared plan contents through that flow.</p>
-        <p>We do not store the decryption key. Because the key is not stored by our hosted service, we cannot access the unencrypted contents of shared plans through this flow.</p>
-
-        <h3>b. Basic infrastructure data</h3>
-        <p>Our hosted services rely on infrastructure providers such as AWS, CloudFront, and Cloudflare. As a result, limited technical data such as IP addresses or request metadata may be processed by those providers as part of delivering the service.</p>
-        <p>We have configured logging services to be turned off to the extent supported by those providers and services.</p>
-
-        <h3>c. Contact information</h3>
-        <p>If you contact us directly, we may receive your email address and the contents of your message.</p>
-
-        <h2>5. What we do not collect</h2>
-        <ul>
-          <li>We do not use tracking cookies.</li>
-          <li>We do not use analytics cookies.</li>
-          <li>We do not store analytics data.</li>
-          <li>We do not store telemetry about your local Plannotator usage.</li>
-        </ul>
-
-        <h2>6. Cookies and local storage</h2>
-        <p>We may use cookies or similar local storage only where needed for the app to function, such as remembering settings, preferences, or theme choices.</p>
-        <p>We do not use cookies for advertising or analytics.</p>
-
-        <h2>7. How we use information</h2>
-        <p>We use information only as needed to:</p>
-        <ul>
-          <li>serve the website and hosted sharing features</li>
-          <li>deliver shared content through short links</li>
-          <li>keep the service functioning and secure</li>
-          <li>respond to support or contact requests</li>
-          <li>comply with legal obligations</li>
-        </ul>
-
-        <h2>8. Third parties and subprocessors</h2>
-        <p>Our hosted services may rely on third-party infrastructure providers, including:</p>
-        <ul>
-          <li>AWS</li>
-          <li>Amazon CloudFront</li>
-          <li>Cloudflare</li>
-        </ul>
-        <p>These providers may process limited technical information as part of operating and delivering the service.</p>
-
-        <h2>9. Retention</h2>
-        <p>Encrypted shared payloads are retained only as long as needed for the hosted sharing flow to work.</p>
-        <p>Contact emails or support messages may be retained as needed to respond to you and keep basic records of those conversations.</p>
-        <p>We may retain information longer if required for security, abuse prevention, or legal compliance.</p>
-
-        <h2>10. Your choices</h2>
-        <p>You can avoid our hosted services entirely by:</p>
-        <ul>
-          <li>using Plannotator locally without hosted sharing</li>
-          <li>self-hosting the sharing services</li>
-          <li>disabling sharing features</li>
-        </ul>
-        <p>If you are working on sensitive, regulated, or confidential projects, we recommend self-hosting or disabling hosted sharing.</p>
-
-        <h2>11. Security</h2>
-        <p>We take reasonable steps to limit the data processed by our hosted services. However, no website or internet-based system can offer perfect security.</p>
-        <p>For sensitive or regulated use cases, self-hosting is the safest option.</p>
-
-        <h2>12. Your rights</h2>
-        <p>Depending on where you live, you may have rights to request access to, correction of, or deletion of personal information we hold about you.</p>
-        <p>To make a privacy request, email: <a href="mailto:backnotprop@gmail.com">backnotprop@gmail.com</a></p>
-        <p>Because Plannotator is primarily local-first, and because some hosted shared data may be stored only in encrypted form, our ability to identify, access, or act on some data may be limited.</p>
-
-        <h2>13. Changes to this policy</h2>
-        <p>We may update this Privacy Policy from time to time. If we do, we will update the "Last updated" date above.</p>
+        <h2>10. Changes to this policy</h2>
+        <p>We may update this policy when Plannotator's behavior or hosted services change. The date at the top identifies the current version.</p>
       </article>
     </div>
     <Footer />

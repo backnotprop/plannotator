@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Check, Copy, MoreHorizontal } from 'lucide-react';
 import { AppIcon } from './icons/AppIcon';
 import { getLastOpenInApp, setLastOpenInApp } from '../utils/storage';
+import { copyTextToClipboard } from '../utils/clipboard';
 import type { OpenInKind } from '@plannotator/core/open-in-apps';
 import {
   DropdownMenu,
@@ -163,11 +164,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   };
 
   const copyText = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      /* ignore */
-    }
+    await copyTextToClipboard(text);
     setMenuOpen(false);
   };
 

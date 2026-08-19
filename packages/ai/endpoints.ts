@@ -83,10 +83,22 @@ export interface AIEndpointDeps {
   getCwd?: () => string;
   /** Optional hook to finish lazy provider capability loading before reporting capabilities. */
   beforeCapabilities?: () => Promise<void> | void;
+  /** Optional hook to finish provider-specific lazy initialization before creating a session. */
+  beforeProviderSession?: (providerId: string) => Promise<void> | void;
 }
 
 const MAX_CLIENT_MAX_TURNS = 99;
 const MAX_CLIENT_BUDGET_USD = 5;
+
+export function createBestEffortOnce(
+  initialize: () => Promise<void>,
+): () => Promise<void> {
+  let result: Promise<void> | null = null;
+  return () => {
+    result ??= initialize().catch(() => {});
+    return result;
+  };
+}
 
 function clampPositiveInteger(value: unknown, max: number): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
@@ -113,11 +125,28 @@ function clampPositiveNumber(value: unknown, max: number): number | undefined {
  * ```
  */
 export function createAIEndpoints(deps: AIEndpointDeps) {
-  const { registry, sessionManager, getCwd, beforeCapabilities } = deps;
+  const {
+    registry,
+    sessionManager,
+    getCwd,
+    beforeCapabilities,
+    beforeProviderSession,
+  } = deps;
 
   return {
-    "/api/ai/capabilities": async (_req: Request) => {
+    "/api/ai/capabilities": async (req: Request) => {
       await beforeCapabilities?.();
+      // Explicit provider activation (?activate=<providerId>): run the same
+      // deferred initializer the session path uses, then report the refreshed
+      // metadata — so the client's model picker can move past a provider's
+      // static fallback without creating a session. A plain capabilities
+      // probe must never activate anything: the editor calls it automatically
+      // on load, and activating there would reintroduce the eager launch this
+      // deferral exists to prevent.
+      const activateId = new URL(req.url).searchParams.get("activate");
+      if (activateId && registry.get(activateId)) {
+        await beforeProviderSession?.(activateId);
+      }
       const defaultEntry = registry.getDefault();
       const providerDetails = registry.list().map(id => {
         const p = registry.get(id)!;
@@ -151,9 +180,10 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       // Resolve provider: by ID, or default
-      const provider = providerId
-        ? registry.get(providerId)
-        : registry.getDefault()?.provider;
+      const providerEntry = providerId
+        ? { id: providerId, provider: registry.get(providerId) }
+        : registry.getDefault();
+      const provider = providerEntry?.provider;
 
       if (!provider) {
         return Response.json(
@@ -163,12 +193,23 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       try {
+        await beforeProviderSession?.(providerEntry.id);
+        // Resolve the model against the post-activation list: a requested
+        // model the (possibly refreshed) provider still offers is honored,
+        // anything else — including a stale pre-discovery fallback id — snaps
+        // to the provider's current default. Providers that report no models
+        // pass the request through verbatim.
+        const models = provider.models ?? [];
+        const effectiveModel =
+          model && models.some((candidate) => candidate.id === model)
+            ? model
+            : models.find((candidate) => candidate.default)?.id ?? models[0]?.id ?? model;
         const boundedMaxTurns = clampPositiveInteger(maxTurns, MAX_CLIENT_MAX_TURNS);
         const boundedMaxBudgetUsd = clampPositiveNumber(maxBudgetUsd, MAX_CLIENT_BUDGET_USD);
         const options: CreateSessionOptions = {
           context,
           cwd: getCwd?.(),
-          model,
+          model: effectiveModel,
           ...(boundedMaxTurns !== undefined && { maxTurns: boundedMaxTurns }),
           ...(boundedMaxBudgetUsd !== undefined && { maxBudgetUsd: boundedMaxBudgetUsd }),
           reasoningEffort,

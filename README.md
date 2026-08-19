@@ -127,7 +127,27 @@ plannotator archive                    # Browse saved plan decisions read-only
 
 ---
 
-## Sharing &amp; Multiplayer
+## Privacy and network behavior
+
+Plannotator does not collect usage telemetry or analytics. Plans, diffs, annotations, drafts, history, and configuration stay local by default.
+
+Each plan review, annotate, archive, share-portal, and code-review app surface checks GitHub for the latest Plannotator release when it loads. This sends no plan or review content and gives the Plannotator project owner no usage analytics, although GitHub receives an ordinary request. There is currently no opt-out setting. Local Git code review can also query the configured `origin` with `git ls-remote` to detect the default branch and a stale baseline; it does not send the local diff.
+
+Content leaves the local workflow only when a network feature needs it:
+
+- URL annotation fetches the requested site, through Jina Reader by default for public pages or directly when Jina is disabled or unavailable.
+- GitHub and GitLab review uses your authenticated CLI and Git remote to retrieve PR or MR data.
+- Ask AI and review agents send the selected question and relevant plan, document, repository, or diff context to your configured provider.
+- Sharing sends the complete link to whoever or whatever service you use to deliver it. Encrypted short links upload ciphertext to the paste service.
+- Workspaces is a separate hosted product, so the open source app's local-storage model does not apply to content placed there.
+
+The [privacy policy](https://plannotator.ai/privacy) documents these boundaries and the hosted website and waitlist data.
+
+---
+
+## Link sharing
+
+Open source asynchronous link sharing remains available for compatibility but is moving to deprecated support. Workspaces is the primary direction for team sharing. No removal date has been announced.
 
 <p align="center">
   <a href="https://room.plannotator.ai/">
@@ -136,27 +156,26 @@ plannotator archive                    # Browse saved plan decisions read-only
 </p>
 
 <p align="center">
-  <sub>Beta: <a href="https://room.plannotator.ai/">room.plannotator.ai</a></sub>
+  <sub>Legacy link-sharing demo: <a href="https://room.plannotator.ai/">room.plannotator.ai</a></sub>
 </p>
 
 <p align="center">
   <a href="https://plannotator.ai/workspaces">
-    <img src=".github/assets/workspaces-cta.svg" alt="Beta is ending. Sign up for Workspaces." height="44" />
+    <img src=".github/assets/workspaces-cta.svg" alt="Workspaces is the team-sharing direction. Join the waitlist." height="44" />
   </a>
 </p>
 
 Share a plan with a teammate and they can annotate it themselves. Import their feedback and send it straight back to your agent.
 
-**Small plans** are encoded entirely in the URL hash. No server involved. The data lives in the link itself.
+**Small markdown shares** are compressed into the URL fragment. The fragment is not included in the browser's request to the share portal, but it is not encrypted. Anyone or any messaging service with the complete link can read the shared content. The portal host still receives ordinary request metadata.
 
-**Large plans** go through a short-link service, encrypted in your browser with AES-256-GCM. The server stores only ciphertext, and the key never leaves the URL fragment. Pastes auto-delete after 7 days.
+**Large markdown and raw HTML shares** use a short-link service. The share payload is encrypted with AES-256-GCM before upload, the server stores only ciphertext, and the key is kept in the URL fragment rather than sent in the paste request. Anyone with the complete link can decrypt it. Hosted pastes expire after 7 days.
 
 Same model as [PrivateBin](https://privatebin.info/). The paste service is [self-hostable](https://docs.plannotator.ai/open-source/workflows/sharing).
 
 Sharing can be disabled entirely with `PLANNOTATOR_SHARE=disabled`.
 
-**Coming next:** live collaboration. Teammates and their agents working through the same plan or review together, in real time. It arrives in Workspaces once the room beta wraps. [Sign up here](https://plannotator.ai/workspaces).
-
+[Workspaces](https://plannotator.ai/workspaces) is the primary path for hosted team collaboration.
 
 ---
 
@@ -174,6 +193,8 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
+The installer downloads the binary from GitHub Releases. A full install can also contact GitHub for release resolution and agent files, Ataraxy-Labs/sem for the optional `sem` sidecar, and npm for Pi, selected extra skills, or the managed agent-terminal runtime. Pinning `--version` skips only GitHub API release resolution, not the release download. See the [privacy policy](https://plannotator.ai/privacy) for the complete network boundaries.
+
 Want just the binary and nothing else? Pass `--minimal` (or export `PLANNOTATOR_MINIMAL=1`) to install only the `plannotator` binary to `~/.local/bin`, skipping every skill, hook, slash command, and per-agent config:
 
 ```bash
@@ -186,15 +207,68 @@ Then finish the step for your agent:
 |---|---|---|
 | **Amp** | Copy [`plannotator.ts`](apps/amp-plugin/plannotator.ts) into `~/.config/amp/plugins/`, then `plugins: reload`. Workflows live in the command palette. | [README](apps/amp-plugin/README.md) |
 | **Claude Code** | `/plugin marketplace add backnotprop/plannotator`, then `/plugin install plannotator@plannotator`. Restart Claude Code. | [README](apps/hook/README.md) |
-| **Codex** | Nothing. Plan review is enabled automatically via Codex's experimental `Stop` hook (macOS/Linux/WSL; Codex hooks are disabled on Windows). `$plannotator-review`, `$plannotator-annotate`, and `$plannotator-last` skills included. | [README](apps/codex/README.md) |
+| **Codex** | Nothing. Plan review is enabled automatically via Codex's experimental `Stop` hook (macOS/Linux/WSL; on native Windows, Codex hooks are experimental and the installer prints manual setup steps). `$plannotator-review`, `$plannotator-annotate`, and `$plannotator-last` skills included. | [README](apps/codex/README.md) |
 | **Copilot CLI** | `/plugin marketplace add backnotprop/plannotator`, then `/plugin install plannotator-copilot@plannotator`. Restart. Plan review activates in plan mode (`Shift+Tab`). | [README](apps/copilot/README.md) |
 | **Droid** | `droid plugin marketplace add https://github.com/backnotprop/plannotator`, then `droid plugin install plannotator@plannotator`. Commands only, no plan interception yet. | [README](apps/droid-plugin/README.md) |
 | **Gemini CLI** | Nothing. The hook, policy, and slash commands are configured automatically. Requires Gemini CLI 0.36.0+. | [README](apps/gemini/README.md) |
 | **Kiro CLI** | Nothing. Skills and an example agent are installed automatically. Try `kiro-cli chat --agent plannotator`. | [README](apps/kiro-cli/README.md) |
 | **OpenCode** | Add `"plugin": ["@plannotator/opencode@latest"]` to `opencode.json`. Restart OpenCode. | [README](apps/opencode-plugin/README.md) |
-| **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator`. | [README](apps/pi-extension/README.md) |
+| **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator-plan-mode`. | [README](apps/pi-extension/README.md) |
 
 Full walkthroughs live in the [installation docs](https://docs.plannotator.ai/open-source/start/installation).
+
+### Uninstall
+
+The safe default removes recognized Plannotator-installed components and keeps
+your local plans, history, drafts, guides, and settings:
+
+```bash
+plannotator uninstall
+```
+
+Use `--purge` for a full removal of known local Plannotator data as well:
+
+```bash
+plannotator uninstall --purge
+```
+
+Purge requires typing `purge` at the prompt and explains that the data is
+local-only: it is not stored on a Plannotator server and cannot be recovered.
+For automation, pass `--yes` (or `-y`); non-interactive removal refuses to run
+without it. Use `--dry-run` to preview recognized work without making changes.
+Host integrations are always part of uninstall. If a broken or unavailable
+host prevents safe cleanup, the command names the blocking plugin manager or
+configuration, gives exact manual cleanup instructions, and stops before
+deleting the binary. Complete that cleanup and rerun uninstall.
+These mechanics keep the ordinary confirmation default-negative, make the
+irreversible outcome require a stronger explicit word, and still give package
+managers and scripts a conventional non-interactive flag.
+
+The command covers the conventional macOS, Linux, WSL, and Windows binary
+locations; the managed `sem` sidecar and agent-terminal runtime; installer
+skills, commands, hooks, policies, caches, and recognizable Amp/Kiro files; and
+detected Claude Code, Copilot CLI, Droid, Pi, and VS Code installations through
+their host CLIs. Shared JSONC settings are edited surgically, while strict JSON
+updates preserve the file's indentation, line endings, and trailing-newline
+style. Custom
+or unrecognized files, separately installed optional skills, project-local
+integrations, external plan-save locations, and invalid configs are preserved
+(malformed host config is a fail-safe error). If cleanup reports an error,
+the CLI remains available for a safe retry, and its Windows PATH entry is
+retained or restored when possible. If PATH restoration itself fails, the
+output gives the full CLI path for retry and asks for manual PATH repair.
+For safety, purge refuses filesystem roots, the home directory, the shared
+temporary directory, symlinked data directories, and non-directory data paths.
+Existing paths are compared by filesystem identity, so case aliases, symlinks,
+hardlinks, and bind mounts cannot bypass the root/home/ancestor checks.
+That identity and every containment guard are revalidated after awaited host
+commands, immediately before the synchronous data-removal block; a replaced
+data directory is refused without touching either the old or replacement data.
+If your dedicated data directory is symlinked, point `PLANNOTATOR_DATA_DIR` at
+its resolved target and retry.
+
+If you installed only the standalone Pi extension and do not have the
+`plannotator` CLI, use `pi remove npm:@plannotator/pi-extension`.
 
 <details>
 <summary>Claude Code: manual hook setup (without the plugin system)</summary>
@@ -311,7 +385,38 @@ Host your-server
 
 ## Security
 
-Every released binary ships with a SHA256 sidecar. [SLSA provenance](https://slsa.dev/) attestations are available from v0.17.2.
+Every released binary ships with a SHA256 sidecar. [SLSA provenance](https://slsa.dev/) attestations are available from v0.17.2. The current release workflow also attaches a CycloneDX JSON SBOM, evaluates it with a fresh Grype database before anything is attested or published, and creates a GitHub/Sigstore SBOM attestation for the shipped binaries and npm tarballs.
+
+The SBOM is intentionally labeled as a release-wide Syft inventory of the monorepo's locked build inputs and dependencies. It is not an exact per-binary runtime inventory: Bun standalone executables do not expose their bundled JavaScript package metadata to Syft. The canonical [installation and verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) cover the existing installer path; the exact new SBOM commands are included below and must be copied to that Mintlify page before the first SBOM-enabled release.
+
+The release gate rejects scanner-side ignored matches and treats unknown applicability conservatively as runtime when evaluating CISA KEV and fixable Critical findings. Its explicit Grype configuration, complete JSON results, database status, and repository policy decision remain available as workflow evidence.
+
+To verify a released Linux x64 binary, its existing provenance, and the new SBOM evidence directly:
+
+```bash
+tag=vX.Y.Z
+version="${tag#v}"
+mkdir -p /tmp/plannotator-release-verify
+gh release download "$tag" --repo backnotprop/plannotator \
+  --pattern 'plannotator-linux-x64*' \
+  --pattern "plannotator-${version}-release-sbom.cdx.json*" \
+  --dir /tmp/plannotator-release-verify
+
+(cd /tmp/plannotator-release-verify && sha256sum --check plannotator-linux-x64.sha256)
+(cd /tmp/plannotator-release-verify && sha256sum --check "plannotator-${version}-release-sbom.cdx.json.sha256")
+
+gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+  --repo backnotprop/plannotator --source-ref "refs/tags/$tag" \
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+  --predicate-type https://slsa.dev/provenance/v1
+
+gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+  --repo backnotprop/plannotator --source-ref "refs/tags/$tag" \
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+  --predicate-type https://cyclonedx.org/bom
+```
+
+These are separate claims over the same artifact digest: provenance identifies its builder/source/workflow, while the CycloneDX predicate describes the release-wide inventory. The release runbook also canonicalizes the downloaded SBOM and attested predicate with `jq -S` and compares them.
 
 To verify on install:
 
@@ -319,13 +424,13 @@ To verify on install:
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --verify-attestation
 ```
 
-Requires `gh` installed and authenticated. Can also be set persistently in `~/.plannotator/config.json`:
+Requires the `gh` CLI, but no login: the installer fetches the attestation bundle from GitHub's public attestations API and verifies it with `gh attestation verify --bundle` (the extraction needs node, python3, or jq on PATH; gh's authenticated fetch is the fallback). Can also be set persistently in `~/.plannotator/config.json`:
 
 ```json
 { "verifyAttestation": true }
 ```
 
-See the [verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
+Installer verification remains opt-in and verifies SLSA build provenance; normal installation does not require `gh`. See the [canonical installation docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
 
 ---
 
@@ -370,9 +475,9 @@ implementation architecture.
 | `PLANNOTATOR_ORIGIN` | Override agent detection: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi` |
 | `PLANNOTATOR_JINA` | `0`/`false` to disable Jina Reader for URL annotation |
 | `JINA_API_KEY` | Jina Reader API key for higher rate limits |
-| `PLANNOTATOR_DATA_DIR` | Base directory for all Plannotator data (plans, history, drafts, `config.json`). Default: `~/.plannotator`; if that directory doesn't exist and `$XDG_DATA_HOME` is set to an absolute path, `$XDG_DATA_HOME/plannotator` is used instead |
+| `PLANNOTATOR_DATA_DIR` | Base directory for Plannotator-managed files (plans, history, drafts, `config.json`). Default: `~/.plannotator`; if that directory doesn't exist and `$XDG_DATA_HOME` is set to an absolute path, `$XDG_DATA_HOME/plannotator` is used instead |
 
-All Plannotator data lives in a single directory — `~/.plannotator` by default. To relocate it (e.g. for an XDG-clean home):
+Plannotator-managed files live under `~/.plannotator` by default. Some UI preferences are stored in functional browser cookies. To relocate the files (for example, for an XDG-clean home):
 
 ```bash
 export PLANNOTATOR_DATA_DIR=~/.local/share/plannotator

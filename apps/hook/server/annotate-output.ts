@@ -11,12 +11,30 @@ export interface AnnotateApprovalCapabilityOptions extends AnnotateOutputOptions
   gate: boolean;
 }
 
+export interface AnnotateClientLeaseCapabilityOptions extends AnnotateApprovalCapabilityOptions {
+  /** True for remote/shared sessions, where a lost tab connection is expected and not abandonment. */
+  isRemote: boolean;
+}
+
 const APPROVED_PLAINTEXT_MARKER = "The user approved.";
 
 export function supportsAnnotateApprovalNotes(
   options: AnnotateApprovalCapabilityOptions,
 ): boolean {
   return options.gate && options.json && !options.hook;
+}
+
+/**
+ * Local direct structured annotate gates (`--gate --json`, not `--hook`, not
+ * a remote/shared session) are the only transport where a tab's abandonment
+ * can be safely resolved automatically — the caller is already blocked on a
+ * structured decision and no other protocol (hook JSON, plaintext) depends on
+ * the exact timing of the response.
+ */
+export function supportsAnnotateClientLease(
+  options: AnnotateClientLeaseCapabilityOptions,
+): boolean {
+  return options.gate && options.json && !options.hook && !options.isRemote;
 }
 
 export function formatAnnotateOutcome(

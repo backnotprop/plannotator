@@ -1,0 +1,948 @@
+name: Security Scanning
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 15 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scanning-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_VERSION: 8.30.0
+  GITLEAKS_LINUX_X64_SHA256: 79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e
+  SEMGREP_VERSION: 1.172.0
+  SEMGREP_IMAGE: semgrep/semgrep:1.172.0-nonroot@sha256:d1012a3bf2acf47721216fbf7ff12d4c2971cc7f9c7b77cf6c6e9dcf006bd487
+  TRIVY_VERSION: 0.73.0
+  TRIVY_LINUX_X64_SHA256: 2edd39da482bb4e9831962487b68f68e3928ec3137794757f54d00383d79547b
+  # v2.2.0 content; the digest-only runtime reference never follows a moving tag.
+  TRIVY_CHECKS_REFERENCE: ghcr.io/aquasecurity/trivy-checks@sha256:891abb1e1dc95429e6ad6768a8c8164dacf6d7ff742b940d1d709e69b5855cc6
+  TRIVY_DB_MAX_AGE_SECONDS: "172800"
+  TRIVY_DISABLE_TELEMETRY: "true"
+  TRIVY_SKIP_VERSION_CHECK: "true"
+  ZIZMOR_VERSION: 1.29.0
+  ZIZMOR_LINUX_X64_SHA256: dd96df044a6e8538d5f423790f453bdd03d49e5b2bcc38214acc41a2f1297839
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read # Required by upload-sarif to read workflow-run metadata.
+      security-events: write # Required only for the final SARIF upload.
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch all branches and tags
+        run: git fetch --force --prune --tags origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Install verified Gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          install_dir="$RUNNER_TEMP/gitleaks-bin"
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$GITLEAKS_LINUX_X64_SHA256" "$archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" gitleaks
+          "$install_dir/gitleaks" version
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Verify Gitleaks detector health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Build the fixture at runtime so the repository never contains a
+          # token-shaped string that GitHub push protection could misclassify.
+          synthetic_prefix='glpat'
+          synthetic_body='abcdefghijklmnopqrst'
+          set +e
+          printf 'token = "%s-%s"\n' "$synthetic_prefix" "$synthetic_body" \
+            | gitleaks stdin --config .gitleaks.toml --no-banner --redact=100 >/dev/null 2>&1
+          detector_exit=$?
+          set -e
+          if [[ "$detector_exit" -ne 1 ]]; then
+            echo "Gitleaks failed its synthetic detection test (exit $detector_exit)." >&2
+            exit 1
+          fi
+
+          # Confirm the exact, reviewed RFC 6455 example is allowlisted without
+          # suppressing the token-shaped fixture above.
+          websocket_example='dGhlIHNhbXBsZSBub25jZQ=='
+          printf 'Sec-WebSocket-Key: %s\n' "$websocket_example" \
+            | gitleaks stdin --config .gitleaks.toml --no-banner --redact=100 >/dev/null
+
+      - name: Scan repository history
+        id: scan
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p security-results
+
+          log_options='--all'
+          scan_scope='all branches and tags'
+
+          if [[ "$EVENT_NAME" == 'pull_request' ]]; then
+            if [[ -z "$PR_BASE_SHA" || -z "$PR_HEAD_SHA" ]]; then
+              echo 'The pull request commit range is missing.' >&2
+              exit 1
+            fi
+            git cat-file -e "${PR_BASE_SHA}^{commit}"
+            git cat-file -e "${PR_HEAD_SHA}^{commit}"
+            log_options="--all ${PR_BASE_SHA}..${PR_HEAD_SHA}"
+            scan_scope='pull request commit range'
+          elif [[ "$EVENT_NAME" == 'push' ]]; then
+            zero_sha='0000000000000000000000000000000000000000'
+            if [[ -n "$PUSH_BEFORE_SHA" && "$PUSH_BEFORE_SHA" != "$zero_sha" ]] \
+              && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+              git cat-file -e "${CURRENT_SHA}^{commit}"
+              log_options="--all ${PUSH_BEFORE_SHA}..${CURRENT_SHA}"
+              scan_scope='push commit range'
+            else
+              echo 'Push base is unavailable; conservatively scanning all branches and tags.'
+            fi
+          fi
+
+          # Findings are informational during rollout (--exit-code 0), while
+          # an actual scanner/configuration error still fails this step.
+          gitleaks git . \
+            --config .gitleaks.toml \
+            --log-opts="$log_options" \
+            --exit-code 0 \
+            --redact=100 \
+            --report-format sarif \
+            --report-path security-results/gitleaks.sarif \
+            --no-banner
+
+          jq -e '.version == "2.1.0" and (.runs | type == "array")' \
+            security-results/gitleaks.sarif >/dev/null
+          finding_count=$(jq '[.runs[].results[]?] | length' security-results/gitleaks.sarif)
+
+          {
+            echo '### Gitleaks'
+            echo "- Scope: $scan_scope"
+            echo "- Findings: $finding_count"
+            echo '- Enforcement: monitor mode; scanner failures still fail the job'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'report-ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Upload Gitleaks SARIF
+        if: >-
+          always() &&
+          steps.scan.outputs.report-ready == 'true' &&
+          (github.event_name != 'pull_request' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'))
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: security-results/gitleaks.sarif
+          category: gitleaks
+
+  semgrep:
+    name: Semgrep CE
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read # Required by upload-sarif to read workflow-run metadata.
+      security-events: write # Required only for the final SARIF upload.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Semgrep CE image
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if docker pull "$SEMGREP_IMAGE"; then
+              break
+            fi
+            if (( attempt == 3 )); then
+              echo 'Semgrep image pull failed after three attempts.' >&2
+              exit 1
+            fi
+            echo "Semgrep image pull failed; retrying (attempt $((attempt + 1))/3)." >&2
+            sleep $((attempt * 5))
+          done
+
+          repo_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$SEMGREP_IMAGE")
+          expected_digest=${SEMGREP_IMAGE##*@}
+          if [[ "$repo_digest" != *"@$expected_digest" ]]; then
+            echo "Semgrep image digest mismatch: $repo_digest" >&2
+            exit 1
+          fi
+
+          image_user=$(docker image inspect --format '{{.Config.User}}' "$SEMGREP_IMAGE")
+          if [[ -z "$image_user" || "$image_user" == 'root' || "$image_user" == '0' ]]; then
+            echo "The pinned Semgrep image is not configured as non-root." >&2
+            exit 1
+          fi
+
+          actual_version=$(docker run --rm --network none "$SEMGREP_IMAGE" semgrep --version)
+          if [[ "$actual_version" != "$SEMGREP_VERSION" ]]; then
+            echo "Expected Semgrep $SEMGREP_VERSION, got $actual_version." >&2
+            exit 1
+          fi
+
+      - name: Verify Semgrep rules and detector health
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/semgrep-health"
+          output_dir="$GITHUB_WORKSPACE/security-results"
+          mkdir -p "$fixture_dir" "$output_dir"
+          chmod 777 "$output_dir"
+
+          cat > "$fixture_dir/command-injection.ts" <<'EOF'
+          import { exec } from "node:child_process";
+          export function runCommand(command: string) {
+            exec(command);
+          }
+          EOF
+          cat > "$fixture_dir/bun-command-injection.ts" <<'EOF'
+          export function runWithBun(command: string) {
+            return Bun.spawn(["sh", "-c", command]);
+          }
+          EOF
+          cat > "$fixture_dir/remote-pipeline.sh" <<'EOF'
+          #!/bin/sh
+          curl --fail https://example.invalid/install.sh | sh
+          EOF
+
+          set +e
+          docker run --rm --network none \
+            --env SEMGREP_SEND_METRICS=off \
+            --volume "$GITHUB_WORKSPACE:/src:ro" \
+            --volume "$fixture_dir:/fixture:ro" \
+            --volume "$output_dir:/out" \
+            --workdir /fixture \
+            "$SEMGREP_IMAGE" \
+            semgrep scan \
+              --oss-only \
+              --metrics off \
+              --disable-version-check \
+              --no-rewrite-rule-ids \
+              --strict \
+              --timeout 30 \
+              --timeout-threshold 1 \
+              --json-output /out/semgrep-health.json \
+              --config /src/.semgrep.yml \
+              /fixture 2>&1 | tee "$output_dir/semgrep-health.log"
+          health_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$health_status" -ne 0 ]]; then
+            echo "Semgrep controlled detector scan failed (exit $health_status)." >&2
+            exit "$health_status"
+          fi
+
+          jq -e --arg version "$SEMGREP_VERSION" '
+            .version == $version and
+            .engine_requested == "OSS" and
+            (.errors | length) == 0 and
+            all(.results[]; .extra.engine_kind == "OSS") and
+            any(.results[];
+              .check_id == "plannotator.node.nonliteral-exec" and
+              (.path | endswith("command-injection.ts")) and .start.line == 3) and
+            any(.results[];
+              .check_id == "plannotator.node.shell-command-argument" and
+              (.path | endswith("bun-command-injection.ts")) and .start.line == 2) and
+            any(.results[];
+              .check_id == "plannotator.installer.remote-script-pipeline" and
+              (.path | endswith("remote-pipeline.sh")) and .start.line == 2)
+          ' "$output_dir/semgrep-health.json" >/dev/null || {
+            echo 'Semgrep controlled detector report failed its engine, error, or exact-line assertions.' >&2
+            exit 1
+          }
+
+          # A malformed local ruleset must be an engine failure, not a clean scan.
+          cat > "$fixture_dir/invalid.yml" <<'EOF'
+          rules:
+            - id: deliberately-invalid
+              languages: [typescript]
+              pattern:
+          EOF
+          set +e
+          docker run --rm --network none \
+            --env SEMGREP_SEND_METRICS=off \
+            --volume "$fixture_dir:/fixture:ro" \
+            --workdir /fixture \
+            "$SEMGREP_IMAGE" \
+            semgrep scan --oss-only --metrics off --disable-version-check \
+              --strict --config /fixture/invalid.yml /fixture/command-injection.ts \
+              >"$output_dir/semgrep-invalid-rules.log" 2>&1
+          invalid_status=$?
+          set -e
+          if [[ "$invalid_status" -eq 0 ]]; then
+            echo 'Semgrep accepted a deliberately malformed ruleset.' >&2
+            exit 1
+          fi
+
+      - name: Scan source with Semgrep CE
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          output_dir="$GITHUB_WORKSPACE/security-results"
+          mkdir -p "$output_dir"
+          chmod 777 "$output_dir"
+
+          # The source mount and scanner network are read-only/offline. Findings
+          # remain local; only GitHub receives the validated reports below.
+          set +e
+          docker run --rm --network none \
+            --env SEMGREP_SEND_METRICS=off \
+            --volume "$GITHUB_WORKSPACE:/src:ro" \
+            --volume "$output_dir:/out" \
+            --workdir /src \
+            "$SEMGREP_IMAGE" \
+            semgrep scan \
+              --oss-only \
+              --metrics off \
+              --disable-version-check \
+              --no-rewrite-rule-ids \
+              --strict \
+              --timeout 30 \
+              --timeout-threshold 1 \
+              --max-target-bytes 5000000 \
+              --quiet \
+              --json-output /out/semgrep.json \
+              --sarif-output /out/semgrep.sarif \
+              --config /src/.semgrep.yml \
+              /src 2>&1 | tee "$output_dir/semgrep-scan.log"
+          scan_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$scan_status" -ne 0 ]]; then
+            echo "Semgrep source scan failed (exit $scan_status)." >&2
+            exit "$scan_status"
+          fi
+
+          jq -e --arg version "$SEMGREP_VERSION" '
+            .version == $version and
+            .engine_requested == "OSS" and
+            (.errors | length) == 0 and
+            (.paths.scanned | length) >= 500 and
+            all(.results[]; .extra.engine_kind == "OSS") and
+            any(.paths.scanned[]; startswith("/src/packages/server/")) and
+            any(.paths.scanned[]; startswith("/src/apps/pi-extension/server/")) and
+            any(.paths.scanned[]; startswith("/src/packages/ui/")) and
+            any(.paths.scanned[]; startswith("/src/apps/paste-service/")) and
+            any(.paths.scanned[]; startswith("/src/scripts/"))
+          ' "$output_dir/semgrep.json" >/dev/null || {
+            echo 'Semgrep JSON failed its OSS-engine, error-free, target-count, or required-surface assertions.' >&2
+            exit 1
+          }
+          jq -e --arg version "$SEMGREP_VERSION" '
+            .version == "2.1.0" and
+            (.runs | length) == 1 and
+            .runs[0].tool.driver.name == "Semgrep OSS" and
+            .runs[0].tool.driver.semanticVersion == $version and
+            (.runs[0].tool.driver.rules | length) >= 10 and
+            .runs[0].invocations[0].executionSuccessful == true
+          ' "$output_dir/semgrep.sarif" >/dev/null || {
+            echo 'Semgrep SARIF failed its schema, OSS-driver, version, rule-floor, or execution assertions.' >&2
+            exit 1
+          }
+
+          finding_count=$(jq '.results | length' security-results/semgrep.json)
+          error_count=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' security-results/semgrep.json)
+          warning_count=$(jq '[.results[] | select(.extra.severity == "WARNING")] | length' security-results/semgrep.json)
+          target_count=$(jq '.paths.scanned | length' security-results/semgrep.json)
+          rule_count=$(jq '.runs[0].tool.driver.rules | length' security-results/semgrep.sarif)
+          rules_sha=$(sha256sum .semgrep.yml | cut -d' ' -f1)
+
+          {
+            echo '### Semgrep Community Edition'
+            echo '- Scope: TypeScript/JavaScript (Bun, Pi/Node, React/DOM, Cloudflare) plus generic installer checks'
+            echo "- Engine: Semgrep OSS $SEMGREP_VERSION; $rule_count repository-owned rules (SHA-256 \`$rules_sha\`)"
+            echo '- Network/data mode: scan runs offline; no token, Registry rules, metrics, version check, or Semgrep Cloud upload'
+            echo "- Targets: $target_count"
+            echo "- Findings: $finding_count ($error_count error, $warning_count warning)"
+            echo '- CE limit: intrafile analysis only; no Pro cross-file/cross-function or hosted policy features'
+            echo '- Enforcement: monitor mode; rule, parser, timeout, engine, and report failures still fail the job'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'report-ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Retain Semgrep reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semgrep-reports
+          path: |
+            security-results/semgrep*.json
+            security-results/semgrep*.sarif
+            security-results/semgrep*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Semgrep SARIF
+        if: >-
+          always() &&
+          steps.scan.outputs.report-ready == 'true' &&
+          (github.event_name != 'pull_request' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'))
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: security-results/semgrep.sarif
+          category: semgrep-ce
+
+  trivy:
+    name: Trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read # Required by upload-sarif to read workflow-run metadata.
+      security-events: write # Required only for the final SARIF upload.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download verified Trivy archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/trivy.tar.gz"
+          curl --fail --silent --show-error --location \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 15 --max-time 120 \
+            --proto '=https' --tlsv1.2 \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$TRIVY_LINUX_X64_SHA256" "$archive" \
+            | sha256sum --check --strict
+
+      - name: Activate verified Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/trivy-bin"
+          mkdir -p "$install_dir"
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$install_dir" trivy
+          actual_version=$("$install_dir/trivy" --version | awk 'NR == 1 { print $2 }')
+          if [[ "$actual_version" != "$TRIVY_VERSION" ]]; then
+            echo "Expected Trivy $TRIVY_VERSION, got $actual_version." >&2
+            exit 1
+          fi
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Resolve and validate vulnerability database
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry_token=$(curl --fail --silent --show-error --location \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 15 --max-time 120 \
+            --proto '=https' --tlsv1.2 \
+            'https://ghcr.io/token?service=ghcr.io&scope=repository:aquasecurity/trivy-db:pull' \
+            | jq -er '.token')
+          headers=$(curl --fail --silent --show-error --head --location \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 15 --max-time 120 \
+            --proto '=https' --tlsv1.2 \
+            -H "Authorization: Bearer $registry_token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json' \
+            'https://ghcr.io/v2/aquasecurity/trivy-db/manifests/2')
+          db_digest=$(printf '%s\n' "$headers" | tr -d '\r' \
+            | awk 'tolower($1) == "docker-content-digest:" { print $2 }')
+          if [[ ! "$db_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid Trivy database digest: $db_digest" >&2
+            exit 1
+          fi
+
+          cache_dir="$RUNNER_TEMP/trivy-cache"
+          db_reference="ghcr.io/aquasecurity/trivy-db@$db_digest"
+          for attempt in 1 2 3; do
+            set +e
+            trivy fs \
+              --cache-dir "$cache_dir" \
+              --db-repository "$db_reference" \
+              --download-db-only \
+              --no-progress \
+              --skip-version-check \
+              --disable-telemetry
+            download_status=$?
+            set -e
+            if [[ "$download_status" -eq 0 ]]; then
+              break
+            fi
+            if (( attempt == 3 )); then
+              echo "Trivy database download failed after three attempts (exit $download_status)." >&2
+              exit "$download_status"
+            fi
+            echo "Trivy database download failed; retrying (attempt $((attempt + 1))/3)." >&2
+            sleep $((attempt * 5))
+          done
+
+          metadata="$cache_dir/db/metadata.json"
+          test -s "$cache_dir/db/trivy.db"
+          updated_epoch=$(jq -er '
+            select(.Version == 2) |
+            .UpdatedAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601
+          ' "$metadata")
+          now_epoch=$(date -u +%s)
+          db_age_seconds=$((now_epoch - updated_epoch))
+          if (( db_age_seconds < -300 || db_age_seconds > TRIVY_DB_MAX_AGE_SECONDS )); then
+            echo "Trivy database age is invalid: $db_age_seconds seconds." >&2
+            exit 1
+          fi
+
+          db_updated_at=$(jq -er '.UpdatedAt' "$metadata")
+          {
+            echo "TRIVY_CACHE_DIR=$cache_dir"
+            echo "TRIVY_DB_REFERENCE=$db_reference"
+            echo "TRIVY_DB_DIGEST=$db_digest"
+            echo "TRIVY_DB_UPDATED_AT=$db_updated_at"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify Trivy detector and checks health
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/trivy-health"
+          mkdir -p "$fixture_dir" security-results
+          cat > "$fixture_dir/package-lock.json" <<'EOF'
+          {
+            "name": "trivy-health",
+            "version": "1.0.0",
+            "lockfileVersion": 3,
+            "requires": true,
+            "packages": {
+              "": { "name": "trivy-health", "version": "1.0.0" },
+              "node_modules/lodash": { "version": "4.17.20", "license": "MIT" }
+            },
+            "dependencies": { "lodash": { "version": "4.17.20" } }
+          }
+          EOF
+          cat > "$fixture_dir/Dockerfile" <<'EOF'
+          FROM alpine:3.20
+          USER root
+          EOF
+
+          : > security-results/trivy-health.log
+          for attempt in 1 2 3; do
+            set +e
+            trivy fs \
+              --cache-dir "$TRIVY_CACHE_DIR" \
+              --db-repository "$TRIVY_DB_REFERENCE" \
+              --checks-bundle-repository "$TRIVY_CHECKS_REFERENCE" \
+              --skip-db-update \
+              --skip-version-check \
+              --disable-telemetry \
+              --scanners vuln,misconfig \
+              --include-non-failures \
+              --severity HIGH,CRITICAL \
+              --exit-code 9 \
+              --format json \
+              --output security-results/trivy-health.json \
+              "$fixture_dir" 2>>security-results/trivy-health.log
+            detector_status=$?
+            set -e
+            if [[ "$detector_status" -eq 9 ]]; then
+              break
+            fi
+            if (( attempt < 3 )); then
+              echo "Trivy controlled detector scan did not return its expected finding status; retrying (attempt $((attempt + 1))/3)." >&2
+              sleep $((attempt * 5))
+            fi
+          done
+          cat security-results/trivy-health.log
+          if [[ "$detector_status" -ne 9 ]]; then
+            echo "Trivy failed its controlled detector test (exit $detector_status)." >&2
+            exit 1
+          fi
+
+          jq -e '
+            .SchemaVersion == 2 and
+            any(.Results[].Vulnerabilities[]?;
+              .VulnerabilityID == "CVE-2021-23337" and
+              .PkgName == "lodash" and .InstalledVersion == "4.17.20") and
+            any(.Results[].Misconfigurations[]?;
+              .ID == "DS-0002" and .Status == "FAIL" and
+              .Severity == "HIGH" and .CauseMetadata.StartLine == 2)
+          ' security-results/trivy-health.json >/dev/null || {
+            echo 'Trivy controlled detector report failed its vulnerability or misconfiguration assertions.' >&2
+            exit 1
+          }
+
+          checks_metadata="$TRIVY_CACHE_DIR/policy/metadata.json"
+          expected_checks_digest=${TRIVY_CHECKS_REFERENCE##*@}
+          jq -e --arg digest "$expected_checks_digest" '
+            .MajorVersion == 2 and .Digest == $digest
+          ' "$checks_metadata" >/dev/null || {
+            echo 'Trivy checks metadata does not match the pinned v2.2.0 OCI digest.' >&2
+            exit 1
+          }
+
+          # Exercise the report guard: malformed/empty collection metadata must fail.
+          if printf '{"SchemaVersion":1,"Results":[]}' \
+            | jq -e '.SchemaVersion == 2 and (.Results | length) > 0' >/dev/null; then
+            echo 'The Trivy report guard accepted invalid collection metadata.' >&2
+            exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Materialize packages for license evidence
+        shell: bash
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Scan dependencies and configuration with Trivy
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p security-results
+
+          set +e
+          trivy fs \
+            --cache-dir "$TRIVY_CACHE_DIR" \
+            --db-repository "$TRIVY_DB_REFERENCE" \
+            --checks-bundle-repository "$TRIVY_CHECKS_REFERENCE" \
+            --skip-db-update \
+            --skip-check-update \
+            --skip-version-check \
+            --disable-telemetry \
+            --scanners vuln,misconfig \
+            --include-dev-deps \
+            --include-non-failures \
+            --exit-code 0 \
+            --skip-dirs node_modules \
+            --skip-dirs '**/node_modules' \
+            --skip-dirs '**/dist' \
+            --skip-dirs '**/dist-ssr' \
+            --skip-dirs '**/.astro' \
+            --skip-dirs '**/coverage' \
+            --skip-dirs apps/pi-extension/generated \
+            --format json \
+            --output security-results/trivy.json \
+            . 2>security-results/trivy-scan.log
+          scan_status=$?
+          set -e
+          cat security-results/trivy-scan.log
+          if [[ "$scan_status" -ne 0 ]]; then
+            echo "Trivy vulnerability/misconfiguration scan failed (exit $scan_status)." >&2
+            exit "$scan_status"
+          fi
+
+          if grep -Eq $'\t(ERROR|FATAL)\t' security-results/trivy-scan.log; then
+            echo 'Trivy logged a collection or scanner error.' >&2
+            exit 1
+          fi
+          grep -F '[vuln] Vulnerability scanning is enabled' security-results/trivy-scan.log >/dev/null
+          grep -F '[misconfig] Misconfiguration scanning is enabled' security-results/trivy-scan.log >/dev/null
+
+          set +e
+          trivy fs \
+            --cache-dir "$TRIVY_CACHE_DIR" \
+            --skip-db-update \
+            --skip-check-update \
+            --skip-version-check \
+            --disable-telemetry \
+            --scanners license \
+            --include-dev-deps \
+            --exit-code 0 \
+            --skip-dirs '**/dist' \
+            --skip-dirs '**/dist-ssr' \
+            --skip-dirs '**/.astro' \
+            --skip-dirs '**/coverage' \
+            --skip-dirs apps/pi-extension/generated \
+            --format json \
+            --output security-results/trivy-license.json \
+            . 2>security-results/trivy-license.log
+          license_status=$?
+          set -e
+          cat security-results/trivy-license.log
+          if [[ "$license_status" -ne 0 ]]; then
+            echo "Trivy license scan failed (exit $license_status)." >&2
+            exit "$license_status"
+          fi
+
+          if grep -Eq $'\t(ERROR|FATAL)\t' security-results/trivy-license.log; then
+            echo 'Trivy logged a license collection error.' >&2
+            exit 1
+          fi
+          grep -F '[license] License scanning is enabled' security-results/trivy-license.log >/dev/null
+
+          echo "Trivy dependency report metadata: $(jq -c \
+            '{SchemaVersion, ArtifactName, ArtifactType}' security-results/trivy.json)"
+          echo "Trivy license report metadata: $(jq -c \
+            '{SchemaVersion, ArtifactName, ArtifactType}' security-results/trivy-license.json)"
+
+          # trivy fs reports "repository" when it can read Git metadata from the
+          # checkout and "filesystem" otherwise. Both are defined artifact types
+          # in the pinned Trivy release and use the same local filesystem scanner.
+          jq -e '.SchemaVersion == 2 and
+            (.ArtifactType == "filesystem" or .ArtifactType == "repository")' \
+            security-results/trivy.json >/dev/null || {
+              echo 'Trivy vulnerability/misconfiguration report metadata is invalid.' >&2
+              exit 1
+            }
+          jq -e '.SchemaVersion == 2 and
+            (.ArtifactType == "filesystem" or .ArtifactType == "repository")' \
+            security-results/trivy-license.json >/dev/null || {
+              echo 'Trivy license report metadata is invalid.' >&2
+              exit 1
+            }
+
+          bun_package_count=$(jq '[.Results[] | select(
+            .Target == "bun.lock" and .Class == "lang-pkgs" and .Type == "bun"
+          ) | .Packages[]?] | length' security-results/trivy.json)
+          expected_npm_targets="$RUNNER_TEMP/trivy-expected-npm-targets.txt"
+          actual_npm_targets="$RUNNER_TEMP/trivy-actual-npm-targets.txt"
+          git ls-files '*package-lock.json' \
+            | awk '$0 !~ /(^|\/)(node_modules|dist|dist-ssr|\.astro|coverage)(\/|$)/ &&
+              $0 !~ /^apps\/pi-extension\/generated\//' \
+            | sort -u > "$expected_npm_targets"
+          jq -r '.Results[] | select(
+            .Class == "lang-pkgs" and .Type == "npm" and
+            ((.Packages // []) | length) > 0
+          ) | .Target' security-results/trivy.json \
+            | sort -u > "$actual_npm_targets"
+          expected_npm_target_count=$(wc -l < "$expected_npm_targets")
+          npm_target_count=$(jq '[.Results[] | select(
+            .Class == "lang-pkgs" and .Type == "npm"
+          )] | length' security-results/trivy.json)
+          total_package_count=$(jq '[.Results[].Packages[]?] | length' security-results/trivy.json)
+          bun_license_count=$(jq '[.Results[] | select(
+            .Target == "bun.lock" and .Class == "license"
+          ) | .Licenses[]?] | length' security-results/trivy-license.json)
+          license_count=$(jq '[.Results[].Licenses[]?] | length' security-results/trivy-license.json)
+          if (( expected_npm_target_count < 1 || bun_package_count < 500 \
+            || total_package_count < bun_package_count )); then
+            echo "Trivy dependency coverage is incomplete: bun=$bun_package_count npm-targets=$npm_target_count expected-npm-targets=$expected_npm_target_count total=$total_package_count." >&2
+            exit 1
+          fi
+          if ! cmp --silent "$expected_npm_targets" "$actual_npm_targets"; then
+            echo 'Trivy did not catalog every tracked, in-scope npm lockfile with packages:' >&2
+            diff --unified "$expected_npm_targets" "$actual_npm_targets" >&2 || true
+            exit 1
+          fi
+          if (( bun_license_count < 500 || license_count < bun_license_count )); then
+            echo "Trivy license coverage is incomplete: bun=$bun_license_count total=$license_count." >&2
+            exit 1
+          fi
+
+          jq -e 'any(.Results[].Packages[]?;
+            .Name == "dompurify" and (.Version | length) > 0 and
+            .Relationship == "direct")' security-results/trivy.json >/dev/null || {
+              echo 'Trivy did not catalog the direct dompurify sentinel from bun.lock.' >&2
+              exit 1
+            }
+          jq -e 'any(.Results[].Packages[]?;
+            .Name == "hono" and (.Version | length) > 0 and
+            .Relationship == "indirect")' security-results/trivy.json >/dev/null || {
+              echo 'Trivy did not catalog the indirect hono sentinel from bun.lock.' >&2
+              exit 1
+            }
+          jq -e 'any(.Results[].Packages[]?;
+            .Name == "bun-types" and (.Version | length) > 0 and
+            .Relationship == "direct" and .Dev == true)' \
+            security-results/trivy.json >/dev/null || {
+              echo 'Trivy did not catalog the direct development bun-types sentinel from bun.lock.' >&2
+              exit 1
+            }
+          jq -e 'any(.Results[];
+            .Target == "tests/manual/ssh/Dockerfile" and
+            .Class == "config" and .Type == "dockerfile" and
+            .MisconfSummary.Successes > 0 and
+            (.Misconfigurations | any(.Status == "FAIL")))' \
+            security-results/trivy.json >/dev/null || {
+              echo 'Trivy did not execute both passing and failing Dockerfile checks against the manual SSH fixture.' >&2
+              exit 1
+            }
+
+          trivy convert \
+            --format sarif \
+            --output security-results/trivy.sarif \
+            security-results/trivy.json
+          jq -e --arg version "$TRIVY_VERSION" '
+            .version == "2.1.0" and
+            (.runs | length) == 1 and
+            .runs[0].tool.driver.name == "Trivy" and
+            .runs[0].tool.driver.version == $version and
+            (.runs[0].tool.driver.rules | length) > 0 and
+            (.runs[0].results | type) == "array"
+          ' security-results/trivy.sarif >/dev/null || {
+            echo 'Trivy SARIF metadata is invalid.' >&2
+            exit 1
+          }
+
+          vulnerability_count=$(jq '[.Results[].Vulnerabilities[]?] | length' security-results/trivy.json)
+          critical_count=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' security-results/trivy.json)
+          high_count=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity == "HIGH")] | length' security-results/trivy.json)
+          misconfiguration_count=$(jq '[.Results[].Misconfigurations[]? | select(.Status == "FAIL")] | length' security-results/trivy.json)
+          checks_digest=$(jq -er '.Digest' "$TRIVY_CACHE_DIR/policy/metadata.json")
+
+          {
+            echo '### Trivy'
+            echo '- Scope: committed Bun/npm dependency locks plus filesystem/IaC misconfiguration; secret scanning disabled (Gitleaks remains authoritative)'
+            echo "- Engine: Trivy $TRIVY_VERSION; database \`$TRIVY_DB_DIGEST\` (updated \`$TRIVY_DB_UPDATED_AT\`)"
+            echo "- Misconfiguration checks: v2.2.0 content, \`$checks_digest\`"
+            echo "- Dependency catalog: $total_package_count records ($bun_package_count from text bun.lock, including development dependencies; $npm_target_count/$expected_npm_target_count tracked npm locks)"
+            echo "- Vulnerabilities: $vulnerability_count ($critical_count critical, $high_count high)"
+            echo "- Misconfiguration failures: $misconfiguration_count; tests/manual/ssh/Dockerfile is a non-production manual fixture"
+            echo "- Informational installed-license records: $license_count (runner/install graph, not a deployment inventory)"
+            echo '- Enforcement: monitor mode; install, release checksum, DB freshness, checks, catalog, detector, collection, and report failures still fail the job'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'report-ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Retain Trivy reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-reports
+          path: |
+            security-results/trivy*.json
+            security-results/trivy*.sarif
+            security-results/trivy*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Trivy SARIF
+        if: >-
+          always() &&
+          steps.scan.outputs.report-ready == 'true' &&
+          (github.event_name != 'pull_request' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'))
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: security-results/trivy.sarif
+          category: trivy
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # Required by upload-sarif to read workflow-run metadata.
+      security-events: write # Required only for the final SARIF upload.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install verified zizmor
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zizmor.tar.gz"
+          install_dir="$RUNNER_TEMP/zizmor-bin"
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$ZIZMOR_LINUX_X64_SHA256" "$archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" zizmor
+          "$install_dir/zizmor" --version
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Verify zizmor detector health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Construct an attacker-controlled expression at runtime so this
+          # workflow remains safe while testing that zizmor catches it.
+          unsafe_expression='$'"{{ github.event.issue.title }}"
+          set +e
+          printf '%s\n' \
+            'name: Synthetic unsafe workflow' \
+            'on: issues' \
+            'jobs:' \
+            '  test:' \
+            '    runs-on: ubuntu-latest' \
+            '    steps:' \
+            "      - run: echo \"$unsafe_expression\"" \
+            | zizmor --offline --persona regular --strict-collection \
+                --format=json --no-progress --color=never - \
+                > "$RUNNER_TEMP/zizmor-health.json" 2>/dev/null
+          detector_exit=$?
+          set -e
+
+          if [[ "$detector_exit" -lt 11 || "$detector_exit" -gt 14 ]] \
+            || ! jq -e 'any(.ident == "template-injection")' \
+              "$RUNNER_TEMP/zizmor-health.json" >/dev/null; then
+            echo "zizmor failed its synthetic detection test (exit $detector_exit)." >&2
+            exit 1
+          fi
+
+      - name: Audit GitHub configuration
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p security-results
+
+          # SARIF mode reports findings without a non-zero exit. Internal,
+          # collection, or configuration failures still fail the step.
+          zizmor --offline \
+            --persona regular \
+            --strict-collection \
+            --format=sarif \
+            --no-progress \
+            --color=never \
+            . > security-results/zizmor.sarif
+
+          jq -e '.version == "2.1.0" and (.runs | type == "array")' \
+            security-results/zizmor.sarif >/dev/null
+          finding_count=$(jq '[.runs[].results[]?] | length' security-results/zizmor.sarif)
+
+          {
+            echo '### zizmor'
+            echo '- Scope: all workflows, local actions, and Dependabot configuration'
+            echo "- Findings: $finding_count"
+            echo '- Network mode: offline'
+            echo '- Enforcement: monitor mode; scanner failures still fail the job'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'report-ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Upload zizmor SARIF
+        if: >-
+          always() &&
+          steps.scan.outputs.report-ready == 'true' &&
+          (github.event_name != 'pull_request' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'))
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: security-results/zizmor.sarif
+          category: zizmor

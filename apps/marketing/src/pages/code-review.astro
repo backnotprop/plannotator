@@ -92,7 +92,7 @@ const aiFeatures = [
     eyebrow: 'agent reviews',
     title: 'Run review agents',
     body: [
-      'Kick off a review agent against the current changeset; its findings come back as annotations on the diff, each with a severity, the reasoning behind it, and a file and line anchor. You decide what to keep — nothing is sent anywhere until you send it.',
+      'Kick off a review agent against the current changeset; the selected AI provider receives the review prompt and relevant repository or diff context. Findings come back as annotations with a severity, reasoning, and a file and line anchor. Nothing is posted back to GitHub or GitLab until you choose to send the review.',
       'The review is yours to define. Point it at one of your own skills — a security checklist, your naming conventions, whatever you\'ve written — and Plannotator links to it locally and runs it as a launchable reviewer, findings landing inline like the built-in one. Runs on Claude or Codex natively, or through Cursor, OpenCode, Pi, and GitHub Copilot CLI when they\'re on your PATH.',
     ],
     points: ['Bring your own review skill; its findings land as diff comments', 'Code Tours: a narrated walkthrough with checkpoints', 'Run several engines on the same diff and compare findings'],
@@ -167,7 +167,8 @@ const description =
           tokens, or whole files, and when you're done the notes feed straight into your agent
           session — an automated feedback loop. It works on local diffs, commits, branches,
           worktrees, and GitHub/GitLab PRs. The core tool is manual; the AI layer on top is
-          optional and answers to you. Free, MIT / Apache-2.0, and it runs entirely on your machine.
+          optional and answers to you. Free, MIT / Apache-2.0, with local review data kept on your
+          machine by default.
         </p>
 
         <div class="cr-vcs-badges">

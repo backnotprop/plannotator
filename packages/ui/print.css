@@ -4,7 +4,8 @@
  *   1. @media print — standard print styles
  *   2. .plannotator-print — class added via JS beforeprint/afterprint events
  *      to guarantee overrides that @media print alone cannot achieve
- *      (e.g. beating Tailwind layers + hljs github-dark theme).
+ *      (e.g. beating Tailwind layers, and the syntax theme's per-token inline
+ *      colours — inline styles only lose to an !important author rule).
  */
 
 /* ============================================================
@@ -12,7 +13,7 @@
  * These use .plannotator-print on <html> for maximum specificity.
  * ============================================================ */
 
-/* Code blocks: override github-dark.css .hljs{background:#0d1117} */
+/* Code blocks: flatten the syntax theme's dark block background to paper */
 .plannotator-print pre,
 .plannotator-print pre[class] {
   background: #f5f5f5 !important;
@@ -23,18 +24,19 @@
 }
 
 .plannotator-print pre code,
-.plannotator-print code.hljs,
-.plannotator-print pre code.hljs,
-.plannotator-print .hljs {
+.plannotator-print code.pn-code,
+.plannotator-print pre code.pn-code,
+.plannotator-print .code-snippet-preview {
   background: transparent !important;
   background-color: transparent !important;
   color: #1a1a1a !important;
 }
 
+/* The syntax theme colours every token with an inline `style`, so these
+   !important rules are what flattens code to black on paper. */
 .plannotator-print pre span,
 .plannotator-print pre code span,
-.plannotator-print .hljs span,
-.plannotator-print [class*="hljs-"] {
+.plannotator-print .code-snippet-preview span {
   color: #1a1a1a !important;
   background: transparent !important;
   background-color: transparent !important;
@@ -284,9 +286,8 @@
 
   pre code,
   pre code[class],
-  pre code.hljs,
-  code.hljs,
-  code[data-highlighted] {
+  pre code.pn-code,
+  code.pn-code {
     font-size: 9pt !important;
     background: transparent !important;
     background-color: transparent !important;
@@ -298,14 +299,14 @@
     word-wrap: break-word !important;
   }
 
-  .hljs {
+  .code-snippet-preview {
     background: transparent !important;
     background-color: transparent !important;
     color: #1a1a1a !important;
   }
 
-  pre span, pre code span, .hljs span, code span,
-  [class*="hljs-"] {
+  pre span, pre code span, code span,
+  .code-snippet-preview span {
     color: #1a1a1a !important;
     background: transparent !important;
     background-color: transparent !important;

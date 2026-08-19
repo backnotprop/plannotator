@@ -1,7 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import { CODEX_MODELS, codexReasoningOptions } from "./AgentsTab";
+import { CLAUDE_MODELS, CODEX_MODELS, TOUR_CLAUDE_MODELS, codexReasoningOptions } from "./AgentsTab";
 
 const catalogEntry = (value: string) => CODEX_MODELS.find((m) => m.value === value);
+
+describe("CLAUDE_MODELS catalog", () => {
+  test("offers the current 5-series flagships", () => {
+    for (const value of ["claude-fable-5", "claude-opus-5", "claude-sonnet-5"]) {
+      expect(CLAUDE_MODELS.some((m) => m.value === value)).toBe(true);
+    }
+    expect(CLAUDE_MODELS.find((m) => m.value === "claude-opus-5")?.label).toBe("Opus 5");
+  });
+
+  // The 5-series models are 1M-context by default, so they carry no `[1m]`
+  // variant — that suffix exists only to opt the older 4.x models into the
+  // larger window. Pinned so a future entry doesn't invent `claude-opus-5[1m]`.
+  test("5-series entries have no [1m] context variant", () => {
+    for (const { value } of CLAUDE_MODELS) {
+      if (/-5(\[|$)/.test(value)) expect(value).not.toContain("[1m]");
+    }
+  });
+
+  test("tour/guide catalog inherits every review model plus the latest aliases", () => {
+    for (const { value } of CLAUDE_MODELS) {
+      expect(TOUR_CLAUDE_MODELS.some((m) => m.value === value)).toBe(true);
+    }
+    for (const alias of ["sonnet", "opus", "fable"]) {
+      expect(TOUR_CLAUDE_MODELS.some((m) => m.value === alias)).toBe(true);
+    }
+  });
+});
 
 test("uses the canonical GPT-5.6 Sol model ID", () => {
   expect(catalogEntry("gpt-5.6-sol")?.label).toBe("GPT-5.6 Sol");

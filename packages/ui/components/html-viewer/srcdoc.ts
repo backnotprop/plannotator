@@ -120,11 +120,26 @@ export function buildSrcdocInjection({
   return `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style><script>${BRIDGE_SCRIPT}</script>`;
 }
 
+/**
+ * A document-authored CSP `<meta>` tag (e.g. `default-src 'none'` in
+ * Plannotator's own portable guided-review exports) blocks the inline bridge
+ * script and disables annotation entirely. The iframe `sandbox` attribute is
+ * the security boundary for the annotate surface; the page's CSP was written
+ * for its standalone context, so it is removed before injection.
+ */
+const META_CSP_RE =
+  /<meta\s[^>]*http-equiv\s*=\s*["']?\s*content-security-policy\s*["']?[^>]*\/?>/gi;
+
+export function neutralizeMetaCsp(rawHtml: string): string {
+  return rawHtml.replace(META_CSP_RE, "<!-- plannotator: meta CSP removed for annotation -->");
+}
+
 /** Splice the injection just before `</head>`, or prepend when there is none. */
 export function injectIntoHead(rawHtml: string, injection: string): string {
-  const headClose = rawHtml.indexOf("</head>");
+  const html = neutralizeMetaCsp(rawHtml);
+  const headClose = html.indexOf("</head>");
   if (headClose !== -1) {
-    return rawHtml.slice(0, headClose) + injection + rawHtml.slice(headClose);
+    return html.slice(0, headClose) + injection + html.slice(headClose);
   }
-  return injection + rawHtml;
+  return injection + html;
 }

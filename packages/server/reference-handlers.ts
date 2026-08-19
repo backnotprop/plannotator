@@ -26,7 +26,7 @@ import {
 	isWithinProjectRoot,
 	getFileBrowserMaxFiles,
 	warmFileListCache,
-	ANNOTATABLE_DOC_REGEX,
+	getAnnotatableDocRegex,
 	MAX_ANNOTATABLE_FILE_BYTES,
 	isAnnotatableTextPath,
 } from "@plannotator/shared/resolve-file";
@@ -310,8 +310,9 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	// .xml). Without it, those paths keep the syntax-highlighted code-file
 	// popout response, so code-file links inside documents are unaffected.
 	const forceDoc = url.searchParams.get("doc") === "1";
+	const docExtensions = getAnnotatableDocRegex();
 	const wantsDocRender = (path: string) =>
-		ANNOTATABLE_DOC_REGEX.test(path) && (forceDoc || !isCodeFilePath(path));
+		docExtensions.test(path) && (forceDoc || !isCodeFilePath(path));
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
@@ -648,10 +649,11 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 
 // --- File Browser ---
 
-const FILE_BROWSER_EXTENSIONS = ANNOTATABLE_DOC_REGEX;
-
+// Resolved per call, not captured at module load: the accepted set includes
+// the user's configured extra markdown extensions (#1307), which the shared
+// resolver reads from config.json on first use.
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
-	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);
+	return getAnnotatableDocRegex().test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
 type FileBrowserWalkState = {
@@ -685,7 +687,7 @@ async function walkFileBrowserFiles(dir: string, root: string, state: FileBrowse
 		if (entry.isDirectory()) {
 			if (isFileBrowserExcludedPath(relativePath)) continue;
 			await walkFileBrowserFiles(fullPath, root, state);
-		} else if (entry.isFile() && FILE_BROWSER_EXTENSIONS.test(entry.name)) {
+		} else if (entry.isFile() && getAnnotatableDocRegex().test(entry.name)) {
 			if (isFileBrowserExcludedPath(relativePath)) continue;
 			addFileBrowserFile(state, relativePath);
 		}

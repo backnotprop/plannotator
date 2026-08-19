@@ -27,6 +27,8 @@ interface FileBrowserProps {
   annotationCounts?: Map<string, number>;
   highlightedFiles?: Set<string>;
   editStatuses?: Map<string, FileEditStatus>;
+  /** Prevent competing destination changes while a document is activating. */
+  selectionPending?: boolean;
 }
 
 export interface FileEditStatus {
@@ -246,7 +248,8 @@ const TreeNode: React.FC<{
   editStatuses?: Map<string, FileEditStatus>;
   workspaceStatus?: WorkspaceStatusPayload;
   forceExpandFolders?: boolean;
-}> = ({ node, depth, dirPath, expandedFolders, onToggleFolder, onSelectFile, activeFile, annotationCounts, highlightedFiles, editStatuses, workspaceStatus, forceExpandFolders = false }) => {
+  selectionPending?: boolean;
+}> = ({ node, depth, dirPath, expandedFolders, onToggleFolder, onSelectFile, activeFile, annotationCounts, highlightedFiles, editStatuses, workspaceStatus, forceExpandFolders = false, selectionPending = false }) => {
   const folderKey = `${dirPath}:${node.path}`;
   const absolutePath = `${dirPath}/${node.path}`;
   const isExpanded = forceExpandFolders || expandedFolders.has(folderKey);
@@ -305,6 +308,7 @@ const TreeNode: React.FC<{
             editStatuses={editStatuses}
             workspaceStatus={workspaceStatus}
             forceExpandFolders={forceExpandFolders}
+            selectionPending={selectionPending}
           />
         ))}
       </>
@@ -347,7 +351,8 @@ const TreeNode: React.FC<{
       onClick={() => {
         if (!isSelectionDisabled) onSelectFile(absolutePath, dirPath);
       }}
-      disabled={isSelectionDisabled}
+      disabled={isSelectionDisabled || selectionPending}
+      aria-busy={isActive && selectionPending ? true : undefined}
       className={`file-tree-item w-full text-left group ${isActive ? "active" : ""} ${fileCount > 0 ? "has-annotations" : ""} ${isHighlighted ? 'file-annotation-flash' : ''} ${isSelectionDisabled ? 'opacity-70 cursor-default' : ''}`}
       style={{ paddingLeft: paddingLeft + 15 }}
       title={isDeleted ? `${node.path} (${editStatus?.status === "missing" ? "missing on disk" : "deleted on disk"})` : node.path}
@@ -357,6 +362,9 @@ const TreeNode: React.FC<{
       </svg>
       <span className={`truncate flex-1 min-w-0 ${isDeleted ? "line-through" : ""}`}>{displayName}</span>
       <div className="ml-auto flex flex-shrink-0 items-center gap-1.5 text-[10px]">
+        {isActive && selectionPending && (
+          <span className="text-primary">Opening…</span>
+        )}
         {editMarker && (
           <span
             className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold leading-none ${editMarker.className}`}
@@ -393,7 +401,8 @@ const DirSection: React.FC<{
   highlightedFiles?: Set<string>;
   editStatuses?: Map<string, FileEditStatus>;
   forceExpandFolders?: boolean;
-}> = ({ dir, expandedFolders, onToggleFolder, onSelectFile, activeFile, onRetry, annotationCounts, highlightedFiles, editStatuses, forceExpandFolders = false }) => {
+  selectionPending?: boolean;
+}> = ({ dir, expandedFolders, onToggleFolder, onSelectFile, activeFile, onRetry, annotationCounts, highlightedFiles, editStatuses, forceExpandFolders = false, selectionPending = false }) => {
   const workspaceStatus = React.useMemo(() => normalizeWorkspaceStatus(dir.workspaceStatus), [dir.workspaceStatus]);
 
   if (dir.isLoading) {
@@ -443,6 +452,7 @@ const DirSection: React.FC<{
           editStatuses={editStatuses}
           workspaceStatus={workspaceStatus}
           forceExpandFolders={forceExpandFolders}
+          selectionPending={selectionPending}
         />
       ))}
     </div>
@@ -462,6 +472,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
   annotationCounts,
   highlightedFiles,
   editStatuses,
+  selectionPending = false,
 }) => {
   const [isFilterOpen, setIsFilterOpen] = React.useState(false);
   const [filterQuery, setFilterQuery] = React.useState("");
@@ -528,7 +539,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         {showFilterInput ? (
           <div
             onBlur={handleFilterBlur}
-            className="flex h-6 items-center gap-1.5 rounded-sm bg-muted/25 px-1.5 text-muted-foreground focus-within:bg-muted/40"
+            className="file-browser-filter-field flex h-6 items-center gap-1.5 rounded-sm bg-muted/25 px-1.5 text-muted-foreground focus-within:bg-muted/40"
           >
             <Search size={12} className="shrink-0 text-muted-foreground/55" aria-hidden="true" />
             <input
@@ -556,7 +567,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                   setFilterQuery("");
                   inputRef.current?.focus();
                 }}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/55 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:bg-muted"
+                className="file-browser-filter-clear flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/55 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:bg-muted"
                 aria-label="Clear file filter"
                 title="Clear file filter"
               >
@@ -617,6 +628,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                 highlightedFiles={highlightedFiles}
                 editStatuses={editStatuses}
                 forceExpandFolders={isFiltering}
+                selectionPending={selectionPending}
               />
             )}
           </div>

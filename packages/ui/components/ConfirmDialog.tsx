@@ -2,7 +2,8 @@
  * Reusable confirmation dialog component
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 
 export interface ConfirmDialogProps {
   isOpen: boolean;
@@ -31,6 +32,10 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   showCancel = false,
   wide = false,
 }) => {
+  const descriptionId = useId();
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     if (!isOpen) return;
     const handleKey = (event: KeyboardEvent) => {
@@ -39,11 +44,6 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         event.stopPropagation();
         if (onConfirm) onConfirm();
         else onClose();
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
       }
     };
     window.addEventListener('keydown', handleKey);
@@ -58,8 +58,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   };
 
   const buttonColors = {
-    info: 'bg-primary text-primary-foreground hover:opacity-90',
-    warning: 'bg-warning text-warning-foreground hover:opacity-90',
+    info: 'bg-primary text-primary-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-90',
+    warning: 'bg-warning text-warning-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:opacity-90',
   };
 
   const icons = {
@@ -76,40 +76,54 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
-      data-plannotator-confirm-dialog="true"
+    <Dialog
+      open={isOpen}
+      disablePointerDismissal
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        className={`bg-card border border-border rounded-xl w-full shadow-2xl p-6 ${wide ? 'max-w-md' : 'max-w-sm'}`}
+      <DialogContent
+        hideClose
+        aria-describedby={descriptionId}
+        initialFocus={() => (showCancel ? cancelButtonRef.current : confirmButtonRef.current)}
+        backdropClassName="bg-background/80 backdrop-blur-sm"
+        className={`bg-card text-foreground rounded-xl shadow-2xl p-6 transition-none ${wide ? 'max-w-md' : 'max-w-sm'}`}
+        data-plannotator-confirm-dialog="true"
       >
         <div className="flex items-center gap-3 mb-4">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${iconColors[variant]}`}>
+          <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center ${iconColors[variant]}`}>
             {icons[variant]}
           </div>
-          <h3 className="font-semibold">{title}</h3>
+          <DialogTitle className="font-semibold tracking-normal">{title}</DialogTitle>
         </div>
-        <div className="text-sm text-muted-foreground mb-2">
-          {message}
-        </div>
-        {subMessage && (
-          <div className="text-xs text-muted-foreground mb-6">
-            {subMessage}
+        <div id={descriptionId}>
+          <div className="text-sm text-muted-foreground mb-2">
+            {message}
           </div>
-        )}
-        {!subMessage && <div className="mb-4" />}
+          {subMessage && (
+            <div className="text-xs text-muted-foreground mb-6">
+              {subMessage}
+            </div>
+          )}
+          {!subMessage && <div className="mb-4" />}
+        </div>
         <div className="flex justify-end gap-2">
           {showCancel && (
             <button
+              ref={cancelButtonRef}
+              type="button"
+              data-pn-touch-target="true"
               onClick={onClose}
-              className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-opacity"
+              className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/80 transition-opacity"
             >
               {cancelText}
             </button>
           )}
           <button
+            ref={confirmButtonRef}
+            type="button"
+            data-pn-touch-target="true"
             onClick={() => {
               if (onConfirm) {
                 onConfirm();
@@ -122,7 +136,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             {confirmText}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };

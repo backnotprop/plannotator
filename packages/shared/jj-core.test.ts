@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  getJjSnapshotRevsets,
+  resolveJjSnapshotEndpoint,
   getJjDiffArgs,
   getJjEvoLogEntries,
   jjLineBaseRevset,
@@ -11,6 +13,72 @@ import {
 } from "./jj-core";
 
 describe("jj diff args", () => {
+  test("maps Call flow modes to the revsets used by each visible Jujutsu diff", () => {
+    // Parent hops are counted, never encoded as `@-` / `parents(@-)`: those
+    // resolve to several revisions on a merge and `jj diff` rejects them.
+    expect(getJjSnapshotRevsets("jj-current", "trunk()")).toEqual({
+      from: { revset: "@", firstParentSteps: 1 },
+      to: { revset: "@", firstParentSteps: 0 },
+    });
+    expect(getJjSnapshotRevsets("jj-last", "trunk()")).toEqual({
+      from: { revset: "@", firstParentSteps: 2 },
+      to: { revset: "@", firstParentSteps: 1 },
+    });
+    expect(getJjSnapshotRevsets("jj-line", "trunk()")).toEqual({
+      from: { revset: "heads(::@ & ::(trunk()))", firstParentSteps: 0 },
+      to: { revset: "@", firstParentSteps: 0 },
+    });
+    expect(getJjSnapshotRevsets("jj-evolog", "abc123456789")).toEqual({
+      from: { revset: "abc123456789", firstParentSteps: 0 },
+      to: { revset: "@", firstParentSteps: 0 },
+    });
+    expect(getJjSnapshotRevsets("jj-evolog", ""))
+      .toBeNull();
+    expect(getJjSnapshotRevsets("jj-all", "trunk()"))
+      .toBeNull();
+  });
+
+  test("walks first parents so a merge revision resolves to one revision", async () => {
+    const parentsOf: Record<string, string[]> = {
+      "@": ["aaaaaaaaaaaa", "bbbbbbbbbbbb"],
+      aaaaaaaaaaaa: ["cccccccccccc"],
+      cccccccccccc: [],
+    };
+    const asked: string[] = [];
+    const runtime = {
+      async runJj(args: string[]) {
+        const revision = args[args.indexOf("-r") + 1];
+        asked.push(revision);
+        return { stdout: (parentsOf[revision] ?? []).join("\n"), stderr: "", exitCode: 0 };
+      },
+    };
+
+    // jj-current: one hop off the merge picks the FIRST parent, not both.
+    expect(await resolveJjSnapshotEndpoint(runtime, { revset: "@", firstParentSteps: 1 }))
+      .toBe("aaaaaaaaaaaa");
+    // jj-last: two hops stay on the first-parent line.
+    expect(await resolveJjSnapshotEndpoint(runtime, { revset: "@", firstParentSteps: 2 }))
+      .toBe("cccccccccccc");
+    expect(asked).toEqual(["@", "@", "aaaaaaaaaaaa"]);
+
+    // A revision with no parent cannot be a snapshot base.
+    expect(resolveJjSnapshotEndpoint(runtime, { revset: "cccccccccccc", firstParentSteps: 1 }))
+      .rejects.toThrow();
+  });
+
+  test("uses a zero-hop revset verbatim without asking the repository", async () => {
+    let calls = 0;
+    const runtime = {
+      async runJj() {
+        calls += 1;
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    };
+    expect(await resolveJjSnapshotEndpoint(runtime, { revset: "trunk()", firstParentSteps: 0 }))
+      .toBe("trunk()");
+    expect(calls).toBe(0);
+  });
+
   test("builds git-format diff args for each jj mode", () => {
     expect(getJjDiffArgs("jj-current", "trunk()")).toEqual({
       args: ["diff", "--git", "-r", "@"],

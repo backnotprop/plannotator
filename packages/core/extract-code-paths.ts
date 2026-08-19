@@ -8,7 +8,7 @@ const FENCED_CODE_BLOCK = /(^|\n)([ \t]*)(```|~~~)[\s\S]*?\n\2\3/g;
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 // Match InlineMarkdown.tsx's bare-URL regex exactly so URL ranges excised
 // here mirror the ranges the renderer would consume.
-const URL_REGEX = /https?:\/\/[^\s<>"']+/g;
+const URL_REGEX = new RegExp("https?://[^\\s<>\"']+", "g");
 const BACKTICK_SPAN = /`([^`\n]+)`/g;
 
 /**
