@@ -6,6 +6,7 @@ import { useTheme } from './ThemeProvider';
 import { CommentPopover } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 export interface CodeFileAnnotationInput {
   filePath: string;
@@ -457,12 +458,11 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
   }, [onAddAnnotation, openCommentForRange]);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(contents);
+    if (await copyTextToClipboard(contents)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
     }
   };
 
@@ -583,6 +583,7 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
           anchorRect={pendingComment.anchorRect}
           contextText={pendingComment.contextText}
           isGlobal={false}
+          skillReferences
           onSubmit={(text, images) => {
             onAddAnnotation({
               filePath: filepath,

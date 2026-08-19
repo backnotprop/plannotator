@@ -11,7 +11,7 @@ import type {
   PostRenderPhase,
   SelectedLineRange,
 } from '@pierre/diffs';
-import { CodeView, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
+import { CodeView, EditProvider, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import type {
   CodeAnnotation,
@@ -29,12 +29,26 @@ import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
+import { hashString } from '../utils/hashString';
+import {
+  resolveLineSelectionBehavior,
+  type LineSelectionSource,
+} from '../utils/lineSelectionBehavior';
+import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
+import { BinaryFileNotice } from './BinaryFileNotice';
+import { GeneratedFileNotice } from './GeneratedFileNotice';
+import { EditSessionHud } from './EditSessionHud';
 import { FileCommentBanner } from './FileCommentBanner';
 import { annotationMatchesPrScope, isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
+import { useEditSession } from '../edit/useEditSession';
+import type { EditSelectionAnnotationRequest, EditSelectionComment } from '../edit/useEditSession';
+import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import { InlineAnnotation } from './InlineAnnotation';
+import { InlineAIMarker } from './InlineAIMarker';
 import { detectLanguage } from '../utils/detectLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
@@ -134,15 +148,24 @@ import {
  *  - Safari scroll guardian: NOT carried forward. The old DiffViewer guardian
  *    targeted the OverlayScrollbars viewport wrapping many separate FileDiff
  *    shadow nodes and restored scrollTop on a ">200 -> 0" jump heuristic.
- *    CodeView owns its own scroll model and DELIBERATELY rebases the container's
- *    DOM scrollTop into a bounded 12M-px paged window, so that heuristic would
- *    misfire against CodeView's own rebasing. CodeView is the scroll authority
- *    here; we rely on it rather than a guardian that would fight it. (Still
- *    needs real WebKit validation.)
+ *    CodeView owns its own scroll model and deliberately rebases its DOM
+ *    scrollTop, so that heuristic would fight Pierre. CodeView therefore keeps
+ *    its native bounded scroll viewport on every form factor. A page-scroll
+ *    proxy was physically rejected on iPhone because the document could outrun
+ *    Pierre's virtual window and expose a large blank tail.
  *
  * The worker pool remains a later phase.
+ *
+ * EXPERIMENTAL edit-to-suggestion (flag-gated, default OFF): the plain
+ * all-files panel can opt into Pierre's experimental edit mode. One file at a
+ * time enters an in-place editor (lazy-loaded chunk); on completion the net
+ * change is diffed against the pre-session content and becomes ordinary
+ * suggestion annotations. The item's pristine FileDiffMetadata is deep-cloned
+ * before the session and restored (version bump + updateItem) when it ends,
+ * because Pierre's editor mutates the metadata in place. See
+ * ../edit/useEditSession.ts and ../edit/pierreEditAdapter.ts.
  */
-interface AllFilesCodeViewProps {
+export interface AllFilesCodeViewProps {
   files: DiffFile[];
   diffStyle: 'split' | 'unified';
   diffOverflow?: 'scroll' | 'wrap';
@@ -161,6 +184,9 @@ interface AllFilesCodeViewProps {
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
   reviewSnapshotId?: string;
+  /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
+   * matching virtualization metric without changing desktop geometry. */
+  compactTouchLayout?: boolean;
   // Annotation / toolbar wiring (P2). Mirrors AllFilesDiffView's surface so the
   // toolbar opens against the file CodeView reports for a selection.
   onLineSelection: (range: SelectedLineRange | null) => void;
@@ -188,9 +214,14 @@ interface AllFilesCodeViewProps {
   onAddFileCommentForFile?: (filePath: string, text: string) => void;
   viewedFiles?: Set<string>;
   onToggleViewed?: (filePath: string) => void;
+  /** Chrome preference (#1277): false hides the header Viewed buttons; the `v`
+   *  shortcut and viewed state are unaffected. */
+  showViewedControls?: boolean;
   stagedFiles?: Set<string>;
   onStage?: (filePath: string) => void;
   canStageFiles?: boolean;
+  /** Same preference for the header Git Add buttons (`a` shortcut still works). */
+  showStageControls?: boolean;
   /** Per-file staging gate — false for committed files in since-base mode. The
    * All-files surface lists committed files too, so mode-level canStageFiles is
    * not enough; without this the `a` shortcut / header would `git add` a
@@ -198,6 +229,19 @@ interface AllFilesCodeViewProps {
   canStagePath?: (filePath: string) => boolean;
   stagingFile?: string | null;
   stageError?: string | null;
+  /** Repo-relative paths marked `linguist-generated` in `.gitattributes`
+   * (#1317). Their diffs SEED collapsed (GitHub-style) and their headers show
+   * a "generated" tag. Presentation-only: the diff data is fully present, so
+   * annotations, search, and augmentation behave normally once expanded. */
+  generatedFiles?: Set<string>;
+  /** Generated files the user explicitly expanded — session-local state the
+   * OWNER keeps (outside this component) so expansion survives remounts and
+   * fileSetKey re-seeds. Read at item-seed time via ref so expanding never
+   * rebuilds the identity or remounts CodeView. */
+  expandedGeneratedFiles?: Set<string>;
+  /** Report a generated file's collapse change so the owner can maintain
+   * expandedGeneratedFiles. Fires only for paths in generatedFiles. */
+  onGeneratedFileCollapsedChange?: (filePath: string, collapsed: boolean) => void;
   prUrl?: string;
   prDiffScope?: string;
   // Search (P6). The raw-patch index lives in App (useReviewSearch); these feed
@@ -210,6 +254,10 @@ interface AllFilesCodeViewProps {
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
   // File-tree active-file highlight follows scroll.
   onVisibleFileChange?: (filePath: string | null) => void;
+  /** Tokenized request to reveal a file through CodeView's own item navigation.
+   *  Guided Review uses this for outline chips and sidebar/AI jumps. The token
+   *  lets repeated requests for the same path fire again. */
+  fileScrollTarget?: { filePath: string; token: number } | null;
   // Which left panel drives the item order: 'tree' (folders-first visual
   // order) or 'list' (files array verbatim — the sections view's order).
   fileOrder?: 'tree' | 'list';
@@ -220,6 +268,16 @@ interface AllFilesCodeViewProps {
   /** Seed every file collapsed (commit diffs open as a folded overview under
    * the commit-description header). The collapse-all toggle still works. */
   defaultCollapsed?: boolean;
+  /** Guide-only seed captured once for this component mount. Local collapse
+   * changes therefore do not alter CodeView's key; a true outer remount captures
+   * the shell's latest value. */
+  mountCollapsed?: boolean;
+  /** Restore an inner CodeView position after an outer virtualized shell remounts. */
+  initialScrollPosition?: number;
+  /** Persist the current inner CodeView position outside this component. */
+  onScrollPositionChange?: (position: number) => void;
+  /** Report collapse changes so an outer shell can preserve them across remounts. */
+  onFileCollapsedChange?: (filePath: string, collapsed: boolean) => void;
   /** Content rendered ABOVE the first file, inside the scroller — it scrolls
    * away with the diff (not pinned). Implemented as layout.paddingTop +
    * a portal into CodeView's scroll container, since CodeView owns both the
@@ -235,7 +293,37 @@ interface AllFilesCodeViewProps {
   onAskAIForFile?: (filePath: string, question: string) => void;
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
+  /** Line-scoped questions rendered as inline sparkle markers. */
+  aiMessages?: AIChatEntry[];
+  onClickAIMarker?: (questionId: string) => void;
   getAIHistoryForFile?: (filePath: string) => AIChatEntry[];
+  /** Let wheel/touch gestures continue into a containing page when this nested
+   * viewer reaches either vertical boundary. Guided Review file cards opt in. */
+  allowScrollChaining?: boolean;
+  /**
+   * Portable / read-only host (the exported Guided Review viewer): no line or
+   * gutter selection, no annotation toolbar or comment popovers, no global
+   * keyboard shortcuts, no /api/file-content augmentation, no open-in
+   * affordance. Everything the diff LOOKS like is unchanged — this only turns
+   * off surfaces that require the review server or mutate review state.
+   * See adr/decisions/007-portable-guided-reviews-20260815.md (D2, D4).
+   */
+  readOnly?: boolean;
+  /** EXPERIMENTAL flag-gated edit-to-suggestion mode. Only the plain all-files
+   * dock panel passes this — Guided Review surfaces deliberately do NOT (the
+   * GuideViewportManager evicts CodeViews beyond ~8 mounted, which would
+   * destroy an active editor's state; scoping edit mode to this surface is the
+   * simple safe v1 choice). When absent/false, no edit UI renders and no
+   * editor is ever constructed (code-split hosts also never fetch the editor
+   * chunk; the single-file build inlines it, functionally inert). */
+  enableEditSuggestions?: boolean;
+  /** Sink for suggestions derived from a completed edit session. Required for
+   * edit mode to activate. */
+  onAddSuggestionsForFile?: (filePath: string, hunks: SuggestionHunk[]) => void;
+  /** Sink for a comment authored through the edit session's Selection Action
+   * ("Make annotation"): a line-scoped comment anchored to PRISTINE new-side
+   * lines snapshotted at selection time (see edit/selectionAnchor.ts). */
+  onAddEditorCommentForFile?: (filePath: string, comment: EditSelectionComment) => void;
 }
 
 // Diffshub-style stable path-based id allocation. Plannotator's file list is
@@ -243,7 +331,7 @@ interface AllFilesCodeViewProps {
 // common case. Pathological patches (e.g. a delete + re-add of the same path,
 // or repeated paths) would otherwise collapse two files onto one CodeView item,
 // breaking selection/scroll identity — so a per-base suffix disambiguates them
-// while still keeping a filePath <-> itemId map for the bridge.
+// while still keeping filePath <-> itemId maps for constant-time lookups.
 interface ItemIdentity {
   items: CodeViewItem<DiffAnnotationMetadata>[];
   /** Maps a file path to the CodeView item id that owns it. */
@@ -258,18 +346,6 @@ interface ItemIdentity {
   itemIdToFile: Map<string, DiffFile>;
 }
 
-// Cheap content hash (djb2 xor variant) for diff-change detection. Replaces
-// patch-LENGTH proxies: a same-length different-content patch set must still
-// remount CodeView (fileSetKey) and must not collide in highlight caches
-// (cacheKey). Not cryptographic — collision odds for this purpose are fine.
-function hashString(value: string): string {
-  let hash = 5381;
-  for (let i = 0; i < value.length; i++) {
-    hash = ((hash * 33) ^ value.charCodeAt(i)) >>> 0;
-  }
-  return hash.toString(36);
-}
-
 // The first rendered line of a file's diff, used to anchor file-scoped comments.
 // Pierre suppresses the header-prefix slot whenever a custom header is present
 // (renderDiffChildren makes them mutually exclusive), so file comments can't
@@ -278,13 +354,40 @@ function hashString(value: string): string {
 // lineNumber = lineEnd, metadata = DiffAnnotationMetadata). File-scoped comments
 // are deliberately excluded — they render in the file header (renderCustomHeader),
 // not the gutter (see fileCommentsByPath).
+export function projectFileAIMarkers(
+  aiMessages: AIChatEntry[],
+  filePath: string,
+): DiffLineAnnotation<DiffAnnotationMetadata>[] {
+  return aiMessages
+    .filter(
+      ({ question }) =>
+        question.filePath === filePath &&
+        question.lineStart != null &&
+        question.lineEnd != null,
+    )
+    .map(({ question, response }) => ({
+      side: question.side === 'new' ? ('additions' as const) : ('deletions' as const),
+      lineNumber: question.lineEnd!,
+      metadata: {
+        annotationId: question.id,
+        type: 'comment' as CodeAnnotationType,
+        kind: 'ai-marker' as const,
+        questionId: question.id,
+        promptPreview: question.prompt.slice(0, 40) + (question.prompt.length > 40 ? '...' : ''),
+        hasResponse: !!response.text && !response.error,
+        isStreaming: response.isStreaming,
+      },
+    }));
+}
+
 function projectFileAnnotations(
   annotations: CodeAnnotation[],
+  aiMessages: AIChatEntry[],
   filePath: string,
   prUrl: string | undefined,
   prDiffScope: string | undefined,
 ): DiffLineAnnotation<DiffAnnotationMetadata>[] {
-  return annotations
+  const reviewAnnotations = annotations
     .filter(
       (a) =>
         a.filePath === filePath &&
@@ -296,16 +399,20 @@ function projectFileAnnotations(
       lineNumber: ann.lineEnd,
       metadata: lineAnnotationMetadata(ann),
     }));
+  return [...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
 }
 
 function buildItemIdentity(
   files: DiffFile[],
   visualOrder: number[],
   annotations: CodeAnnotation[],
+  aiMessages: AIChatEntry[],
   prUrl: string | undefined,
   prDiffScope: string | undefined,
   patchHashes: string[],
   seedCollapsed: boolean,
+  generatedFiles: Set<string> | undefined,
+  expandedGeneratedFiles: Set<string> | undefined,
 ): ItemIdentity {
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
@@ -354,14 +461,19 @@ function buildItemIdentity(
     fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
-    const fileAnnotations = projectFileAnnotations(annotations, file.path, prUrl, prDiffScope);
+    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope);
+    // Generated files (#1317) seed collapsed like GitHub's diff view, unless
+    // the user already expanded them this session. A view-state seed only —
+    // the item carries the full fileDiff either way.
+    const seedFileCollapsed = seedCollapsed
+      || (generatedFiles?.has(file.path) === true && expandedGeneratedFiles?.has(file.path) !== true);
     items.push({
       id,
       type: 'diff',
       fileDiff,
       version: 0,
       annotations: fileAnnotations,
-      ...(seedCollapsed && { collapsed: true }),
+      ...(seedFileCollapsed && { collapsed: true }),
     });
     // First occurrence of a path wins the canonical lookup so the file tree
     // (keyed by path) navigates to the primary item for that path.
@@ -384,6 +496,7 @@ function buildItemIdentity(
 // internally responsive (ResizeObserver shrinks labels) but its OUTER box height
 // is fixed, so the responsive label changes never alter the row height.
 const PANEL_HEADER_HEIGHT = 33; // --panel-header-h
+const COMPACT_PANEL_HEADER_HEIGHT = 44;
 // Hunk separator height forced by usePierreTheme unsafeCSS:
 //   [data-separator='line-info'] { height: 24px; margin-block: 4px; }
 // => 24 + 4*2 = 32. Pierre's own 'line-info' default metric is also 32, so
@@ -395,6 +508,8 @@ const HUNK_SEPARATOR_HEIGHT = 32;
 // (item growth + re-render) are allowed to land. Slightly above Pierre's own
 // post-interaction restore delay (120ms).
 const AUGMENT_APPLY_IDLE_MS = 150;
+const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
+const noopAIMarkerClick = () => {};
 
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   files,
@@ -413,6 +528,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   pendingSelection,
   reviewBase,
   reviewSnapshotId,
+  compactTouchLayout,
   onLineSelection,
   onAddAnnotationForFile,
   onEditAnnotation,
@@ -421,12 +537,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onAddFileCommentForFile,
   viewedFiles,
   onToggleViewed,
+  showViewedControls = true,
   stagedFiles,
   onStage,
   canStageFiles = false,
+  showStageControls = true,
   canStagePath,
   stagingFile,
   stageError,
+  generatedFiles,
+  expandedGeneratedFiles,
+  onGeneratedFileCollapsedChange,
   prUrl,
   prDiffScope,
   searchQuery = '',
@@ -435,24 +556,44 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   activeSearchMatch = null,
   onCodeNavRequest,
   onVisibleFileChange,
+  fileScrollTarget,
   fileOrder,
   registerCollapseAllToggle,
   onAllCollapsedChange,
   defaultCollapsed,
+  mountCollapsed,
+  initialScrollPosition = 0,
+  onScrollPositionChange,
+  onFileCollapsedChange,
   leadingContent,
   isActive = true,
+  readOnly = false,
   aiAvailable = false,
   onAskAIForFile,
   isAILoading = false,
   onViewAIResponse,
+  aiMessages = EMPTY_AI_MESSAGES,
+  onClickAIMarker,
   getAIHistoryForFile,
+  allowScrollChaining = false,
+  enableEditSuggestions = false,
+  onAddSuggestionsForFile,
+  onAddEditorCommentForFile,
 }) => {
+  const mountCollapsedRef = useRef(mountCollapsed);
+  const seedCollapsed = mountCollapsedRef.current ?? defaultCollapsed;
+
   // showFileHeader: true suppresses usePierreTheme's `[data-title]` hide rule.
   // With renderCustomHeader the built-in header runs in 'custom' mode (only the
   // header-custom slot, no [data-title] element), so that rule is moot either
   // way — we keep `true` to be explicit that the built-in title is irrelevant
   // here (our FileHeader owns all header chrome).
-  const pierreTheme = usePierreTheme({ fontFamily, fontSize, showFileHeader: true });
+  const pierreTheme = usePierreTheme({
+    fontFamily,
+    fontSize,
+    showFileHeader: true,
+    compactTouchLayout,
+  });
   // Worker-pool highlighting: wait for the pool so the first tokenization
   // wave runs in workers (not a main-thread fallback), and keep the pool's
   // theme pair in step with the UI theme.
@@ -486,6 +627,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     observer.observe(el);
     return () => observer.disconnect();
   }, [scrollEl, leadingContent]);
+
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 
   // NOTE: no center split dragger on this surface (parity with the legacy
@@ -527,8 +669,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const prevStagedRef = useRef<Set<string> | undefined>(stagedFiles);
   const prevStagingRef = useRef<string | null | undefined>(stagingFile);
   const prevStageErrorRef = useRef<string | null | undefined>(stageError);
-  // Previous annotations snapshot for the per-item annotation-sync effect (P4).
+  // Previous line-card snapshots for the per-item annotation-sync effect (P4).
   const prevAnnotationsRef = useRef<CodeAnnotation[]>(annotations);
+  const prevAIMessagesRef = useRef<AIChatEntry[]>(aiMessages);
 
   // Order items to mirror whichever left panel is active: 'tree' replays the
   // file-tree's visual order (folders-first); 'list' keeps the files array
@@ -555,21 +698,44 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // the CodeView remount it drives via fileSetKey) must only change when the
   // FILE SET changes — otherwise every annotation add/edit/delete would remount
   // the whole CodeView and lose scroll/selection state. Existing annotations are
-  // seeded into items on (re)build via the captured `annotations` closure for
-  // the first paint; subsequent annotation changes are applied incrementally per
-  // item by the annotation-sync effect below (updateItem on only the changed
-  // file). We read the latest annotations through a ref at build time so a
-  // remount triggered by a file-set change still seeds current annotations.
+  // seeded into items on (re)build via the latest refs for the first paint;
+  // subsequent annotation/AI-message changes are applied incrementally per item
+  // by the annotation-sync effect below (updateItem on only the changed file).
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+  const aiMessagesRef = useRef(aiMessages);
+  aiMessagesRef.current = aiMessages;
   // Per-file patch content hashes — shared by fileSetKey (remount detection)
   // and the items' cacheKeys (highlight cache identity). Hashed once per
   // files-identity change.
   const patchHashes = useMemo(() => files.map((f) => hashString(f.patch)), [files]);
+  // Generated-file collapse seeding (#1317). The generated SET is content-keyed
+  // (generatedKey) so a refreshed payload carrying an equal set never rebuilds
+  // the identity or remounts CodeView; the user's EXPANDED set is read via ref
+  // so expanding a file (session state owned by App) never rebuilds either —
+  // the live Pierre item already reflects it, and the ref makes any LATER
+  // rebuild (diff switch, order change) re-seed those files expanded.
+  const expandedGeneratedRef = useRef(expandedGeneratedFiles);
+  expandedGeneratedRef.current = expandedGeneratedFiles;
+  const generatedKey = useMemo(
+    () => (generatedFiles && generatedFiles.size > 0 ? [...generatedFiles].sort().join('\n') : ''),
+    [generatedFiles],
+  );
   const identity = useMemo<ItemIdentity>(
-    () => buildItemIdentity(files, visualOrder, annotationsRef.current, prUrl, prDiffScope, patchHashes, defaultCollapsed === true),
+    () => buildItemIdentity(
+      files,
+      visualOrder,
+      annotationsRef.current,
+      aiMessagesRef.current,
+      prUrl,
+      prDiffScope,
+      patchHashes,
+      seedCollapsed === true,
+      generatedFiles,
+      expandedGeneratedRef.current,
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [files, visualOrder, prUrl, prDiffScope, patchHashes, defaultCollapsed],
+    [files, visualOrder, prUrl, prDiffScope, patchHashes, seedCollapsed, generatedKey],
   );
   const { filePathToItemId, filePathToItemIds, itemIdToFilePath, itemIdToFile } = identity;
 
@@ -583,10 +749,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // annotations ref and can't otherwise detect the filter change.
     // fileOrder is part of the key: CodeView seeds initialItems once per
     // instance, so an order change must remount to re-seed in the new order.
-    // defaultCollapsed is part of the key: CodeView seeds item collapsed state
-    // once per instance, so a seed change must remount to take effect.
-    () => `${fileOrder ?? 'tree'}:${defaultCollapsed ? 'c' : 'e'}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
-    [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, defaultCollapsed],
+    // seedCollapsed is part of the key: normal surfaces can change their live
+    // default, while guide mounts keep their captured seed stable.
+    // generatedKey is part of the key (hashed — it can hold many paths): the
+    // generated set only changes with a served payload, and a changed set must
+    // remount so items re-seed through the new per-file collapse defaults.
+    // The user's expandedGenerated set is deliberately NOT in the key —
+    // expansion is live item state, and remounting on expand would lose
+    // scroll/selection state.
+    () => `${fileOrder ?? 'tree'}:${seedCollapsed ? 'c' : 'e'}:g${generatedKey ? hashString(generatedKey) : ''}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
+    [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, seedCollapsed, generatedKey],
   );
 
   // Visual-order list of file paths (for [/] stepping). Derived from items so it
@@ -759,6 +931,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     ) => {
       if (!('side' in annotation) || item.type !== 'diff') return null;
       if (!annotation.metadata) return null;
+      if (annotation.metadata.kind === 'ai-marker') {
+        return (
+          <InlineAIMarker
+            questionId={annotation.metadata.questionId!}
+            promptPreview={annotation.metadata.promptPreview!}
+            hasResponse={annotation.metadata.hasResponse!}
+            isStreaming={annotation.metadata.isStreaming!}
+            onClick={onClickAIMarker ?? noopAIMarkerClick}
+          />
+        );
+      }
       const filePath = itemIdToFilePath.get(item.id);
       return (
         <InlineAnnotation
@@ -795,6 +978,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     setSelectedLines(null);
     pendingToolbarRange.current = null;
     visibleFileRef.current = null;
+    // An edit session cannot survive the CodeView remount (Pierre tears the
+    // editor down without a completion callback), and fileSetKey also changes
+    // on sort-order / collapse-default flips, not just diff switches. The
+    // session controller drops a clean session silently; a dirty one prompts
+    // to keep its recovered edits as suggestions (this effect runs
+    // post-commit, so the synchronous confirm inside is safe).
+    editSession.handleFileSetChange();
+    // A pending editor-selection comment entry is anchored to the OLD diff's
+    // pristine coordinates — stale once the file set changes.
+    setSelectionAnnotationRequest(null);
     setFileCommentAnchor(null);
     fileCommentButtonRefs.current.clear();
     // Resync the header-refresh snapshots to the current props so the post-
@@ -804,9 +997,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     prevStagedRef.current = stagedFiles;
     prevStagingRef.current = stagingFile;
     prevStageErrorRef.current = stageError;
-    // Annotations are seeded into the remounted items at build time, so resync
-    // the snapshot here to avoid a spurious full annotation refresh post-remount.
+    // Line cards are seeded into the remounted items at build time, so resync
+    // both snapshots here to avoid a spurious refresh post-remount.
     prevAnnotationsRef.current = annotations;
+    prevAIMessagesRef.current = aiMessages;
     // Garbage-collect STALE-generation content fetches. Generation-aware on
     // purpose: this passive effect runs AFTER the remounted CodeView's seed
     // layout effect has already fired the new diff's first postRender wave —
@@ -826,11 +1020,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // --- Collapse via CodeView item state (Diffshub pattern + anchor fix) ------
 
-  const [allCollapsed, setAllCollapsed] = useState(defaultCollapsed === true);
+  const [allCollapsed, setAllCollapsed] = useState(seedCollapsed === true);
 
   // Reset the global collapse toggle when the file set changes — items re-seed
   // with the current default on CodeView remount.
-  useEffect(() => setAllCollapsed(defaultCollapsed === true), [identity.items, defaultCollapsed]);
+  useEffect(() => setAllCollapsed(seedCollapsed === true), [identity.items, seedCollapsed]);
 
   // Re-derive the collapse-all mirror from live item state after any
   // per-file toggle. Matters most for commit diffs (seeded all-collapsed):
@@ -845,11 +1039,29 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     setAllCollapsed(!anyExpanded);
   });
 
+  const reportFileCollapsed = useStableCallback((itemId: string, collapsed: boolean) => {
+    const filePath = itemIdToFilePath.get(itemId);
+    if (!filePath) return;
+    onFileCollapsedChange?.(filePath, collapsed);
+    // Generated files (#1317): let the owner track explicit expansion so it
+    // survives remounts. Every collapse mutation funnels through here —
+    // toggle, viewed+collapse, collapse/expand-all, the collapsed-placeholder
+    // strip, and the navigation-driven expansions (guide outline, search
+    // match, sidebar comment) — so the owner's set always mirrors the live
+    // item state.
+    if (generatedFiles?.has(filePath)) onGeneratedFileCollapsedChange?.(filePath, collapsed);
+  });
+
   const toggleItemCollapsed = useStableCallback((itemId: string) => {
     const handle = viewerRef.current;
     const viewer = handle?.getInstance();
     const item = handle?.getItem(itemId);
     if (handle == null || viewer == null || item == null) return;
+
+    // Collapsing a file that is mid-edit ends its session first (Pierre would
+    // otherwise end it implicitly; routing through finishIfEditing keeps the
+    // suggestion capture + pristine restore on our one code path).
+    if (item.collapsed !== true) editSession.finishIfEditing(itemId);
 
     // If the item top is above scrollTop, re-anchor after the update so the
     // collapsing file stays in view (it would otherwise shift the content
@@ -859,6 +1071,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.version = (item.version ?? 0) + 1;
     if (!handle.updateItem(item)) return;
     syncAllCollapsedMirror();
+    reportFileCollapsed(itemId, item.collapsed === true);
 
     if (itemTop != null && itemTop < viewer.getScrollTop()) {
       viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
@@ -871,10 +1084,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const handle = viewerRef.current;
     const item = handle?.getItem(itemId);
     if (handle == null || item == null || item.collapsed === true) return;
+    editSession.finishIfEditing(itemId);
     item.collapsed = true;
     item.version = (item.version ?? 0) + 1;
     handle.updateItem(item);
     syncAllCollapsedMirror();
+    reportFileCollapsed(itemId, true);
   });
 
   const isItemCollapsed = useCallback((itemId: string): boolean => {
@@ -890,9 +1105,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     for (const { id } of identity.items) {
       const item = handle.getItem(id);
       if (item == null || (item.collapsed === true) === collapsed) continue;
+      if (collapsed) editSession.finishIfEditing(id);
       item.collapsed = collapsed;
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
+      reportFileCollapsed(id, collapsed);
     }
     if (collapsed) {
       const first = identity.items[0]?.id;
@@ -969,6 +1186,41 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   itemIdToFileRef.current = itemIdToFile;
   const fileSetKeyRef = useRef(fileSetKey);
   fileSetKeyRef.current = fileSetKey;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+
+  // --- Edit-to-suggestion sessions (EXPERIMENTAL, flag-gated) -----------------
+  // One file at a time; the editor chunk lazy-loads on first entry; the item's
+  // pristine FileDiffMetadata is deep-cloned before the session and restored
+  // (via version bump + updateItem) when it ends. See useEditSession.
+  const editEnabled = enableEditSuggestions && onAddSuggestionsForFile != null;
+  // A pending "Make annotation" request from the edit session's Selection
+  // Action popover. The Pierre popover (shadow DOM) only snapshots the
+  // selection; the actual comment entry is the app's own CommentPopover,
+  // anchored at the snapshotted rect — focusing an input inside the editor's
+  // popover would blur the editor, collapse the selection, and tear the
+  // popover down mid-typing, so entry deliberately lives OUTSIDE the editor.
+  const [selectionAnnotationRequest, setSelectionAnnotationRequest] =
+    useState<EditSelectionAnnotationRequest | null>(null);
+  const editSession = useEditSession({
+    enabled: editEnabled,
+    viewerRef,
+    itemIdToFileRef,
+    fileSetKeyRef,
+    reviewBaseRef,
+    reviewSnapshotIdRef,
+    annotationsRef,
+    onAddSuggestions: onAddSuggestionsForFile,
+    onSelectionAnnotation: onAddEditorCommentForFile ? setSelectionAnnotationRequest : undefined,
+    refreshItem,
+  });
+
+  // Surface a mid-session comment inside the editor as a marker as soon as it
+  // lands in the annotations prop. Stable callback; no-op outside a session.
+  const refreshEditSessionMarkers = editSession.refreshMarkers;
+  useEffect(() => {
+    refreshEditSessionMarkers();
+  }, [annotations, refreshEditSessionMarkers]);
 
   // Augmentation APPLIES are deferred to scroll-idle. updateItem() mutates
   // item layout — the full-content parse counts collapsed-context regions the
@@ -1042,6 +1294,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (file == null) return;
 
     const controller = new AbortController();
+
+    // Read-only hosts have no review server: leave the raw-patch context in
+    // place and mark the item done so it never re-fires (no dead requests,
+    // no console noise from a CSP that blocks connect-src).
+    if (readOnlyRef.current) {
+      augmentState.set(itemId, { status: 'done', controller, generation });
+      return;
+    }
     augmentState.set(itemId, { status: 'pending', controller, generation });
 
     // A resolution stage is stale when its fetch was aborted (unmount / diff
@@ -1101,7 +1361,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             newFile:
               data.newContent != null ? { name: file.path, contents: data.newContent } : undefined,
           });
-          if (!result) {
+          if (!result || result.isPartial) {
             augmentState.set(itemId, { status: 'done', controller, generation });
             return;
           }
@@ -1125,6 +1385,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           // The item may have been torn down between fetch start and apply;
           // belt-and-suspenders on top of the staleness check above.
           if (liveHandle == null || item == null || item.type !== 'diff') {
+            augmentState.set(itemId, { status: 'done', controller, generation });
+            return;
+          }
+          // Never clobber an active edit session's document: the editor is
+          // mutating item.fileDiff in place, and the session already ensured
+          // full content before starting. Mark done — the pristine restore at
+          // session end republishes whatever the session started from.
+          if (itemId === editSession.editingItemIdRef.current) {
             augmentState.set(itemId, { status: 'done', controller, generation });
             return;
           }
@@ -1231,6 +1499,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const host = rootNode instanceof ShadowRoot ? rootNode.host : null;
       const itemId = host instanceof HTMLElement ? nodeToItemIdRef.current.get(host) : undefined;
       if (itemId == null) return;
+      // Text drags inside an active editor are the editor's own selection.
+      if (itemId === editSession.editingItemIdRef.current) return;
       const filePath = itemIdToFilePath.get(itemId);
       if (filePath == null) return;
       routeSelectionToToolbar(
@@ -1317,6 +1587,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       item.collapsed = false;
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
+      syncAllCollapsedMirror();
+      reportFileCollapsed(itemId, false);
     }
 
     // ReviewSearchSide: 'addition' -> additions, 'deletion' -> deletions,
@@ -1331,45 +1603,45 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       viewer.scrollTo({ type: 'line', id: itemId, lineNumber, side, align: 'center' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [activeSearchMatch, filePathToItemId, isActive]);
+  }, [activeSearchMatch, filePathToItemId, isActive, syncAllCollapsedMirror, reportFileCollapsed]);
 
   // --- Annotations through CodeView item state (P4) ---------------------------
 
-  // Set an item's annotations to the current per-file projection, bump version,
-  // and updateItem. Mirrors Diffshub's updateViewerDiffItem (getItem, mutate,
-  // version++, updateItem) but rebuilds the whole annotation array from the
-  // source-of-truth `annotations` rather than splicing a single entry — the diff
-  // is computed at the item granularity by the sync effect below, so only files
-  // whose annotation set actually changed get an updateItem.
+  // Set an item's review annotations and AI markers to the current per-file
+  // projection, then republish that item only. This preserves CodeView scroll
+  // state while streaming answers update their inline marker.
   const syncItemAnnotations = useCallback(
-    (filePath: string, itemId: string, allAnnotations: CodeAnnotation[]) => {
+    (
+      filePath: string,
+      itemId: string,
+      allAnnotations: CodeAnnotation[],
+      allAIMessages: AIChatEntry[],
+    ) => {
       const handle = viewerRef.current;
       const item = handle?.getItem(itemId);
       if (handle == null || item == null || item.type !== 'diff') return;
-      item.annotations = projectFileAnnotations(allAnnotations, filePath, prUrl, prDiffScope);
+      item.annotations = projectFileAnnotations(
+        allAnnotations,
+        allAIMessages,
+        filePath,
+        prUrl,
+        prDiffScope,
+      );
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
     },
     [prUrl, prDiffScope],
   );
 
-  // Whenever the `annotations` prop changes, re-project per file and updateItem
-  // ONLY on the files whose annotation set changed (so a single add/edit/delete
-  // re-renders just its owning file, never the whole CodeView). Diff is keyed on
-  // a per-file annotation signature so unrelated files are untouched. New diffs
-  // remount CodeView via fileSetKey and seed annotations at build time, so the
-  // diff-switch reset effect resynchronizes prevAnnotationsRef to avoid a
-  // spurious full refresh right after a remount.
+  // Keep review annotations incremental: a single add/edit/delete republishes
+  // only files whose annotation signature changed. New diffs seed the current
+  // projection during build, so this path never remounts CodeView.
   useEffect(() => {
     const handle = viewerRef.current;
     const prev = prevAnnotationsRef.current;
     prevAnnotationsRef.current = annotations;
     if (handle == null || prev === annotations) return;
 
-    // Per-file annotation signature: id|line|side|content fingerprint. We only
-    // need to know whether a file's gutter annotations changed, so a stable
-    // string built from the fields that affect rendering is sufficient and far
-    // cheaper than deep-equality of the projected objects.
     const signatures = (list: CodeAnnotation[]) => {
       const map = new Map<string, string>();
       for (const a of list) {
@@ -1407,14 +1679,34 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     });
 
     for (const path of changedPaths) {
-      // Fan out to ALL items rendering this path (duplicate display paths
-      // produce twins; updating only the canonical first item would leave the
-      // twin rendering deleted/stale annotations until the next remount).
       for (const itemId of filePathToItemIds.get(path) ?? []) {
-        syncItemAnnotations(path, itemId, annotations);
+        syncItemAnnotations(path, itemId, annotations, aiMessages);
       }
     }
-  }, [annotations, prUrl, prDiffScope, filePathToItemIds, syncItemAnnotations]);
+  }, [annotations, aiMessages, prUrl, prDiffScope, filePathToItemIds, syncItemAnnotations]);
+
+  // AI answers stream independently of review annotations. Any message change
+  // republishes only the files represented by the previous or next message set;
+  // projectFileAnnotations performs the final line-scope/path filter.
+  useEffect(() => {
+    const handle = viewerRef.current;
+    const prev = prevAIMessagesRef.current;
+    // If the worker-pool gate still hides CodeView, retain the old snapshot.
+    // The workerPoolReady dependency replays this sync once the handle exists.
+    if (handle == null) return;
+    prevAIMessagesRef.current = aiMessages;
+    if (prev === aiMessages) return;
+
+    const changedPaths = new Set<string>();
+    for (const { question } of [...prev, ...aiMessages]) {
+      if (question.filePath) changedPaths.add(question.filePath);
+    }
+    for (const path of changedPaths) {
+      for (const itemId of filePathToItemIds.get(path) ?? []) {
+        syncItemAnnotations(path, itemId, annotations, aiMessages);
+      }
+    }
+  }, [aiMessages, annotations, filePathToItemIds, syncItemAnnotations, workerPoolReady]);
 
   // --- Header actions ---------------------------------------------------------
 
@@ -1478,6 +1770,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
     collectSetDelta(viewedFiles, prevViewedRef.current);
     collectSetDelta(stagedFiles, prevStagedRef.current);
+    // Generated tags (#1317) deliberately have no delta here: any
+    // content-changed generated set remounts CodeView via fileSetKey
+    // (generatedKey), so a delta on the live items is unreachable.
     // stagingFile / stageError are single-file scalars: the file that just
     // started/stopped staging (or whose error appeared/cleared) needs a refresh.
     if (stagingFile !== prevStagingRef.current) {
@@ -1504,6 +1799,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       }
     }
   }, [viewedFiles, stagedFiles, stagingFile, stageError, filePathToItemIds, refreshItem]);
+
+  // The control-visibility preferences affect every header at once, so a
+  // toggle refreshes all items (same slot-portal republish constraint as the
+  // per-file sync above).
+  const prevShowViewedRef = useRef(showViewedControls);
+  const prevShowStageRef = useRef(showStageControls);
+  useEffect(() => {
+    const changed =
+      prevShowViewedRef.current !== showViewedControls ||
+      prevShowStageRef.current !== showStageControls;
+    prevShowViewedRef.current = showViewedControls;
+    prevShowStageRef.current = showStageControls;
+    if (!changed || viewerRef.current == null) return;
+    for (const itemIds of filePathToItemIds.values()) {
+      for (const itemId of itemIds) refreshItem(itemId);
+    }
+  }, [showViewedControls, showStageControls, filePathToItemIds, refreshItem]);
 
   // --- Line selection through CodeView (replaces geometry-based inference) ---
 
@@ -1574,21 +1886,41 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
   }, [activeFilePath, pendingSelection, filePathToItemId]);
 
-  const handleLineSelectionEnd = useStableCallback(
-    (range: SelectedLineRange | null, item: CodeViewItem<DiffAnnotationMetadata>) => {
+  const handleLineSelectionInteraction = useStableCallback(
+    (
+      source: LineSelectionSource,
+      range: SelectedLineRange | null,
+      item: CodeViewItem<DiffAnnotationMetadata>,
+    ) => {
       if (range == null || item.type !== 'diff') return;
+      // The file being edited owns its pointer interactions — opening the
+      // annotation toolbar over an active editor would fight its focus.
+      if (item.id === editSession.editingItemIdRef.current) return;
       const filePath = itemIdToFilePath.get(item.id);
       if (filePath == null) return;
+      if (resolveLineSelectionBehavior({
+        source,
+        compactTouchLayout: compactTouchLayout === true,
+      }) === 'preserve-selection') {
+        pendingToolbarRange.current = null;
+        setActiveFilePath(filePath);
+        setSelectedLines({ id: item.id, range });
+        onLineSelection(range);
+        return;
+      }
       routeSelectionToToolbar(range, filePath);
+    },
+  );
+
+  const handleLineSelectionEnd = useStableCallback(
+    (range: SelectedLineRange | null, item: CodeViewItem<DiffAnnotationMetadata>) => {
+      handleLineSelectionInteraction('range-gesture', range, item);
     },
   );
 
   const handleGutterUtilityClick = useStableCallback(
     (range: SelectedLineRange, item: CodeViewItem<DiffAnnotationMetadata>) => {
-      if (item.type !== 'diff') return;
-      const filePath = itemIdToFilePath.get(item.id);
-      if (filePath == null) return;
-      routeSelectionToToolbar(range, filePath);
+      handleLineSelectionInteraction('gutter-comment-action', range, item);
     },
   );
 
@@ -1657,8 +1989,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // scroll EVENT, which can outpace frames during momentum scrolling. Also
   // stamps scroll activity for the augmentation idle-flush.
   const scrollReportRafRef = useRef<number | null>(null);
-  const handleScroll = useStableCallback(() => {
+  const handleScroll = useStableCallback((position: number) => {
     lastScrollTsRef.current = Date.now();
+    onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
     scrollReportRafRef.current = requestAnimationFrame(() => {
       scrollReportRafRef.current = null;
@@ -1680,6 +2013,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return () => cancelAnimationFrame(raf);
   }, [reportVisibleFile, fileSetKey]);
 
+  // Outer Guide file shells survive while this CodeView is evicted. Restore
+  // their last inner position once after this component mount; later parent
+  // renders may expose a newer live ref value, but must not snap active scrolling.
+  const hasRestoredInitialScrollRef = useRef(false);
+  useEffect(() => {
+    if (hasRestoredInitialScrollRef.current || initialScrollPosition <= 0) return;
+    hasRestoredInitialScrollRef.current = true;
+    const raf = requestAnimationFrame(() => {
+      viewerRef.current?.scrollTo({ type: 'position', position: initialScrollPosition });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [fileSetKey, initialScrollPosition]);
+
   // --- [/]/z/v/a/c/x navigation + header actions driven by CodeView ----------
 
   const scrollToItem = useCallback((itemId: string) => {
@@ -1687,6 +2033,31 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (viewer == null) return;
     viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
   }, []);
+
+  // File-level navigation for surfaces whose lightweight navigation UI lives
+  // outside CodeView (Guided Review's outline). Expand before scrolling so a
+  // viewed/collapsed target reveals code rather than only its file header.
+  // rAF waits for CodeView's initial seed/remount to publish the imperative
+  // handle; token semantics allow the same file to be requested repeatedly.
+  useEffect(() => {
+    if (!fileScrollTarget) return;
+    const itemId = filePathToItemId.get(fileScrollTarget.filePath);
+    if (itemId == null) return;
+    const raf = requestAnimationFrame(() => {
+      const handle = viewerRef.current;
+      const item = handle?.getItem(itemId);
+      if (handle == null || item == null) return;
+      if (item.collapsed === true) {
+        item.collapsed = false;
+        item.version = (item.version ?? 0) + 1;
+        handle.updateItem(item);
+        syncAllCollapsedMirror();
+        reportFileCollapsed(itemId, false);
+      }
+      handle.scrollTo({ type: 'item', id: itemId, align: 'start' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [fileScrollTarget?.filePath, fileScrollTarget?.token, fileSetKey, filePathToItemId, syncAllCollapsedMirror, reportFileCollapsed]);
 
   // --- Selected-annotation highlight + navigation ----------------------------
 
@@ -1745,6 +2116,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       item.collapsed = false;
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
+      syncAllCollapsedMirror();
+      reportFileCollapsed(itemId, false);
     }
 
     const isFile = isFileScopedAnnotation(ann);
@@ -1760,7 +2133,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [scrollTargetAnnotation, filePathToItemId]);
 
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || readOnly) return;
     const handler = (e: KeyboardEvent) => {
       // composedPath()[0] pierces shadow DOM: window-level e.target retargets
       // to the shadow HOST (e.g. <diffs-container>), which would hide a
@@ -1851,6 +2224,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, [
     isActive,
+    readOnly,
     orderedItemIds,
     filePathToItemId,
     itemIdToFilePath,
@@ -1878,20 +2252,34 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
     const collapsed = item.collapsed === true;
     const fileComments = fileCommentsByPath.get(filePath) ?? [];
+    // Edit-to-suggestion affordance (flag-gated). Slot portals republish on
+    // updateItem BEFORE React commits state, so read the session's refs.
+    const isEditingThis = editEnabled && editSession.editingItemIdRef.current === item.id;
+    const editDisabledReason = editEnabled
+      ? editSession.editUnavailableRef.current.get(filePath) ?? null
+      : null;
 
     return (
       <div className="flex flex-col">
         <FileHeader
+        compactTouchLayout={compactTouchLayout}
+        readOnly={readOnly}
         filePath={filePath}
         patch={file.patch}
         status={file.status}
         oldPath={file.oldPath}
+        onEditFile={editEnabled ? () => editSession.startEdit(item.id) : undefined}
+        isEditing={isEditingThis}
+        editDisabledReason={editDisabledReason}
         isViewed={viewedFiles?.has(filePath)}
+        isGenerated={generatedFiles?.has(filePath) === true}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
+        showViewedControl={showViewedControls}
         isStaged={stagedFiles?.has(filePath)}
         isStaging={stagingFile === filePath}
         onStage={onStage ? () => onStage(filePath) : undefined}
         canStage={canStagePath ? canStagePath(filePath) : canStageFiles}
+        showStageControl={showStageControls}
         stageError={stagingFile === filePath ? stageError : null}
         onFileComment={onAddFileCommentForFile ? (anchorEl) => handleFileComment(filePath, anchorEl) : undefined}
         // Eager registration so the `c` shortcut can anchor the popover for a
@@ -1912,6 +2300,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
               e.stopPropagation();
               toggleItemCollapsed(item.id);
             }}
+            data-pn-touch-target={compactTouchLayout || undefined}
+            data-pn-touch-target-icon={compactTouchLayout || undefined}
             className="flex items-center justify-center w-6 h-6 rounded hover:bg-foreground/10 transition-colors flex-shrink-0"
             title={collapsed ? 'Expand diff' : 'Collapse diff'}
           >
@@ -1928,6 +2318,42 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
         />
+        {/* A collapsed generated file must read as an intentional fold, never
+            a failed render: an explicit placeholder strip with the counts,
+            clickable through the SAME toggle funnel as the chevron. */}
+        {collapsed && generatedFiles?.has(filePath) === true && (
+          <GeneratedFileNotice
+            additions={file.additions}
+            deletions={file.deletions}
+            onExpand={() => toggleItemCollapsed(item.id)}
+            onHeightChange={() => refreshItem(item.id)}
+          />
+        )}
+        {/* Files over the review size cap arrive as a contents-free stub, so
+            Pierre renders nothing below the header. Explain why rather than
+            leaving a bare header that reads as a broken diff. */}
+        {!collapsed && isOversizedReviewStubPatch(file.patch) && (
+          <OversizedFileNotice onHeightChange={() => refreshItem(item.id)} />
+        )}
+        {/* The general fallback under that specific case: any OTHER hunkless
+            binary chunk draws nothing either. Gated on the marker so a
+            marker-carrying stub is explained exactly once, by the line above. */}
+        {!collapsed
+          && !isOversizedReviewStubPatch(file.patch)
+          && isContentlessBinaryPatch(file.patch) && (
+          <BinaryFileNotice onHeightChange={() => refreshItem(item.id)} />
+        )}
+        {/* EXPERIMENTAL edit-session HUD: session controls + state in a slim
+            strip below the header, above the file content. Appears/disappears
+            with session start/end, which both go through a version-bumped
+            updateItem, so the slot height is re-measured on each transition. */}
+        {isEditingThis && (
+          <EditSessionHud
+            onComplete={editSession.completeEdit}
+            onCancel={editSession.cancelEdit}
+            dirtyStore={editSession.dirtyStore}
+          />
+        )}
         {/* File-scoped comments live in the header (below the path), shown only
             when the file is expanded. They ride the sticky header — fine for a
             short guide note; long ones scroll within the banner. */}
@@ -1977,8 +2403,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
-      enableLineSelection: true,
-      enableGutterUtility: true,
+      enableLineSelection: !readOnly,
+      enableGutterUtility: !readOnly,
       hunkSeparators: 'line-info',
       stickyHeaders: true,
       // Flush files together (no inter-file gap) — file boundaries already read
@@ -1987,7 +2413,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // description card) so items start below it and it scrolls with them.
       layout: { gap: 0, paddingTop: 8 + leadingHeight, paddingBottom: 8 },
       itemMetrics: {
-        diffHeaderHeight: PANEL_HEADER_HEIGHT,
+        diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
         hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
         ...(customLineHeight != null && { lineHeight: customLineHeight }),
       },
@@ -2046,7 +2472,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
+      readOnly,
       customLineHeight,
+      compactTouchLayout,
       leadingHeight,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
@@ -2064,31 +2492,49 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return <div className="relative h-full" />;
   }
 
+  const codeView = (
+    <CodeView<DiffAnnotationMetadata>
+      // Remount on diff switch so uncontrolled `initialItems` re-seeds from
+      // the freshly computed identity. Without this, switching diff
+      // type/base/whitespace/PR with the all-files panel open would keep the
+      // OLD diff on screen (the panel instance is reused, not recreated).
+      key={fileSetKey}
+      ref={viewerRef}
+      containerRef={attachScrollContainer}
+      // Containment mirrors Pierre's own production wrapper (diffshub
+      // CodeViewWrapper): without it, every forced layout during scrolling
+      // recomputes the whole document instead of the clipped subtree.
+      // overflow-anchor:none disables the BROWSER's scroll anchoring, which
+      // otherwise fights CodeView's own anchor resolution whenever item
+      // heights change (our augmentation applies).
+      className={`relative h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
+      initialItems={identity.items}
+      options={options}
+      selectedLines={selectedLines}
+      onSelectedLinesChange={handleSelectedLinesChange}
+      onScroll={handleScroll}
+      renderCustomHeader={renderCustomHeader}
+      renderAnnotation={renderAnnotation}
+      // Edit-to-suggestion (flag-gated): only wired when enabled so the
+      // flag-off surface is byte-identical to the pre-feature one.
+      {...(editEnabled && {
+        editorOptions: editSession.editorOptions,
+        onItemEditChange: editSession.onItemEditChange,
+        onItemEditComplete: editSession.onItemEditComplete,
+      })}
+    />
+  );
+
   return (
     <div className="relative h-full">
-      <CodeView<DiffAnnotationMetadata>
-        // Remount on diff switch so uncontrolled `initialItems` re-seeds from
-        // the freshly computed identity. Without this, switching diff
-        // type/base/whitespace/PR with the all-files panel open would keep the
-        // OLD diff on screen (the panel instance is reused, not recreated).
-        key={fileSetKey}
-        ref={viewerRef}
-        containerRef={attachScrollContainer}
-        // Containment mirrors Pierre's own production wrapper (diffshub
-        // CodeViewWrapper): without it, every forced layout during scrolling
-        // recomputes the whole document instead of the clipped subtree.
-        // overflow-anchor:none disables the BROWSER's scroll anchoring, which
-        // otherwise fights CodeView's own anchor resolution whenever item
-        // heights change (our augmentation applies).
-        className="relative h-full overflow-y-auto overflow-x-clip overscroll-contain [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]"
-        initialItems={identity.items}
-        options={options}
-        selectedLines={selectedLines}
-        onSelectedLinesChange={handleSelectedLinesChange}
-        onScroll={handleScroll}
-        renderCustomHeader={renderCustomHeader}
-        renderAnnotation={renderAnnotation}
-      />
+      {/* EditProvider only mounts when the experimental flag is on; its
+          factory declines attaches until the lazy editor chunk has loaded
+          (the chunk loads on first Edit click, never before). */}
+      {editEnabled ? (
+        <EditProvider createEditor={editSession.createEditor}>{codeView}</EditProvider>
+      ) : (
+        codeView
+      )}
 
       {/* Leading content (commit description card) lives INSIDE the scroll
           container at content-top: absolutely positioned children of a scroller
@@ -2102,6 +2548,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           scrollEl,
         )}
 
+      {!readOnly && (
       <ToolbarHost
         ref={toolbarHostRef}
         patch={activePatch}
@@ -2116,8 +2563,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onViewAIResponse={onViewAIResponse}
         aiHistoryMessages={aiHistoryForActiveFile}
       />
+      )}
 
-      {fileCommentAnchor && onAddFileCommentForFile && (
+      {!readOnly && fileCommentAnchor && onAddFileCommentForFile && (
         <CommentPopover
           key={`file:${prUrl ?? ''}:${prDiffScope ?? ''}:${fileCommentAnchor.filePath}`}
           anchorEl={fileCommentAnchor.el}
@@ -2129,6 +2577,36 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             setFileCommentAnchor(null);
           }}
           onClose={() => setFileCommentAnchor(null)}
+        />
+      )}
+
+      {/* Comment entry for the edit session's "Make annotation" action. The
+          anchor rect and the pristine line range were snapshotted at click
+          time, so this stays valid even if the editor selection has since
+          collapsed or the session has ended (pristine coordinates are
+          session-invariant). */}
+      {!readOnly && selectionAnnotationRequest && onAddEditorCommentForFile && (
+        <CommentPopover
+          key={`edit-selection:${selectionAnnotationRequest.filePath}:${selectionAnnotationRequest.lineStart}-${selectionAnnotationRequest.lineEnd}`}
+          anchorRect={selectionAnnotationRequest.anchorRect}
+          contextText={selectionAnnotationRequest.selectedText.replace(/\s+/g, ' ').trim()}
+          isGlobal={false}
+          allowImages={false}
+          onSubmit={(text) => {
+            onAddEditorCommentForFile(selectionAnnotationRequest.filePath, {
+              lineStart: selectionAnnotationRequest.lineStart,
+              lineEnd: selectionAnnotationRequest.lineEnd,
+              exact: selectionAnnotationRequest.exact,
+              selectedText: selectionAnnotationRequest.selectedText,
+              text,
+            });
+            // The editor kept its ranged selection while the entry was open;
+            // collapse it so the Selection Action popover does not re-open
+            // over the just-annotated lines.
+            editSession.collapseSelection();
+            setSelectionAnnotationRequest(null);
+          }}
+          onClose={() => setSelectionAnnotationRequest(null)}
         />
       )}
     </div>

@@ -1,16 +1,18 @@
 ---
 title: "Sharing Plans With Your Team"
-description: "How Plannotator's URL-based sharing lets teammates review and annotate agent plans together — with zero backend, zero accounts, and full privacy."
+description: "How Plannotator's legacy URL sharing handles hash links, encrypted short links, and teammate annotations."
 date: 2026-02-18
 author: "backnotprop"
 tags: ["sharing", "collaboration", "privacy"]
 ---
 
-**Plannotator is an open-source plan review UI for AI coding agents.** It intercepts plan mode via hooks, opening a browser-based editor where you can annotate, approve, or reject plans before the agent acts. The sharing feature lets you send a plan — annotations included — to a teammate as a URL. They can review it, add their own feedback, and import it back. No backend stores anything. All data lives in the URL itself.
+> **Status update, July 31, 2026:** Open source asynchronous link sharing remains available for compatibility but is moving to deprecated support. [Workspaces](/workspaces/) is the primary direction for team sharing. No removal date has been announced.
+
+**Plannotator is an open-source plan review UI for AI coding agents.** It intercepts plan mode via hooks, opening a browser-based editor where you can annotate, approve, or reject plans before the agent acts. The sharing feature lets you send a plan, including annotations, to a teammate as a URL. They can review it, add their own feedback, and import it back. Small markdown shares put compressed content in the URL fragment. Larger markdown and raw HTML shares can use encrypted short links backed by a paste service.
 
 ## Watch the Demo
 
-<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube.com/embed/a_AT7cEN_9I" title="Plannotator Demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+<iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube-nocookie.com/embed/a_AT7cEN_9I" title="Plannotator Demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 
 ## The scenario
 
@@ -34,7 +36,7 @@ You paste this in Slack and send it to your senior teammate.
 
 ### 3. Your senior reviews and annotates
 
-Your senior clicks the link. The share portal — a static page with no backend — decompresses the URL hash and renders the plan with your annotations. They can now add their own feedback:
+Your senior clicks the link. The static share portal decompresses the URL fragment in the browser and renders the plan with your annotations. No backend stores this hash-share payload, although the portal host receives an ordinary page request. They can now add their own feedback:
 
 - **Comment** on the migration script section: "Add a rollback step"
 - **Comment** on the session handling approach: "Swap JWT for HTTP-only cookies"
@@ -96,24 +98,24 @@ Claude can act on each item directly.
 
 ## Why URL-based sharing matters
 
-The sharing system uses no backend. Here's what actually happens when you click "Copy Link":
+For a small markdown share, no backend stores the shared payload. Here's what happens when you click "Copy Link":
 
 1. The plan markdown and annotations are serialized into a compact JSON payload
 2. The payload is compressed using the browser's native `CompressionStream` with `deflate-raw`
 3. The compressed bytes are base64url-encoded
 4. The result becomes the URL's hash fragment (the part after `#`)
 
-The hash fragment of a URL is never sent to a server in HTTP requests — that's part of the HTTP specification. The share portal at `share.plannotator.ai` is a static page. It serves the UI, then the browser reads and decompresses the hash client-side. The server sees nothing.
+Browsers do not include a URL fragment in HTTP requests. The share portal at `share.plannotator.ai` serves the static UI, then the browser reads and decompresses the fragment. The portal host still receives normal request metadata such as an IP address and user agent, and the UI makes Plannotator's release check against GitHub. Neither request includes the shared plan or annotations.
 
 This means:
 
 - **No accounts.** No sign-ups, no OAuth, no tokens.
-- **No storage (small plans).** Nothing is persisted anywhere. Close the tab and the data exists only in the URL you copied.
-- **End-to-end encrypted (large plans).** When a plan is too large for a URL, short links encrypt your plan with AES-256-GCM in your browser before uploading. The paste service stores only ciphertext it cannot read — the decryption key lives only in the URL you share. Pastes auto-delete after 7 days.
-- **No tracking.** The share portal has no analytics, no cookies, no telemetry.
-- **Self-hostable.** If even a static page hosted by someone else isn't acceptable, you can [self-host the portal](/docs/guides/self-hosting/) and point Plannotator at it with `PLANNOTATOR_SHARE_URL`.
+- **No payload storage for small markdown shares.** Shared content stays in the URL fragment. It is compressed, not encrypted.
+- **Client-encrypted short links.** When markdown is too large for a URL, or when you share raw HTML, the browser encrypts the payload with AES-256-GCM before uploading. The paste service stores ciphertext, while the decryption key stays in the URL fragment rather than the HTTP request. Hosted ciphertext expires after 7 days.
+- **No Plannotator analytics or telemetry.** Functional cookies can remember settings and a dismissed update notice.
+- **Self-hostable.** You can [self-host the portal](/docs/guides/self-hosting/) and point Plannotator at it with `PLANNOTATOR_SHARE_URL`.
 
-For teams working on proprietary code, this is meaningful. The plan content — which may describe internal architecture, security measures, or business logic — never leaves the URL bar. You share it over whatever channel you already trust (Slack, email, a DM) and the recipient decompresses it locally.
+The complete link contains either the readable compressed payload or the short-link decryption key. Anyone with the link can read the shared content. Slack, email, a ticketing system, or another delivery service can also retain the full URL, so use only a channel you trust with that content.
 
 ## When to use this
 
@@ -124,7 +126,7 @@ Not every plan needs a second pair of eyes. But some do:
 - **Onboarding** — a senior reviewing a junior's first few agent-assisted plans to build trust in the workflow
 - **Compliance** — regulated industries where changes need documented review trails (combine with [plan saving](/docs/getting-started/configuration/) to disk)
 
-The sharing round-trip adds a review step without leaving the agent workflow. The junior doesn't need to copy-paste a plan into a Google Doc. The senior doesn't need to context-switch into a different tool. It all happens within the same Plannotator session that the hook opened.
+The legacy sharing round-trip adds a review step without leaving the agent workflow. For ongoing team collaboration, Workspaces is the primary direction.
 
 ## Try it
 

@@ -44,18 +44,18 @@ const DIFF_OPTIONS: { value: DiffChoice; label: string; tag?: string; desc: stri
 
 const VIEW_OPTIONS: { key: 'sections' | 'tree'; img: string; title: string; tag: string; desc: string }[] = [
   {
-    key: 'sections',
-    img: sectionsImg,
-    title: 'Git status',
-    tag: 'New',
-    desc: 'Committed, Changes, and Untracked — grouped like git status.',
-  },
-  {
     key: 'tree',
     img: treeImg,
     title: 'Tree',
     tag: 'Classic',
     desc: 'The familiar folder tree of changed files.',
+  },
+  {
+    key: 'sections',
+    img: sectionsImg,
+    title: 'Git status',
+    tag: 'New',
+    desc: 'Committed, Changes, and Untracked — grouped like git status.',
   },
 ];
 
@@ -82,7 +82,7 @@ export const ReviewSetupDialog: React.FC<ReviewSetupDialogProps> = ({ isOpen, on
               <h3 className="font-semibold text-2xl mb-1.5">Set up your review view</h3>
               <p className="text-sm text-muted-foreground max-w-3xl">
                 A simpler review, closer to what you'd see on GitHub. We recommend the{' '}
-                <span className="text-foreground font-medium">Git status</span> view defaulting to{' '}
+                <span className="text-foreground font-medium">Tree</span> view defaulting to{' '}
                 <span className="text-foreground font-medium">All changes</span> — every local change
                 since <span className="font-mono">origin/main</span>. It isn't a literal PR (only
                 committed work lands in one — pick <span className="text-foreground font-medium">Committed changes</span>{' '}

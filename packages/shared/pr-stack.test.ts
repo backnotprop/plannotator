@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import type { PRMetadata } from "./pr-types";
-import type { GitCommandResult, ReviewGitRuntime } from "./review-core";
+import {
+  MAX_REVIEW_FILE_CONTENT_BYTES,
+  type GitCommandResult,
+  type ReviewGitRuntime,
+} from "./review-core";
 import { runPRFullStackDiff, runPRLayerLocalDiff } from "./pr-stack";
 
 function result(stdout = "", stderr = "", exitCode = 0): GitCommandResult {
   return { stdout, stderr, exitCode };
 }
+
+const unavailableFileMethods = {
+  async getFileInfo() { return null; },
+  async readLink() { return null; },
+};
 
 const metadata: PRMetadata = {
   platform: "github",
@@ -27,9 +36,13 @@ describe("runPRFullStackDiff", () => {
   test("uses origin default branch when it is available", async () => {
     const calls: string[][] = [];
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         calls.push(args);
         if (args[0] === "show-ref" && args[3] === "refs/remotes/origin/main") {
+          return result();
+        }
+        if (args[0] === "diff" && args.includes("--raw")) {
           return result();
         }
         if (args[0] === "diff") {
@@ -60,11 +73,15 @@ describe("runPRFullStackDiff", () => {
 
   test("falls back to a local default branch", async () => {
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit(args) {
         if (args[0] === "show-ref" && args[3] === "refs/remotes/origin/main") {
           return result("", "", 1);
         }
         if (args[0] === "show-ref" && args[3] === "refs/heads/main") {
+          return result();
+        }
+        if (args[0] === "diff" && args.includes("--raw")) {
           return result();
         }
         if (args[0] === "diff") {
@@ -87,6 +104,7 @@ describe("runPRFullStackDiff", () => {
 
   test("returns an error when no default branch ref exists locally", async () => {
     const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
       async runGit() {
         return result("", "", 1);
       },
@@ -100,6 +118,47 @@ describe("runPRFullStackDiff", () => {
     expect(diff.patch).toBe("");
     expect(diff.label).toBe("Full stack diff unavailable");
     expect(diff.error).toContain("Could not find origin/main or local main");
+  });
+
+  test("omits oversized tracked object content with literal pathspec exclusions", async () => {
+    const calls: string[][] = [];
+    const oldObjectId = "a".repeat(40);
+    const newObjectId = "b".repeat(40);
+    const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
+      async runGit(args, options) {
+        calls.push(args);
+        if (args[0] === "show-ref") return result();
+        if (args[0] === "cat-file" && args.some((arg) => arg.startsWith("--batch-check"))) {
+          return result(
+            (options?.stdin ?? "").trim().split("\n").filter(Boolean).map((objectId) =>
+              `${objectId} blob ${MAX_REVIEW_FILE_CONTENT_BYTES + 1}`,
+            ).join("\n"),
+          );
+        }
+        if (args[0] === "diff" && args.includes("--raw")) {
+          return result(
+            `:100644 100644 ${oldObjectId} ${newObjectId} M\0large [*]?.txt\0`,
+          );
+        }
+        if (args[0] === "diff" && args.some((arg) => arg.startsWith(":(top,exclude,literal)"))) {
+          return result();
+        }
+        if (args[0] === "diff") return result("x".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1));
+        return result("", "unexpected", 1);
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    const diff = await runPRFullStackDiff(runtime, metadata, "/repo");
+
+    expect(diff.patch.length).toBeLessThan(2_000);
+    expect(diff.patch).toContain("Binary files");
+    expect(diff.patch).not.toContain("xxxxxxxxxx");
+    expect(calls.some((args) => args[0] === "diff" && args.includes("--raw"))).toBe(true);
+    expect(calls.some((args) => args.some((arg) => arg === ":(top,exclude,literal)large [*]?.txt"))).toBe(true);
   });
 });
 
@@ -127,6 +186,7 @@ describe("runPRLayerLocalDiff", () => {
     return {
       calls,
       runtime: {
+        ...unavailableFileMethods,
         async runGit(args) {
           calls.push(args);
           if (args[0] === "cat-file") {
@@ -136,6 +196,9 @@ describe("runPRLayerLocalDiff", () => {
           if (args[0] === "fetch") {
             const sha = args.at(-1)!;
             if (opts.fetchable?.has(sha)) missing.delete(sha);
+            return result();
+          }
+          if (args[0] === "diff" && args.includes("--raw")) {
             return result();
           }
           if (args[0] === "diff") {
@@ -241,5 +304,46 @@ describe("runPRLayerLocalDiff", () => {
 
     expect(diff.error).toContain("Invalid PR head SHA");
     expect(calls.length).toBe(0);
+  });
+
+  test("omits oversized layer objects before rendering their patch", async () => {
+    const calls: string[][] = [];
+    const runtime: ReviewGitRuntime = {
+      ...unavailableFileMethods,
+      async runGit(args, options) {
+        calls.push(args);
+        if (args[0] === "cat-file" && args[1] === "-t") return result();
+        if (args[0] === "cat-file" && args[1] === "-s") {
+          return result(`${MAX_REVIEW_FILE_CONTENT_BYTES + 1}\n`);
+        }
+        if (args[0] === "cat-file" && args.some((arg) => arg.startsWith("--batch-check"))) {
+          return result(
+            (options?.stdin ?? "").trim().split("\n").filter(Boolean).map((objectId) =>
+              `${objectId} blob ${MAX_REVIEW_FILE_CONTENT_BYTES + 1}`,
+            ).join("\n"),
+          );
+        }
+        if (args[0] === "diff" && args.includes("--raw")) {
+          return result(
+            `:100644 100644 ${"a".repeat(40)} ${"b".repeat(40)} A\0large [*]?.txt\0`,
+          );
+        }
+        if (args[0] === "diff" && args.some((arg) => arg.startsWith(":(top,exclude,literal)"))) {
+          return result();
+        }
+        if (args[0] === "diff") return result("x".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 1));
+        return result("", "unexpected", 1);
+      },
+      async readTextFile() {
+        return null;
+      },
+    };
+
+    const diff = await runPRLayerLocalDiff(runtime, layerMetadata, "/repo");
+
+    expect(diff.patch.length).toBeLessThan(2_000);
+    expect(diff.patch).toContain("Binary files");
+    expect(diff.patch).not.toContain("xxxxxxxxxx");
+    expect(calls.some((args) => args[0] === "diff" && args.includes("--raw"))).toBe(true);
   });
 });

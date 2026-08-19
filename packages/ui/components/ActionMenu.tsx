@@ -68,6 +68,7 @@ interface ActionMenuItemProps {
   label: string;
   subtitle?: string;
   badge?: React.ReactNode;
+  disabled?: boolean;
 }
 
 export const ActionMenuItem: React.FC<ActionMenuItemProps> = ({
@@ -76,10 +77,14 @@ export const ActionMenuItem: React.FC<ActionMenuItemProps> = ({
   label,
   subtitle,
   badge,
+  disabled = false,
 }) => (
   <button
+    data-pn-touch-target
+    type="button"
     onClick={onClick}
-    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted"
+    disabled={disabled}
+    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
   >
     <span className="text-muted-foreground">{icon}</span>
     {subtitle ? (

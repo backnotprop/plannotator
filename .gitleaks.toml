@@ -1,0 +1,30 @@
+title = "Plannotator Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+# Disposition: public, non-secret RFC test vector; reviewed 2026-08-11.
+# Owner: Plannotator maintainers. Re-review by 2027-08-11 or when the fixture is removed.
+description = "RFC 6455 WebSocket handshake example"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = [
+  '''Sec-WebSocket-Key:\s*dGhlIHNhbXBsZSBub25jZQ==''',
+]
+
+[[allowlists]]
+# Disposition: intentionally public by design; reviewed 2026-08-17.
+# A guides.show share link carries its decryption key in the URL fragment;
+# publishing the key IS the sharing mechanism (end-to-end encryption, key never
+# sent to the server). Example links in docs and landing pages are deliberately
+# world-readable, so their #key= fragments are not leaked secrets. The regex is
+# anchored to the guides.show share-path shape so real credentials elsewhere
+# still trip the generic rule.
+# Owner: Plannotator maintainers. Re-review by 2027-08-17 or if the share URL shape changes.
+description = "guides.show share links (key-in-fragment by design)"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = [
+  '''guides\.show/g/[A-Za-z0-9_-]+#key=[A-Za-z0-9_-]+''',
+]

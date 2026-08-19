@@ -15,25 +15,18 @@
  * @packageDocumentation
  */
 
-import { type Plugin, tool } from "@opencode-ai/plugin";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { type Plugin, tool } from "@opencode-ai/plugin/v1";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  getPlanDeniedPrompt,
-  getPlanApprovedPrompt,
-  getPlanApprovedWithNotesPrompt,
-  getPlanToolName,
-  getAnnotateMessageFeedbackPrompt,
-} from "@plannotator/shared/prompts";
 import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
+  composeSystemPrompt,
   stripConflictingPlanModeRules,
 } from "./plan-mode";
-import { sanitizeTag } from "@plannotator/shared/project";
 import {
   applyWorkflowConfig,
   isPlanningAgent,
@@ -43,23 +36,19 @@ import {
   shouldInjectGenericPlanReminder,
   shouldModifyPrompts,
   shouldRegisterSubmitPlan,
-  shouldRejectSubmitPlanForAgent,
-  shouldStartImplementationForAgent,
   type RuntimeMode,
   type PlannotatorOpenCodeOptions,
 } from "./workflow";
-import {
-  applyEdits,
-  formatWithLineNumbers,
-  getPlanBackingPath,
-  validateEdits,
-} from "./plan-edits";
 import {
   handleCliCommand,
   runCliPlanReview,
   type OpenCodeBridgeContext,
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
+import { resolveValidatedTargetAgent } from "./agent-switch";
+import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
+import { executeSubmitPlan } from "./submit-plan-executor";
+import { getPlanningPrompt } from "./planning-prompt";
 
 // Lazy-load HTML at first use instead of embedding in the bundle.
 // The two SPA files are ~20 MB combined — inlining them as string literals
@@ -98,62 +87,6 @@ function getReviewHtml(): string {
 }
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600; // 96 hours
-const MAX_PLAN_SIZE = 5 * 1024 * 1024; // 5MB
-
-// ── Planning prompt ───────────────────────────────────────────────────────
-
-/**
- * Unified planning prompt injected for all primary agents.
- *
- * Design principles:
- * - Explain the WHY — the model is smart, give it context
- * - Keep it lean — every line should pull its weight
- * - Don't overfit — let the agent and user dictate the workflow
- * - Edit-based: all submissions use line-range edits against a backing file
- */
-function getPlanningPrompt(): string {
-  return `## Plannotator — Plan Review
-
-You have a plan submission tool called \`submit_plan\`. It opens an interactive review UI where the user can annotate, approve, or request changes.
-
-**How to use it:**
-
-\`submit_plan\` accepts an array of line-range edits. On first submission, pass the full plan as a single edit starting at line 1:
-
-\`\`\`json
-{ "edits": [{ "start": 1, "content": "# My Plan\\n\\n## Goals\\n..." }] }
-\`\`\`
-
-If the user denies and requests changes, apply surgical edits using line ranges. The tool response includes your plan with line numbers so you can target specific ranges:
-
-\`\`\`json
-{ "edits": [
-  { "start": 12, "end": 14, "content": "revised section content" },
-  { "start": 30, "end": 30, "content": "" }
-] }
-\`\`\`
-
-Edit semantics:
-- \`start\` and \`end\` are 1-indexed, inclusive line numbers
-- Omit \`end\` to replace from \`start\` through end of file (use this for the initial full write)
-- Empty \`content\` with \`start\`/\`end\` deletes those lines
-- Multiple edits in one call are applied in order; line numbers refer to the state before edits
-
-### Before you write a plan
-
-Do not jump straight to writing a plan. First:
-
-1. **Explore** — Read the relevant code, trace dependencies, and look at existing patterns. The depth should match the task.
-2. **Ask questions** — If you need information only the user can provide (requirements, preferences, tradeoffs), ask using the \`question\` tool. Don't guess at ambiguous requirements.
-
-Only write and submit a plan once you have sufficient context.
-
-### What NOT to do
-
-- Don't proceed with implementation until the plan is approved.
-- Don't use \`plan_exit\` — use \`submit_plan\` instead.
-- Don't end your turn without either submitting a plan or asking the user a question.`;
-}
 
 // ── Plugin ────────────────────────────────────────────────────────────────
 
@@ -474,32 +407,32 @@ tools (except writing markdown files), or otherwise make changes to the system.
 
       if (shouldInjectFullPlanningPrompt(lastUserAgent, workflowOptions)) {
         const stripped = stripConflictingPlanModeRules(output.system);
-        output.system.length = 0;
-        output.system.push(...stripped);
-        output.system.push(getPlanningPrompt());
-
         const hook = readImprovementHook("enterplanmode-improve");
         const pfmEnabled = loadConfig().pfmReminder === true;
         const improveContext = composeImproveContext({
           pfmEnabled,
           improvementHookContent: hook?.content ?? null,
         });
-        if (improveContext) {
-          output.system.push(improveContext);
-        }
+        const parts = [...stripped, getPlanningPrompt()];
+        if (improveContext) parts.push(improveContext);
+        output.system.length = 0;
+        output.system.push(...composeSystemPrompt([], parts));
 
         return;
       }
 
       if (!shouldInjectGenericPlanReminder(lastUserAgent, isSubagent, workflowOptions)) return;
 
-      output.system.push(`## Plan Submission
+      const planSubmissionReminder = `## Plan Submission
 
 When you have completed your plan, call the \`submit_plan\` tool to submit it for user review. Pass your full plan as a single edit: \`{ "edits": [{ "start": 1, "content": "..." }] }\`.
 
 The user will review your plan in a visual UI where they can annotate, approve, or request changes. If rejected, the response includes your plan with line numbers; use targeted edits to revise specific sections.
 
-Do NOT proceed with implementation until your plan is approved.`);
+Do NOT proceed with implementation until your plan is approved.`;
+      const composed = composeSystemPrompt(output.system, [planSubmissionReminder]);
+      output.system.length = 0;
+      output.system.push(...composed);
     },
 
     // Intercept plannotator commands before the agent sees them.
@@ -542,23 +475,18 @@ Do NOT proceed with implementation until your plan is approved.`);
           };
           const result = await embedded.handleEmbeddedCommand(cmd, event, deps);
           if (cmd === "plannotator-last" && result.feedback) {
-            try {
-              await ctx.client.session.prompt({
-                path: { id: input.sessionID },
-                body: {
-                  parts: [{
-                    type: "text",
-                    text: getAnnotateMessageFeedbackPrompt("opencode", undefined, { feedback: result.feedback }),
-                  }],
-                },
-              });
-            } catch {
-              // Session may not be available
-            }
+            await embedded.deliverEmbeddedAnnotateMessagePrompt({
+              client: ctx.client,
+              sessionId: input.sessionID,
+              approved: Boolean(result.approved),
+              feedback: result.feedback,
+            });
           }
           return;
         } catch (error) {
-          if (workflowOptions.runtime === "embedded") throw error;
+          if (!shouldFallbackAfterEmbeddedError(workflowOptions.runtime, error)) {
+            throw error;
+          }
           try {
             void ctx.client.app.log({
               level: "error",
@@ -607,60 +535,15 @@ Do NOT proceed with implementation until your plan is approved.`);
         },
 
         async execute(args, context) {
-          const invokingAgent = context.agent;
-          if (shouldRejectSubmitPlanForAgent(invokingAgent, workflowOptions)) {
-            return `Plannotator is configured for plan-agent mode. submit_plan can only be called by: ${workflowOptions.planningAgents.join(", ")}.
-
-Use /plannotator-last or /plannotator-annotate for manual review, or set workflow to all-agents to allow broader submit_plan access.`;
-          }
-
-          context.abort.throwIfAborted();
-
-          if (!args.edits || args.edits.length === 0) {
-            return "Error: No edits provided. Pass at least one edit with start and content.";
-          }
-
-          // Read existing backing file (empty on first call)
-          const project = sanitizeTag(path.basename(ctx.directory)) || "_unknown";
-          const backingPath = getPlanBackingPath(project);
-          const backingDir = path.dirname(backingPath);
-          mkdirSync(backingDir, { recursive: true });
-
-          let existingContent = "";
-          if (existsSync(backingPath)) {
-            existingContent = readFileSync(backingPath, "utf-8");
-          }
-
-          // Validate and apply edits
-          const existingLines = existingContent ? existingContent.split("\n") : [];
-
-          const validationError = validateEdits(existingLines, args.edits);
-          if (validationError) {
-            return `Error: ${validationError}`;
-          }
-
-          let resultLines: string[];
-          try {
-            resultLines = applyEdits(existingLines, args.edits);
-          } catch (err) {
-            return `Error applying edits: ${err instanceof Error ? err.message : String(err)}`;
-          }
-
-          const planContent = resultLines.join("\n");
-          if (planContent.length > MAX_PLAN_SIZE) {
-            return `Error: Plan content exceeds the maximum size of ${MAX_PLAN_SIZE / (1024 * 1024)}MB.`;
-          }
-          if (!planContent.trim()) {
-            return "Error: Plan content is empty after applying edits.";
-          }
-
-          // Write backing file
-          writeFileSync(backingPath, planContent, "utf-8");
-
-          const timeoutSeconds = getPlanTimeoutSeconds();
-          let result: OpenCodePlanReviewResult;
-          try {
-            result = await runPlanReview({
+          return await executeSubmitPlan({
+            edits: args.edits,
+            invokingAgent: context.agent,
+            sessionId: context.sessionID,
+            abortSignal: context.abort,
+            directory: ctx.directory,
+            workflowOptions,
+          }, {
+            reviewPlan: async ({ planContent }) => await runPlanReview({
               client: ctx.client,
               runtime: workflowOptions.runtime,
               planContent,
@@ -668,70 +551,29 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
               shareBaseUrl: getShareBaseUrl(),
               pasteApiUrl: getPasteApiUrl(),
               htmlContent: getPlanHtml(),
-              timeoutSeconds,
+              timeoutSeconds: getPlanTimeoutSeconds(),
               abortSignal: context.abort,
               cwd: ctx.directory,
               bridge: await getBridgeContext(),
-            });
-          } catch (error) {
-            context.abort.throwIfAborted();
-            return `[Plannotator] Failed to open plan review: ${error instanceof Error ? error.message : String(error)}`;
-          }
-
-          if (result.approved) {
-            // Clean up backing file after approval
-            try { unlinkSync(backingPath); } catch { /* already gone */ }
-
-            const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== 'disabled';
-            const targetAgent = result.agentSwitch || 'build';
-            const shouldStartImplementation = shouldSwitchAgent
-              && shouldStartImplementationForAgent(targetAgent, workflowOptions);
-
-            if (shouldSwitchAgent) {
-              try {
-                await ctx.client.session.prompt({
-                  path: { id: context.sessionID },
-                  body: {
-                    agent: targetAgent,
-                    noReply: true,
-                    parts: [{
-                      type: "text",
-                      text: shouldStartImplementation
-                        ? "Proceed with implementation"
-                        : "Plan approved. Plan mode remains active; no implementation has been requested.",
-                    }],
-                  },
-                });
-              } catch {
-                // Silently fail if session is busy
-              }
-            }
-
-            if (result.feedback) {
-              return getPlanApprovedWithNotesPrompt("opencode", undefined, {
-                planFilePath: backingPath,
-                doneMsg: result.savedPath ? `Saved to: ${result.savedPath}` : "",
-                feedback: result.feedback,
-                proceedSuffix: shouldStartImplementation
-                  ? "\n\nProceed with implementation, incorporating these notes where applicable."
-                  : "",
+            }),
+            resolveTargetAgent: async ({ requestedAgent, directory, delivery }) =>
+              await resolveValidatedTargetAgent({
+                client: ctx.client,
+                targetAgent: requestedAgent,
+                directory,
+                delivery,
+              }),
+            sendApprovalHandoff: async ({ sessionId, targetAgent, text }) => {
+              await ctx.client.session.prompt({
+                path: { id: sessionId },
+                body: {
+                  agent: targetAgent,
+                  noReply: true,
+                  parts: [{ type: "text", text }],
+                },
               });
-            }
-
-            return getPlanApprovedPrompt("opencode", undefined, {
-              planFilePath: backingPath,
-              doneMsg: result.savedPath ? ` Saved to: ${result.savedPath}` : "",
-            });
-          } else {
-            const lineNumberedPlan = formatWithLineNumbers(planContent);
-            const totalLines = planContent.split("\n").length;
-
-            return getPlanDeniedPrompt("opencode", undefined, {
-              toolName: getPlanToolName("opencode"),
-              planFileRule: "",
-              feedback: result.feedback || "Plan changes requested",
-            }) + `\n\n## Current Plan (${totalLines} lines)\n\nThe plan below shows the current state with line numbers. Use these exact line numbers in your next \`submit_plan\` call:\n\n\`\`\`\n${lineNumberedPlan}\n\`\`\`\n\nCall \`submit_plan\` with targeted edits to address the feedback above.`;
-          }
+            },
+          });
         },
       }),
     };

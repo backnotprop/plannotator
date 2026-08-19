@@ -63,6 +63,48 @@ describe("Amp Plannotator plugin helpers", () => {
     );
   });
 
+  // #1137: approved decisions carrying Approve-with-Notes feedback (#1092)
+  // were silently dropped — formatAnnotationFeedback returned null for
+  // anything that was not "annotated".
+  test("surfaces approved-with-notes feedback for message annotations", () => {
+    const result = formatAnnotationFeedback(
+      { decision: "approved", feedback: "Ship it, but rename the flag before GA." },
+      { kind: "message" },
+    );
+
+    expect(result).toBe(
+      "# Approved with Notes\n\nThe artifact is approved. The notes below are non-blocking guidance, not a request for another revision.\n\nShip it, but rename the flag before GA.\n\nDo not revise or reopen the artifact solely because of these notes unless the user explicitly requests it. Carry the notes into subsequent work where applicable.",
+    );
+  });
+
+  test("surfaces approved-with-notes feedback with the file context", () => {
+    const result = formatAnnotationFeedback(
+      { decision: "approved", feedback: "Fine as-is; consider splitting later." },
+      { kind: "file", filePath: "docs/plan.md" },
+    );
+
+    expect(result).toContain("# Approved with Notes");
+    expect(result).toContain("File: docs/plan.md\n\nFine as-is; consider splitting later.");
+  });
+
+  test("keeps note-less and dismissed decisions silent", () => {
+    expect(
+      formatAnnotationFeedback({ decision: "approved" }, { kind: "message" }),
+    ).toBeNull();
+    expect(
+      formatAnnotationFeedback(
+        { decision: "approved", feedback: "   " },
+        { kind: "message" },
+      ),
+    ).toBeNull();
+    expect(
+      formatAnnotationFeedback(
+        { decision: "dismissed", feedback: "should never surface" },
+        { kind: "message" },
+      ),
+    ).toBeNull();
+  });
+
   test("detects non-action outputs", () => {
     expect(isNoActionFeedback("Review session closed without feedback.")).toBe(true);
     expect(isNoActionFeedback("Code review completed — no changes requested.")).toBe(false);

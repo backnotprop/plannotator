@@ -25,10 +25,29 @@ export const PermissionModeSetup: React.FC<PermissionModeSetupProps> = ({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl w-full max-w-lg shadow-2xl">
+    // Same bounded shell as the sibling one-time dialogs (see
+    // LookAndFeelAnnouncementDialog): safe-area padding, a card capped to the
+    // visible viewport, and the option list as the only scrolling region. The
+    // hand-rolled unbounded card used to overflow both edges of a short
+    // landscape phone with nothing left to tap.
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-background/90 backdrop-blur-sm"
+      style={{
+        paddingTop: 'max(1rem, var(--pn-safe-top, 0px))',
+        paddingRight: 'max(1rem, var(--pn-safe-right, 0px))',
+        paddingBottom: 'max(1rem, var(--pn-safe-bottom, 0px))',
+        paddingLeft: 'max(1rem, var(--pn-safe-left, 0px))',
+      }}
+    >
+      <div
+        className="bg-card border border-border rounded-xl w-full max-w-lg shadow-2xl flex flex-col overflow-hidden"
+        style={{
+          maxHeight:
+            'calc(var(--pn-viewport-height, 100vh) - max(1rem, var(--pn-safe-top, 0px)) - max(1rem, var(--pn-safe-bottom, 0px)))',
+        }}
+      >
         {/* Header */}
-        <div className="p-5 border-b border-border">
+        <div className="p-5 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-1.5 rounded-lg bg-primary/15">
               <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -47,7 +66,7 @@ export const PermissionModeSetup: React.FC<PermissionModeSetupProps> = ({
         </div>
 
         {/* Options */}
-        <div className="p-4 space-y-2">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
           {PERMISSION_MODE_OPTIONS.map((option) => (
             <label
               key={option.value}
@@ -74,7 +93,7 @@ export const PermissionModeSetup: React.FC<PermissionModeSetupProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-border flex justify-between items-center">
+        <div className="p-4 border-t border-border flex flex-shrink-0 flex-wrap gap-2 justify-between items-center">
           <p className="text-xs text-muted-foreground">
             You can change this later in Settings.
           </p>

@@ -150,7 +150,16 @@ export function usePRContext(prMetadata: PRMetadata | null) {
     };
   }, [fetchContext, prUrl]);
 
-  return { prContext, isLoading, error, fetchContext };
+  // Effects reset state after a PR URL changes, but consumers render once
+  // before that reset runs. Never expose the previous PR's context during
+  // that transition (especially to center panels that remain open in-place).
+  const isCurrentPR = prUrl === lastUrl.current;
+  return {
+    prContext: isCurrentPR ? prContext : null,
+    isLoading: !isCurrentPR && prUrl !== undefined ? true : isLoading,
+    error: isCurrentPR ? error : null,
+    fetchContext,
+  };
 }
 
 function parsePRContextStreamEvent(value: unknown): PRContextStreamEvent | null {

@@ -193,12 +193,19 @@ export interface MarkerModel {
 export type MarkerStreamEvent = Record<string, unknown>;
 
 /** Optional per-engine run knobs. Engines ignore fields they have no flag
- *  for — today only Pi consumes `thinking` (its unified reasoning level). */
+ *  for — today Pi consumes `thinking` (its unified reasoning level) and
+ *  Cursor consumes `cursorSandbox`. */
 export interface MarkerBuildOptions {
   /** Pi: `--thinking off|minimal|low|medium|high|xhigh` (Pi's default is
    *  medium; xhigh is accepted only by codex-max models — Pi errors clearly
    *  otherwise, surfaced as a failed job). */
   thinking?: string;
+  /** Cursor: pass `--sandbox enabled` (default true). Callers resolve this via
+   *  resolveCursorSandbox() (PLANNOTATOR_CURSOR_SANDBOX env var / config.json
+   *  `cursorSandbox`) — this module stays env-free. When false the pair is
+   *  OMITTED entirely (never `--sandbox disabled`), deferring to the user's
+   *  own Cursor Agent sandbox configuration. */
+  cursorSandbox?: boolean;
 }
 
 /** Stable ids of the marker engines — the single union every cast/lookup
@@ -371,8 +378,23 @@ function cursorFormatLogEvent(event: MarkerStreamEvent): string | null {
  * `agent` reads task text from argv, not stdin. `--model` is omitted when the
  * model is `Auto`/empty so Cursor uses its default model selection. `--workspace`
  * is set to the launch cwd when provided.
+ *
+ * Escape hatch: on systems where Cursor's sandbox cannot start (NixOS,
+ * AppArmor-restricted Linux) the hardcoded `--sandbox enabled` hard-fails the
+ * job ("Sandbox mode is enabled but not available on this system") and
+ * overrides the user's own `agent sandbox` configuration. `opts.cursorSandbox:
+ * false` (resolved from PLANNOTATOR_CURSOR_SANDBOX / config.json
+ * `cursorSandbox`) OMITS the pair entirely — never `--sandbox disabled` — so
+ * the user's Cursor Agent configuration governs. Tradeoff stated plainly:
+ * opting out means the review job's write protection rests on `--mode ask`
+ * plus whatever sandboxing the user's own Cursor config provides.
  */
-function cursorBuildArgv(prompt: string, model?: string, cwd?: string): string[] {
+function cursorBuildArgv(
+  prompt: string,
+  model?: string,
+  cwd?: string,
+  opts?: MarkerBuildOptions,
+): string[] {
   // `auto` is Cursor's default model id — omit --model so the CLI chooses.
   const useModel = !!model && model.toLowerCase() !== "auto";
   return [
@@ -385,8 +407,7 @@ function cursorBuildArgv(prompt: string, model?: string, cwd?: string): string[]
     "--stream-partial-output",
     "--trust",
     ...(cwd ? ["--workspace", cwd] : []),
-    "--sandbox",
-    "enabled",
+    ...(opts?.cursorSandbox === false ? [] : ["--sandbox", "enabled"]),
     ...(useModel ? ["--model", model] : []),
     // Prompt is the trailing positional arg — agent reads it from argv, not stdin.
     prompt,

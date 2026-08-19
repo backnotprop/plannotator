@@ -5,7 +5,7 @@
  * Consumes the version history API endpoints.
  */
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   computePlanDiff,
   type PlanDiffBlock,
@@ -89,7 +89,22 @@ export function usePlanDiff(
   currentPlan: string,
   initialPreviousPlan: string | null,
   versionInfo: VersionInfo | null,
-  fetchers?: PlanDiffFetchers
+  fetchers?: PlanDiffFetchers,
+  /**
+   * Identity of the document `initialPreviousPlan`/`versionInfo` belong to
+   * (e.g. a folder/linked document's filepath). When this changes between
+   * renders, the diff-base state below switches to that document's own
+   * remembered base selection (if this document was visited earlier in the
+   * session — see baseSelectionsByDocKeyRef below) or, the first time a
+   * document is seen, seeds from its `initialPreviousPlan`/`versionInfo` —
+   * either way, never keeping whatever the previously active document had
+   * selected, since that would silently keep diffing the new document's text
+   * against the old document's base plan. Omit (or keep it referentially
+   * stable, as the root document does for the life of a session) to preserve
+   * exactly today's one-time-hydration behavior via the two sync effects
+   * below.
+   */
+  docKey?: string | null
 ): UsePlanDiffReturn {
   const fetchVersionImpl = fetchers?.fetchVersion ?? defaultFetchVersion;
   const fetchVersionsImpl = fetchers?.fetchVersions ?? defaultFetchVersions;
@@ -117,6 +132,62 @@ export function usePlanDiff(
       setDiffBaseVersion(versionInfo.version - 1);
     }
   }, [versionInfo]);
+
+  // Remember each document's diff-base selection across navigation, keyed by
+  // docKey (including `null`/`undefined`) — so returning to a previously
+  // visited document (e.g. the root doc after a linked-doc detour) restores
+  // whatever base version the user had picked there instead of re-seeding
+  // defaults. A plain ref (not state) since writing it must never itself
+  // trigger a render — it's only read/written from inside the docKey-change
+  // effect below. Never shared across keys: each key's entry is only ever
+  // populated from that same key's own state at the moment it stops being
+  // active.
+  const baseSelectionsByDocKeyRef = useRef(
+    new Map<
+      string | null | undefined,
+      { diffBasePlan: string | null; diffBaseVersion: number | null }
+    >()
+  );
+
+  // Reset (or restore) diff-base state whenever the active document identity
+  // changes (e.g. folder/linked-doc navigation). docKey is undefined/stable
+  // for a session with no per-doc identity (the root document), so this
+  // never fires there and the sync effects above keep owning its one-time
+  // hydration — byte-identical to before this seam existed.
+  const prevDocKeyRef = useRef(docKey);
+  useEffect(() => {
+    if (prevDocKeyRef.current === docKey) return;
+
+    // Persist the outgoing document's current selection before switching, so
+    // coming back to it later (even after other documents were visited in
+    // between) restores it rather than re-seeding defaults.
+    baseSelectionsByDocKeyRef.current.set(prevDocKeyRef.current, {
+      diffBasePlan,
+      diffBaseVersion,
+    });
+    prevDocKeyRef.current = docKey;
+
+    const remembered = baseSelectionsByDocKeyRef.current.get(docKey);
+    if (remembered) {
+      setDiffBasePlan(remembered.diffBasePlan);
+      setDiffBaseVersion(remembered.diffBaseVersion);
+    } else {
+      setDiffBasePlan(initialPreviousPlan);
+      setDiffBaseVersion(
+        versionInfo && versionInfo.version > 1 ? versionInfo.version - 1 : null
+      );
+    }
+    setVersions([]);
+    setIsLoadingVersions(false);
+    setIsSelectingVersion(false);
+    setFetchingVersion(null);
+    // Only the identity change (docKey) should trigger this reset — the sync
+    // effects above already handle initialPreviousPlan/versionInfo arriving
+    // late for a stable identity, and re-running this on every value change
+    // would fight version selection (selectBaseVersion intentionally leaves
+    // docKey unchanged while it swaps diffBasePlan/diffBaseVersion).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docKey]);
 
   const hasPreviousVersion =
     versionInfo !== null && versionInfo.totalVersions > 1 && diffBasePlan !== null;

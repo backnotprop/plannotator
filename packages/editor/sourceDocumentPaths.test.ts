@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { dirnameBrowserPath, normalizeBrowserPath, pathIsInsideDir } from './sourceDocumentPaths';
+import {
+  buildSourceWatchSubscription,
+  dirnameBrowserPath,
+  normalizeBrowserPath,
+  pathIsInsideDir,
+} from './sourceDocumentPaths';
 
 describe('source document path helpers', () => {
   test('normalizes separators and trailing slashes', () => {
@@ -25,5 +30,40 @@ describe('source document path helpers', () => {
     expect(pathIsInsideDir('C:\\repo\\docs\\a.md', 'C:/repo/docs')).toBe(true);
     expect(pathIsInsideDir('C:\\note.md', 'C:/')).toBe(true);
     expect(pathIsInsideDir('/repo/docs/a.md', '')).toBe(false);
+  });
+
+  test('builds a stable exact-file watch subscription from Unix paths', () => {
+    const subscription = buildSourceWatchSubscription([
+      '/repo/docs/b.md',
+      '',
+      '/repo/docs/a.md',
+      '/repo/docs/a.md',
+      '/repo/notes/c.md',
+    ]);
+
+    expect(subscription).toEqual({
+      query: [
+        'filePath=%2Frepo%2Fdocs%2Fa.md',
+        'filePath=%2Frepo%2Fdocs%2Fb.md',
+        'filePath=%2Frepo%2Fnotes%2Fc.md',
+      ].join('&'),
+      dirs: ['/repo/docs', '/repo/notes'],
+      key: ['/repo/docs/a.md', '/repo/docs/b.md', '/repo/notes/c.md'].join('\n'),
+    });
+  });
+
+  test('normalizes and deduplicates Windows paths before building a subscription', () => {
+    const subscription = buildSourceWatchSubscription([
+      'C:\\repo\\notes\\b.md',
+      'C:/repo/docs/a.md',
+      'C:\\repo\\docs\\a.md',
+      'C:\\repo\\notes\\b.md',
+    ]);
+
+    expect(subscription).toEqual({
+      query: 'filePath=C%3A%2Frepo%2Fdocs%2Fa.md&filePath=C%3A%2Frepo%2Fnotes%2Fb.md',
+      dirs: ['C:/repo/docs', 'C:/repo/notes'],
+      key: 'C:/repo/docs/a.md\nC:/repo/notes/b.md',
+    });
   });
 });

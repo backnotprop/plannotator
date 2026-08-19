@@ -23,8 +23,8 @@
   --warning: oklch(0.75 0.15 85);
   --warning-foreground: oklch(0.20 0.02 260);
 
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   --radius: 0.625rem;
 
   --code-bg: oklch(0.26 0.02 260);

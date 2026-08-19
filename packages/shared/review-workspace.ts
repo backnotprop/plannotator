@@ -224,6 +224,14 @@ function aggregateRepos(repos: WorkspaceRepoRuntimeState[]): WorkspaceDiffSnapsh
   };
 }
 
+// Guards a normalizeWorkspacePath(relative(...)) result: on Windows,
+// path.relative cannot relativize across drives and returns the target's
+// absolute path instead (after backslash normalization, e.g. "L:/other/..."),
+// which must be treated as escaping the repo the same as "..".
+export function isRepoRelative(rel: string): boolean {
+  return Boolean(rel) && !rel.startsWith("..") && !rel.startsWith("/") && !/^[A-Za-z]:/.test(rel);
+}
+
 function normalizeAgentPath(root: string, repos: WorkspaceRepoRuntimeState[], filePath: string): string {
   const normalized = normalizeWorkspacePath(filePath);
   if (resolveWorkspaceFilePath(repos, normalized)) return normalized;
@@ -231,13 +239,13 @@ function normalizeAgentPath(root: string, repos: WorkspaceRepoRuntimeState[], fi
   const sorted = [...repos].sort((a, b) => b.cwd.length - a.cwd.length);
   for (const repo of sorted) {
     const rel = normalizeWorkspacePath(relative(repo.cwd, filePath));
-    if (rel && !rel.startsWith("..") && !rel.startsWith("/")) {
+    if (isRepoRelative(rel)) {
       return `${normalizeWorkspacePath(repo.label)}/${rel}`;
     }
   }
 
   const rootRel = normalizeWorkspacePath(relative(root, filePath));
-  if (rootRel && !rootRel.startsWith("..") && !rootRel.startsWith("/")) {
+  if (isRepoRelative(rootRel)) {
     if (resolveWorkspaceFilePath(repos, rootRel)) return rootRel;
   }
 
@@ -246,7 +254,7 @@ function normalizeAgentPath(root: string, repos: WorkspaceRepoRuntimeState[], fi
     return `${normalizeWorkspacePath(changedRepos[0].label)}/${normalized}`;
   }
 
-  if (rootRel && !rootRel.startsWith("..") && !rootRel.startsWith("/")) return rootRel;
+  if (isRepoRelative(rootRel)) return rootRel;
   return normalized;
 }
 

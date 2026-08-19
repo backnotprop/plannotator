@@ -204,6 +204,8 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `hooks/useActiveSection` | Scroll-spy over rendered headings; no backend. *(Blessed in 0.24.0.)* |
 | `hooks/useScrollViewport` | Resolves the scrolling element for viewport-aware UI; no backend. *(Blessed in 0.24.0.)* |
 | `utils/annotationHelpers` | Pure annotation utilities (`getAnnotationCountBySection`, `buildTocHierarchy` + `TocItem`). *(Blessed in 0.24.0.)* |
+| `components/html-viewer` (`HtmlViewer`) | The raw-HTML annotation viewer: overlay-projected placed markers, pinpoint anchors, multi-target comments. Props + validated bridge protocol; no backend of its own. See "Raw-HTML annotation viewer + syntax-highlighting migration (0.29.0)". *(Blessed in 0.29.0.)* |
+| `utils/codeHighlight` / `utils/codeBlockMark` / `utils/syntaxTheme` | The Shiki-based fence highlighter, swap-surviving annotation marks, and palette→Shiki theme mapping. Replaces all `.hljs` styling. *(Blessed in 0.29.0.)* |
 
 **AI is fully avoidable** — with one precision worth knowing. No AI *UI* is reachable from the supported components: `useAIChat` is imported only by `components/ai/DocumentAIChatPanel` and `useAIProviderConfig`, neither of which any supported component imports, and `CommentPopover`'s Ask-AI affordance exists only behind the optional `onAskAI` prop. `configure.ts` does statically import the `useAIChat` module (it needs `setAITransport`), but if you never use AI the hook is dead code and bundlers eliminate it — verified empirically: a standalone consumer's production bundle importing the full supported surface contains zero `/api/ai` strings. Don't import `components/ai/*` and don't pass `aiTransport`, and you ship no AI code.
 
@@ -267,6 +269,8 @@ interface Annotation {
 
 **Honesty note:** the failure path (step 4) is exercised in real use but is **not covered by automated tests** — nothing in the suite asserts the stale-anchor behavior. Treat the described degradation as accurate-but-unverified-by-CI, and test it in your integration if you depend on it.
 
+**Migration caveat — reference-style link resolution (#923):** `parseMarkdownToBlocks` now rewrites CommonMark reference links (`[text][id]`) and blanks their `[id]: url` definitions before splitting into blocks, so documents containing that syntax render differently than they did before this pass existed — a `[text][id]` pair that used to render as literal bracket text now renders as a link, and the definition line disappears from the rendered DOM entirely. That changes both the text and the per-tag DOM index at the affected positions. Any annotation whose `startMeta`/`endMeta` was captured against the *old* (pre-resolution) render of such a document — i.e. persisted before a host upgrades past this change — can restore onto the wrong text after upgrading, same as any other DOM-structure change described above; the text-search fallback (step 3) is the recovery path, and `originalText` is what to fall back to if you need to re-anchor server-side.
+
 ---
 
 ## Known rough edges (and why they're fine for now)
@@ -324,7 +328,7 @@ Re-verify your seam contract against `0.23.0` before adopting; the list above is
 
 Six items accumulated through Workspaces' first three integration slices. All are additive; every default reproduces 0.23.0 behavior.
 
-1. **`AnnotationPanel` host props.** `renderCardFooter?: (annotation) => ReactNode` — a per-card slot at each plan-annotation card's foot (plug reply/resolve UI in; clicks inside the slot don't select the card). `readOnly?: boolean` — hides every mutation affordance (delete/edit on all card kinds); selection and scrolling still work.
+1. **`AnnotationPanel` host props.** `renderCardFooter?: (annotation) => ReactNode` — a per-card slot at each plan-annotation card's foot (plug reply/resolve UI in; clicks inside the slot don't select the card). `readOnly?: boolean` — hides the built-in mutation affordances (delete/edit on all card kinds); selection and scrolling still work, and as of 0.30.0 the host footer slot still renders (see "Unanchored-annotation reporting + readOnly footer fix (0.30.0)").
 2. **Six more supported imports** (already in the table above, tagged *Blessed in 0.24.0*): `TableOfContents`, `ResizeHandle` + `useResizablePanel`, `useActiveSection`, `useScrollViewport`, `utils/annotationHelpers`. All verified under the strict-consumer gate.
 3. **`Viewer`/`CommentPopover` `allowImages?: boolean`.** Pass `false` when you have no `uploadTransport` — the attach-image affordance disappears instead of dead-ending. (CommentPopover already had the prop; Viewer now exposes and threads it.)
 4. **`Viewer` `readOnly?: boolean`.** View-only users: suppresses every composer entry point (selection toolbar, comment popovers, quick labels, pinpoint, global comment, attachments, checkbox toggles) while existing annotations still render and select.
@@ -409,10 +413,63 @@ Seam pinned end-to-end by `components/MarkdownDiff.reexport.test.tsx` (public su
 
 ---
 
+## Raw-HTML annotation viewer + syntax-highlighting migration (0.29.0)
+
+0.29.0 blesses the rebuilt raw-HTML annotation viewer as supported host surface and carries one **breaking** migration inherited from the diff-pane highlighter unification. Read both parts before upgrading from 0.28.0.
+
+### BREAKING: `.hljs` is gone — style code via `pn-code`
+
+highlight.js was removed from the package; the single highlighter is now Shiki via `@pierre/diffs` (new dependency, pinned `1.3.2`). Consumer impact:
+
+1. **Any host CSS targeting `.hljs` or `.hljs-*` token classes is inert.** Fenced code blocks now carry `pn-code font-mono language-{lang}` — import `CODE_BLOCK_CLASS` from `utils/codeHighlight` instead of hardcoding class strings.
+2. **Per-theme token CSS is the wrong layer now.** Fences resolve a real Shiki theme from the active palette (`utils/syntaxTheme`, `hooks/useFenceTheme`); to change code colors, map the palette to a different Shiki theme — don't write token-class CSS.
+3. **New supported utils:** `utils/codeHighlight` (`applyHighlight`, `highlightToHtml`, `codeBlockClassName`, `onCodeHighlightSwap`), `utils/codeBlockMark` (annotation marks that survive highlight swaps), `utils/syntaxTheme`. All pure/browser-safe.
+4. **Language-less fences render as plain text — there is no auto-detection anywhere.** Don't reintroduce it host-side; it breaks the byte-identity contract the annotation layer depends on.
+5. **Remove any bundler alias on `highlight.js`.** A host that aliased `highlight.js/lib/common` (or any hljs path) while consuming ≤0.28.0 will now **fail at config load** — the module no longer exists in the dependency tree. Delete the alias along with the `.hljs` CSS. (Reported by the first 0.29.0 adopter.)
+6. **Known cosmetic install warning:** `@pierre/diffs@1.3.2` → `@pierre/theming@1.0.0` declares a peer of `@pierre/theme@^1.1.0` while `2.0.0` resolves. Upstream ranges we don't control; harmless, appears in every consumer's install output.
+
+### Blessed: `components/html-viewer` (`HtmlViewer`)
+
+The overlay-projection annotation viewer for raw HTML (placed comment markers, pinpoint element anchors, shift-click multi-target, drag selection) is now on the supported allowlist, same standing as `components/Viewer`. The full architecture handoff (anchor model, reconcile loop, message protocol, test map) is a separate document — ask the maintainer for `HANDOFF_HTML_ANNOTATION_v0.26.8.md`. The contract summary:
+
+1. **The contract is props + the validated message protocol — not `configurePlannotatorUI`.** `HtmlViewer` is driven by its props (`rawHtml`, `annotations`, `onAddAnnotation`, `onSelectAnnotation`, `selectedAnnotationId`, `mode`, `inputMethod`, `readOnly`, …) and adapts the sandboxed iframe's validated bridge messages to the same annotation controls the markdown `Viewer` uses. The `configure()` seams still govern what surrounds it (storage, drafts, images, AI), but nothing about the viewer itself routes through `configure()`. Integrate on props; that is the path we maintain.
+2. **Numbering derives from the `annotations` prop — drive the prop.** Marker numbers are computed from the prop's array order (matching `exportAnnotations` numbering, globals occupying slots) and synced to the iframe on every prop change. Mounting with an empty prop and driving the viewer imperatively is NOT supported and will leave bubbles unnumbered; the imperative handle (`applySharedAnnotations`, `removeHighlight`, `clearAllHighlights`) exists for repaint scenarios on top of a prop-driven mount, not as a substitute for it. If your host architecture truly cannot supply the prop, ask for a numbering seam rather than working around it.
+3. **`readOnly` is view-only, not blank.** With `readOnly`, committed annotations still restore, markers still paint with correct numbers, and clicking a marker still fires `onSelectAnnotation`; every authoring entry point (composer, toolbar, quick label, vim) is disabled. Pinned by the "readOnly view-only contract" tests in `components/html-viewer/htmlPinpointProtocol.test.tsx`.
+4. **Security envelope: opaque-origin `srcdoc` sandbox only.** The iframe is `sandbox="allow-scripts"` (no `allow-same-origin`) and both sides authenticate messages by source identity with `targetOrigin: "*"`. That pattern is safe **only** because a `srcdoc` sandbox has an opaque origin. If a host serves annotated content from a real origin (a proxy, a hosted iframe), it must add strict `targetOrigin` and origin checks — do not reuse the `"*"` pattern there.
+5. **Multi-target cap is 16 on our side.** `htmlAdditionalTargets` accepts up to 16 additional anchors per comment; a host enforcing a smaller product cap (e.g. 7) should cap at composer level before submit — the stored schema is unchanged either way. As with every anchor field, persist `htmlAnchor`/`htmlAdditionalTargets` as opaque JSON and round-trip them unchanged (see "The annotation anchor schema").
+
+### `@plannotator/core` 0.23.0
+
+Additive only, but required: `@plannotator/ui` 0.29.0 imports the new `@plannotator/core/annotatable` subpath (absent from published core 0.22.0), so core 0.23.0 must be installed/published first. Also picks up additive exports in `agent-jobs`, `config-types`, `favicon`, `feedback-templates`, and an external-annotation PATCH-merge fix (tool-submitted `source` markers are no longer clearable via PATCH).
+
+---
+
+## Unanchored-annotation reporting + readOnly footer fix (0.30.0)
+
+Two consumer-driven changes: the `onUnanchoredChange` callback (the accepted ask from the 0.29.0 adoption) and a behavior fix to `AnnotationPanel`'s readOnly mode.
+
+### `HtmlViewer` `onUnanchoredChange?: (ids: string[]) => void`
+
+Fail-closed anchors hide markers rather than guess, which previously meant an annotation whose content vanished from the page disappeared silently. The viewer now reports it:
+
+1. **The callback receives the complete current set** of annotation ids with no live representation on the page — every target dead (element disconnected AND text unfindable), or the restore never resolved anything. It fires only when the set changes, including back to `[]` on recovery. An id being merely offscreen, clipped, or style-hidden is NOT unanchored: its content exists, so no report.
+2. **It fires in readOnly mode too** — view-only surfaces are exactly where silently missing markers go unnoticed.
+3. **Bounded like every bridge message:** at most 512 ids of at most 256 chars; an out-of-contract report is rejected whole at the parent trust boundary.
+4. **Timing:** reports ride the overlay reconcile (rAF-coalesced), so expect them shortly after load, after page mutations, and after your own `annotations` prop changes — not synchronously with them.
+
+Pinned by "unanchored ids are reported on change" in `components/html-viewer/srcdoc.test.ts` (bridge behavior) and the "unanchored report" suite in `components/html-viewer/htmlPinpointProtocol.test.tsx` (trust boundary + readOnly delivery).
+
+### `AnnotationPanel` readOnly no longer suppresses the host footer slot
+
+**Behavior change.** Through 0.29.1, `readOnly` dropped the `renderCardFooter` slot entirely, which threw away host READ affordances (a replies list, a copy link) along with mutations — view-only panels lost their replies. As of 0.30.0 the footer slot always renders; `readOnly` hides only the built-in mutation affordances (delete/edit, direct-edit discard). **The host gates its own footer contents:** if you render mutation UI in the footer, gate it on your own view-only state. A host that relied on the automatic suppression must add that gate when upgrading.
+
+---
+
 ## Publishing & versioning
 
-- `@plannotator/core` and `@plannotator/ui` are versioned **in lockstep with the repo** (`@plannotator/ui` is now `0.28.0`; `@plannotator/core` remains `0.22.0` until its next change — the ui→core dependency still resolves exactly at pack time).
-- They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --provenance --access public`). Publish **`core` first, then `ui`**.
+- `@plannotator/ui` is now `0.30.0`; `@plannotator/core` is `0.23.0`. **Publish `core` first** — ui 0.29.0 imports `@plannotator/core/annotatable`, which does not exist in core 0.22.0. The ui→core dependency resolves exactly at pack time.
+- They depend on each other via `workspace:*`. At publish time that must resolve to the **exact** version in the tarball, so publish with a tool that does that resolution (the repo's existing flow uses `bun pm pack` to build the tarball, then `npm publish *.tgz --access public`). Publish **`core` first, then `ui`**.
+- **`--provenance` only works from a supported CI environment (GitHub Actions OIDC)** — a local publish fails with `Automatic provenance generation not supported for provider: null`. Until a CI publish job exists for these two packages, local publishes drop the flag. Publishing under `--tag next` first lets the consumer preflight before `npm dist-tag add <pkg>@<version> latest` promotes it.
 - `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS.
 - There is **no CI publish job for these two packages yet** — first publish is manual from `main` after merge. (Wiring a CI publish job is a follow-up.)
 

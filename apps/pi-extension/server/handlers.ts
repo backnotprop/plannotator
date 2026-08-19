@@ -8,10 +8,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
-import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.js";
-import { FAVICON_PNG_BYTES } from "../generated/favicon.js";
+import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.ts";
+import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../generated/favicon.ts";
+import { getServerConfig } from "../generated/config.ts";
+import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
-import { json, parseBody, send, toWebRequest } from "./helpers";
+import { json, parseBody, send, toWebRequest } from "./helpers.ts";
 import {
 	type BearConfig,
 	type IntegrationResult,
@@ -20,7 +22,7 @@ import {
 	saveToBear,
 	saveToObsidian,
 	saveToOctarine,
-} from "./integrations.js";
+} from "./integrations.ts";
 
 type Res = import("node:http").ServerResponse;
 
@@ -228,11 +230,63 @@ export function readDraftGenerationFromBody(body: unknown): number | undefined {
 
 export { readDraftGenerationFromUrl };
 
+/**
+ * Serve the app favicon. Mirrors packages/server/shared-handlers.ts
+ * handleFavicon() exactly: the persisted style decides the payload, the response
+ * declares its real type, and it is not cached because one URL now has two
+ * possible bodies. See that file for the full reasoning.
+ */
 export function handleFavicon(res: Res): void {
+	if (getServerConfig(null).favicon === "classic") {
+		send(res, Buffer.from(CLASSIC_FAVICON_SVG, "utf-8"), 200, {
+			"Content-Type": "image/svg+xml",
+			"Cache-Control": "no-cache",
+		});
+		return;
+	}
 	send(res, Buffer.from(FAVICON_PNG_BYTES), 200, {
 		"Content-Type": "image/png",
-		"Cache-Control": "public, max-age=86400",
+		"Cache-Control": "no-cache",
 	});
+}
+
+/**
+ * List global agent skills for comment skill references. Used by plan +
+ * annotate servers. Takes no client input (fixed roots only) and degrades to an
+ * empty catalog on any failure so the composer never breaks.
+ */
+export function handleReferenceSkillsRequest(res: Res): void {
+	try {
+		json(res, { skills: listReferenceSkills() });
+	} catch (err) {
+		console.error(
+			`[plannotator] Skill catalog failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		json(res, { skills: [] });
+	}
+}
+
+/**
+ * Serve a referenced skill's SKILL.md contents for feedback injection
+ * (`?name=<skill>`). Used by plan + annotate servers. The name is matched
+ * against discovered skills only — it is never used as a path — so traversal
+ * and absolute-path inputs answer 404, never a file outside the skill roots.
+ */
+export function handleReferenceSkillContentRequest(res: Res, url: URL): void {
+	try {
+		const name = url.searchParams.get("name") ?? "";
+		const skill = readReferenceSkillContent(name);
+		if (!skill) {
+			json(res, { error: "Skill not found" }, 404);
+			return;
+		}
+		json(res, { skill });
+	} catch (err) {
+		console.error(
+			`[plannotator] Skill content failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		json(res, { error: "Skill content failed" }, 500);
+	}
 }
 
 /** Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers. */

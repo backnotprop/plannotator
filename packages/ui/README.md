@@ -24,6 +24,8 @@ configurePlannotatorUI({
   draftTransport,
   externalAnnotationTransport, // live/agent comments
   aiTransport,
+  skillCatalogTransport,       // skill-reference catalog for comment composers
+  skillContentTransport,       // human-only skill contents for feedback injection
   serverSync,
 });
 ```
@@ -77,6 +79,10 @@ Requires `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^
 - **Bytes are the contract:** `ref.current.getMarkdown()` / `.getOriginalMarkdown()` return the exact input strings (CRLF and trailing whitespace included); `getChangeCount()` / `goToNextChange()` / `goToPreviousChange()` drive review navigation.
 
 Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^0.8.0` (which adds a `@codemirror/merge` peer — declared by this package). See HANDOFF.md § "Frozen markdown diff (0.28.0)".
+
+### Raw-HTML annotation viewer (`HtmlViewer`)
+
+`components/html-viewer` is supported host surface as of 0.29.0: the overlay-projection annotation viewer for raw HTML (placed comment markers, pinpoint element anchors, shift-click multi-target comments). Its contract is **props plus the validated iframe message protocol** — not `configurePlannotatorUI()`, which only governs the backend surfaces around it. Drive the `annotations` prop (marker numbering derives from its array order); `readOnly` keeps markers painted and clickable while disabling all authoring. **0.29.0 also carries a breaking migration:** highlight.js is gone and `.hljs` selectors are inert — style code via the exported `pn-code` class (`CODE_BLOCK_CLASS` in `utils/codeHighlight`). See HANDOFF.md § "Raw-HTML annotation viewer + syntax-highlighting migration (0.29.0)" before upgrading from 0.28.0.
 
 ## Consuming it (e.g. from Workspaces)
 

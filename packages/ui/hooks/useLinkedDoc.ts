@@ -11,6 +11,7 @@ import type { Annotation, ImageAttachment } from "../types";
 import type { ViewerHandle } from "../components/Viewer";
 import type { SidebarTab } from "./useSidebar";
 import type { SourceSaveCapability } from "@plannotator/core/source-save";
+import type { VersionInfo } from "./usePlanDiff";
 
 export interface LinkedDocLoadData {
   markdown?: string;
@@ -20,6 +21,43 @@ export interface LinkedDocLoadData {
   rawHtml?: string;
   shareHtml?: string;
   sourceSave?: SourceSaveCapability;
+  /**
+   * Per-file version-diff baseline (annotate folder sessions only) — the same
+   * field names/shapes /api/plan already returns for single-file sessions.
+   * /api/doc only populates these for eligible folder files (local annotatable
+   * plain-text files — .md/.mdx/.txt plus the config set, per
+   * `isAnnotatableTextPath` — markdown-branch, not converted/HTML); every other
+   * document — including
+   * plain linked docs outside folder mode — omits them, which is what keeps
+   * the diff badge/version browser from appearing for those.
+   */
+  previousPlan?: string | null;
+  versionInfo?: VersionInfo | null;
+}
+
+/**
+ * Resolve the version-diff baseline for a document being activated: prefer
+ * an already-cached baseline (set the first time this document was opened)
+ * over the freshly-fetched `data`, so re-opening a document during a session
+ * never loses — or needs to re-request — its baseline. Pure so it's testable
+ * without mounting the hook; used by activateDocument below.
+ *
+ * Gated on whether a baseline was EVER captured for this document (versionInfo
+ * presence), not on truthiness of the cached previousPlan value — a document
+ * at its first-ever version legitimately caches `previousPlan: null` ("no
+ * earlier version to diff against yet"), which is a resolved fact, not a
+ * cache miss. Falling through to `data` on a plain `??` would silently
+ * discard that fact whenever `data` lacks the fields too (e.g. the
+ * missing-on-disk openLoaded path, which never fetches /api/doc).
+ */
+export function resolveDiffBaseline(
+  cached: Pick<CachedDocState, 'previousPlan' | 'versionInfo'> | undefined,
+  data: Pick<LinkedDocLoadData, 'previousPlan' | 'versionInfo'>,
+): { previousPlan: string | null | undefined; versionInfo: VersionInfo | null | undefined } {
+  if (cached && cached.versionInfo !== undefined) {
+    return { previousPlan: cached.previousPlan, versionInfo: cached.versionInfo };
+  }
+  return { previousPlan: data.previousPlan, versionInfo: data.versionInfo };
 }
 
 export interface UseLinkedDocOptions {
@@ -52,6 +90,9 @@ export interface UseLinkedDocOptions {
   /** Let the host initialize/restore editable document state and optionally
    *  override the markdown displayed for this file. */
   onDocumentLoaded?: (doc: LinkedDocLoadData) => string | undefined;
+  /** Notify the host after any fetched or already-loaded destination has been
+   *  activated, including HTML documents and backlinks to the source. */
+  onDocumentActivated?: (doc: LinkedDocLoadData & { filepath: string }) => void;
   /** Read current host-owned text when caching a linked doc. */
   getDocumentMarkdown?: (filepath: string, fallback?: string) => string | undefined;
   /** Let the host restore any state that was suspended while a linked doc was active. */
@@ -73,6 +114,12 @@ export interface CachedDocState {
   globalAttachments: ImageAttachment[];
   markdown?: string;
   isConverted?: boolean;
+  /** Version-diff baseline captured the first time this document was
+   *  activated — see LinkedDocLoadData. Persisted here so re-opening the
+   *  same document later in the session reuses it instead of losing it (or
+   *  needing to re-fetch it) once the fresh /api/doc data is gone. */
+  previousPlan?: string | null;
+  versionInfo?: VersionInfo | null;
 }
 
 export interface LinkedDocSessionState {
@@ -109,6 +156,12 @@ export interface UseLinkedDocReturn {
   restoreSession: (state: LinkedDocSessionState) => void;
   /** Reactive count of annotations on non-active documents (updates on open() and back()) */
   docAnnotationCount: number;
+  /** Active document's version-diff baseline (folder annotate only). Null
+   *  when no document is active, or the active document has no eligible
+   *  history — including every non-folder linked doc, since /api/doc never
+   *  populates these fields for those. */
+  diffPreviousPlan: string | null;
+  diffVersionInfo: VersionInfo | null;
 }
 
 const HIGHLIGHT_REAPPLY_DELAY = 100;
@@ -135,11 +188,18 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     sourceConverted,
     onBeforeNavigate,
     onDocumentLoaded,
+    onDocumentActivated,
     getDocumentMarkdown,
     onAfterBack,
   } = options;
 
-  const [linkedDoc, setLinkedDoc] = useState<{ filepath: string; isConverted?: boolean; markdown?: string } | null>(null);
+  const [linkedDoc, setLinkedDoc] = useState<{
+    filepath: string;
+    isConverted?: boolean;
+    markdown?: string;
+    previousPlan?: string | null;
+    versionInfo?: VersionInfo | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [docAnnotationCount, setDocAnnotationCount] = useState(0);
@@ -169,6 +229,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         globalAttachments: [...globalAttachments],
         markdown: getDocumentMarkdown?.(linkedDoc.filepath, linkedDoc.markdown) ?? linkedDoc.markdown,
         isConverted: linkedDoc.isConverted,
+        previousPlan: linkedDoc.previousPlan,
+        versionInfo: linkedDoc.versionInfo,
       });
       // Update reactive count so button labels can respond
       let total = 0;
@@ -234,6 +296,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     // annotations intact.
     if (sourceFilePath && data.filepath === sourceFilePath && savedPlanState.current) {
       back();
+      onDocumentActivated?.(data);
       return;
     }
 
@@ -264,6 +327,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         globalAttachments: [...globalAttachments],
         markdown: getDocumentMarkdown?.(linkedDoc.filepath, linkedDoc.markdown) ?? linkedDoc.markdown,
         isConverted: linkedDoc.isConverted,
+        previousPlan: linkedDoc.previousPlan,
+        versionInfo: linkedDoc.versionInfo,
       });
       let total = 0;
       for (const [fp, cached] of docCache.current.entries()) {
@@ -294,13 +359,17 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setAnnotations(cached?.annotations ?? []);
     setGlobalAttachments(cached?.globalAttachments ?? []);
     setSelectedAnnotationId(null);
+    const diffBaseline = resolveDiffBaseline(cached, data);
     setLinkedDoc({
       filepath: data.filepath,
       isConverted: !!data.isConverted,
       markdown: nextMarkdown,
+      previousPlan: diffBaseline.previousPlan,
+      versionInfo: diffBaseline.versionInfo,
     });
     setError(null);
     sidebar.open(targetTab ?? "toc");
+    onDocumentActivated?.(data);
 
     // Re-apply cached annotations after DOM settles
     if (cached?.annotations.length) {
@@ -330,6 +399,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     sourceFilePath,
     onBeforeNavigate,
     onDocumentLoaded,
+    onDocumentActivated,
     getDocumentMarkdown,
     back,
   ]);
@@ -391,6 +461,8 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         globalAttachments: [...globalAttachments],
         markdown: getDocumentMarkdown?.(linkedDoc.filepath, linkedDoc.markdown) ?? linkedDoc.markdown,
         isConverted: linkedDoc.isConverted,
+        previousPlan: linkedDoc.previousPlan,
+        versionInfo: linkedDoc.versionInfo,
       });
     }
 
@@ -490,5 +562,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     snapshotSession,
     restoreSession,
     docAnnotationCount,
+    diffPreviousPlan: linkedDoc?.previousPlan ?? null,
+    diffVersionInfo: linkedDoc?.versionInfo ?? null,
   };
 }

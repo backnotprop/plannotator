@@ -18,19 +18,29 @@ import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
+  getAnnotateApprovedWithNotesPrompt,
   getReviewApprovedPrompt,
   getReviewDeniedSuffix,
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
-import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles } from "@plannotator/shared/resolve-file";
+import { resolveMarkdownFile, resolveUserPath, hasMarkdownFiles, getAnnotatableDocRegex, MAX_ANNOTATABLE_FILE_BYTES } from "@plannotator/shared/resolve-file";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { parseAnnotateArgs } from "@plannotator/shared/annotate-args";
+import {
+  annotateInputNamesExistingTarget,
+  buildAmbiguousAnnotateArgsMessage,
+  buildUnresolvedAnnotateArgsMessage,
+  probeAnnotateToken,
+  selectAnnotateTokenTarget,
+} from "@plannotator/shared/annotate-target";
 import { parseReviewArgs } from "@plannotator/shared/review-args";
 import { urlToMarkdown, isConvertedSource } from "@plannotator/shared/url-to-markdown";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 import { statSync } from "fs";
 import path from "path";
+import { resolveValidatedTargetAgent } from "./agent-switch";
+import { deliverOpenCodePrompt } from "./prompt-delivery-error";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -172,8 +182,11 @@ export async function handleReviewCommand(
     const sessionId = event.properties?.sessionID;
 
     if (sessionId) {
-      const shouldSwitchAgent = result.agentSwitch && result.agentSwitch !== "disabled";
-      const targetAgent = result.agentSwitch || "build";
+      const targetAgent = await resolveValidatedTargetAgent({
+        client,
+        targetAgent: result.agentSwitch,
+        directory,
+      });
 
       // Append the verification-only suffix when the reviewer sent annotations to
       // act on (PR mode included). Platform PR actions post a status message
@@ -188,7 +201,7 @@ export async function handleReviewCommand(
         await client.session.prompt({
           path: { id: sessionId },
           body: {
-            ...(shouldSwitchAgent && { agent: targetAgent }),
+            ...(targetAgent && { agent: targetAgent }),
             parts: [{ type: "text", text: message }],
           },
         });
@@ -212,11 +225,46 @@ export async function handleAnnotateCommand(
   // --json is accepted silently (OpenCode writes to session, not stdout).
   // parseAnnotateArgs strips leading @ on filePath (reference-mode convention).
   // `rawFilePath` preserves it for the scoped-package markdown fallback.
-  const { filePath, rawFilePath, gate, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(rawArgs);
+  let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(rawArgs);
+  // @ts-ignore - Event properties contain sessionID
+  const sessionId = event.properties?.sessionID;
 
   if (!filePath) {
     client.app.log({ level: "error", message: "Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]" });
     return;
+  }
+
+  // Tolerant fallback (#1182): when the whole argument string names nothing,
+  // probe each token; exactly one existing target proceeds, several is an
+  // error, several unresolvable words get an actionable message instead of
+  // "File not found: the". Bare directory names only count in the sole-arg
+  // pre-pass, and unrecognized dash-prefixed tokens disable tolerance so a
+  // typo'd flag errors the way it always did.
+  const tolerantRoot = directory || process.cwd();
+  if (!annotateInputNamesExistingTarget(rawFilePath, tolerantRoot)) {
+    const selection = selectAnnotateTokenTarget(rawFilePath, (token) =>
+      probeAnnotateToken(token, tolerantRoot, { bareDirectories: false }),
+    );
+    if (selection.kind === "single") {
+      filePath = selection.candidate.value;
+      rawFilePath = selection.candidate.value;
+    } else if (selection.kind === "multiple") {
+      client.app.log({ level: "error", message: buildAmbiguousAnnotateArgsMessage(selection.candidates) });
+      return;
+    } else if (selection.kind === "none" && selection.words.length > 1) {
+      // Content flags only; --gate is transport for this invocation, not a
+      // property of the target.
+      const flags = [
+        ...(renderMarkdownFlag ? ["--markdown"] : []),
+        ...(noJina ? ["--no-jina"] : []),
+        ...(renderHtmlFlag ? ["--render-html"] : []),
+      ];
+      client.app.log({ level: "error", message: buildUnresolvedAnnotateArgsMessage({ words: selection.words, flags }) });
+      return;
+    }
+    // "flagged" (unrecognized dash tokens) or a single unresolvable word
+    // falls through to the existing pipeline so its specific errors
+    // ("File not found", unsupported type) stay verbatim.
   }
 
   let markdown: string;
@@ -256,8 +304,8 @@ export async function handleAnnotateCommand(
     }
 
     if (isFolder) {
-      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, /\.(mdx?|txt|html?)$/i)) {
-        client.app.log({ level: "error", message: `No markdown, text, or HTML files found in ${resolvedArg}` });
+      if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, getAnnotatableDocRegex())) {
+        client.app.log({ level: "error", message: `No annotatable files (markdown, plain-text, config, or HTML) found in ${resolvedArg}` });
         return;
       }
       folderPath = resolvedArg;
@@ -306,6 +354,10 @@ export async function handleAnnotateCommand(
       }
 
       absolutePath = resolved.path;
+      if (Bun.file(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
+        client.app.log({ level: "error", message: `File too large to annotate (max 2MB): ${absolutePath}` });
+        return;
+      }
       client.app.log({ level: "info", message: `Resolved: ${absolutePath}` });
       markdown = await Bun.file(absolutePath).text();
     }
@@ -331,6 +383,7 @@ export async function handleAnnotateCommand(
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     gate,
+    approvalNotesSupported: Boolean(sessionId),
     agentCwd,
     htmlContent,
     onReady: (url, isRemote, port) => {
@@ -343,46 +396,50 @@ export async function handleAnnotateCommand(
   await Bun.sleep(1500);
   server.stop();
 
-  // Both exit and approve are "no-op for the agent" — skip session injection.
-  if (result.exit || result.approved) {
+  if (result.exit || (result.approved && !result.feedback)) {
     return;
   }
 
   if (result.feedback) {
-    // @ts-ignore - Event properties contain sessionID
-    const sessionId = event.properties?.sessionID;
-
     if (sessionId) {
-      try {
-        await client.session.prompt({
+      const text = result.approved
+        ? getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
+            context: `${isFolder ? "Folder" : "File"}: ${absolutePath}`,
+            feedback: result.feedback,
+          })
+        : getAnnotateFileFeedbackPrompt("opencode", undefined, {
+            fileHeader: isFolder ? "Folder" : "File",
+            filePath: absolutePath,
+            feedback: result.feedback,
+          });
+      await deliverOpenCodePrompt({
+        client,
+        prompt: {
           path: { id: sessionId },
           body: {
             parts: [{
               type: "text",
-              text: getAnnotateFileFeedbackPrompt("opencode", undefined, {
-                fileHeader: isFolder ? "Folder" : "File",
-                filePath: absolutePath,
-                feedback: result.feedback,
-              }),
+              text,
             }],
           },
-        });
-      } catch {
-        // Session may not be available
-      }
+        },
+        failureMessage: result.approved
+          ? "Could not deliver approved annotation notes to the OpenCode session."
+          : "Could not deliver annotation feedback to the OpenCode session.",
+      });
     }
   }
 }
 
 /**
  * Handle /plannotator-last command.
- * Called from command.execute.before — returns the feedback string
- * so the caller can set it as output.parts for the agent to see.
+ * Called from command.execute.before — returns approval-aware feedback so the
+ * caller can choose the correct prompt semantics before injecting it.
  */
 export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
-): Promise<string | null> {
+): Promise<{ approved: boolean; feedback: string } | null> {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
@@ -444,6 +501,7 @@ export async function handleAnnotateLastCommand(
     shareBaseUrl: getShareBaseUrl(),
     pasteApiUrl: getPasteApiUrl(),
     gate,
+    approvalNotesSupported: true,
     htmlContent,
     onReady: (url, isRemote, port) => {
       handleAnnotateServerReady(url, isRemote, port);
@@ -455,10 +513,11 @@ export async function handleAnnotateLastCommand(
   await Bun.sleep(1500);
   server.stop();
 
-  // Both exit and approve signal "don't inject feedback" — return null.
-  if (result.exit || result.approved) {
+  if (result.exit || (result.approved && !result.feedback)) {
     return null;
   }
 
-  return result.feedback || null;
+  return result.feedback
+    ? { approved: Boolean(result.approved), feedback: result.feedback }
+    : null;
 }

@@ -1,0 +1,23 @@
+version: 2
+
+# Dependabot owns Bun workspace updates. Renovate owns GitHub Actions.
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: America/Los_Angeles
+    # Delay routine releases long enough for ecosystem problems to surface.
+    # Dependabot security updates do not observe this cooldown.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      bun-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

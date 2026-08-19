@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  formatShortcutBindingTokens,
+  listScopeShortcuts,
+  vimSelectionShortcuts,
+} from '../shortcuts';
 import { isMac, modKey, altKey } from '../utils/platform';
 
 /* ─── Key cap component ─── */
@@ -79,9 +84,17 @@ const inputMethodShortcuts: ShortcutSection = {
   ],
 };
 
+const documentViewShortcuts: ShortcutSection = {
+  title: 'View',
+  shortcuts: [
+    { keys: [modKey, '.'], desc: 'Toggle focus mode', hint: 'Collapses the Contents sidebar and the right-hand panel together; press again to restore whatever was open before. Markdown documents only; HTML pages keep their own layout.' },
+  ],
+};
+
 const annotationShortcuts: ShortcutSection = {
   title: 'Annotations',
   shortcuts: [
+    { keys: [shiftKey, '1-4'], desc: 'Switch annotation mode', hint: '1 Markup, 2 Comment, 3 Redline, 4 Label — matches the toolstrip order' },
     { keys: ['a-z'], desc: 'Start typing comment', hint: 'When the annotation toolbar is open, any letter key opens the comment editor with that character' },
     { keys: [altKey, '1-0'], desc: 'Apply quick label', hint: 'Instantly applies the Nth preset label (0 = 10th). When the label picker is open, bare digits also work.' },
     { keys: [modKey, enter], desc: 'Submit comment' },
@@ -103,10 +116,29 @@ const imageAnnotatorShortcuts: ShortcutSection = {
 };
 
 const sharedPlanEditorShortcuts: ShortcutSection[] = [
+  documentViewShortcuts,
   inputMethodShortcuts,
   annotationShortcuts,
   imageAnnotatorShortcuts,
 ];
+
+const vimShortcuts: ShortcutSection[] = (() => {
+  const sections = new Map<string, Shortcut[]>();
+  const entries = listScopeShortcuts(vimSelectionShortcuts)
+    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
+
+  for (const entry of entries) {
+    const shortcuts = sections.get(entry.section) ?? [];
+    shortcuts.push({
+      keys: formatShortcutBindingTokens(entry.bindings[0] ?? ''),
+      desc: entry.description,
+      hint: entry.hint,
+    });
+    sections.set(entry.section, shortcuts);
+  }
+
+  return Array.from(sections, ([title, shortcuts]) => ({ title, shortcuts }));
+})();
 
 const planActionShortcuts: ShortcutSection = {
   title: 'Actions',
@@ -152,6 +184,7 @@ const reviewShortcuts: ShortcutSection[] = [
     title: 'Actions',
     shortcuts: [
       { keys: [modKey, enter], desc: 'Approve / Send feedback' },
+      { keys: [modKey, shiftKey, 'Y'], desc: 'Copy feedback', hint: 'Copies the same feedback that gets submitted' },
       { keys: [altKey, altKey], desc: 'Toggle destination', hint: 'Double-tap to switch between GitHub and Agent in PR review mode' },
       { keys: [modKey, 'B'], desc: 'Toggle file tree' },
       { keys: [modKey, '.'], desc: 'Toggle sidebar' },
@@ -191,8 +224,19 @@ const reviewShortcuts: ShortcutSection[] = [
 
 /* ─── Exported panel ─── */
 
-export const KeyboardShortcuts: React.FC<{ mode: 'plan' | 'annotate' | 'review' }> = ({ mode }) => {
-  const sections = mode === 'review' ? reviewShortcuts : mode === 'annotate' ? annotateShortcuts : planShortcuts;
+/** Render the surface shortcut reference, including opt-in Vim commands. */
+export const KeyboardShortcuts: React.FC<{
+  mode: 'plan' | 'annotate' | 'review';
+  vimModeEnabled?: boolean;
+}> = ({ mode, vimModeEnabled = false }) => {
+  const baseSections = mode === 'review'
+    ? reviewShortcuts
+    : mode === 'annotate'
+      ? annotateShortcuts
+      : planShortcuts;
+  const sections = vimModeEnabled && mode !== 'review'
+    ? [...vimShortcuts, ...baseSections]
+    : baseSections;
 
   return (
     <div className="space-y-4">

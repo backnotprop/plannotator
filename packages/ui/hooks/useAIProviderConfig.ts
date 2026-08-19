@@ -59,14 +59,15 @@ export function useAIProviderConfig({
   // Auto-resolve provider/model once capabilities are known.
   useEffect(() => {
     if (!available || providers.length === 0) return;
+    const saved = getAIProviderSettings();
+    const selection = resolveAIProviderSelection({
+      providers,
+      origin,
+      settings: saved,
+      serverDefaultProvider: defaultProvider,
+    });
+
     setAiConfig(prev => {
-      const saved = getAIProviderSettings();
-      const selection = resolveAIProviderSelection({
-        providers,
-        origin,
-        settings: saved,
-        serverDefaultProvider: defaultProvider,
-      });
       if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
       return {
         ...prev,
@@ -99,9 +100,13 @@ export function useAIProviderConfig({
         }
         const reasoningEffort = model ? (reasoningEffortByModel[model] ?? null) : null;
         const next = { ...prev, providerId, model, reasoningEffort, reasoningEffortByModel };
+        // Only an explicit model pick is persisted. A resolver-derived model
+        // (e.g. the static fallback a lazily-discovered provider advertises
+        // before activation) must never overwrite the user's saved preference
+        // — the session request may fall back, the cookie may not.
         saveAIProviderSelection({
           providerId: next.providerId,
-          model: next.model,
+          model: config.model !== undefined ? next.model : null,
           origin,
           settings: saved,
         });

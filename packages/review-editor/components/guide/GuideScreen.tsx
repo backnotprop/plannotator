@@ -6,11 +6,14 @@ import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 import { REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
 import { isTerminalStatus } from '@plannotator/shared/agent-jobs';
 import { useGuideData } from '../../hooks/guide/useGuideData';
+import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
 import { useReviewState } from '../../dock/ReviewStateContext';
 import { GuideEmptyState } from './GuideEmptyState';
 import { GuideGenerating } from './GuideGenerating';
-import { GuideSectionSkeleton } from './GuideSkeleton';
-import { GuideView } from './GuideView';
+import { GuideSectionSkeleton } from '@plannotator/guide-viewer/GuideSkeleton';
+import { GuideView } from '@plannotator/guide-viewer/GuideView';
+import { ReviewGuideHost } from './ReviewGuideHost';
+import { GuideExportButton } from './GuideExportButton';
 
 interface GuideScreenProps {
   /** Latest completed guide job id (or the demo guide id in standalone mode).
@@ -26,6 +29,10 @@ interface GuideScreenProps {
    *  panel successfully submits a manually-fixed output (POST .../submit →
    *  200). Wired to the same handler ReviewSidebar's onOpenGuide uses. */
   onOpenFixedGuide?: (jobId: string) => void;
+  /** Open a persisted guide from GuideEmptyState's previous-guides list —
+   *  receives the `saved:{id}` pseudo job id (#1112). Wired to the same
+   *  handler as onOpenFixedGuide; ids are opaque to this screen. */
+  onOpenSavedGuide?: (jobId: string) => void;
 }
 
 /**
@@ -46,6 +53,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   killJob,
   onClose,
   onOpenFixedGuide,
+  onOpenSavedGuide,
 }) => {
   const [cancelling, setCancelling] = useState(false);
   // GuideScreen renders inside ReviewStateProvider (ActiveGuide below already
@@ -153,6 +161,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
         capabilities={capabilities}
         launchJob={launchJob}
         onOpenFixedGuide={onOpenFixedGuide}
+        onOpenSavedGuide={onOpenSavedGuide}
       />
     );
   }
@@ -182,11 +191,12 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
           error: failedGuideJob.error ?? 'Guide generation failed.',
         }}
         onOpenFixedGuide={onOpenFixedGuide}
+        onOpenSavedGuide={onOpenSavedGuide}
       />
     );
   }
 
-  return <GuideEmptyState capabilities={capabilities} launchJob={launchJob} onBack={onClose} />;
+  return <GuideEmptyState capabilities={capabilities} launchJob={launchJob} onBack={onClose} onOpenSavedGuide={onOpenSavedGuide} />;
 };
 
 function ActiveGuide({
@@ -196,6 +206,7 @@ function ActiveGuide({
   capabilities,
   launchJob,
   onOpenFixedGuide,
+  onOpenSavedGuide,
 }: {
   jobId: string;
   jobs: AgentJobInfo[];
@@ -206,10 +217,26 @@ function ActiveGuide({
   capabilities: AgentCapabilities | null;
   launchJob: (params: AgentLaunchParams) => Promise<AgentJobInfo | null>;
   onOpenFixedGuide?: (jobId: string) => void;
+  onOpenSavedGuide?: (jobId: string) => void;
 }) {
   const { guide, loading, error, reviewed, toggleReviewed, retry } = useGuideData(jobId);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
   const state = useReviewState();
+  // Shared guide-launch defaults, for the outdated-saved-guide "Regenerate"
+  // hint (#1112) — same params GuideEmptyState's Generate button would send.
+  const guideLaunch = useGuideLaunch(capabilities);
+  const [regenerating, setRegenerating] = useState(false);
+  const handleRegenerate = async () => {
+    if (!guideLaunch.canLaunch || regenerating) return;
+    setRegenerating(true);
+    try {
+      await launchJob(guideLaunch.buildParams());
+      // A successful launch lands as a new running guide job — GuideScreen's
+      // running-job branch takes over from here automatically.
+    } finally {
+      setRegenerating(false);
+    }
+  };
 
   // "Details" switches this screen over to the full failure-recovery panel
   // (GuideEmptyState's failure branch) for `failedJob`, instead of duplicating
@@ -231,12 +258,10 @@ function ActiveGuide({
   const dismissedRef = useRef<Set<string>>(new Set());
   const [, bumpDismissTick] = useState(0);
 
-  // focusedFile otherwise stays null until pointerenter (see GuideDiffSection),
-  // which leaves a keyboard-only user with nothing focused (no annotation
-  // toolbar target) until they touch the mouse. Default it once the guide
-  // loads: the first section's first diff file that still resolves against
-  // the current diff (guide refs can go stale if the diff changed since
-  // generation — see GuideDiffSection's "no longer in the current diff" case).
+  // Default the virtualized guide to its first resolvable file. CodeView takes
+  // over active-file reporting after its initial window mounts; this seed keeps
+  // the summary and annotation toolbar meaningful for keyboard-only users too.
+  // Guide refs can go stale when the diff changes after generation.
   useEffect(() => {
     if (focusedFile !== null || !guide) return;
     const filePathsInDiff = new Set(state.files.map((f) => f.path));
@@ -281,6 +306,7 @@ function ActiveGuide({
           error: failedJob.error ?? 'Guide generation failed.',
         }}
         onOpenFixedGuide={onOpenFixedGuide}
+        onOpenSavedGuide={onOpenSavedGuide}
       />
     );
   }
@@ -344,18 +370,23 @@ function ActiveGuide({
   }
 
   const engine = jobs.find((j) => j.id === jobId)?.engine;
+  const model = jobs.find((j) => j.id === jobId)?.model;
 
   return (
     <div className="w-full">
       {failureStrip}
-      <GuideView
-        guide={guide}
-        reviewed={reviewed}
-        onToggleReviewed={toggleReviewed}
-        engineLabel={engine ? REVIEW_ENGINE_LABEL[engine as ReviewEngine] ?? engine : undefined}
-        focusedFile={focusedFile}
-        onFocusFile={setFocusedFile}
-      />
+      <ReviewGuideHost>
+        <GuideView
+          guide={guide}
+          reviewed={reviewed}
+          onToggleReviewed={toggleReviewed}
+          engineLabel={engine ? `${REVIEW_ENGINE_LABEL[engine as ReviewEngine] ?? engine}${model ? ` · ${model}` : ''}` : undefined}
+          focusedFile={focusedFile}
+          onFocusFile={setFocusedFile}
+          onRegenerate={guideLaunch.canLaunch && !regenerating ? handleRegenerate : undefined}
+          headerActions={<GuideExportButton jobId={jobId} />}
+        />
+      </ReviewGuideHost>
     </div>
   );
 }

@@ -92,7 +92,7 @@ Annotates the agent's most recent message. See the [annotate last docs](/docs/co
 Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
 
 ```bash
-npx skills add backnotprop/plannotator/apps/skills/extra
+npx skills add backnotprop/plannotator/apps/skills/extra --global
 ```
 
 ## Plugin installation

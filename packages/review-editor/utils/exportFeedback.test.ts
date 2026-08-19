@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { exportReviewFeedback } from "./exportFeedback";
-import type { CodeAnnotation } from "@plannotator/ui/types";
+import { buildProseFeedback, exportReviewFeedback } from "./exportFeedback";
+import { AnnotationType, type Annotation, type CodeAnnotation, type CommentAnnotation } from "@plannotator/ui/types";
 import type { PRMetadata } from "@plannotator/shared/pr-types";
 
 const ann = (overrides: Partial<CodeAnnotation> = {}): CodeAnnotation => ({
@@ -13,6 +13,16 @@ const ann = (overrides: Partial<CodeAnnotation> = {}): CodeAnnotation => ({
   text: "This looks wrong",
   createdAt: Date.now(),
   ...overrides,
+});
+
+const targetWithoutInlineAnchor = (filePath: string, line: number) => ({
+  treePath: 'checkout:0/existing:0',
+  entry: 'checkout()',
+  label: 'existing()',
+  filePath,
+  lineStart: line,
+  lineEnd: line,
+  side: 'new' as const,
 });
 
 const prMeta: PRMetadata = {
@@ -31,6 +41,81 @@ const prMeta: PRMetadata = {
 };
 
 describe("exportReviewFeedback", () => {
+  it("keeps every Shift-clicked Call Flow target in one native annotation", () => {
+    const result = exportReviewFeedback([ann({
+      callFlowTargets: [{
+        treePath: 'checkout:0/save:0',
+        entry: 'checkout()',
+        label: 'saveOrder()',
+        filePath: 'src/order.ts',
+        lineStart: 10,
+        lineEnd: 10,
+        side: 'new',
+      }, {
+        treePath: 'checkout:0/publish:1',
+        entry: 'checkout()',
+        label: 'publishReceipt()',
+        filePath: 'src/events.ts',
+        lineStart: 22,
+        lineEnd: 24,
+        side: 'new',
+      }],
+    })]);
+
+    expect(result).toContain('`checkout()` → `saveOrder()` — `src/order.ts:L10`');
+    expect(result).toContain('`checkout()` → `publishReceipt()` — `src/events.ts:L22-L24`');
+    expect(result.match(/This looks wrong/g)).toHaveLength(1);
+  });
+
+  it("exports file-scoped out-of-hunk Call Flow feedback without inventing an inline line", () => {
+    const result = exportReviewFeedback([ann({
+      scope: 'file',
+      lineStart: 1,
+      lineEnd: 1,
+      callFlowTargets: [targetWithoutInlineAnchor('src/index.ts', 200)],
+    })]);
+
+    expect(result).toContain('### File Comment');
+    expect(result).toContain('`src/index.ts:L200`');
+    expect(result).not.toContain('### Line 1');
+  });
+
+  it("exports a source-less structural Call Flow step as general feedback", () => {
+    const result = exportReviewFeedback([ann({
+      scope: 'general',
+      filePath: '',
+      lineStart: 0,
+      lineEnd: 0,
+      callFlowTargets: [{
+        treePath: 'checkout:0/branch:0',
+        entry: 'checkout()',
+        label: 'if (authorized)',
+        side: 'new',
+      }],
+    })]);
+
+    expect(result).toContain('## General');
+    expect(result).toContain('`checkout()` → `if (authorized)` — `inferred step`');
+  });
+
+  it("exports exact raw CallDiff lines as review-scoped feedback", () => {
+    const result = exportReviewFeedback([ann({
+      scope: 'general',
+      filePath: '',
+      lineStart: 0,
+      lineEnd: 0,
+      callFlowTargets: [{
+        treePath: 'raw:11',
+        entry: 'Raw CallDiff output',
+        label: '- existingCall()',
+        rawLine: 12,
+        side: 'old',
+      }],
+    })]);
+
+    expect(result).toContain('`Raw CallDiff output` → `- existingCall()` — `raw CallDiff line 12`');
+  });
+
   it("local mode: uses generic header, no PR content", () => {
     const result = exportReviewFeedback([ann()]);
     expect(result).toStartWith("# Code Review Feedback\n\n");
@@ -182,6 +267,86 @@ describe("exportReviewFeedback", () => {
     ]);
     expect(result).toContain("**Suggested code:**");
     expect(result).toContain("const x = 1;");
+  });
+
+  it("emits a Replaces block before Suggested code when originalCode is present", () => {
+    const result = exportReviewFeedback([
+      ann({ suggestedCode: "const x = 1;", originalCode: "let x = 1;" }),
+    ]);
+    const replaces = result.indexOf("**Replaces:**\n```\nlet x = 1;\n```");
+    const suggested = result.indexOf("**Suggested code:**\n```\nconst x = 1;\n```");
+    expect(replaces).toBeGreaterThan(-1);
+    expect(suggested).toBeGreaterThan(replaces);
+  });
+
+  it("pairs Replaces with the matching Suggested code per annotation", () => {
+    const result = exportReviewFeedback([
+      ann({ lineStart: 2, lineEnd: 2, suggestedCode: "two'", originalCode: "two" }),
+      ann({ lineStart: 8, lineEnd: 9, suggestedCode: "eight'\nnine'", originalCode: "eight\nnine" }),
+    ]);
+    expect(result).toContain(
+      "**Replaces:**\n```\ntwo\n```\n\n**Suggested code:**\n```\ntwo'\n```",
+    );
+    expect(result).toContain(
+      "**Replaces:**\n```\neight\nnine\n```\n\n**Suggested code:**\n```\neight'\nnine'\n```",
+    );
+  });
+
+  it("emits Replaces without Suggested code for a deletion-only suggestion", () => {
+    // The edit-session derivation for a fully-emptied file produces text +
+    // originalCode with no suggestedCode; the anchor must still export.
+    const result = exportReviewFeedback([
+      ann({ text: "Suggested change: remove these lines.", originalCode: "one\ntwo" }),
+    ]);
+    expect(result).toContain("**Replaces:**\n```\none\ntwo\n```");
+    expect(result).not.toContain("**Suggested code:**");
+  });
+
+  it("omits Replaces when the annotation has no originalCode", () => {
+    const result = exportReviewFeedback([
+      ann({ suggestedCode: "const x = 1;" }),
+    ]);
+    expect(result).not.toContain("**Replaces:**");
+  });
+
+  it("emits a Highlighted text block for an edit-session selection comment", () => {
+    const result = exportReviewFeedback([
+      ann({ text: "Rename this", selectedText: "const widget = make();" }),
+    ]);
+    expect(result).toContain("Rename this\n");
+    expect(result).toContain("**Highlighted text:**\n```\nconst widget = make();\n```");
+    // A plain comment must never masquerade as a replacement.
+    expect(result).not.toContain("**Replaces:**");
+    expect(result).not.toContain("approximate");
+  });
+
+  it("labels an approximate anchor when the selection overlapped in-session edits", () => {
+    const result = exportReviewFeedback([
+      ann({
+        text: "Not sure about this",
+        selectedText: "const edited = true;",
+        selectedTextFromEdits: true,
+      }),
+    ]);
+    const note = result.indexOf("in-progress edits");
+    const highlighted = result.indexOf("**Highlighted text:**\n```\nconst edited = true;\n```");
+    expect(note).toBeGreaterThan(-1);
+    expect(highlighted).toBeGreaterThan(note);
+  });
+
+  it("omits the Highlighted text block when there is no selectedText", () => {
+    const result = exportReviewFeedback([ann()]);
+    expect(result).not.toContain("**Highlighted text:**");
+  });
+
+  it("emits Replaces for file-scoped suggestions too", () => {
+    const result = exportReviewFeedback([
+      ann({ scope: "file", suggestedCode: "const x = 1;", originalCode: "let x = 1;" }),
+    ]);
+    const replaces = result.indexOf("**Replaces:**\n```\nlet x = 1;\n```");
+    const suggested = result.indexOf("**Suggested code:**");
+    expect(replaces).toBeGreaterThan(-1);
+    expect(suggested).toBeGreaterThan(replaces);
   });
 
   it("includes side indicator", () => {
@@ -382,5 +547,60 @@ describe("exportReviewFeedback", () => {
       { mode: "gitbutler:workspace", base: "abc123", snapshotId: "snapshot-b" },
     );
     expect(result).toContain("anchored to that GitButler diff");
+  });
+});
+
+describe("buildProseFeedback — artifact annotations", () => {
+  const artifact = {
+    artifactId: "pr-artifact-video",
+    artifactName: "Demo recording",
+    artifactUrl: "https://example.com/demo.webm",
+    artifactKind: "video" as const,
+    sourceUrl: "https://github.com/acme/widgets/pull/42#issuecomment-9",
+    anchor: { kind: "video" as const, timestamp: 83.4 },
+  };
+
+  it("exports a timestamped comment artifact as reply context for agent and GitHub delivery", () => {
+    const annotation: CommentAnnotation = {
+      id: "artifact-note",
+      commentId: "issuecomment-9",
+      commentAuthor: "alice",
+      commentBody: "Here is the UI recording.",
+      text: "The panel jumps at this moment.",
+      createdAt: 1,
+      artifact,
+    };
+
+    const output = buildProseFeedback([], [annotation], undefined);
+    expect(output).toContain("# PR Artifact Feedback");
+    expect(output).toContain("Demo recording — Video at 1:23");
+    expect(output).toContain("In reply to the artifact source comment by @alice");
+    expect(output).toContain("> Here is the UI recording.");
+    expect(output).toContain("https://github.com/acme/widgets/pull/42#issuecomment-9");
+  });
+
+  it("keeps description artifact feedback separate from PR-description text anchors", () => {
+    const annotation: Annotation = {
+      id: "image-note",
+      blockId: "",
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.GLOBAL_COMMENT,
+      text: "Crop this more tightly.",
+      originalText: "",
+      createdA: 1,
+      artifact: {
+        ...artifact,
+        artifactId: "pr-artifact-image",
+        artifactName: "Hero image",
+        artifactKind: "image",
+        anchor: { kind: "image", x: 0.25, y: 0.4 },
+      },
+    };
+
+    const output = buildProseFeedback([annotation], [], "![Hero image](https://example.com/hero.png)");
+    expect(output).toContain("Hero image — Pin at 25%, 40%");
+    expect(output).toContain("Regarding an artifact in the PR description.");
+    expect(output).toContain("Crop this more tightly.");
   });
 });

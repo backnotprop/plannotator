@@ -217,7 +217,7 @@ export interface ClaudeCommandResult {
  * Build the `claude -p` command. Prompt is passed via stdin, not as a
  * positional arg — avoids quoting issues, argv limits, and variadic flag conflicts.
  */
-export function buildClaudeCommand(prompt: string, model: string = "claude-opus-4-7", effort?: string): ClaudeCommandResult {
+export function buildClaudeCommand(prompt: string, model: string = "claude-opus-5", effort?: string): ClaudeCommandResult {
   const allowedTools = [
     "Agent", "Read", "Glob", "Grep",
     // GitHub CLI

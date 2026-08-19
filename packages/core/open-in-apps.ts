@@ -81,6 +81,16 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     linux: { bin: 'zed' },
   },
   {
+    id: 'zed-preview',
+    label: 'Zed Preview',
+    kind: 'editor',
+    icon: 'zed',
+    // Preview installs as a separate app bundle only on macOS. Zed's Linux
+    // install script and Windows installer both expose the preview CLI as
+    // plain `zed`, so the 'zed' entry above already covers preview there.
+    mac: { appName: 'Zed Preview' },
+  },
+  {
     id: 'sublime-text',
     label: 'Sublime Text',
     kind: 'editor',

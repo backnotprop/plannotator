@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { AgentJobInfo, AgentCapabilities } from '../types';
 import { isTerminalStatus } from '@plannotator/core/agent-jobs';
+import { GUIDE_ENGINE_LABEL } from '@plannotator/core/guide';
 import { cn } from '../lib/utils';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { ClaudeIcon, CodexIcon, CopilotIcon, CursorIcon, OpenCodeIcon, PiIcon } from './icons/AgentIcons';
@@ -22,6 +23,7 @@ import { useAgentSettings } from '../hooks/useAgentSettings';
 import type { AgentEngine, AgentMode, ReviewEngine } from '../hooks/useAgentSettings';
 import type { AgentLaunchParams } from '../hooks/useAgentJobs';
 import { ConfigRow, SegmentedPicker, Toggle, SelectMenu } from './AgentControls';
+import { CODEX_MODELS, CODEX_EFFORT_LABELS, codexReasoningOptions } from '../utils/codexModels';
 
 export type { AgentLaunchParams } from '../hooks/useAgentJobs';
 
@@ -29,6 +31,7 @@ export type { AgentLaunchParams } from '../hooks/useAgentJobs';
 
 export const CLAUDE_MODELS: Array<{ value: string; label: string }> = [
   { value: 'claude-fable-5', label: 'Fable 5' },
+  { value: 'claude-opus-5', label: 'Opus 5' },
   { value: 'claude-opus-4-8', label: 'Opus 4.8' },
   { value: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M)' },
   { value: 'claude-sonnet-5', label: 'Sonnet 5' },
@@ -49,31 +52,10 @@ export const CLAUDE_EFFORT: Array<{ value: string; label: string }> = [
   { value: 'max', label: 'Max' },
 ];
 
-export const CODEX_MODELS: Array<{ value: string; label: string }> = [
-  // GPT-5.6 naming scheme: the bare `gpt-5.6` alias routes to `gpt-5.6-sol`
-  // (flagship); `-terra` is the mid price/performance tier and `-luna` the
-  // efficient high-volume tier.
-  { value: 'gpt-5.6', label: 'GPT-5.6' },
-  { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-  { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-  { value: 'gpt-5.5', label: 'GPT-5.5' },
-  { value: 'gpt-5.4', label: 'GPT-5.4' },
-  { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-  { value: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-  { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-  { value: 'gpt-5.2', label: 'GPT-5.2' },
-  { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
-  { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini' },
-  { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-];
-
-export const CODEX_REASONING: Array<{ value: string; label: string }> = [
-  { value: 'minimal', label: 'Minimal' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'XHigh' },
-];
+// Codex model catalog + per-model reasoning efforts live in
+// utils/codexModels (useAgentSettings needs them too, for effort clamping);
+// re-exported here so both launch surfaces keep one import site.
+export { CODEX_MODELS, codexReasoningOptions } from '../utils/codexModels';
 
 // Tour/guide Claude catalog: the CLI's latest-resolving aliases on top
 // (verified against `claude --help`: "Provide an alias for the latest model
@@ -146,14 +128,7 @@ const ENGINE_ICON: Record<AgentEngine, React.FC<{ className?: string }>> = {
 // review surface offers the wider set (Cursor/OpenCode). Exported so the guide
 // takeover surfaces (GuideScreen, GuideEmptyState in packages/review-editor)
 // share this one source of truth instead of keeping their own copies in sync.
-export const REVIEW_ENGINE_LABEL: Record<ReviewEngine, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  copilot: 'Copilot',
-};
+export const REVIEW_ENGINE_LABEL: Record<ReviewEngine, string> = GUIDE_ENGINE_LABEL;
 
 // Review-only icon map — the wide set. Tour keeps the narrow ENGINE_ICON.
 const REVIEW_ENGINE_ICON: Record<ReviewEngine, React.FC<{ className?: string }>> = {
@@ -276,7 +251,7 @@ function formatEffort(value: string): string {
 }
 
 function formatReasoning(value: string): string {
-  return catalogLabel(CODEX_REASONING, value);
+  return CODEX_EFFORT_LABELS[value] ?? value;
 }
 
 // --- Add-a-review dialog: a type-ahead picker over every discovered skill ---
@@ -891,7 +866,12 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
       ? { effort: tourClaudeEffort }
       : { reasoningEffort: tourCodexReasoning, ...(tourCodexFast && { fastMode: true }) }),
   });
-  const buildGuideLaunch = (): LaunchParams => {
+  // Guide extra instructions (#1265) are server-stored: this surface has no
+  // editor, so it sends none and the server applies the stored standing
+  // instructions itself, keeping sidebar launches identical to launch-page
+  // ones without a second read path.
+  const buildGuideLaunch = (): LaunchParams => buildGuideEngineParams();
+  const buildGuideEngineParams = (): LaunchParams => {
     if (guideEngine === 'cursor') {
       // Same omission rules as buildReviewLaunch: auto/empty ⇒ engine default.
       // Guide-scoped model — deliberately NOT the shared cursorModel (see
@@ -1118,7 +1098,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                       <SelectMenu value={codexModel} options={CODEX_MODELS} onChange={setCodexModel} />
                     </ConfigRow>
                     <ConfigRow label="Reasoning" stacked>
-                      <SegmentedPicker options={CODEX_REASONING} value={codexReasoning} onChange={setCodexReasoning} />
+                      <SegmentedPicker options={codexReasoningOptions(codexModel)} value={codexReasoning} onChange={setCodexReasoning} />
                     </ConfigRow>
                     <ConfigRow label="Fast mode">
                       <Toggle checked={codexFast} onChange={setCodexFast} />
@@ -1161,7 +1141,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                 {tourEngine === 'codex' && (
                   <>
                     <ConfigRow label="Reasoning" stacked>
-                      <SegmentedPicker options={CODEX_REASONING} value={tourCodexReasoning} onChange={setTourCodexReasoning} />
+                      <SegmentedPicker options={codexReasoningOptions(tourCodexModel)} value={tourCodexReasoning} onChange={setTourCodexReasoning} />
                     </ConfigRow>
                     <ConfigRow label="Fast mode">
                       <Toggle checked={tourCodexFast} onChange={setTourCodexFast} />
@@ -1196,7 +1176,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                     deliberately not offered for guide. */}
                 {guideEngine === 'codex' && (
                   <ConfigRow label="Reasoning" stacked>
-                    <SegmentedPicker options={CODEX_REASONING} value={guideCodexReasoning} onChange={setGuideCodexReasoning} />
+                    <SegmentedPicker options={codexReasoningOptions(guideCodexModel)} value={guideCodexReasoning} onChange={setGuideCodexReasoning} />
                   </ConfigRow>
                 )}
 

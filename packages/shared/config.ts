@@ -10,8 +10,9 @@ import { getPlannotatorDataDir } from "./data-dir";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { execSync } from "child_process";
 
-import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions } from '@plannotator/core/config-types';
-export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions };
+import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig } from '@plannotator/core/config-types';
+import { isFaviconStyle, type FaviconStyle } from './favicon';
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -53,6 +54,7 @@ export interface PromptConfig {
     fileFeedback?: string;
     messageFeedback?: string;
     approved?: string;
+    approvedWithNotes?: string;
   };
 }
 
@@ -86,6 +88,20 @@ export function mergePromptConfig(
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  /** Optional analysis layers used by code review. */
+  reviewAnalysis?: {
+    /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
+    semanticDiff?: boolean;
+    /** Call-stack impact analysis powered by the optional CallDiff runtime. */
+    callFlow?: boolean;
+  };
+  /**
+   * Appearance: which mode, plus the palette assigned to each half of the
+   * light/dark pair. Written by the UI through POST /api/config, so a choice
+   * made in one session is picked up by the next one (each hook invocation
+   * runs on its own random port).
+   */
+  theme?: ThemeConfig;
   prompts?: PromptConfig;
   conventionalComments?: boolean;
   /** null = explicitly cleared (use defaults), undefined = not set */
@@ -98,6 +114,25 @@ export interface PlannotatorConfig {
    * (`gh auth login`). OS-level opt-in only — no UI surface. Default: false.
    */
   verifyAttestation?: boolean;
+  /**
+   * Per-agent installer integration opt-outs. Read by
+   * scripts/install.sh|ps1|cmd on every run (not by any runtime code).
+   * When an agent's flag is true, the installer does not write that agent's
+   * integration even when the agent is detected, reports the detected state
+   * honestly ("detected, skipped"), and never removes an integration a
+   * previous install already wired. Overridden by the
+   * PLANNOTATOR_SKIP_CODEX_INSTALL / PLANNOTATOR_SKIP_GEMINI_INSTALL /
+   * PLANNOTATOR_SKIP_KIRO_INSTALL / PLANNOTATOR_SKIP_OPENCODE_INSTALL env
+   * vars, which are in turn overridden by the --skip-codex / --skip-gemini /
+   * --skip-kiro / --skip-opencode flags. OpenCode has no detection leg, so
+   * its entry is a plain do-not-write switch. Default: all off.
+   */
+  skipInstall?: {
+    codex?: boolean;
+    gemini?: boolean;
+    kiro?: boolean;
+    opencode?: boolean;
+  };
   /**
    * Enable Jina Reader for URL-to-markdown conversion during annotation.
    * When true (default), `plannotator annotate <url>` routes through
@@ -113,6 +148,23 @@ export interface PlannotatorConfig {
    * annotate sessions fully stateless. Default: true.
    */
   annotateHistory?: boolean;
+  /**
+   * Extra file extensions annotate treats as markdown (#1307), e.g.
+   * [".livemd"] for Livebook notebooks. Listed extensions are accepted
+   * everywhere .md is accepted on the annotate path and render as markdown.
+   * Entries must start with a dot and carry no path separators or globs;
+   * invalid entries are dropped and `.env` can never be registered (annotate
+   * copies file contents into the data dir). Resolved by
+   * `resolveMarkdownExtensions` in ./markdown-extensions. Default: none.
+   */
+  markdownExtensions?: string[];
+  /**
+   * Persist successful Guided Reviews (guide content + per-section reviewed
+   * state) under ~/.plannotator/guides/ (or PLANNOTATOR_DATA_DIR) so they
+   * survive closing Plannotator. Set to false to disable writes; already-saved
+   * guides remain readable and listed. Default: true.
+   */
+  guideHistory?: boolean;
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -134,10 +186,82 @@ export interface PlannotatorConfig {
    * env var value, which takes precedence over this setting.
    */
   share?: "enabled" | "disabled";
+  /**
+   * Base URL of the guide host that `plannotator guide share` and the
+   * in-app "Create share link" upload Guided Reviews to (default
+   * https://guides.show; a self-hosted `apps/guides-show` origin otherwise).
+   * Must be http(s); a trailing slash is trimmed. Mirrors the
+   * PLANNOTATOR_GUIDE_SHARE_URL env var, which takes precedence. Guide sharing
+   * is off entirely while `share` is "disabled".
+   */
+  guideShareUrl?: string;
+  /**
+   * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
+   * jobs. When true (default), review jobs run with Cursor's sandbox forced
+   * on as part of their read-only posture. Set to false on systems where
+   * Cursor's sandbox cannot start (e.g. NixOS / AppArmor-restricted Linux):
+   * the flag pair is then OMITTED entirely, deferring to the user's own
+   * Cursor Agent sandbox configuration. Mirrors the
+   * PLANNOTATOR_CURSOR_SANDBOX env var, which takes precedence.
+   */
+  cursorSandbox?: boolean;
+  /**
+   * Display-only hostname for advertised session URLs (issue #657). Lets a
+   * remote-mode user hand out a reachable link (e.g. a Tailscale MagicDNS
+   * name or tailnet IP) instead of localhost. Host only — the port is chosen
+   * at runtime and always appended. Never affects which interface the server
+   * binds; that stays governed by PLANNOTATOR_REMOTE. Applied only in remote
+   * sessions: a local session binds loopback, so the override is ignored
+   * (localhost is advertised) with a once-per-process stderr warning.
+   * Mirrors the PLANNOTATOR_URL_HOST env var, which takes precedence.
+   */
+  urlHost?: string;
+  /**
+   * Mirror the approved plan checklist into an editable todo provider during
+   * execution (issue #484). "auto" (default) syncs whenever a provider is
+   * detected — currently pi-todos. Detection checks the configured todo
+   * directory; PI_TODO_PATH only redirects which directory is checked.
+   *
+   * The mirror is additive: the progress widget is left alone. pi-todos has no
+   * live surface of its own (its list renders on demand in `/todos`), so the
+   * widget stays the at-a-glance tracker while the provider contributes
+   * editable, session-durable todos. Sync is one-way; provider-side edits are
+   * never read back. Failures are non-fatal.
+   */
+  todoProvider?: "auto" | "off";
+  /**
+   * Selected favicon style for Plannotator application surfaces:
+   * 'totman' (production brand mascot) or 'classic' (historical dark-navy P tile).
+   */
+  favicon?: FaviconStyle;
 }
 
-const CONFIG_DIR = getPlannotatorDataDir();
-const CONFIG_PATH = join(CONFIG_DIR, "config.json");
+/** Parse the only server-writable call-review analysis flags. */
+export function parseReviewAnalysisConfig(value: unknown): PlannotatorConfig["reviewAnalysis"] | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const result: NonNullable<PlannotatorConfig["reviewAnalysis"]> = {};
+  if (input.semanticDiff !== undefined) {
+    if (typeof input.semanticDiff !== "boolean") return undefined;
+    result.semanticDiff = input.semanticDiff;
+  }
+  if (input.callFlow !== undefined) {
+    if (typeof input.callFlow !== "boolean") return undefined;
+    result.callFlow = input.callFlow;
+  }
+  return result;
+}
+
+// Resolved per call, not at module scope: tests sandbox the data dir by
+// setting PLANNOTATOR_DATA_DIR at runtime, and a module-scope constant would
+// freeze whatever the env held at first import (bun runs every test file in
+// one process).
+function getConfigDir(): string {
+  return getPlannotatorDataDir();
+}
+function getConfigPath(): string {
+  return join(getConfigDir(), "config.json");
+}
 
 /**
  * Load config from ~/.plannotator/config.json.
@@ -145,8 +269,9 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
  */
 export function loadConfig(): PlannotatorConfig {
   try {
-    if (!existsSync(CONFIG_PATH)) return {};
-    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    const configPath = getConfigPath();
+    if (!existsSync(configPath)) return {};
+    const raw = readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch (e) {
@@ -165,15 +290,23 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
     const mergedDiffOptions = (current.diffOptions || partial.diffOptions)
       ? { ...current.diffOptions, ...partial.diffOptions }
       : undefined;
+    const mergedTheme = (current.theme || partial.theme)
+      ? { ...current.theme, ...partial.theme }
+      : undefined;
+    const mergedReviewAnalysis = (current.reviewAnalysis || partial.reviewAnalysis)
+      ? { ...current.reviewAnalysis, ...partial.reviewAnalysis }
+      : undefined;
     const mergedPrompts = mergePromptConfig(current.prompts, partial.prompts);
     const merged = {
       ...current,
       ...partial,
       diffOptions: mergedDiffOptions,
+      theme: mergedTheme,
+      reviewAnalysis: mergedReviewAnalysis,
       prompts: mergedPrompts,
     };
-    mkdirSync(CONFIG_DIR, { recursive: true });
-    writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+    mkdirSync(getConfigDir(), { recursive: true });
+    writeFileSync(getConfigPath(), JSON.stringify(merged, null, 2) + "\n", "utf-8");
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);
   }
@@ -199,6 +332,9 @@ export function detectGitUser(): string | null {
 export function getServerConfig(gitUser: string | null): {
   displayName?: string;
   diffOptions?: DiffOptions;
+  theme?: ThemeConfig;
+  favicon?: FaviconStyle;
+  reviewAnalysis: NonNullable<PlannotatorConfig["reviewAnalysis"]>;
   gitUser?: string;
   conventionalComments?: boolean;
   conventionalLabels?: CCLabelConfig[] | null;
@@ -207,6 +343,15 @@ export function getServerConfig(gitUser: string | null): {
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
+    ...(cfg.theme !== undefined && { theme: cfg.theme }),
+    ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
+    // These values gate server-side work, so always make the resolved defaults
+    // explicit. The client must not revive a stale cookie that disagrees with
+    // the server when the config leaves either optional leaf unset.
+    reviewAnalysis: {
+      semanticDiff: cfg.reviewAnalysis?.semanticDiff !== false,
+      callFlow: cfg.reviewAnalysis?.callFlow === true,
+    },
     gitUser: gitUser ?? undefined,
     ...(cfg.conventionalComments !== undefined && { conventionalComments: cfg.conventionalComments }),
     ...(cfg.conventionalLabels !== undefined && { conventionalLabels: cfg.conventionalLabels }),
@@ -225,6 +370,22 @@ export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType
 }
 
 /**
+ * Coerce a config.json value that should be a boolean. JSON parsing preserves
+ * whatever type the user typed, so a hand-edited `"false"` (quoted) arrives as
+ * a string and would fail `=== false` checks downstream. Accepts real booleans
+ * plus "true"/"false"/"1"/"0" strings; anything else falls back to the default.
+ */
+function coerceConfigBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    if (v === "true" || v === "1") return true;
+    if (v === "false" || v === "0") return false;
+  }
+  return fallback;
+}
+
+/**
  * Resolve whether to use Glimpse native window.
  *
  * Priority (highest wins):
@@ -235,8 +396,7 @@ export function resolveUseGlimpse(config: PlannotatorConfig): boolean {
   if (envVal !== undefined) {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
-  if (config.glimpse !== undefined) return config.glimpse;
-  return true;
+  return coerceConfigBoolean(config.glimpse, true);
 }
 
 /**
@@ -256,8 +416,21 @@ export function resolveAnnotateHistory(config: PlannotatorConfig): boolean {
   if (envVal !== undefined) {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
-  if (config.annotateHistory !== undefined) return config.annotateHistory;
-  return true;
+  return coerceConfigBoolean(config.annotateHistory, true);
+}
+
+/**
+ * Resolve whether successful Guided Reviews are persisted to disk.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_GUIDE_HISTORY env var  →  config.guideHistory  →  default true
+ */
+export function resolveGuideHistory(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_GUIDE_HISTORY;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  return coerceConfigBoolean(config.guideHistory, true);
 }
 
 export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): boolean {
@@ -270,11 +443,8 @@ export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): b
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
 
-  // Config file
-  if (config.jina !== undefined) return config.jina;
-
-  // Default: enabled
-  return true;
+  // Config file (default: enabled)
+  return coerceConfigBoolean(config.jina, true);
 }
 
 /**
@@ -283,9 +453,162 @@ export function resolveUseJina(cliNoJina: boolean, config: PlannotatorConfig): b
  * Priority (highest wins):
  *   PLANNOTATOR_SHARE env var  →  config.share  →  default true
  */
-export function resolveSharingEnabled(config: PlannotatorConfig): boolean {
-  const envVal = process.env.PLANNOTATOR_SHARE;
+export function resolveSharingEnabled(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  const envVal = env.PLANNOTATOR_SHARE;
   if (envVal !== undefined) return envVal !== "disabled";
   if (config.share !== undefined) return config.share !== "disabled";
+  return true;
+}
+
+/** Where shared Guided Reviews are uploaded by default (guide share hosting contract, §7). */
+export const DEFAULT_GUIDE_SHARE_URL = "https://guides.show";
+
+/**
+ * Validate and normalize a guide share service URL: http(s) only, credentials,
+ * query and fragment dropped, trailing slashes trimmed so callers can append
+ * `/api/g`. Null when the value must not be used.
+ */
+export function normalizeGuideShareUrl(input: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(input.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  const path = parsed.pathname.replace(/\/+$/, "");
+  return `${parsed.protocol}//${parsed.host}${path}`;
+}
+
+const warnedInvalidGuideShareUrls = new Set<string>();
+
+/**
+ * Resolve the guide host that guide share links are created on.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_GUIDE_SHARE_URL env var  →  config.guideShareUrl  →  https://guides.show
+ *
+ * An empty (but set) env var counts as unset. A value that is not an http(s)
+ * URL warns once per value on stderr and falls back to the default: a share
+ * setting must never break a server launch or a CLI run. Whether sharing is
+ * allowed at all is a separate question (`resolveSharingEnabled`).
+ */
+export function resolveGuideShareUrl(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): string {
+  const envVal = env.PLANNOTATOR_GUIDE_SHARE_URL;
+  const raw = envVal !== undefined && envVal.trim() !== "" ? envVal : config.guideShareUrl;
+  if (typeof raw !== "string" || raw.trim() === "") return DEFAULT_GUIDE_SHARE_URL;
+  const normalized = normalizeGuideShareUrl(raw);
+  if (normalized) return normalized;
+  if (!warnedInvalidGuideShareUrls.has(raw)) {
+    warnedInvalidGuideShareUrls.add(raw);
+    process.stderr.write(
+      `[plannotator] Warning: invalid guide share URL ${JSON.stringify(raw)} — expected an http(s) URL; using ${DEFAULT_GUIDE_SHARE_URL}\n`,
+    );
+  }
+  return DEFAULT_GUIDE_SHARE_URL;
+}
+
+// Bare hostname or IPv4: letters/digits/dots/hyphens, no leading/trailing
+// dot or hyphen. Covers MagicDNS names ("my-machine.tailnet.ts.net").
+const URL_HOST_HOSTNAME_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
+// Bracketed IPv6 literal, e.g. [fd7a::1]; dots allow IPv4-mapped forms.
+const URL_HOST_IPV6_RE = /^\[[0-9A-Fa-f:.]+\]$/;
+
+/**
+ * Validate a display host for advertised URLs. Host only: anything carrying a
+ * scheme, path, query, credentials, whitespace, or a port (":" outside IPv6
+ * brackets — the runtime-chosen port is always appended) is rejected.
+ */
+export function isValidUrlHost(host: string): boolean {
+  return URL_HOST_HOSTNAME_RE.test(host) || URL_HOST_IPV6_RE.test(host);
+}
+
+const warnedInvalidUrlHosts = new Set<string>();
+
+/**
+ * Resolve the display-only hostname used in advertised session URLs.
+ * Returns undefined when unset (callers advertise localhost). An empty (but
+ * set) env var suppresses the config key. Callers apply this only to remote
+ * sessions; local sessions ignore it (see buildAdvertisedUrl).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_URL_HOST env var  →  config.urlHost  →  undefined
+ *
+ * An invalid value warns once per value on stderr and falls back to
+ * localhost — a display setting must never crash a server launch. The echoed
+ * value is JSON-encoded so an embedded newline cannot forge extra stderr
+ * lines (hosts surface "Plannotator session ready" lines as clickable links).
+ *
+ * The sentinel "auto" is returned verbatim (it matches the hostname shape);
+ * the advertised-URL layer resolves it via Tailscale detection
+ * (packages/server/remote.ts and the Pi network.ts mirror).
+ */
+export function resolveUrlHost(config: PlannotatorConfig): string | undefined {
+  const envVal = process.env.PLANNOTATOR_URL_HOST;
+  const raw = envVal !== undefined ? envVal : config.urlHost;
+  if (typeof raw !== "string") return undefined;
+  const host = raw.trim();
+  if (host === "") return undefined;
+  if (isValidUrlHost(host)) return host;
+  if (!warnedInvalidUrlHosts.has(host)) {
+    warnedInvalidUrlHosts.add(host);
+    process.stderr.write(
+      `[plannotator] Warning: invalid advertised URL host ${JSON.stringify(host)} — expected a bare hostname, IPv4, or bracketed IPv6 (no scheme, port, or path); using localhost\n`,
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Resolve whether Plannotator-managed AI features are enabled.
+ *
+ * Set PLANNOTATOR_AI=disabled to prevent provider runtime initialization and
+ * hide the corresponding UI. External agents may still open Plannotator as a
+ * review surface and submit annotations through the external annotation API.
+ */
+export function resolveAIEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.PLANNOTATOR_AI?.toLowerCase() !== "disabled";
+}
+
+/**
+ * Resolve whether Cursor review jobs pass `--sandbox enabled` to the `agent` CLI.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_CURSOR_SANDBOX env var  →  config.cursorSandbox  →  default true
+ *
+ * Env values `0` / `false` / `disabled` turn the flag off (the pair is omitted
+ * from the argv, deferring to the user's own Cursor Agent configuration);
+ * anything else — including `1` / `true` / `enabled` — keeps the default.
+ */
+export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_CURSOR_SANDBOX;
+  if (envVal !== undefined) {
+    const v = envVal.toLowerCase();
+    return v !== "0" && v !== "false" && v !== "disabled";
+  }
+  return coerceConfigBoolean(config.cursorSandbox, true);
+}
+
+/**
+ * Resolve whether the approved plan checklist is mirrored into an editable todo
+ * provider during execution.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_TODO_PROVIDER env var  →  config.todoProvider  →  default auto
+ *
+ * Env values `off` / `0` / `false` / `disabled` turn the mirror off, matching
+ * the vocabulary the other flags accept; anything else — including `auto` —
+ * keeps it on. Enabled only means "sync when a provider is detected": with no
+ * provider present, the progress widget is the whole experience either way.
+ */
+export function resolveTodoProviderEnabled(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_TODO_PROVIDER;
+  if (envVal !== undefined) {
+    const v = envVal.toLowerCase();
+    return v !== "off" && v !== "0" && v !== "false" && v !== "disabled";
+  }
+  if (config.todoProvider !== undefined) return config.todoProvider !== "off";
   return true;
 }

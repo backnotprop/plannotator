@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { Origin } from '@plannotator/core/agents';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
@@ -28,9 +28,11 @@ import {
 } from '../utils/octarine';
 import {
   getAgentSwitchSettings,
+  getAgentSwitchDefaults,
   saveAgentSwitchSettings,
   AGENT_OPTIONS,
   type AgentSwitchSettings,
+  type AgentSwitchSurface,
 } from '../utils/agentSwitch';
 import {
   getPlanSaveSettings,
@@ -70,8 +72,10 @@ import {
   saveFileBrowserSettings,
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
+import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
+import { AnalysisLayerToggle } from './AnalysisLayerToggle';
 
-type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'saving' | 'labels' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -91,6 +95,10 @@ interface SettingsProps {
    *  (base ref unresolvable) — the Git tab shows a note that the Git-status
    *  preference can't take effect in THIS repo. */
   sinceBaseUnavailable?: boolean;
+  /** The host is rendering its compact touch shell (review only). Display
+   *  settings that the compact shell overrides for the session are hidden
+   *  there instead of silently editing the desktop preference. */
+  isCompactTouchLayout?: boolean;
   /** Override Obsidian vault detection (default = GET /api/obsidian/vaults). */
   onDetectObsidianVaults?: () => Promise<string[]>;
 }
@@ -169,32 +177,180 @@ function SegmentedControl<T extends string>({ options, value, onChange }: {
   );
 }
 
-function ToggleSwitch({ checked, onChange, label, description }: {
+function ToggleSwitch({ checked, onChange, label, description, disabled = false }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   description?: string;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={`flex items-center justify-between gap-4 ${disabled ? 'opacity-50' : ''}`}>
       <div>
         <div className="text-sm font-medium">{label}</div>
         {description && <div className="text-xs text-muted-foreground">{description}</div>}
       </div>
       <button
+        type="button"
         role="switch"
+        aria-label={label}
         aria-checked={checked}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-          checked ? 'bg-primary' : 'bg-muted'
-        }`}
+        className="relative inline-flex h-11 w-11 shrink-0 items-center disabled:cursor-not-allowed"
       >
         <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+          aria-hidden="true"
+          className={`absolute inset-x-0 top-2.5 h-6 rounded-full transition-colors ${
+            checked ? 'bg-primary' : 'bg-muted'
+          }`}
+        />
+        <span
+          aria-hidden="true"
+          className={`absolute top-3.5 inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
             checked ? 'translate-x-6' : 'translate-x-1'
           }`}
         />
       </button>
+    </div>
+  );
+}
+
+interface VimSettingsTabProps {
+  readonly vimModeEnabled: boolean;
+  readonly vimHudEnabled: boolean;
+  readonly vimHudKeyPanelEnabled: boolean;
+  readonly onVimModeChange: (enabled: boolean) => void;
+  readonly onVimHudChange: (enabled: boolean) => void;
+  readonly onVimHudKeyPanelChange: (enabled: boolean) => void;
+}
+
+/** First-class Vim configuration, separate from the shortcut reference. */
+function VimSettingsTab({
+  vimModeEnabled,
+  vimHudEnabled,
+  vimHudKeyPanelEnabled,
+  onVimModeChange,
+  onVimHudChange,
+  onVimHudKeyPanelChange,
+}: VimSettingsTabProps) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="text-sm font-semibold">Vim mode</div>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Navigate, select, and annotate the rendered document without reaching for the mouse.
+        </p>
+      </div>
+
+      <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+        <ToggleSwitch
+          checked={vimModeEnabled}
+          onChange={onVimModeChange}
+          label="Vim controls"
+          description="Use Vim-style keys for document navigation and annotation. Off by default."
+        />
+        <div className="border-t border-border" />
+        <ToggleSwitch
+          checked={vimModeEnabled && vimHudEnabled}
+          onChange={onVimHudChange}
+          label="Vim HUD"
+          description={
+            vimModeEnabled
+              ? 'Show the four-corner target reticle and navigation context.'
+              : 'Enable Vim controls first to use the target reticle.'
+          }
+          disabled={!vimModeEnabled}
+        />
+        <div className="border-t border-border" />
+        <ToggleSwitch
+          checked={vimModeEnabled && vimHudEnabled && vimHudKeyPanelEnabled}
+          onChange={onVimHudKeyPanelChange}
+          label="Key panel"
+          description={
+            vimModeEnabled && vimHudEnabled
+              ? 'Show the bottom-right live keypress legend and command panel.'
+              : 'Enable the Vim HUD first to use the live keypress legend.'
+          }
+          disabled={!vimModeEnabled || !vimHudEnabled}
+        />
+      </div>
+
+      <div className="rounded-xl border border-primary/20 bg-primary/[0.05] p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/15 font-mono text-xs font-bold text-primary">
+            ?
+          </span>
+          <div>
+            <div className="text-xs font-semibold">Learn while you navigate</div>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Vim takes focus automatically when the page is ready. From other app controls, press{' '}
+              <span className="font-mono text-foreground">Esc</span> to return to the document, then
+              use <span className="font-mono text-foreground">j</span> and{' '}
+              <span className="font-mono text-foreground">k</span> to move by block. Press{' '}
+              <span className="font-mono text-foreground">?</span> for the complete key map,
+              even when the Key panel is hidden.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewAnalysisTab() {
+  const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
+  const callFlowEnabled = useConfigValue('callFlowEnabled');
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="text-sm font-semibold">Analysis layers</div>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Add structural context to the ordinary code diff. Each layer is independent and does no work while disabled.
+        </p>
+      </div>
+
+      <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+        <AnalysisLayerToggle
+          checked={semanticDiffEnabled}
+          onChange={(enabled) => configStore.set('semanticDiffEnabled', enabled)}
+          label="Semantic changes"
+          description="Organize added, changed, moved, and removed functions, classes, and other named code. Enabled by default."
+        />
+        <div className="border-t border-border" />
+        <AnalysisLayerToggle
+          checked={callFlowEnabled}
+          onChange={(enabled) => configStore.set('callFlowEnabled', enabled)}
+          label="Call flow"
+          description="Diffs for function call stacks across git commits. 22 languages supported (AST-based, built using Tree-sitter)."
+        />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl border border-border p-3.5">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <span className="grid h-6 w-6 place-items-center rounded-md bg-primary/10 font-mono text-primary">▣</span>
+            Dock
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            Open the complete analysis from the file panel. Rows jump to the relevant code location.
+          </p>
+        </div>
+        <div className="rounded-xl border border-border p-3.5">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <span className="grid h-6 w-6 place-items-center rounded-md bg-primary/10 font-mono text-primary">⌁</span>
+            File lens
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            File headers show compact counts and a focused popover for that file.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-warning/25 bg-warning/[0.05] p-4 text-xs leading-relaxed text-muted-foreground">
+        <span className="font-semibold text-foreground">Call flow is syntactic.</span>{' '}
+        It does not use type resolution or runtime traces, so treat it as navigation context—not proof that a path executes.
+      </div>
     </div>
   );
 }
@@ -269,7 +425,7 @@ const GitTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavail
   );
 };
 
-const ReviewDisplayTab: React.FC = () => {
+const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isCompactTouchLayout = false }) => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
@@ -278,6 +434,7 @@ const ReviewDisplayTab: React.FC = () => {
   const diffShowBackground = useConfigValue('diffShowBackground');
   const diffLineBgIntensity = useConfigValue('diffLineBgIntensity');
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
+  const editSuggestions = useConfigValue('editSuggestions');
   const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
@@ -289,6 +446,21 @@ const ReviewDisplayTab: React.FC = () => {
 
   return (
     <>
+      {/* Experimental: edit code to author suggestions */}
+      <div className="space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Experimental
+        </div>
+        <ToggleSwitch
+          checked={editSuggestions}
+          onChange={(v) => configStore.set('editSuggestions', v)}
+          label="Edit Code to Suggest"
+          description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
+        />
+      </div>
+
+      <div className="border-t border-border" />
+
       {/* Font Family */}
       <div className="space-y-2">
         <div>
@@ -351,13 +523,23 @@ const ReviewDisplayTab: React.FC = () => {
 
       <div className="border-t border-border" />
 
-      {/* Diff Style */}
+      {/* Diff Style. The compact touch shell renders a session-only unified
+          diff, so the control there would look dead while quietly rewriting
+          the DESKTOP preference. Say what the phone is doing instead. */}
       <div className="space-y-2">
         <div>
           <div className="text-sm font-medium">Diff Style</div>
           <div className="text-xs text-muted-foreground">Side-by-side or inline diff view</div>
+          {isCompactTouchLayout && (
+            <div className="text-xs text-muted-foreground mt-1">
+              This layout shows unified diffs for the session; your desktop
+              preference is unchanged.
+            </div>
+          )}
         </div>
-        <SegmentedControl options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
+        {!isCompactTouchLayout && (
+          <SegmentedControl options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
+        )}
       </div>
 
       <div className="border-t border-border" />
@@ -442,6 +624,9 @@ const ReviewDisplayTab: React.FC = () => {
         label="Hide Whitespace"
         description="Ignore whitespace-only changes in diffs"
       />
+
+      <div className="border-t border-border" />
+
 
     </>
   );
@@ -651,9 +836,24 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, onDetectObsidianVaults }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults }) => {
   const [showDialog, setShowDialog] = useState(false);
+  const settingsWasOpenRef = useRef(false);
   const [themePreview, setThemePreview] = useState(false);
+
+  useEffect(() => {
+    const wasOpen = settingsWasOpenRef.current;
+    settingsWasOpenRef.current = showDialog;
+    if (
+      wasOpen
+      && !showDialog
+      && !themePreview
+      && mode !== 'review'
+      && configStore.get('vimModeEnabled')
+    ) {
+      requestVimDocumentFocus();
+    }
+  }, [mode, showDialog, themePreview]);
 
   useEffect(() => {
     if (!themePreview) return;
@@ -665,6 +865,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const gridEnabled = useConfigValue('gridEnabled');
+  const vimModeEnabled = useConfigValue('vimModeEnabled');
+  const vimHudEnabled = useConfigValue('vimHudEnabled');
+  const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
   const [identity, setIdentity] = useState('');
   const [obsidian, setObsidian] = useState<ObsidianSettings>({
     enabled: false,
@@ -678,7 +881,10 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [vaultsLoading, setVaultsLoading] = useState(false);
   const [bear, setBear] = useState<BearSettings>({ enabled: false, customTags: '', tagPosition: 'append', autoSave: false });
   const [octarine, setOctarine] = useState<OctarineSettings>({ enabled: false, workspace: '', folder: 'plannotator', autoSave: false });
-  const [agent, setAgent] = useState<AgentSwitchSettings>({ switchTo: 'build' });
+  // The agent switch default depends on the surface: plan approval hands off to
+  // the build agent, review feedback stays on the current agent.
+  const agentSurface: AgentSwitchSurface = mode === 'review' ? 'review' : 'plan';
+  const [agent, setAgent] = useState<AgentSwitchSettings>(() => getAgentSwitchDefaults(agentSurface));
   const [planSave, setPlanSave] = useState<PlanSaveSettings>({ enabled: true, customPath: null });
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>({ tocEnabled: true, stickyActionsEnabled: true, planWidth: 'compact' });
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
@@ -693,7 +899,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [newDirPath, setNewDirPath] = useState('');
 
   // Fetch available agents for OpenCode
-  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null);
+  const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null, agentSurface);
 
   const mainTabs = useMemo(() => {
     const t: { id: SettingsTab; label: string }[] = [{ id: 'general', label: 'General' }];
@@ -705,11 +911,15 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     }
     if (mode === 'review') {
       t.push({ id: 'git', label: 'Git' });
-      t.push({ id: 'display', label: 'Display' });
+      t.push({ id: 'display', label: 'Editor' });
+      t.push({ id: 'analysis', label: 'Analysis' });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
         t.push({ id: 'ai', label: 'AI' });
       }
+    }
+    if (mode !== 'review') {
+      t.push({ id: 'vim', label: 'Vim' });
     }
     t.push({ id: 'shortcuts', label: 'Shortcuts' });
     if (mode === 'plan') {
@@ -742,7 +952,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       setObsidian(getObsidianSettings());
       setBear(getBearSettings());
       setOctarine(getOctarineSettings());
-      setAgent(getAgentSwitchSettings());
+      setAgent(getAgentSwitchSettings(agentSurface));
       setPlanSave(getPlanSaveSettings());
       setUiPrefs(getUIPreferences());
       setPermissionMode(getPermissionModeSettings().mode);
@@ -914,12 +1124,23 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         >
           <div
             className="bg-card border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative overflow-hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="plannotator-settings-title"
             onClick={e => e.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape' || event.defaultPrevented) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setShowDialog(false);
+            }}
           >
             {taterMode && <TaterSpritePullup />}
             <div className="flex items-center justify-between p-4 border-b border-border">
-              <h3 className="font-semibold text-sm">Settings</h3>
+              <h3 id="plannotator-settings-title" className="font-semibold text-sm">Settings</h3>
               <button
+                type="button"
+                aria-label="Close settings"
                 onClick={() => setShowDialog(false)}
                 className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
               >
@@ -1200,7 +1421,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                 {/* === DISPLAY TAB === */}
                 {activeTab === 'display' && mode === 'review' && (
-                  <ReviewDisplayTab />
+                  <ReviewDisplayTab isCompactTouchLayout={isCompactTouchLayout} />
+                )}
+
+                {activeTab === 'analysis' && mode === 'review' && (
+                  <ReviewAnalysisTab />
                 )}
 
                 {activeTab === 'display' && mode !== 'review' && (
@@ -1655,7 +1880,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                       saveQuickLabels(updated);
                                       setEditingTipIndex(null);
                                     }
-                                    if (e.key === 'Escape') setEditingTipIndex(null);
+                                    if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setEditingTipIndex(null);
+                                    }
                                   }}
                                   placeholder="AI instruction tip..."
                                   className="flex-1 px-2 py-1 bg-background/60 rounded text-[10px] text-muted-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -1709,9 +1938,22 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                   </>
                 )}
 
+                {/* === VIM TAB === */}
+                {activeTab === 'vim' && mode !== 'review' && (
+                  <VimSettingsTab
+                    vimModeEnabled={vimModeEnabled}
+                    vimHudEnabled={vimHudEnabled}
+                    vimHudKeyPanelEnabled={vimHudKeyPanelEnabled}
+                    onVimModeChange={(enabled) => configStore.set('vimModeEnabled', enabled)}
+                    onVimHudChange={(enabled) => configStore.set('vimHudEnabled', enabled)}
+                    onVimHudKeyPanelChange={(enabled) =>
+                      configStore.set('vimHudKeyPanelEnabled', enabled)}
+                  />
+                )}
+
                 {/* === SHORTCUTS TAB === */}
                 {activeTab === 'shortcuts' && (
-                  <KeyboardShortcuts mode={mode} />
+                  <KeyboardShortcuts mode={mode} vimModeEnabled={vimModeEnabled} />
                 )}
 
                 {/* === COMMENTS TAB === */}
