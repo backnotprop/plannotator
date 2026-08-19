@@ -212,3 +212,42 @@ describe("annotate CLI tolerant tiers", () => {
     expect(result.stdout).toContain("Could not resolve the arguments below");
   });
 });
+
+describe("plannotator annotate: live app remote hard-off (CLI layer)", () => {
+  test("a live-resolving loopback URL under PLANNOTATOR_REMOTE exits as a startup failure", async () => {
+    // The fake app lives in THIS process, so the CLI must be spawned
+    // asynchronously (a sync spawn would block the event loop and deadlock
+    // the probe request against our own server).
+    const app = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response("<html><head></head><body>app</body></html>", {
+          headers: { "Content-Type": "text/html" },
+        }),
+    });
+    try {
+      const child = Bun.spawn(
+        [process.execPath, cliEntry, "annotate", `http://127.0.0.1:${app.port}/`],
+        {
+          cwd: fixtureDir,
+          env: {
+            ...process.env,
+            PLANNOTATOR_CWD: fixtureDir,
+            PLANNOTATOR_DATA_DIR: dataDir,
+            PLANNOTATOR_REMOTE: "1",
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const exitCode = await child.exited;
+      const stderr = await new Response(child.stderr).text();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("Live app annotation is unavailable in remote mode");
+      expect(stderr).toContain("--static");
+    } finally {
+      app.stop(true);
+    }
+  });
+});

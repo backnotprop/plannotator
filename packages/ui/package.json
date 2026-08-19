@@ -10,6 +10,7 @@
     "./components/goal-setup/*": "./components/goal-setup/*.tsx",
     "./components/ImageAnnotator": "./components/ImageAnnotator/index.tsx",
     "./components/html-viewer": "./components/html-viewer/index.ts",
+    "./components/html-viewer/bridge-script": "./components/html-viewer/bridge-script.ts",
     "./components/sidebar/*": "./components/sidebar/*.tsx",
     "./components/plan-diff/*": "./components/plan-diff/*.tsx",
     "./utils/*": "./utils/*.ts",

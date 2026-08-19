@@ -27,7 +27,8 @@
     "./project": "./project.ts",
     "./pr": "./pr.ts",
     "./html-assets": "./html-assets.ts",
-    "./guide-cli": "./guide/guide-cli.ts"
+    "./guide-cli": "./guide/guide-cli.ts",
+    "./live-proxy": "./live-proxy.ts"
   },
   "files": [
     "*.ts",

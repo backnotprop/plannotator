@@ -267,6 +267,9 @@ describe("Plannotator phase framing messages", () => {
 		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
 		expect((await startAgent(runtime, context))?.message?.customType).toBe("plannotator-framing");
 		await runtime.commands.get("plannotator-plan-mode")?.handler("", context); // exit to idle
+		// The first idle prompt after a toggle-off carries the one-shot
+		// plan-mode-off countermand (#1320); idle injects nothing after that.
+		expect((await startAgent(runtime, context))?.message?.details).toEqual({ phase: "idle" });
 		expect(await startAgent(runtime, context)).toBeUndefined();
 
 		await runtime.commands.get("plannotator-plan-mode")?.handler("", context); // re-enter
@@ -536,6 +539,158 @@ describe("Plannotator phase framing messages", () => {
 	});
 });
 
+describe("Plannotator plan-mode-off countermand (#1320)", () => {
+	test("toggling plan mode off delivers the plan-mode-off notice exactly once", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		expect((await startAgent(runtime, context))?.message?.customType).toBe("plannotator-framing");
+
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context); // toggle off
+		// The transition arms the latch and persists it, so a resume between
+		// the toggle and the next prompt still owes the notice.
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "idle",
+			idleNoticePending: true,
+		});
+
+		const notice = await startAgent(runtime, context);
+		expect(notice?.message?.customType).toBe("plannotator-framing");
+		expect(notice?.message?.display).toBe(false);
+		expect(notice?.message?.details).toEqual({ phase: "idle" });
+		// Deliberate protocol marker (mirrors the pinned phase markers): the
+		// idle context filter anchors on framing with details.phase "idle",
+		// and the marker names the countermand for humans reading transcripts.
+		expect(notice?.message?.content).toContain("[PLANNOTATOR - PLAN MODE OFF]");
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "idle",
+			idleNoticePending: false,
+		});
+
+		// One-shot: later idle prompts inject nothing again (#1269 steady state).
+		expect(await startAgent(runtime, context)).toBeUndefined();
+		expect(await startAgent(runtime, context)).toBeUndefined();
+	});
+
+	test("plan completion (executing → idle) also delivers the notice", async () => {
+		const cwd = makeWorkspace();
+		writeFileSync(join(cwd, "PLAN.md"), "# Plan\n\n- [x] Step one\n- [x] Step two\n", "utf-8");
+		const runtime = createRuntime();
+		const context = executingContext(cwd, { framingDelivered: true });
+		await runtime.run("session_start", context);
+
+		// All steps complete: agent_end returns the session to idle.
+		await runtime.run("agent_end", context, {});
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "idle",
+			idleNoticePending: true,
+		});
+
+		const notice = await startAgent(runtime, context);
+		expect(notice?.message?.details).toEqual({ phase: "idle" });
+		expect(notice?.message?.content).toContain("[PLANNOTATOR - PLAN MODE OFF]");
+		expect(await startAgent(runtime, context)).toBeUndefined();
+	});
+
+	test("fresh sessions never deliver the notice: the #1269 inject-nothing promise holds", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		// A session that never entered plan mode injects nothing, ever — the
+		// reporter's patch on #1320 (deliver on every idle entry, fresh
+		// sessions included) must fail here and in "idle prompts inject
+		// nothing" above.
+		expect(await startAgent(runtime, context)).toBeUndefined();
+		expect(await startAgent(runtime, context)).toBeUndefined();
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "idle",
+			idleNoticePending: false,
+		});
+	});
+
+	test("a resumed idle session that already delivered the notice does not repeat it", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({
+			cwd,
+			entries: [
+				{
+					type: "custom",
+					customType: "plannotator",
+					data: { phase: "idle", framingDelivered: false, idleNoticePending: false },
+				},
+			],
+		});
+		await runtime.run("session_start", context);
+
+		expect(await startAgent(runtime, context)).toBeUndefined();
+	});
+
+	test("a path that recorded the toggle-off but not the delivery still owes the notice", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		// Branch onto a path whose last state entry armed the latch (toggle-off
+		// persisted, notice not yet delivered on that path).
+		const pendingPath = createContext({
+			cwd,
+			entries: [
+				{
+					type: "custom",
+					customType: "plannotator",
+					data: { phase: "idle", framingDelivered: false, idleNoticePending: true },
+				},
+			],
+		});
+		await runtime.run("session_tree", pendingPath, { newLeafId: "n1", oldLeafId: null });
+
+		const notice = await startAgent(runtime, pendingPath);
+		expect(notice?.message?.content).toContain("[PLANNOTATOR - PLAN MODE OFF]");
+		expect(await startAgent(runtime, pendingPath)).toBeUndefined();
+	});
+
+	test("re-entering planning supersedes an undelivered notice", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		expect((await startAgent(runtime, context))?.message?.customType).toBe("plannotator-framing");
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context); // off: notice pending
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context); // on again, no turn between
+
+		// The load-bearing contract of enterPlanning's latch clear: the
+		// re-entered planning state entry must NOT carry a pending notice.
+		// If it did, the latch would propagate into planning/executing state
+		// entries and re-arm through the resync fallbacks, delivering a stale
+		// "plan mode is off" into a session that is back IN plan mode.
+		expect(runtime.lastPersistedState()).toMatchObject({
+			phase: "planning",
+			idleNoticePending: false,
+		});
+
+		// The first prompt of the new cycle delivers planning framing, not a
+		// stale "plan mode is off" — that would contradict the toggle.
+		const reentry = await startAgent(runtime, context);
+		expect(reentry?.message?.content).toContain("[PLANNOTATOR - PLANNING PHASE]");
+		expect(reentry?.message?.details).toEqual({ phase: "planning" });
+
+		// The next toggle-off re-arms and delivers normally.
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		expect((await startAgent(runtime, context))?.message?.content).toContain(
+			"[PLANNOTATOR - PLAN MODE OFF]",
+		);
+	});
+});
+
 describe("Plannotator context filtering", () => {
 	test("idle filters out all plannotator-injected messages", async () => {
 		const cwd = makeWorkspace();
@@ -593,6 +748,83 @@ describe("Plannotator context filtering", () => {
 		]);
 
 		expect(kept?.map((m) => m.content)).toEqual(["first cycle", "new cycle framing", "second cycle"]);
+	});
+
+	test("idle keeps only the newest plan-mode-off notice while stripping the rest", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context); // toggle off → idle
+
+		const kept = await filterContext(runtime, context, [
+			framingMessage("planning"),
+			{ role: "user", content: "please plan" },
+			todoMessage(),
+			framingMessage("idle", "old off notice from an earlier cycle"),
+			{ role: "user", content: "[PLANNOTATOR - PLANNING PHASE] legacy injected" },
+			framingMessage("idle", "current off notice"),
+			{ role: "assistant", content: "understood" },
+		]);
+
+		// The countermand for the framing this filter strips must itself
+		// survive — dropping it re-creates the silent-removal bug (#1320).
+		expect(kept?.map((m) => m.content)).toEqual([
+			"please plan",
+			"current off notice",
+			"understood",
+		]);
+	});
+
+	test("the idle filter is deterministic and passes untouched sessions through unchanged", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+
+		// Fresh idle session, no plannotator content: the filter must not
+		// perturb the message list at all — a byte-stable prefix is what keeps
+		// the provider prompt cache warm (#922/#1269).
+		const untouched: ContextMessage[] = [
+			{ role: "user", content: "hello" },
+			{ role: "assistant", content: "hi" },
+			{ role: "toolResult", content: "ls output" },
+		];
+		expect(await filterContext(runtime, context, untouched)).toEqual(untouched);
+
+		// With a delivered notice in history, consecutive idle calls yield
+		// identical output (the anchor is stable), so the filter never flips
+		// the notice in and out of context between LLM calls.
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context);
+		const withNotice: ContextMessage[] = [
+			{ role: "user", content: "question" },
+			framingMessage("idle", "off notice"),
+			{ role: "assistant", content: "answer" },
+		];
+		const first = await filterContext(runtime, context, withNotice);
+		const second = await filterContext(runtime, context, withNotice);
+		expect(first).toEqual(second);
+		expect(first?.map((m) => m.content)).toEqual(["question", "off notice", "answer"]);
+	});
+
+	test("entering planning drops the delivered plan-mode-off notice", async () => {
+		const cwd = makeWorkspace();
+		const runtime = createRuntime();
+		const context = createContext({ cwd });
+		await runtime.run("session_start", context);
+		await runtime.commands.get("plannotator-plan-mode")?.handler("", context); // planning
+
+		// The new planning framing supersedes the old countermand; keeping
+		// both would tell the model plan mode is simultaneously on and off.
+		const kept = await filterContext(runtime, context, [
+			framingMessage("idle", "off notice"),
+			{ role: "user", content: "plan this" },
+			framingMessage("planning", "current planning framing"),
+		]);
+
+		expect(kept?.map((m) => m.content)).toEqual(["plan this", "current planning framing"]);
 	});
 
 	test("an active phase without its own framing still drops other-phase framing", async () => {

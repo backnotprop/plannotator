@@ -131,7 +131,25 @@ type PersistedPlannotatorState = {
 	phaseAddedTools?: string[];
 	/** Whether the current phase's entry framing message was already delivered. */
 	framingDelivered?: boolean;
+	/**
+	 * Whether a "plan mode off" notice is still owed to the model after a
+	 * planning/executing → idle transition (#1320). Set on every return to
+	 * idle from a phase, cleared when the notice is delivered or when a new
+	 * phase entry supersedes it. Never set on fresh sessions, so an idle
+	 * session that never entered plan mode still injects nothing (#1269).
+	 */
+	idleNoticePending?: boolean;
 };
+
+/**
+ * One-shot countermand delivered on the first prompt after a planning or
+ * executing phase returns to idle (#1320). The idle context filter silently
+ * strips the phase framing, but the model's own plan-mode turns — and any
+ * blocked-write tool results — stay in history and keep steering it, so the
+ * end of plan mode must be stated, not just implied by removal.
+ */
+const PLAN_MODE_OFF_NOTICE = `[PLANNOTATOR - PLAN MODE OFF]
+Plannotator plan mode has ended. Disregard all earlier Plannotator planning or execution instructions from this session: the planning restrictions (markdown-only writes, plan submission for review) and the execution checklist protocol ([DONE:n] markers) no longer apply, and the plan-submission tool is no longer available. Full tool access is restored — respond and use tools normally. If the user wants planning again, they will re-enable plan mode.`;
 
 function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml: boolean }): string | null {
 	const { hasUI, hasPlanHtml } = options;
@@ -289,6 +307,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 	// must never be re-sent on later prompts of the same phase. Reset at every
 	// phase transition; persisted so session resume does not re-deliver.
 	let framingDelivered = false;
+	// One-shot latch for the plan-mode-off countermand (#1320): armed only by
+	// returnToIdle (a genuine planning/executing → idle transition), never on
+	// fresh sessions, so the #1269 inject-nothing-while-idle promise holds
+	// until plan mode has actually been used. Persisted like framingDelivered
+	// so resume/branch switches neither drop nor duplicate the notice.
+	let idleNoticePending = false;
 	/**
 	 * Cleared when this extension instance's session is torn down or replaced.
 	 * Pi builds a fresh instance for the replacement session, so this latch only
@@ -422,6 +446,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			savedState,
 			phaseAddedTools,
 			framingDelivered,
+			idleNoticePending,
 		});
 	}
 
@@ -506,6 +531,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 	async function enterPlanning(ctx: ExtensionContext): Promise<void> {
 		phase = "planning";
 		framingDelivered = false;
+		// An undelivered plan-mode-off notice is superseded by the planning
+		// framing this entry will deliver; dropping it avoids a stale "plan
+		// mode is off" landing after plan mode came back on.
+		idleNoticePending = false;
 		checklistItems = [];
 		captureSavedState(ctx);
 		await applyPhaseConfig(ctx, { restoreSavedState: false });
@@ -528,6 +557,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 	async function returnToIdle(ctx: ExtensionContext): Promise<void> {
 		phase = "idle";
 		framingDelivered = false;
+		// Every caller reaches here FROM planning or executing, so this is the
+		// one place the plan-mode-off notice may be armed (#1320). Fresh idle
+		// sessions never pass through returnToIdle and stay injection-free.
+		idleNoticePending = true;
 		checklistItems = [];
 		lastSubmittedPath = null;
 		// Re-detect for the next plan: a provider that appeared (or a transient
@@ -1264,7 +1297,29 @@ export default function plannotator(pi: ExtensionAPI): void {
 	// left untouched, and cache-busting reduces to conversation-suffix appends
 	// (#922, approach suggested by Karrq).
 	pi.on("before_agent_start", async (_event, ctx) => {
-		if (phase !== "planning" && phase !== "executing") return;
+		if (phase !== "planning" && phase !== "executing") {
+			// Idle injects nothing (#1269) — with one exception: the first
+			// prompt after a planning/executing → idle transition delivers a
+			// one-shot plan-mode-off countermand (#1320). The idle filter
+			// strips the phase framing silently, but the model's own plan-mode
+			// turns and blocked-write tool results remain in history and keep
+			// steering it, so the end of plan mode must be said out loud.
+			// Cache-wise this is free: the notice is a conversation-suffix
+			// append at a boundary where stripping the framing has already
+			// invalidated the cached prefix. Fresh idle sessions never arm the
+			// latch and keep their byte-stable prefix.
+			if (phase !== "idle" || !idleNoticePending) return;
+			idleNoticePending = false;
+			persistState();
+			return {
+				message: {
+					customType: "plannotator-framing",
+					content: PLAN_MODE_OFF_NOTICE,
+					display: false,
+					details: { phase },
+				},
+			};
+		}
 
 		const profile = getPhaseProfile();
 		const planRef = lastSubmittedPath ?? "your plan file";
@@ -1371,7 +1426,10 @@ Mark completed steps with [DONE:n] in your response.`
 	});
 
 	// Keep plannotator conversation messages coherent with the current phase.
-	// While idle, everything plannotator injected is filtered out (as before).
+	// While idle, everything plannotator injected is filtered out — except the
+	// newest plan-mode-off notice (details.phase === "idle"), which is the
+	// countermand for the framing this very filter removes (#1320); stripping
+	// it too would re-create the silent-removal bug it exists to fix.
 	// During a phase, only the newest framing for the CURRENT phase survives:
 	// framing from other phases or earlier cycles is dropped (stale planning
 	// rules cannot leak into execution), along with todo-status messages that
@@ -1380,10 +1438,26 @@ Mark completed steps with [DONE:n] in your response.`
 	// only mid-history changes happen at phase transitions.
 	pi.on("context", async (event) => {
 		if (phase === "idle") {
+			// Anchor search mirrors the per-phase logic below: the newest idle
+			// framing (the plan-mode-off notice) survives, every other injected
+			// message is stripped. Deterministic across idle turns, so the
+			// filter itself never perturbs the provider's cached prefix while
+			// idle — sessions that never entered plan mode filter nothing.
+			let idleAnchor = -1;
+			for (let i = event.messages.length - 1; i >= 0; i--) {
+				const msg = event.messages[i] as { customType?: string; details?: unknown };
+				if (
+					msg.customType === "plannotator-framing" &&
+					(msg.details as { phase?: string } | undefined)?.phase === "idle"
+				) {
+					idleAnchor = i;
+					break;
+				}
+			}
 			return {
-				messages: event.messages.filter((m) => {
+				messages: event.messages.filter((m, index) => {
 					const msg = m as { customType?: string; role?: string; content?: unknown };
-					if (msg.customType === "plannotator-framing") return false;
+					if (msg.customType === "plannotator-framing") return index === idleAnchor;
 					if (msg.customType === "plannotator-context") return false;
 					if (msg.role !== "user") return true;
 
@@ -1524,12 +1598,20 @@ Mark completed steps with [DONE:n] in your response.`
 			// so a resumed phase must not deliver it again. A path recorded
 			// before delivery restores the latch open and re-delivers.
 			framingDelivered = stateEntry.data.framingDelivered ?? false;
+			// Same contract for the plan-mode-off notice: a path that recorded
+			// the transition but not yet the delivery still owes it; a path
+			// that recorded the delivery must not repeat it.
+			idleNoticePending = stateEntry.data.idleNoticePending ?? false;
 		} else {
 			// No plannotator activity on this path. Memory savedState and
 			// phaseAddedTools are kept so the idle branch below can hand back
 			// tools and settings a now-abandoned branch's phase had taken.
 			phase = options.phaseWhenUnrecorded;
 			framingDelivered = false;
+			// A path with no plannotator state never had plan mode, so no
+			// countermand is owed — and injecting one here would break the
+			// #1269 fresh-session inject-nothing promise.
+			idleNoticePending = false;
 		}
 
 		if (phase === "planning" && !savedState) {
@@ -1562,13 +1644,20 @@ Mark completed steps with [DONE:n] in your response.`
 						}
 					}
 				} else {
-					// Plan file gone — fall back to idle
+					// Plan file gone — fall back to idle. This demotes a RECORDED
+					// executing phase, so the session provably used plan mode and
+					// its framing residue is still in history: owe the countermand.
+					// Arming here cannot break the #1269 fresh-session promise —
+					// only a persisted executing entry reaches this branch.
 					phase = "idle";
 					lastSubmittedPath = null;
+					idleNoticePending = true;
 				}
 			} else {
-				// No path recorded — can't rebuild, fall back to idle
+				// No path recorded — can't rebuild, fall back to idle. Same
+				// recorded-executing demotion as above: the countermand is owed.
 				phase = "idle";
+				idleNoticePending = true;
 			}
 		}
 

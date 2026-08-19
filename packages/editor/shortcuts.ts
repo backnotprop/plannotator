@@ -9,6 +9,7 @@ import {
   defineShortcutScope,
   documentViewShortcuts,
   goalSetupShortcuts,
+  htmlAnnotateShortcuts,
   imageAnnotatorShortcuts,
   inputMethodShortcuts,
   viewerShortcuts,
@@ -83,6 +84,7 @@ const annotateEditorSettingsShortcuts = defineShortcutScope({
 const sharedPlanSurfaceShortcuts = [
   documentViewShortcuts,
   inputMethodShortcuts,
+  htmlAnnotateShortcuts,
   annotationModeShortcuts,
   annotationToolbarShortcuts,
   viewerShortcuts,

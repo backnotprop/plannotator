@@ -33,6 +33,10 @@ interface AnnotationToolbarProps {
   onQuickLabel?: (label: QuickLabel) => void;
   /** Text to copy when the button is clicked */
   copyText?: string;
+  /** Comment-only surfaces (HTML / live-app viewer): hide the Delete action.
+   *  Markdown surfaces keep the full toolbar. Quick labels are already gated
+   *  by the presence of onQuickLabel. */
+  commentOnly?: boolean;
   /** Hide the copy button (set when a keyboard copy handler exists) */
   hideCopyButton?: boolean;
   /** Close toolbar when element scrolls out of viewport */
@@ -52,6 +56,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onRequestComment,
   onQuickLabel,
   copyText,
+  commentOnly = false,
   hideCopyButton = false,
   closeOnScrollOut = false,
   isExiting = false,
@@ -209,12 +214,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             <div className="w-px h-5 bg-border mx-0.5" />
           </>
         )}
-        <ToolbarButton
-          onClick={() => handleTypeSelect(AnnotationType.DELETION)}
-          icon={<TrashIcon />}
-          label="Delete"
-          className="text-destructive hover:bg-destructive/10"
-        />
+        {!commentOnly && (
+          <ToolbarButton
+            onClick={() => handleTypeSelect(AnnotationType.DELETION)}
+            icon={<TrashIcon />}
+            label="Delete"
+            className="text-destructive hover:bg-destructive/10"
+          />
+        )}
         <ToolbarButton
           onClick={() => handleTypeSelect(AnnotationType.COMMENT)}
           icon={<CommentIcon />}

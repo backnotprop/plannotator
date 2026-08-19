@@ -555,6 +555,14 @@ const AnnotationCard: React.FC<{
             diff
           </span>
         )}
+        {annotation.pageUrl && (
+          <span
+            className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground truncate max-w-[10rem]"
+            title={annotation.pageUrl}
+          >
+            {annotation.pageUrl}
+          </span>
+        )}
         <span className="text-[10px] text-muted-foreground/50 truncate">
           {annotation.author ? `${annotation.author}${isMe ? ' (me)' : ''} · ` : ''}{formatTimestamp(annotation.createdA)}
         </span>

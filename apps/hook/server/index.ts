@@ -113,6 +113,14 @@ import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
+// Bridge sources for live app sessions: the CLI supplies them so
+// @plannotator/server never imports @plannotator/ui (mirrors the existing
+// htmlContent precedent).
+import {
+  ANNOTATION_HIGHLIGHT_CSS,
+  BRIDGE_SCRIPT,
+  LIVE_BRIDGE_BOOTSTRAP,
+} from "@plannotator/ui/components/html-viewer/bridge-script";
 import { rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
@@ -316,6 +324,15 @@ if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
 const renderMarkdownIdx = args.indexOf("--markdown");
 const renderMarkdownFlag = renderMarkdownIdx !== -1;
 if (renderMarkdownFlag) args.splice(renderMarkdownIdx, 1);
+// Live app annotation flags (annotate, loopback URLs): --app forces live
+// mode, --static forces the classic conversion pipeline. Transport-shape
+// flags: never echoed in the tolerant handoff's re-run flag list.
+const appFlagIdx = args.indexOf("--app");
+const appFlag = appFlagIdx !== -1;
+if (appFlag) args.splice(appFlagIdx, 1);
+const staticFlagIdx = args.indexOf("--static");
+const staticFlag = staticFlagIdx !== -1;
+if (staticFlag) args.splice(staticFlagIdx, 1);
 
 // Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
@@ -1092,9 +1109,13 @@ if (args[0] === "sessions") {
     );
   }
 
+  if (appFlag && staticFlag) {
+    exitAnnotateStartupFailure("--app and --static are mutually exclusive");
+  }
+
   const rawFilePath = args[1];
   if (!rawFilePath) {
-    exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
+    exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--app] [--static] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
   }
 
   // Use PLANNOTATOR_CWD if set (original working directory before script cd'd)
@@ -1145,6 +1166,8 @@ if (args[0] === "sessions") {
           projectRoot,
           noJina: cliNoJina,
           renderMarkdown: renderMarkdownFlag,
+          forceApp: appFlag,
+          forceStatic: staticFlag,
         });
 
   if (tolerantMultiToken) {
@@ -1155,6 +1178,8 @@ if (args[0] === "sessions") {
         projectRoot,
         noJina: cliNoJina,
         renderMarkdown: renderMarkdownFlag,
+        forceApp: appFlag,
+        forceStatic: staticFlag,
       });
     } else if (selection.kind === "multiple") {
       exitAnnotateStartupFailure(buildAmbiguousAnnotateArgsMessage(selection.candidates));
@@ -1194,6 +1219,8 @@ if (args[0] === "sessions") {
       projectRoot,
       noJina: cliNoJina,
       renderMarkdown: renderMarkdownFlag,
+      forceApp: appFlag,
+      forceStatic: staticFlag,
     });
   }
 
@@ -1210,7 +1237,28 @@ if (args[0] === "sessions") {
     sourceInfo,
     sourceConverted,
     isUrl,
+    liveApp: liveAppResolved,
   } = resolution;
+
+  // Remote hard-off (layer 1 of 3; the server throw and the proxy's
+  // unconditional loopback bind are the others). No override env var exists
+  // on purpose: a live proxy relays the user's authenticated dev app.
+  if (liveAppResolved && isRemoteSession()) {
+    exitAnnotateStartupFailure(
+      "Live app annotation is unavailable in remote mode (PLANNOTATOR_REMOTE). Run locally, or use --static to annotate a converted snapshot of the page.",
+    );
+  }
+
+  // --tailscale is the same exposure in different clothes: the annotate
+  // server stays loopback-bound but is published across the tailnet through
+  // the serve proxy, so a live proxy would relay the user's authenticated
+  // dev app to every tailnet peer. Hard-off, matching how the annotate agent
+  // terminal treats tailnet publication; the server throw backstops this.
+  if (liveAppResolved && tailscaleFlag) {
+    exitAnnotateStartupFailure(
+      "Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). Run without --tailscale, or use --static to annotate a converted snapshot of the page.",
+    );
+  }
 
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
@@ -1219,7 +1267,15 @@ if (args[0] === "sessions") {
     markdown,
     filePath: absolutePath,
     origin: detectedOrigin,
-    mode: annotateMode,
+    mode: liveAppResolved ? "annotate-app" : annotateMode,
+    liveApp: liveAppResolved
+      ? {
+          targetUrl: absolutePath,
+          bridgeScript: BRIDGE_SCRIPT,
+          bridgeBootstrap: LIVE_BRIDGE_BOOTSTRAP,
+          annotationCss: ANNOTATION_HIGHLIGHT_CSS,
+        }
+      : undefined,
     folderPath,
     sourceInfo,
     sourceConverted,

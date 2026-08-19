@@ -54,6 +54,8 @@ import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
+import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
+import { randomBytes } from "node:crypto";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
 
 // Re-export utilities
@@ -72,8 +74,22 @@ export interface AnnotateServerOptions {
   htmlContent: string;
   /** Origin identifier for UI customization */
   origin?: Origin;
-  /** UI mode: "annotate" for files, "annotate-last" for last agent message, "annotate-folder" for folders */
-  mode?: "annotate" | "annotate-last" | "annotate-folder";
+  /** UI mode: "annotate" for files, "annotate-last" for last agent message,
+   *  "annotate-folder" for folders, "annotate-app" for live local apps */
+  mode?: "annotate" | "annotate-last" | "annotate-folder" | "annotate-app";
+  /**
+   * Live local app annotation (mode "annotate-app"): the server starts a
+   * loopback reverse proxy mirroring targetUrl and serves the composed
+   * bridge body from it. The caller supplies the bridge sources (this
+   * package deliberately does not import @plannotator/ui); the server owns
+   * the per-session token. Refused outright in remote mode.
+   */
+  liveApp?: {
+    targetUrl: string;
+    bridgeScript: string;
+    bridgeBootstrap: string;
+    annotationCss: string;
+  };
   /** Folder path when annotating a directory (used as projectRoot for file browser) */
   folderPath?: string;
   /**
@@ -192,6 +208,7 @@ export async function startAnnotateServer(
     convertHtml = false,
     agentCwd,
     project,
+    liveApp,
     onReady,
   } = options;
 
@@ -205,6 +222,20 @@ export async function startAnnotateServer(
   const clientLeaseSupported =
     (options.clientLeaseSupported ?? false) && options.tailnetPublished !== true;
 
+  // Remote hard-off, defense in depth behind the CLI check: a live proxy
+  // relays the user's authenticated dev app, so it must never coexist with a
+  // beyond-loopback annotate bind. No override env var exists on purpose.
+  // A --tailscale session forces local mode but is reachable across the
+  // tailnet through the serve proxy, so it is exposure all the same (the
+  // annotate agent terminal treats tailnet publication identically).
+  if (liveApp && (isRemoteSession() || options.tailnetPublished === true)) {
+    throw new Error(
+      options.tailnetPublished === true && !isRemoteSession()
+        ? "Live app annotation is unavailable in tailnet-published sessions"
+        : "Live app annotation is unavailable in remote mode",
+    );
+  }
+
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
@@ -217,10 +248,13 @@ export async function startAnnotateServer(
   const annotateProjectName = project ?? "_unknown";
   const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
   // Single local file sessions are the only ones this eager gate covers.
-  // URL and agent-message sessions never write session content to the data
-  // dir. Folder sessions do participate in per-file version history, but
-  // lazily through /api/doc (see computeFolderAnnotateHistory below), not
-  // here. The durable submit records stay single-local-file only.
+  // URL, agent-message, and live-app sessions never write session content to
+  // the data dir. Folder sessions do participate in per-file version history,
+  // but lazily through /api/doc (see computeFolderAnnotateHistory below), not
+  // here. The durable submit records stay single-local-file only. The
+  // mode === "annotate" check is deliberate and explicit: "annotate-app"
+  // (whose filePath is URL-shaped anyway) must never become history-eligible
+  // by accident.
   const singleFileLocalAnnotate = mode === "annotate" && !/^https?:\/\//i.test(filePath);
   let annotateHistory: AnnotateHistoryResult | null = null;
   {
@@ -462,6 +496,12 @@ export async function startAnnotateServer(
     { graceMs: clientLeaseGraceMs },
   );
 
+  // Live app session state, populated after the annotate port is known (the
+  // editor origins carry the port) and before onReady advertises the URL.
+  let liveProxy: LiveAppProxy | null = null;
+  let liveSessionToken = "";
+  let liveAppUrl = "";
+
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -484,6 +524,38 @@ export async function startAnnotateServer(
           }
 
           // API: Get plan content (reuse /api/plan so the plan editor UI works)
+          if (url.pathname === "/api/plan" && req.method === "GET" && mode === "annotate-app" && liveApp) {
+            // Live app session: no rawHtml, no renderAs, no version fields,
+            // sharing off. The client frames appUrl (the loopback proxy) and
+            // authenticates the bridge with liveToken.
+            return Response.json({
+              plan: "",
+              origin,
+              mode,
+              filePath,
+              sourceInfo: sourceInfo ?? liveApp.targetUrl,
+              appUrl: liveAppUrl,
+              targetUrl: liveApp.targetUrl,
+              liveToken: liveSessionToken,
+              gate,
+              approvalNotesSupported,
+              clientLease: clientLeaseSupported
+                ? { enabled: true as const, reconnectGraceMs: clientLeaseGraceMs }
+                : { enabled: false as const },
+              sharingEnabled: false,
+              convertHtml: false,
+              repoInfo,
+              projectRoot: process.cwd(),
+              isWSL: wslFlag,
+              serverConfig: getServerConfig(gitUser),
+              agentTerminal: agentTerminal.capability,
+              feedbackTemplates: {
+                fileFeedback: getAnnotateFileFeedbackTemplate(origin),
+                messageFeedback: getAnnotateMessageFeedbackTemplate(origin),
+              },
+            });
+          }
+
           if (url.pathname === "/api/plan" && req.method === "GET") {
             const displayRawHtml = renderHtml && rawHtml ? htmlAssets.rewriteHtml(rawHtml, filePath) : undefined;
             // For HTML, render the version diff as the real page with inline
@@ -1011,6 +1083,53 @@ export async function startAnnotateServer(
   const port = server.port!;
   const serverUrl = buildAdvertisedUrl(port);
 
+  if (liveApp) {
+    // Compose the proxy-served bridge body: JSON config prelude (the token
+    // this server owns, both editor origin forms with the localhost one
+    // first to match the advertised URL, and the annotation CSS), then the
+    // bootstrap that installs the CSS, then the bridge itself.
+    liveSessionToken = randomBytes(16).toString("hex");
+    const editorOrigins = [
+      `http://localhost:${port}`,
+      `http://127.0.0.1:${port}`,
+    ];
+    const bridgeJs =
+      "window.__plannotatorLiveConfig = "
+      + JSON.stringify({
+        live: true,
+        token: liveSessionToken,
+        editorOrigins,
+        css: liveApp.annotationCss,
+      })
+      + ";\n"
+      + liveApp.bridgeBootstrap
+      + "\n"
+      + liveApp.bridgeScript;
+    liveProxy = startLiveAppProxy({
+      targetUrl: liveApp.targetUrl,
+      editorOrigins,
+      bridgeJs,
+    });
+    // Advertise the proxy under the LOCALHOST spelling, carrying the target
+    // URL's own path and query. localhost keeps the framed app same-site
+    // with the editor page (buildAdvertisedUrl advertises localhost locally)
+    // and shares the dev app's host-only localhost cookies and storage,
+    // which a 127.0.0.1 spelling would not (and Safari ITP blocks all
+    // cookies in cross-site iframes). The proxy itself still BINDS the
+    // 127.0.0.1 literal; browsers that resolve localhost to ::1 first fall
+    // back to IPv4 on the refused loopback connect. The path matters too:
+    // annotating http://localhost:5173/admin must open /admin, not the app
+    // root. PLANNOTATOR_URL_HOST is still never applied here.
+    let targetPath = "/";
+    try {
+      const parsedTarget = new URL(liveApp.targetUrl);
+      targetPath = parsedTarget.pathname + parsedTarget.search;
+    } catch {
+      targetPath = "/";
+    }
+    liveAppUrl = `http://localhost:${liveProxy.port}${targetPath}`;
+  }
+
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.
   void warmFileListCache(process.cwd(), "code");
@@ -1023,6 +1142,7 @@ export async function startAnnotateServer(
       clientLease.closeSessions();
       aiRuntime?.dispose();
       agentTerminal.dispose();
+      liveProxy?.stop();
     } finally {
       server.stop();
     }

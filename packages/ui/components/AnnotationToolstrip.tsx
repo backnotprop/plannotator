@@ -25,6 +25,11 @@ interface AnnotationToolstripProps {
    * narrow and leaves room for the diff badges.
    */
   iconOnly?: boolean;
+  /**
+   * Hide the drag/pinpoint input group entirely. Live app sessions are
+   * pinpoint-only, so the switch would be a dead control there.
+   */
+  hideInputMethodSwitch?: boolean;
 }
 
 export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
@@ -36,6 +41,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   compact = false,
   showHelpLink = true,
   iconOnly = false,
+  hideInputMethodSwitch = false,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
   const [helpTab, setHelpTab] = useState<'selection' | 'plannotator'>('selection');
@@ -50,6 +56,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
     <>
       <div className={`flex items-center flex-wrap ${compact ? 'gap-1' : 'gap-1.5'}`}>
         {/* Input method group */}
+        {!hideInputMethodSwitch && (
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
             active={inputMethod === 'drag'}
@@ -89,6 +96,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
             }
           />
         </div>
+        )}
 
         {/* Action mode group */}
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">

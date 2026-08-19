@@ -79,6 +79,7 @@ export interface Annotation {
     displayMode: boolean;
   }>; // math elements covered by a mixed text+formula selection
   prUrl?: string; // code-review PR mode: the PR this note belongs to, so it isn't shown/exported against another PR after an in-place switch
+  pageUrl?: string; // set only by live app annotate sessions: the page (pathname + search) the annotation was made on; restore filters to the current page and export groups by page
   htmlAnchor?: HtmlElementAnchor; // raw-HTML pinpoint: serialized element anchor for reliable restoration
   htmlAdditionalTargets?: HtmlAnnotationTarget[]; // raw-HTML shift-click multi-select: extra elements this one comment covers (primary stays htmlAnchor/originalText)
   // web-highlighter metadata for cross-element selections

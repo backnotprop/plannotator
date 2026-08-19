@@ -213,19 +213,83 @@ body[data-plannotator-vim-focus-owner]:focus {
 export const BRIDGE_SCRIPT = `(function() {
   var PREFIX = 'plannotator-bridge-';
 
+  // --- Live mode (proxied local app) ---
+  // Srcdoc sessions carry no config: LIVE stays null and every branch below is
+  // inert, keeping srcdoc behavior byte-for-byte identical. The proxy injects
+  // this script into EVERY HTML response, so a frame gate deactivates the
+  // bridge when the proxied page is opened directly (not framed) and inside
+  // nested same-origin subframes: only the frame whose parent IS the editor
+  // may run.
+  var LIVE = window.__plannotatorLiveConfig || null;
+  if (LIVE && (window === window.parent || window.parent !== window.top)) return;
+  // The server cannot know which origin form (localhost or 127.0.0.1) the
+  // editor tab was opened on, so live outbound messages are posted once per
+  // listed editor origin: the browser delivers only the post whose
+  // targetOrigin matches the parent document and silently drops the rest,
+  // so exactly one copy arrives. Inbound accepts any listed origin. Srcdoc
+  // keeps targetOrigin '*' and no token.
+  function isEditorOrigin(origin) {
+    if (!LIVE) return true;
+    var list = LIVE.editorOrigins || [];
+    for (var i = 0; i < list.length; i++) { if (list[i] === origin) return true; }
+    return false;
+  }
+  function postToParent(msg) {
+    if (LIVE) {
+      msg.token = LIVE.token;
+      var origins = LIVE.editorOrigins || [];
+      for (var o = 0; o < origins.length; o++) parent.postMessage(msg, origins[o]);
+      return;
+    }
+    parent.postMessage(msg, '*');
+  }
+  // Page identity for multi-page live sessions: annotations are stamped with
+  // the page they were made on, and restore filters to the current page.
+  function currentPageUrl() {
+    return (location.pathname + location.search).slice(0, 2048);
+  }
+  if (LIVE) {
+    // SPA navigation: report history changes so the parent can re-filter the
+    // restored set. Coalesced with a microtask flag so a pushState burst posts
+    // once. Full reloads need nothing: the proxy re-injects and the fresh
+    // document posts ready again.
+    var pageChangeQueued = false;
+    var postPageChange = function() {
+      if (pageChangeQueued) return;
+      pageChangeQueued = true;
+      Promise.resolve().then(function() {
+        pageChangeQueued = false;
+        postToParent({ type: PREFIX + 'page-change', pageUrl: currentPageUrl() });
+      });
+    };
+    var wrapHistory = function(name) {
+      var original = history[name];
+      if (typeof original !== 'function') return;
+      history[name] = function() {
+        var result = original.apply(this, arguments);
+        postPageChange();
+        return result;
+      };
+    };
+    wrapHistory('pushState');
+    wrapHistory('replaceState');
+    window.addEventListener('popstate', postPageChange);
+  }
+
   // --- Theme ---
   // The author owns this document. Unless it opted in to host theming
   // (hostTheme), only viewer-namespaced --pn-* properties may be written to its
   // root, and its class list is never touched.
   window.addEventListener('message', function(e) {
     if (e.source !== parent) return;
+    if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data) return;
     if (e.data.type === PREFIX + 'set-vim-help') {
       vimHelpOpen = !!e.data.open;
-      parent.postMessage({
+      postToParent({
         type: PREFIX + 'vim-help',
         open: vimHelpOpen
-      }, '*');
+      });
       return;
     }
     if (e.data.type !== PREFIX + 'theme') return;
@@ -246,11 +310,12 @@ export const BRIDGE_SCRIPT = `(function() {
   // --- Resize ---
   var lastHeight = 0;
   function postResize() {
+    if (LIVE) return; // live surfaces render full-viewport; the parent ignores height
     if (!document.body) return;
     var h = document.body.scrollHeight;
     if (h !== lastHeight) {
       lastHeight = h;
-      parent.postMessage({ type: PREFIX + 'resize', height: h }, '*');
+      postToParent({ type: PREFIX + 'resize', height: h });
     }
   }
   window.addEventListener('load', postResize);
@@ -274,7 +339,28 @@ export const BRIDGE_SCRIPT = `(function() {
   var pendingMultiTargets = []; // { key, el, anchor, label, text, box }
   var multiTargetSeq = 0;
   var MAX_MULTI_TARGETS = 16;
-  var currentInputMethod = 'drag'; // 'drag' = text selection, 'pinpoint' = click an element
+  // Live mode clamps the INPUT METHOD to pinpoint (click = element). Text
+  // drag-selection is a separate, always-on channel — see the mouseup handler
+  // — so the clamp only decides what a plain click does, never whether text
+  // can be selected and commented.
+  var currentInputMethod = LIVE ? 'pinpoint' : 'drag'; // 'drag' = text selection, 'pinpoint' = click an element
+  // Interact/Annotate mode. While INACTIVE the bridge keeps clicks native: no
+  // pinpoint capture, no hover outline, no [data-annotate] click, no
+  // committed-highlight click interception — clicks, forms, and SPA
+  // navigation reach the page untouched. Text drag-selection commenting stays
+  // LIVE in both modes (a real drag opens the comment toolbar even in
+  // Interact), committed overlay artifacts stay visible in both modes, and
+  // marker buttons keep their own clicks. BOTH surface kinds start ARMED —
+  // Esc (or the header pen) drops to Interact.
+  var annotateModeActive = true;
+  function updatePinpointCursor() {
+    if (!document.body) return;
+    if (annotateModeActive && currentInputMethod === 'pinpoint') {
+      document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
+    } else {
+      document.body.removeAttribute('data-plannotator-pinpoint-cursor');
+    }
+  }
   var pinpointHover = null;
   var vimEnabled = false;
   var vimHudEnabled = false;
@@ -295,10 +381,9 @@ export const BRIDGE_SCRIPT = `(function() {
   // and immediately clear it. This flag suppresses that one trailing clear.
   var skipNextClear = false;
 
-  document.addEventListener('mouseup', function(e) {
-    if (currentInputMethod === 'pinpoint') return; // pinpoint uses click, not drag-select
-    setTimeout(handleSelection, 10);
-  });
+  // Drag-selection commenting is handled by the merged capture-phase mouseup
+  // listener below (after the drag-yield state it reads) — it is ALWAYS live:
+  // both surfaces, armed or Interact, drag or pinpoint input method.
 
   // The page fully controls element text, so everything posted as a selection
   // is bounded here before it crosses the bridge (the parent enforces the same
@@ -322,7 +407,7 @@ export const BRIDGE_SCRIPT = `(function() {
       // Trailing clear from a plain-click element annotation — consume it once.
       if (skipNextClear) { skipNextClear = false; return; }
       if (pendingSelection) {
-        parent.postMessage({ type: PREFIX + 'selection-clear' }, '*');
+        postToParent({ type: PREFIX + 'selection-clear' });
         pendingSelection = null;
         pendingRange = null;
         clearMultiTargets();
@@ -350,7 +435,7 @@ export const BRIDGE_SCRIPT = `(function() {
       endOffset: range.endOffset
     };
 
-    parent.postMessage({
+    postToParent({
       type: PREFIX + 'selection',
       text: text,
       modeOverride: modeOverride || undefined,
@@ -359,7 +444,7 @@ export const BRIDGE_SCRIPT = `(function() {
       targetKey: (extras && extras.targetKey) || undefined,
       targetLabel: (extras && extras.targetLabel) || undefined,
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
-    }, '*');
+    });
     renderAnnotationOverlay(); // draft selection highlight (overlay-projected)
     return true;
   }
@@ -382,17 +467,17 @@ export const BRIDGE_SCRIPT = `(function() {
       // Drag selections keep the existing close-on-scroll-out behavior.
       if (pendingPinViaPinpoint || pendingMultiTargets.length > 0) return;
       // Selection scrolled out of view — close the toolbar (matches markdown).
-      parent.postMessage({ type: PREFIX + 'selection-clear' }, '*');
+      postToParent({ type: PREFIX + 'selection-clear' });
       pendingSelection = null;
       pendingRange = null;
       clearPendingPin();
       renderAnnotationOverlay();
       return;
     }
-    parent.postMessage({
+    postToParent({
       type: PREFIX + 'selection-rect',
       rect: { top: r.top, left: r.left, width: r.width, height: r.height }
-    }, '*');
+    });
   }
   window.addEventListener('scroll', function() {
     if (!pendingSelection) return;
@@ -402,6 +487,7 @@ export const BRIDGE_SCRIPT = `(function() {
   // --- Mark Creation ---
   window.addEventListener('message', function(e) {
     if (e.source !== parent) return;
+    if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data || !e.data.type) return;
     var type = e.data.type;
 
@@ -483,11 +569,11 @@ export const BRIDGE_SCRIPT = `(function() {
         e.data.anchor,
         e.data.additionalAnchors
       );
-      parent.postMessage({
+      postToParent({
         type: PREFIX + 'mark-applied',
         id: e.data.id,
         success: found
-      }, '*');
+      });
     }
 
     else if (type === PREFIX + 'remove-mark') {
@@ -578,18 +664,44 @@ export const BRIDGE_SCRIPT = `(function() {
     }
 
     else if (type === PREFIX + 'set-input-method') {
-      currentInputMethod = e.data.method === 'pinpoint' ? 'pinpoint' : 'drag';
+      // Live mode clamps the input method to pinpoint (what a plain click
+      // does); text drag-selection commenting stays live regardless.
+      currentInputMethod = (LIVE || e.data.method === 'pinpoint') ? 'pinpoint' : 'drag';
       if (currentInputMethod === 'pinpoint') {
         clearHoverHighlight(); // pinpoint owns clicks; drop the select affordance (and any pending hit test)
-        if (document.body) document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
       } else {
-        if (document.body) document.body.removeAttribute('data-plannotator-pinpoint-cursor');
         clearPinpointHover();
       }
+      updatePinpointCursor(); // cursor affordance is mode-gated: never in Interact
       if (vimEnabled) updateVimUi();
     }
 
+    else if (type === PREFIX + 'set-annotate-mode') {
+      var nextAnnotateActive = e.data.active === true;
+      if (nextAnnotateActive !== annotateModeActive) {
+        annotateModeActive = nextAnnotateActive;
+        if (!annotateModeActive) {
+          // Disarm tears down every PENDING affordance; committed markers and
+          // highlights stay visible, and marker buttons keep their clicks.
+          if (pendingSelection) postToParent({ type: PREFIX + 'selection-clear' });
+          pendingSelection = null;
+          pendingRange = null;
+          skipNextClear = false;
+          clearMultiTargets();
+          clearPendingPin();
+          try { window.getSelection().removeAllRanges(); } catch (ex) {}
+          clearPinpointHover();
+          clearHoverHighlight();
+          renderAnnotationOverlay();
+        }
+        updatePinpointCursor();
+      }
+    }
+
     else if (type === PREFIX + 'set-vim-mode') {
+      // Vim is off in live mode: it writes classes onto author elements and
+      // captures keys the app needs.
+      if (LIVE) return;
       var wasVimEnabled = vimEnabled;
       var wasVimHudEnabled = vimHudEnabled;
       vimEnabled = e.data.enabled === true;
@@ -1096,6 +1208,7 @@ export const BRIDGE_SCRIPT = `(function() {
   document.addEventListener('mousemove', function(e) {
     lastPointer = { x: e.clientX, y: e.clientY };
     updateDragYield(e);
+    if (!annotateModeActive) return; // Interact mode: no hover affordances
     if (currentInputMethod !== 'pinpoint') {
       // Click-to-select hover affordance (drag mode owns highlight clicks):
       // cheap cached-rect hit test, rAF-throttled, cleared while a draft or
@@ -1108,6 +1221,9 @@ export const BRIDGE_SCRIPT = `(function() {
       return;
     }
     if (vimEnabled && vimPhase !== 'inactive') return;
+    // Mid-drag (text selection in progress) the element hover box is noise:
+    // the drag owns the surface until mouseup resolves it.
+    if (dragYieldActive) { clearPinpointHover(); return; }
     // Hit-test at the pointer (e.target only backstops engines without
     // elementFromPoint) so the same code path serves the scroll re-hit-test.
     updatePinpointHover(e.clientX, e.clientY, e.target);
@@ -1137,7 +1253,7 @@ export const BRIDGE_SCRIPT = `(function() {
       renderAnnotationOverlay();
       // Scroll under a stationary pointer moves the committed rects: re-run
       // the cached-rect hover test so the affordance tracks reality.
-      if (currentInputMethod !== 'pinpoint' && lastPointer && !pendingPinEl && !pendingSelection) {
+      if (annotateModeActive && currentInputMethod !== 'pinpoint' && lastPointer && !pendingPinEl && !pendingSelection) {
         setHoverHighlight(committedHighlightIdAtCached(lastPointer.x, lastPointer.y));
       }
       positionMultiTargetBoxes();
@@ -1145,7 +1261,7 @@ export const BRIDGE_SCRIPT = `(function() {
         positionPinpointBox(pendingPinEl);
         return;
       }
-      if (currentInputMethod !== 'pinpoint') return;
+      if (!annotateModeActive || currentInputMethod !== 'pinpoint') return;
       if (vimEnabled && vimPhase !== 'inactive') return;
       if (lastPointer) {
         updatePinpointHover(lastPointer.x, lastPointer.y, pinpointHover);
@@ -1259,15 +1375,21 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   }
 
-  // Drag-selection marker yield: while a text drag is in progress in drag
-  // mode, placed markers drop pointer input (the same data-pn-hittest CSS the
-  // hit-test yield uses) so a 25px bubble sitting over the text cannot
-  // capture the selection mid-drag. Armed only by a >4px move with the
-  // primary button held from a non-overlay mousedown, so marker clicks
-  // (mousedown ON the marker) and plain click-to-select (no drag) are
-  // untouched; disarmed on mouseup or when the button is seen released.
+  // Drag-selection marker yield: while a text drag is in progress, placed
+  // markers drop pointer input (the same data-pn-hittest CSS the hit-test
+  // yield uses) so a 25px bubble sitting over the text cannot capture the
+  // selection mid-drag. Armed only by a >4px move with the primary button
+  // held from a non-overlay mousedown, so marker clicks (mousedown ON the
+  // marker) and plain click-to-select (no drag) are untouched; disarmed on
+  // mouseup or when the button is seen released. The same >4px arming is
+  // what tells the mouseup handler below that a REAL drag happened, which
+  // is how drag-selection commenting stays live in pinpoint/armed mode
+  // without a plain pinpoint click re-posting its own selection.
   var dragYieldStart = null;
   var dragYieldActive = false;
+  // True between a drag's terminating mouseup and the next mousedown: the
+  // click event that follows a completed drag must not pinpoint-annotate.
+  var dragEndedClick = false;
   function endDragYield() {
     dragYieldStart = null;
     if (dragYieldActive) {
@@ -1292,13 +1414,25 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   }
   document.addEventListener('mousedown', function(e) {
-    if (currentInputMethod === 'pinpoint') return;
+    dragEndedClick = false;
     if (e.button !== 0) return;
     if (isViewerOverlayNode(e.target)) return;
     dragYieldStart = { x: e.clientX, y: e.clientY };
   }, true);
   document.addEventListener('mouseup', function() {
+    // Text drag-selection commenting is ALWAYS live: both surfaces, armed or
+    // Interact. In armed pinpoint a plain click belongs to the pinpoint
+    // handler — only a REAL drag (>4px with the button held) schedules the
+    // selection pass, so annotateElement's own selection is never re-posted
+    // by its trailing mouseup. Everywhere else the classic always-schedule
+    // behavior stays: handleSelection only acts on a real selection, posts
+    // the clear that dismisses a stale draft, and never preventDefaults —
+    // a plain click is never swallowed.
+    var dragged = dragYieldActive;
+    dragEndedClick = dragged;
     endDragYield();
+    if (annotateModeActive && currentInputMethod === 'pinpoint' && !dragged) return;
+    setTimeout(handleSelection, 10);
   }, true);
 
   // One record per committed annotation. Its targets are live projections;
@@ -1362,7 +1496,11 @@ export const BRIDGE_SCRIPT = `(function() {
     var key = JSON.stringify(combined);
     if (key === lastUnanchoredKey) return;
     lastUnanchoredKey = key;
-    parent.postMessage({ type: PREFIX + 'unanchored', ids: combined }, '*');
+    // postToParent, not a raw '*' post: live sessions stamp the session
+    // token and post only to the listed editor origins, and the parent
+    // drops untokened live messages — a raw post would silently disable
+    // unanchored reporting exactly where restores fail most (live pages).
+    postToParent({ type: PREFIX + 'unanchored', ids: combined });
   }
 
   function validNormalizedPoint(p) {
@@ -1502,9 +1640,47 @@ export const BRIDGE_SCRIPT = `(function() {
         }
       }
     }
+    if (!record.targets.length && LIVE) {
+      // Live pages render late (lazy routes, data-dependent trees): a
+      // restore that resolves nothing keeps its record, seeded with
+      // unresolved placeholder targets built from the durable params, so
+      // the mutation-driven reconcile re-acquires them when the elements
+      // appear. Srcdoc documents are static (nothing would ever
+      // re-resolve), so the record is dropped below exactly as before.
+      if (anchor) {
+        record.targets.push({
+          kind: 'element',
+          element: null,
+          anchor: anchor,
+          point: normalizedPointOf(anchor, null)
+        });
+      }
+      if (originalText) {
+        record.targets.push({
+          kind: 'range',
+          range: null,
+          text: originalText,
+          markerless: !!anchor
+        });
+      }
+      if (additionalAnchors && additionalAnchors.length) {
+        var lateCount = Math.min(additionalAnchors.length, MAX_MULTI_TARGETS);
+        for (var lateIndex = 0; lateIndex < lateCount; lateIndex++) {
+          if (!additionalAnchors[lateIndex]) continue;
+          record.targets.push({
+            kind: 'element',
+            element: null,
+            anchor: additionalAnchors[lateIndex],
+            point: normalizedPointOf(additionalAnchors[lateIndex], null)
+          });
+        }
+      }
+    }
     if (!record.targets.length) {
       // The record is removed (nothing to retry), so the per-pass dead scan
       // cannot see this id: track it separately for the unanchored report.
+      // Live sessions only reach here when the durable params seeded no
+      // placeholder targets at all (nothing will ever re-resolve).
       removeAnnRecord(id);
       restoreFailedIds.add(id);
     }
@@ -2067,7 +2243,7 @@ export const BRIDGE_SCRIPT = `(function() {
     btn.addEventListener('click', function(clickEvent) {
       clickEvent.preventDefault();
       clickEvent.stopPropagation();
-      parent.postMessage({ type: PREFIX + 'mark-click', id: annId }, '*');
+      postToParent({ type: PREFIX + 'mark-click', id: annId });
     });
     overlayNodes.add(btn);
     return btn;
@@ -2608,7 +2784,7 @@ export const BRIDGE_SCRIPT = `(function() {
         clearPendingPin();
         try { window.getSelection().removeAllRanges(); } catch (ex) {}
         renderAnnotationOverlay();
-        if (echo) parent.postMessage({ type: PREFIX + 'multi-target-removed', key: key }, '*');
+        if (echo) postToParent({ type: PREFIX + 'multi-target-removed', key: key });
         return;
       }
       var next = pendingMultiTargets.shift();
@@ -2628,14 +2804,14 @@ export const BRIDGE_SCRIPT = `(function() {
       mainBox.classList.remove('pn-pin-enter');
       if (pendingPinEl && pendingPinEl.isConnected) positionPinpointBox(pendingPinEl);
       renderAnnotationOverlay();
-      if (echo) parent.postMessage({ type: PREFIX + 'multi-target-removed', key: key }, '*');
+      if (echo) postToParent({ type: PREFIX + 'multi-target-removed', key: key });
       return;
     }
     for (var i = 0; i < pendingMultiTargets.length; i++) {
       if (pendingMultiTargets[i].key === key) {
         destroyMultiTargetBox(pendingMultiTargets[i].box);
         pendingMultiTargets.splice(i, 1);
-        if (echo) parent.postMessage({ type: PREFIX + 'multi-target-removed', key: key }, '*');
+        if (echo) postToParent({ type: PREFIX + 'multi-target-removed', key: key });
         return;
       }
     }
@@ -2678,13 +2854,13 @@ export const BRIDGE_SCRIPT = `(function() {
     var key = makeTargetKey();
     var box = createMultiTargetBox(el);
     pendingMultiTargets.push({ key: key, el: el, anchor: anchor, label: label, text: text, point: point, box: box });
-    parent.postMessage({
+    postToParent({
       type: PREFIX + 'multi-target-added',
       key: key,
       label: label,
       text: text,
       anchor: anchor || undefined
-    }, '*');
+    });
   }
 
   /** Chip hover in the composer: flash the corresponding pinned outline. */
@@ -2748,12 +2924,12 @@ export const BRIDGE_SCRIPT = `(function() {
     pointerRelayRaf = requestAnimationFrame(function() {
       pointerRelayRaf = 0;
       if (!pendingPinEl || !pointerRelayPos) return;
-      parent.postMessage({
+      postToParent({
         type: PREFIX + 'pointer',
         x: pointerRelayPos.x,
         y: pointerRelayPos.y,
         shift: pointerRelayPos.shift
-      }, '*');
+      });
     });
   }
 
@@ -2823,22 +2999,30 @@ export const BRIDGE_SCRIPT = `(function() {
     pendingSelection = { element: true };
     pendingRange = null;
     skipNextClear = true; // don't let this click's mouseup clear the toolbar we just opened
-    parent.postMessage({ type: PREFIX + 'selection', text: elText,
+    postToParent({ type: PREFIX + 'selection', text: elText,
       modeOverride: modeOverride || undefined,
       anchor: pendingPinAnchor || undefined,
       pinpoint: !!viaPinpoint || undefined,
       targetKey: pendingPinKey || undefined,
       targetLabel: pendingPinLabel || undefined,
-      rect: { top: r.top, left: r.left, width: r.width, height: r.height } }, '*');
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
     return true;
   }
 
   document.addEventListener('click', function(e) {
-    if (currentInputMethod !== 'pinpoint') return;
+    if (!annotateModeActive || currentInputMethod !== 'pinpoint') return;
     // Real placed markers (and any other viewer overlay) own their clicks —
     // checked by IDENTITY, not selector, so a page element spoofing
     // [data-plannotator-marker] stays an ordinary annotatable target.
     if (isViewerOverlayNode(e.target)) return;
+    // A drag that ended in this click owns the surface: the drag-selection
+    // pass is about to post the selected text, and pinpoint-annotating the
+    // element under the pointer would clobber it (annotateElement rewrites
+    // the selection). Keyed off the >4px drag arming, not selection state, so
+    // the selection a previous text-element pin left behind never blocks the
+    // next plain re-pin click. One-shot: only the drag's own trailing click
+    // is suppressed.
+    if (dragEndedClick) { dragEndedClick = false; return; }
     // Shift-click while an ARMED pinpoint draft is open: toggle the element
     // in/out of the SAME draft comment instead of replacing the selection.
     // Unarmed drafts (modes the parent does not mirror, e.g. quickLabel)
@@ -2865,23 +3049,47 @@ export const BRIDGE_SCRIPT = `(function() {
     annotateElement(el, undefined, true, { x: e.clientX, y: e.clientY });
   }, true);
 
-  // Escape while pinpointing (outside vim, which has its own ladder): cancel a
-  // pending pin, else just drop the hover outline.
+  // Escape ladder (outside vim, which has its own): a pending draft closes
+  // first, then the hover outline clears, then Esc EXITS Annotate back to
+  // Interact — the parent owns the mode, so the final rung only posts
+  // annotate-exit and waits for set-annotate-mode to come back down.
+  function closePendingDraft() {
+    postToParent({ type: PREFIX + 'selection-clear' });
+    pendingSelection = null;
+    pendingRange = null;
+    skipNextClear = false;
+    clearMultiTargets();
+    clearPendingPin();
+    window.getSelection().removeAllRanges();
+    renderAnnotationOverlay();
+  }
   document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape' || vimEnabled) return;
+    if (!annotateModeActive) {
+      // Interact mode: Esc belongs to the page — except an open drag-comment
+      // draft (drag-selection stays live in Interact) still closes first.
+      if (pendingSelection) closePendingDraft();
+      return;
+    }
     if (pendingSelection) {
-      parent.postMessage({ type: PREFIX + 'selection-clear' }, '*');
-      pendingSelection = null;
-      pendingRange = null;
-      skipNextClear = false;
-      clearMultiTargets();
-      clearPendingPin();
-      window.getSelection().removeAllRanges();
-      renderAnnotationOverlay();
-    } else if (currentInputMethod === 'pinpoint') {
+      closePendingDraft();
+    } else if (currentInputMethod === 'pinpoint' && pinpointHover) {
       clearPinpointHover();
+    } else {
+      postToParent({ type: PREFIX + 'annotate-exit' });
     }
   });
+
+  // Mod+Shift+A toggles Interact/Annotate from inside the iframe (the parent
+  // registers the same chord, but focus usually lives in here on live apps).
+  // Capture phase so the page cannot swallow the reserved chord; the parent
+  // answers with set-annotate-mode.
+  document.addEventListener('keydown', function(e) {
+    if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return;
+    if (e.key !== 'a' && e.key !== 'A') return;
+    e.preventDefault();
+    postToParent({ type: PREFIX + 'annotate-toggle' });
+  }, true);
 
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the
   // toolbar — no pinpoint mode. Lets an HTML doc (e.g. a flow graph) wire its own
@@ -2890,6 +3098,7 @@ export const BRIDGE_SCRIPT = `(function() {
   // a committed highlight selects the annotation instead (the pre-overlay
   // handler deferred to '.annotation-highlight' the same way).
   document.addEventListener('click', function(e) {
+    if (!annotateModeActive) return; // Interact mode: [data-annotate] stays a page element
     if (currentInputMethod === 'pinpoint') return; // pinpoint handler covers this
     if (isViewerOverlayNode(e.target)) return; // placed markers own their clicks
     var t = e.target && e.target.closest && e.target.closest('[data-annotate]');
@@ -2933,6 +3142,10 @@ export const BRIDGE_SCRIPT = `(function() {
   }
 
   document.addEventListener('click', function(e) {
+    // Interact mode: highlight rects are pointer-transparent projections, so a
+    // page click landing on one goes to the page. Markers (real buttons) stay
+    // the affordance for opening a committed comment in Interact.
+    if (!annotateModeActive) return;
     if (e.shiftKey) return; // shift belongs to multi-select
     if (isViewerOverlayNode(e.target)) return; // markers own their clicks
     if (pendingPinEl) return; // an open pinpoint draft owns the surface
@@ -2941,7 +3154,7 @@ export const BRIDGE_SCRIPT = `(function() {
     var hitId = committedHighlightAt(e.clientX, e.clientY);
     if (!hitId) return;
     e.stopPropagation();
-    parent.postMessage({ type: PREFIX + 'mark-click', id: hitId }, '*');
+    postToParent({ type: PREFIX + 'mark-click', id: hitId });
   });
 
   // --- Optional Vim navigation ---
@@ -3655,10 +3868,10 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!vimEnabled) return;
     if (vimHudEnabled && vimLastPostedPhase !== vimPhase) {
       vimLastPostedPhase = vimPhase;
-      parent.postMessage({
+      postToParent({
         type: PREFIX + 'vim-state',
         phase: vimPhase
-      }, '*');
+      });
     }
     var badge = document.querySelector('[data-plannotator-vim-badge]');
     if (!vimHudEnabled && !badge) badge = getVimBadgeEl();
@@ -3720,10 +3933,10 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function toggleVimHelp() {
     vimHelpOpen = !vimHelpOpen;
-    parent.postMessage({
+    postToParent({
       type: PREFIX + 'vim-help',
       open: vimHelpOpen
-    }, '*');
+    });
   }
 
   function clearVimUi() {
@@ -3743,10 +3956,10 @@ export const BRIDGE_SCRIPT = `(function() {
 
   function copyVimText(text) {
     if (!text) return;
-    parent.postMessage({
+    postToParent({
       type: PREFIX + 'vim-copy',
       text: text
-    }, '*');
+    });
   }
 
   function vimActionMode(key) {
@@ -3808,7 +4021,7 @@ export const BRIDGE_SCRIPT = `(function() {
       handled = true;
     } else if (key === 'Escape') {
       if (pendingSelection) {
-        parent.postMessage({ type: PREFIX + 'selection-clear' }, '*');
+        postToParent({ type: PREFIX + 'selection-clear' });
         pendingSelection = null;
         pendingRange = null;
         restoreVimSemanticTarget();
@@ -4025,12 +4238,12 @@ export const BRIDGE_SCRIPT = `(function() {
         vimLastActionId = vimActionId;
         vimLastActionContext = vimCommandContext;
         updateVimReticle();
-        parent.postMessage({
+        postToParent({
           type: PREFIX + 'vim-command',
           actionId: vimActionId,
           key: hudKey,
           context: vimCommandContext
-        }, '*');
+        });
       }
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -4064,7 +4277,7 @@ export const BRIDGE_SCRIPT = `(function() {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (!e.key || e.key.length !== 1) return; // single printable char only
     e.preventDefault();
-    parent.postMessage({ type: PREFIX + 'keytype', key: e.key }, '*');
+    postToParent({ type: PREFIX + 'keytype', key: e.key });
     // Hand keyboard focus back to the parent window so the comment textarea can
     // take it. Blurring the <iframe> from the parent isn't enough — the inner
     // document keeps focus — so the iframe must relinquish it. parent.focus() is
@@ -4305,7 +4518,13 @@ export const BRIDGE_SCRIPT = `(function() {
       }).observe(document.body);
     }
     watchPageMutations();
-    parent.postMessage({ type: PREFIX + 'ready' }, '*');
+    // Armed is the default on both surfaces, and live sessions default to
+    // pinpoint: show the cursor affordance immediately instead of waiting for
+    // the parent's first set-input-method/set-annotate-mode round trip.
+    updatePinpointCursor();
+    var readyMsg = { type: PREFIX + 'ready' };
+    if (LIVE) readyMsg.pageUrl = currentPageUrl();
+    postToParent(readyMsg);
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', onReady);
@@ -4332,4 +4551,23 @@ export const BRIDGE_SCRIPT = `(function() {
       return out;
     }
   };
+})();`;
+
+/**
+ * Live-mode bootstrap, prepended to BRIDGE_SCRIPT by the annotate server when
+ * composing the proxy-served bridge body. Reads the JSON config prelude
+ * (window.__plannotatorLiveConfig) and installs the annotation CSS that srcdoc
+ * mode splices as a <style> tag. Runs before the bridge IIFE and before its
+ * MutationObserver exists, so this write never feeds the reconcile loop.
+ * Same escaping rules as BRIDGE_SCRIPT: a dependency-free string constant.
+ */
+export const LIVE_BRIDGE_BOOTSTRAP = `(function() {
+  var config = window.__plannotatorLiveConfig;
+  if (!config || typeof config.css !== 'string') return;
+  try {
+    var style = document.createElement('style');
+    style.setAttribute('data-plannotator-live-css', '');
+    style.appendChild(document.createTextNode(config.css));
+    (document.head || document.documentElement).appendChild(style);
+  } catch (ex) {}
 })();`;
