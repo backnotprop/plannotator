@@ -41,7 +41,7 @@ const p4Provider: VcsProvider = {
 };
 
 const api = createVcsApi([
-  createJjProvider(jjRuntime),
+  createJjProvider(jjRuntime, gitRuntime),
   createGitButlerProvider(gitButlerRuntime),
   createGitProvider(gitRuntime),
   p4Provider,
@@ -61,6 +61,8 @@ export const {
   stageFile,
   unstageFile,
   resolveVcsCwd,
+  vcsSupportsSnapshot,
+  materializeVcsSnapshot,
 } = api;
 
 export { resolveInitialDiffType, gitRuntime };

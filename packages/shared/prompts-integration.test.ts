@@ -332,6 +332,28 @@ describe("prompts integration (config from disk)", () => {
     expect(result).toBe("LGTM");
   });
 
+  test("annotate approved-with-notes reads override from config.json", async () => {
+    writeConfig({
+      prompts: {
+        annotate: {
+          approvedWithNotes: "APPROVED {{context}}\n\nNotes: {{feedback}}",
+        },
+      },
+    });
+
+    const result = await runScript(`
+      import { getAnnotateApprovedWithNotesPrompt } from "./packages/shared/prompts";
+      console.log(getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
+        context: "File: src/app.ts",
+        feedback: "Keep the retry bounded.",
+      }));
+    `);
+
+    expect(result).toBe(
+      "APPROVED File: src/app.ts\n\nNotes: Keep the retry bounded.",
+    );
+  });
+
   // ── Review denied suffix ─────────────────────────────────────────────
 
   test("review denied suffix reads override from config.json", async () => {

@@ -6,7 +6,7 @@ sidebar:
 section: "Guides"
 ---
 
-`plannotator annotate` and `plannotator annotate-last` accept three flags that turn markdown annotation into a full review gate with structured output.
+`plannotator annotate` and `plannotator annotate-last` accept three flags that turn markdown annotation into a full review gate with structured output. Direct `plannotator annotate` invocations also support strict automation with `--require-approval` and `--result-file`.
 
 ## Capabilities
 
@@ -24,7 +24,7 @@ section: "Guides"
  (none)                   │  2-button        │  n/a                    │  empty                   │  feedback (plaintext)
  --gate                   │  3-button        │  `The user approved.`   │  empty                   │  feedback (plaintext)
  --json                   │  2-button        │  n/a                    │  {"decision":"dismissed"}│  {"decision":"annotated","feedback":"..."}
- --gate --json            │  3-button        │  {"decision":"approved"}│  {"decision":"dismissed"}│  {"decision":"annotated","feedback":"..."}
+ --gate --json            │  3-button        │  {"decision":"approved","feedback":"..."}│  {"decision":"dismissed"}│  {"decision":"annotated","feedback":"..."}
  --hook                   │  3-button        │  empty                  │  empty                   │  {"decision":"block","reason":"..."}
 ```
 
@@ -33,7 +33,7 @@ section: "Guides"
 ```json
 {
   "decision": "approved" | "annotated" | "dismissed",
-  "feedback": "string (present only when decision is 'annotated')"
+  "feedback": "string (present for annotated decisions and approvals with notes)"
 }
 ```
 
@@ -43,6 +43,12 @@ section: "Guides"
 
 ```json
 {"decision":"approved"}
+```
+
+If the reviewer approves while leaving notes, direct structured transport preserves both:
+
+```json
+{"decision":"approved","feedback":"Keep the retry bounded."}
 ```
 
 **Dismissed** (reviewer clicked Close, `--json` or `--gate --json`):
@@ -80,6 +86,9 @@ Structured stdout. Every decision is emitted as a JSON object with a `decision` 
 
 - `--json` alone keeps the two-button UI. Only `annotated` and `dismissed` decisions are emitted.
 - `--gate --json` unlocks all three decisions in structured form.
+- Direct `--gate --json` approval can include feedback. Transports that can
+  deliver approval but not attached notes warn before discarding feedback and
+  direct the reviewer to **Send Feedback** instead.
 - On OpenCode and Pi, `--json` is accepted silently. Those harnesses write back to the session directly rather than via stdout, so the flag has no effect there. Recipes remain portable.
 
 ## `--hook`
@@ -92,7 +101,45 @@ Emits hook-native JSON that works directly with Claude Code and Codex PostToolUs
 
 This is the recommended approach for hook integrations. The `{"decision":"block","reason":"..."}` format is the native protocol both Claude Code and Codex use for PostToolUse and Stop hooks. No wrapper script needed.
 
+`--hook` remains intentionally unchanged: approval is represented by empty
+stdout in the native hook protocol, so it has no channel for approval notes.
+Use **Send Feedback** to block with notes; that action still means “revise and
+reopen,” not “approve and continue.”
+
 The flag is accepted silently on OpenCode and Pi for the same reason `--json` is: those harnesses don't use stdout as the signal channel.
+
+## Strict direct gates
+
+For a fail-closed direct CLI gate, add either or both strict options:
+
+```sh
+plannotator annotate docs/plan.md --gate --json \
+  --require-approval \
+  --result-file .tmp/plan-review-result.json
+```
+
+- **`--require-approval`** exits `0` only for `approved`. `annotated` and `dismissed` still publish their valid JSON decision, then exit nonzero.
+- **`--result-file <path>`** atomically publishes the same newline-terminated JSON bytes written to stdout. The path is resolved from the invocation working directory.
+- Both options require `--gate --json`, are available only on direct `annotate` invocations, and cannot be combined with `--hook`. Hook output and exit behavior are unchanged.
+
+The result-file parent directory must already exist and the destination must not. Plannotator writes a private `0600` temporary file in the same directory, flushes and closes it, then publishes it with an atomic no-clobber hard link. It never overwrites an existing destination or falls back to a non-atomic copy. Use a unique result path for every invocation.
+
+The stdout decision record is written **before** the result file. If publication fails, the reviewer's decision has already been emitted on stdout — capture stdout even when you also pass `--result-file`.
+
+Two caveats on the publication guarantees:
+
+- The `0600` temporary-file mode is a POSIX permission and is effectively a no-op on Windows; use filesystem ACLs there if the result path needs to be private.
+- The atomic link (like an atomic rename) is not followed by an `fsync` of the parent directory. Publication is atomic against concurrent readers, but a machine crash immediately afterwards can still lose the directory entry.
+
+Keep the reviewed source at a stable project path so revisions and version history continue to refer to the same artifact. Result and diagnostic log files can instead live in a narrowly scoped temporary directory.
+
+Clicking Close publishes `{"decision":"dismissed"}`.
+
+Abandoning the review publishes the same `dismissed` decision. A local direct structured gate tracks its connected review surfaces: once at least one has connected, losing the last one starts a 30-second reconnect grace period, and expiry resolves the gate as `dismissed`. Reloading the page, navigating away and back, or closing one of several tabs all reconnect or leave another surface connected, so none of them dismiss the review. Approve, Send Annotations, and Close still win over a pending expiry.
+
+An abandoned review keeps its saved annotation draft, so nothing you wrote is lost. If a stale tab comes back after the gate already resolved, its Approve, Send Annotations, or Close reports an error instead of pretending to apply: the decision the caller received is the one that counts.
+
+Two cases remain caller-side recovery, never approval: a session where no review client ever connected (a browser that failed to launch keeps waiting, so pass your own startup timeout), and a half-open transport loss, where the connection is only proven dead by a failing heartbeat write and can take longer than the grace period to notice. Remote and shared sessions keep the behavior off entirely, because a tunnel or proxy disconnect is not abandonment.
 
 ## Primary use cases
 
@@ -116,4 +163,10 @@ See [Hook Integration](/docs/guides/hook-integration/) for copy-paste recipes th
 
 ## Exit codes
 
-Every decision exits `0`. Signals live on stdout. This keeps Plannotator composable with harnesses that use exit codes for their own purposes.
+By default, every decision exits `0`; existing plaintext, JSON, and hook integrations are unchanged. With `--require-approval`, only `approved` exits `0`; `annotated` and `dismissed` publish their JSON result before exiting `1`.
+
+Strict invocations that are misconfigured or cannot start exit `2` — bad flag combinations, an invalid `--result-file` destination, and every annotate startup failure (missing or unreadable path, unreachable URL, empty folder, ambiguous filename, oversized file). Those startup failures exit `1` for non-strict invocations, as they always have; under a strict flag `1` means "the reviewer did not approve", so a mistyped path must never be reported as a rejection.
+
+A failed atomic publish also exits `2`, but that code means the result *file* was not published — the reviewer's decision was already written to stdout. Only a stdout write failure leaves no record at all.
+
+This follows the grep convention: `0` approved, `1` not approved, `2` the gate itself errored.

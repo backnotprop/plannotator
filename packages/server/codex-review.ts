@@ -212,7 +212,7 @@ export async function buildCodexCommand(options: CodexCommandOptions): Promise<s
     "exec",
     "--output-schema", schemaPath,
     "-o", outputPath,
-    "--full-auto",
+    "--approve-for-me",
     "--ephemeral",
     "-C", cwd,
     prompt,

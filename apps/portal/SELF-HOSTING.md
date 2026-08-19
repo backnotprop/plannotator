@@ -1,8 +1,18 @@
 # Self-Hosting the Plannotator Share Portal
 
-The share portal is a static single-page application. It has no backend,
-no database, and makes no network requests. All plan data is encoded in
-the URL hash.
+The share portal is a static single-page application with no application
+database. Small markdown shares keep compressed, unencrypted content in the
+URL fragment, which is not included in the request to the portal host. The
+portal still checks GitHub for Plannotator release metadata on every app load,
+with no current opt-out setting, and short URLs
+fetch encrypted ciphertext from the configured paste service. Rendered
+documents can also request remote assets that they reference. The built portal
+includes its default Inter and Geist Mono fonts and Highlight.js assets, so
+those defaults do not request Google Fonts or cdnjs.
+
+Open source asynchronous link sharing is moving to deprecated support.
+Workspaces is the primary direction for team sharing. No removal date has
+been announced.
 
 ## Build
 
@@ -62,3 +72,8 @@ When `PLANNOTATOR_SHARE_URL` is not set, the default
 2. Add an annotation, click Export > Share
 3. Confirm the share URL starts with your configured domain
 4. Open the link — the plan and annotations should render correctly
+
+For raw HTML, the header's Copy Share Link action or a configured callback can
+create the encrypted short link immediately. Remote raw HTML sessions create
+one automatically at session startup. These paths do not use the markdown
+Create short link confirmation.

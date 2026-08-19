@@ -11,6 +11,7 @@ import { getObsidianSettings, getEffectiveVaultPath } from '../utils/obsidian';
 import { getBearSettings } from '../utils/bear';
 import { getOctarineSettings } from '../utils/octarine';
 import { wrapFeedbackForAgent } from '../utils/parser';
+import { copyTextToClipboard } from '../utils/clipboard';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
 /** POST body shape sent to the notes endpoint (mirrors what the Notes tab builds today). */
@@ -57,6 +58,13 @@ interface ExportModalProps {
   initialTab?: Tab;
   /** Override the save-to-notes wire. Default: POST /api/save-notes (today's behavior). */
   onSaveToNotes?: (payload: SaveToNotesPayload) => Promise<SaveToNotesResult>;
+  /**
+   * Wrap the annotations output for the clipboard Copy button. Annotate
+   * sessions pass a mode-aware wrapper so Copy matches Send Feedback instead
+   * of the plan-deny framing (#1107). Default: plan-deny wrap (today's
+   * plan-review behavior).
+   */
+  wrapCopiedAnnotations?: (feedback: string) => string;
 }
 
 type Tab = 'share' | 'annotations' | 'notes';
@@ -81,6 +89,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   isApiMode = false,
   initialTab,
   onSaveToNotes = defaultSaveToNotes,
+  wrapCopiedAnnotations = wrapFeedbackForAgent,
 }) => {
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
@@ -115,17 +124,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const isOctarineReady = octarineSettings.enabled && octarineSettings.workspace.trim().length > 0;
 
   const handleCopy = async (text: string, which: 'short' | 'full' | 'annotations') => {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyTextToClipboard(text)) {
       setCopied(which);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy:', e);
+    } else {
+      console.error('Failed to copy');
     }
   };
 
   const handleCopyAnnotations = async () => {
-    await handleCopy(wrapFeedbackForAgent(annotationsOutput), 'annotations');
+    await handleCopy(wrapCopiedAnnotations(annotationsOutput), 'annotations');
   };
 
   // Whether the hash URL is large enough to warrant a short URL option
@@ -309,7 +317,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     </button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Encrypted short link. Your plan is end-to-end encrypted before it leaves your browser — not even the server can read it.
+                    Encrypted short link. The browser uploads AES-256-GCM ciphertext; the decryption key stays in the URL fragment.
                   </p>
                 </div>
               ) : isGeneratingShortUrl ? (
@@ -376,13 +384,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
                 {!shortShareUrl && !isGeneratingShortUrl && !urlIsLarge && (
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Your plan is encoded entirely in the URL — it never touches a server.
+                    Shared content is compressed, not encrypted, in the URL fragment. The portal request does not include that fragment.
                   </p>
                 )}
               </div>}
 
               <p className="text-xs text-muted-foreground">
-                Only someone with this exact link can view your plan. Short links are end-to-end encrypted — the decryption key is in the URL and never sent to the server.
+                Anyone with the full link can view the shared content, including services used to send the link. Hosted short-link ciphertext expires after 7 days.
               </p>
             </div>
           ) : activeTab === 'notes' && showNotesTab ? (

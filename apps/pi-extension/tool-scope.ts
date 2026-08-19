@@ -3,27 +3,37 @@ import { extname, isAbsolute, relative, resolve } from "node:path";
 export type Phase = "idle" | "planning" | "executing";
 
 export const PLAN_SUBMIT_TOOL = "plannotator_submit_plan";
-export const PLANNING_DISCOVERY_TOOLS = ["grep", "find", "ls"] as const;
 
-const PLANNING_ONLY_TOOLS = new Set<string>([PLAN_SUBMIT_TOOL]);
 const ALLOWED_PLAN_EXTENSIONS = new Set<string>([".md", ".mdx"]);
 
 export function stripPlanningOnlyTools(tools: readonly string[]): string[] {
-	return tools.filter((tool) => !PLANNING_ONLY_TOOLS.has(tool));
+	return tools.filter((tool) => tool !== PLAN_SUBMIT_TOOL);
 }
 
-export function getToolsForPhase(
-	baseTools: readonly string[],
-	phase: Phase,
-): string[] {
-	const tools = stripPlanningOnlyTools(baseTools);
-	if (phase !== "planning") {
-		return [...new Set(tools)];
-	}
+export function applyPhaseTools(
+	activeTools: readonly string[],
+	previouslyAddedTools: readonly string[],
+	configuredTools: readonly string[],
+): { activeTools: string[]; addedTools: string[] } {
+	const previousAdditions = new Set(previouslyAddedTools);
+	const baseTools = activeTools.filter((tool) => !previousAdditions.has(tool));
+	const baseToolSet = new Set(baseTools);
+	const addedTools = [...new Set(configuredTools)].filter(
+		(tool) => !baseToolSet.has(tool),
+	);
 
-	return [
-		...new Set([...tools, ...PLANNING_DISCOVERY_TOOLS, PLAN_SUBMIT_TOOL]),
-	];
+	return {
+		activeTools: [...baseTools, ...addedTools],
+		addedTools,
+	};
+}
+
+export function releasePhaseTools(
+	activeTools: readonly string[],
+	addedTools: readonly string[],
+): string[] {
+	const additions = new Set(addedTools);
+	return activeTools.filter((tool) => !additions.has(tool));
 }
 
 // Used by both the planning-phase write gate and plannotator_submit_plan.

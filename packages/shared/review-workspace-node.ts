@@ -11,6 +11,7 @@ import {
   parsePatchPathToken,
 } from "./diff-paths";
 import { validateFilePath } from "./review-core";
+import { getFileBrowserMaxFiles } from "./resolve-file";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -174,15 +175,21 @@ function compareDirentsByName(a: Dirent, b: Dirent): number {
   return 0;
 }
 
+interface WorkspaceScanState {
+  visitedRealPaths: Set<string>;
+  readonly limit: number;
+}
+
 function collectWorkspaceRepos(
   root: string,
   current: string,
-  visitedRealPaths: Set<string>,
+  state: WorkspaceScanState,
   results: string[],
 ): void {
+  if (state.visitedRealPaths.size >= state.limit) return;
   const realPath = resolveDirectoryRealPath(current);
-  if (!realPath || visitedRealPaths.has(realPath)) return;
-  visitedRealPaths.add(realPath);
+  if (!realPath || state.visitedRealPaths.has(realPath)) return;
+  state.visitedRealPaths.add(realPath);
 
   let entries: Dirent[];
   try {
@@ -197,9 +204,10 @@ function collectWorkspaceRepos(
   }
 
   for (const entry of entries) {
+    if (state.visitedRealPaths.size >= state.limit) return;
     if (SKIP_DIRS.has(entry.name)) continue;
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    collectWorkspaceRepos(root, resolve(current, entry.name), visitedRealPaths, results);
+    collectWorkspaceRepos(root, resolve(current, entry.name), state, results);
   }
 }
 
@@ -210,11 +218,22 @@ function collectWorkspaceRepos(
  * retained for labels and file routing. Each canonical directory is traversed
  * at most once, so cycles and duplicate aliases cannot duplicate repositories.
  * Unreadable, broken, and non-directory entries are ignored.
+ *
+ * The walk visits at most `PLANNOTATOR_FILE_BROWSER_MAX_FILES` directories.
+ * Symlinks may legitimately lead outside the workspace root (that is how
+ * symlinked repos are discovered), so a link into a huge unrelated tree cannot
+ * be fenced by path — the visit budget is what keeps discovery from scanning
+ * indefinitely before the server starts.
  */
 export function discoverWorkspaceRepoPaths(root: string): string[] {
   const resolvedRoot = resolve(root);
   const results: string[] = [];
-  collectWorkspaceRepos(resolvedRoot, resolvedRoot, new Set<string>(), results);
+  collectWorkspaceRepos(
+    resolvedRoot,
+    resolvedRoot,
+    { visitedRealPaths: new Set<string>(), limit: getFileBrowserMaxFiles() },
+    results,
+  );
   return results.sort();
 }
 

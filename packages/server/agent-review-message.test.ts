@@ -286,6 +286,16 @@ describe("getLocalDiffInstruction", () => {
 });
 
 describe("buildClaudeCommand", () => {
+  test("defaults to Opus 5 when the caller passes no model", () => {
+    const command = buildClaudeCommand("review").command;
+    expect(command[command.indexOf("--model") + 1]).toBe("claude-opus-5");
+  });
+
+  test("still honours an explicitly requested model", () => {
+    const command = buildClaudeCommand("review", "claude-sonnet-5").command;
+    expect(command[command.indexOf("--model") + 1]).toBe("claude-sonnet-5");
+  });
+
   test("allows read-only JJ commands", () => {
     const command = buildClaudeCommand("review").command;
     const allowedTools = command[command.indexOf("--allowedTools") + 1];

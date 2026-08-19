@@ -106,7 +106,9 @@ Images are stored as temporary files and referenced by name in the feedback sent
 
 ## Agent switching (OpenCode)
 
-OpenCode users can configure which agent receives the approved plan. Set this in Settings — choose from available agents or enter a custom agent name. If the configured agent isn't found, Plannotator shows a warning before approval.
+OpenCode users can configure which agent receives the approved plan. By default, approved plans are handed off to the build agent. See [Agent switching settings](/docs/getting-started/ui-settings/#agent-switching).
+
+If the configured agent isn't found in the current OpenCode session, Plannotator logs a warning and shows a warning toast, then omits the agent switch so the current/default OpenCode flow continues.
 
 ## Server API
 

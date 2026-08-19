@@ -15,6 +15,7 @@ import {
 
 export {
   WorkspaceReviewSession,
+  isRepoRelative,
   mapRepoDiffTypeToWorkspaceMode,
   mapWorkspaceModeToRepoDiffType,
   resolveWorkspaceInitialDiffType,

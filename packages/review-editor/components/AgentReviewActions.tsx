@@ -40,6 +40,7 @@ export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
         onClick={onExit}
         disabled={busy}
         isLoading={isExiting}
+        labelBreakpoint="lg"
       />
 
       {hasAnnotations && (
@@ -51,6 +52,7 @@ export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
           shortLabel="Send"
           loadingLabel="Sending..."
           title="Send feedback"
+          labelBreakpoint="lg"
         />
       )}
 
@@ -61,6 +63,7 @@ export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
           isLoading={isApproving}
           dimmed={totalAnnotationCount > 0}
           title="Approve - no changes needed"
+          labelBreakpoint="lg"
         />
         {totalAnnotationCount > 0 && (
           <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vim UX smoke fixture</title>
+  <style>
+    body {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 48px 32px;
+      font: 17px/1.6 system-ui, sans-serif;
+      color: #d9dce5;
+      background: #171923;
+    }
+    code, pre {
+      font-family: ui-monospace, monospace;
+    }
+    pre {
+      padding: 20px;
+      border-radius: 12px;
+      background: #222633;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px 12px;
+      border: 1px solid #3b4050;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Keyboard review fixture</h1>
+    <p>
+      Reviewers can move by <strong>document structure</strong>, refine into
+      exact words, and annotate without reaching for the mouse.
+    </p>
+    <section>
+      <h2>Runtime policy</h2>
+      <pre><code>const retryLimit = 3;
+const timeoutMs = 1_500;
+const endpoint = "wss://example.test";</code></pre>
+      <p>The retry limit should stay conservative during rollout.</p>
+    </section>
+    <table>
+      <thead>
+        <tr><th>Setting</th><th>Value</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>retryLimit</td><td>3</td></tr>
+        <tr><td>timeoutMs</td><td>1,500 ms</td></tr>
+      </tbody>
+    </table>
+    <label>
+      Native note
+      <input value="Typing here must stay native">
+    </label>
+    <button type="button">Native action</button>
+  </main>
+</body>
+</html>

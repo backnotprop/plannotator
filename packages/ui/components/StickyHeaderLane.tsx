@@ -27,7 +27,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnnotationToolstrip } from './AnnotationToolstrip';
 import { DocBadges } from './DocBadges';
-import { useScrollViewport } from '../hooks/useScrollViewport';
+import {
+  getScrollViewportIntersectionRoot,
+  useScrollViewport,
+} from '../hooks/useScrollViewport';
 import type { EditorMode, InputMethod } from '../types';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
 
@@ -69,6 +72,9 @@ interface StickyHeaderLaneProps {
   isPlanDiffActive?: boolean;
   hasPreviousVersion?: boolean;
   onPlanDiffToggle?: () => void;
+  /** Baseline suffix + tooltip for the plan-diff badge (see DocBadges). */
+  planDiffBaselineLabel?: string;
+  planDiffBaselineTooltip?: string;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
 
   // Layout
@@ -94,6 +100,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   isPlanDiffActive,
   hasPreviousVersion,
   onPlanDiffToggle,
+  planDiffBaselineLabel,
+  planDiffBaselineTooltip,
   archiveInfo,
   maxWidth,
   remountToken,
@@ -167,7 +175,11 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     if (!sentinelRef.current || !scrollViewport) return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsStuck(!entry.isIntersecting),
-      { root: scrollViewport, rootMargin: '80px 0px 0px 0px', threshold: 0 }
+      {
+        root: getScrollViewportIntersectionRoot(scrollViewport),
+        rootMargin: '80px 0px 0px 0px',
+        threshold: 0,
+      }
     );
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
@@ -251,6 +263,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
             isPlanDiffActive={isPlanDiffActive}
             hasPreviousVersion={hasPreviousVersion}
             onPlanDiffToggle={onPlanDiffToggle}
+            planDiffBaselineLabel={planDiffBaselineLabel}
+            planDiffBaselineTooltip={planDiffBaselineTooltip}
             archiveInfo={archiveInfo}
           />
         </div>

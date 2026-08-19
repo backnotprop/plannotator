@@ -23,6 +23,11 @@ These are local-only scripts for launching Plannotator UI flows with fixture dat
 
 See [UI-TESTING.md](../docs/UI-TESTING.md) for detailed UI testing documentation.
 
+The end-to-end, user-centered Vim controls matrix lives in
+[manual/vim-ux-smoke.md](manual/vim-ux-smoke.md). It covers real Markdown and
+raw-HTML navigation, selection, annotation, focus recovery, HUD behavior, and
+native-control compatibility.
+
 ## Integration & Utility Tests (`manual/local/`)
 
 These scripts test integrations, releases, and provide utilities.

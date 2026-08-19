@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FAVICON_PNG_DATA_URL } from '@plannotator/core/favicon';
+import { copyTextToClipboard } from '../../utils/clipboard';
 
 interface HooksStatus {
   pfmReminder: { enabled: boolean };
@@ -22,7 +23,8 @@ const CopyPathButton: React.FC<{ filePath: string }> = ({ filePath }) => {
   const [copied, setCopied] = useState(false);
 
   const copy = () => {
-    navigator.clipboard.writeText(filePath).then(() => {
+    void copyTextToClipboard(filePath).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });

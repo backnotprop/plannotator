@@ -149,10 +149,11 @@ export function StackedPRLabel({
       <Popover.Trigger
         render={
           <button
+            data-pn-touch-target
             type="button"
             disabled={isSwitchingScope}
             title={`Stack: comparing vs ${scopeTarget}`}
-            className="text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 py-0.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+            className="h-7 text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
           />
         }
       >
@@ -174,7 +175,7 @@ export function StackedPRLabel({
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="start" sideOffset={6} className="z-50">
-          <Popover.Popup className="w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
+          <Popover.Popup className="w-[min(20rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-border rounded shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
           {/* Section 1: Stack Tree */}
           <div className="px-3 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
@@ -188,6 +189,7 @@ export function StackedPRLabel({
               </span>
               {showToggle && (
                 <button
+                  data-pn-touch-target
                   type="button"
                   onClick={toggleHideMerged}
                   title={hideMerged ? 'Show merged PRs' : 'Hide merged PRs'}
@@ -225,6 +227,7 @@ export function StackedPRLabel({
                       }`} />
                     </div>
                     <button
+                      data-pn-touch-target
                       type="button"
                       disabled={disabled}
                       onClick={() => handleNodeClick(node)}
@@ -271,6 +274,7 @@ export function StackedPRLabel({
             </div>
             {layerOption && (
               <button
+                data-pn-touch-target
                 type="button"
                 disabled={!layerOption.enabled || isSwitchingScope}
                 onClick={() => handleSelect('layer')}
@@ -297,6 +301,7 @@ export function StackedPRLabel({
             )}
             {fullStackOption && (
               <button
+                data-pn-touch-target
                 type="button"
                 disabled={!fullStackOption.enabled || isSwitchingScope}
                 onClick={() => handleSelect('full-stack')}

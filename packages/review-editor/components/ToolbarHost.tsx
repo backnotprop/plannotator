@@ -12,11 +12,14 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { SuggestionModal } from './SuggestionModal';
+import { ExpandedCommentDialog } from './ExpandedCommentDialog';
 import { getEnabledLabels } from './ConventionalLabelPicker';
 import type { AIChatEntry } from '../hooks/useAIChat';
+import { formatLineRange, formatTokenContext } from '../utils/formatLineRange';
 
 export interface ToolbarHostHandle {
   handleLineSelectionEnd: (range: SelectedLineRange | null) => void;
+  openLineAnnotation: (range: SelectedLineRange) => void;
   handleTokenClick: (props: DiffTokenEventBaseProps, event: MouseEvent) => void;
   startEdit: (annotation: CodeAnnotation) => void;
 }
@@ -43,7 +46,7 @@ interface ToolbarHostProps {
     conventionalLabel?: ConventionalLabel | null,
     decorations?: ConventionalDecoration[],
   ) => void;
-  // AI props (optional — only DiffViewer wires these today)
+  // AI props (optional — DiffViewer and external source-selection bridges wire these)
   aiAvailable?: boolean;
   onAskAI?: (question: string) => void;
   isAILoading?: boolean;
@@ -97,17 +100,59 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     ref,
     () => ({
       handleLineSelectionEnd: toolbar.handleLineSelectionEnd,
+      openLineAnnotation: toolbar.openLineAnnotation,
       handleTokenClick: toolbar.handleTokenClick,
       startEdit: toolbar.startEdit,
     }),
-    [toolbar.handleLineSelectionEnd, toolbar.handleTokenClick, toolbar.startEdit],
+    [toolbar.handleLineSelectionEnd, toolbar.openLineAnnotation, toolbar.handleTokenClick, toolbar.startEdit],
   );
 
   const handleCloseCodeModal = useCallback(() => toolbar.setShowCodeModal(false), [toolbar.setShowCodeModal]);
+  const handleCollapseCommentModal = useCallback(() => {
+    if (toolbar.expandedComposerRequired) {
+      toolbar.handleDismiss();
+      return;
+    }
+    toolbar.setShowCommentModal(false);
+  }, [toolbar.expandedComposerRequired, toolbar.handleDismiss, toolbar.setShowCommentModal]);
+  const handleCancelCommentModal = useCallback(() => {
+    toolbar.setShowCommentModal(false);
+    toolbar.handleCancel();
+  }, [toolbar.handleCancel, toolbar.setShowCommentModal]);
+  const handleEditSuggestion = useCallback(() => {
+    if (!toolbar.suggestedCode && toolbar.selectedOriginalCode) {
+      toolbar.setSuggestedCode(toolbar.selectedOriginalCode);
+    }
+    toolbar.setShowCommentModal(false);
+    toolbar.setShowCodeModal(true);
+  }, [
+    toolbar.selectedOriginalCode,
+    toolbar.setShowCodeModal,
+    toolbar.setShowCommentModal,
+    toolbar.setSuggestedCode,
+    toolbar.suggestedCode,
+  ]);
+  const handleExpandedAskAI = useCallback((question: string) => {
+    if (!onAskAI) return;
+    onAskAI(question);
+    toolbar.setCommentText('');
+    toolbar.setAskAIMode(true);
+    toolbar.setShowCommentModal(false);
+  }, [onAskAI, toolbar.setAskAIMode, toolbar.setCommentText, toolbar.setShowCommentModal]);
+
+  const expandedCommentTitle = useMemo(() => {
+    const toolbarState = toolbar.toolbarState;
+    if (!toolbarState) return 'Comment';
+    if (toolbar.editingAnnotationId) return 'Edit annotation';
+    if (toolbarState.tokenSelection) return formatTokenContext(toolbarState.tokenSelection);
+    return formatLineRange(toolbarState.range.start, toolbarState.range.end);
+  }, [toolbar.editingAnnotationId, toolbar.toolbarState]);
+
+  const canSubmitAnnotation = toolbar.commentText.trim().length > 0 || toolbar.suggestedCode.trim().length > 0;
 
   return (
     <>
-      {toolbar.toolbarState && !toolbar.showCodeModal && (
+      {toolbar.toolbarState && !toolbar.showCodeModal && !toolbar.showCommentModal && (
         <AnnotationToolbar
           toolbarState={toolbar.toolbarState}
           toolbarRef={toolbar.toolbarRef}
@@ -118,7 +163,10 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
           showSuggestedCode={toolbar.showSuggestedCode}
           setShowSuggestedCode={toolbar.setShowSuggestedCode}
           selectedOriginalCode={toolbar.selectedOriginalCode}
+          askAIMode={toolbar.askAIMode}
+          setAskAIMode={toolbar.setAskAIMode}
           setShowCodeModal={toolbar.setShowCodeModal}
+          setShowCommentModal={toolbar.setShowCommentModal}
           isEditing={!!toolbar.editingAnnotationId}
           onSubmit={toolbar.handleSubmitAnnotation}
           onDismiss={toolbar.handleDismiss}
@@ -134,6 +182,25 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
           isAILoading={isAILoading}
           onViewAIResponse={onViewAIResponse}
           aiHistoryMessages={aiHistoryMessages}
+        />
+      )}
+
+      {toolbar.toolbarState && toolbar.showCommentModal && (
+        <ExpandedCommentDialog
+          title={expandedCommentTitle}
+          commentText={toolbar.commentText}
+          setCommentText={toolbar.setCommentText}
+          isEditing={!!toolbar.editingAnnotationId}
+          canSubmit={canSubmitAnnotation}
+          aiAvailable={aiAvailable && !toolbar.editingAnnotationId}
+          onAskAI={handleExpandedAskAI}
+          onSubmit={toolbar.handleSubmitAnnotation}
+          onCollapse={handleCollapseCommentModal}
+          onCancel={handleCancelCommentModal}
+          autoFocus={!toolbar.expandedComposerRequired}
+          collapsible={!toolbar.expandedComposerRequired}
+          onEditSuggestion={toolbar.expandedComposerRequired ? handleEditSuggestion : undefined}
+          hasSuggestedCode={toolbar.suggestedCode.trim().length > 0}
         />
       )}
 

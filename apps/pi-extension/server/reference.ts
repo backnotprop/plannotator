@@ -14,21 +14,21 @@ import {
 import type { ServerResponse } from "node:http";
 import { join, resolve as resolvePath } from "node:path";
 
-import { json, parseBody } from "./helpers";
+import { json, parseBody } from "./helpers.ts";
 import type { IncomingMessage } from "node:http";
 
 import {
 	type VaultNode,
 	buildFileTree,
 	isFileBrowserExcludedPath,
-} from "../generated/reference-common.js";
+} from "../generated/reference-common.ts";
 import {
 	filterWorkspaceStatusForDirectory,
 	getWorkspaceStatusForDirectory,
 	getWorkspaceStatusRelativePaths,
 	type WorkspaceFileChange,
-} from "../generated/workspace-status.js";
-import { detectObsidianVaults } from "../generated/integrations-common.js";
+} from "../generated/workspace-status.ts";
+import { detectObsidianVaults } from "../generated/integrations-common.ts";
 import {
 	isAbsoluteUserPath,
 	isCodeFilePath,
@@ -37,19 +37,40 @@ import {
 	resolveUserPath,
 	isWithinProjectRoot,
 	warmFileListCache,
-} from "../generated/resolve-file.js";
-import { parseCodePath } from "../generated/code-file.js";
-import { htmlToMarkdown } from "../generated/html-to-markdown.js";
-import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.js";
+	getAnnotatableDocRegex,
+	MAX_ANNOTATABLE_FILE_BYTES,
+	isAnnotatableTextPath,
+} from "../generated/resolve-file.ts";
+import { parseCodePath } from "../generated/code-file.ts";
+import { htmlToMarkdown } from "../generated/html-to-markdown.ts";
+import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "../generated/source-save.ts";
 import {
 	createSourceSaveCapability,
 	createSourceSaveCapabilityFromSnapshot,
 	readSourceFileSnapshot,
 	resolveExistingSourceSaveFile,
-} from "../generated/source-save-node.js";
+} from "../generated/source-save-node.ts";
+import type { AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { preloadFile } from "@pierre/diffs/ssr";
 
+/**
+ * Subset of AnnotateHistoryResult the folder /api/doc path actually needs.
+ * `diffCurrent` is omitted: it always equals the request's own `content` and
+ * the client never reads it off this response (the single-file /api/plan
+ * payload still returns the full AnnotateHistoryResult, `diffCurrent`
+ * included, for legacy shape parity — see serverAnnotate.ts). Mirrors
+ * packages/server/reference-handlers.ts.
+ */
+export type FolderAnnotateHistory = Omit<AnnotateHistoryResult, "diffCurrent">;
+
 type Res = ServerResponse;
+
+// History eligibility for folder /api/doc documents is `isAnnotatableTextPath`
+// (ANNOTATABLE_TEXT_REGEX in @plannotator/core/annotatable) — the exact set the
+// single-file pipeline snapshots (.md/.mdx/.txt plus the plain-text config
+// formats; no HTML, no .env). Reusing the canonical predicate keeps cross-mode
+// slug continuity: a .yaml with single-file history must diff when opened via
+// its folder too. Mirrors packages/server/reference-handlers.ts.
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
@@ -57,6 +78,22 @@ export interface HandleDocOptions {
 	sourceSaveFolderPath?: string;
 	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
+	/**
+	 * When set, /api/doc runs annotate's per-file version-history pipeline for
+	 * eligible markdown-branch documents (local file under an allowed root,
+	 * any annotatable plain-text extension per `isAnnotatableTextPath`, not
+	 * HTML, not a converted doc, under the annotatable size cap already
+	 * enforced above) and merges `previousPlan`/`versionInfo` into the
+	 * response — the same field names the single-file /api/plan payload uses
+	 * (which additionally returns `diffCurrent`; the folder path omits it
+	 * since it always equals the document's own content and the client never
+	 * reads it). `compute` is expected to memoize per resolved path itself
+	 * (the annotate server keys its cache by path in its own closure); this
+	 * module only decides *whether* to call it.
+	 */
+	annotateHistory?: {
+		compute: (resolvedFilePath: string, content: string) => FolderAnnotateHistory | null;
+	};
 }
 
 interface HandleDocExistsOptions {
@@ -91,6 +128,33 @@ function getTrustedBaseDir(base: string | null, roots: string[]): string | null 
 	if (!base) return null;
 	const resolvedBase = resolveUserPath(base);
 	return isWithinAllowedRoots(resolvedBase, roots) ? resolvedBase : null;
+}
+
+export type ResolveAllowedDocPathResult =
+	| { kind: "resolved"; path: string }
+	| { kind: "denied" };
+
+/**
+ * Resolve a client-supplied path the same way /api/doc's base-relative and
+ * absolute branches do (see `getTrustedBaseDir` / `isWithinAllowedRoots`
+ * above), for callers that need the canonical contained path without
+ * reading the file — namely the annotate version endpoints, which derive a
+ * history slug from the resolved path rather than trusting a client-supplied
+ * slug (a client slug would be a path-traversal vector: the history dir
+ * lookup joins it into a filesystem path unsanitized). Mirrors
+ * packages/server/reference-handlers.ts.
+ */
+export function resolveAllowedDocPath(
+	requestedPath: string,
+	base: string | null,
+	options?: { rootPaths?: string[] },
+): ResolveAllowedDocPathResult {
+	const allowedRoots = getAllowedRootPaths(options);
+	const resolvedBase = getTrustedBaseDir(base, allowedRoots);
+	const candidate = resolveUserPath(requestedPath, resolvedBase ?? undefined);
+	return isWithinAllowedRoots(candidate, allowedRoots)
+		? { kind: "resolved", path: candidate }
+		: { kind: "denied" };
 }
 
 function relativizeToAllowedRoots(path: string, roots: string[]): string {
@@ -157,11 +221,17 @@ function resolveMarkdownFileFromAllowedRoots(input: string, roots: string[]): Ro
 	return { kind: "not_found", input };
 }
 
+type DocOptionsResult<T> = T & {
+	sourceSave?: SourceSaveCapability;
+	previousPlan?: string | null;
+	versionInfo?: AnnotateHistoryResult["versionInfo"];
+};
+
 function applyDocOptions<T extends Record<string, unknown>>(
 	data: T,
 	options: HandleDocOptions = {},
 	sourceSnapshot?: SourceFileSnapshot,
-): T & { sourceSave?: SourceSaveCapability } {
+): DocOptionsResult<T> {
 	const next: Record<string, unknown> = { ...data };
 	if (
 		typeof next.rawHtml === "string" &&
@@ -170,16 +240,37 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	) {
 		next.rawHtml = options.rewriteHtml(next.rawHtml, next.filepath);
 	}
+	// Annotate version history (folder mode only — see HandleDocOptions.annotateHistory).
+	// Independent of the sourceSave branching below: only markdown-branch
+	// documents (not HTML, not converted) with an annotatable plain-text
+	// extension are eligible — the same set the single-file pipeline
+	// snapshots. The 2MB annotatable-file size cap is already enforced by the
+	// caller before any of these responses are built, so no separate check is
+	// needed here. Mirrors packages/server/reference-handlers.ts.
+	if (
+		options.annotateHistory &&
+		typeof data.filepath === "string" &&
+		data.renderAs === "markdown" &&
+		data.isConverted !== true &&
+		typeof data.markdown === "string" &&
+		isAnnotatableTextPath(data.filepath)
+	) {
+		const history = options.annotateHistory.compute(data.filepath, data.markdown);
+		if (history) {
+			next.previousPlan = history.previousPlan;
+			next.versionInfo = history.versionInfo;
+		}
+	}
 	if (typeof data.filepath !== "string") {
-		return options.sourceSaveFolderPath || options.sourceSaveFilePath
-			? { ...next, sourceSave: disabledSourceSave("not-local-file") } as T & { sourceSave?: SourceSaveCapability }
-			: next as T & { sourceSave?: SourceSaveCapability };
+		return (options.sourceSaveFolderPath || options.sourceSaveFilePath
+			? { ...next, sourceSave: disabledSourceSave("not-local-file") }
+			: next) as DocOptionsResult<T>;
 	}
 	if (data.renderAs === "html") {
-		return { ...next, sourceSave: disabledSourceSave("html-render") } as T & { sourceSave?: SourceSaveCapability };
+		return { ...next, sourceSave: disabledSourceSave("html-render") } as DocOptionsResult<T>;
 	}
 	if (data.isConverted === true) {
-		return { ...next, sourceSave: disabledSourceSave("converted-source") } as T & { sourceSave?: SourceSaveCapability };
+		return { ...next, sourceSave: disabledSourceSave("converted-source") } as DocOptionsResult<T>;
 	}
 	if (options.sourceSaveFilePath) {
 		const sourcePath = resolveExistingSourceSaveFile("single-file", options.sourceSaveFilePath);
@@ -188,10 +279,10 @@ function applyDocOptions<T extends Record<string, unknown>>(
 			: createSourceSaveCapability("single-file", data.filepath);
 		if (sourcePath && doc.enabled && sourcePath === doc.path) {
 			options.onSourceDocumentServed?.(doc.path);
-			return { ...next, sourceSave: doc } as T & { sourceSave?: SourceSaveCapability };
+			return { ...next, sourceSave: doc } as DocOptionsResult<T>;
 		}
 	}
-	if (!options.sourceSaveFolderPath) return next as T & { sourceSave?: SourceSaveCapability };
+	if (!options.sourceSaveFolderPath) return next as DocOptionsResult<T>;
 	const sourceSave = sourceSnapshot
 		? createSourceSaveCapabilityFromSnapshot("folder-file", data.filepath, sourceSnapshot, options.sourceSaveFolderPath)
 		: createSourceSaveCapability("folder-file", data.filepath, options.sourceSaveFolderPath);
@@ -199,7 +290,7 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	return {
 		...next,
 		sourceSave,
-	} as T & { sourceSave?: SourceSaveCapability };
+	} as DocOptionsResult<T>;
 }
 
 function jsonDoc(
@@ -212,10 +303,12 @@ function jsonDoc(
 	json(res, applyDocOptions(data, options, sourceSnapshot), status);
 }
 
-/** Recursively walk a directory collecting files by extension, skipping ignored dirs. */
-const FILE_BROWSER_EXTENSIONS = /\.(mdx?|txt|html?)$/i;
-
-function walkMarkdownFiles(dir: string, root: string, results: string[], extensions: RegExp = FILE_BROWSER_EXTENSIONS): void {
+/**
+ * Recursively walk a directory collecting files by extension, skipping ignored
+ * dirs. The default matcher is resolved per call, not captured at module load:
+ * it includes the user's configured extra markdown extensions (#1307).
+ */
+function walkMarkdownFiles(dir: string, root: string, results: string[], extensions: RegExp = getAnnotatableDocRegex()): void {
 	let entries: Dirent[];
 	try {
 		entries = readdirSync(dir, { withFileTypes: true }) as Dirent[];
@@ -237,7 +330,7 @@ function walkMarkdownFiles(dir: string, root: string, results: string[], extensi
 }
 
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
-	return FILE_BROWSER_EXTENSIONS.test(relativePath) && !isFileBrowserExcludedPath(relativePath);
+	return getAnnotatableDocRegex().test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
 /** Serve a linked markdown document. Uses shared resolveMarkdownFile for parity with Bun server. */
@@ -258,10 +351,18 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	const base = url.searchParams.get("base");
 	const resolvedBase = getTrustedBaseDir(base, allowedRoots);
 	const convert = url.searchParams.get("convert") === "1";
+	// `?doc=1` (set by the file browser) forces annotatable plain-text rendering
+	// for extensions that overlap CODE_FILE_REGEX (.yaml, .json, .toml, .ini,
+	// .xml). Without it, those paths keep the syntax-highlighted code-file
+	// popout response, so code-file links inside documents are unaffected.
+	const forceDoc = url.searchParams.get("doc") === "1";
+	const docExtensions = getAnnotatableDocRegex();
+	const wantsDocRender = (path: string) =>
+		docExtensions.test(path) && (forceDoc || !isCodeFilePath(path));
 	if (
 		resolvedBase &&
 		!isAbsoluteUserPath(requestedPath) &&
-		/\.(mdx?|txt|html?)$/i.test(requestedPath)
+		wantsDocRender(requestedPath)
 	) {
 		const fromBase = resolveUserPath(requestedPath, resolvedBase);
 		if (!isWithinAllowedRoots(fromBase, allowedRoots)) {
@@ -270,6 +371,10 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 		}
 		try {
 			if (existsSync(fromBase)) {
+				if (statSync(fromBase).size > MAX_ANNOTATABLE_FILE_BYTES) {
+					json(res, { error: "File too large (max 2MB)" }, 413);
+					return;
+				}
 				const snapshot = readSourceFileSnapshot(fromBase);
 				const raw = snapshot.text;
 				const isHtml = /\.html?$/i.test(requestedPath);
@@ -316,7 +421,10 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	}
 
 	// Code files: try literal resolve first; on miss, fall back to smart resolver.
-	if (isCodeFilePath(requestedPath)) {
+	// Skipped when the client asked for doc rendering (`?doc=1`) on an
+	// annotatable plain-text path — those fall through to the markdown
+	// resolution below and render like .txt.
+	if (isCodeFilePath(requestedPath) && !(forceDoc && isAnnotatableTextPath(requestedPath))) {
 		const parsed = parseCodePath(requestedPath);
 		const cleanPath = parsed.filePath;
 		const literalPath = resolveUserPath(cleanPath, resolvedBase || projectRoot);
@@ -354,7 +462,7 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 
 		try {
 			const stat = statSync(resolvedCode);
-			if (stat.size > 2 * 1024 * 1024) {
+			if (stat.size > MAX_ANNOTATABLE_FILE_BYTES) {
 				json(res, { error: "File too large (max 2MB)" }, 413);
 				return;
 			}
@@ -407,6 +515,10 @@ export async function handleDocRequest(res: Res, url: URL, options: HandleDocOpt
 	}
 
 	try {
+		if (statSync(result.path).size > MAX_ANNOTATABLE_FILE_BYTES) {
+			json(res, { error: "File too large (max 2MB)" }, 413);
+			return;
+		}
 		const snapshot = readSourceFileSnapshot(result.path);
 		jsonDoc(res, { markdown: snapshot.text, filepath: result.path, renderAs: "markdown" }, options, undefined, snapshot);
 	} catch {

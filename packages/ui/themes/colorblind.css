@@ -1,0 +1,89 @@
+/* Colorblind — tuned for red-green color vision deficiency (protanopia /
+ * deuteranopia, the common ~95% of CVD). Additions are blue, deletions are
+ * orange: the pair differs along the blue-yellow axis that survives red-green
+ * dichromacy. Diff pair verified with Machado et al. (2009) severity-1.0
+ * simulation: simulated add/del line backgrounds stay at CIEDE2000 >= 8.9
+ * across every diffLineBgIntensity (subtle/normal/strong) in both modes, and
+ * the theme foreground keeps >= 4.7:1 WCAG contrast over the strongest tint.
+ *
+ * --diffs-addition-color-override / --diffs-deletion-color-override are
+ * @pierre/diffs' theme-override entry points; custom properties inherit into
+ * the diff shadow DOM, so defining them here recolors the review editor's
+ * line backgrounds, gutter +/- signs, indicator bars, and per-file counts
+ * without any app-code changes. Plan-diff views and file-tree +/- follow
+ * --success / --destructive, which map to the same pair. */
+.theme-colorblind {
+  --background: #16181d;
+  --foreground: #eaedf2;
+  --card: #1c1f26;
+  --card-foreground: #eaedf2;
+  --popover: #22262e;
+  --popover-foreground: #eaedf2;
+  --primary: #7fb0f2;
+  --primary-foreground: #10131a;
+  --secondary: #2a2e37;
+  --secondary-foreground: #dfe3ea;
+  --muted: #232730;
+  --muted-foreground: #a7aeba;
+  --accent: #e5b84a;
+  --accent-foreground: #16181d;
+  --destructive: #c96e12;
+  --destructive-foreground: #16181d;
+  --border: #343945;
+  --input: #232730;
+  --ring: #7fb0f2;
+  --success: #4f83d1;
+  --success-foreground: #10131a;
+  --warning: #d9a839;
+  --warning-foreground: #16181d;
+
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #1d212a;
+  --focus-highlight: #35b6d9;
+
+  /* Review-editor diff pair (Pierre pipeline). */
+  --diffs-addition-color-override: #4f83d1;
+  --diffs-deletion-color-override: #c96e12;
+}
+
+.theme-colorblind.light {
+  --background: #f8f9fb;
+  --foreground: #22262e;
+  --card: #ffffff;
+  --card-foreground: #22262e;
+  --popover: #ffffff;
+  --popover-foreground: #22262e;
+  --primary: #1a63b8;
+  --primary-foreground: #ffffff;
+  --secondary: #e7eaef;
+  --secondary-foreground: #333a45;
+  --muted: #eceef3;
+  --muted-foreground: #565e6b;
+  --accent: #946300;
+  --accent-foreground: #ffffff;
+  --destructive: #a55c1e;
+  --destructive-foreground: #ffffff;
+  --border: #d8dce3;
+  --input: #eceef3;
+  --ring: #1a63b8;
+  --success: #216cab;
+  --success-foreground: #ffffff;
+  --warning: #8f6400;
+  --warning-foreground: #ffffff;
+
+  --code-bg: #eef0f4;
+  --focus-highlight: #0e7d9e;
+
+  --diffs-addition-color-override: #216cab;
+  --diffs-deletion-color-override: #a55c1e;
+}
+
+/* Code-block token colours are no longer hand-written here. Plan-editor fences
+ * are highlighted by the same Shiki instance, in the same resolved theme, as
+ * the code-review diff pane — for this palette that is @pierre/theme's
+ * `pierre-{dark,light}-protanopia-deuteranopia`, which is exactly what the
+ * removed highlight.js `.hljs-*` overrides were approximating by hand. */
+

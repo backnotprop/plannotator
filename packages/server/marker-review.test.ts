@@ -106,6 +106,26 @@ describe("buildMarkerCommand: cursor", () => {
     expect(buildMarkerCommand(cursor, "p", undefined, "/repo").command).not.toContain("--model");
     expect(buildMarkerCommand(cursor, "p").command).not.toContain("--workspace");
   });
+
+  test("cursorSandbox: false omits the --sandbox pair entirely (escape hatch)", () => {
+    const { command } = buildMarkerCommand(cursor, "review this", "gpt-5", "/repo", { cursorSandbox: false });
+    expect(command).not.toContain("--sandbox");
+    // The pair is OMITTED, never flipped to `--sandbox disabled`.
+    expect(command).not.toContain("enabled");
+    expect(command).not.toContain("disabled");
+    // The rest of the read-only posture is unchanged.
+    expect(command[command.indexOf("--mode") + 1]).toBe("ask");
+    expect(command).not.toContain("--force");
+    expect(command).not.toContain("--yolo");
+    expect(command[command.length - 1]).toBe("review this");
+  });
+
+  test("cursorSandbox: true and undefined keep --sandbox enabled (default)", () => {
+    const explicit = buildMarkerCommand(cursor, "p", "gpt-5", "/repo", { cursorSandbox: true }).command;
+    expect(explicit[explicit.indexOf("--sandbox") + 1]).toBe("enabled");
+    const omitted = buildMarkerCommand(cursor, "p", "gpt-5", "/repo", {}).command;
+    expect(omitted[omitted.indexOf("--sandbox") + 1]).toBe("enabled");
+  });
 });
 
 describe("buildMarkerCommand: opencode", () => {

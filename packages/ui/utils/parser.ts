@@ -1,11 +1,82 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
+import { skillReferenceExportBlock } from './skillReferences';
 
 /**
  * Parsed YAML frontmatter as key-value pairs.
  */
 export interface Frontmatter {
   [key: string]: string | string[];
+}
+
+/** Number of leading whitespace characters on a line. */
+function indentWidth(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
+/** Strip the common leading indentation shared by all non-empty lines. */
+function dedentLines(lines: string[]): string[] {
+  const indents = lines.filter((l) => l !== '').map(indentWidth);
+  const minIndent = indents.length ? Math.min(...indents) : 0;
+  return lines.map((l) => (l === '' ? '' : l.slice(minIndent)));
+}
+
+/**
+ * Fold YAML `>`-style scalar lines: adjacent non-empty lines join with a
+ * single space, and a run of N blank lines between paragraphs folds to N
+ * newlines.
+ */
+function foldScalarLines(lines: string[]): string {
+  let text = '';
+  let started = false;
+  let blanks = 0;
+  for (const l of lines) {
+    if (l === '') {
+      blanks++;
+      continue;
+    }
+    if (!started) {
+      text = l;
+      started = true;
+    } else {
+      text += blanks > 0 ? '\n'.repeat(blanks) : ' ';
+      text += l;
+    }
+    blanks = 0;
+  }
+  return text;
+}
+
+/**
+ * Parse a YAML block scalar (`|` literal keeps newlines / `>` folded joins
+ * with spaces) whose body is the run of lines below `bodyStart` indented
+ * deeper than `keyIndent`. Trailing blank lines are dropped and chomping
+ * indicators are treated as strip. Returns the value and the index of the
+ * last line the scalar consumed.
+ */
+function parseBlockScalar(
+  lines: string[],
+  bodyStart: number,
+  keyIndent: number,
+  folded: boolean,
+): { value: string; endIndex: number } {
+  const body: string[] = [];
+  let j = bodyStart;
+  for (; j < lines.length; j++) {
+    // CRLF sources split on '\n' leave a trailing '\r' that would otherwise
+    // survive into the folded value (every other parser path trims lines).
+    const bodyLine = lines[j].replace(/\r$/, '');
+    if (bodyLine.trim() === '') {
+      body.push('');
+      continue;
+    }
+    if (indentWidth(bodyLine) <= keyIndent) break; // dedent ends the block
+    body.push(bodyLine);
+  }
+  const dedented = dedentLines(body);
+  while (dedented.length && dedented[dedented.length - 1] === '') dedented.pop();
+  const value = (folded ? foldScalarLines(dedented) : dedented.join('\n')).trim();
+  return { value, endIndex: j - 1 };
 }
 
 /**
@@ -44,8 +115,10 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
   let currentKey: string | null = null;
   let currentArray: string[] | null = null;
 
-  for (const line of frontmatterRaw.split('\n')) {
-    const trimmedLine = line.trim();
+  const lines = frontmatterRaw.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmedLine = rawLine.trim();
 
     // Array item (- value)
     if (trimmedLine.startsWith('- ') && currentKey) {
@@ -64,6 +137,27 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
       currentKey = trimmedLine.slice(0, colonIndex).trim();
       const value = trimmedLine.slice(colonIndex + 1).trim();
       currentArray = null;
+
+      // Block scalar: `|` (literal, keep newlines) or `>` (folded, join with
+      // spaces), each with optional chomping indicator (`-`/`+`). The value
+      // spans the following lines indented deeper than the key, e.g.
+      //   description: >-
+      //     line one
+      //     line two
+      // Without this, the indicator (">-") was stored verbatim and the body
+      // silently dropped.
+      const blockScalar = value.match(/^([|>])[+-]?$/);
+      if (blockScalar) {
+        const { value: scalarValue, endIndex } = parseBlockScalar(
+          lines,
+          i + 1,
+          indentWidth(rawLine),
+          blockScalar[1] === '>',
+        );
+        frontmatter[currentKey] = scalarValue;
+        i = endIndex;
+        continue;
+      }
 
       if (value) {
         frontmatter[currentKey] = value;
@@ -101,16 +195,372 @@ const VOID_HTML_TAGS: ReadonlySet<string> = new Set([
 
 const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
 
+export interface ParseMarkdownOptions {
+  /**
+   * Strip a leading `--- ... ---` pair as frontmatter (default true).
+   * Pass false for non-markdown plain-text sources (.yaml/.json/.txt/…)
+   * where the delimiters are real content — a multi-document YAML starts
+   * with them (see shouldStripFrontmatter in @plannotator/core/annotatable).
+   */
+  frontmatter?: boolean;
+}
+
+// CommonMark bounds a link label to 999 characters. Reusing that bound here
+// also caps the worst-case backtracking cost of the bracket-matching groups
+// below to a constant per starting position, turning a document with a very
+// long run of unmatched `[` characters (a real hazard within the 2MB annotate
+// cap) into a linear scan instead of a quadratic one. A label longer than
+// this is a deliberate, documented degradation: it is neither collected as a
+// definition nor resolved as a reference, so it is simply left untouched
+// rather than partially or incorrectly rewritten.
+const MAX_REF_LABEL_CHARS = 999;
+// Same reasoning applied to the inline-code-span alternative: bounding how far
+// a lazy scan for a closing backtick run can travel keeps a line with many
+// stray, unterminated backticks linear too. 5000 is far beyond any realistic
+// inline code span, so legitimate spans are unaffected.
+const MAX_CODE_SPAN_CHARS = 5000;
+// Defense-in-depth cap on the number of definitions collected from a single
+// document. A pathological document could otherwise grow the map without
+// bound; this keeps that growth bounded even though ordinary documents never
+// approach it.
+const MAX_TRACKED_DEFINITIONS = 20_000;
+
+// A link reference definition: `[label]: destination "optional title"`, with up
+// to three leading spaces. The destination is a bare token or an <...> form; any
+// trailing text must be a quoted or parenthesized title, otherwise the line is
+// ordinary prose (so `[Reminder]: call the bank` is NOT a definition). Matches
+// the CommonMark shape closely enough for the simplified parser. `\r?` before
+// the end anchor tolerates a CRLF source (lines are split on `\n` only, so a
+// CRLF line keeps its trailing `\r`).
+const REFERENCE_DEFINITION_RE = new RegExp(
+  `^ {0,3}\\[([^\\]]{1,${MAX_REF_LABEL_CHARS}})\\]:[ \\t]*(?:<([^>]*)>|(\\S+))[ \\t]*(?:"[^"]*"|'[^']*'|\\([^)]*\\))?[ \\t]*\\r?$`,
+);
+
+// One left-to-right pass over a line. The first alternative matches a whole
+// inline code span (balanced backtick run) so its contents are skipped; the
+// second matches a reference link/image: optional `!`, the bracketed text, then
+// an optional second bracket for the full (`[label]`) or collapsed (`[]`) forms.
+// A bare `[text]` is the shortcut form, resolved only when it names a definition
+// and is not actually an inline link. Groups: 1 code ticks, 2 `!`, 3 text,
+// 4 second bracket, 5 label.
+const REFERENCE_LINK_RE = new RegExp(
+  `(\`+)[^\\n]{0,${MAX_CODE_SPAN_CHARS}}?\\1|(!?)\\[([^\\]]{1,${MAX_REF_LABEL_CHARS}})\\](\\[([^\\]]{0,${MAX_REF_LABEL_CHARS}})\\])?`,
+  'g',
+);
+
+// CommonMark label matching is case-insensitive and collapses internal runs of
+// whitespace.
+const normalizeRefLabel = (label: string): string =>
+  label.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * One pass over the lines that marks every line the block parser (below) will
+ * render as code or raw HTML — fenced code blocks and HTML blocks — so link
+ * reference definitions and references inside them are left completely
+ * untouched. This reuses the exact same conditions the block parser itself
+ * uses (not a looser approximation), so the two can never disagree about
+ * where code/HTML starts and ends:
+ *
+ * - Fences: `trimmed.startsWith('```')` after a full `.trim()` — the block
+ *   parser has no minimum-indent exemption, so ANY indentation (a fence
+ *   nested inside a list item, or simply indented 4+ spaces) still opens a
+ *   code block, and this must too. Only backtick fences are recognized —
+ *   the block parser has no `~~~` support, so this doesn't either (a `~~~`
+ *   line is ordinary text to both).
+ * - Raw HTML blocks: the same `HTML_BLOCK_OPEN_RE`/`HTML_BLOCK_TAGS`/
+ *   `VOID_HTML_TAGS` the block parser uses, with the same three extents
+ *   (blank-line termination for a leading close tag, single-line for void
+ *   tags, balanced-depth scanning otherwise) — so a definition sitting
+ *   inside `<details>…</details>` or `<pre>…</pre>` is protected exactly as
+ *   far as the block parser's own HTML block extends.
+ */
+/**
+ * Per-tag-name index backing `findHtmlBlockEnd`. `augmented` is the running
+ * open-tag-count-minus-close-tag-count prefix sum for this tag name, with a
+ * virtual baseline of 0 prepended at index 0 — so `augmented[k]` is the sum
+ * through line `k-1` (the depth baseline a block opening at line `k` must
+ * return to) and `augmented[k+1]` is the sum through line `k`.
+ * `nextAtOrBelow[m]` is the classic "next element at or below this one"
+ * index over `augmented`: the smallest `m' > m` with `augmented[m'] <=
+ * augmented[m]`, or -1 if none exists.
+ */
+interface TagCloseIndex {
+  augmented: number[];
+  nextAtOrBelow: number[];
+}
+
+/**
+ * Builds a `TagCloseIndex` for one tag name in a single O(N) pass (plus a
+ * classic O(N) monotonic-stack pass for `nextAtOrBelow` — each index is
+ * pushed and popped at most once, so the two passes together are linear in
+ * the document's line count, independent of how many opening/closing tags
+ * it contains).
+ */
+function buildTagCloseIndex(lines: string[], tagName: string): TagCloseIndex {
+  const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
+  const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
+  const n = lines.length;
+  const augmented = new Array<number>(n + 1);
+  augmented[0] = 0;
+  let running = 0;
+  for (let k = 0; k < n; k++) {
+    running += (lines[k].match(openRe) || []).length;
+    running -= (lines[k].match(closeRe) || []).length;
+    augmented[k + 1] = running;
+  }
+  const nextAtOrBelow = new Array<number>(n + 1).fill(-1);
+  const stack: number[] = [];
+  for (let m = n; m >= 0; m--) {
+    while (stack.length && augmented[stack[stack.length - 1]] > augmented[m]) stack.pop();
+    nextAtOrBelow[m] = stack.length ? stack[stack.length - 1] : -1;
+    stack.push(m);
+  }
+  return { augmented, nextAtOrBelow };
+}
+
+/**
+ * Shared helper computing the last line index of a balanced open/close-tag
+ * HTML block that opens at `startIndex` with the given already-computed
+ * `depth` (the opening line's own open-tag count minus close-tag count).
+ * Used by both `markProtectedLines` (the resolver's protection pass) and
+ * `parseMarkdownToBlocks` (the block parser) so the two can never disagree
+ * about a multi-line HTML block's extent, and so a fix here lives in exactly
+ * one place instead of two copies drifting apart.
+ *
+ * History: naively scanning line-by-line from `startIndex` until depth
+ * returns to zero (or giving up at end-of-document) is O(N^2) for a
+ * document with many consecutive unclosed openers (e.g. thousands of bare
+ * `<div>` lines), since every one of them re-scans to EOF. A first fix
+ * added an O(1) "does a close exist anywhere" pre-check plus a fixed
+ * line-count cap on the residual scan — but that cap silently truncated
+ * VALID blocks longer than it, and removing the cap alone reopened a
+ * closely related O(N^2) case: N unclosed openers followed by a SINGLE
+ * trailing close still all pass the "a close exists somewhere" pre-check,
+ * so every one of them still scans forward (mostly to EOF) before giving up.
+ *
+ * Fixed properly here with a per-tag-name prefix-sum index
+ * (`buildTagCloseIndex`, O(N), built once per tag name and cached per
+ * document — see `closeCache`): finding "the exact line where a block
+ * starting at `startIndex` closes, if ever" is exactly the classic "next
+ * smaller-or-equal element" query against that prefix sum, which the index
+ * answers in O(1). No scanning happens per opener at all — not for a block
+ * that never closes, not for one that closes after any number of
+ * intervening lines, however many. This is provably linear overall (a
+ * document with T distinct protected tag names costs O(T * N) to index,
+ * and T is bounded by the small, fixed `HTML_BLOCK_TAGS` set) and can never
+ * truncate a valid block, because it always finds the block's real end
+ * (however far away) rather than giving up at a fixed distance.
+ *
+ * Returns `startIndex` unchanged when the block never closes: depth <= 0,
+ * or the running depth never returns to exactly zero anywhere in the rest
+ * of the document (whether because no close exists at all, or one exists
+ * but is insufficient to bring the count back to exactly the opener's own
+ * baseline — e.g. an unbalanced/self-closing tag).
+ */
+function findHtmlBlockEnd(
+  lines: string[],
+  startIndex: number,
+  tagName: string,
+  depth: number,
+  closeCache: Map<string, TagCloseIndex>,
+): number {
+  if (depth <= 0) return startIndex;
+  let index = closeCache.get(tagName);
+  if (!index) {
+    index = buildTagCloseIndex(lines, tagName);
+    closeCache.set(tagName, index);
+  }
+  const { augmented, nextAtOrBelow } = index;
+  const m = nextAtOrBelow[startIndex];
+  if (m === -1) return startIndex;
+  return augmented[m] === augmented[startIndex] ? m - 1 : startIndex;
+}
+
+const markProtectedLines = (lines: string[]): boolean[] => {
+  const isProtected = new Array<boolean>(lines.length).fill(false);
+  let fenceLen = 0; // 0 = not currently inside a fence
+  const closeCache = new Map<string, TagCloseIndex>();
+  for (let i = 0; i < lines.length; i++) {
+    if (fenceLen > 0) {
+      isProtected[i] = true;
+      if (new RegExp('^\\s*`{' + fenceLen + ',}').test(lines[i])) fenceLen = 0;
+      continue;
+    }
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('```')) {
+      fenceLen = trimmed.match(/^`+/)![0].length;
+      isProtected[i] = true;
+      continue;
+    }
+    const htmlTagMatch = trimmed.match(HTML_BLOCK_OPEN_RE);
+    if (htmlTagMatch && HTML_BLOCK_TAGS.has(htmlTagMatch[1].toLowerCase())) {
+      const tagName = htmlTagMatch[1].toLowerCase();
+      const isCloseTag = trimmed.startsWith('</');
+      isProtected[i] = true;
+      if (isCloseTag) {
+        while (i + 1 < lines.length && lines[i + 1].trim() !== '') {
+          i++;
+          isProtected[i] = true;
+        }
+      } else if (VOID_HTML_TAGS.has(tagName)) {
+        while (!lines[i].includes('>') && i + 1 < lines.length && lines[i + 1].trim() !== '') {
+          i++;
+          isProtected[i] = true;
+        }
+      } else {
+        const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
+        const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
+        const depth = (lines[i].match(openRe) || []).length - (lines[i].match(closeRe) || []).length;
+        const end = findHtmlBlockEnd(lines, i, tagName, depth, closeCache);
+        if (end > i) {
+          for (let idx = i + 1; idx <= end; idx++) isProtected[idx] = true;
+          i = end;
+        }
+      }
+    }
+  }
+  return isProtected;
+};
+
+/** Resolve reference links/images in one non-code, non-HTML line. A single
+ * left-to-right pass: an inline code span is matched as a whole and returned
+ * verbatim, so a reference-looking pattern inside backticks is never
+ * rewritten; only bracketed references outside code are resolved. Every label
+ * that actually resolves against a definition is recorded into `usedLabels`,
+ * so the caller can tell a genuinely consumed definition from an unused one. */
+const resolveRefsInLine = (
+  line: string,
+  defs: Map<string, string>,
+  usedLabels: Set<string>,
+): string => {
+  if (!line.includes('[')) return line;
+  return line.replace(
+    REFERENCE_LINK_RE,
+    (match, codeTicks, bang, text, secondBracket, label, offset: number, whole: string) => {
+      if (codeTicks !== undefined) return match; // inline code span: keep verbatim
+      let refLabel: string;
+      if (secondBracket === undefined) {
+        // Shortcut `[text]`: not a link when an inline `(...)` destination
+        // follows (that is an inline link the existing renderer already draws).
+        if (whole[offset + match.length] === '(') return match;
+        // Nor when it is a task-list checkbox marker at the start of a list
+        // item (`- [x]`); the checkbox parser owns that `[x]`, and resolving it
+        // against a stray `x`/`X` definition would clobber the item.
+        if (/^[ xX]$/.test(text) && /^\s*(?:[-*+]|\d+[.)])\s+$/.test(whole.slice(0, offset))) {
+          return match;
+        }
+        refLabel = text;
+      } else {
+        refLabel = label === '' ? text : label;
+      }
+      const normalized = normalizeRefLabel(refLabel);
+      const dest = defs.get(normalized);
+      // An unknown reference stays literal, matching CommonMark and avoiding
+      // false links for bracketed prose like `[TODO]` or array indices.
+      if (!dest) return match;
+      usedLabels.add(normalized);
+      return `${bang}[${text}](${dest})`;
+    },
+  );
+};
+
+/**
+ * Resolve CommonMark link reference definitions and reference links into inline
+ * `[text](url)` links, so the shared inline renderer draws them instead of
+ * showing raw `[text][id]` and `[id]: url` text (issue #923). Definitions and
+ * references inside fenced code blocks, raw HTML blocks, and inline code spans
+ * are left untouched. A definition-shaped line is only ever blanked when its
+ * label was actually consumed by a resolved reference outside a protected
+ * region — an unused definition, or one referenced only from inside code/HTML,
+ * stays visible exactly as written. Blanked lines keep block start-line
+ * numbers accurate (and their own CRLF ending, so line endings round-trip).
+ * GFM footnote definitions (`[^label]: ...`) are never treated as link
+ * definitions. No-op (returns the input) when the document defines no
+ * (non-footnote) references.
+ */
+export const resolveReferenceLinks = (markdown: string): string => {
+  if (!markdown.includes('[')) return markdown;
+  const lines = markdown.split('\n');
+  const isProtected = markProtectedLines(lines);
+  const defs = new Map<string, string>();
+  // The normalized label a definition-shaped line defines, or null if the
+  // line isn't a definition (or is a footnote definition, which is never
+  // collected/blanked).
+  const defLabelByLine = new Array<string | null>(lines.length).fill(null);
+  // A definition cannot interrupt a paragraph (CommonMark 4.7): a line matching
+  // the definition shape is only a definition when it can start a block, i.e.
+  // the previous line is the document start, blank, a protected code/HTML
+  // line (each is its own block), or itself a definition. Otherwise the line
+  // is paragraph continuation text and must be left untouched, or a bare
+  // `[word]: token` under a sentence would be silently deleted.
+  let canStartDefinition = true;
+  for (let i = 0; i < lines.length; i++) {
+    if (isProtected[i]) {
+      canStartDefinition = true;
+      continue;
+    }
+    const blank = lines[i].trim() === '';
+    const match = canStartDefinition && !blank ? lines[i].match(REFERENCE_DEFINITION_RE) : null;
+    if (match) {
+      const rawLabel = match[1];
+      // GFM footnote definition ([^label]: ...) — not a link reference
+      // definition. Leave it out of `defs` entirely so it can never be
+      // collected, blanked, or accidentally satisfy a footnote reference's
+      // lookup; it stays block-starting like any other definition line.
+      if (!rawLabel.startsWith('^') && defs.size < MAX_TRACKED_DEFINITIONS) {
+        const label = normalizeRefLabel(rawLabel);
+        const dest = match[2] !== undefined ? match[2] : match[3];
+        // First definition wins, per CommonMark.
+        if (label && dest && !defs.has(label)) defs.set(label, dest);
+        defLabelByLine[i] = label;
+      }
+      // A run of definitions stays eligible; canStartDefinition remains true.
+    } else {
+      // Blank keeps a new block startable; any other non-definition line starts
+      // (or continues) a paragraph, so a following definition-shaped line is text.
+      canStartDefinition = blank;
+    }
+  }
+  if (defs.size === 0) return markdown;
+  const usedLabels = new Set<string>();
+  // Resolve references first; definition-shaped lines are passed through
+  // unresolved (never fed to resolveRefsInLine) so a definition's own
+  // `[label]` can never be mistaken for a reference to itself.
+  const resolved = lines.map((line, i) =>
+    isProtected[i] || defLabelByLine[i] !== null ? line : resolveRefsInLine(line, defs, usedLabels),
+  );
+  return resolved
+    .map((line, i) => {
+      const label = defLabelByLine[i];
+      if (label === null || !usedLabels.has(label)) return line;
+      // Blank in place, preserving this line's own CRLF ending if it had one.
+      return line.endsWith('\r') ? '\r' : '';
+    })
+    .join('\n');
+};
+
 /**
  * A simplified markdown parser that splits content into linear blocks.
  * For a production app, we would use a robust AST walker (remark),
  * but for this demo, we want predictable text-anchoring.
  */
-export const parseMarkdownToBlocks = (markdown: string): Block[] => {
-  const { content: cleanMarkdown, contentStartLine } = extractFrontmatter(markdown);
+export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownOptions): Block[] => {
+  const { content: rawContent, contentStartLine } =
+    options?.frontmatter === false
+      ? { content: markdown, contentStartLine: 1 }
+      : extractFrontmatter(markdown);
+  // Resolve link reference definitions into inline links before splitting. This
+  // blanks definition lines in place, so line count (and every block's
+  // startLine) is preserved.
+  const cleanMarkdown = resolveReferenceLinks(rawContent);
   const lines = cleanMarkdown.split('\n');
   const blocks: Block[] = [];
   let currentId = 0;
+  // Cache for findHtmlBlockEnd's per-tag-name prefix-sum index — scoped per
+  // parse call (per document) and shared across every HTML-block opener
+  // encountered below, so a document with many consecutive openers of the
+  // same tag only pays its one-time O(N) build cost once.
+  const htmlCloseCache = new Map<string, TagCloseIndex>();
 
   let buffer: string[] = [];
   let currentType: Block['type'] = 'paragraph';
@@ -501,23 +951,15 @@ export const parseMarkdownToBlocks = (markdown: string): Block[] => {
         const openRe = new RegExp(`<${tagName}(?:\\s|>|/|$)`, 'gi');
         const closeRe = new RegExp(`</${tagName}\\s*>`, 'gi');
         const depth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
-        if (depth > 0) {
-          // Scan ahead for the matching close tag. If none is ever found — a
-          // self-closing <video/>, or an unclosed <picture>/<div> — do NOT swallow
-          // the rest of the document into this block; keep it to the opening line.
-          let j = i;
-          let d = depth;
-          const scanned: string[] = [];
-          while (d > 0 && j + 1 < lines.length) {
-            j++;
-            scanned.push(lines[j]);
-            d += (lines[j].match(openRe) || []).length;
-            d -= (lines[j].match(closeRe) || []).length;
-          }
-          if (d === 0) {
-            i = j;
-            for (const s of scanned) htmlLines.push(s);
-          }
+        // Scan ahead for the matching close tag via the shared, bounded/
+        // linear helper (see its doc comment for why a naive per-opener scan
+        // is quadratic). If none is ever found — a self-closing <video/>, or
+        // an unclosed <picture>/<div> — do NOT swallow the rest of the
+        // document into this block; keep it to the opening line.
+        const end = findHtmlBlockEnd(lines, i, tagName, depth, htmlCloseCache);
+        if (end > i) {
+          for (let k = i + 1; k <= end; k++) htmlLines.push(lines[k]);
+          i = end;
         }
       }
 
@@ -656,6 +1098,32 @@ const blockEndLine = (block: Block): number => {
 
 /** Resolve the source-line label for a single annotation.
  *  Returns null for global comments, diff-view annotations, or missing blocks. */
+/** Multi-target raw-HTML comments: list every ADDITIONAL element the one
+ *  comment covers (the primary target is already quoted as `originalText`),
+ *  labeled with the semantic hover label plus a short excerpt so the agent
+ *  reading the feedback sees every referenced element. Emits nothing for
+ *  single-target annotations, keeping their output byte-identical. */
+const additionalTargetsExportBlock = (ann: any): string => {
+  const targets = ann?.htmlAdditionalTargets;
+  if (!Array.isArray(targets) || targets.length === 0) return '';
+  // Leading blank line: the preceding comment line is a `> blockquote`, and
+  // markdown lazy continuation would otherwise fold this block into it.
+  let block = `\n**Also applies to ${targets.length} more element${targets.length > 1 ? 's' : ''}:**\n`;
+  targets.forEach((target: any) => {
+    // Labels and texts are page-controlled (aria-label etc.). The DTO
+    // boundary already collapses label whitespace; do it here again (defense
+    // in depth) so persisted pre-fix data can never smuggle newlines — and
+    // with them fake markdown structure — into agent-read feedback.
+    const rawLabel = typeof target?.label === 'string' ? target.label.replace(/\s+/g, ' ').trim() : '';
+    const label = rawLabel ? `[${rawLabel}] ` : '';
+    const raw = typeof target?.text === 'string' ? target.text : '';
+    const excerpt = raw.replace(/\s+/g, ' ').trim();
+    const clipped = excerpt.length > 120 ? `${excerpt.slice(0, 120)}…` : excerpt;
+    block += `- ${label}"${clipped}"\n`;
+  });
+  return block;
+};
+
 const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   if (!ann.blockId || ann.type === 'GLOBAL_COMMENT') return null;
   if (typeof ann.blockId === 'string' && ann.blockId.startsWith('diff-block-')) return null;
@@ -686,6 +1154,10 @@ export const exportAnnotations = (
     return a.startOffset - b.startOffset;
   });
 
+  // One injection per export: a human-only skill referenced by several
+  // comments has its instructions injected once (see skillReferenceExportBlock).
+  const injectedSkills = new Set<string>();
+
   let output = `# ${title}\n\n`;
 
   if (opts.sourceConverted) {
@@ -706,8 +1178,40 @@ export const exportAnnotations = (
     output += `I've reviewed this ${subject} and have ${annotations.length} piece${annotations.length > 1 ? 's' : ''} of feedback:\n\n`;
   }
 
-  sortedAnns.forEach((ann, index) => {
-    output += `## ${index + 1}. `;
+  // Live app sessions stamp annotations with the page they were made on.
+  // When any exported annotation carries a pageUrl, entries are grouped under
+  // per-page headings in order of first appearance; annotations without one
+  // (e.g. globals) come first under no heading. Numbers stay GLOBAL: each
+  // entry keeps the number of its position in the ungrouped order, matching
+  // the on-page marker numbering, so grouped sections may show
+  // non-contiguous numbers. With no pageUrl anywhere the output is
+  // byte-identical to the ungrouped export.
+  const hasPageGroups = sortedAnns.some(
+    (a: any) => typeof a.pageUrl === 'string' && a.pageUrl.length > 0,
+  );
+  const annotationNumbers = new Map<any, number>(
+    sortedAnns.map((ann, index) => [ann, index + 1]),
+  );
+  let emitOrder = sortedAnns;
+  if (hasPageGroups) {
+    const unpaged = sortedAnns.filter((a: any) => !a.pageUrl);
+    const pageOrder: string[] = [];
+    for (const ann of sortedAnns) {
+      if (ann.pageUrl && !pageOrder.includes(ann.pageUrl)) pageOrder.push(ann.pageUrl);
+    }
+    emitOrder = [
+      ...unpaged,
+      ...pageOrder.flatMap((page) => sortedAnns.filter((a: any) => a.pageUrl === page)),
+    ];
+  }
+
+  let lastEmittedPage: string | null = null;
+  emitOrder.forEach((ann) => {
+    if (hasPageGroups && ann.pageUrl && ann.pageUrl !== lastEmittedPage) {
+      output += `### Page: ${ann.pageUrl}\n\n`;
+      lastEmittedPage = ann.pageUrl;
+    }
+    output += `## ${annotationNumbers.get(ann)}. `;
 
     // Add diff context label if annotation was created in diff view
     if (ann.diffContext) {
@@ -740,6 +1244,17 @@ export const exportAnnotations = (
         output += `General feedback about the ${subject}\n`;
         output += `> ${ann.text}\n`;
         break;
+    }
+
+    // Multi-target raw-HTML comments list every additional covered element.
+    output += additionalTargetsExportBlock(ann);
+
+    // Skill references in the comment text (no-op unless a catalog is
+    // registered). An annotation carrying a `source` arrived through the
+    // external-annotations API, not from the reviewer — it may list skills
+    // but must never cause a human-only skill's instructions to be injected.
+    if (!ann.isQuickLabel) {
+      output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
     }
 
     // Add attached images for this annotation
@@ -785,6 +1300,9 @@ export const exportLinkedDocAnnotations = (
   docAnnotations: Map<string, LinkedDocAnnotationEntry>
 ): string => {
   let output = `\n# Linked Document Feedback\n\nThe following feedback is on documents referenced in the plan.\n\n`;
+
+  // One injection per export, across all linked documents.
+  const injectedSkills = new Set<string>();
 
   for (const [filepath, { annotations, globalAttachments, blocks: docBlocks, isConverted }] of docAnnotations) {
     if (annotations.length === 0 && globalAttachments.length === 0) continue;
@@ -832,6 +1350,12 @@ export const exportLinkedDocAnnotations = (
           break;
       }
 
+      // Multi-target raw-HTML comments list every additional covered element.
+      output += additionalTargetsExportBlock(ann);
+
+      // External (tool-sourced) comments list skills but never inject.
+      output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
+
       if (ann.images && ann.images.length > 0) {
         output += `**Attached images:**\n`;
         ann.images.forEach((img: ImageAttachment) => {
@@ -875,6 +1399,8 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
   if (annotations.length === 0) return '';
 
   let output = `\n# Code File Feedback\n\nThe following feedback is on code files referenced from the reviewed document.\n\n`;
+  // One injection per export, across all code-file comments.
+  const injectedSkills = new Set<string>();
   const sorted = [...annotations].sort((a, b) => {
     if (a.filePath !== b.filePath) return a.filePath.localeCompare(b.filePath);
     if (a.lineStart !== b.lineStart) return a.lineStart - b.lineStart;
@@ -893,6 +1419,8 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
     if (ann.text) {
       output += `> ${ann.text}\n`;
     }
+    // External (tool-sourced) comments list skills but never inject.
+    output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
     if (ann.images && ann.images.length > 0) {
       output += `**Attached images:**\n`;
       ann.images.forEach((img) => {

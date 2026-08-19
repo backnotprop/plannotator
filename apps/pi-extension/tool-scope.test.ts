@@ -1,48 +1,40 @@
 import { describe, expect, test } from "bun:test";
 import {
-	getToolsForPhase,
+	applyPhaseTools,
 	isPlanWritePathAllowed,
-	PLAN_SUBMIT_TOOL,
-	stripPlanningOnlyTools,
-} from "./tool-scope";
+	releasePhaseTools,
+} from "./tool-scope.ts";
 
 describe("pi plan tool scoping", () => {
-	test("planning phase adds the submit tool and discovery helpers", () => {
-		expect(getToolsForPhase(["read", "bash", "edit", "write"], "planning")).toEqual([
-			"read",
-			"bash",
-			"edit",
-			"write",
-			"grep",
-			"find",
-			"ls",
-			PLAN_SUBMIT_TOOL,
-		]);
+	test("adds configured phase tools without replacing the active tools", () => {
+		expect(
+			applyPhaseTools(["inspect", "search"], [], ["search", "submit_plan"]),
+		).toEqual({
+			activeTools: ["inspect", "search", "submit_plan"],
+			addedTools: ["submit_plan"],
+		});
 	});
 
-	test("idle and executing phases strip the planning-only submit tool", () => {
-		const leakedTools = ["read", "bash", "grep", PLAN_SUBMIT_TOOL, "write"];
-
-		expect(getToolsForPhase(leakedTools, "idle")).toEqual([
-			"read",
-			"bash",
-			"grep",
-			"write",
-		]);
-		expect(getToolsForPhase(leakedTools, "executing")).toEqual([
-			"read",
-			"bash",
-			"grep",
-			"write",
-		]);
+	test("changes phases without restoring tools removed by another extension", () => {
+		expect(
+			applyPhaseTools(
+				["inspect", "external_new", "submit_plan"],
+				["submit_plan", "missing_phase_tool"],
+				["execution_progress"],
+			),
+		).toEqual({
+			activeTools: ["inspect", "external_new", "execution_progress"],
+			addedTools: ["execution_progress"],
+		});
 	});
 
-	test("stripping planning-only tools preserves unrelated tools", () => {
-		expect(stripPlanningOnlyTools([PLAN_SUBMIT_TOOL, "todo", "question", "read"])).toEqual([
-			"todo",
-			"question",
-			"read",
-		]);
+	test("releases only tools added by the phase", () => {
+		expect(
+			releasePhaseTools(
+				["inspect", "external_new", "execution_progress"],
+				["execution_progress", "already_removed"],
+			),
+		).toEqual(["inspect", "external_new"]);
 	});
 });
 

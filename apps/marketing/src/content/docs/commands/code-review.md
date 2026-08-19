@@ -124,6 +124,25 @@ The review UI shows your changes in a familiar diff format:
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
 
+### Optional analysis layers
+
+Open **Settings → Analysis** to control Semantic Changes and Call Flow independently. A one-time review welcome presents the same two switches side by side. Disabling either layer avoids its analysis work and leaves the ordinary patch unchanged.
+
+**Semantic Changes** summarizes added, modified, moved, and deleted named entities. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and requires Node.js 22 or newer. Its toggle names the current review's languages and estimated footprint; enabling it consents to one background install of the roughly 5 MB pruned core plus only the needed grammar packs. A later missing language does not block installed ones: affected files are listed as skipped while support installs automatically, and analysis refreshes in the same session. Each target gets one automatic attempt per review session; failed targets expose a quiet Retry in the panel. When enabled, Call Flow appears in two places:
+
+- **Dock** — switch between expandable entry-path trees with source navigation and CallDiff's exact, copyable raw output.
+- **Lens** — a compact `flow N` badge in each impacted file header, opening the complete inferred entry trees that contain a changed call in that file, plus a link to the full Dock.
+
+In either structured tree, use the comment action on a changed call to open Plannotator's ordinary code-review annotation toolbar without leaving Call Flow. The resulting file-and-line annotation appears in the diff and sidebar and follows the normal feedback and hosted-review submission path. Unchanged context rows remain available for navigation but cannot become inline diff comments.
+
+The Dock and every Lens share one snapshot-bound result. CallDiff provenance is available from the Dock's info control rather than occupying the primary analysis heading.
+
+The Dock's compact **Languages** detail lists cumulative installed size plus every supported family's installed state and estimated pruned size. It supports install-ahead-of-need; per-pack removal is not available in this version.
+
+For working-tree modes, Plannotator creates temporary synthetic Git commits from the already-visible patch; it never stages files or changes the source repository. Before the worker starts, the server maps changed extensions to installed packs and gives CallDiff an exact snapshot path set for those language families. Analysis cannot install packages: its grammar cache is the verified managed store and npm is blocked in the worker. The result is snapshot-bound, cached per review, and discarded if the underlying review changes while it runs.
+
+Call Flow is syntactic and does not resolve types, imports, runtime dispatch, or data flow. It currently requires a local Git checkout and is unavailable for multi-repository workspace reviews, GitButler committed views, jj, P4, and the baseline-free All Files mode.
+
 ### Panel views
 
 The left panel has three views. The header toggle is session-scoped — glancing at another view never changes your saved default (that's a Settings / setup-dialog decision).
@@ -162,6 +181,14 @@ If only one provider is installed, it's used automatically with no configuration
 A Guided Review turns the changeset into an ordered, chaptered walkthrough: an agent organizes the diff into sections — the heart of the change first, consequences next, glue last — each pairing a prose overview and per-file summaries with the live, annotatable diffs it covers. Annotations made inside a guide are the same annotations as everywhere else and export in the same feedback.
 
 Open it with the **Guide** button in the review header (or `Mod+Shift+G`), pick an agent and model, and generate. Sections track a per-section "reviewed" state so you can work through a large change in order. Guides run on Claude or Codex natively, and on Cursor, OpenCode, Pi, or GitHub Copilot CLI when those binaries are installed.
+
+### Portable guides
+
+**Download portable guide** (top-right of a guide) saves the guide as one small HTML file you can send to anyone: it contains the guide, the exact diff it was generated against, and where the change came from (repo, branch, PR link, generating agent). The file renders identically to the in-app guide — same chapters, same diff viewer, syntax highlighting, light/dark — by loading the viewer from `guides.show`, so its size is roughly the size of the diff, never the app. It opens straight from disk. Without internet the file still shows the guide text and file list.
+
+The same export is available from the command line — `plannotator guide list` shows saved guides, `plannotator guide export --id <id>` writes the HTML — and `plannotator guide export --guide guide.json --patch guide.patch` wraps a guide an agent wrote itself (the standalone `plannotator-guide` skill; see [portable guide format](/docs/reference/portable-guides/)). Guides generated before this feature have no retained diff and are not exportable.
+
+**Create share link** (in the same Share menu, or `plannotator guide share`) uploads the guide and its diff once to guides.show and gives you a link instead of a file; the upload is encrypted by default with the key carried only in the link, and the one-time delete token (or **Remove link**) takes it down. See [share links](/docs/reference/portable-guides/#share-links).
 
 ## How review agents prompt the CLI
 
@@ -225,6 +252,8 @@ Runtime keys use Plannotator's runtime identifiers. For code review, the current
 | `/api/agents/capabilities` | GET | Check available agent providers |
 | `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (review, Code Tour, Guided Review) |
 | `/api/guide/:jobId` | GET | Fetch a completed Guided Review (sections, summaries, file refs) |
+| `/api/guide/:jobId/export` | GET | Download a guide (live id or `saved:{id}`) as one portable HTML file; `/export-info` returns its size and languages |
+| `/api/guide/:jobId/share` | POST/DELETE | Create a share link for a guide on the guide host (`{ public?, ttlSeconds? }`; encrypted unless `public`) or remove the recorded one; `/share-info` reports whether sharing is enabled, the host, and an existing link |
 | `/api/guide/:jobId/reviewed` | PUT | Persist per-section reviewed state |
 | `/api/code-nav/resolve` | POST | Find symbol definitions/references for code navigation |
 | `/api/code-nav/file` | GET | Read a working-tree file for code-nav preview |

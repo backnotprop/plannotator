@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { getGitDiffFingerprint, type ReviewGitRuntime } from "./review-core";
+import { join, resolve as resolvePath } from "node:path";
+import {
+  getGitDiffFingerprint,
+  MAX_REVIEW_FILE_CONTENT_BYTES,
+  type ReviewGitRuntime,
+} from "./review-core";
 
 // Real-git runtime against a throwaway repo — fingerprints are only meaningful
 // against actual VCS behavior, so no mocks.
@@ -12,6 +16,9 @@ const runtime: ReviewGitRuntime = {
       cwd: options?.cwd,
       stdout: "pipe",
       stderr: "pipe",
+      stdin: options?.stdin === undefined
+        ? "ignore"
+        : new TextEncoder().encode(options.stdin),
     });
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -23,6 +30,29 @@ const runtime: ReviewGitRuntime = {
   async readTextFile(path) {
     try {
       return await Bun.file(path).text();
+    } catch {
+      return null;
+    }
+  },
+  async getFileInfo(basePath, path) {
+    const fullPath = resolvePath(basePath ?? "", path);
+    try {
+      const fileStat = lstatSync(fullPath);
+      return {
+        path: fullPath,
+        size: fileStat.size,
+        mtimeMs: fileStat.mtimeMs,
+        isFile: fileStat.isFile(),
+        isSymbolicLink: fileStat.isSymbolicLink(),
+        isExecutable: (fileStat.mode & 0o111) !== 0,
+      };
+    } catch {
+      return null;
+    }
+  },
+  async readLink(path) {
+    try {
+      return readlinkSync(path);
     } catch {
       return null;
     }
@@ -78,6 +108,26 @@ describe("getGitDiffFingerprint", () => {
     writeFileSync(join(repo, "new.txt"), "hello world\n");
     const edited = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
     expect(edited).not.toBe(created!);
+  });
+
+  test("large untracked files use metadata without entering the JS heap", async () => {
+    const path = join(repo, "large-untracked.bin");
+    writeFileSync(path, Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 1));
+    let largeFileReads = 0;
+    const guardedRuntime: ReviewGitRuntime = {
+      ...runtime,
+      async readTextFile(requestedPath) {
+        if (requestedPath === path) largeFileReads++;
+        return runtime.readTextFile(requestedPath);
+      },
+    };
+
+    const before = await getGitDiffFingerprint(guardedRuntime, "uncommitted", "main", repo);
+    writeFileSync(path, Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 2, 1));
+    const after = await getGitDiffFingerprint(guardedRuntime, "uncommitted", "main", repo);
+
+    expect(largeFileReads).toBe(0);
+    expect(after).not.toBe(before);
   });
 
   test("uncommitted: changes when a commit lands (HEAD moves)", async () => {

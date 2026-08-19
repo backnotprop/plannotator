@@ -6,10 +6,11 @@ import type { PRContext, PRMetadata } from '@plannotator/shared/pr-types';
 interface PRSummaryTabProps {
   context: PRContext;
   metadata: PRMetadata;
+  compact?: boolean;
 }
-export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, metadata }) => {
+export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, metadata, compact = false }) => {
   return (
-    <div className="px-8 py-4 space-y-4 max-w-2xl">
+    <div className={`${compact ? 'px-4' : 'px-8'} py-4 space-y-4 max-w-2xl`}>
       {/* PR title + state */}
       <div className="space-y-2">
         <div className="flex items-start gap-2">
@@ -34,8 +35,8 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
           </a>
         </div>
 
-        <div className="text-[10px] text-muted-foreground font-mono">
-          {metadata.author} wants to merge <code className="bg-muted px-1 rounded">{metadata.headBranch}</code> into <code className="bg-muted px-1 rounded">{metadata.baseBranch}</code>
+        <div className="text-[10px] text-muted-foreground font-mono break-words">
+          {metadata.author} wants to merge <code className="bg-muted px-1 rounded break-all">{metadata.headBranch}</code> into <code className="bg-muted px-1 rounded break-all">{metadata.baseBranch}</code>
         </div>
         {metadata.defaultBranch && metadata.baseBranch !== metadata.defaultBranch && (
           <div className="inline-flex items-center gap-1.5 rounded border border-accent/20 bg-accent/10 px-2 py-1 text-[10px] text-accent">
@@ -103,4 +104,3 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
     </div>
   );
 });
-

@@ -2,19 +2,19 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { DiffType, VcsSelection } from "./server.js";
+import type { DiffType, VcsSelection } from "./server.ts";
 import {
 	getLastAssistantMessageText,
 	getRecentAssistantMessages,
-} from "./assistant-message.js";
+} from "./assistant-message.ts";
 import {
 	getStartupErrorMessage,
 	hasPlanBrowserHtml,
 	hasReviewBrowserHtml,
 	loadPlannotatorBrowser,
-} from "./plannotator-browser-runtime.js";
+} from "./plannotator-browser-runtime.ts";
 
-type PlannotatorBrowserModule = typeof import("./plannotator-browser.js");
+type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
 
 /** Start a plan-review browser session after loading the browser/server graph on demand. */
 export function startPlanReviewBrowserSession(
@@ -81,6 +81,7 @@ export function openArchiveBrowserAction(
 
 export const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request" as const;
 export const PLANNOTATOR_REVIEW_RESULT_CHANNEL = "plannotator:review-result" as const;
+export const PLANNOTATOR_PLAN_APPROVED_CHANNEL = "plannotator:plan-approved" as const;
 export const PLANNOTATOR_TIMEOUT_MS = 5_000;
 
 export type PlannotatorAction =
@@ -145,6 +146,13 @@ export interface PlannotatorReviewResultEvent {
 	savedPath?: string;
 	agentSwitch?: string;
 	permissionMode?: string;
+}
+
+export interface PlannotatorPlanApprovedEvent {
+	cwd: string;
+	planFilePath: string;
+	planContent: string;
+	feedback?: string;
 }
 
 export interface PlannotatorReviewStatusPayload {

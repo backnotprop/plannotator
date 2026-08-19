@@ -11,6 +11,7 @@ import type {
   PRContext,
   PRRuntime,
   PRReviewFileComment,
+  PRReviewSubmissionResult,
   PRStackTree,
   PRListItem,
 } from "@plannotator/shared/pr-types";
@@ -37,7 +38,7 @@ import {
   fetchPRList as fetchPRListCore,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
+export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
 export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-types";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
@@ -110,13 +111,14 @@ export function fetchPRFileContent(
   return fetchPRFileContentCore(runtime, ref, sha, filePath);
 }
 
+/** Submit a review through the Bun command runtime. */
 export function submitPRReview(
   ref: PRRef,
   headSha: string,
   action: "approve" | "comment",
   body: string,
   fileComments: PRReviewFileComment[],
-): Promise<void> {
+): Promise<PRReviewSubmissionResult> {
   return submitPRReviewCore(runtime, ref, headSha, action, body, fileComments);
 }
 

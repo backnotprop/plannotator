@@ -8,11 +8,15 @@ section: "Getting Started"
 
 Plannotator stores all settings in **cookies** rather than localStorage. This is because each hook invocation starts a server on a random port, and localStorage is scoped by origin (including port). Cookies persist across ports, so your preferences carry over between sessions.
 
-Open settings with the **gear icon** in the header. The dialog has three tabs: **General**, **Display**, and **Saving**. The code review UI shows only the General tab.
+Open settings with the **gear icon** in the header. Available tabs depend on the current surface; code review includes dedicated Git, Editor, Analysis, Comments, and AI settings alongside General and Theme.
 
 ## Theme
 
 The sun/moon toggle in the header switches between **Dark**, **Light**, and **System** themes. System follows your OS preference and updates automatically. Dark is the default.
+
+The **Theme** tab in Settings assigns a palette to each half of a pair: one theme for light mode, one for dark mode. A Light/Dark switch above the grid decides which half you are assigning, and the grid then lists only the palettes that can render it (Kanagawa Wave appears under Dark, Kanagawa Lotus under Light, and a palette that ships both variants appears under each with that mode's colors). The summary line above the grid always names both halves, and clicking either side jumps the grid to it.
+
+With **System** selected, your two choices swap as your OS switches between light and dark. All three mode buttons stay available whatever you pick, because a dark-only palette simply never occupies the light half. The pair is saved to `~/.plannotator/config.json` under `theme`, so it carries across sessions and hosts.
 
 ## General
 
@@ -38,13 +42,15 @@ On first launch, Plannotator shows a one-time setup dialog for this setting. You
 
 > OpenCode only.
 
-Controls which agent to switch to after plan approval. The dropdown is populated dynamically from your OpenCode configuration.
+Controls which agent to switch to after plan approval or after sending code review feedback. The dropdown is populated dynamically from your OpenCode configuration.
 
 | Option | Behavior |
 |--------|----------|
-| **Build** (default) | Switch to the build agent after approval |
+| **Build** | Switch to the build agent |
 | **Custom** | Enter a custom agent name (shows a warning if the agent isn't found) |
-| **Disabled** | Stay on the current agent after approval |
+| **Disabled** | Stay on the current agent |
+
+Until you pick an option, the default differs by surface: plan approval hands off to the **build** agent, and review feedback stays on the current agent. Once you pick an option it applies to both.
 
 ### Auto-close tab
 
@@ -127,6 +133,19 @@ When the agent resubmits a revised plan, a `+N/-M` badge appears showing what ch
 ## Diff style
 
 In the code review UI, a toggle in the header switches between **Split** (side-by-side) and **Unified** (single-pane) diff views. Split is the default.
+
+## Review analysis
+
+Code review's **Analysis** tab controls two independent, optional layers:
+
+- **Semantic changes** identifies changed named code entities. It is enabled by default for compatibility and can be turned off without affecting the ordinary diff.
+- **Call flow** uses CallDiff to compare inferred call trees between the review's two exact Git snapshots. It is experimental and off by default.
+
+The first code-review session shows both choices side by side in a one-time welcome; change them later in **Settings → Analysis**. Call flow's toggle is the install consent and names the current review's language support, estimated total size, and Node.js 22+ requirement.
+
+When Call Flow is enabled and supported, **Call flow** appears beside All files in the left panel. Its Dock switches between an interactive **Paths** tree and CallDiff's exact, copyable **Raw** output. The compact **flow** badge in a file header opens every complete inferred entry tree containing a changed call in that file rather than a pruned step list. Both structured surfaces navigate to source locations in the ordinary diff, and all Dock/Lens views share one snapshot-bound analysis result.
+
+Call Flow is syntactic: it does not use type resolution, runtime traces, or data-flow analysis. Treat its paths as review and navigation context, not proof that a path executes. The managed runtime requires Node.js 22 or newer and is not installed with Plannotator. First enable detects the changed languages and automatically installs the pruned core (about 5 MB on macOS arm64) plus only their grammar packs in the background. Later missing languages install automatically while installed-language analysis remains available; the skipped-files line reports progress. Each target gets one automatic attempt per review session; an install failure stays quiet and requires an explicit Retry in that session. Open the Dock's **Languages** detail to see cumulative installed size, every supported family, installed state, and estimated per-pack size, or install one ahead of need. Scripted installs can opt into the core with `--with-call-flow`, `PLANNOTATOR_INSTALL_CALLDIFF=1`, or `plannotator install-runtime call-flow`.
 
 ## Resizable panels
 

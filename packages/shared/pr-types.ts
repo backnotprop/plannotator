@@ -185,6 +185,47 @@ export interface PRReviewFileComment {
   start_side?: "LEFT" | "RIGHT";
 }
 
+/** One inline comment that GitLab did not accept, paired with its safe error text. */
+export interface PRReviewCommentFailure {
+  comment: PRReviewFileComment;
+  error: string;
+}
+
+/**
+ * Exact mutation that is safe after a partial platform submission.
+ *
+ * The review body is intentionally absent because it may already be posted.
+ */
+export interface PRReviewRetry {
+  action: "approve" | "comment";
+  fileComments: PRReviewFileComment[];
+}
+
+/** A platform review for which every requested mutation completed. */
+export interface PRReviewSubmissionComplete {
+  status: "complete";
+}
+
+/**
+ * A GitLab review that mutated the MR but did not complete every requested
+ * mutation. Callers must use `retry` instead of replaying the original review.
+ */
+export interface PRReviewSubmissionPartial {
+  status: "partial";
+  postedFileCommentCount: number;
+  failedFileComments: PRReviewCommentFailure[];
+  reviewBodyPosted: boolean;
+  approval: "not-requested" | "succeeded" | "failed";
+  approvalError?: string;
+  recoveryFile?: string;
+  retry: PRReviewRetry;
+}
+
+/** Caller-visible result of posting a review to GitHub or GitLab. */
+export type PRReviewSubmissionResult =
+  | PRReviewSubmissionComplete
+  | PRReviewSubmissionPartial;
+
 export type PRDiffScope = "layer" | "full-stack";
 
 export interface PRDiffScopeOption {

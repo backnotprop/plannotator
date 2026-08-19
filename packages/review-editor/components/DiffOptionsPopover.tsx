@@ -87,8 +87,19 @@ function CompactToggle({ checked, onChange, label }: {
   );
 }
 
-export const DiffOptionsPopover: React.FC = () => {
-  const diffStyle = useConfigValue('diffStyle');
+interface DiffOptionsPopoverProps {
+  diffStyle?: 'split' | 'unified';
+  onDiffStyleChange?: (style: 'split' | 'unified') => void;
+  compactTouchLayout?: boolean;
+}
+
+export const DiffOptionsPopover: React.FC<DiffOptionsPopoverProps> = ({
+  diffStyle: controlledDiffStyle,
+  onDiffStyleChange,
+  compactTouchLayout = false,
+}) => {
+  const storedDiffStyle = useConfigValue('diffStyle');
+  const diffStyle = controlledDiffStyle ?? storedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
   const diffLineDiffType = useConfigValue('diffLineDiffType');
@@ -104,6 +115,8 @@ export const DiffOptionsPopover: React.FC = () => {
       <Popover.Trigger
         render={
           <button
+            data-pn-touch-target
+            data-pn-touch-target-icon
             className="px-2 py-1 rounded-md text-muted-foreground hover:text-foreground transition-colors flex items-center data-popup-open:bg-background data-popup-open:text-foreground data-popup-open:shadow-sm"
             title="Diff display options"
           />
@@ -116,14 +129,21 @@ export const DiffOptionsPopover: React.FC = () => {
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner align="end" sideOffset={6} className="z-50">
-          <Popover.Popup className="w-72 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
+          <Popover.Popup
+            data-pn-compact-diff-options={compactTouchLayout || undefined}
+            className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
+          >
           <div className="p-2.5 space-y-2">
             <div className="space-y-1.5">
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-1">Layout</div>
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
-                    <CompactSegmented options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
+                    <CompactSegmented
+                      options={DIFF_STYLE_OPTIONS}
+                      value={diffStyle}
+                      onChange={onDiffStyleChange ?? ((value) => configStore.set('diffStyle', value))}
+                    />
                   </div>
                   <div className="w-px h-5 bg-border/50 flex-shrink-0" />
                   <div className="flex-1">

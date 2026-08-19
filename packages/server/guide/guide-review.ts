@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { loadConfig, resolveCursorSandbox } from "../config";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
 import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
@@ -17,15 +18,23 @@ import {
   type MarkerEngine,
   type MarkerEngineId,
 } from "../marker-review";
+import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from "@plannotator/shared/guide";
 import type {
   CodeGuideOutput,
   GuideDiffRef,
   GuideSection,
 } from "@plannotator/shared/guide";
+import type { GuideLaunchReview } from "@plannotator/shared/guide-format";
 
 export type { CodeGuideOutput, GuideDiffRef, GuideSection };
 
 export const GUIDE_EMPTY_OUTPUT_ERROR = "Guide generation returned empty or malformed output";
+
+/** Generic structural validation failure (no sections / blank overviews).
+ *  onJobComplete deliberately does NOT surface this string on the job card —
+ *  the caller substitutes GUIDE_EMPTY_OUTPUT_ERROR — whereas the informative
+ *  outside-changeset validation error passes through verbatim. */
+export const GUIDE_NO_SECTIONS_ERROR = "No sections survived validation";
 
 export const GUIDE_SCHEMA_JSON = JSON.stringify({
   type: "object",
@@ -65,6 +74,14 @@ export const GUIDE_SCHEMA_JSON = JSON.stringify({
   additionalProperties: false,
 });
 
+/**
+ * The Guided Review methodology. MIRRORED VERBATIM into the standalone
+ * `plannotator-guide` agent skill (github.com/plannotator/guides,
+ * skills/plannotator-guide/SKILL.md, section "2. Write the guide"), where only
+ * the mechanics differ (the diff is guide.patch, the output is guide.json).
+ * When this text changes, update the skill in the same change: a guide made by
+ * an agent must follow the same rules as one made in-app.
+ */
 export const GUIDE_REVIEW_PROMPT = `# Guided Review Organizer
 
 ## Identity
@@ -81,11 +98,20 @@ diff, but here is the key part" orientation a reviewer cannot get from
 reading files in path order.
 
 ## Voice
-Write like a colleague explaining the change to another capable engineer —
-at explain-like-I'm-new-here level: assume the reader is skilled but has
-never seen this codebase. Plain and direct; name things by what they do,
-expand project-specific shorthand the first time it appears, and never
-assume the reader knows the module layout.
+Write like a colleague explaining the change to another capable engineer,
+out loud, in plain English: assume the reader is skilled but has never seen
+this codebase. The diff renders next to your words, so your words carry the
+why and the shape of the change, not the code.
+- Short sentences. Twenty-five words is the ceiling and most sentences are
+  shorter. One idea per sentence. If you reach for a dash or a semicolon,
+  end the sentence instead.
+- Plain words. Say file, function, module, request, the server. Not
+  artifact, surface, primitive, chain, backbone. Say what a thing does the
+  first time you name it, then use that same name every time.
+- Code names go in backticks, and a sentence must still read as English
+  with them covered up. Two per sentence at most.
+- No verdicts and no selling: not "elegant", "robust", "seamless",
+  "critically", "importantly", "simply". State the fact.
 
 ## Speed
 You are handed the changeset directly. Reading it once, carefully, is 90%
@@ -225,8 +251,9 @@ accounted for.
   never neither.
 - Typically 2-6 sections. Never more than 10. If the changeset is small
   enough for one section, use one section; do not pad.
-- Never use em-dashes (—) anywhere in the output. Use commas, colons,
-  semicolons, parentheses, or separate sentences instead.
+- Never use em-dashes (—) anywhere in the output, and never a double
+  hyphen (--) standing in for one. Use commas, colons, or separate
+  sentences instead.
 - No emoji anywhere.
 - title: one line.
 - intent: 1-2 sentences, not a paragraph.
@@ -261,6 +288,44 @@ bugs; that is normal and expected, not a sign you did not look hard enough.
    diffs, or in unplacedFiles. Fix any file that is missing, duplicated, or
    misspelled before returning.
 8. Return structured JSON matching the schema.`;
+
+/**
+ * The guide methodology, optionally extended with reviewer-supplied extra
+ * instructions (#1265): freeform standing preferences ("prefer product
+ * vocabulary X", "never invent ticket IDs") APPENDED as a clearly delimited
+ * section, never replacing the built-in organizer prompt. Absent or blank
+ * instructions return GUIDE_REVIEW_PROMPT itself, byte-identical, so every
+ * existing prompt path is unchanged. Text beyond
+ * GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS is truncated (hygiene bound on prompt
+ * size; the launch UI caps input at the same limit).
+ */
+export function composeGuideMethodology(extraInstructions?: string): string {
+  const trimmed = extraInstructions?.trim();
+  if (!trimmed) return GUIDE_REVIEW_PROMPT;
+  const bounded = trimmed.length > GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS
+    ? trimmed.slice(0, GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS)
+    : trimmed;
+  // This section precedes the marker output contract in composed prompts,
+  // and marker nonce recovery takes the FIRST tag-shaped match in the prompt
+  // (extractMarkerNonce). A pasted example tag in the instructions would
+  // hijack recovery and fail an otherwise-valid marker run, so tag-shaped
+  // sequences are defanged before composition.
+  const defanged = bounded.replace(
+    /<\/?plannotator-review-json:pn[0-9a-f]{12}>/g,
+    "[marker tag removed]",
+  );
+  return [
+    GUIDE_REVIEW_PROMPT,
+    "",
+    "## Additional reviewer instructions",
+    "The reviewer supplied these standing preferences for this guide. Apply",
+    "them where they shape vocabulary, emphasis, or ordering judgment. They",
+    "refine the methodology above; they never override the coverage rule, the",
+    "hard constraints, the research budget, or the output schema.",
+    "",
+    defanged,
+  ].join("\n");
+}
 
 export interface GuideChangedFile {
   path: string;
@@ -447,7 +512,7 @@ export async function buildGuideCodexCommand(options: {
     "exec",
     "--output-schema", schemaPath,
     "-o", outputPath,
-    "--full-auto", "--ephemeral",
+    "--approve-for-me", "--ephemeral",
     "-C", cwd,
     prompt,
   ];
@@ -524,12 +589,13 @@ chapter over dumping it in unplacedFiles.`;
 
 /**
  * Compose a marker engine's guide prompt: the guide methodology (GUIDE_REVIEW_PROMPT,
- * unchanged from the claude/codex paths) + the marker output contract (nonce-tagged)
+ * unchanged from the claude/codex paths, plus any reviewer extra instructions
+ * via composeGuideMethodology) + the marker output contract (nonce-tagged)
  * + the user message. Mirrors composeMarkerReviewPrompt's shape; guide has no
  * custom-profile concept, so there is no "replace the methodology" branch.
  */
-export function composeGuideMarkerPrompt(userMessage: string, nonce: string): string {
-  return GUIDE_REVIEW_PROMPT + "\n\n" + buildGuideMarkerOutputContract(nonce) + "\n\n---\n\n" + userMessage;
+export function composeGuideMarkerPrompt(userMessage: string, nonce: string, extraInstructions?: string): string {
+  return composeGuideMethodology(extraInstructions) + "\n\n" + buildGuideMarkerOutputContract(nonce) + "\n\n---\n\n" + userMessage;
 }
 
 // ---------------------------------------------------------------------------
@@ -907,6 +973,10 @@ export interface GuideSessionOnJobCompleteOptions {
    * switch never invalidates an otherwise-valid guide. Only falls back to
    * the current patch when a snapshot wasn't available (defensive). */
   changedFiles: string[];
+  /** The review this guide describes, captured at LAUNCH (decision record D6).
+   *  Recorded whether or not the output validates, so a later repair or
+   *  export sees the same diff the model was given. */
+  launchReview?: GuideLaunchReview;
 }
 
 export interface GuideSession {
@@ -924,10 +994,18 @@ export interface GuideSession {
    *  section placement against, not whatever patch happens to be on screen
    *  when the reviewer gets around to fixing the JSON. */
   launchChangedFiles: Map<string, string[]>;
+  /** Launch-time review per job id (patch + labels + source). In-memory
+   *  source of truth for exporting a live guide this session; the persisted
+   *  copy (guide-store) is authoritative for `saved:` ids and after restart.
+   *  Bounded to the most recent MAX_LAUNCH_REVIEWS jobs — each entry holds a
+   *  full patch. */
+  launchReviews: Map<string, GuideLaunchReview>;
   buildCommand(opts: GuideSessionBuildCommandOptions): Promise<GuideSessionBuildCommandResult>;
   onJobComplete(opts: GuideSessionOnJobCompleteOptions): Promise<{
     summary: GuideSessionJobSummary | null;
-    /** Sanitized provider failure when transport succeeded but the Pi run did not. */
+    /** Sanitized provider failure when transport succeeded but the Pi run did
+     *  not, or an informative validation failure worth showing verbatim on
+     *  the job card (refs outside the changeset under review). */
     error?: string;
   }>;
   getGuide(jobId: string): (CodeGuideOutput & { reviewed: boolean[] }) | null;
@@ -939,6 +1017,9 @@ export interface GuideSession {
    *  the FAILED job's own recorded set, rather than from whatever diff is on
    *  screen at repair time (see the repairOf branch in buildAgentJob). */
   getLaunchChangedFiles(jobId: string): string[] | null;
+  /** Launch-time review recorded for a job id, or null. Repairs reuse the
+   *  FAILED job's review the same way they reuse its changed-file set. */
+  getLaunchReview(jobId: string): GuideLaunchReview | null;
   /** Manually submit corrected guide JSON (mechanical repair -> parse ->
    *  validateGuideOutput) for a job whose automatic output failed. Success
    *  stores under the SAME job id the reviewed state is already keyed to.
@@ -954,6 +1035,9 @@ export interface GuideSession {
  *  growing the map unbounded; a manual repair attempt on a >200KB guide
  *  output is unlikely to succeed anyway. */
 const MAX_FAILED_PAYLOAD_CHARS = 200_000;
+
+/** Launch reviews retained per session (each holds a full patch). Oldest evicted first. */
+const MAX_LAUNCH_REVIEWS = 20;
 
 /**
  * Shared validation core for guide output: sanitize the raw sections /
@@ -975,12 +1059,20 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
   const placed = new Set<string>();
   const validatedSections: GuideSection[] = [];
   const sanitizedSections = sanitizeGuideSections(output.sections);
+  // Files the model referenced that are not part of the changeset — tracked
+  // so a fully-invalidated guide can explain WHY nothing survived (typically
+  // the model guided a different commit than the one under review).
+  const outsideChangeset = new Set<string>();
 
   for (const section of sanitizedSections) {
     const originalDiffCount = section.diffs.length;
     const diffs: GuideDiffRef[] = [];
     for (const ref of section.diffs) {
-      if (!changedSet.has(ref.file)) continue; // not a real changed file
+      if (!changedSet.has(ref.file)) {
+        // not a real changed file
+        outsideChangeset.add(ref.file);
+        continue;
+      }
       if (placed.has(ref.file)) continue; // duplicate — first placement wins
       placed.add(ref.file);
       diffs.push(ref);
@@ -1003,8 +1095,20 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
   if (validatedSections.length === 0) {
     // Nothing survived validation — a guide screen with zero sections is
     // useless (it would just be a single "Everything else" bucket for the
-    // whole diff). Fail closed, same as an unparseable output.
-    return { error: "No sections survived validation" };
+    // whole diff). Fail closed, same as an unparseable output. When the
+    // sections died because their refs named files outside the changeset,
+    // say so — that failure is actionable (guide the right commit), unlike
+    // genuinely structural emptiness (no sections / blank overviews), which
+    // keeps the generic message.
+    if (outsideChangeset.size > 0) {
+      const examples = [...outsideChangeset].slice(0, 3).join(", ");
+      return {
+        error:
+          `Guide referenced ${outsideChangeset.size} file(s) outside the changeset under review ` +
+          `(e.g. ${examples}). To guide a different commit, open it in the Commits panel first, then relaunch.`,
+      };
+    }
+    return { error: GUIDE_NO_SECTIONS_ERROR };
   }
 
   // unplacedFiles = every changed file that never landed in a section,
@@ -1101,12 +1205,14 @@ export function createGuideSession(): GuideSession {
   const guideReviewed = new Map<string, boolean[]>();
   const failedPayloads = new Map<string, string>();
   const launchChangedFiles = new Map<string, string[]>();
+  const launchReviews = new Map<string, GuideLaunchReview>();
 
   return {
     guideResults,
     guideReviewed,
     failedPayloads,
     launchChangedFiles,
+    launchReviews,
 
     async buildCommand({ cwd, patch, diffType, options, prMetadata, changedFiles, config, repair }) {
       const engine = (typeof config?.engine === "string" ? config.engine : "claude") as "claude" | "codex" | MarkerEngineId;
@@ -1130,7 +1236,7 @@ export function createGuideSession(): GuideSession {
           const thinking = "minimal";
           const nonce = makeMarkerNonce();
           const markerPrompt = composeGuideMarkerRepairPrompt(repair.payload, nonce);
-          const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking });
+          const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
           return { command, prompt: markerPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: markerEngine.id, model, thinking };
         }
 
@@ -1138,13 +1244,23 @@ export function createGuideSession(): GuideSession {
 
         if (engine === "codex") {
           const outputPath = generateGuideOutputPath();
-          const command = await buildGuideCodexCommand({ cwd, outputPath, prompt: repairPrompt, model: model || undefined, reasoningEffort: "minimal", fastMode: false });
-          return { command, outputPath, prompt: repairPrompt, label: "Guide Repair", engine: "codex", model, reasoningEffort: "minimal" };
+          // "low" not "minimal": no current Codex model supports minimal.
+          const command = await buildGuideCodexCommand({ cwd, outputPath, prompt: repairPrompt, model: model || undefined, reasoningEffort: "low", fastMode: false });
+          return { command, outputPath, prompt: repairPrompt, label: "Guide Repair", engine: "codex", model, reasoningEffort: "low" };
         }
 
         const { command, stdinPrompt } = buildGuideClaudeCommand(repairPrompt, model, "low");
         return { command, stdinPrompt, prompt: repairPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: "claude", model, effort: "low" };
       }
+
+      // Reviewer-supplied extra instructions (#1265) apply only to the normal
+      // guide-organizing prompt. The repair paths above never see them: a
+      // repair is a mechanical JSON-syntax fix of previously-captured output,
+      // and content preferences have no business influencing it.
+      const extraInstructions =
+        typeof config?.instructions === "string" && config.instructions.trim().length > 0
+          ? config.instructions
+          : undefined;
 
       const userMessage = buildGuideUserMessage(patch, diffType, options, prMetadata, changedFiles);
 
@@ -1158,12 +1274,12 @@ export function createGuideSession(): GuideSession {
       if (markerEngine) {
         const thinking = typeof config?.thinking === "string" && config.thinking ? config.thinking : undefined;
         const nonce = makeMarkerNonce();
-        const markerPrompt = composeGuideMarkerPrompt(userMessage, nonce);
-        const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking });
+        const markerPrompt = composeGuideMarkerPrompt(userMessage, nonce, extraInstructions);
+        const { command } = buildMarkerCommand(markerEngine, markerPrompt, model || undefined, cwd, { thinking, cursorSandbox: resolveCursorSandbox(loadConfig()) });
         return { command, prompt: markerPrompt, cwd, label: "Guided Review", captureStdout: true, engine: markerEngine.id, model, thinking };
       }
 
-      const prompt = GUIDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
+      const prompt = composeGuideMethodology(extraInstructions) + "\n\n---\n\n" + userMessage;
 
       if (engine === "codex") {
         const outputPath = generateGuideOutputPath();
@@ -1175,12 +1291,23 @@ export function createGuideSession(): GuideSession {
       return { command, stdinPrompt, prompt, cwd, label: "Guided Review", captureStdout: true, engine: "claude", model, effort };
     },
 
-    async onJobComplete({ job, meta, changedFiles }) {
+    async onJobComplete({ job, meta, changedFiles, launchReview }) {
       // Record the changed-file set this attempt validated against — BEFORE
       // parsing, so both the success and failure paths capture it. A later
       // manual repair (submitManualOutput) reuses this exact set instead of
       // whatever patch happens to be on screen at repair time.
       launchChangedFiles.set(job.id, changedFiles);
+      if (launchReview) {
+        // Same discipline for the review itself; bounded because each entry
+        // carries a full patch.
+        launchReviews.delete(job.id);
+        launchReviews.set(job.id, launchReview);
+        while (launchReviews.size > MAX_LAUNCH_REVIEWS) {
+          const oldest = launchReviews.keys().next().value;
+          if (oldest === undefined) break;
+          launchReviews.delete(oldest);
+        }
+      }
 
       let output: CodeGuideOutput | null = null;
       // Best-effort raw candidate for failed-payload capture — populated
@@ -1229,7 +1356,12 @@ export function createGuideSession(): GuideSession {
       if ("error" in result) {
         console.error(`[guide] ${result.error} for job ${job.id}`);
         stashFailedPayload(failedPayloads, job.id, rawCandidate);
-        return { summary: null };
+        // Surface only the informative outside-changeset explanation on the
+        // failure card; the generic structural case keeps the empty-output
+        // message the caller substitutes when `error` is absent.
+        return result.error === GUIDE_NO_SECTIONS_ERROR
+          ? { summary: null }
+          : { summary: null, error: result.error };
       }
 
       guideResults.set(job.id, result.guide);
@@ -1260,6 +1392,10 @@ export function createGuideSession(): GuideSession {
 
     getLaunchChangedFiles(jobId) {
       return launchChangedFiles.get(jobId) ?? null;
+    },
+
+    getLaunchReview(jobId) {
+      return launchReviews.get(jobId) ?? null;
     },
 
     submitManualOutput(jobId, payloadText, fallbackChangedFiles) {

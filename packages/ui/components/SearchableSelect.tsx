@@ -107,6 +107,7 @@ export function SearchableSelect<T extends { id: string }>({
             />
           </svg>
           <input
+            data-pn-mobile-editable
             ref={inputRef}
             value={search}
             onChange={(e) => {
@@ -128,6 +129,7 @@ export function SearchableSelect<T extends { id: string }>({
           ) : (
             filtered.map((item, i) => (
               <button
+                data-pn-touch-target
                 key={item.id}
                 type="button"
                 data-index={i}

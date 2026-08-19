@@ -7,7 +7,7 @@
 
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, CommandResult } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { encodeApiFilePath } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
 
@@ -269,9 +269,10 @@ export async function fetchGlMRContext(
   const mrEndpoint = `projects/${encoded}/merge_requests/${ref.iid}`;
 
   // Fetch all context in parallel
-  const [mrResult, notesResult, approvalsResult, pipelinesResult, issuesResult] = await Promise.all([
+  const [mrResult, notesResult, discussionsResult, approvalsResult, pipelinesResult, issuesResult] = await Promise.all([
     runtime.runCommand("glab", apiArgs(ref.host, mrEndpoint)),
-    runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/notes?sort=asc&per_page=100`)),
+    runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/notes?sort=asc&per_page=100`, ["--paginate"])),
+    runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/discussions?per_page=100`, ["--paginate"])),
     runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/approvals`)),
     runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/pipelines?per_page=5`)),
     runtime.runCommand("glab", apiArgs(ref.host, `${mrEndpoint}/closes_issues`)),
@@ -347,22 +348,86 @@ export async function fetchGlMRContext(
     ? (mergeStateMap[detailedStatus] ?? detailedStatus.toUpperCase())
     : mergeable;
 
+  // --- Discussions (inline review threads) ---
+  const reviewThreads: PRContext["reviewThreads"] = [];
+  const discussionNoteIds = new Set<string>();
+  if (discussionsResult.exitCode === 0) {
+    try {
+      const parsed: unknown = parsePaginatedArray<unknown>(discussionsResult.stdout);
+      if (Array.isArray(parsed)) {
+        for (const rawDiscussion of parsed) {
+          if (!isRecord(rawDiscussion) || rawDiscussion.individual_note === true) continue;
+          const rawDiscussionNotes = Array.isArray(rawDiscussion.notes)
+            ? rawDiscussion.notes.filter(isRecord)
+            : [];
+          const visibleNotes = rawDiscussionNotes.filter((note) => note.system !== true);
+          const positionNote = visibleNotes.find((note) => isRecord(note.position));
+          const resolvableNotes = visibleNotes.filter((note) => note.resolvable === true);
+          if (positionNote === undefined && resolvableNotes.length === 0) continue;
+
+          const position = positionNote && isRecord(positionNote.position)
+            ? positionNote.position
+            : null;
+          const lineRange = position && isRecord(position.line_range) ? position.line_range : null;
+          const rangeStart = lineRange && isRecord(lineRange.start) ? lineRange.start : null;
+          const newLine = position ? numberValue(position.new_line) : null;
+          const oldLine = position ? numberValue(position.old_line) : null;
+          const startNewLine = rangeStart ? numberValue(rangeStart.new_line) : null;
+          const startOldLine = rangeStart ? numberValue(rangeStart.old_line) : null;
+          const comments = visibleNotes.map((note) => {
+            const id = stringValue(note.id);
+            if (id !== "") discussionNoteIds.add(id);
+            const author = isRecord(note.author) ? note.author : null;
+            const avatarUrl = resolveAvatar(author?.avatar_url);
+            const fallbackUrl = `${str(mr.web_url)}#note_${id}`;
+            return {
+              id,
+              author: str(author?.username),
+              ...(avatarUrl ? { avatarUrl } : {}),
+              ...(isGitlabBot(author) ? { isBot: true } : {}),
+              body: str(note.body),
+              createdAt: str(note.created_at),
+              url: str(note.web_url) || fallbackUrl,
+            };
+          });
+          if (comments.length === 0) continue;
+
+          reviewThreads.push({
+            id: stringValue(rawDiscussion.id),
+            isResolved: resolvableNotes.length > 0
+              && resolvableNotes.every((note) => note.resolved === true),
+            // GitLab does not expose an isOutdated equivalent on discussions.
+            isOutdated: false,
+            path: position ? str(position.new_path) || str(position.old_path) : "",
+            line: newLine ?? oldLine,
+            startLine: startNewLine ?? startOldLine,
+            diffSide: newLine !== null ? "RIGHT" : oldLine !== null ? "LEFT" : null,
+            comments,
+          });
+        }
+      }
+    } catch { /* non-JSON response */ }
+  }
+
   // --- Notes (comments) ---
   const notes: PRContext["comments"] = [];
   if (notesResult.exitCode === 0) {
     try {
-      const rawNotes = JSON.parse(notesResult.stdout) as any[];
-      for (const n of rawNotes) {
-        if (n.system) continue;
-        const avatarUrl = resolveAvatar(n.author?.avatar_url);
+      const rawNotes = parsePaginatedArray<unknown>(notesResult.stdout);
+      for (const rawNote of rawNotes) {
+        if (!isRecord(rawNote)) continue;
+        const id = stringValue(rawNote.id);
+        if (rawNote.system === true || discussionNoteIds.has(id)) continue;
+        const author = isRecord(rawNote.author) ? rawNote.author : null;
+        const avatarUrl = resolveAvatar(author?.avatar_url);
         notes.push({
-          id: String(n.id ?? ""),
-          author: str(n.author?.username),
+          id,
+          author: str(author?.username),
           ...(avatarUrl ? { avatarUrl } : {}),
-          ...(isGitlabBot(n.author) ? { isBot: true } : {}),
-          body: str(n.body),
-          createdAt: str(n.created_at),
-          url: str(n.web_url) || "",
+          ...(isGitlabBot(author) ? { isBot: true } : {}),
+          body: str(rawNote.body),
+          createdAt: str(rawNote.created_at),
+          url: str(rawNote.web_url) || "",
         });
       }
     } catch { /* non-JSON response */ }
@@ -460,7 +525,7 @@ export async function fetchGlMRContext(
     mergeStateStatus,
     comments: notes,
     reviews,
-    reviewThreads: [],  // TODO: parse DiffNote positions from notes for thread support
+    reviewThreads,
     checks,
     linkedIssues,
   };
@@ -468,6 +533,14 @@ export async function fetchGlMRContext(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 // --- File Content ---
@@ -494,6 +567,13 @@ export async function fetchGlFileContent(
 
 // --- Submit MR Review ---
 
+/**
+ * Submit a GitLab review across its separate note, discussion, and approval
+ * APIs.
+ *
+ * Returns a narrowed retry contract whenever GitLab accepts only part of the
+ * review. Throws only while replaying the original request is still safe.
+ */
 export async function submitGlMRReview(
   runtime: PRRuntime,
   ref: GlMRRef,
@@ -501,13 +581,17 @@ export async function submitGlMRReview(
   action: "approve" | "comment",
   body: string,
   fileComments: PRReviewFileComment[],
-): Promise<void> {
+): Promise<PRReviewSubmissionResult> {
   if (!runtime.runCommandWithInput) {
     throw new Error("Runtime does not support stdin input; cannot submit MR review");
   }
+  const runCommandWithInput = runtime.runCommandWithInput.bind(runtime);
 
   const encoded = encodeProject(ref.projectPath);
   const mrEndpoint = `projects/${encoded}/merge_requests/${ref.iid}`;
+  let reviewBodyPosted = false;
+  let failedFileComments: PRReviewCommentFailure[] = [];
+  let recoveryFile: string | undefined;
 
   // Fetch base SHA for position context (needed for line comments)
   // We use the headSha passed in and derive baseSha from MR metadata
@@ -516,7 +600,7 @@ export async function submitGlMRReview(
   // 1. Post general body as a note (if non-empty)
   if (body && body.trim()) {
     const notePayload = JSON.stringify({ body: body.trim() });
-    const noteResult = await runtime.runCommandWithInput(
+    const noteResult = await runCommandWithInput(
       "glab",
       apiArgs(ref.host, `${mrEndpoint}/notes`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
       notePayload,
@@ -525,94 +609,104 @@ export async function submitGlMRReview(
       const msg = noteResult.stderr.trim() || noteResult.stdout.trim() || `exit code ${noteResult.exitCode}`;
       throw new Error(`Failed to post MR note: ${msg}`);
     }
+    reviewBodyPosted = true;
   }
 
   // 2. Post inline file comments as discussions with position
   if (fileComments.length > 0) {
     // We need the MR's diff_refs for the position SHAs.
-    const mrResult = await runtime.runCommand(
-      "glab",
-      apiArgs(ref.host, mrEndpoint),
-    );
     let baseSha = headSha; // fallback
     let startSha = headSha;
-    if (mrResult.exitCode === 0 && mrResult.stdout.trim()) {
-      try {
-        const mrData = JSON.parse(mrResult.stdout) as { diff_refs?: { base_sha: string; start_sha: string; head_sha: string } };
-        if (mrData.diff_refs) {
-          baseSha = mrData.diff_refs.base_sha;
-          startSha = mrData.diff_refs.start_sha;
+    let diffRefsError: string | undefined;
+    try {
+      const mrResult = await runtime.runCommand(
+        "glab",
+        apiArgs(ref.host, mrEndpoint),
+      );
+      if (mrResult.exitCode === 0 && mrResult.stdout.trim()) {
+        try {
+          const mrData = JSON.parse(mrResult.stdout) as { diff_refs?: { base_sha: string; start_sha: string; head_sha: string } };
+          if (mrData.diff_refs) {
+            baseSha = mrData.diff_refs.base_sha;
+            startSha = mrData.diff_refs.start_sha;
+          }
+        } catch {
+          // Use fallbacks
         }
-      } catch {
-        // Use fallbacks
       }
+    } catch (error) {
+      diffRefsError = error instanceof Error ? error.message : String(error);
     }
 
-    const errors: string[] = [];
+    if (diffRefsError) {
+      failedFileComments = fileComments.map((comment) => ({
+        comment,
+        error: `${comment.path}:${comment.line}: Failed to prepare inline comment: ${diffRefsError}`,
+      }));
+    } else {
+      // Submit comments in parallel
+      const results = await Promise.allSettled(
+        fileComments.map(async (comment) => {
+          const isOldSide = comment.side === "LEFT";
+          const position: Record<string, unknown> = {
+            position_type: "text",
+            base_sha: baseSha,
+            head_sha: headSha,
+            start_sha: startSha,
+            new_path: comment.path,
+            old_path: comment.path,
+          };
 
-    // Submit comments in parallel
-    const results = await Promise.allSettled(
-      fileComments.map(async (comment) => {
-        const isOldSide = comment.side === "LEFT";
-        const position: Record<string, unknown> = {
-          position_type: "text",
-          base_sha: baseSha,
-          head_sha: headSha,
-          start_sha: startSha,
-          new_path: comment.path,
-          old_path: comment.path,
-        };
+          if (isOldSide) {
+            position.old_line = comment.line;
+          } else {
+            position.new_line = comment.line;
+          }
 
-        if (isOldSide) {
-          position.old_line = comment.line;
-        } else {
-          position.new_line = comment.line;
-        }
+          // Multi-line range support
+          if (comment.start_line != null && comment.start_line !== comment.line) {
+            const startIsOld = (comment.start_side ?? comment.side) === "LEFT";
+            const startEntry: Record<string, unknown> = { type: startIsOld ? "old" : "new" };
+            if (startIsOld) startEntry.old_line = comment.start_line;
+            else startEntry.new_line = comment.start_line;
 
-        // Multi-line range support
-        if (comment.start_line != null && comment.start_line !== comment.line) {
-          const startIsOld = (comment.start_side ?? comment.side) === "LEFT";
-          const startEntry: Record<string, unknown> = { type: startIsOld ? "old" : "new" };
-          if (startIsOld) startEntry.old_line = comment.start_line;
-          else startEntry.new_line = comment.start_line;
+            const endEntry: Record<string, unknown> = { type: isOldSide ? "old" : "new" };
+            if (isOldSide) endEntry.old_line = comment.line;
+            else endEntry.new_line = comment.line;
 
-          const endEntry: Record<string, unknown> = { type: isOldSide ? "old" : "new" };
-          if (isOldSide) endEntry.old_line = comment.line;
-          else endEntry.new_line = comment.line;
+            position.line_range = { start: startEntry, end: endEntry };
+          }
 
-          position.line_range = { start: startEntry, end: endEntry };
-        }
+          const payload = JSON.stringify({ body: comment.body, position });
+          const res = await runCommandWithInput(
+            "glab",
+            apiArgs(ref.host, `${mrEndpoint}/discussions`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+            payload,
+          );
 
-        const payload = JSON.stringify({ body: comment.body, position });
-        const res = await runtime.runCommandWithInput!(
-          "glab",
-          apiArgs(ref.host, `${mrEndpoint}/discussions`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
-          payload,
-        );
+          if (res.exitCode !== 0) {
+            const msg = res.stderr.trim() || res.stdout.trim() || `exit code ${res.exitCode}`;
+            throw new Error(`${comment.path}:${comment.line}: ${msg}`);
+          }
+        }),
+      );
 
-        if (res.exitCode !== 0) {
-          const msg = res.stderr.trim() || res.stdout.trim() || `exit code ${res.exitCode}`;
-          throw new Error(`${comment.path}:${comment.line}: ${msg}`);
-        }
-      }),
-    );
-
-    for (const r of results) {
-      if (r.status === "rejected") {
-        errors.push(r.reason instanceof Error ? r.reason.message : String(r.reason));
-      }
+      failedFileComments = results.flatMap((result, index) =>
+        result.status === "rejected"
+          ? [{
+              comment: fileComments[index],
+              error: result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            }]
+          : [],
+      );
     }
+    const errors = failedFileComments.map((failure) => failure.error);
 
     if (errors.length > 0) {
       // Persist unposted bodies to disk so the work survives transient GitLab errors.
-      // We keep the original throw-vs-warn split intentionally:
-      //  - all-fail → throw (nothing was posted, caller retries from clean state)
-      //  - partial-fail → warn only (some discussions + the MR note are already on
-      //    the server; throwing would have the client re-submit the whole review
-      //    and create duplicates).
-      const failed = results
-        .map((r, i) => (r.status === "rejected" ? fileComments[i] : null))
-        .filter((c): c is PRReviewFileComment => c !== null);
+      const failed = failedFileComments.map((failure) => failure.comment);
       let savedTo: string | null = null;
       try {
         const dir = join(getPlannotatorDataDir(), "failed-comments");
@@ -626,16 +720,20 @@ export async function submitGlMRReview(
       } catch (writeErr) {
         console.error(`[plannotator] Failed to persist unposted comments: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`);
       }
+      recoveryFile = savedTo ?? undefined;
       const suffix = savedTo ? ` (unposted bodies saved to ${savedTo})` : "";
 
-      if (errors.length === fileComments.length) {
-        // All failed — safe to throw, nothing was posted.
+      if (errors.length === fileComments.length && !reviewBodyPosted) {
+        // All failed and there was no review body — safe to throw because the
+        // MR was not mutated. The client can replay the original request.
         throw new Error(
           `Failed to post inline comments${suffix}:\n${errors.join("\n")}`,
         );
       }
-      // Partial failure — some comments and the MR note are already posted.
-      // Don't throw, or the UI will resubmit the whole review and duplicate them.
+
+      // Some part of the review already exists on GitLab. Keep processing an
+      // approval request, then return the exact safe retry instead of making
+      // callers infer that replaying the original review is safe.
       console.error(
         `[plannotator] ${errors.length}/${fileComments.length} inline comments failed${suffix}:\n${errors.join("\n")}`,
       );
@@ -643,15 +741,44 @@ export async function submitGlMRReview(
   }
 
   // 3. Approve if requested
+  let approval: "not-requested" | "succeeded" | "failed" = "not-requested";
+  let approvalError: string | undefined;
   if (action === "approve") {
-    const approveResult = await runtime.runCommandWithInput(
-      "glab",
-      apiArgs(ref.host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
-      "{}",
-    );
-    if (approveResult.exitCode !== 0) {
-      const msg = approveResult.stderr.trim() || approveResult.stdout.trim() || `exit code ${approveResult.exitCode}`;
-      throw new Error(`Failed to approve MR: ${msg}`);
+    try {
+      const approveResult = await runCommandWithInput(
+        "glab",
+        apiArgs(ref.host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+        "{}",
+      );
+      if (approveResult.exitCode !== 0) {
+        const msg = approveResult.stderr.trim() || approveResult.stdout.trim() || `exit code ${approveResult.exitCode}`;
+        approval = "failed";
+        approvalError = `Failed to approve MR: ${msg}`;
+      } else {
+        approval = "succeeded";
+      }
+    } catch (error) {
+      approval = "failed";
+      const message = error instanceof Error ? error.message : String(error);
+      approvalError = `Failed to approve MR: ${message}`;
     }
   }
+
+  if (failedFileComments.length > 0 || approval === "failed") {
+    return {
+      status: "partial",
+      postedFileCommentCount: fileComments.length - failedFileComments.length,
+      failedFileComments,
+      reviewBodyPosted,
+      approval,
+      ...(approvalError ? { approvalError } : {}),
+      ...(recoveryFile ? { recoveryFile } : {}),
+      retry: {
+        action: approval === "failed" ? "approve" : "comment",
+        fileComments: failedFileComments.map((failure) => failure.comment),
+      },
+    };
+  }
+
+  return { status: "complete" };
 }

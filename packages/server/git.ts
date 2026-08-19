@@ -5,6 +5,9 @@
  * Used by both Claude Code hook and OpenCode plugin.
  */
 
+import { lstat, readlink } from "node:fs/promises";
+import { resolve as resolvePath } from "node:path";
+
 import {
   type DiffOption,
   type DiffResult,
@@ -47,7 +50,9 @@ async function runGit(
     cwd: options?.cwd,
     detached: command.isolateProcessGroup,
     env: command.env,
-    stdin: "ignore",
+    stdin: options?.stdin === undefined
+      ? "ignore"
+      : new TextEncoder().encode(options.stdin),
     stdout: "pipe",
     stderr: "pipe",
     windowsHide: true,
@@ -92,6 +97,29 @@ export const runtime: ReviewGitRuntime = {
   async readTextFile(path: string): Promise<string | null> {
     try {
       return await Bun.file(path).text();
+    } catch {
+      return null;
+    }
+  },
+  async getFileInfo(basePath, path) {
+    const fullPath = resolvePath(basePath ?? "", path);
+    try {
+      const fileStat = await lstat(fullPath);
+      return {
+        path: fullPath,
+        size: fileStat.size,
+        mtimeMs: fileStat.mtimeMs,
+        isFile: fileStat.isFile(),
+        isSymbolicLink: fileStat.isSymbolicLink(),
+        isExecutable: (fileStat.mode & 0o111) !== 0,
+      };
+    } catch {
+      return null;
+    }
+  },
+  async readLink(path: string): Promise<string | null> {
+    try {
+      return await readlink(path);
     } catch {
       return null;
     }

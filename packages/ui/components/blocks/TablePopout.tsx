@@ -10,6 +10,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import type { Block } from '../../types';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { PopoutDialog } from '../PopoutDialog';
 import { parseTableContent, buildCsvFromRows, buildMarkdownTable } from './TableBlock';
@@ -99,22 +100,20 @@ const TablePopoutImpl: React.FC<TablePopoutProps> = ({
     );
 
   const handleCopyMarkdown = async () => {
-    try {
-      await navigator.clipboard.writeText(buildMarkdownTable(headers, getVisibleRowsData()));
+    if (await copyTextToClipboard(buildMarkdownTable(headers, getVisibleRowsData()))) {
       setCopiedMd(true);
       setTimeout(() => setCopiedMd(false), 1500);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
     }
   };
 
   const handleCopyCsv = async () => {
-    try {
-      await navigator.clipboard.writeText(buildCsvFromRows(headers, getVisibleRowsData()));
+    if (await copyTextToClipboard(buildCsvFromRows(headers, getVisibleRowsData()))) {
       setCopiedCsv(true);
       setTimeout(() => setCopiedCsv(false), 1500);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } else {
+      console.error('Failed to copy');
     }
   };
 

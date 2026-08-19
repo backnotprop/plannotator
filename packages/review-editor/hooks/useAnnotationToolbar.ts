@@ -1,6 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { CodeAnnotation, SelectedLineRange, CodeAnnotationType, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import { useDismissOnOutsideAndEscape } from '@plannotator/ui/hooks/useDismissOnOutsideAndEscape';
+import {
+  hasPrimaryCoarsePointer,
+  shouldUseExpandedComposer,
+  useVisibleViewportBounds,
+} from '@plannotator/ui/hooks/useViewportEnvironment';
 import { extractLinesFromPatch } from '../utils/patchParser';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 
@@ -54,6 +59,11 @@ function draftKey(filePath: string, range: SelectedLineRange): string {
 }
 
 export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation }: UseAnnotationToolbarArgs) {
+  const visibleBounds = useVisibleViewportBounds(16);
+  const expandedComposerRequired = shouldUseExpandedComposer({
+    bounds: visibleBounds,
+    coarsePointer: hasPrimaryCoarsePointer(),
+  });
   const toolbarRef = useRef<HTMLDivElement>(null);
   const lastMousePosition = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const tokenAnchorRef = useRef<TokenMeta | null>(null);
@@ -63,7 +73,9 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   const [suggestedCode, setSuggestedCode] = useState('');
   const [showSuggestedCode, setShowSuggestedCode] = useState(false);
   const [selectedOriginalCode, setSelectedOriginalCode] = useState('');
+  const [askAIMode, setAskAIMode] = useState(false);
   const [showCodeModal, setShowCodeModal] = useState(false);
+  const [showCommentModal, setShowCommentModal] = useState(false);
   const [modalLayout, setModalLayout] = useState<'horizontal' | 'vertical'>('horizontal');
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [conventionalLabel, setConventionalLabel] = useState<ConventionalLabel | null>(null);
@@ -127,7 +139,9 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setSuggestedCode('');
     setSelectedOriginalCode('');
     setShowSuggestedCode(false);
+    setAskAIMode(false);
     setShowCodeModal(false);
+    setShowCommentModal(false);
     setEditingAnnotationId(null);
     setConventionalLabel(null);
     setDecorations([]);
@@ -148,6 +162,9 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   ) => {
     saveDraft();
     setEditingAnnotationId(null);
+    setAskAIMode(false);
+    setShowCodeModal(false);
+    setShowCommentModal(expandedComposerRequired);
 
     const draft = draftStore.get(draftKey(filePath, range));
     if (draft) {
@@ -174,7 +191,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setSelectedOriginalCode(extractLinesFromPatch(patch, start, end, side as 'old' | 'new'));
 
     onLineSelection(range);
-  }, [patch, filePath, onLineSelection, saveDraft]);
+  }, [expandedComposerRequired, patch, filePath, onLineSelection, saveDraft]);
 
   // Handle line selection end (gutter clicks)
   const handleLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
@@ -187,8 +204,24 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     }
 
     const mousePos = lastMousePosition.current;
-    openToolbar(range, { top: mousePos.y + 10, left: mousePos.x });
-  }, [onLineSelection, openToolbar]);
+    const hasPointerPosition = mousePos.x > 0 || mousePos.y > 0;
+    openToolbar(range, hasPointerPosition
+      ? { top: mousePos.y + 10, left: mousePos.x }
+      : {
+          top: visibleBounds.top + visibleBounds.height / 2,
+          left: visibleBounds.left + visibleBounds.width / 2,
+        }
+    );
+  }, [onLineSelection, openToolbar, visibleBounds]);
+
+  /** Open the ordinary code-review composer for a selection requested elsewhere. */
+  const openLineAnnotation = useCallback((range: SelectedLineRange) => {
+    tokenAnchorRef.current = null;
+    openToolbar(range, {
+      top: Math.max(visibleBounds.top + 64, visibleBounds.top + visibleBounds.height / 2 - 80),
+      left: visibleBounds.left + visibleBounds.width / 2,
+    });
+  }, [openToolbar, visibleBounds]);
 
   // Handle annotation submission (create or update)
   const handleSubmitAnnotation = useCallback(() => {
@@ -232,21 +265,29 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     setSuggestedCode(annotation.suggestedCode || '');
     setSelectedOriginalCode(annotation.originalCode || '');
     setShowSuggestedCode(!!annotation.suggestedCode);
+    setAskAIMode(false);
     setShowCodeModal(false);
+    setShowCommentModal(expandedComposerRequired);
     setConventionalLabel(annotation.conventionalLabel || null);
     setDecorations(annotation.decorations || []);
 
     // Position toolbar near the annotation using last known mouse position
     const mousePos = lastMousePosition.current;
+    const hasPointerPosition = mousePos.x > 0 || mousePos.y > 0;
     setToolbarState({
-      position: { top: mousePos.y + 10, left: mousePos.x },
+      position: hasPointerPosition
+        ? { top: mousePos.y + 10, left: mousePos.x }
+        : {
+            top: visibleBounds.top + visibleBounds.height / 2,
+            left: visibleBounds.left + visibleBounds.width / 2,
+          },
       range: {
         start: annotation.lineStart,
         end: annotation.lineEnd,
         side: annotation.side === 'new' ? 'additions' : 'deletions',
       },
     });
-  }, []);
+  }, [expandedComposerRequired, visibleBounds]);
 
   // Dismiss: save draft and hide toolbar
   const handleDismiss = useCallback(() => {
@@ -263,10 +304,16 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
   }, [onLineSelection, clearDraft, resetForm]);
 
   useDismissOnOutsideAndEscape({
-    enabled: !!toolbarState && !showCodeModal,
+    enabled: !!toolbarState && !showCodeModal && !showCommentModal,
     ref: toolbarRef,
     onDismiss: handleDismiss,
   });
+
+  useEffect(() => {
+    if (toolbarState && expandedComposerRequired && !showCodeModal) {
+      setShowCommentModal(true);
+    }
+  }, [expandedComposerRequired, showCodeModal, toolbarState]);
 
   useEffect(() => {
     const wasFocused = wasFocusedRef.current;
@@ -291,7 +338,9 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
       setConventionalLabel(draft.conventionalLabel);
       setDecorations(draft.decorations);
       setEditingAnnotationId(null);
+      setAskAIMode(false);
       setShowCodeModal(false);
+      setShowCommentModal(expandedComposerRequired);
       setToolbarState({
         position: draft.position,
         range: draft.range,
@@ -306,7 +355,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
       setSelectedOriginalCode(extractLinesFromPatch(patch, start, end, side as 'old' | 'new'));
       onLineSelection(draft.range);
     }
-  }, [filePath, isFocused, onLineSelection, patch]);
+  }, [expandedComposerRequired, filePath, isFocused, onLineSelection, patch]);
 
   // Handle single token click — opens toolbar for one token
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
@@ -347,8 +396,13 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     showSuggestedCode,
     setShowSuggestedCode,
     selectedOriginalCode,
+    askAIMode,
+    setAskAIMode,
     showCodeModal,
     setShowCodeModal,
+    showCommentModal,
+    setShowCommentModal,
+    expandedComposerRequired,
     modalLayout,
     setModalLayout,
     editingAnnotationId,
@@ -361,6 +415,7 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     // Handlers
     handleMouseMove,
     handleLineSelectionEnd,
+    openLineAnnotation,
     handleTokenClick,
     handleSubmitAnnotation,
     handleDismiss,

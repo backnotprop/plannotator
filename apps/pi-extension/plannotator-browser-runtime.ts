@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-type PlannotatorBrowserModule = typeof import("./plannotator-browser.js");
+type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const planHtmlPath = resolve(moduleDirectory, "plannotator.html");
@@ -68,7 +68,7 @@ export function getStartupErrorMessage(error: unknown): string {
  */
 export function loadPlannotatorBrowser(): Promise<PlannotatorBrowserModule> {
 	if (!browserModulePromise) {
-		browserModulePromise = import("./plannotator-browser.js").catch((error: unknown) => {
+		browserModulePromise = import("./plannotator-browser.ts").catch((error: unknown) => {
 			browserModulePromise = undefined;
 			throw error;
 		});

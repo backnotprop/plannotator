@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useState } from 'react';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 
 interface CopyButtonProps {
   text: string;
@@ -29,12 +30,9 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ text, className = '', va
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyTextToClipboard(text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard API may not be available
     }
   };
 

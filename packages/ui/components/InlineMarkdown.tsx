@@ -1,8 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import hljs from "highlight.js";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
+import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
+import { useFenceTheme } from "../hooks/useFenceTheme";
 import { transformPlainText } from "../utils/inlineTransforms";
+import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -93,18 +95,34 @@ const CodeSnippetPreview: React.FC<{
   const end = Math.min(allLines.length, (lineEnd ?? line));
   const snippet = allLines.slice(start, end).join('\n');
 
-  const highlightedLines = useMemo(() => {
-    const lang = extToLanguage(filepath);
-    const lines = snippet.split('\n');
-    return lines.map(line => {
-      try {
-        if (lang) return hljs.highlight(line, { language: lang }).value;
-        return hljs.highlightAuto(line).value;
-      } catch {
-        return line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      }
+  const fenceTheme = useFenceTheme();
+  // Bumped once the grammar is attached, to re-run the memo below with the
+  // highlighter warm. Until then the snippet renders as plain text — no
+  // auto-detection, and an unknown extension simply stays plain.
+  const [highlighterGeneration, setHighlighterGeneration] = useState(0);
+  const lang = extToLanguage(filepath);
+
+  useEffect(() => {
+    if (!lang) return;
+    let cancelled = false;
+    void ensureHighlight(lang, fenceTheme).then((ok) => {
+      if (ok && !cancelled) setHighlighterGeneration((n) => n + 1);
     });
-  }, [snippet, filepath]);
+    return () => { cancelled = true; };
+  }, [lang, fenceTheme]);
+
+  const highlightedLines = useMemo(() => {
+    // Highlight the snippet as one unit so multi-line constructs (block
+    // comments, template literals) tokenise correctly, then split back into
+    // rows: the highlighter joins lines with "\n" and never emits one inside a
+    // span, so the split is exact.
+    const html = lang ? highlightToHtml(snippet, lang, fenceTheme) : null;
+    if (html !== null) return html.split('\n');
+    return snippet.split('\n').map(line =>
+      line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+    // highlighterGeneration is the "grammar just became available" signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snippet, lang, fenceTheme, highlighterGeneration]);
 
   if (!anchorEl) return null;
 
@@ -126,7 +144,7 @@ const CodeSnippetPreview: React.FC<{
         <span>{filepath.split('/').pop()}</span>
         <span className="opacity-60">{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>
       </div>
-      <div className="hljs code-snippet-preview overflow-auto text-[12px] leading-5 min-h-0" style={{ padding: 0, background: 'var(--code-bg, #1e293b)' }}>
+      <div className="code-snippet-preview overflow-auto text-[12px] leading-5 min-h-0" style={{ padding: 0, background: 'var(--code-bg, #1e293b)' }}>
         <table className="border-collapse w-full">
           <tbody>
             {snippet.split('\n').map((_, i) => (
@@ -860,7 +878,7 @@ export const InlineMarkdown: React.FC<{
       // targets are opaque doc ids, not paths. null → today's rendering.
       const resolution = resolveLinkedDoc?.(target) ?? null;
       const display = resolution?.label || storedLabel || target;
-      const targetPath = /\.(mdx?|txt|html?)$/i.test(target)
+      const targetPath = hasLinkedDocExtension(target)
         ? target
         : `${target}.md`;
 
@@ -992,7 +1010,7 @@ export const InlineMarkdown: React.FC<{
       // Fragment is stripped before handing to onOpenLinkedDoc (overlay has
       // no anchor-scroll support today).
       const isLocalDoc =
-        /\.(mdx?|txt|html?)(#.*)?$/i.test(linkUrl) &&
+        hasLinkedDocExtension(linkUrl, { allowFragment: true }) &&
         !linkUrl.startsWith("http://") &&
         !linkUrl.startsWith("https://");
       const isCodeFile = !isLocalDoc && isCodeFilePath(linkUrl);
