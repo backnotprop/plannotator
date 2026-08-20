@@ -25,8 +25,7 @@ import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
-import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
-import { loadFont, resolveFontFamily } from '@plannotator/ui/utils/typography';
+import { legacyDiffFontSelection, loadFont, migrateLegacyDiffFont, resolveFontFamily } from '@plannotator/ui/utils/typography';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -388,10 +387,13 @@ const ReviewApp: React.FC = () => {
   // choice even though the visual result applies to plan/document surfaces.
   const gridEnabled = useConfigValue('gridEnabled');
 
+  // A pre-migration session (or the read-only viewer, which has no typography
+  // plumbing) can still be carrying the legacy value; migrateLegacyDiffFont
+  // normally retires it before first paint.
   const reviewMono = resolveFontFamily(typography.review?.mono) ?? diffFontFamily;
 
   useEffect(() => {
-    if (!typography.review?.mono && diffFontFamily) loadDiffFont(diffFontFamily);
+    if (!typography.review?.mono) void loadFont(legacyDiffFontSelection(diffFontFamily));
     if (diffFontSize) {
       document.documentElement.style.setProperty('--diff-font-size-override', diffFontSize);
     } else {
@@ -400,7 +402,9 @@ const ReviewApp: React.FC = () => {
     document.documentElement.style.setProperty('--diffs-tab-size', String(diffTabSize));
   }, [diffFontFamily, typography.review?.mono, diffFontSize, diffTabSize]);
 
-  useEffect(() => loadFont(typography.review?.mono), [typography.review?.mono]);
+  // Braces matter: React reads an effect's return value as its cleanup
+  // function, and a Promise is not callable.
+  useEffect(() => { void loadFont(typography.review?.mono); }, [typography.review?.mono]);
 
   const reviewSidebar = useSidebar<ReviewSidebarTab>(false, 'annotations');
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
@@ -1728,6 +1732,9 @@ const ReviewApp: React.FC = () => {
         apiModeRef.current = true;
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
+        // The Code Font picker is gone; fold any value it left behind into
+        // typography.review.mono before anything reads the review face.
+        migrateLegacyDiffFont(configStore);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
         setSnapshotId(data.snapshotId);

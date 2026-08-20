@@ -15,7 +15,11 @@ export interface ThemeConfig {
 export type TypographySurface = 'plan' | 'annotate' | 'review';
 export type TypographyRole = 'display' | 'mono';
 export const DISPLAY_TYPOGRAPHY_CATALOG_IDS = ['inter', 'atkinson-hyperlegible', 'ibm-plex-sans'] as const;
-export const MONO_TYPOGRAPHY_CATALOG_IDS = ['jetbrains-mono', 'fira-code', 'ibm-plex-mono'] as const;
+/** Kept in step with FONT_CATALOG in packages/ui/utils/typography.ts (asserted by its test). */
+export const MONO_TYPOGRAPHY_CATALOG_IDS = [
+  'jetbrains-mono', 'fira-code', 'ibm-plex-mono', 'hack', 'inconsolata',
+  'red-hat-mono', 'roboto-mono', 'source-code-pro', 'atkinson-hyperlegible-mono',
+] as const;
 export const TYPOGRAPHY_CATALOG_IDS = [...DISPLAY_TYPOGRAPHY_CATALOG_IDS, ...MONO_TYPOGRAPHY_CATALOG_IDS] as const;
 export type TypographyCatalogId = typeof TYPOGRAPHY_CATALOG_IDS[number];
 
