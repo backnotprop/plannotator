@@ -107,6 +107,20 @@ export interface PlannotatorConfig {
   /** null = explicitly cleared (use defaults), undefined = not set */
   conventionalLabels?: CCLabelConfig[] | null;
   /**
+   * Where the annotate-mode Agent TUI docks: "left" (the historic default),
+   * "right", or "hidden" to keep it out of the layout until the user opens it
+   * for a session. Written by the UI through POST /api/config, because every
+   * annotate session runs on its own random port — a cookie alone would make
+   * the choice per-session rather than per-user.
+   */
+  agentTerminalSide?: "left" | "right" | "hidden";
+  /**
+   * Which agent the annotate-mode Agent TUI preselects (an agent id such as
+   * "claude"). Unset means the first available agent wins. Persisted here for
+   * the same random-port reason as agentTerminalSide.
+   */
+  agentTerminalDefaultAgent?: string;
+  /**
    * Enable `gh attestation verify` during CLI installation/upgrade.
    * Read by scripts/install.sh|ps1|cmd on every run (not by any runtime code).
    * When true, the installer runs build-provenance verification after the
@@ -338,6 +352,8 @@ export function getServerConfig(gitUser: string | null): {
   gitUser?: string;
   conventionalComments?: boolean;
   conventionalLabels?: CCLabelConfig[] | null;
+  agentTerminalSide?: PlannotatorConfig["agentTerminalSide"];
+  agentTerminalDefaultAgent?: string;
 } {
   const cfg = loadConfig();
   return {
@@ -355,7 +371,23 @@ export function getServerConfig(gitUser: string | null): {
     gitUser: gitUser ?? undefined,
     ...(cfg.conventionalComments !== undefined && { conventionalComments: cfg.conventionalComments }),
     ...(cfg.conventionalLabels !== undefined && { conventionalLabels: cfg.conventionalLabels }),
+    ...(isAgentTerminalSide(cfg.agentTerminalSide) && { agentTerminalSide: cfg.agentTerminalSide }),
+    ...(typeof cfg.agentTerminalDefaultAgent === "string" &&
+      cfg.agentTerminalDefaultAgent !== "" && {
+        agentTerminalDefaultAgent: cfg.agentTerminalDefaultAgent,
+      }),
   };
+}
+
+/**
+ * Guard for the annotate Agent TUI placement. config.json is hand-editable, so
+ * a bogus value must simply not be advertised — the client then keeps its own
+ * resolved default instead of adopting a side that does not exist.
+ */
+export function isAgentTerminalSide(
+  value: unknown,
+): value is NonNullable<PlannotatorConfig["agentTerminalSide"]> {
+  return value === "left" || value === "right" || value === "hidden";
 }
 
 /**

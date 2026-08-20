@@ -8,6 +8,7 @@ export {
   resolveCursorSandbox,
   resolveGuideHistory,
   parseReviewAnalysisConfig,
+  isAgentTerminalSide,
   type PlannotatorConfig,
   type DiffOptions,
 } from "@plannotator/shared/config";
