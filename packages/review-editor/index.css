@@ -174,7 +174,7 @@ diffs-container {
   /* Force the app's sans font — without this the card inherits its surroundings,
      which inside the diff is MONOSPACE, making inline comment prose hard to read
      and inconsistent with the sidebar. Code spans opt back into mono explicitly. */
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   margin: 0.5rem 0.25rem;
   cursor: pointer;
   /* Soft two-layer shadow (close contact + ambient lift) for a card that reads
@@ -233,7 +233,7 @@ diffs-container {
 /* Inline markdown in review comments */
 .review-comment-body .inline-code,
 .review-comment-markdown .inline-code {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.85em;
   background: var(--muted);
   padding: 0.1em 0.35em;
@@ -242,7 +242,7 @@ diffs-container {
 
 .review-comment-body .inline-code-block,
 .review-comment-markdown .inline-code-block {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.75rem;
   line-height: 1.5;
   background: var(--code-bg);
@@ -256,7 +256,7 @@ diffs-container {
 
 .review-comment-body .inline-code-block code,
 .review-comment-markdown .inline-code-block code {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
 }
 
 .light .review-comment-body .inline-code-block,
@@ -301,7 +301,7 @@ diffs-container {
   max-width: 56rem;
   margin: 0 auto;
   padding: 1.5rem;
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.8125rem;
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
@@ -457,7 +457,7 @@ diffs-container {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.6875rem;
   line-height: 1;
   cursor: pointer;
@@ -513,7 +513,7 @@ diffs-container {
   color: var(--popover-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.8125rem;
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
@@ -552,7 +552,7 @@ diffs-container {
   min-height: 100%;
   margin: 0 auto;
   padding: 1.5rem clamp(1rem, 3vw, 2rem) 3rem;
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.75rem;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
@@ -573,7 +573,7 @@ diffs-container {
 .call-flow-empty-kicker {
   margin-bottom: 0.25rem;
   color: var(--primary);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.1em;
@@ -582,7 +582,7 @@ diffs-container {
 
 .call-flow-header h2 {
   margin: 0;
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.015em;
@@ -646,7 +646,7 @@ diffs-container {
   align-items: center;
   gap: 0.375rem;
   padding: 0 0.5rem;
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.6875rem;
   font-weight: 550;
   white-space: nowrap;
@@ -654,7 +654,7 @@ diffs-container {
 .call-flow-languages-trigger-count {
   min-width: 2.5ch;
   color: var(--primary);
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.625rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -713,7 +713,7 @@ diffs-container {
   justify-content: space-between;
   gap: 0.625rem;
   color: var(--muted-foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.625rem;
 }
 .call-flow-context-summary { margin-right: auto; }
@@ -792,7 +792,7 @@ diffs-container {
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -852,7 +852,7 @@ diffs-container {
 }
 .call-flow-file-boundary-label {
   color: var(--muted-foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.5625rem;
   font-weight: 650;
   letter-spacing: 0.08em;
@@ -1046,7 +1046,7 @@ diffs-container {
   padding: clamp(1.75rem, 7vh, 3.5rem) 0.75rem 3rem;
   color: var(--muted-foreground);
   /* Prose, not code: the shell defaults to the mono diff face. */
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
 }
 .call-flow-empty .call-flow-empty-kicker {
   margin-bottom: 0;
@@ -1057,7 +1057,7 @@ diffs-container {
 }
 .call-flow-empty strong {
   color: var(--foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 1.0625rem;
   font-weight: 600;
   line-height: 1.3;
@@ -1079,7 +1079,7 @@ diffs-container {
   border-bottom: 1px solid var(--border);
 }
 .call-flow-loading div { display: grid; gap: 0.125rem; }
-.call-flow-loading strong { font-family: var(--pn-display-font); font-size: 0.875rem; }
+.call-flow-loading strong { font-family: var(--pn-display-font, var(--font-sans)); font-size: 0.875rem; }
 .call-flow-loading span:last-child { color: var(--muted-foreground); font-size: 0.6875rem; }
 .call-flow-spinner {
   width: 1rem;
@@ -1108,7 +1108,7 @@ diffs-container {
   padding: 0.1875rem 0.5rem;
   border-bottom: 1px solid oklch(from var(--border) l c h / 0.6);
   color: var(--muted-foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.6875rem;
 }
 .call-flow-raw-hint {
@@ -1181,7 +1181,7 @@ diffs-container {
 .call-flow-search-count {
   min-width: 3.5rem;
   color: var(--muted-foreground);
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.625rem;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -1311,7 +1311,7 @@ diffs-container {
   border-radius: var(--radius-lg);
   background: var(--popover);
   color: var(--popover-foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.6875rem;
   outline: none;
 }
@@ -1329,7 +1329,7 @@ diffs-container {
 .call-flow-languages-popover-header > span {
   flex: none;
   padding-top: 0.125rem;
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-variant-numeric: tabular-nums;
 }
 .call-flow-languages-popover ul {
@@ -1370,7 +1370,7 @@ diffs-container {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted-foreground);
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.6875rem;
   line-height: 1;
   cursor: pointer;
@@ -1409,7 +1409,7 @@ diffs-container {
   border-radius: var(--radius-lg);
   background: var(--popover);
   color: var(--popover-foreground);
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.75rem;
   outline: none;
 }
@@ -1435,7 +1435,7 @@ diffs-container {
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.75rem;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -1464,7 +1464,7 @@ diffs-container {
   padding: 0 0.5rem;
   background: transparent;
   color: var(--muted-foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.625rem;
   font-weight: 550;
   cursor: pointer;
@@ -1561,7 +1561,7 @@ diffs-container {
   border-bottom: 1px solid oklch(from var(--border) l c h / 0.45);
   background: var(--popover);
   color: var(--muted-foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.5625rem;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -1607,7 +1607,7 @@ diffs-container {
   border-radius: var(--radius-sm);
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.6875rem;
   font-weight: 600;
   cursor: pointer;
@@ -1637,7 +1637,7 @@ diffs-container {
   border-radius: var(--radius-sm);
   background: var(--primary);
   color: var(--primary-foreground);
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
@@ -1667,7 +1667,7 @@ diffs-container {
   margin: 0.75rem 0 0.25rem;
   padding: 0;
   list-style: none;
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
   font-size: 0.75rem;
 }
 .call-flow-install-stages li {
@@ -1770,7 +1770,7 @@ diffs-container {
 
 /* Individual label tag — monospace, tight, code-native */
 .cc-tag {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.5625rem;
   font-weight: 500;
   line-height: 1;
@@ -1847,7 +1847,7 @@ diffs-container {
   gap: 0.3125rem;
   margin-left: 0.25rem;
   padding: 0.125rem 0.375rem 0.125rem 0.25rem;
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.5625rem;
   font-weight: 500;
   letter-spacing: 0.01em;
@@ -1925,7 +1925,7 @@ diffs-container {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.5625rem;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -2021,7 +2021,7 @@ diffs-container {
 
 /* Export modal code blocks */
 .export-code-block {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.75rem;
   background: var(--muted);
   border-radius: var(--radius-sm);
@@ -2034,7 +2034,7 @@ diffs-container {
 /* Suggested code input - code editor style */
 .suggested-code-input {
   width: 100%;
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.6875rem;
   line-height: 1.6;
   color: var(--foreground);
@@ -2096,7 +2096,7 @@ diffs-container {
 }
 
 .suggestion-block-code code {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   background: transparent !important;
   padding: 0 !important;
 }
@@ -2121,12 +2121,12 @@ diffs-container {
 
 /* Suggestion modal original code pane */
 .suggestion-modal-original {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   background: var(--code-bg);
 }
 
 .suggestion-modal-original code {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   background: transparent !important;
   padding: 0 !important;
 }
@@ -2137,7 +2137,7 @@ diffs-container {
 
 /* Suggestion diff (original vs suggested) */
 .suggestion-diff {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.6875rem;
   line-height: 1.5;
   overflow-x: auto;
@@ -2238,7 +2238,7 @@ diffs-container {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.625rem;
   background: var(--muted);
   color: var(--muted-foreground);
@@ -2350,7 +2350,7 @@ diffs-container {
 .ai-markdown ol { list-style: decimal; }
 
 .ai-markdown code {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
   font-size: 0.6875rem;
   background: var(--muted);
   padding: 0.125rem 0.25rem;
@@ -2503,7 +2503,7 @@ diffs-container {
 .suggestion-modal-original code,
 .suggestion-diff,
 .ai-markdown code {
-  font-family: var(--pn-mono-font) !important;
+  font-family: var(--pn-mono-font, var(--font-mono)) !important;
 }
 
 /* Font size override — only takes effect when --diff-font-size-override is set on :root */

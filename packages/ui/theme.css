@@ -727,10 +727,10 @@ body {
   --pn-mono-font: var(--pn-review-mono-font, var(--font-mono));
 }
 [data-pn-surface] {
-  font-family: var(--pn-display-font);
+  font-family: var(--pn-display-font, var(--font-sans));
 }
 [data-pn-surface] :is(code, kbd, pre, samp) {
-  font-family: var(--pn-mono-font);
+  font-family: var(--pn-mono-font, var(--font-mono));
 }
 
 /* Safari extends the page canvas beneath its floating browser controls. The
