@@ -4,6 +4,7 @@ import { getSingularPatch } from '@pierre/diffs';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useConfigValue } from '@plannotator/ui/config';
+import { monoFontStack } from '@plannotator/ui/utils/typography';
 import { useReviewState } from '../dock/ReviewStateContext';
 import { resolveSyntaxTheme, buildLineBgOverrides } from '../hooks/usePierreTheme';
 
@@ -31,9 +32,12 @@ function buildPierreCSS(
     const fg = styles.getPropertyValue('--foreground').trim();
     if (!bg || !fg) return '';
 
-    const fontCSS = (fontFamily || fontSize) ? `
+    // See usePierreTheme: the generic monospace fallback keeps columns aligned
+    // when the chosen family is unavailable.
+    const monoStack = monoFontStack(fontFamily);
+    const fontCSS = (monoStack || fontSize) ? `
       pre, code, [data-line-content], [data-column-number] {
-        ${fontFamily ? `font-family: ${fontFamily} !important;` : ''}
+        ${monoStack ? `font-family: ${monoStack} !important;` : ''}
         ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
       }` : '';
 

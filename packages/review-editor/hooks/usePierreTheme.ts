@@ -10,6 +10,7 @@ import { useConfigValue } from '@plannotator/ui/config';
  * the import path the review editor has always used.
  */
 import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+import { monoFontStack } from '@plannotator/ui/utils/typography';
 export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
 
 export interface PierreTheme {
@@ -241,9 +242,13 @@ export function usePierreTheme(options?: {
       const primary = styles.getPropertyValue('--primary').trim();
       if (!bg || !fg) return;
 
-      const fontCSS = fontFamily || fontSize ? `
+      // Always keep a generic monospace behind the chosen face: the diff pane
+      // is column-aligned, so a family that fails to load must not fall through
+      // to the surrounding proportional font.
+      const monoStack = monoFontStack(fontFamily);
+      const fontCSS = monoStack || fontSize ? `
           pre, code, [data-line-content], [data-column-number] {
-            ${fontFamily ? `font-family: ${fontFamily} !important;` : ''}
+            ${monoStack ? `font-family: ${monoStack} !important;` : ''}
             ${fontSize ? `font-size: ${fontSize} !important; line-height: 1.5 !important;` : ''}
           }` : '';
 
