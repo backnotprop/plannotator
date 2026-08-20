@@ -27,6 +27,7 @@ import {
   resolveAgentTerminalWebSocketUrl,
   resolveAnnotateAgentId,
   saveAnnotateAgentId,
+  type AnnotateAgentTerminalPlacement,
   type AnnotateAgentTerminalSide,
 } from "@plannotator/ui/utils/annotateAgentTerminal";
 import { getItem, setItem } from "@plannotator/ui/utils/storage";
@@ -64,7 +65,10 @@ type AgentTerminalDisplaySettings = {
 interface AnnotateAgentTerminalPanelProps {
   capability: AgentTerminalCapability;
   width: number | string;
+  /** The durable preference, which the Position control reflects. */
   side: AnnotateAgentTerminalSide;
+  /** The edge actually docked against ('hidden' opened for a session = left). */
+  placement: AnnotateAgentTerminalPlacement;
   onSideChange: (side: AnnotateAgentTerminalSide) => void;
   onSessionActiveChange?: (active: boolean) => void;
   onSessionReadyChange?: (ready: boolean) => void;
@@ -128,6 +132,7 @@ export const AnnotateAgentTerminalPanel = forwardRef<
   capability,
   width,
   side,
+  placement,
   onSideChange,
   onSessionActiveChange,
   onSessionReadyChange,
@@ -318,7 +323,7 @@ export const AnnotateAgentTerminalPanel = forwardRef<
     setStatus("exited");
   }, [clearTimers, onClose, onSessionActiveChange, onSessionReadyChange]);
 
-  const sideBorderClass = side === "left"
+  const sideBorderClass = placement === "left"
     ? "border-r border-border"
     : "border-l border-border/50";
 
@@ -573,12 +578,15 @@ function AgentTerminalDisplayPopover({
             </button>
           </div>
 
+          {/* Hidden closes the terminal (and this popover with it). The same
+              control lives in Settings, which is how it is reopened. */}
           <TerminalDisplaySegmented
             label="Position"
             value={side}
             options={[
               { value: "left", label: "Left" },
               { value: "right", label: "Right" },
+              { value: "hidden", label: "Hidden" },
             ]}
             onChange={onSideChange}
           />
