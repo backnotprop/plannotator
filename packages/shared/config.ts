@@ -498,11 +498,17 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
       : undefined;
     // A typography update is a complete profile snapshot. Replacing it makes
     // Reset durable instead of deep-merging deleted roles back from disk.
+    // When the incoming value is absent or invalid we keep what is on disk —
+    // including a value that does not parse. saveConfig is called for every
+    // unrelated setting, so dropping an unparsable key here would silently
+    // delete a hand-edited typography block on the next theme toggle instead
+    // of leaving it there to be fixed. Readers already ignore it (both
+    // getServerConfig and the client validate before use).
     const currentTypography = parseTypographyConfig(current.typography);
     const partialTypography = parseTypographyConfig(partial.typography);
-    const mergedTypography = partial.typography === undefined || !partialTypography.ok
-      ? (currentTypography.ok ? currentTypography.value : undefined)
-      : partialTypography.value;
+    const mergedTypography = partial.typography !== undefined && partialTypography.ok
+      ? partialTypography.value
+      : (currentTypography.ok ? currentTypography.value : current.typography);
     const mergedReviewAnalysis = (current.reviewAnalysis || partial.reviewAnalysis)
       ? { ...current.reviewAnalysis, ...partial.reviewAnalysis }
       : undefined;
