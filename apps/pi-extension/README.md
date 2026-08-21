@@ -276,6 +276,8 @@ URL targets work too. A loopback `http` URL that answers with an HTML page (a ru
 
 Run `/plannotator-last` to annotate the agent's most recent response. The message opens in the annotation UI where you can highlight text, add comments, and send structured feedback back to the agent.
 
+By default the delivered feedback is prefixed with an excerpt of the target response ("This feedback applies to the earlier assistant response excerpted below: ..." — up to 1,000 characters) whenever the extension judges the target may no longer be in the model's working context (different session, agent busy, or entries added after it). Since the model usually still holds the last response in context, the excerpt can be redundant; set `{ "annotateMessageAnchoring": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_ANNOTATE_MESSAGE_ANCHORING=0` to always deliver the annotations alone (#1334).
+
 ### Archive browser
 
 The Plannotator archive browser is available through the shared event API as `archive`, which opens the saved plan/decision browser for future callers. The orchestrator does not expose a dedicated archive command yet.

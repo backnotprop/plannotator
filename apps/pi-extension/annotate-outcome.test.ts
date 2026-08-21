@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
+import { classifyAnnotateOutcome, shouldPrependMessageAnchor } from "./annotate-outcome.ts";
 
 describe("Pi annotate outcomes", () => {
   test("delivers approved file feedback before the approval notification", () => {
@@ -47,5 +47,41 @@ describe("Pi annotate outcomes", () => {
       notification: "closed",
       promptKind: null,
     });
+  });
+});
+
+describe("shouldPrependMessageAnchor (#1334)", () => {
+  test("anchors a possibly-stale target by default", () => {
+    expect(shouldPrependMessageAnchor({
+      anchoringEnabled: true,
+      targetMayBeStale: true,
+    })).toBe(true);
+  });
+
+  test("skips anchoring when the config disables it", () => {
+    expect(shouldPrependMessageAnchor({
+      anchoringEnabled: false,
+      targetMayBeStale: true,
+    })).toBe(false);
+  });
+
+  test("skips anchoring when the target is the live last message", () => {
+    expect(shouldPrependMessageAnchor({
+      anchoringEnabled: true,
+      targetMayBeStale: false,
+    })).toBe(false);
+  });
+
+  test("message-scope feedback (picker, many messages) never anchors", () => {
+    expect(shouldPrependMessageAnchor({
+      feedbackScope: "messages",
+      anchoringEnabled: true,
+      targetMayBeStale: true,
+    })).toBe(false);
+    expect(shouldPrependMessageAnchor({
+      feedbackScope: "message",
+      anchoringEnabled: true,
+      targetMayBeStale: true,
+    })).toBe(true);
   });
 });
