@@ -26,6 +26,10 @@ export interface ReviewJjRuntime {
   ) => Promise<GitCommandResult>;
 }
 
+// `reachable(@, mutable())` is JJ's definition of the stack being worked on.
+// Its root parents are where that line diverged from immutable history.
+const JJ_LINE_BASE_REVSET = "fork_point(roots(reachable(@, mutable()))-)";
+
 export async function detectJjWorkspace(
   runtime: ReviewJjRuntime,
   cwd?: string,
@@ -368,13 +372,24 @@ export async function selectDefaultJjCompareTarget(
     "log",
     "--no-graph",
     "-r",
-    JJ_TRUNK_REVSET,
+    JJ_LINE_BASE_REVSET,
     "-T",
-    "json(bookmarks)",
+    'json(bookmarks) ++ "\\t" ++ commit_id ++ "\\n"',
   ], { cwd });
-  if (result.exitCode !== 0) return JJ_TRUNK_REVSET;
+  if (result.exitCode !== 0) {
+    throw new Error(firstErrorLine(result.stderr) ?? "Jujutsu could not resolve the line-of-work base.");
+  }
 
-  return parseJjResolvedBookmarks(result.stdout)[0] ?? JJ_TRUNK_REVSET;
+  const [record] = splitJjTemplateRecords(result.stdout);
+  if (!record) throw new Error("The current Jujutsu revision is not part of a mutable line of work.");
+
+  const fields = splitJjTemplateFields(record);
+  const bookmark = parseJjResolvedBookmarks(fields?.[0] ?? record)[0];
+  if (bookmark) return bookmark;
+
+  const commitId = fields?.[1].trim();
+  if (commitId) return commitId;
+  throw new Error("Jujutsu returned an invalid line-of-work base.");
 }
 
 function parseJjResolvedBookmarks(value: string): string[] {

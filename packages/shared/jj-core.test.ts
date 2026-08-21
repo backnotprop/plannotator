@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   getJjSnapshotRevsets,
   resolveJjSnapshotEndpoint,
@@ -153,38 +156,106 @@ describe("jj diff args", () => {
 });
 
 describe("jj compare targets", () => {
-  test("resolves default target from jj trunk remote bookmarks", async () => {
+  const testIfJj = (() => {
+    try {
+      return Bun.spawnSync(["jj", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;
+    } catch {
+      return false;
+    }
+  })()
+    ? test
+    : test.skip;
+
+  testIfJj("uses the parent of the current mutable line of work", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "plannotator-jj-base-"));
+    const immutableHeads = 'revset-aliases."immutable_heads()"=bookmarks(exact:"development")';
+    const jj = (args: string[], configureImmutableHeads = false) => {
+      const command = configureImmutableHeads ? ["jj", "--config", immutableHeads, ...args] : ["jj", ...args];
+      const result = Bun.spawnSync(command, { cwd: workspace, stdout: "pipe", stderr: "pipe" });
+      if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+      return result;
+    };
+
+    try {
+      jj(["git", "init", "."]);
+      writeFileSync(join(workspace, "history.txt"), "development\n");
+      jj(["commit", "-m", "development"]);
+      jj(["bookmark", "create", "development", "-r", "@-"]);
+
+      jj(["new", "development"]);
+      appendFileSync(join(workspace, "history.txt"), "feature one\n");
+      jj(["commit", "-m", "feature one"]);
+      appendFileSync(join(workspace, "history.txt"), "feature two\n");
+      jj(["commit", "-m", "feature two"]);
+      jj(["bookmark", "create", "feature", "-r", "@-"]);
+
+      const runtime: ReviewJjRuntime = {
+        async runJj(args, options) {
+          const result = Bun.spawnSync(["jj", "--config", immutableHeads, ...args], {
+            cwd: options?.cwd,
+            stdout: "pipe",
+            stderr: "pipe",
+          });
+          return {
+            stdout: result.stdout.toString(),
+            stderr: result.stderr.toString(),
+            exitCode: result.exitCode,
+          };
+        },
+      };
+
+      // Verify the fixture's configured boundary independently of the code under test.
+      expect(jj(["log", "--no-graph", "-r", "roots(reachable(@, mutable()))-", "-T", "bookmarks"], true).stdout.toString().trim())
+        .toBe("development");
+      await expect(selectDefaultJjCompareTarget(runtime, workspace)).resolves.toBe("development");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("resolves the line base in one JJ query and prefers its remote bookmark", async () => {
     const calls: string[][] = [];
     const runtime: ReviewJjRuntime = {
       async runJj(args) {
         calls.push(args);
-        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\n', stderr: "", exitCode: 0 };
+        return {
+          stdout: '[{"name":"development"},{"name":"development","remote":"origin"}]\\t0123456789abcdef\\n',
+          stderr: "",
+          exitCode: 0,
+        };
       },
     };
 
-    await expect(selectDefaultJjCompareTarget(runtime, "/repo"))
-      .resolves.toBe("main@origin");
+    await expect(selectDefaultJjCompareTarget(runtime, "/repo")).resolves.toBe("development@origin");
     expect(calls).toEqual([[
       "log",
       "--no-graph",
       "-r",
-      "trunk()",
+      "fork_point(roots(reachable(@, mutable()))-)",
       "-T",
-      "json(bookmarks)",
+      'json(bookmarks) ++ "\\t" ++ commit_id ++ "\\n"',
     ]]);
   });
 
-  test("falls back to local bookmark then trunk revset", async () => {
-    const runtimeFor = (stdout: string): ReviewJjRuntime => ({
+  test("uses the base commit id when it has no bookmark", async () => {
+    const runtime: ReviewJjRuntime = {
       async runJj() {
-        return { stdout, stderr: "", exitCode: 0 };
+        return { stdout: "[]\\t0123456789abcdef\\n", stderr: "", exitCode: 0 };
+      },
+    };
+
+    await expect(selectDefaultJjCompareTarget(runtime)).resolves.toBe("0123456789abcdef");
+  });
+
+  test("reports when JJ cannot resolve a line base", async () => {
+    const runtimeFor = (stdout: string, stderr = "", exitCode = 0): ReviewJjRuntime => ({
+      async runJj() {
+        return { stdout, stderr, exitCode };
       },
     });
 
-    await expect(selectDefaultJjCompareTarget(runtimeFor('[{"name":"develop"}]\n')))
-      .resolves.toBe("develop");
-    await expect(selectDefaultJjCompareTarget(runtimeFor('[]\n')))
-      .resolves.toBe("trunk()");
+    await expect(selectDefaultJjCompareTarget(runtimeFor(""))).rejects.toThrow("not part of a mutable line");
+    await expect(selectDefaultJjCompareTarget(runtimeFor("", "unknown revset", 1))).rejects.toThrow("unknown revset");
   });
 
   test("treats bookmarks and revsets correctly in line-of-work revsets", () => {

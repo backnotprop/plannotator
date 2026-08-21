@@ -93,7 +93,7 @@ In a jj workspace, the diff type picker shows jj-native options instead of git m
 
 - **Current** - working-copy changes
 - **Last** - the previous change
-- **Line** - full line of work from the current change back to trunk
+- **Line** - the current mutable line of work, starting where it diverged from immutable history
 - **All** - all local changes not yet on the remote
 - **Evolution** - amendment history for the current change (requires 2+ evolog entries)
 

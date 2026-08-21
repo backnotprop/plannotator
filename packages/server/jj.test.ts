@@ -45,24 +45,24 @@ describe("jj diff args", () => {
 });
 
 describe("jj compare targets", () => {
-  test("resolves default target from jj trunk bookmarks", async () => {
+  test("resolves a readable target for the detected line base", async () => {
     await expect(selectDefaultJjCompareTarget({
       async runJj() {
-        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\n', stderr: "", exitCode: 0 };
+        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\\t0123456789abcdef\\n', stderr: "", exitCode: 0 };
       },
     })).resolves.toBe("main@origin");
 
     await expect(selectDefaultJjCompareTarget({
       async runJj() {
-        return { stdout: '[{"name":"main"}]\n', stderr: "", exitCode: 0 };
+        return { stdout: '[{"name":"main"}]\\t0123456789abcdef\\n', stderr: "", exitCode: 0 };
       },
     })).resolves.toBe("main");
 
     await expect(selectDefaultJjCompareTarget({
       async runJj() {
-        return { stdout: "[]\n", stderr: "", exitCode: 0 };
+        return { stdout: "[]\\t0123456789abcdef\\n", stderr: "", exitCode: 0 };
       },
-    })).resolves.toBe("trunk()");
+    })).resolves.toBe("0123456789abcdef");
   });
 
   test("treats bookmarks and revsets correctly in line-of-work revsets", () => {
