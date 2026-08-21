@@ -862,24 +862,94 @@ export function extractRecentRenderedMessages(
 export function getRecentRenderedMessages(
   logPath: string,
   limit: number,
-  opts: { activeBranchOnly?: boolean } = {},
+  opts: RecentRenderedMessagesOptions = {},
 ): RenderedMessage[] {
+  return getRecentRenderedMessagesDetailed(logPath, limit, opts).messages;
+}
+
+export interface RecentRenderedMessagesOptions {
+  activeBranchOnly?: boolean;
+  /**
+   * Drop every message from the active turn — the entries from the newest
+   * human prompt onward. For launchers that run the CLI from the agent's own
+   * tool call: the agent can still write to the transcript after the process
+   * starts, and its acknowledgement would otherwise become "the last message".
+   * Without a human prompt in range the option is a no-op.
+   */
+  excludeActiveTurn?: boolean;
+}
+
+export interface RecentRenderedMessagesResult {
+  messages: RenderedMessage[];
+  /**
+   * True when the log did hold assistant messages but `excludeActiveTurn`
+   * removed all of them. Callers must distinguish this from "wrong log file":
+   * it is the right file with nothing before the current turn.
+   */
+  emptiedByActiveTurn: boolean;
+}
+
+/**
+ * Index of the newest human prompt — the start of the active turn — or -1.
+ * Restricted to `branchIndices` when given, so a `/rewind` orphan can't anchor.
+ */
+export function findActiveTurnStartIndex(
+  entries: SessionLogEntry[],
+  branchIndices: Set<number> | null = null,
+): number {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (branchIndices && !branchIndices.has(i)) continue;
+    const entry = entries[i];
+    if (entry && isHumanPrompt(entry)) return i;
+  }
+  return -1;
+}
+
+/**
+ * `getRecentRenderedMessages` with the cutoff outcome exposed. The
+ * active-turn cutoff is applied after the fail-open-on-empty-branch fallback,
+ * so a fresh `/compact` transcript still degrades to file order first; the
+ * anchor is then looked up in whichever index set the messages came from.
+ */
+export function getRecentRenderedMessagesDetailed(
+  logPath: string,
+  limit: number,
+  opts: RecentRenderedMessagesOptions = {},
+): RecentRenderedMessagesResult {
   try {
     const content = readFileSync(logPath, "utf-8");
     const entries = parseSessionLog(content);
-    const branchIndices = opts.activeBranchOnly
+    let branchIndices = opts.activeBranchOnly
       ? resolveActiveBranchIndices(entries)
       : null;
-    const messages = extractRecentRenderedMessages(entries, entries.length, limit, {
+    let messages = extractRecentRenderedMessages(entries, entries.length, limit, {
       branchIndices,
     });
     if (messages.length === 0 && branchIndices) {
       // Fail open, never fail empty: an empty active branch (fresh /compact)
       // must not make this log look like the wrong file.
-      return extractRecentRenderedMessages(entries, entries.length, limit);
+      branchIndices = null;
+      messages = extractRecentRenderedMessages(entries, entries.length, limit);
     }
-    return messages;
+    if (!opts.excludeActiveTurn || messages.length === 0) {
+      return { messages, emptiedByActiveTurn: false };
+    }
+    const turnStart = findActiveTurnStartIndex(entries, branchIndices);
+    if (turnStart === -1) {
+      return { messages, emptiedByActiveTurn: false };
+    }
+    let before = extractRecentRenderedMessages(entries, turnStart, limit, {
+      branchIndices,
+    });
+    if (before.length === 0 && branchIndices) {
+      // Same fail-open as above, one step later: right after a /compact the
+      // branch holds the launching turn and nothing before it, while the
+      // messages the user means sit on the far side of the boundary.
+      const fileOrderStart = findActiveTurnStartIndex(entries);
+      before = extractRecentRenderedMessages(entries, fileOrderStart, limit);
+    }
+    return { messages: before, emptiedByActiveTurn: before.length === 0 };
   } catch {
-    return [];
+    return { messages: [], emptiedByActiveTurn: false };
   }
 }
