@@ -34,6 +34,15 @@ import {
 } from "@plannotator/shared/resolve-file";
 import { isConvertedSource, urlToMarkdown } from "@plannotator/shared/url-to-markdown";
 import { isLoopbackHostname } from "@plannotator/server/live-proxy";
+import {
+  LIVE_APP_REQUIRES_HTTP_MESSAGE,
+  LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
+  LIVE_APP_REQUIRES_URL_MESSAGE,
+  buildForceAppFailureMessage,
+  buildLiveProbeFallbackNotice,
+  classifyLiveAppCandidate,
+  probeLiveAppTarget,
+} from "@plannotator/shared/live-probe";
 
 export interface AnnotateResolutionSuccess {
   ok: true;
@@ -108,72 +117,39 @@ export async function resolveAnnotateTarget(options: {
     return {
       ok: false,
       notFound: false,
-      message: "--app requires a URL target (a running local app, e.g. http://localhost:5173)",
+      message: LIVE_APP_REQUIRES_URL_MESSAGE,
     };
   }
 
   if (isUrl) {
-    // --- Live app detection (phase 1: Bun server + Claude Code CLI only) ---
+    // --- Live app detection (shared with the Pi extension) ---
     // Loopback http URLs default to LIVE mode when a quick probe returns an
     // HTML page; --static forces the classic conversion pipeline; --app
     // forces live mode and fails loudly when it cannot apply. Non-loopback
-    // URLs keep the conversion pipeline untouched.
-    let parsedUrl: URL | null = null;
-    try {
-      parsedUrl = new URL(filePath);
-    } catch {
-      parsedUrl = null;
-    }
-    const loopback = parsedUrl !== null && isLoopbackHostname(parsedUrl.hostname);
+    // URLs keep the conversion pipeline untouched. Probe semantics and
+    // messages live in @plannotator/shared/live-probe so every host judges
+    // the same URL identically.
+    const { parsed: parsedUrl, loopback } = classifyLiveAppCandidate(filePath);
 
     if (forceApp && !loopback) {
       return {
         ok: false,
         notFound: false,
-        message: "--app requires a localhost/loopback URL",
+        message: LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
       };
     }
     if (forceApp && parsedUrl?.protocol === "https:") {
-      // The phase 1 proxy is http-only.
+      // The live proxy is http-only.
       return {
         ok: false,
         notFound: false,
-        message: "--app requires an http:// URL (the live app proxy does not support https upstreams)",
+        message: LIVE_APP_REQUIRES_HTTP_MESSAGE,
       };
     }
 
     if (loopback && parsedUrl?.protocol === "http:" && !forceStatic) {
-      let liveEligible = false;
-      let probeError: string | null = null;
-      let probeRedirectedTo: string | null = null;
-      try {
-        const probe = await fetch(filePath, {
-          headers: { accept: "text/html" },
-          redirect: "follow",
-          signal: AbortSignal.timeout(3000),
-        });
-        const contentType = probe.headers.get("content-type") ?? "";
-        // Live eligibility is judged on the FINAL response after redirects.
-        // A loopback URL that 302s off its own origin (auth portal, tunnel
-        // splash page, another local service) must not open a live session
-        // whose iframe immediately navigates off the proxy; same-server
-        // redirects (/ to /login) stay live-eligible.
-        let finalOnOrigin = false;
-        try {
-          const finalUrl = new URL(probe.url || filePath);
-          finalOnOrigin =
-            finalUrl.protocol === "http:"
-            && isLoopbackHostname(finalUrl.hostname)
-            && (finalUrl.port || "80") === (parsedUrl.port || "80");
-          if (!finalOnOrigin) probeRedirectedTo = probe.url;
-        } catch {
-          finalOnOrigin = false;
-        }
-        liveEligible = probe.status < 500 && contentType.includes("text/html") && finalOnOrigin;
-      } catch (err) {
-        probeError = err instanceof Error ? err.message : String(err);
-      }
-      if (liveEligible) {
+      const probe = await probeLiveAppTarget(filePath, parsedUrl);
+      if (probe.liveEligible) {
         log(`Live app: ${filePath}`);
         return {
           ok: true,
@@ -190,11 +166,7 @@ export async function resolveAnnotateTarget(options: {
         return {
           ok: false,
           notFound: false,
-          message: probeError !== null
-            ? `--app: could not reach ${filePath}: ${probeError}`
-            : probeRedirectedTo !== null
-              ? `--app: ${filePath} redirected off its loopback origin (${probeRedirectedTo}); live mode requires the app to serve HTML from the probed origin`
-              : `--app: ${filePath} did not return an HTML page`,
+          message: buildForceAppFailureMessage(filePath, probe),
         };
       }
       // Probe failure or non-HTML without --app: fall through to the static
@@ -202,11 +174,8 @@ export async function resolveAnnotateTarget(options: {
       // behavior for dead URLs and JSON endpoints). A failed probe says so
       // first: a dev server still starting up probes as unreachable, and a
       // silent downgrade to static conversion reads as a broken live session.
-      if (probeError !== null) {
-        log(
-          `Live probe failed for ${filePath} (${probeError}); using static conversion. `
-          + `If a dev server is still starting up, retry with --app to force live mode.`,
-        );
+      if (probe.probeError !== null) {
+        log(buildLiveProbeFallbackNotice(filePath, probe.probeError));
       }
     }
 

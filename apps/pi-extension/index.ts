@@ -733,10 +733,16 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// Split known annotate flags from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
-			// (scoped-package-style names).
-			let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
+			// (scoped-package-style names). liveFlags: Pi supports live app
+			// sessions, so --app / --static are recognized here.
+			let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina, app: appFlag, static: staticFlag } = parseAnnotateArgs(args ?? "", { liveFlags: true });
+			// Same flag-conflict-first ordering as the Bun CLI.
+			if (appFlag && staticFlag) {
+				ctx.ui.notify("--app and --static are mutually exclusive", "error");
+				return;
+			}
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--app] [--static] [--gate] [--json]", "error");
 				return;
 			}
 
@@ -784,28 +790,91 @@ export default function plannotator(pi: ExtensionAPI): void {
 			let rawHtml: string | undefined;
 			let absolutePath: string;
 			let folderPath: string | undefined;
-			let mode: "annotate" | "annotate-folder" | undefined;
+			let mode: "annotate" | "annotate-folder" | "annotate-app" | undefined;
 			let sourceInfo: string | undefined;
 			let sourceConverted = false;
 			let isFolder = false;
+			let liveTargetUrl: string | undefined;
 
 			// --- URL annotation ---
 			const isUrl = /^https?:\/\//i.test(filePath);
 
+			// --app is contracted to fail loudly whenever it cannot apply; a
+			// file or folder target silently swallowing it would hide the
+			// flag's typo'd use (same contract as the Bun CLI).
+			if (!isUrl && appFlag) {
+				const { LIVE_APP_REQUIRES_URL_MESSAGE } = await import("./generated/live-probe.ts");
+				ctx.ui.notify(LIVE_APP_REQUIRES_URL_MESSAGE, "error");
+				return;
+			}
+
 			if (isUrl) {
-				const useJina = resolveUseJina(noJina, loadConfig());
-				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
-				try {
-					const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.ts");
-					const result = await urlToMarkdown(filePath, { useJina });
-					markdown = result.markdown;
-					sourceConverted = isConvertedSource(result.source);
-				} catch (err) {
-					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+				// --- Live app detection (shared probe: same 3s timeout, same
+				// "< 500 + HTML + same loopback origin" gate as the Bun CLI) ---
+				const {
+					LIVE_APP_REMOTE_MESSAGE,
+					LIVE_APP_REQUIRES_HTTP_MESSAGE,
+					LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
+					buildForceAppFailureMessage,
+					buildLiveProbeFallbackNotice,
+					classifyLiveAppCandidate,
+					probeLiveAppTarget,
+				} = await import("./generated/live-probe.ts");
+				const { parsed: parsedUrl, loopback } = classifyLiveAppCandidate(filePath);
+
+				if (appFlag && !loopback) {
+					ctx.ui.notify(LIVE_APP_REQUIRES_LOOPBACK_MESSAGE, "error");
 					return;
 				}
-				absolutePath = filePath;
-				sourceInfo = filePath;
+				if (appFlag && parsedUrl?.protocol === "https:") {
+					// The live proxy is http-only.
+					ctx.ui.notify(LIVE_APP_REQUIRES_HTTP_MESSAGE, "error");
+					return;
+				}
+
+				if (loopback && parsedUrl?.protocol === "http:" && !staticFlag) {
+					const probe = await probeLiveAppTarget(filePath, parsedUrl);
+					if (probe.liveEligible) {
+						// Remote hard-off (layer 1 of 2; the server throw in
+						// serverAnnotate.ts backstops it): a live proxy relays
+						// the user's authenticated dev app, and a remote Pi
+						// session is reachable beyond loopback.
+						if (isRemoteSession()) {
+							ctx.ui.notify(LIVE_APP_REMOTE_MESSAGE, "error");
+							return;
+						}
+						liveTargetUrl = filePath;
+						mode = "annotate-app";
+						ctx.ui.notify(`Live app: ${filePath}`, "info");
+					} else if (appFlag) {
+						ctx.ui.notify(buildForceAppFailureMessage(filePath, probe), "error");
+						return;
+					} else if (probe.probeError !== null) {
+						// A dev server still starting up probes as unreachable;
+						// say so instead of silently downgrading to static.
+						ctx.ui.notify(buildLiveProbeFallbackNotice(filePath, probe.probeError), "info");
+					}
+				}
+
+				if (liveTargetUrl) {
+					markdown = "";
+					absolutePath = filePath;
+					sourceInfo = filePath;
+				} else {
+					const useJina = resolveUseJina(noJina, loadConfig());
+					ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
+					try {
+						const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.ts");
+						const result = await urlToMarkdown(filePath, { useJina });
+						markdown = result.markdown;
+						sourceConverted = isConvertedSource(result.source);
+					} catch (err) {
+						ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+						return;
+					}
+					absolutePath = filePath;
+					sourceInfo = filePath;
+				}
 			} else {
 				// Pick the interpretation of the user input that actually exists:
 				// stripped form first (reference-mode primary), literal as fallback
@@ -881,6 +950,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					rawHtml,
 					!!rawHtml,
 					renderMarkdownFlag,
+					undefined,
+					liveTargetUrl,
 				);
 				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session

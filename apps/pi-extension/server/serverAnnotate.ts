@@ -2,7 +2,16 @@ import { createServer } from "node:http";
 import type { IncomingMessage } from "node:http";
 import { dirname, resolve as resolvePath } from "node:path";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+
+import {
+	buildLiveAppUrl,
+	buildLiveEditorOrigins,
+	composeLiveBridgeJs,
+	liveAppDraftIdentity,
+} from "../generated/live-proxy-core.ts";
+import { startLiveAppProxyNode } from "../generated/live-proxy-node.ts";
+import type { LiveAppProxy } from "../generated/live-proxy-core.ts";
 
 import { contentHash, deleteDraft } from "../generated/draft.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
@@ -224,7 +233,28 @@ export async function startAnnotateServer(options: {
 	agentCwd?: string;
 	/** Project name for keying per-file version history (powers the annotate version diff). */
 	project?: string;
+	/**
+	 * Live local app annotation (mode "annotate-app"): the server starts a
+	 * loopback reverse proxy (node:http transport over the shared core)
+	 * mirroring targetUrl and serves the composed bridge body from it. The
+	 * caller supplies the bridge sources; the server owns the per-session
+	 * token. Refused outright in remote mode.
+	 */
+	liveApp?: {
+		targetUrl: string;
+		bridgeScript: string;
+		bridgeBootstrap: string;
+		annotationCss: string;
+	};
 }): Promise<AnnotateServerResult> {
+	// Remote hard-off, defense in depth behind the command-side check: a live
+	// proxy relays the user's authenticated dev app, so it must never coexist
+	// with a beyond-loopback annotate bind. No override env var exists on
+	// purpose (mirrors packages/server/annotate.ts).
+	if (options.liveApp && isRemoteSession()) {
+		throw new Error("Live app annotation is unavailable in remote mode");
+	}
+
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
@@ -275,11 +305,19 @@ export async function startAnnotateServer(options: {
 		{ graceMs: clientLeaseGraceMs },
 	);
 
-	// Folder annotation has no stable markdown body, so key drafts by folder path instead.
+	// Draft identity. Content-derived for the modes that HAVE content, and
+	// path-derived for the modes that do not: a live app session resolves
+	// `markdown` to "" by construction (the page lives behind the proxy), so
+	// its target is its identity — hashing the empty body would give every
+	// live session on the machine one shared draft slot. Folder sessions key
+	// by folder path for the same reason. liveAppDraftIdentity is the shared
+	// normalization, so Bun and Pi sessions key the same target identically.
 	const draftSource =
-		options.mode === "annotate-folder" && options.folderPath
-			? `folder:${resolvePath(options.folderPath)}`
-			: options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
+		options.mode === "annotate-app" && options.liveApp
+			? `annotate-app\0${liveAppDraftIdentity(options.liveApp.targetUrl)}`
+			: options.mode === "annotate-folder" && options.folderPath
+				? `folder:${resolvePath(options.folderPath)}`
+				: options.renderHtml && options.rawHtml ? options.rawHtml : options.markdown;
 	const draftKey = contentHash(draftSource);
 
 	// Per-file version history → powers the native version diff in annotate mode.
@@ -290,10 +328,13 @@ export async function startAnnotateServer(options: {
 	const annotateProjectName = options.project ?? "_unknown";
 	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
 	// Single local file sessions are the only ones this eager gate covers.
-	// URL and agent-message sessions never write session content to the data
-	// dir. Folder sessions do participate in per-file version history, but
-	// lazily through /api/doc (see computeFolderAnnotateHistory below), not
-	// here. The durable submit records stay single-local-file only.
+	// URL, agent-message, and live-app sessions never write session content to
+	// the data dir. Folder sessions do participate in per-file version history,
+	// but lazily through /api/doc (see computeFolderAnnotateHistory below), not
+	// here. The durable submit records stay single-local-file only. The
+	// mode === "annotate" check is deliberate and explicit: "annotate-app"
+	// (whose filePath is URL-shaped anyway) must never become history-eligible
+	// by accident.
 	const singleFileLocalAnnotate =
 		(options.mode || "annotate") === "annotate" && !/^https?:\/\//i.test(options.filePath);
 	let annotateHistory: AnnotateHistoryResult | null = null;
@@ -499,6 +540,13 @@ export async function startAnnotateServer(options: {
 		initialSingleFileSourcePath,
 	});
 
+	// Live app session state, populated after the annotate port is known (the
+	// editor origins carry the port) and before the URL is returned to the
+	// caller for advertisement.
+	let liveProxy: LiveAppProxy | null = null;
+	let liveSessionToken = "";
+	let liveAppUrl = "";
+
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
 
@@ -541,7 +589,41 @@ export async function startAnnotateServer(options: {
 			return;
 		}
 
-		if (url.pathname === "/api/plan" && req.method === "GET") {
+		if (url.pathname === "/api/plan" && req.method === "GET" && options.mode === "annotate-app" && options.liveApp) {
+			// Live app session: no rawHtml, no renderAs, no version fields,
+			// sharing off. The client frames appUrl (the loopback proxy) and
+			// authenticates the bridge with liveToken. Mirrors the Bun
+			// server's annotate-app payload (packages/server/annotate.ts).
+			json(res, {
+				plan: "",
+				origin: options.origin ?? "pi",
+				mode: options.mode,
+				filePath: options.filePath,
+				sourceInfo: options.sourceInfo ?? options.liveApp.targetUrl,
+				appUrl: liveAppUrl,
+				targetUrl: options.liveApp.targetUrl,
+				liveToken: liveSessionToken,
+				gate: options.gate ?? false,
+				approvalNotesSupported: options.approvalNotesSupported ?? false,
+				clientLease: options.clientLeaseSupported
+					? { enabled: true as const, reconnectGraceMs: clientLeaseGraceMs }
+					: { enabled: false as const },
+				sharingEnabled: false,
+				convertHtml: false,
+				repoInfo,
+				projectRoot: process.cwd(),
+				serverConfig: getServerConfig(gitUser),
+				agentTerminal: agentTerminalCapability,
+				feedbackTemplates: {
+					fileFeedback: getAnnotateFileFeedbackTemplate(
+						(options.origin ?? "pi") as PromptRuntime,
+					),
+					messageFeedback: getAnnotateMessageFeedbackTemplate(
+						(options.origin ?? "pi") as PromptRuntime,
+					),
+				},
+			});
+		} else if (url.pathname === "/api/plan" && req.method === "GET") {
 			const displayRawHtml = options.renderHtml && options.rawHtml
 				? htmlAssets.rewriteHtml(options.rawHtml, options.filePath)
 				: undefined;
@@ -928,6 +1010,55 @@ export async function startAnnotateServer(options: {
 
 	const { port, portSource } = await listenOnPort(server);
 
+	if (options.liveApp) {
+		// Compose the proxy-served bridge body via the shared assembly (config
+		// prelude with the token this server owns, both editor origin forms
+		// with the localhost one first to match the advertised URL, then the
+		// bootstrap that installs the CSS, then the bridge itself). A proxy
+		// startup failure must not leave the annotate listener hanging.
+		try {
+			liveSessionToken = randomBytes(16).toString("hex");
+			const editorOrigins = buildLiveEditorOrigins(port);
+			liveProxy = await startLiveAppProxyNode({
+				targetUrl: options.liveApp.targetUrl,
+				editorOrigins,
+				bridgeJs: composeLiveBridgeJs({
+					token: liveSessionToken,
+					editorOrigins,
+					annotationCss: options.liveApp.annotationCss,
+					bridgeBootstrap: options.liveApp.bridgeBootstrap,
+					bridgeScript: options.liveApp.bridgeScript,
+				}),
+			});
+			// Advertise the proxy under the LOCALHOST spelling, carrying the
+			// target URL's own path and query (see buildLiveAppUrl in the
+			// shared core for the same-site/cookie rationale).
+			// PLANNOTATOR_URL_HOST is never applied here.
+			liveAppUrl = buildLiveAppUrl(liveProxy.port, options.liveApp.targetUrl);
+		} catch (error) {
+			// Same disposal set the normal stop() runs, each step guarded so
+			// the original startup error is what propagates.
+			for (const dispose of [
+				() => closeAllFileBrowserWatchers(),
+				() => {
+					clientLease.cancel();
+					clientLease.closeSessions();
+				},
+				() => aiRuntime?.dispose(),
+				() => agentTerminal.dispose(),
+			]) {
+				try {
+					dispose();
+				} catch {
+					// startup failure cleanup: best effort
+				}
+			}
+			server.close();
+			(server as { closeAllConnections?: () => void }).closeAllConnections?.();
+			throw error;
+		}
+	}
+
 	// Mirror the Bun server: bind first, then warm through the async shared walk.
 	void warmFileListCache(process.cwd(), "code");
 
@@ -954,6 +1085,11 @@ export async function startAnnotateServer(options: {
 				}],
 				["AI runtime", () => aiRuntime?.dispose()],
 				["agent terminal", () => agentTerminal.dispose()],
+				// Live proxy last, mirroring the Bun server's guarded order: a
+				// throw in the historically fragile agent-terminal teardown
+				// (#1314) must never orphan the proxy's listener or its
+				// upstream sockets.
+				["live proxy", () => liveProxy?.stop()],
 			];
 			try {
 				for (const [name, dispose] of disposals) {

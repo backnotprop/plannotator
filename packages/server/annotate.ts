@@ -55,6 +55,12 @@ import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
+import {
+  buildLiveAppUrl,
+  buildLiveEditorOrigins,
+  composeLiveBridgeJs,
+  liveAppDraftIdentity,
+} from "@plannotator/shared/live-proxy-core";
 import { randomBytes } from "node:crypto";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
 
@@ -204,26 +210,10 @@ export function runGuardedShutdown(
   }
 }
 
-/**
- * Stable identity for a live app session's annotation draft.
- *
- * A live session's draft has to key off WHICH APP is being annotated, since
- * the session holds no document text of its own. Normalizing through the URL
- * parser first so the same dev server recovers its draft when the target is
- * spelled slightly differently on a later run (a trailing slash, an uppercase
- * host, an explicit :80). Unparseable values fall back to the trimmed string:
- * a target that never reached the URL parser cannot have started a proxy
- * anyway, and a per-target key that is merely raw is still per-target.
- */
-export function liveAppDraftIdentity(targetUrl: string): string {
-  try {
-    const url = new URL(targetUrl);
-    const path = url.pathname.replace(/\/+$/, "");
-    return `${url.origin}${path}${url.search}`;
-  } catch {
-    return targetUrl.trim();
-  }
-}
+// Stable identity for a live app session's annotation draft — moved to the
+// shared live-proxy core so the Pi mirror keys drafts identically; re-exported
+// here for existing import sites.
+export { liveAppDraftIdentity } from "@plannotator/shared/live-proxy-core";
 
 /**
  * Start the Annotate server
@@ -1148,50 +1138,28 @@ export async function startAnnotateServer(
   const serverUrl = buildAdvertisedUrl(port);
 
   if (liveApp) {
-    // Compose the proxy-served bridge body: JSON config prelude (the token
-    // this server owns, both editor origin forms with the localhost one
-    // first to match the advertised URL, and the annotation CSS), then the
-    // bootstrap that installs the CSS, then the bridge itself.
+    // Compose the proxy-served bridge body via the shared assembly (config
+    // prelude with the token this server owns, both editor origin forms
+    // with the localhost one first to match the advertised URL, then the
+    // bootstrap that installs the CSS, then the bridge itself).
     liveSessionToken = randomBytes(16).toString("hex");
-    const editorOrigins = [
-      `http://localhost:${port}`,
-      `http://127.0.0.1:${port}`,
-    ];
-    const bridgeJs =
-      "window.__plannotatorLiveConfig = "
-      + JSON.stringify({
-        live: true,
-        token: liveSessionToken,
-        editorOrigins,
-        css: liveApp.annotationCss,
-      })
-      + ";\n"
-      + liveApp.bridgeBootstrap
-      + "\n"
-      + liveApp.bridgeScript;
+    const editorOrigins = buildLiveEditorOrigins(port);
     liveProxy = startLiveAppProxy({
       targetUrl: liveApp.targetUrl,
       editorOrigins,
-      bridgeJs,
+      bridgeJs: composeLiveBridgeJs({
+        token: liveSessionToken,
+        editorOrigins,
+        annotationCss: liveApp.annotationCss,
+        bridgeBootstrap: liveApp.bridgeBootstrap,
+        bridgeScript: liveApp.bridgeScript,
+      }),
     });
     // Advertise the proxy under the LOCALHOST spelling, carrying the target
-    // URL's own path and query. localhost keeps the framed app same-site
-    // with the editor page (buildAdvertisedUrl advertises localhost locally)
-    // and shares the dev app's host-only localhost cookies and storage,
-    // which a 127.0.0.1 spelling would not (and Safari ITP blocks all
-    // cookies in cross-site iframes). The proxy itself still BINDS the
-    // 127.0.0.1 literal; browsers that resolve localhost to ::1 first fall
-    // back to IPv4 on the refused loopback connect. The path matters too:
-    // annotating http://localhost:5173/admin must open /admin, not the app
-    // root. PLANNOTATOR_URL_HOST is still never applied here.
-    let targetPath = "/";
-    try {
-      const parsedTarget = new URL(liveApp.targetUrl);
-      targetPath = parsedTarget.pathname + parsedTarget.search;
-    } catch {
-      targetPath = "/";
-    }
-    liveAppUrl = `http://localhost:${liveProxy.port}${targetPath}`;
+    // URL's own path and query (see buildLiveAppUrl in live-proxy-core for
+    // the same-site/cookie rationale). PLANNOTATOR_URL_HOST is still never
+    // applied here.
+    liveAppUrl = buildLiveAppUrl(liveProxy.port, liveApp.targetUrl);
   }
 
   // The cache warm must never gate the listening socket. Its async filesystem

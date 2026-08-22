@@ -45,7 +45,8 @@ export type PromptRuntime =
   | "copilot-cli"
   | "pi"
   | "codex"
-  | "gemini-cli";
+  | "gemini-cli"
+  | "oh-my-pi";
 
 interface PromptSectionConfig {
   [key: string]: string | Partial<Record<PromptRuntime, PromptSectionOverrides>> | undefined;

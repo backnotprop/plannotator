@@ -113,6 +113,7 @@ import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
+import { LIVE_APP_REMOTE_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
 // @plannotator/server never imports @plannotator/ui (mirrors the existing
 // htmlContent precedent).
@@ -508,7 +509,10 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 //   > Copilot CLI (COPILOT_CLI)
 //   > OpenCode (OPENCODE)
 //   > Gemini CLI (GEMINI_CLI)
-//   > Claude Code (default fallback)
+//   > oh-my-pi harness (OMPCODE) — checked last because OMP exports OMPCODE
+//     into every shell it spawns; runtimes launched from an OMP session must
+//     still be detected as themselves. OMPCODE still wins over the terminal
+//     fallback below.
 //
 // To add a new agent, also add an entry to AGENT_CONFIG in
 // packages/shared/agents.ts (see header comment there).
@@ -519,6 +523,7 @@ const detectedOrigin: Origin =
   process.env.COPILOT_CLI ? "copilot-cli" :
   process.env.OPENCODE ? "opencode" :
   process.env.GEMINI_CLI ? "gemini-cli" :
+  process.env.OMPCODE ? "oh-my-pi" :
   "claude-code";
 
 type OpenCodeBridgeAgent = {
@@ -1244,9 +1249,7 @@ if (args[0] === "sessions") {
   // unconditional loopback bind are the others). No override env var exists
   // on purpose: a live proxy relays the user's authenticated dev app.
   if (liveAppResolved && isRemoteSession()) {
-    exitAnnotateStartupFailure(
-      "Live app annotation is unavailable in remote mode (PLANNOTATOR_REMOTE). Run locally, or use --static to annotate a converted snapshot of the page.",
-    );
+    exitAnnotateStartupFailure(LIVE_APP_REMOTE_MESSAGE);
   }
 
   // --tailscale is the same exposure in different clothes: the annotate

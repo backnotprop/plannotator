@@ -118,7 +118,7 @@ If the probe does not return an HTML page from the same loopback origin, Plannot
 
 `--app` does not skip the probe. It turns each of the quiet fallbacks above into a clear error: a non-URL target, a non-loopback URL, an `https` URL, an unreachable app, an off-origin redirect, or a non-HTML response. These exit `1`, or `2` under a strict gate (`--require-approval` / `--result-file`), like any other annotate startup failure. The two flags are mutually exclusive.
 
-Live app annotation runs on the standalone CLI and the Claude Code slash command. On OpenCode and Pi, URL targets still convert to markdown.
+Live app annotation runs on the standalone CLI, the Claude Code slash command, and the Pi extension's `/plannotator-annotate` command, with the same probe, flags, and fallbacks everywhere. On OpenCode, URL targets still convert to markdown.
 
 ### Annotating a live app
 

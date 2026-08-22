@@ -270,6 +270,8 @@ Plannotator does not send `Continue with the approved plan`, enter its executing
 
 Run `/plannotator-annotate <file.md>` to open any markdown file in the annotation UI. Useful for reviewing documentation or design specs with the agent.
 
+URL targets work too. A loopback `http` URL that answers with an HTML page (a running dev app, e.g. `http://localhost:5173`) opens **live**: the app is served through a local reverse proxy and annotated in place, with HMR and WebSockets passed through. `--static` forces the classic markdown conversion; `--app` requires a live session and errors instead of falling back. Live sessions are unavailable in remote mode (`PLANNOTATOR_REMOTE`).
+
 ### Annotate last message
 
 Run `/plannotator-last` to annotate the agent's most recent response. The message opens in the annotation UI where you can highlight text, add comments, and send structured feedback back to the agent.
