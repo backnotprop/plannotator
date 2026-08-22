@@ -63,12 +63,32 @@ describe("jj compare targets", () => {
         return { stdout: "[]\\t0123456789abcdef\\n", stderr: "", exitCode: 0 };
       },
     })).resolves.toBe("0123456789abcdef");
+
+    // Generated `jj git push --change` bookmarks are never a readable target.
+    await expect(selectDefaultJjCompareTarget({
+      async runJj() {
+        return {
+          stdout: '[{"name":"push-vmopwunwxopv","remote":"origin"}]\\t0123456789abcdef\\n',
+          stderr: "",
+          exitCode: 0,
+        };
+      },
+    })).resolves.toBe("0123456789abcdef");
+
+    // An unresolvable base degrades to the previous default instead of aborting
+    // review startup, which has no handler for a throw.
+    await expect(selectDefaultJjCompareTarget({
+      async runJj() {
+        return { stdout: "", stderr: "unknown function", exitCode: 1 };
+      },
+    })).resolves.toBe("trunk()");
   });
 
   test("treats bookmarks and revsets correctly in line-of-work revsets", () => {
     expect(jjLineBaseRevset("main")).toBe('heads(::@ & ::(bookmarks(exact:"main")))');
     expect(jjLineBaseRevset("main@origin")).toBe('heads(::@ & ::(remote_bookmarks(exact:"main", exact:"origin")))');
     expect(jjLineBaseRevset("trunk()")).toBe("heads(::@ & ::(trunk()))");
+    expect(jjLineBaseRevset("a".repeat(40))).toBe(`heads(::@ & ::(${"a".repeat(40)}))`);
   });
 });
 
