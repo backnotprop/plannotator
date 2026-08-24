@@ -109,6 +109,7 @@ export async function handleEmbeddedCommand(
   event: any,
   deps: {
     client: any;
+    serverUrl?: URL;
     htmlContent: string;
     reviewHtmlContent: string;
     getSharingEnabled: () => Promise<boolean>;

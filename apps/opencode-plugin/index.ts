@@ -157,6 +157,7 @@ type EmbeddedRuntimeModule = {
     event: any,
     deps: {
       client: any;
+      serverUrl?: URL;
       htmlContent: string;
       reviewHtmlContent: string;
       getSharingEnabled: () => Promise<boolean>;
@@ -466,6 +467,7 @@ Do NOT proceed with implementation until your plan is approved.`;
           const embedded = await importEmbeddedRuntime();
           const deps = {
             client: ctx.client,
+            serverUrl: ctx.serverUrl,
             htmlContent: getPlanHtml(),
             reviewHtmlContent: getReviewHtml(),
             getSharingEnabled,

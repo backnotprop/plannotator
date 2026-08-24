@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
@@ -19,6 +19,11 @@ const startAnnotateServerMock = mock(async (_options: any) => ({
 }));
 
 const tempDirs: string[] = [];
+const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+
+beforeEach(() => {
+  process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
+});
 
 function makeTempDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "plannotator-opencode-commands-"));
@@ -49,6 +54,8 @@ function makeDeps() {
 
 afterEach(() => {
   startAnnotateServerMock.mockClear();
+  if (originalDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
