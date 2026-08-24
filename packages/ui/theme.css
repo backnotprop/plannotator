@@ -817,6 +817,55 @@ body:has([data-pn-document-scroll="true"]) > #root {
   overscroll-behavior: contain;
 }
 
+/* Compact Settings is a portaled full-stage surface. Its section list or
+ * section detail is the only scroll owner, while the surrounding stage stays
+ * pinned to the observed visual viewport through keyboard and browser-chrome
+ * changes. Desktop Settings does not carry this marker. */
+[data-pn-settings-layout='compact'] {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+[data-pn-settings-layout='compact'] button:not([role='switch']) {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+[data-pn-settings-layout='compact'] [role='switch']::before {
+  position: absolute;
+  inset: -0.625rem -0.125rem;
+  content: '';
+}
+
+[data-pn-settings-layout='compact']
+  :is(input:not([type='range']):not([type='color']):not([type='checkbox']):not([type='radio']), select, textarea) {
+  min-block-size: var(--pn-touch-target);
+  font-size: 1rem !important;
+}
+
+[data-pn-settings-layout='compact'] input[type='range'] {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+[data-pn-settings-layout='compact'] .pn-settings-obsidian-destination {
+  flex-direction: column;
+}
+
+[data-pn-settings-layout='compact'] .pn-settings-obsidian-destination > * {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-pn-settings-layout='compact'],
+  [data-pn-settings-layout='compact'] * {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* The navigator reuses information-dense desktop browser content, but its
  * interactive rows become physical controls on touch. Scope both the 44px
  * target and the TOC's legible type lift to the compact stage only. */

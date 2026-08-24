@@ -194,6 +194,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   bearConfigured,
   octarineConfigured,
 }) => {
+  const settingsReturnFocusRef = React.useRef<HTMLButtonElement>(null);
+
   return (
     <header
       data-app-header="true"
@@ -456,10 +458,13 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             onExternalClose={onCloseSettings}
             gitUser={gitUser}
             agentTerminalAvailable={agentTerminalAvailable}
+            isCompactTouchLayout={compactTouchLayout}
+            returnFocusRef={settingsReturnFocusRef}
           />
         </div>
 
         <PlanHeaderMenu
+          triggerRef={settingsReturnFocusRef}
           appVersion={appVersion}
           updateInfo={updateInfo}
           origin={origin}

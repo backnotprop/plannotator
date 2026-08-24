@@ -33,6 +33,7 @@ export interface CompactReviewAction {
 }
 
 interface ReviewHeaderMenuProps {
+  triggerRef?: React.Ref<HTMLButtonElement>;
   onOpenSettings: () => void;
   onOpenReviewSetup?: () => void;
   onOpenExport: () => void;
@@ -56,6 +57,7 @@ interface ReviewHeaderMenuProps {
 }
 
 export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
+  triggerRef,
   onOpenSettings,
   onOpenReviewSetup,
   onOpenExport,
@@ -90,6 +92,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
       }
       renderTrigger={({ isOpen, toggleMenu }) => (
         <button
+          ref={triggerRef}
           data-pn-touch-target
           data-pn-touch-target-icon
           onClick={() => {

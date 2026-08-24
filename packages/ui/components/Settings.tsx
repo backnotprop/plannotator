@@ -74,9 +74,29 @@ import {
   type FileBrowserSettings,
 } from '../utils/fileBrowser';
 import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
+import { useViewportEnvironment } from '../hooks/useViewportEnvironment';
 import { AnalysisLayerToggle } from './AnalysisLayerToggle';
 
 type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+
+const SETTINGS_TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
+  general: 'Identity and session behavior',
+  theme: 'Appearance, color, and favicon',
+  git: 'Review start view and change scope',
+  display: 'Layout and presentation preferences',
+  analysis: 'Semantic changes and call flow',
+  saving: 'Plan history and quick-save defaults',
+  labels: 'Quick feedback presets',
+  vim: 'Document navigation and HUD',
+  shortcuts: 'Keyboard reference',
+  ai: 'Provider and model defaults',
+  files: 'Extra file browser directories',
+  obsidian: 'Vault saving and browsing',
+  bear: 'Bear Notes export preferences',
+  octarine: 'Workspace export preferences',
+  comments: 'Conventional review labels',
+  hooks: 'Plan and review automation',
+};
 
 interface SettingsProps {
   taterMode: boolean;
@@ -96,10 +116,12 @@ interface SettingsProps {
    *  (base ref unresolvable) — the Git tab shows a note that the Git-status
    *  preference can't take effect in THIS repo. */
   sinceBaseUnavailable?: boolean;
-  /** The host is rendering its compact touch shell (review only). Display
-   *  settings that the compact shell overrides for the session are hidden
-   *  there instead of silently editing the desktop preference. */
+  /** The host is rendering its compact touch shell. Settings becomes a
+   *  full-screen, touch-native surface; review display preferences that the
+   *  compact shell overrides for the session remain protected. */
   isCompactTouchLayout?: boolean;
+  /** Focus target restored after an externally opened Settings surface closes. */
+  returnFocusRef?: React.RefObject<HTMLButtonElement | null>;
   /** Override Obsidian vault detection (default = GET /api/obsidian/vaults). */
   onDetectObsidianVaults?: () => Promise<string[]>;
   /** This annotate session actually offers the Agent TUI, so its Position
@@ -848,24 +870,73 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false }) => {
+export const Settings: React.FC<SettingsProps> = ({
+  taterMode,
+  onTaterModeChange,
+  onIdentityChange,
+  origin,
+  mode = 'plan',
+  onUIPreferencesChange,
+  externalOpen,
+  onExternalClose,
+  aiProviders = [],
+  gitUser,
+  sinceBaseUnavailable,
+  isCompactTouchLayout = false,
+  returnFocusRef,
+  onDetectObsidianVaults,
+  agentTerminalAvailable = false,
+}) => {
+  useViewportEnvironment();
   const [showDialog, setShowDialog] = useState(false);
+  const [compactScreen, setCompactScreen] = useState<'sections' | 'detail'>('sections');
   const settingsWasOpenRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const internalTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const backButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const compactSectionReturnIdRef = useRef<SettingsTab | null>(null);
   const [themePreview, setThemePreview] = useState(false);
 
   useEffect(() => {
     const wasOpen = settingsWasOpenRef.current;
     settingsWasOpenRef.current = showDialog;
-    if (
-      wasOpen
-      && !showDialog
-      && !themePreview
-      && mode !== 'review'
-      && configStore.get('vimModeEnabled')
-    ) {
-      requestVimDocumentFocus();
+
+    let animationFrame: number | null = null;
+    if (!wasOpen && showDialog) {
+      const activeElement = document.activeElement;
+      previousFocusRef.current = returnFocusRef?.current
+        ?? (activeElement instanceof HTMLElement ? activeElement : null)
+        ?? internalTriggerRef.current;
+      animationFrame = window.requestAnimationFrame(() => {
+        const initialControl = isCompactTouchLayout && compactScreen === 'detail'
+          ? backButtonRef.current
+          : closeButtonRef.current;
+        initialControl?.focus({ preventScroll: true });
+      });
     }
-  }, [mode, showDialog, themePreview]);
+
+    if (wasOpen && !showDialog && !themePreview) {
+      const explicitFocusTarget = returnFocusRef?.current;
+      if (explicitFocusTarget) {
+        animationFrame = window.requestAnimationFrame(() => {
+          if (explicitFocusTarget.isConnected) explicitFocusTarget.focus({ preventScroll: true });
+        });
+      } else if (mode !== 'review' && configStore.get('vimModeEnabled')) {
+        requestVimDocumentFocus();
+      } else {
+        const focusTarget = previousFocusRef.current;
+        animationFrame = window.requestAnimationFrame(() => {
+          if (focusTarget?.isConnected) focusTarget.focus({ preventScroll: true });
+        });
+      }
+    }
+
+    return () => {
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    };
+  }, [compactScreen, isCompactTouchLayout, mode, returnFocusRef, showDialog, themePreview]);
 
   useEffect(() => {
     if (!themePreview) return;
@@ -954,6 +1025,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   // Sync external open state
   useEffect(() => {
     if (externalOpen) {
+      setCompactScreen('sections');
       setShowDialog(true);
       onExternalClose?.();
     }
@@ -1116,11 +1188,79 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   // Default (Plannotator cookie identity) is editable, so this is true and the
   // controls render exactly as before.
   const identityEditable = isIdentityEditable();
+  const activeTabLabel = [...mainTabs, ...integrationTabs]
+    .find((tab) => tab.id === activeTab)?.label ?? 'Settings';
+
+  const closeSettings = () => {
+    setShowDialog(false);
+  };
+
+  const openCompactSection = (
+    tab: { id: SettingsTab; label: string },
+  ) => {
+    compactSectionReturnIdRef.current = tab.id;
+    setActiveTab(tab.id);
+    setCompactScreen('detail');
+    window.requestAnimationFrame(() => backButtonRef.current?.focus({ preventScroll: true }));
+  };
+
+  const showCompactSectionList = () => {
+    setCompactScreen('sections');
+    window.requestAnimationFrame(() => {
+      const sectionId = compactSectionReturnIdRef.current;
+      if (!sectionId) return;
+      dialogRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-pn-settings-section="${sectionId}"]`)
+        ?.focus({ preventScroll: true });
+    });
+  };
+
+  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape' && !event.defaultPrevented) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSettings();
+      return;
+    }
+
+    if (event.key !== 'Tab' || event.defaultPrevented) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => {
+      if (element.hidden || element.getAttribute('aria-hidden') === 'true') return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    });
+    const first = focusable.at(0);
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    if (event.shiftKey && (activeElement === first || !dialog.contains(activeElement))) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+    } else if (!event.shiftKey && (activeElement === last || !dialog.contains(activeElement))) {
+      event.preventDefault();
+      first.focus({ preventScroll: true });
+    }
+  };
 
   return (
     <>
       <button
-        onClick={() => setShowDialog(true)}
+        ref={internalTriggerRef}
+        type="button"
+        aria-label="Settings"
+        onClick={() => {
+          previousFocusRef.current = internalTriggerRef.current;
+          setCompactScreen('sections');
+          setShowDialog(true);
+        }}
         className="relative p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         title="Settings"
       >
@@ -1132,57 +1272,176 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
       {showDialog && !themePreview && createPortal(
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
-          onClick={() => setShowDialog(false)}
+          className={isCompactTouchLayout
+            ? 'pn-visible-viewport-stage z-[100] flex flex-col bg-card'
+            : 'fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4'
+          }
+          onClick={isCompactTouchLayout ? undefined : closeSettings}
         >
           <div
-            className="bg-card border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative overflow-hidden"
+            ref={dialogRef}
+            data-pn-settings-layout={isCompactTouchLayout ? 'compact' : 'desktop'}
+            data-pn-settings-screen={isCompactTouchLayout ? compactScreen : undefined}
+            className={isCompactTouchLayout
+              ? 'relative flex min-h-0 flex-1 flex-col overflow-hidden bg-card'
+              : 'bg-card border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative overflow-hidden'
+            }
             role="dialog"
             aria-modal="true"
             aria-labelledby="plannotator-settings-title"
             onClick={e => e.stopPropagation()}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape' || event.defaultPrevented) return;
-              event.preventDefault();
-              event.stopPropagation();
-              setShowDialog(false);
-            }}
+            onKeyDown={handleDialogKeyDown}
           >
             {taterMode && <TaterSpritePullup />}
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h3 id="plannotator-settings-title" className="font-semibold text-sm">Settings</h3>
-              <button
-                type="button"
-                aria-label="Close settings"
-                onClick={() => setShowDialog(false)}
-                className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex flex-col md:flex-row md:min-h-[420px] flex-1 min-h-0 overflow-hidden">
-              {/* Mobile: horizontal tab bar */}
-              <nav className="md:hidden flex overflow-x-auto border-b border-border px-2 py-1.5 gap-1 flex-shrink-0">
-                {[...mainTabs, ...integrationTabs].map(tab => (
+            {isCompactTouchLayout ? (
+              <div className="grid min-h-14 shrink-0 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center border-b border-border/80 px-2">
+                {compactScreen === 'detail' ? (
                   <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`px-3 py-1.5 rounded text-xs whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-                      activeTab === tab.id
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                    }`}
+                    ref={backButtonRef}
+                    type="button"
+                    data-pn-touch-target
+                    data-pn-touch-target-icon
+                    aria-label="Back to Settings"
+                    onClick={showCompactSectionList}
+                    className="grid h-11 w-11 place-items-center rounded-lg text-foreground transition-colors active:bg-muted"
                   >
-                    {tab.label}
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
                   </button>
-                ))}
-              </nav>
+                ) : (
+                  <span aria-hidden="true" />
+                )}
+                <h3
+                  id="plannotator-settings-title"
+                  className="min-w-0 truncate px-2 text-center text-base font-semibold tracking-tight"
+                >
+                  {compactScreen === 'detail' ? activeTabLabel : 'Settings'}
+                </h3>
+                {compactScreen === 'sections' ? (
+                  <button
+                    ref={closeButtonRef}
+                    type="button"
+                    data-pn-touch-target
+                    data-pn-touch-target-icon
+                    aria-label="Close settings"
+                    onClick={closeSettings}
+                    className="grid h-11 w-11 place-items-center rounded-lg text-foreground transition-colors active:bg-muted"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                ) : (
+                  <span aria-hidden="true" />
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between p-4 border-b border-border">
+                <h3 id="plannotator-settings-title" className="font-semibold text-sm">Settings</h3>
+                <button
+                  ref={closeButtonRef}
+                  type="button"
+                  aria-label="Close settings"
+                  onClick={closeSettings}
+                  className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
 
-              {/* Desktop: sidebar */}
-              <nav className="hidden md:block w-40 border-r border-border p-2 flex-shrink-0">
+            <div className={isCompactTouchLayout
+              ? 'flex flex-1 min-h-0 overflow-hidden'
+              : 'flex flex-col md:flex-row md:min-h-[420px] flex-1 min-h-0 overflow-hidden'
+            }>
+              {isCompactTouchLayout && compactScreen === 'sections' && (
+                <OverlayScrollArea
+                  data-pn-settings-scroll-owner
+                  className="min-h-0 flex-1 overscroll-contain"
+                >
+                  <nav aria-label="Settings sections" className="mx-auto w-full max-w-2xl px-3 py-4">
+                    <div className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      Preferences
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-border/80 bg-muted/15">
+                      {mainTabs.map((tab, index) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          data-pn-settings-section={tab.id}
+                          onClick={() => openCompactSection(tab)}
+                          className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted ${index > 0 ? 'border-t border-border/70' : ''}`}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[0.9375rem] font-medium text-foreground">{tab.label}</span>
+                            <span className="mt-0.5 block text-[0.8125rem] leading-snug text-muted-foreground">
+                              {tab.id === 'display' && mode === 'review'
+                                ? 'Code font and diff presentation'
+                                : SETTINGS_TAB_DESCRIPTIONS[tab.id]}
+                            </span>
+                          </span>
+                          <svg className="h-4 w-4 shrink-0 text-muted-foreground/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      ))}
+                    </div>
+
+                    {integrationTabs.length > 0 && (
+                      <>
+                        <div className="px-2 pb-2 pt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                          Integrations
+                        </div>
+                        <div className="overflow-hidden rounded-xl border border-border/80 bg-muted/15">
+                          {integrationTabs.map((tab, index) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              data-pn-settings-section={tab.id}
+                              onClick={() => openCompactSection(tab)}
+                              className={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted ${index > 0 ? 'border-t border-border/70' : ''}`}
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-[0.9375rem] font-medium text-foreground">{tab.label}</span>
+                                <span className="mt-0.5 block text-[0.8125rem] leading-snug text-muted-foreground">
+                                  {SETTINGS_TAB_DESCRIPTIONS[tab.id]}
+                                </span>
+                              </span>
+                              <svg className="h-4 w-4 shrink-0 text-muted-foreground/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                              </svg>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </nav>
+                </OverlayScrollArea>
+              )}
+
+              {!isCompactTouchLayout && (
+                <>
+                  {/* Narrow fine-pointer desktop: preserve the incumbent horizontal tab bar. */}
+                  <nav className="md:hidden flex overflow-x-auto border-b border-border px-2 py-1.5 gap-1 flex-shrink-0">
+                    {[...mainTabs, ...integrationTabs].map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`px-3 py-1.5 rounded text-xs whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                          activeTab === tab.id
+                            ? 'bg-primary/10 text-primary font-medium'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </nav>
+
+                  <nav className="hidden md:block w-40 border-r border-border p-2 flex-shrink-0">
                 <div className="space-y-0.5">
                   {mainTabs.map(tab => (
                     <button
@@ -1221,11 +1480,23 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     </div>
                   </>
                 )}
-              </nav>
+                  </nav>
+                </>
+              )}
 
               {/* Content — scrollable */}
-              <OverlayScrollArea className="flex-1 min-h-0">
-              <div className="p-4 space-y-4">
+              {(!isCompactTouchLayout || compactScreen === 'detail') && (
+              <OverlayScrollArea
+                data-pn-settings-scroll-owner={isCompactTouchLayout || undefined}
+                className="flex-1 min-h-0 overscroll-contain"
+              >
+              <div
+                data-pn-settings-section-content={activeTab}
+                className={isCompactTouchLayout
+                  ? 'mx-auto w-full max-w-2xl space-y-4 px-4 py-5 sm:px-6'
+                  : 'p-4 space-y-4'
+                }
+              >
 
                 {/* === GENERAL TAB === */}
                 {activeTab === 'general' && (
@@ -2135,7 +2406,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         <div className="border-t border-border" />
 
                         <div className="space-y-3">
-                          <div className="flex gap-3">
+                          <div className="pn-settings-obsidian-destination flex gap-3">
                             <div className="flex-1 space-y-1.5">
                               <label className="text-xs text-muted-foreground">Vault</label>
                               {vaultsLoading ? (
@@ -2472,6 +2743,7 @@ tags: [plan, ...]
 
               </div>
               </OverlayScrollArea>
+              )}
             </div>
           </div>
         </div>,
@@ -2479,7 +2751,10 @@ tags: [plan, ...]
       )}
 
       {themePreview && createPortal(
-        <div className="fixed inset-0 z-[100] flex flex-col pointer-events-none">
+        <div className={isCompactTouchLayout
+          ? 'pn-visible-viewport-stage z-[100] flex flex-col pointer-events-none'
+          : 'fixed inset-0 z-[100] flex flex-col pointer-events-none'
+        }>
           <div className="flex-1" />
           <div
             className="pointer-events-auto w-full bg-card border-t-2 border-primary/30 shadow-[0_-4px_20px_rgba(0,0,0,0.4)] flex flex-col max-h-[35vh] overflow-hidden"
@@ -2488,6 +2763,7 @@ tags: [plan, ...]
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border flex-shrink-0">
               <span className="text-xs font-medium text-muted-foreground">Theme Preview</span>
               <button
+                data-pn-touch-target={isCompactTouchLayout || undefined}
                 onClick={() => { setThemePreview(false); setShowDialog(true); }}
                 className="px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
               >

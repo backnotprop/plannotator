@@ -345,6 +345,7 @@ const ReviewApp: React.FC = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [showWorktreeDialog, setShowWorktreeDialog] = useState(false);
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
+  const settingsReturnFocusRef = useRef<HTMLButtonElement>(null);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const diffStyle = useConfigValue('diffStyle');
@@ -4034,6 +4035,7 @@ const ReviewApp: React.FC = () => {
             <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
 
             <ReviewHeaderMenu
+              triggerRef={settingsReturnFocusRef}
               onOpenSettings={() => setOpenSettingsMenu(true)}
               onOpenReviewSetup={sectionsCapable ? () => { reviewSetupIsFirstRun.current = false; setShowReviewSetup(true); } : undefined}
               onOpenExport={() => setShowExportModal(true)}
@@ -4534,6 +4536,7 @@ const ReviewApp: React.FC = () => {
             // Display tab hides the Split/Unified control rather than writing
             // the desktop preference from a phone.
             isCompactTouchLayout={isCompactTouchLayout}
+            returnFocusRef={settingsReturnFocusRef}
           />
         </div>
 

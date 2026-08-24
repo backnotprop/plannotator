@@ -30,8 +30,10 @@ async function openDisplayTab(isCompactTouchLayout: boolean): Promise<void> {
     );
   });
 
-  const displayTab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-    .find((button) => button.textContent?.trim() === 'Editor');
+  const displayTab = isCompactTouchLayout
+    ? document.querySelector<HTMLButtonElement>('[data-pn-settings-section="display"]')
+    : Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.trim() === 'Editor');
   if (!displayTab) throw new Error('review display tab did not render');
   await act(async () => displayTab.click());
 }

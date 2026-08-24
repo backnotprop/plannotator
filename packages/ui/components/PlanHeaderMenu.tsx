@@ -14,6 +14,7 @@ import type { UpdateInfo } from '../hooks/useUpdateCheck';
 import type { Origin } from '@plannotator/core/agents';
 
 interface PlanHeaderMenuProps {
+  triggerRef?: React.Ref<HTMLButtonElement>;
   appVersion: string;
   updateInfo?: UpdateInfo | null;
   origin?: Origin | null;
@@ -48,6 +49,7 @@ export interface CompactPlanAction {
 }
 
 export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
+  triggerRef,
   appVersion,
   updateInfo,
   origin,
@@ -88,6 +90,7 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
       }
       renderTrigger={({ isOpen, toggleMenu }) => (
         <button
+          ref={triggerRef}
           id={compactTouchLayout ? 'pn-compact-plan-options-trigger' : undefined}
           data-pn-touch-target={compactTouchLayout || undefined}
           data-pn-touch-target-icon={compactTouchLayout || undefined}
