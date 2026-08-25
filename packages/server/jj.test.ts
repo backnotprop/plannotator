@@ -45,22 +45,41 @@ describe("jj diff args", () => {
 });
 
 describe("jj compare targets", () => {
-  test("resolves default target from jj trunk bookmarks", async () => {
+  test("resolves a readable target for the detected line base", async () => {
     await expect(selectDefaultJjCompareTarget({
       async runJj() {
-        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\n', stderr: "", exitCode: 0 };
+        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\\t0123456789abcdef\\n', stderr: "", exitCode: 0 };
       },
     })).resolves.toBe("main@origin");
 
     await expect(selectDefaultJjCompareTarget({
       async runJj() {
-        return { stdout: '[{"name":"main"}]\n', stderr: "", exitCode: 0 };
+        return { stdout: '[{"name":"main"}]\\t0123456789abcdef\\n', stderr: "", exitCode: 0 };
       },
     })).resolves.toBe("main");
 
     await expect(selectDefaultJjCompareTarget({
       async runJj() {
-        return { stdout: "[]\n", stderr: "", exitCode: 0 };
+        return { stdout: "[]\\t0123456789abcdef\\n", stderr: "", exitCode: 0 };
+      },
+    })).resolves.toBe("0123456789abcdef");
+
+    // Generated `jj git push --change` bookmarks are never a readable target.
+    await expect(selectDefaultJjCompareTarget({
+      async runJj() {
+        return {
+          stdout: '[{"name":"push-vmopwunwxopv","remote":"origin"}]\\t0123456789abcdef\\n',
+          stderr: "",
+          exitCode: 0,
+        };
+      },
+    })).resolves.toBe("0123456789abcdef");
+
+    // An unresolvable base degrades to the previous default instead of aborting
+    // review startup, which has no handler for a throw.
+    await expect(selectDefaultJjCompareTarget({
+      async runJj() {
+        return { stdout: "", stderr: "unknown function", exitCode: 1 };
       },
     })).resolves.toBe("trunk()");
   });
@@ -69,6 +88,7 @@ describe("jj compare targets", () => {
     expect(jjLineBaseRevset("main")).toBe('heads(::@ & ::(bookmarks(exact:"main")))');
     expect(jjLineBaseRevset("main@origin")).toBe('heads(::@ & ::(remote_bookmarks(exact:"main", exact:"origin")))');
     expect(jjLineBaseRevset("trunk()")).toBe("heads(::@ & ::(trunk()))");
+    expect(jjLineBaseRevset("a".repeat(40))).toBe(`heads(::@ & ::(${"a".repeat(40)}))`);
   });
 });
 

@@ -84,7 +84,10 @@
     "./archive-mode": "./archive-mode.ts",
     "./guide-format": "./guide-format.ts",
     "./guide-viewer-manifest": "./guide-viewer-manifest.ts",
-    "./guide-format-fixtures": "./guide-format-fixtures.ts"
+    "./guide-format-fixtures": "./guide-format-fixtures.ts",
+    "./live-proxy-core": "./live-proxy-core.ts",
+    "./live-probe": "./live-probe.ts",
+    "./live-proxy-node": "./live-proxy-node.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.64",

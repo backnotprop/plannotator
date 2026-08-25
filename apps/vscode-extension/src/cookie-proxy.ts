@@ -1,6 +1,6 @@
 import * as http from "http";
 import { EventEmitter } from "events";
-import { buildThemeListenerScript } from "./vscode-theme";
+import { buildThemeListenerScript, THEME_MODE_COOKIE } from "./vscode-theme";
 
 export interface CookieProxyOptions {
   loadCookies: () => string;
@@ -161,14 +161,120 @@ function parseCookieString(str: string): Record<string, string> {
   return store;
 }
 
+/**
+ * Marks a cookie store as having been through the seeding rules below, and at
+ * which version. Written on every load, so its ABSENCE means exactly one thing:
+ * this store was last written by an extension that predates the rules. That is
+ * the only condition under which the legacy re-seed runs, which is what makes
+ * it a one-time migration rather than a policy that keeps re-applying.
+ *
+ * It rides in the same jar as everything else: the page POSTs its whole
+ * `document.cookie` back every 2s, so the marker lands in `globalState` with
+ * the rest. If a panel closes before that first sync, nothing was persisted at
+ * all and the migration simply runs again next time, on the same store.
+ *
+ * `plannotator-` prefixed so it travels with the rest of the store — that
+ * prefix is what `buildSetCookieHeaders` restores as real cookies, so the jar
+ * and the document agree about it. The app ignores cookies it does not know.
+ *
+ * The version is recorded for a future migration to read; the legacy re-seed
+ * below gates on the marker being ABSENT rather than on the version matching,
+ * because a bumped version must not re-run a rule whose whole justification is
+ * that the stored value predates it.
+ */
+export const PANEL_SEED_COOKIE = "plannotator-vscode-seed";
+export const PANEL_SEED_VERSION = "1";
+
+/**
+ * The mode a legacy panel store carries when the user never picked one.
+ *
+ * Plannotator's ThemeProvider persists the mode it resolved on its FIRST mount,
+ * default included (`writeThemePairCookies` in packages/ui/config/settings.ts,
+ * driven by the mirror effect in ThemeProvider.tsx and by the store's
+ * cookie backfill in configStore.ensureLoaded). So any panel that ever loaded
+ * has a mode cookie, and for a user who never chose one it is `dark` — the
+ * app's default, which has never been anything else.
+ */
+const LEGACY_AUTO_SEEDED_MODE = "dark";
+
+/**
+ * Values the panel starts its virtual cookie jar with, on top of whatever the
+ * user has already stored.
+ *
+ * The theme mode is SEEDED to System on a panel that has never stored one.
+ * Plannotator's own default is Dark, which would leave a first-time user in a
+ * light IDE staring at a dark panel now that the theme bridge no longer forces
+ * the mode onto the app (see vscode-theme.ts). System is what "adapts to your
+ * VS Code color theme" means here. It is a seed and not a write: an already
+ * stored mode is never touched, so the moment the user picks one this stops
+ * applying.
+ *
+ * ---
+ *
+ * Upgrade path (issue #1053 again, for the users who reported it). Seeding an
+ * absent mode only ever helped panels opened for the FIRST time on this
+ * version. Every panel opened before it already stored `dark` — written by the
+ * app, not chosen by the user — so the seed above never fired for them and the
+ * panel stayed dark in a light IDE: the exact bug, still broken for exactly the
+ * people who hit it.
+ *
+ * There is no provenance to read. The store is one flat cookie string in
+ * `globalState` with no timestamps and no per-cookie metadata, and the app
+ * writes the same `plannotator-theme=dark` whether the user picked Dark or
+ * never opened the theme settings. So `dark` alone cannot be interpreted, and
+ * this migration leans on the three things that CAN be:
+ *
+ *  1. Value. `light` and `system` are never what the auto-seed writes, so a
+ *     store carrying either is a choice and is left alone. Only the exact
+ *     legacy default is re-seeded.
+ *  2. The marker above. The re-seed runs once per store, so a Dark chosen
+ *     after the migration is permanent — that is the case that must never be
+ *     clobbered, and it cannot be, because by then the marker is present.
+ *  3. The app's own record of the choice. `configStore.set` (what the theme
+ *     picker calls) writes the mode to ~/.plannotator/config.json, while
+ *     `seed`/`ensureLoaded` deliberately never do. `configStore.init` then
+ *     applies that server value OVER the cookie and rewrites the cookie to
+ *     match. So for any mode the user actually picked while a Plannotator
+ *     server was running — which is every panel session — the choice outranks
+ *     whatever we seed, re-asserts itself in the same page load, and syncs
+ *     back into the store alongside the marker.
+ *
+ * What that leaves: a user whose explicit Dark exists ONLY as a cookie, with
+ * nothing in config.json to restore it. They are indistinguishable from a user
+ * who never chose, and they get System once. In a dark IDE that resolves to
+ * dark and nothing changes; in a light IDE the panel turns light and re-picking
+ * Dark makes it stick for good. That one-time cost is the price of unbreaking
+ * every user who never chose at all, and it is paid at most once.
+ */
+export function applyPanelCookieDefaults(
+  store: Record<string, string>,
+): Record<string, string> {
+  const seeded: Record<string, string> = {
+    ...store,
+    "plannotator-auto-close": "true",
+  };
+  const storedMode = seeded[THEME_MODE_COOKIE];
+  const alreadyMarked = seeded[PANEL_SEED_COOKIE] !== undefined;
+  if (!storedMode || (!alreadyMarked && storedMode === LEGACY_AUTO_SEEDED_MODE)) {
+    seeded[THEME_MODE_COOKIE] = "system";
+  }
+  // Unconditional, and unconditional on a fresh store too: a user who picks
+  // Dark right after their first panel opens must not look like a legacy store
+  // the next time one does.
+  seeded[PANEL_SEED_COOKIE] = PANEL_SEED_VERSION;
+  return seeded;
+}
+
 function injectScript(html: string, savedCookies: string): string {
-  const initial = JSON.stringify(parseCookieString(savedCookies));
+  const initial = JSON.stringify(
+    applyPanelCookieDefaults(parseCookieString(savedCookies)),
+  );
   const themeListener = buildThemeListenerScript();
 
   // Virtual cookie jar: overrides document.cookie so plannotator works even
   // when the browser blocks third-party cookies inside the iframe.
   const script = themeListener + `<script>(function(){
-      var S=${initial};S["plannotator-auto-close"]="true";
+      var S=${initial};
       Object.defineProperty(document,"cookie",{configurable:true,
         get:function(){return Object.keys(S).map(function(k){return k+"="+S[k]}).join("; ");},
         set:function(v){

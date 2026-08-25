@@ -29,7 +29,7 @@ for f in config-types storage-types workspace-status-types; do
 done
 
 # Everything else in the original flat list stays sourced from packages/shared.
-for f in prompts review-core generated-files cli-pagination jj-core gitbutler-core vcs-core review-args draft annotate-history pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common markdown-extensions resolve-file file-browser-watch-core annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale; do
+for f in prompts review-core generated-files cli-pagination jj-core gitbutler-core vcs-core review-args draft annotate-history pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-gitlab checklist integrations-common repo reference-common markdown-extensions resolve-file file-browser-watch-core annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale live-proxy-core live-probe live-proxy-node; do
   src="../../packages/shared/$f.ts"
   # Shared modules that import browser-safe siblings from @plannotator/core
   # (e.g. guide-store → core/guide-format): generated/ is flat and vendors the
@@ -107,6 +107,12 @@ for f in guide-share; do
     > "generated/$f.ts"
 done
 
+# Live-app bridge sources from packages/ui — dependency-free string constants
+# (BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP, ANNOTATION_HIGHLIGHT_CSS) the annotate
+# command composes into the proxy-served bridge body for live app sessions.
+printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/bridge-script.ts\n' \
+  | cat - "../../packages/ui/components/html-viewer/bridge-script.ts" > "generated/bridge-script.ts"
+
 # Vendor the moved AI context types from core into generated/ai/.
 printf '// @generated — DO NOT EDIT. Source: packages/core/ai-context.ts\n' \
   | cat - "../../packages/core/ai-context.ts" > "generated/ai/ai-context.ts"
@@ -118,7 +124,7 @@ for f in index types provider session-manager endpoints context base-session; do
     > "generated/ai/$f.ts"
 done
 
-for f in claude-agent-sdk codex-app-server opencode-sdk command-path pi-sdk pi-sdk-node pi-events; do
+for f in claude-agent-sdk codex-app-server opencode-sdk command-path child-io pi-sdk pi-sdk-node pi-events; do
   src="../../packages/ai/providers/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" > "generated/ai/providers/$f.ts"
 done
@@ -144,3 +150,17 @@ find generated -name '*.ts' | while read -r f; do
     -e "s|(import[[:space:]]+['\"])(\.\.?/([^'\"/]+/)*[^'\"/.]+)(['\"])|\1\2.ts\4|g" \
     "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 done
+
+# ---------------------------------------------------------------------------
+# Vendor the plannotator knowledge skill so Pi installs it declaratively via
+# the `pi.skills` manifest entry in package.json. Without this, a Pi user gets
+# the extension but none of the CLI reference the other hosts ship as a skill.
+#
+# Deliberately NOT given the `// @generated` header the .ts files above carry:
+# a SKILL.md must open with its YAML frontmatter on line 1, and any prepended
+# comment makes the skill unparseable to every loader that reads it. The copy
+# is kept honest the same way plannotator.html and call-flow-runtime/ are —
+# it is gitignored, so the only copy that can ever exist is this one.
+rm -rf skills
+mkdir -p skills
+cp -R ../skills/core/plannotator skills/plannotator

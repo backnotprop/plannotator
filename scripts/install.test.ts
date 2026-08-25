@@ -99,6 +99,10 @@ describe("install.sh", () => {
       expect(script).toContain(`copy_skill_if_present apps/skills/claude/${skill} "$CLAUDE_SKILLS_DIR"`);
       expect(script).toContain(`copy_skill_if_present apps/skills/core/${skill} "$AGENTS_SKILLS_DIR"`);
     }
+    // The knowledge skill has no Claude-only injection form: both scopes
+    // install the single-sourced apps/skills/core/plannotator copy.
+    expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator "$CLAUDE_SKILLS_DIR"');
+    expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator "$AGENTS_SKILLS_DIR"');
     // Codex no longer receives a skills install (core skills live in ~/.agents/skills).
     expect(script).not.toContain('copy_skill_if_present apps/skills/core/plannotator-review "$CODEX_SKILLS_DIR"');
     // Extras are not default-installed anywhere except Kiro.
@@ -184,6 +188,11 @@ describe("install.sh", () => {
     // Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"');
+    // The knowledge skill has no Kiro-specific form either, so Kiro gets the
+    // same single-sourced core copy as Claude and ~/.agents. Kiro shipping
+    // only the action skills and no CLI reference was the #1377 install-reach
+    // gap; assert the copy line so the scope cannot be dropped again.
+    expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator "$KIRO_SKILLS_DIR"');
     // The two extras Kiro keeps receiving come from apps/skills/extra.
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
@@ -594,6 +603,9 @@ describe("install.ps1", () => {
     // (PowerShell's Copy-Item -Recurse into an existing dir nests).
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\claude\\$skill" $claudeSkillsDir');
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\$skill" $agentsSkillsDir');
+    // Knowledge skill: single-sourced from core into both scopes.
+    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\plannotator" $claudeSkillsDir');
+    expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\plannotator" $agentsSkillsDir');
     expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last"');
     // Copy-SkillIfPresent pre-removes the destination to avoid nesting on upgrade.
     expect(script).toContain("if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }");
@@ -863,6 +875,9 @@ describe("install.cmd", () => {
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\claude\\%%S" "!CLAUDE_SKILLS_DIR!\\%%S\\"');
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!AGENTS_SKILLS_DIR!\\%%S\\"');
     expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last) do");
+    // Knowledge skill: single-sourced from core into both scopes.
+    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator) do");
+    expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\plannotator" "!CLAUDE_SKILLS_DIR!\\plannotator\\"');
     // No Codex skills install — only the cleanup loop references CODEX skills.
     expect(script).not.toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!CODEX_SKILLS_DIR!\\%%S\\"');
     // Missing git is a hard failure with an actionable message (parity with sh/ps1).
@@ -1103,7 +1118,7 @@ describe("install.cmd", () => {
 
 describe("Core Plannotator skills", () => {
   test("every core skill includes an OpenAI agent config sidecar", () => {
-    for (const skill of CORE_SKILLS) {
+    for (const skill of [...CORE_SKILLS, "plannotator"]) {
       const configPath = join(
         scriptsDir,
         "..",
@@ -1118,29 +1133,54 @@ describe("Core Plannotator skills", () => {
     }
   });
 
-  test("every skill in the repo sets disable-model-invocation: true", () => {
+  test("every skill in the repo sets disable-model-invocation: true (knowledge skill excepted)", () => {
     // Maintainer rule: ALL Plannotator skills are user-invoked, never
     // model-auto-invoked. Load-bearing for #842: Pi natively discovers
     // ~/.agents/skills, and this frontmatter line is the only thing keeping
     // skills out of Pi's system prompt (<available_skills>). Scans every
     // SKILL.md dynamically so newly added skills are covered automatically.
+    //
+    // ONE deliberate exception: apps/skills/core/plannotator, the knowledge
+    // layer. Its whole purpose is that an agent asked to "use Plannotator"
+    // can pull in the CLI reference itself, so it ships model-invocable; it
+    // only loads reference text and runs nothing. Asserted both ways below
+    // so neither an accidental lock of the knowledge skill nor an accidental
+    // unlock of any other skill can slip through.
+    const MODEL_INVOCABLE_SKILLS = new Set(["plannotator"]);
     const skillRoots = [
       join(scriptsDir, "..", "apps", "skills", "core"),
       join(scriptsDir, "..", "apps", "skills", "extra"),
       join(scriptsDir, "..", "apps", "kiro-cli", "skills"),
     ];
     let checked = 0;
+    let invocableSeen = 0;
     for (const root of skillRoots) {
       for (const dir of readdirSync(root)) {
         const skillMd = join(root, dir, "SKILL.md");
         if (!existsSync(skillMd)) continue;
         const frontmatter = readFileSync(skillMd, "utf-8").split("---")[1] ?? "";
+        if (MODEL_INVOCABLE_SKILLS.has(dir)) {
+          expect(frontmatter).not.toContain("disable-model-invocation");
+          invocableSeen++;
+          continue;
+        }
         expect(frontmatter).toContain("disable-model-invocation: true");
         checked++;
       }
     }
     // 3 core + 3 extra + 2 kiro — bump when adding skills, never below.
     expect(checked).toBeGreaterThanOrEqual(8);
+    expect(invocableSeen).toBe(1);
+  });
+
+  test("the knowledge skill's Codex sidecar allows implicit invocation", () => {
+    // The counterpart of the exception above: the OpenAI sidecar must not
+    // re-lock what the frontmatter deliberately leaves invocable.
+    const sidecar = readFileSync(
+      join(scriptsDir, "..", "apps", "skills", "core", "plannotator", "agents", "openai.yaml"),
+      "utf-8",
+    );
+    expect(sidecar).toContain("allow_implicit_invocation: true");
   });
 });
 
@@ -1157,6 +1197,21 @@ describe("install shared behavior", () => {
       expect(script, name).toContain(
         "To uninstall later: plannotator uninstall",
       );
+    }
+  });
+
+  test("every installer copies the knowledge skill into the Kiro scope", () => {
+    // #1377 install reach: the Kiro leg copied only the two action skills, so
+    // Kiro users got launchers and no CLI reference. Each script spells the
+    // copy differently, so assert the source path reaches the Kiro skills dir
+    // in each dialect rather than one shared string.
+    const kiroKnowledgeSkillCopy: ReadonlyArray<readonly [string, string]> = [
+      ["install.sh", 'copy_skill_if_present apps/skills/core/plannotator "$KIRO_SKILLS_DIR"'],
+      ["install.ps1", 'Copy-SkillIfPresent "apps\\skills\\core\\plannotator" $kiroSkillsDir'],
+      ["install.cmd", 'xcopy /s /i /y /q "apps\\skills\\core\\plannotator" "!KIRO_SKILLS_DIR!\\plannotator\\"'],
+    ];
+    for (const [name, expected] of kiroKnowledgeSkillCopy) {
+      expect(readScript(name), name).toContain(expected);
     }
   });
 
@@ -2073,6 +2128,9 @@ if [ "$1" = "clone" ]; then
     printf 'name: %s\\n' "$skill" > "$dest/apps/skills/claude/$skill/SKILL.md"
     printf 'name: %s\\n' "$skill" > "$dest/apps/skills/core/$skill/SKILL.md"
   done
+  # The knowledge skill exists only under core (no Claude injection variant).
+  mkdir -p "$dest/apps/skills/core/plannotator"
+  printf 'name: plannotator\\n' > "$dest/apps/skills/core/plannotator/SKILL.md"
   mkdir -p "$dest/apps/opencode-plugin/commands"
   printf 'stub\\n' > "$dest/apps/opencode-plugin/commands/plannotator-review.md"
   exit 0
@@ -2297,6 +2355,9 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         expect(existsSync(join(sandbox.home, ".claude", "skills", skill, "SKILL.md"))).toBe(true);
         expect(existsSync(join(sandbox.home, ".agents", "skills", skill, "SKILL.md"))).toBe(true);
       }
+      // The knowledge skill lands in both scopes from its single core source.
+      expect(existsSync(join(sandbox.home, ".claude", "skills", "plannotator", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(sandbox.home, ".agents", "skills", "plannotator", "SKILL.md"))).toBe(true);
     });
 
     test("#1238: a genuine clone failure surfaces git's captured stderr next to the generic message", () => {

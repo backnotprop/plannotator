@@ -31,6 +31,7 @@ const EDITOR_ORIGINS = ["http://localhost:4100", "http://127.0.0.1:4100"];
 
 const HTML_PAGE = "<!doctype html><html><head><title>Fake App</title><link rel=\"stylesheet\" href=\"/style.css\"></head><body><div id=\"root\">hi</div><script src=\"/asset.js\"></script></body></html>";
 const NO_HEAD_PAGE = "<html><body><p>bare</p></body></html>";
+const BANNER_COMMENT_PAGE = "<!doctype html><!-- @generated: do not edit <head> manually --><html><head><title>Gen</title></head><body>ok</body></html>";
 const BINARY_BYTES = new Uint8Array([0, 1, 2, 3, 250, 251, 252, 253, 254, 255]);
 
 let upstreamHits: string[] = [];
@@ -93,6 +94,32 @@ beforeAll(() => {
           });
           return new Response(stream, { headers: { "Content-Type": "text/html" } });
         }
+        case "/banner-comment":
+          // Codegen banner naming <head> inside a comment BEFORE the real
+          // head: injecting into the comment ships a bridge the browser
+          // never executes, and annotation breaks with no warning at all.
+          return new Response(BANNER_COMMENT_PAGE, {
+            headers: { "Content-Type": "text/html" },
+          });
+        case "/chunked-banner-comment": {
+          // The same banner, with the stream split inside the comment.
+          const parts = ["<!-- do not edit <he", "ad> by hand --><html><head><title>c</title></head><body>ok</body></html>"];
+          const stream = new ReadableStream<Uint8Array>({
+            async start(controller) {
+              for (const part of parts) {
+                controller.enqueue(new TextEncoder().encode(part));
+                await Bun.sleep(10);
+              }
+              controller.close();
+            },
+          });
+          return new Response(stream, { headers: { "Content-Type": "text/html" } });
+        }
+        case "/uppercase-content-type":
+          // Media types are case-insensitive: this is HTML.
+          return new Response(HTML_PAGE, {
+            headers: { "Content-Type": "TEXT/HTML; charset=UTF-8", "X-Frame-Options": "DENY" },
+          });
         case "/asset.js":
           recordedHeaders["asset-accept-encoding"] = req.headers.get("accept-encoding");
           return new Response("console.log('asset');", {
@@ -224,6 +251,31 @@ describe("live proxy: HTML injection", () => {
     const html = await (await fetch(proxyUrl("/chunked-head-close"))).text();
     expect(html.split(INJECT_TAG).length - 1).toBe(1);
     expect(html).toContain(`${INJECT_TAG}</head>`);
+  });
+
+  test("a comment naming <head> before the real head does not capture the injection", async () => {
+    const html = await (await fetch(proxyUrl("/banner-comment"))).text();
+    expect(html.split(INJECT_TAG).length - 1).toBe(1);
+    // The tag lands after the REAL head open tag, not inside the banner.
+    expect(html).toContain(`<html><head>${INJECT_TAG}`);
+    expect(html.indexOf(INJECT_TAG)).toBeGreaterThan(html.indexOf("-->"));
+    expect(html.replace(INJECT_TAG, "")).toBe(BANNER_COMMENT_PAGE);
+  });
+
+  test("a comment split across chunks is still skipped whole", async () => {
+    const html = await (await fetch(proxyUrl("/chunked-banner-comment"))).text();
+    expect(html.split(INJECT_TAG).length - 1).toBe(1);
+    expect(html).toContain(`<head>${INJECT_TAG}`);
+    expect(html.indexOf(INJECT_TAG)).toBeGreaterThan(html.indexOf("-->"));
+  });
+
+  test("an uppercase TEXT/HTML content type is still injected and reframed", async () => {
+    const res = await fetch(proxyUrl("/uppercase-content-type"));
+    const html = await res.text();
+    expect(html.split(INJECT_TAG).length - 1).toBe(1);
+    // The framing rewrites ride on the same content-type test.
+    expect(res.headers.get("x-frame-options")).toBeNull();
+    expect(res.headers.get("content-security-policy")).toContain("frame-ancestors");
   });
 
   test("content-length is not present (or correct) on injected responses", async () => {
@@ -442,6 +494,20 @@ describe("live proxy: security posture", () => {
     expect(upstreamHits).toEqual([]);
   });
 
+  test("a Host-less HTTP/1.0 request gets the plain 403, never a runtime error page", async () => {
+    // With no Host header req.url is a bare "/", so constructing a URL from it
+    // throws. Doing that before the Host check served Bun's internal debug
+    // page (tens of KB, with a stack trace) from a port whose entire contract
+    // is refusing requests that do not name it.
+    upstreamHits = [];
+    const raw = await rawHttpRequest(proxy.port, ["GET / HTTP/1.0"]);
+    expect(raw.head.startsWith("http/1.0 403") || raw.head.startsWith("http/1.1 403")).toBe(true);
+    const body = Buffer.from(raw.body).toString("utf-8");
+    expect(body).toBe("Forbidden");
+    expect(raw.head).toContain("text/plain");
+    expect(upstreamHits).toEqual([]);
+  });
+
   test("the proxy origin and bind are loopback, independent of PLANNOTATOR_REMOTE", () => {
     expect(proxy.origin).toBe(`http://127.0.0.1:${proxy.port}`);
     // The bind is a source-level contract: the literal loopback constant,
@@ -570,6 +636,64 @@ describe("live proxy: unit helpers", () => {
     expect(rewriteLoopbackLocation("/relative", target, proxyOrigin)).toBeNull();
   });
 
+  test("createHtmlInjector ignores head markers inside comments and declarations", () => {
+    // Each input pairs a decoy in an ignored span with the real head, so a
+    // scanner that is not span-aware injects into bytes the browser drops.
+    const cases: { html: string; expected: string }[] = [
+      // Comment before the real head open tag (the reported codegen banner).
+      {
+        html: "<!-- do not edit <head> --><html><head><title>t</title></head></html>",
+        expected: "<!-- do not edit <head> --><html><head><INJ><title>t</title></head></html>",
+      },
+      // Decoy </head> in a comment, real </head> with no head open tag.
+      {
+        html: "<html><!-- </head> --><body>x</body></head></html>",
+        expected: "<html><!-- </head> --><body>x</body><INJ></head></html>",
+      },
+      // Legacy --!> comment terminator.
+      {
+        html: "<!-- <head> --!><html><head>a</head></html>",
+        expected: "<!-- <head> --!><html><head><INJ>a</head></html>",
+      },
+      // Bogus comment / CDATA-ish: the HTML parser ends it at the first '>',
+      // which is the one inside the decoy, so the decoy is hidden either way.
+      {
+        html: "<![CDATA[<head>]]><html><head>a</head></html>",
+        expected: "<![CDATA[<head>]]><html><head><INJ>a</head></html>",
+      },
+      // Consecutive comments, and a comment AFTER the injection point is
+      // simply passed through.
+      {
+        html: "<!--a--><!--<head>--><head x><!--<head>--></head>",
+        expected: "<!--a--><!--<head>--><head x><INJ><!--<head>--></head>",
+      },
+    ];
+    for (const { html, expected } of cases) {
+      expect(runInjector(html, [html.length])).toBe(expected);
+    }
+  });
+
+  test("createHtmlInjector: comments survive every chunk boundary", () => {
+    // The scanner holds back a fixed tail across chunks, so every split point
+    // through a comment open, its body, its terminator and the head marker
+    // after it must produce the identical single injection.
+    const html = "<!doctype html><!-- gen: keep <head> as is --><html><head lang=\"en\"><title>t</title></head><body>b</body></html>";
+    const expected = html.replace("<head lang=\"en\">", "<head lang=\"en\"><INJ>");
+    for (let split = 0; split <= html.length; split++) {
+      expect(runInjector(html, [split, html.length])).toBe(expected);
+    }
+    // And byte-at-a-time, the worst case for a holdback-based scanner.
+    expect(runInjector(html, html.split("").map((_, i) => i + 1))).toBe(expected);
+  });
+
+  test("createHtmlInjector falls back to appending when a comment never closes", () => {
+    // Degenerate input: an unterminated comment swallows the rest of the
+    // document, so there is no live injection point left. Appending keeps the
+    // existing no-marker behavior rather than dropping the bridge silently.
+    const html = "<html><!-- oops <head><body>x</body></html>";
+    expect(runInjector(html, [html.length])).toBe(html + "<INJ>");
+  });
+
   test("createHtmlInjector does not treat <header> as a head open tag", () => {
     const injector = createHtmlInjector("<INJ>");
     const out: string[] = [];
@@ -582,6 +706,32 @@ describe("live proxy: unit helpers", () => {
     expect(html).toBe("<html><body><header>x</header></body></html><INJ>");
   });
 });
+
+/**
+ * Feed `html` through a fresh injector, cut at the given cumulative byte
+ * offsets, and return the reassembled output. Concatenating before decoding
+ * matters: a cut can land inside a multi-byte character.
+ */
+function runInjector(html: string, cuts: number[]): string {
+  const injector = createHtmlInjector("<INJ>");
+  const bytes = new TextEncoder().encode(html);
+  const out: Uint8Array[] = [];
+  let prev = 0;
+  for (const cut of cuts) {
+    const end = Math.min(cut, bytes.length);
+    if (end > prev) out.push(...injector.push(bytes.subarray(prev, end)));
+    prev = end;
+  }
+  if (prev < bytes.length) out.push(...injector.push(bytes.subarray(prev)));
+  out.push(...injector.flush());
+  const merged = new Uint8Array(out.reduce((n, p) => n + p.length, 0));
+  let cursor = 0;
+  for (const part of out) {
+    merged.set(part, cursor);
+    cursor += part.length;
+  }
+  return new TextDecoder().decode(merged);
+}
 
 /** Minimal raw HTTP/1.1 client: needed to send a forged Host header and to
  * observe exact relayed bytes without fetch's transparent decompression. */

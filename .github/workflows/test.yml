@@ -37,6 +37,13 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # The extension has its own tsconfig (Node libs, no DOM) and is not part
+      # of the root typecheck, so nothing was checking it. A type error in the
+      # panel cookie seed shipped that way; this is the step that would have
+      # caught it.
+      - name: Type check VS Code extension
+        run: bun run --cwd apps/vscode-extension lint
+
       - name: Run tests
         run: bun test
 
@@ -86,6 +93,7 @@ jobs:
           packages/ui/utils/inputMethod.test.ts
           packages/ui/utils/vimNavigation.test.ts
           packages/ui/utils/clipboard.test.ts
+          apps/vscode-extension/src/vscode-theme.test.ts
           packages/ui/utils/vimScroll.test.ts
           packages/ui/components/InlineMarkdown.resolveLinkedDoc.test.tsx
           packages/ui/components/MarkdownDiff.frozen.test.tsx
@@ -96,6 +104,7 @@ jobs:
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
           packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
+          packages/review-editor/components/AnnotationToolbar.placement.test.tsx
           packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
           packages/review-editor/components/FileHeader.edit.test.tsx
           packages/review-editor/edit/useEditSession.recovery.test.tsx
@@ -139,6 +148,7 @@ jobs:
           packages/editor/App.archiveReadOnly.test.tsx
           packages/editor/App.htmlChrome.test.tsx
           packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
+          packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
 
   opencode-v2:

@@ -52,12 +52,23 @@ async function mount(props: { commentOnly?: boolean; withQuickLabels?: boolean }
 }
 
 describe.if(hasDom)('AnnotationToolbar commentOnly seam', () => {
-  test('commentOnly hides Delete and offers commenting only', async () => {
+  test('commentOnly without a label handler hides Delete and every label affordance', async () => {
     const titles = await mount({ commentOnly: true });
     expect(titles).toContain('Comment');
     expect(titles).not.toContain('Delete');
     expect(titles).not.toContain('Quick label');
     expect(titles).not.toContain('Looks good');
+  });
+
+  test('commentOnly with a label handler restores ONLY the thumbs-up (no Delete, no picker)', async () => {
+    // The restricted restore: HTML/live surfaces get exactly one label
+    // affordance back. A regression that also renders the Zap picker (or
+    // Delete) re-opens the comment-only ruling this seam enforces.
+    const titles = await mount({ commentOnly: true, withQuickLabels: true });
+    expect(titles).toContain('Comment');
+    expect(titles).toContain('Looks good');
+    expect(titles).not.toContain('Delete');
+    expect(titles).not.toContain('Quick label');
   });
 
   test('the default (markdown surface) toolbar keeps Delete and quick labels', async () => {
