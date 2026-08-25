@@ -162,7 +162,7 @@ import {
   resolveSessionLogByCwdScan,
   type RenderedMessage,
 } from "./session-log";
-import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
+import { findCodexRolloutsByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
@@ -1387,16 +1387,16 @@ if (args[0] === "sessions") {
       lastMessage = { messageId: "stdin", text, lineNumbers: [] };
     }
   } else if (codexThreadId) {
-    // Codex path: find rollout by thread ID
+    // Codex path: find rollouts by thread ID
     if (process.env.PLANNOTATOR_DEBUG) {
       console.error(`[DEBUG] Codex detected, thread ID: ${codexThreadId}`);
     }
-    const rolloutPath = findCodexRolloutByThreadId(codexThreadId);
-    if (rolloutPath) {
-      if (process.env.PLANNOTATOR_DEBUG) {
-        console.error(`[DEBUG] Rollout: ${rolloutPath}`);
-      }
-      recentMessages = getRecentCodexMessages(rolloutPath, RECENT_MESSAGES_LIMIT, { beforeActiveTurn: true })
+    const rolloutPaths = findCodexRolloutsByThreadId(codexThreadId);
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Rollouts: ${rolloutPaths.length ? rolloutPaths.join(", ") : "(none)"}`);
+    }
+    if (rolloutPaths.length > 0) {
+      recentMessages = getRecentCodexMessages(rolloutPaths, RECENT_MESSAGES_LIMIT, { beforeActiveTurn: true })
         .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
       lastMessage = recentMessages[0] ?? null;
     }
@@ -2168,17 +2168,16 @@ if (args[0] === "sessions") {
   }
 
   if (event.hook_event_name === "Stop") {
-    const rolloutPath =
-      (typeof event.transcript_path === "string" && event.transcript_path) ||
-      (process.env.CODEX_THREAD_ID
-        ? findCodexRolloutByThreadId(process.env.CODEX_THREAD_ID)
-        : null);
-
-    if (!rolloutPath || !existsSync(rolloutPath)) {
+        const rolloutPaths =
+      (typeof event.transcript_path === "string" && event.transcript_path)
+        ? [event.transcript_path]
+        : (process.env.CODEX_THREAD_ID
+          ? findCodexRolloutsByThreadId(process.env.CODEX_THREAD_ID)
+          : []);
+    if (rolloutPaths.length === 0 || !existsSync(rolloutPaths[0])) {
       process.exit(0);
     }
-
-    const latestPlan = getLatestCodexPlan(rolloutPath, {
+    const latestPlan = getLatestCodexPlan(rolloutPaths, {
       turnId: typeof event.turn_id === "string" ? event.turn_id : undefined,
       stopHookActive: !!event.stop_hook_active,
     });
