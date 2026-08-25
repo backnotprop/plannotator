@@ -164,7 +164,7 @@ Later layers overwrite earlier ones. If a field is omitted, it inherits the valu
 | `phases.executing` | object | Settings for execution mode |
 | `phases.reviewing` | object | Reserved for future review-mode customization |
 | `model` | `{ provider, id }` \| `null` | Sets the model for the phase; `null` leaves the current model unchanged |
-| `thinking` | `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `null` | Sets the thinking level; `null` leaves the current level unchanged |
+| `thinking` | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` \| `null` | Sets the thinking level; `null` leaves the current level unchanged. Pi clamps a level the running model does not support, and an unrecognized value is reported as a warning instead of being ignored |
 | `activeTools` | string[] \| `null` | Tools to turn on for the phase. Setting it **replaces** the inherited list rather than adding to it (phase overrides `defaults`, your config overrides the built-in one); `[]` or `null` means no extra phase tools. `plannotator_submit_plan` is always enabled during planning regardless of this setting |
 | `statusLabel` | string \| `null` | Optional UI label for the phase; empty/null clears it |
 | `instructions` | string \| `null` | Phase framing template, delivered **once** as a hidden conversation message when the phase is entered; empty/null disables the framing message. Replaces the removed `systemPrompt` key, which is now ignored with a warning |
@@ -269,6 +269,8 @@ Plannotator does not send `Continue with the approved plan`, enter its executing
 ### Markdown annotation
 
 Run `/plannotator-annotate <file.md>` to open any markdown file in the annotation UI. Useful for reviewing documentation or design specs with the agent.
+
+URL targets work too. A loopback `http` URL that answers with an HTML page (a running dev app, e.g. `http://localhost:5173`) opens **live**: the app is served through a local reverse proxy and annotated in place, with HMR and WebSockets passed through. `--static` forces the classic markdown conversion; `--app` requires a live session and errors instead of falling back. Live sessions are unavailable in remote mode (`PLANNOTATOR_REMOTE`).
 
 ### Annotate last message
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPromptVariables, loadPlannotatorConfig, formatTodoList, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
+import { buildPromptVariables, loadPlannotatorConfig, formatTodoList, renderTemplate, resolveExecutionMode, resolvePhaseProfile, THINKING_LEVELS } from "./config.ts";
 
 const tempDirs: string[] = [];
 const originalHome = process.env.HOME;
@@ -113,6 +113,76 @@ describe("plannotator config", () => {
     expect(loaded.warnings[0]).toContain('Ignoring unknown executionMode "handoff"');
     expect(loaded.warnings[0]).toContain("Falling back to automatic");
     expect(resolveExecutionMode(loaded.config)).toBe("automatic");
+  });
+
+  test("accepts every thinking level Pi supports, including max", () => {
+    // #1304: the whitelist was frozen at pi's Apr-2026 level set, so "max"
+    // (added to pi's ThinkingLevel in 0.84) resolved to nothing at all. The
+    // loop covers the whole list so a level cannot quietly fall out of it; the
+    // compile-time guard in config.ts covers the other direction.
+    for (const level of THINKING_LEVELS) {
+      const homeDir = makeTempDir("plannotator-config-home-thinking-");
+      const cwdDir = makeTempDir("plannotator-config-cwd-thinking-");
+      process.env.HOME = homeDir;
+
+      const projectConfigDir = join(cwdDir, ".pi");
+      mkdirSync(projectConfigDir, { recursive: true });
+      writeFileSync(
+        join(projectConfigDir, "plannotator.json"),
+        JSON.stringify({ phases: { planning: { thinking: level } } }),
+        "utf-8",
+      );
+
+      const loaded = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
+
+      expect(loaded.warnings).toEqual([]);
+      expect(resolvePhaseProfile(loaded.config, "planning").thinking).toBe(level);
+    }
+  });
+
+  test("warns instead of silently dropping an unrecognized thinking level", () => {
+    const homeDir = makeTempDir("plannotator-config-home-thinking-bad-");
+    const cwdDir = makeTempDir("plannotator-config-cwd-thinking-bad-");
+    process.env.HOME = homeDir;
+
+    const globalConfigDir = join(homeDir, ".pi", "agent");
+    const projectConfigDir = join(cwdDir, ".pi");
+    mkdirSync(globalConfigDir, { recursive: true });
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, "plannotator.json"), JSON.stringify({ defaults: { thinking: "low" } }), "utf-8");
+    writeFileSync(
+      join(projectConfigDir, "plannotator.json"),
+      JSON.stringify({ phases: { planning: { thinking: "maximum" } } }),
+      "utf-8",
+    );
+
+    const loaded = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
+
+    expect(loaded.warnings).toHaveLength(1);
+    // The value, the JSON path and the file are what make the warning actionable.
+    expect(loaded.warnings[0]).toContain('"maximum"');
+    expect(loaded.warnings[0]).toContain("phases.planning");
+    expect(loaded.warnings[0]).toContain(join(projectConfigDir, "plannotator.json"));
+    expect(loaded.warnings[0]).toContain('"max"');
+    // Rejected value keeps the inherited level rather than clearing it.
+    expect(resolvePhaseProfile(loaded.config, "planning").thinking).toBe("low");
+  });
+
+  test("warns for a non-string thinking value under defaults", () => {
+    const homeDir = makeTempDir("plannotator-config-home-thinking-type-");
+    const cwdDir = makeTempDir("plannotator-config-cwd-thinking-type-");
+    process.env.HOME = homeDir;
+
+    const projectConfigDir = join(cwdDir, ".pi");
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, "plannotator.json"), JSON.stringify({ defaults: { thinking: 3 } }), "utf-8");
+
+    const loaded = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
+
+    expect(loaded.warnings).toHaveLength(1);
+    expect(loaded.warnings[0]).toContain("defaults");
+    expect(loaded.warnings[0]).toContain("3");
+    expect(resolvePhaseProfile(loaded.config, "planning").thinking).toBeUndefined();
   });
 
   test("allows a project config to clear an inherited phase with null", () => {

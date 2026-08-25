@@ -53,7 +53,7 @@ export {
 	hasReviewBrowserHtml,
 } from "./plannotator-browser-runtime.ts";
 
-export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
+export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last" | "annotate-app";
 export interface PlanReviewDecision {
 	approved: boolean;
 	feedback?: string;
@@ -661,6 +661,10 @@ export async function startMarkdownAnnotationSession(
 	renderHtml?: boolean,
 	convertHtml?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+	/** Live app session (mode "annotate-app"): the loopback dev-server URL to
+	 * proxy. The bridge sources are loaded here from the vendored
+	 * bridge-script module, mirroring how the Bun CLI supplies them. */
+	liveTargetUrl?: string,
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
@@ -668,6 +672,22 @@ export async function startMarkdownAnnotationSession(
 	const planHtmlContent = getPlanBrowserHtml();
 	if (!planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
+	}
+
+	// Live sessions serve the page through the proxy; the bridge constants are
+	// lazy-imported so plain annotate sessions never pay for the ~large
+	// string module.
+	let liveApp:
+		| { targetUrl: string; bridgeScript: string; bridgeBootstrap: string; annotationCss: string }
+		| undefined;
+	if (mode === "annotate-app" && liveTargetUrl) {
+		const bridge = await import("./generated/bridge-script.ts");
+		liveApp = {
+			targetUrl: liveTargetUrl,
+			bridgeScript: bridge.BRIDGE_SCRIPT,
+			bridgeBootstrap: bridge.LIVE_BRIDGE_BOOTSTRAP,
+			annotationCss: bridge.ANNOTATION_HIGHLIGHT_CSS,
+		};
 	}
 
 	let resolvedMarkdown = markdown;
@@ -687,6 +707,7 @@ export async function startMarkdownAnnotationSession(
 		filePath,
 		origin: "pi",
 		mode,
+		liveApp,
 		folderPath,
 		recentMessages,
 		sourceInfo,

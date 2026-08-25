@@ -46,6 +46,10 @@ export interface ParsedAnnotateArgs {
   renderHtml: boolean;
   renderMarkdown: boolean;
   noJina: boolean;
+  /** --app: force a live app session (recognized only with `liveFlags`). */
+  app: boolean;
+  /** --static: force the classic conversion pipeline (only with `liveFlags`). */
+  static: boolean;
 }
 
 type Segment = { type: "ws" | "tok"; text: string };
@@ -59,9 +63,27 @@ const FLAG_MAP = {
   "--no-jina": "noJina",
 } as const satisfies Record<string, keyof Omit<ParsedAnnotateArgs, "filePath" | "rawFilePath">>;
 
-export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
+/** Live-mode flags, recognized only where the host actually supports live
+ * app sessions (`liveFlags: true` — Pi today). A host that cannot act on
+ * --app must NOT silently strip it: leaving the token in the path keeps the
+ * legacy "File not found: --app ..." error, which is honest about the flag
+ * being unsupported there. */
+const LIVE_FLAG_MAP = {
+  "--app": "app",
+  "--static": "static",
+} as const satisfies Record<string, keyof Omit<ParsedAnnotateArgs, "filePath" | "rawFilePath">>;
+
+export interface ParseAnnotateArgsOptions {
+  /** Recognize --app / --static (hosts with live app annotation support). */
+  liveFlags?: boolean;
+}
+
+export function parseAnnotateArgs(raw: string, opts?: ParseAnnotateArgsOptions): ParsedAnnotateArgs {
   const s = (raw ?? "").trim();
-  const flags = { gate: false, json: false, hook: false, renderHtml: false, renderMarkdown: false, noJina: false };
+  const flags = { gate: false, json: false, hook: false, renderHtml: false, renderMarkdown: false, noJina: false, app: false, static: false };
+  const flagMap: Record<string, keyof typeof flags> = opts?.liveFlags
+    ? { ...FLAG_MAP, ...LIVE_FLAG_MAP }
+    : { ...FLAG_MAP };
 
   const segments: Segment[] = [];
   for (let i = 0; i < s.length;) {
@@ -75,7 +97,7 @@ export function parseAnnotateArgs(raw: string): ParsedAnnotateArgs {
   for (let j = 0; j < segments.length; j++) {
     const seg = segments[j];
     if (seg.type !== "tok") continue;
-    const key = FLAG_MAP[seg.text as keyof typeof FLAG_MAP];
+    const key = flagMap[seg.text];
     if (!key) continue;
 
     flags[key] = true;
