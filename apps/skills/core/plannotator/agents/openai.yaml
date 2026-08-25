@@ -1,0 +1,9 @@
+interface:
+  display_name: "Plannotator"
+  short_description: "Reference for the plannotator CLI: every subcommand and flag."
+policy:
+  # Deliberate exception to the locked-by-default rule: this skill is the
+  # knowledge layer agents consult when asked to "use Plannotator" without a
+  # more specific plannotator-* skill matching. It only loads reference text
+  # and runs nothing by itself, so implicit invocation is its purpose.
+  allow_implicit_invocation: true

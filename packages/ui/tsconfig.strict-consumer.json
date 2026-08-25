@@ -30,6 +30,7 @@
     "components/InlineMarkdown.tsx",
     "components/Viewer.tsx",
     "components/MarkdownEditor.tsx",
+    "components/MarkdownEditor/embedPicker.ts",
     "components/MarkdownDiff.tsx",
     "components/CommentPopover.tsx",
     "components/AnnotationPanel.tsx",

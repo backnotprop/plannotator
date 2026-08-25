@@ -12,7 +12,7 @@ All Plannotator environment variables and their defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
+| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. Remote mode also turns off [live local app annotation](/docs/commands/annotate/#local-apps): `plannotator annotate http://localhost:5173` exits with a startup failure suggesting `--static` rather than opening a live session. |
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port or inclusive range such as `19432-19463`. A range uses the first available port. When not set, local sessions use a random port; remote sessions default to `19432`. |
 | `PLANNOTATOR_URL_HOST` | unset (`localhost`) | Display-only hostname for advertised session URLs, e.g. a Tailscale MagicDNS name or tailnet IP, so remote-mode links are reachable from another device instead of `http://localhost:<port>`. Host only: bare hostname, IPv4, or bracketed IPv6 such as `[fd7a::1]` — the runtime-chosen port is always appended, and a value carrying a scheme, port, path, or whitespace warns on stderr and falls back to `localhost`. Strictly display-only and remote-only: it never changes which interface the server binds (that stays governed by `PLANNOTATOR_REMOTE`), and a local session ignores the override — the advertised URL stays `localhost`, with a stderr warning to set `PLANNOTATOR_REMOTE=1`. Can also be set via `~/.plannotator/config.json` (`{ "urlHost": "host" }`); the env var takes precedence, and setting it to an empty value suppresses a config-file `urlHost`. |
 | `PLANNOTATOR_BROWSER` | system default | Custom browser to open the UI in. macOS: app name or path. Linux/Windows: executable path. Can also be a script. Takes priority over `BROWSER`. Also settable per-invocation with `--browser`. |
@@ -93,6 +93,7 @@ When remote mode is forced with `PLANNOTATOR_REMOTE=1` / `true`, or SSH is detec
 - Server binds to `PLANNOTATOR_PORT` (default `19432`) instead of a random port
 - Browser-opening behavior depends on the environment and configured browser handler
 - In headless setups, you may need to open the forwarded URL manually
+- [Live local app annotation](/docs/commands/annotate/#local-apps) is unavailable. Annotating a loopback `http` URL that serves HTML exits with a startup failure asking for `--static`, instead of silently converting the page as earlier versions did. Loopback URLs that would not have opened live anyway (unreachable, or not HTML) still convert as before. `--tailscale` sessions refuse live mode the same way, since the session is reachable across your tailnet.
 
 ### Legacy SSH detection
 

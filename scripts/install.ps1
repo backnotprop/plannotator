@@ -1175,6 +1175,10 @@ try {
                 foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
                     Copy-SkillIfPresent "apps\skills\claude\$skill" $claudeSkillsDir
                 }
+                # The plannotator knowledge skill (CLI reference) has no
+                # Claude-only injection form, so Claude installs the same
+                # single-sourced copy Codex gets from apps\skills\core.
+                Copy-SkillIfPresent "apps\skills\core\plannotator" $claudeSkillsDir
                 Write-Host "Installed Claude Code skills to $claudeSkillsDir\"
             } else {
                 Write-Host "Tag $latestTag predates the per-agent skill layout - skipping Claude Code skill install"
@@ -1184,6 +1188,7 @@ try {
                 foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
                     Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
                 }
+                Copy-SkillIfPresent "apps\skills\core\plannotator" $agentsSkillsDir
                 Write-Host "Installed shared agent skills to $agentsSkillsDir\"
             } else {
                 Write-Host "Tag $latestTag predates the core/extra skill layout - skipping shared agent skill install"
@@ -1197,6 +1202,9 @@ try {
                 # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
+                # The plannotator knowledge skill (CLI reference) has no Kiro-specific
+                # form, so Kiro receives the single-sourced core copy like every other scope.
+                Copy-SkillIfPresent "apps\skills\core\plannotator" $kiroSkillsDir
                 # Two extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-setup-goal" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\skills\extra\plannotator-visual-explainer" $kiroSkillsDir

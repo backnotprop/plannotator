@@ -1422,16 +1422,28 @@ export const BRIDGE_SCRIPT = `(function() {
   document.addEventListener('mouseup', function() {
     // Text drag-selection commenting is ALWAYS live: both surfaces, armed or
     // Interact. In armed pinpoint a plain click belongs to the pinpoint
-    // handler — only a REAL drag (>4px with the button held) schedules the
-    // selection pass, so annotateElement's own selection is never re-posted
-    // by its trailing mouseup. Everywhere else the classic always-schedule
-    // behavior stays: handleSelection only acts on a real selection, posts
-    // the clear that dismisses a stale draft, and never preventDefaults —
-    // a plain click is never swallowed.
+    // handler — only a drag that actually PRODUCED a text selection owns its
+    // trailing click, so annotateElement's own selection is never re-posted
+    // by its trailing mouseup. The >4px drift alone is NOT enough to arm the
+    // click suppression: a drifted click (common on trackpads) that selected
+    // nothing must stay a click, or armed pinpoint would silently swallow it
+    // while the unprevented click leaks through to the page. Browsers clear
+    // a prior selection on the mousedown that starts the drag, so the
+    // selection observed here is the one THIS drag produced. Everywhere else
+    // the classic always-schedule behavior stays: handleSelection only acts
+    // on a real selection, posts the clear that dismisses a stale draft, and
+    // never preventDefaults — a plain click is never swallowed.
     var dragged = dragYieldActive;
-    dragEndedClick = dragged;
     endDragYield();
-    if (annotateModeActive && currentInputMethod === 'pinpoint' && !dragged) return;
+    var draggedSelection = false;
+    if (dragged) {
+      try {
+        var s = window.getSelection();
+        draggedSelection = !!(s && !s.isCollapsed && s.rangeCount && (s.toString() || '').trim());
+      } catch (ex) {}
+    }
+    dragEndedClick = draggedSelection;
+    if (annotateModeActive && currentInputMethod === 'pinpoint' && !draggedSelection) return;
     setTimeout(handleSelection, 10);
   }, true);
 
@@ -3018,10 +3030,11 @@ export const BRIDGE_SCRIPT = `(function() {
     // A drag that ended in this click owns the surface: the drag-selection
     // pass is about to post the selected text, and pinpoint-annotating the
     // element under the pointer would clobber it (annotateElement rewrites
-    // the selection). Keyed off the >4px drag arming, not selection state, so
-    // the selection a previous text-element pin left behind never blocks the
-    // next plain re-pin click. One-shot: only the drag's own trailing click
-    // is suppressed.
+    // the selection). Armed at mouseup only when the drag actually produced
+    // a selection — a drifted click arms nothing and pins normally below —
+    // and mousedown clears a prior pin's leftover selection, so stale
+    // selection state never blocks the next plain re-pin click. One-shot:
+    // only the drag's own trailing click is suppressed.
     if (dragEndedClick) { dragEndedClick = false; return; }
     // Shift-click while an ARMED pinpoint draft is open: toggle the element
     // in/out of the SAME draft comment instead of replacing the selection.
@@ -3073,9 +3086,12 @@ export const BRIDGE_SCRIPT = `(function() {
     }
     if (pendingSelection) {
       closePendingDraft();
-    } else if (currentInputMethod === 'pinpoint' && pinpointHover) {
-      clearPinpointHover();
     } else {
+      // Hover-clear is NOT a rung: the hover outline is a pointer
+      // affordance, not a state the user perceives as a step, so clearing
+      // it and exiting to Interact happen on the SAME press. Only an open
+      // draft earns its own press.
+      if (currentInputMethod === 'pinpoint' && pinpointHover) clearPinpointHover();
       postToParent({ type: PREFIX + 'annotate-exit' });
     }
   });

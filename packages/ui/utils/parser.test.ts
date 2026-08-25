@@ -1817,6 +1817,67 @@ describe("exportAnnotations — multi-target raw-HTML comments", () => {
   });
 });
 
+describe("exportAnnotations — live-app page grouping (heading hierarchy)", () => {
+  // Live sessions stamp annotations with the page they were made on; the
+  // export groups entries under per-page headers. The headers must OUTRANK
+  // the entries (## Page over ### N.) or every page section renders nested
+  // under the previous entry.
+  const liveAnn = (num: string, pageUrl?: string, extra: object = {}) => ({
+    blockId: "",
+    startOffset: 0,
+    endOffset: 0,
+    type: "COMMENT",
+    text: `note ${num}`,
+    originalText: `target ${num}`,
+    ...(pageUrl ? { pageUrl } : {}),
+    ...extra,
+  });
+
+  test("page headers are ## and entries demote to ###, so entries nest below their page", () => {
+    const output = exportAnnotations([], [
+      liveAnn("a", "/dashboard"),
+      liveAnn("b", "/dashboard"),
+      liveAnn("c", "/settings"),
+    ]);
+    // Header level outranks entry level.
+    expect(output).toMatch(/^## Page: \/dashboard$/m);
+    expect(output).toMatch(/^## Page: \/settings$/m);
+    expect(output).toMatch(/^### 1\. /m);
+    expect(output).toMatch(/^### 2\. /m);
+    expect(output).toMatch(/^### 3\. /m);
+    expect(output).not.toMatch(/^### Page: /m);
+    expect(output).not.toMatch(/^## \d+\. /m);
+    // Entries sit BELOW the page header they belong to.
+    expect(output.indexOf("## Page: /dashboard")).toBeLessThan(output.indexOf("### 1. "));
+    expect(output.indexOf("### 2. ")).toBeLessThan(output.indexOf("## Page: /settings"));
+    expect(output.indexOf("## Page: /settings")).toBeLessThan(output.indexOf("### 3. "));
+  });
+
+  test("unpaged entries lead at the same ### level, and global numbering survives grouping", () => {
+    const output = exportAnnotations([], [
+      liveAnn("g", undefined, { type: "GLOBAL_COMMENT", originalText: "" }),
+      liveAnn("a", "/b-page"),
+      liveAnn("c", "/a-page"),
+      liveAnn("d", "/b-page"),
+    ]);
+    // The pageless global leads, before any page header, at entry level.
+    expect(output.indexOf("### 1. ")).toBeLessThan(output.indexOf("## Page: "));
+    // Grouping regroups pages by first appearance but keeps the GLOBAL
+    // numbers (matching on-page markers), so /b-page shows 2 and 4.
+    const bPage = output.slice(output.indexOf("## Page: /b-page"), output.indexOf("## Page: /a-page"));
+    expect(bPage).toContain("### 2. ");
+    expect(bPage).toContain("### 4. ");
+  });
+
+  test("without any pageUrl the export keeps its classic ## entries and no page headers", () => {
+    const output = exportAnnotations([], [liveAnn("a"), liveAnn("b")]);
+    expect(output).toMatch(/^## 1\. /m);
+    expect(output).toMatch(/^## 2\. /m);
+    expect(output).not.toContain("Page: ");
+    expect(output).not.toContain("### ");
+  });
+});
+
 describe("parseMarkdownToBlocks — non-markdown plain text (#1029)", () => {
   /**
    * Annotate now accepts YAML/JSON/TOML-style config files and renders them

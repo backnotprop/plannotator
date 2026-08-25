@@ -16,9 +16,10 @@
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
-import { startAnnotateServer } from "./annotate";
+import { liveAppDraftIdentity, runGuardedShutdown, startAnnotateServer } from "./annotate";
 import { getServerConfig, loadConfig } from "./config";
 import { deriveAnnotateHistorySlug } from "@plannotator/shared/annotate-history";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -1971,6 +1972,127 @@ describe("annotate server: live app mode (annotate-app)", () => {
     app.stop(true);
   });
 
+  describe("draft isolation between live sessions", () => {
+    // A live session holds no document text (markdown is "" by construction),
+    // so keying its draft by content gave every live session on the machine
+    // the one hash of the empty string: two sessions against different dev
+    // servers shared a single draft slot and overwrote each other.
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    let draftDataDir: string;
+
+    beforeEach(() => {
+      draftDataDir = mkdtempSync(join(tmpdir(), "plannotator-live-draft-"));
+      process.env.PLANNOTATOR_DATA_DIR = draftDataDir;
+    });
+
+    afterEach(() => {
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(draftDataDir, { recursive: true, force: true });
+    });
+
+    async function saveDraft(server: { url: string }, feedback: string): Promise<void> {
+      const res = await fetch(`${server.url}/api/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback, annotations: [] }),
+      });
+      expect(res.status).toBe(200);
+    }
+
+    async function loadDraft(server: { url: string }): Promise<{ feedback?: string } | null> {
+      const res = await fetch(`${server.url}/api/draft`);
+      if (res.status === 404) return null;
+      expect(res.status).toBe(200);
+      return (await res.json()) as { feedback?: string };
+    }
+
+    test("two live sessions on different targets keep independent drafts", async () => {
+      const appX = startFakeApp();
+      const appY = startFakeApp();
+      const serverX = await startLiveServer(`http://127.0.0.1:${appX.port}`);
+      const serverY = await startLiveServer(`http://127.0.0.1:${appY.port}`);
+      try {
+        await saveDraft(serverX, "notes for X");
+        await saveDraft(serverY, "notes for Y");
+
+        // Neither session sees the other's text, in either direction.
+        expect((await loadDraft(serverX))?.feedback).toBe("notes for X");
+        expect((await loadDraft(serverY))?.feedback).toBe("notes for Y");
+        expect(readdirSync(join(draftDataDir, "drafts")).length).toBe(2);
+      } finally {
+        serverX.stop();
+        serverY.stop();
+        appX.stop(true);
+        appY.stop(true);
+      }
+    });
+
+    test("the same target recovers its draft after a restart", async () => {
+      const app = startFakeApp();
+      const targetUrl = `http://127.0.0.1:${app.port}`;
+      const first = await startLiveServer(targetUrl);
+      try {
+        await saveDraft(first, "survives the crash");
+      } finally {
+        first.stop();
+      }
+      // Same target, spelled with a trailing slash the way a browser would
+      // hand it back: the draft is the point of the key, so it must survive.
+      const second = await startLiveServer(`${targetUrl}/`);
+      try {
+        expect((await loadDraft(second))?.feedback).toBe("survives the crash");
+      } finally {
+        second.stop();
+        app.stop(true);
+      }
+    });
+
+    test("live identities separate distinct targets and are stable across spellings", () => {
+      const a = liveAppDraftIdentity("http://127.0.0.1:5173");
+      expect(liveAppDraftIdentity("http://127.0.0.1:5173/")).toBe(a);
+      expect(liveAppDraftIdentity("http://127.0.0.1:5174")).not.toBe(a);
+      // Different pages of one app are different targets, and stay so.
+      expect(liveAppDraftIdentity("http://127.0.0.1:5173/admin")).not.toBe(a);
+      expect(liveAppDraftIdentity("http://127.0.0.1:5173/admin/")).toBe(
+        liveAppDraftIdentity("http://127.0.0.1:5173/admin"),
+      );
+      // Unparseable input still yields a per-target value rather than throwing.
+      expect(liveAppDraftIdentity("not a url")).toBe("not a url");
+    });
+  });
+
+  test("classic file annotate still keys its draft by content", async () => {
+    // The live fix must not move any existing draft: a file session's key is
+    // the hash of its markdown, exactly as before, so drafts written by an
+    // earlier release are still found.
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-file-draft-"));
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    const markdown = "# Doc\n\nbody text\n";
+    const server = await startAnnotateServer({
+      markdown,
+      filePath: join(dataDir, "doc.md"),
+      htmlContent: MINIMAL_HTML,
+      mode: "annotate",
+    });
+    try {
+      const res = await fetch(`${server.url}/api/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: "file note", annotations: [] }),
+      });
+      expect(res.status).toBe(200);
+      const expectedKey = createHash("sha256").update(markdown).digest("hex").slice(0, 16);
+      expect(existsSync(join(dataDir, "drafts", `${expectedKey}.json`))).toBe(true);
+    } finally {
+      server.stop();
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
   test("remote mode rejects live app sessions outright", async () => {
     process.env.PLANNOTATOR_REMOTE = "1";
     await expect(startLiveServer("http://127.0.0.1:65500")).rejects.toThrow(
@@ -1986,5 +2108,46 @@ describe("annotate server: live app mode (annotate-app)", () => {
     await expect(
       startLiveServer("http://127.0.0.1:65500", { tailnetPublished: true }),
     ).rejects.toThrow("Live app annotation is unavailable in tailnet-published sessions");
+  });
+});
+
+describe("annotate server: guarded shutdown (runGuardedShutdown)", () => {
+  // The live-proxy leak this guards: stop() disposes the agent terminal
+  // BEFORE the live proxy, and agent-terminal teardown is historically
+  // fragile (#1314). In a flat sequence a throw there orphaned the proxy's
+  // listener and upstream WebSockets. Each step must run even when an
+  // earlier one throws, and the listener close must run regardless.
+  test("a throwing disposer does not skip later steps or the listener close", () => {
+    const ran: string[] = [];
+    const logged: string[] = [];
+    runGuardedShutdown(
+      [
+        ["agent terminal", () => {
+          ran.push("agent terminal");
+          throw new Error("pty teardown exploded");
+        }],
+        ["live proxy", () => ran.push("live proxy")],
+      ],
+      () => ran.push("listener"),
+      (message) => logged.push(message),
+    );
+    expect(ran).toEqual(["agent terminal", "live proxy", "listener"]);
+    // The failure is reported, named after the step that threw.
+    expect(logged.some((line) => line.includes("agent terminal"))).toBe(true);
+  });
+
+  test("all steps clean: everything runs once in order, nothing is logged", () => {
+    const ran: string[] = [];
+    const logged: string[] = [];
+    runGuardedShutdown(
+      [
+        ["a", () => ran.push("a")],
+        ["b", () => ran.push("b")],
+      ],
+      () => ran.push("listener"),
+      (message) => logged.push(message),
+    );
+    expect(ran).toEqual(["a", "b", "listener"]);
+    expect(logged).toEqual([]);
   });
 });

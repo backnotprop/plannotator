@@ -31,6 +31,19 @@ export const LABEL_COLOR_MAP: Record<string, { bg: string; text: string; darkTex
   amber:  { bg: 'rgba(180,83,9,0.15)',    text: '#b45309', darkText: '#fbbf24' },
 };
 
+/**
+ * The hardcoded one-click positive label behind the toolbar's 👍 button and
+ * the composer's "Looks good" action. Deliberately NOT part of the
+ * configurable set: it is the ONLY label comment-only surfaces (HTML /
+ * live-app) may emit — their restricted handlers filter on this id.
+ */
+export const THUMBS_UP_LABEL: QuickLabel = {
+  id: 'thumbs-up',
+  emoji: '👍',
+  text: 'Looks good',
+  color: 'green',
+};
+
 export const DEFAULT_QUICK_LABELS: QuickLabel[] = [
   { id: 'clarify-this',            emoji: '❓', text: 'Clarify this',            color: 'yellow' },
   { id: 'missing-overview',        emoji: '🗺️', text: 'Missing overview',        color: 'purple', tip: 'Provide a narrative overview of what is being built, why it is being built, and how it will be built. Add this before the implementation details.' },

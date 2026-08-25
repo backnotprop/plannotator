@@ -16,7 +16,7 @@ import {
 
 interface AnnotationToolbarProps {
   toolbarState: ToolbarState;
-  toolbarRef: React.RefObject<HTMLDivElement>;
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
   commentText: string;
   setCommentText: (text: string) => void;
   suggestedCode: string;
@@ -47,6 +47,9 @@ interface AnnotationToolbarProps {
   /** AI messages that overlap the current line selection */
   aiHistoryMessages?: AIChatEntry[];
 }
+
+// The 338px border box contains the 320px composer, padding, and border.
+const TOOLBAR_MAX_WIDTH = 338;
 
 /** Floating comment input form that appears after line selection */
 export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
@@ -81,7 +84,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 }) => {
   const coarsePointer = hasPrimaryCoarsePointer();
   const visibleBounds = useVisibleViewportBounds(coarsePointer ? 16 : 0);
-  const horizontalInset = coarsePointer ? Math.min(160, visibleBounds.width / 2) : 150;
+  const toolbarWidth = Math.min(TOOLBAR_MAX_WIDTH, visibleBounds.width);
+  const horizontalInset = toolbarWidth / 2;
   const suggestedCodeRef = useRef<HTMLTextAreaElement>(null);
   const handleTabIndent = useTabIndent(setSuggestedCode);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(toolbarRef);
@@ -121,6 +125,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             position: 'fixed',
             top: dragPosition.top,
             left: dragPosition.left,
+            width: toolbarWidth,
+            boxSizing: 'border-box',
             zIndex: 1000,
             maxHeight: visibleBounds.height,
             overflowY: 'auto',
@@ -139,6 +145,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               ),
             ),
             transform: 'translateX(-50%)',
+            width: toolbarWidth,
+            boxSizing: 'border-box',
             zIndex: 1000,
             maxHeight: visibleBounds.height,
             overflowY: 'auto',

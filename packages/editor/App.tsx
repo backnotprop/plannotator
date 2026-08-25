@@ -156,6 +156,14 @@ import {
   type AnnotateAgentTerminalPanelHandle,
 } from './components/AnnotateAgentTerminalPanel';
 import {
+  saveAnnotateAgentTerminalSide,
+  type AnnotateAgentTerminalSide,
+} from '@plannotator/ui/utils/annotateAgentTerminal';
+import {
+  AGENT_TERMINAL_LG_BREAKPOINT,
+  getAgentTerminalLayout,
+} from './agentTerminalLayout';
+import {
   buildAgentTerminalDeliveryRecord,
   buildTerminalAskPrompt,
   isMatchingAgentTerminalDelivery,
@@ -514,6 +522,10 @@ const App: React.FC = () => {
   const [projectRoot, setProjectRoot] = useState<string | null>(null);
   const [agentTerminalCapability, setAgentTerminalCapability] = useState<AgentTerminalCapability | null>(null);
   const [isAgentTerminalOpen, setIsAgentTerminalOpen] = useState(false);
+  // Durable placement preference (server config > cookie > 'left'). Read through
+  // ConfigStore rather than component state so the Settings dialog's copy of the
+  // Position control and the terminal's own popover stay in step.
+  const agentTerminalSide = useConfigValue('agentTerminalSide');
   const [isAgentTerminalRunning, setIsAgentTerminalRunning] = useState(false);
   const [isAgentTerminalReady, setIsAgentTerminalReady] = useState(false);
   const [agentTerminalSessionId, setAgentTerminalSessionId] = useState<number | null>(null);
@@ -558,6 +570,7 @@ const App: React.FC = () => {
   });
   const [showLookAndFeelAnnouncement, setShowLookAndFeelAnnouncement] = useState(needsLookAndFeelAnnouncement);
   const isMobile = useIsMobile();
+  const isBelowAgentTerminalBreakpoint = useIsMobile(AGENT_TERMINAL_LG_BREAKPOINT);
   const isCompactTouchLayout = useCompactTouchLayout();
   const usesDocumentScroll = isCompactTouchLayout;
   const effectiveEditorMode: EditorMode = isCompactTouchLayout ? 'selection' : editorMode;
@@ -577,6 +590,36 @@ const App: React.FC = () => {
   const isCompactReviewOpen = isCompactTouchLayout && compactPlanSurface.type === 'review';
   const effectivePanelOpen = shouldPresentDesktopPlanPanel(isCompactTouchLayout, isPanelOpen);
 
+  // Resolved high, not at render time, because `isRightPanelVisible` is what
+  // decides whether the right-hand annotations/AI surface is actually on screen
+  // — and consumers of that fact (notably the Ask AI model-discovery effect)
+  // read it well before the JSX. Computing it late let those consumers fall
+  // back to `effectivePanelOpen`, which stays true under a right-docked
+  // terminal and so reported an invisible surface as open.
+  const showAgentTerminalControls =
+    annotateMode &&
+    annotateSource !== 'message' &&
+    agentTerminalCapability !== null &&
+    !goalSetupMode;
+  const {
+    shouldRender: shouldRenderAgentTerminal,
+    isVisible: isAgentTerminalVisible,
+    isLeftVisible: isLeftAgentTerminalVisible,
+    showOnLeft: showAgentTerminalOnLeft,
+    showOnRight: showAgentTerminalOnRight,
+    isRightPanelVisible,
+    dockClassName: agentTerminalDockClassName,
+    placement: agentTerminalPlacement,
+  } = getAgentTerminalLayout({
+    showControls: showAgentTerminalControls,
+    isOpen: isAgentTerminalOpen,
+    isRunning: isAgentTerminalRunning,
+    isWideMode: wideModeType !== null,
+    isBelowBreakpoint: isBelowAgentTerminalBreakpoint,
+    side: agentTerminalSide,
+    isRightPanelOpen: effectivePanelOpen,
+  });
+
   // Compact interactions never write into the remembered desktop rail/panel
   // state. Crossing back to a fine-pointer workspace simply removes the
   // transient foreground surface and reveals the incumbent desktop layout.
@@ -590,7 +633,6 @@ const App: React.FC = () => {
     // explicit desktop choice without letting compact changes write it back.
     setCompactInputMethod(inputMethod);
   }, [inputMethod, isCompactTouchLayout]);
-
   const viewerRef = useRef<ViewerHandle>(null);
   // Desktop uses the main document element as its native scroll viewport.
   // Compact coarse-pointer browsers use the page scroller so Mobile Safari
@@ -645,8 +687,10 @@ const App: React.FC = () => {
     defaultWidth: 360,
     minWidth: 280,
     maxWidth: 640,
-    side: 'left',
-    onSnapClose: () => setIsAgentTerminalOpen(false),
+    // The handle follows the edge the panel actually docks against, which for a
+    // 'hidden' preference opened for the session is the left fallback.
+    side: agentTerminalPlacement,
+    onSnapClose: () => hideAgentTerminal(),
     // Single click on the handle (no drag) collapses it.
     onClick: () => hideAgentTerminal(),
     apply: (w) => document.documentElement.style.setProperty('--agent-terminal-w', `${w}px`),
@@ -748,6 +792,38 @@ const App: React.FC = () => {
     }, 0);
   }, []);
 
+  const hideAgentTerminal = useCallback(() => {
+    setIsAgentTerminalOpen(false);
+  }, []);
+
+  /**
+   * RIGHT-SLOT INVARIANT (see also getAgentTerminalLayout in
+   * ./agentTerminalLayout, and the panel render site below).
+   *
+   * A right-docked Agent TUI and the annotations/AI panel compete for the same
+   * slot, and the coordination between them is deliberately ASYMMETRIC:
+   *
+   *  - Panel wins over terminal, destructively. Asking for annotations or Ask
+   *    AI is a request for that specific surface, so the terminal gives up the
+   *    slot: `isAgentTerminalOpen` goes false. Nothing is lost — a running
+   *    agent stays mounted off-layout, so reopening returns to the same
+   *    session rather than a fresh PTY.
+   *  - Terminal wins over panel, non-destructively. Opening the terminal only
+   *    suppresses the panel visually (`isRightPanelVisible`); `isPanelOpen`
+   *    and the selected tab are left alone, so dismissing the terminal
+   *    restores exactly the surface the user had.
+   *
+   * Making this symmetric (closing the panel outright when the terminal opens)
+   * was considered and rejected: the terminal is frequently a short detour
+   * from an annotation pass, and clearing the panel would make every detour
+   * cost the user their place. The asymmetry is the UX, not an oversight.
+   */
+  const replaceRightAgentTerminalWithPanel = useCallback((tab: 'annotations' | 'ai') => {
+    hideAgentTerminal();
+    setRightSidebarTab(tab);
+    setIsPanelOpen(true);
+  }, [hideAgentTerminal]);
+
   const handleAnnotationPanelToggle = useCallback(() => {
     if (isCompactTouchLayout) {
       openCompactPlanSurface('annotations');
@@ -758,9 +834,15 @@ const App: React.FC = () => {
       setRightSidebarTab('annotations');
       return;
     }
+    // Right-slot invariant: only a VISIBLE right-docked terminal is holding the
+    // slot. A collapsed-but-running one is off-layout and must not be evicted.
+    if (agentTerminalPlacement === 'right' && isAgentTerminalVisible) {
+      replaceRightAgentTerminalWithPanel('annotations');
+      return;
+    }
     setRightSidebarTab('annotations');
     setIsPanelOpen(prev => rightSidebarTab === 'annotations' ? !prev : true);
-  }, [exitWideMode, isCompactTouchLayout, openCompactPlanSurface, rightSidebarTab, wideModeType]);
+  }, [agentTerminalPlacement, exitWideMode, isAgentTerminalVisible, isCompactTouchLayout, openCompactPlanSurface, replaceRightAgentTerminalWithPanel, rightSidebarTab, wideModeType]);
 
   const dismissLookAndFeelAnnouncement = useCallback(() => {
     // Persist even when the user accepts the displayed default without first
@@ -780,12 +862,22 @@ const App: React.FC = () => {
       setRightSidebarTab('ai');
       return;
     }
+    // Right-slot invariant: see replaceRightAgentTerminalWithPanel above.
+    if (agentTerminalPlacement === 'right' && isAgentTerminalVisible) {
+      replaceRightAgentTerminalWithPanel('ai');
+      return;
+    }
     setRightSidebarTab('ai');
     setIsPanelOpen(prev => rightSidebarTab === 'ai' ? !prev : true);
-  }, [exitWideMode, isCompactTouchLayout, openCompactPlanSurface, rightSidebarTab, wideModeType]);
+  }, [agentTerminalPlacement, exitWideMode, isAgentTerminalVisible, isCompactTouchLayout, openCompactPlanSurface, replaceRightAgentTerminalWithPanel, rightSidebarTab, wideModeType]);
 
-  const hideAgentTerminal = useCallback(() => {
-    setIsAgentTerminalOpen(false);
+  /**
+   * Record the durable placement. Writing through ConfigStore is the whole
+   * update: `agentTerminalSide` is a useConfigValue subscriber, so the terminal
+   * popover and the Settings dialog observe the same value.
+   */
+  const handleAgentTerminalSideChange = useCallback((side: AnnotateAgentTerminalSide) => {
+    saveAnnotateAgentTerminalSide(side);
   }, []);
 
   const setAgentTerminalDelivery = useCallback((delivery: AgentTerminalDeliveryRecord | null) => {
@@ -816,6 +908,12 @@ const App: React.FC = () => {
     setAgentTerminalSessionId(agentTerminalSessionSeqRef.current);
   }, [setAgentTerminalDelivery]);
 
+  /**
+   * Explicit intent to see the terminal now: the rail toggle, Shift Shift, or
+   * a message routed to the agent. Deliberately does NOT rewrite a 'hidden'
+   * preference — asking for the panel once is not the same as asking for it
+   * every session, so the open is session-scoped and the preference survives.
+   */
   const openAgentTerminal = useCallback(() => {
     if (wideModeType !== null) {
       exitWideMode({ restore: false, panelOpen: false });
@@ -835,6 +933,16 @@ const App: React.FC = () => {
     if (annotateMode && annotateSource !== 'message' && agentTerminalCapability) return;
     closeAgentTerminal();
   }, [agentTerminalCapability, annotateMode, annotateSource, closeAgentTerminal]);
+
+  // Choosing "Hidden" closes the terminal, from either surface that offers the
+  // Position control (the terminal's own popover, which then disappears, and
+  // the Settings dialog, which is how you get it back). Keyed on the preference
+  // alone, so a later explicit open in the same session is not undone: the
+  // effect does not re-run until the preference changes again.
+  useEffect(() => {
+    if (agentTerminalSide !== 'hidden') return;
+    closeAgentTerminal();
+  }, [agentTerminalSide, closeAgentTerminal]);
 
   // Sync sidebar open state when the "Auto-open Sidebar" preference changes in
   // Settings. Deliberately does NOT react to the document or render mode —
@@ -1790,13 +1898,13 @@ const App: React.FC = () => {
 
   // Restore-on-entry: every time the session transitions ONTO an HTML surface
   // (a root raw-HTML session, or a linked .html doc opened from markdown),
-  // apply the sidebar/panel state the user last left an HTML session with
-  // (first-ever run: both closed). The old "Hide tools" chrome flag is gone —
-  // annotation chrome is always visible on HTML surfaces now, and an old
-  // cookie still carrying toolsHidden is simply ignored, so a stale record
-  // can never strand a user with hidden chrome. Re-restoring on each entry is
-  // also what keeps a markdown surface's sidebar state from leaking into the
-  // HTML cookie on the way back.
+  // apply the sidebar/panel/toolsHidden state the user last left an HTML
+  // session with (first-ever run: both closed, tools visible). A restored
+  // toolsHidden:true always has a way back on every layout: the desktop
+  // header eye toggle, and the compact Options menu "Show tools" action
+  // (compactDocumentActions). Re-restoring on each entry is also what keeps
+  // a markdown surface's sidebar state from leaking into the HTML cookie on
+  // the way back.
   const prevHtmlChromeSurfaceRef = useRef(false);
   useEffect(() => {
     if (isLoading || isLoadingShared) return;
@@ -3883,9 +3991,13 @@ const App: React.FC = () => {
 
   // Opening the Ask AI surface with a provider selected is the other explicit
   // gesture that should surface the provider's real model list.
+  // isRightPanelVisible, not effectivePanelOpen: a right-docked Agent TUI
+  // suppresses the panel without closing it, and kicking off provider model
+  // discovery for a surface nobody can see is exactly the eager work this
+  // gesture-gated effect exists to avoid.
   const aiSurfaceOpen = isCompactTouchLayout
     ? compactPlanSurface.type === 'ai'
-    : effectivePanelOpen && rightSidebarTab === 'ai';
+    : isRightPanelVisible && rightSidebarTab === 'ai';
   useEffect(() => {
     if (!aiAvailable || !aiSurfaceOpen) return;
     activateAIProvider(aiConfig.providerId);
@@ -4602,6 +4714,31 @@ const App: React.FC = () => {
               onSelect: handleEditExitClick,
             }]
           : []),
+        // HTML/live surfaces on the compact touch shell: the desktop pen and
+        // eye toggles are header-only and hidden here, and Mod+Shift+A is
+        // keyboard-only, so without these menu actions a touch user has NO
+        // way to disarm annotate mode (every tap annotates, the page beneath
+        // is unreachable) or to bring hidden tools back.
+        ...(isHtmlSurface && !documentReadOnly
+          ? [{
+              id: 'annotate' as const,
+              label: htmlAnnotateArmed ? 'Interact with page' : 'Annotate page',
+              subtitle: htmlAnnotateArmed
+                ? 'Taps annotate. Switch to use the page itself.'
+                : 'Taps use the page. Switch to add annotations.',
+              onSelect: handleHtmlAnnotateToggle,
+            }]
+          : []),
+        ...(isHtmlSurface
+          ? [{
+              id: 'tools' as const,
+              label: htmlToolsHidden ? 'Show tools' : 'Hide tools',
+              subtitle: htmlToolsHidden
+                ? 'Bring the annotation chrome back over the page'
+                : 'Remove all floating chrome from over the page',
+              onSelect: () => setHtmlToolsHidden((v) => !v),
+            }]
+          : []),
       ];
 
   const planMaxWidth = useMemo(() => {
@@ -4609,23 +4746,43 @@ const App: React.FC = () => {
     return widths[uiPrefs.planWidth] ?? 832;
   }, [uiPrefs.planWidth]);
   const annotateReaderMaxWidth = canUseWideMode && wideModeType === 'wide' ? null : planMaxWidth;
-  const showAgentTerminalControls =
-    annotateMode &&
-    annotateSource !== 'message' &&
-    agentTerminalCapability !== null &&
-    !goalSetupMode;
-  const shouldRenderAgentTerminal =
-    showAgentTerminalControls &&
-    agentTerminalCapability !== null &&
-    wideModeType === null &&
-    (isAgentTerminalOpen || isAgentTerminalRunning);
+  const agentTerminalPanel = shouldRenderAgentTerminal && agentTerminalCapability ? (
+    <div
+      key="agent-terminal"
+      className={agentTerminalDockClassName}
+      aria-hidden={!isAgentTerminalVisible}
+      inert={!isAgentTerminalVisible}
+    >
+      <AnnotateAgentTerminalPanel
+        ref={agentTerminalRef}
+        capability={agentTerminalCapability}
+        width={`var(--agent-terminal-w, ${agentTerminalResize.width}px)`}
+        side={agentTerminalSide}
+        placement={agentTerminalPlacement}
+        onSideChange={handleAgentTerminalSideChange}
+        onSessionActiveChange={setIsAgentTerminalRunning}
+        onSessionReadyChange={handleAgentTerminalReadyChange}
+        onClose={hideAgentTerminal}
+      />
+      {isAgentTerminalVisible && (
+        <ResizeHandle
+          {...agentTerminalResize.handleProps}
+          className="hidden lg:block z-[55]"
+          side={agentTerminalPlacement}
+          hideHoverTrack
+          tooltip={RESIZE_HANDLE_TOOLTIP}
+          onCollapse={hideAgentTerminal}
+        />
+      )}
+    </div>
+  ) : null;
   const canShowCollapsedSidebarTabs =
     !isCompactTouchLayout &&
     wideModeType === null &&
     !sidebar.isOpen &&
     !goalSetupMode &&
     !(isHtmlSurface && htmlToolsHidden);
-  const collapsedSidebarTabsStyle = isAgentTerminalOpen
+  const collapsedSidebarTabsStyle = isLeftAgentTerminalVisible
     ? { left: `var(--agent-terminal-w, ${agentTerminalResize.width}px)` }
     : undefined;
   // Only greet in a normal authoring context — not on a read-only shared session
@@ -4894,9 +5051,9 @@ const App: React.FC = () => {
           origin={origin}
           isSubmitting={isSubmitting}
           isExiting={isExiting}
-          isPanelOpen={effectivePanelOpen && rightSidebarTab === 'annotations'}
+          isPanelOpen={isRightPanelVisible && rightSidebarTab === 'annotations'}
           aiAvailable={canUseAskAI}
-          isAIChatOpen={effectivePanelOpen && rightSidebarTab === 'ai'}
+          isAIChatOpen={isRightPanelVisible && rightSidebarTab === 'ai'}
           aiHasMessages={visibleAIMessages.length > 0}
           hasAnyAnnotations={hasAnyAnnotations || hasDirectEdits || hasSavedFileChanges}
           annotationCount={feedbackAnnotationCount}
@@ -4912,6 +5069,7 @@ const App: React.FC = () => {
           taterMode={taterMode}
           mobileSettingsOpen={mobileSettingsOpen}
           gitUser={gitUser}
+          agentTerminalAvailable={showAgentTerminalControls}
           onCallbackFeedback={handleCallbackFeedback}
           onCallbackApprove={handleCallbackApprove}
           onAnnotateExit={handleHeaderAnnotateExit}
@@ -5065,36 +5223,7 @@ const App: React.FC = () => {
         <div data-print-region="content" className={`flex-1 flex ${usesDocumentScroll ? 'overflow-visible' : 'overflow-hidden'} relative z-0 ${isResizing ? 'select-none' : ''}`}>
           {/* Tater sprites — inside content wrapper so z-0 stacking context applies */}
           {taterMode && <TaterSpriteRunning />}
-          {shouldRenderAgentTerminal && agentTerminalCapability && (
-            <div
-              className={
-                isAgentTerminalOpen
-                  ? "contents group/agent-terminal"
-                  : "absolute left-0 top-0 h-full w-0 overflow-hidden pointer-events-none group/agent-terminal"
-              }
-              aria-hidden={!isAgentTerminalOpen}
-              inert={!isAgentTerminalOpen ? true : undefined}
-            >
-              <AnnotateAgentTerminalPanel
-                ref={agentTerminalRef}
-                capability={agentTerminalCapability}
-                width={`var(--agent-terminal-w, ${agentTerminalResize.width}px)`}
-                onSessionActiveChange={setIsAgentTerminalRunning}
-                onSessionReadyChange={handleAgentTerminalReadyChange}
-                onClose={hideAgentTerminal}
-              />
-              {isAgentTerminalOpen && (
-                <ResizeHandle
-                  {...agentTerminalResize.handleProps}
-                  className="hidden lg:block z-[55]"
-                  side="left"
-                  hideHoverTrack
-                  tooltip={RESIZE_HANDLE_TOOLTIP}
-                  onCollapse={hideAgentTerminal}
-                />
-              )}
-            </div>
-          )}
+          {showAgentTerminalOnLeft && agentTerminalPanel}
           {/* Left Sidebar: collapsed tab flags (when sidebar is closed) */}
           {canShowCollapsedSidebarTabs && (
             <SidebarTabs
@@ -5401,6 +5530,10 @@ const App: React.FC = () => {
                     onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                     maxWidth={isHtmlSurface ? null : annotateReaderMaxWidth}
                     fullViewport={isHtmlSurface}
+                    // Applied on every layout: desktop has the header eye
+                    // toggle, and the compact touch shell has the Options
+                    // menu "Show tools" action (compactDocumentActions), so
+                    // a restored toolsHidden:true always has a way back.
                     hideControls={isHtmlSurface && htmlToolsHidden}
                     diffAvailable={!liveApp && !!htmlDiffHtml}
                     diffActive={!liveApp && isPlanDiffActive && !!htmlDiffHtml}
@@ -5501,20 +5634,22 @@ const App: React.FC = () => {
             </div>
           </OverlayScrollArea>
 
+          {showAgentTerminalOnRight && agentTerminalPanel}
+
           {/* Right panel region — `group/sidebar` so the collapse button reveals when
               hovering the whole panel, not just the thin handle. The handle and the
               panel(s) are separate sibling conditionals, so they need a shared hover
               ancestor (`contents` = no layout box). */}
           <div className="contents group/sidebar">
           {/* Resize Handle */}
-          {effectivePanelOpen && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAskAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block z-[55]" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsPanelOpen(false)} />}
+          {isRightPanelVisible && wideModeType === null && !goalSetupMode && (rightSidebarTab === 'annotations' || canUseAskAI) && <ResizeHandle {...panelResize.handleProps} className="hidden md:block z-[55]" side="right" hideHoverTrack tooltip={RESIZE_HANDLE_TOOLTIP} onCollapse={() => setIsPanelOpen(false)} />}
 
           {/* Annotation Panel */}
           {renderAnnotationPanel(
             'panel',
-            effectivePanelOpen && rightSidebarTab === 'annotations' && wideModeType === null && !goalSetupMode,
+            isRightPanelVisible && rightSidebarTab === 'annotations' && wideModeType === null && !goalSetupMode,
           )}
-          {effectivePanelOpen && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAskAI && (
+          {isRightPanelVisible && rightSidebarTab === 'ai' && wideModeType === null && !goalSetupMode && canUseAskAI && (
             <aside
               data-annotation-panel="true"
               className={`border-l border-border/50 bg-card flex flex-col flex-shrink-0 ${

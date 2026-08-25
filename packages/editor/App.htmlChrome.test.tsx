@@ -29,6 +29,22 @@ const appModule = hasDom ? await import("./App") : null;
 const App = appModule?.default as typeof import("./App")["default"];
 const originalFetch = globalThis.fetch;
 const originalEventSource = globalThis.EventSource;
+const originalMatchMedia = hasDom ? window.matchMedia : undefined;
+
+// SAFETY: implements the MediaQueryList surface the shell hooks consume.
+// Coarse-pointer matches put the app in its compact touch layout.
+function coarseMatchMedia(query: string): MediaQueryList {
+  return {
+    matches: query.includes("pointer: coarse"),
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  } as unknown as MediaQueryList;
+}
 
 const RAW_HTML = "<h1>Rendered page</h1><p>Body copy.</p>";
 
@@ -143,6 +159,39 @@ async function mountHtmlAnnotate(): Promise<void> {
   if (!penToggle()) throw new Error("HTML surface did not finish mounting (pen toggle missing)");
 }
 
+function armedRing(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-annotate-armed-ring]");
+}
+
+/** Compact mounts wait on the armed ring: neither the pen nor the eye toggle
+ * exists on the compact touch shell (that absence is what these tests guard). */
+async function mountCompactHtmlAnnotate(): Promise<void> {
+  globalThis.fetch = annotateFetch;
+  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
+  globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => {
+    root?.render(<App />);
+  });
+  for (let attempt = 0; attempt < 20 && !armedRing(); attempt += 1) {
+    await settle();
+  }
+  if (!armedRing()) throw new Error("compact HTML surface did not finish mounting (armed ring missing)");
+}
+
+async function openOptionsMenu(): Promise<void> {
+  const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Options"]');
+  if (!trigger) throw new Error("Options menu trigger missing");
+  await act(async () => trigger.click());
+}
+
+function findMenuItem(label: string): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll("button"))
+    .find((button) => button.textContent?.includes(label));
+}
+
 async function unmountHtmlAnnotate(): Promise<void> {
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -156,7 +205,10 @@ afterEach(async () => {
   globalThis.EventSource = originalEventSource;
   memory.clear();
   resetStorageBackend();
-  if (hasDom) document.body.replaceChildren();
+  if (hasDom) {
+    if (originalMatchMedia) window.matchMedia = originalMatchMedia;
+    document.body.replaceChildren();
+  }
 });
 
 afterAll(() => {
@@ -212,6 +264,108 @@ describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
     expect(toggle!.getAttribute("aria-pressed")).toBe("true");
     await act(async () => toggle!.click());
     expect(sidebarTabs()).not.toBeNull();
+  });
+
+  test("compact touch layout: a toolsHidden:true cookie is undoable through the Options menu 'Show tools' action", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: true, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
+    window.matchMedia = coarseMatchMedia as typeof window.matchMedia;
+    await mountCompactHtmlAnnotate();
+
+    // The cookie applies (desktop parity), but compact is not stranded: the
+    // desktop-only eye toggle is absent and the menu action is the way back.
+    expect(floatingCluster()).toBeNull();
+    expect(toolsToggle()).toBeNull();
+
+    await openOptionsMenu();
+    const show = findMenuItem("Show tools");
+    if (!show) throw new Error('compact menu is missing the "Show tools" action');
+    await act(async () => show.click());
+    expect(floatingCluster()).not.toBeNull();
+  });
+
+  test("compact touch layout: annotate mode is disarmable through the Options menu (no pen, no keyboard needed)", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    window.matchMedia = coarseMatchMedia as typeof window.matchMedia;
+    await mountCompactHtmlAnnotate();
+
+    // Armed by default, and the desktop pen is absent on compact — without
+    // the menu action every tap annotates and the page is unreachable.
+    expect(penToggle()).toBeNull();
+    expect(armedRing()).not.toBeNull();
+
+    await openOptionsMenu();
+    const interact = findMenuItem("Interact with page");
+    if (!interact) throw new Error('compact menu is missing the "Interact with page" action');
+    await act(async () => interact.click());
+    expect(armedRing()).toBeNull();
+
+    // And back: the same slot re-arms.
+    await openOptionsMenu();
+    const annotate = findMenuItem("Annotate page");
+    if (!annotate) throw new Error('compact menu is missing the "Annotate page" action');
+    await act(async () => annotate.click());
+    expect(armedRing()).not.toBeNull();
+  });
+
+  test("the restore commit never writes stale pre-restore values to the cookie", async () => {
+    // The chrome writer runs in the same commit as the restore effect, before
+    // the restored state has landed. If it saved there, a returning user's
+    // remembered state would be transiently inverted in the cookie — and a
+    // page ending between the two writes would freeze the inversion.
+    // Instrument every chrome write: no write may ever carry a state other
+    // than the remembered one, because this session never changes any chrome.
+    const chromeWrites: string[] = [];
+    setStorageBackend({
+      getItem: (key) => memory.get(key) ?? null,
+      setItem: (key, value) => {
+        if (key === "plannotator-html-chrome") chromeWrites.push(value);
+        memory.set(key, value);
+      },
+      removeItem: (key) => void memory.delete(key),
+    });
+    seedAnnouncementsSeen();
+    const rememberedState = { toolsHidden: false, sidebarOpen: true, panelOpen: false };
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ ...rememberedState, savedAt: Date.now() }),
+    );
+    await mountHtmlAnnotate();
+    await settle();
+
+    // Writes re-stamp savedAt, so compare the semantic fields, not bytes.
+    const semantic = (raw: string) => {
+      const { toolsHidden, sidebarOpen, panelOpen } = JSON.parse(raw) as Record<string, unknown>;
+      return { toolsHidden, sidebarOpen, panelOpen };
+    };
+    for (const write of chromeWrites) {
+      expect(semantic(write)).toEqual(rememberedState);
+    }
+    expect(semantic(memory.get("plannotator-html-chrome")!)).toEqual(rememberedState);
+  });
+
+  test("the sidebar is still reachable by keyboard (Mod+B) while tools are hidden", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: true, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
+    await mountHtmlAnnotate();
+    await settle();
+    expect(sidebarTabs()).toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", metaKey: true, bubbles: true }));
+    });
+    await settle();
+
+    expect(findButtonByText("Contents")).not.toBeUndefined();
   });
 
   test("the sidebar-open half of the persisted chrome still restores", async () => {
