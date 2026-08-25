@@ -66,6 +66,30 @@ describe("Pi extension startup boundary", () => {
 		expect(manifest.files).toContain("todo-providers/");
 	});
 
+	test("ships the plannotator knowledge skill through the pi manifest", () => {
+		// #1377 install reach: Pi users got the extension but none of the CLI
+		// reference every other host installs as a skill. Three things have to
+		// line up or it silently stops shipping again: vendor.sh must make the
+		// copy, `files` must include it, and `pi.skills` must name it (Pi
+		// resolves non-glob manifest entries relative to the package root).
+		const manifest = JSON.parse(
+			readFileSync(join(extensionDirectory, "package.json"), "utf-8"),
+		) as { files?: unknown; pi?: { skills?: unknown } };
+
+		expect(manifest.files).toContain("skills/");
+		expect(manifest.pi?.skills).toEqual(["skills/plannotator/SKILL.md"]);
+
+		// Assert the vendor step rather than the vendored file: a fresh checkout
+		// has not run vendor.sh yet, and this must not depend on build order.
+		const vendorScript = readFileSync(
+			join(extensionDirectory, "vendor.sh"),
+			"utf-8",
+		);
+		expect(vendorScript).toContain(
+			"cp -R ../skills/core/plannotator skills/plannotator",
+		);
+	});
+
 	test("requires a Pi host that exposes the resolved project-trust decision", () => {
 		const manifest = JSON.parse(
 			readFileSync(join(extensionDirectory, "package.json"), "utf-8"),

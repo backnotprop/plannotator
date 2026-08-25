@@ -189,7 +189,7 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `components/BlockRenderer` + the block components it renders (`TableBlock`, `HtmlBlock`, `Callout`, `MermaidBlock`, `MathBlock`, …) | Pure rendering. |
 | `components/InlineMarkdown` | Code-file hover previews route through the `docPreviewFetcher` seam. Wiki-link rendering takes the sync `resolveLinkedDoc` prop (live labels + deleted-doc treatment; see "Wiki-link seams (0.27.0)"). |
 | `components/Viewer` | The full annotatable document. Required props: `markdown` and `taterMode` (pass `false`). **Pass `disableCodePathValidation` unless you implement `/api/doc/exists`** — code-path validation is a prop-level opt-out, not a `configure` seam. |
-| `components/MarkdownEditor` | Theme-bridging wrapper over `@plannotator/markdown-editor`. Takes CM6 extensions via the `extensions` prop (captured ONCE per `documentId` — see "Wiki-link seams (0.27.0)") and re-exports `wikiLinks` + its config types. |
+| `components/MarkdownEditor` | Theme-bridging wrapper over `@plannotator/markdown-editor`. Takes CM6 extensions via the `extensions` prop (captured ONCE per `documentId` — see "Wiki-link seams (0.27.0)") and re-exports `wikiLinks`, `embedPicker`, `embedSlashItem`, `planEmbedInsert`, and their public types. |
 | `components/MarkdownDiff` | Theme-bridging wrapper over `@plannotator/markdown-editor`'s frozen two-revision diff. Same shim pattern as `components/MarkdownEditor` (ThemeProvider bridge, `extensions` passthrough, grid card chrome); never editable. See "Frozen markdown diff (0.28.0)". |
 | `components/CommentPopover` | Anchor capture + comment entry. Ask-AI UI renders only if you pass `onAskAI`. |
 | `components/AnnotationPanel` | Renders from your annotation state; no fetches of its own. |
@@ -392,6 +392,49 @@ Consumer-enablement round for wiki-links (Workspaces' `[[doc_01XYZ|label]]` link
 4. **H-ask-1 retired.** The two one-line TS6133 fixes Workspaces carried against `components/html-viewer` (unused `React` default import in `HtmlViewer.tsx`; unused `annotations` destructured binding in `useHtmlAnnotation.ts`) are applied at source. The shipped html-viewer files pass `tsc` under the strict-consumer flags (`--noUnusedLocals` included) — **delete your patch on adoption.**
 
 **Dependency note:** 0.27.0 requires `@plannotator/markdown-editor ^0.3.2` (adds `extensions`) and `@plannotator/atomic-editor ^0.7.0` (adds `wikiLinks` + `preferResolvedLabel`).
+
+---
+
+## Embed media picker (unreleased)
+
+The package now owns the reusable two-stage `/embed` authoring flow. The host still owns its target catalog, serialized embed grammar, and upload UI/API. This is a per-editor extension seam, not a `configurePlannotatorUI()` backend seam.
+
+1. **Single supported import.** `components/MarkdownEditor` re-exports `embedSlashItem()`, `embedPicker(config)`, `EmbedKind`, `EmbedTarget`, `EmbedPickerConfig`, `planEmbedInsert()`, and `EmbedInsertPlan`. Do not import the nested picker module, `@plannotator/atomic-editor`, or `@plannotator/core` directly from a host.
+
+2. **Compose both stages.** Add the static item to `slashCommands()` and register the picker beside it:
+
+   ```tsx
+   import {
+     MarkdownEditor,
+     embedPicker,
+     embedSlashItem,
+     slashCommands,
+   } from "@plannotator/ui/components/MarkdownEditor";
+
+   const editorExtensions = [
+     slashCommands({ items: [embedSlashItem()] }),
+     embedPicker({
+       getTargets: () => currentTargets,
+       buildInsertLine: (target) => buildHostEmbedLine(target),
+       uploadTarget: async (kind) => uploadHostTarget(kind),
+       getNotice: (docBody) => currentEmbedNotice(docBody),
+     }),
+   ];
+
+   <MarkdownEditor extensions={editorExtensions} {...editorProps} />;
+   ```
+
+   The static item rewrites `/query` to `/embed ` and reopens completion. The picker then performs case-insensitive substring matching over target titles and paths. It deliberately returns `filter: false` so multi-word titles remain in the session.
+
+3. **Captured once, callbacks stay live.** The `extensions` array is still captured once per `documentId`. Keep the extension reference stable and close `getTargets`, `buildInsertLine`, `uploadTarget`, and `getNotice` over live refs or route state. Do not rebuild the array merely because target data changed.
+
+4. **Grammar belongs to the host; splicing belongs to the package.** `buildInsertLine(target)` returns the exact line the host wants stored. `planEmbedInsert()` then normalizes that line into its own blank-line-delimited paragraph and places the caret on the following line. Host-specific path resolution, label escaping, and embed-fragment grammar stay outside the package.
+
+5. **Upload is optional and single-flight.** When `uploadTarget` is absent, no upload row is rendered. When present, every picker state includes `Upload HTML...`. While its promise is pending, the typed `/embed` text stays visible and a reopened picker shows an inert `Uploading...` row. Resolving with a target inserts it through `buildInsertLine` and the same splice as an existing target; resolving `null` or rejecting leaves the typed command untouched. The package maps the anchor through CodeMirror transactions and silently drops the insert if the command was edited away. The host owns all failure UI.
+
+6. **One CodeMirror dependency graph.** The picker imports `@codemirror/autocomplete`, `@codemirror/state`, and `@codemirror/view` from `@plannotator/ui`'s declared dependencies. `@plannotator/atomic-editor` declares these as peers, so a consumer must resolve one shared copy. A second live copy of `@codemirror/state` breaks extensions just as it does for `wikiLinks`.
+
+Behavior is pinned by `components/MarkdownEditor.embedPicker.test.ts`, the supported re-export by `components/MarkdownEditor.embedPicker.reexport.test.ts`, and the pure splice planner by `../core/embed-insert.test.ts`.
 
 ---
 

@@ -57,11 +57,14 @@ class PiProcess {
 				"rpc",
 			];
 		try {
+			// stderr is "ignore", not "pipe": we never read it, and an
+			// un-drained stderr pipe deadlocks the child once its buffer fills
+			// (same reasoning as codex-app-server.ts).
 			this.proc = Bun.spawn(command, {
 				cwd,
 				stdin: "pipe",
 				stdout: "pipe",
-				stderr: "pipe",
+				stderr: "ignore",
 			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
@@ -75,6 +78,22 @@ class PiProcess {
 		this.proc.exited.then(() => {
 			this.handleProcessEnd(new Error("Pi process exited unexpectedly"));
 		});
+	}
+
+	/**
+	 * A pipe to the child broke: resolve it as a provider failure and reap the
+	 * child, leaving `alive` false so the next query re-spawns.
+	 */
+	private failProcess(error: Error): void {
+		const proc = this.proc;
+		this.handleProcessEnd(error);
+		if (proc) {
+			try {
+				if (!killWindowsProcessTree(proc.pid)) proc.kill();
+			} catch {
+				// Already gone.
+			}
+		}
 	}
 
 	private handleProcessEnd(error: Error): void {
@@ -143,13 +162,42 @@ class PiProcess {
 		}
 	}
 
-	/** Send a command without waiting for a response. */
+	/**
+	 * Send a command without waiting for a response.
+	 *
+	 * The write is guarded for the same reason the Node variant's is (#1378):
+	 * the child can close the pipe between the liveness check and the write,
+	 * and a raw EPIPE escaping here would surface as a synchronous throw at
+	 * the caller (or an unhandled rejection out of flush()) instead of a
+	 * provider failure. Failing the process rejects anything in flight.
+	 */
 	send(command: Record<string, unknown>): void {
-		if (!this.proc?.stdin || typeof this.proc.stdin === "number") return;
+		const stdin = this.proc?.stdin;
+		if (!stdin || typeof stdin === "number") {
+			this.failProcess(new Error("Pi process stdin is closed"));
+			return;
+		}
 		// Bun.spawn stdin is a FileSink with .write(), not a WritableStream
-		const sink = this.proc.stdin as { write(data: string): void; flush(): void };
-		sink.write(`${JSON.stringify(command)}\n`);
-		sink.flush();
+		const sink = stdin as { write(data: string): void; flush(): unknown };
+		try {
+			sink.write(`${JSON.stringify(command)}\n`);
+			const flushed = sink.flush();
+			if (flushed && typeof (flushed as Promise<number>).then === "function") {
+				(flushed as Promise<number>).catch((err: unknown) => {
+					this.failProcess(
+						new Error(
+							`Pi process stdin write failed: ${err instanceof Error ? err.message : String(err)}`,
+						),
+					);
+				});
+			}
+		} catch (err) {
+			this.failProcess(
+				new Error(
+					`Pi process stdin write failed: ${err instanceof Error ? err.message : String(err)}`,
+				),
+			);
+		}
 	}
 
 	/** Send a command and wait for the correlated response. */

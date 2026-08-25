@@ -314,11 +314,22 @@ export function parseRemoteBookmark(target: string): { name: string; remote: str
   return { name: target.slice(0, at), remote: target.slice(at + 1) };
 }
 
+// A full `commit_id`: 40 hex digits for a SHA-1 repo, 64 for SHA-256. Matching
+// the full length only is deliberate, so an ordinary bookmark whose name
+// happens to be hex (`cafebabe`) is still treated as a bookmark.
+const JJ_FULL_COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
 export function jjCompareTargetRevset(target: string): string {
   const remoteBookmark = parseRemoteBookmark(target);
   if (remoteBookmark) {
     return `remote_bookmarks(exact:${quoteJjString(remoteBookmark.name)}, exact:${quoteJjString(remoteBookmark.remote)})`;
   }
+
+  // The resolved line base is a bare commit id whenever its fork point carries
+  // no usable bookmark. It has no separators, so it would otherwise read as a
+  // local bookmark name and build `bookmarks(exact:"<sha>")`, which resolves to
+  // no revisions at all and makes the whole Line of work diff fail.
+  if (JJ_FULL_COMMIT_ID.test(target)) return target;
 
   const localBookmark = parseJjBookmarkName(target);
   return localBookmark ? `bookmarks(exact:${quoteJjString(localBookmark)})` : target;

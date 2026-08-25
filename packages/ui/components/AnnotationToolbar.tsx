@@ -2,18 +2,12 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
-import { type QuickLabel, getQuickLabels } from "../utils/quickLabels";
+import { type QuickLabel, getQuickLabels, THUMBS_UP_LABEL } from "../utils/quickLabels";
 import { copyTextToClipboard } from "../utils/clipboard";
+import { acquireTypeToCommentCapture } from "../shortcuts/plan-review/annotationMode.shortcuts";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
-
-const THUMBS_UP_LABEL: QuickLabel = {
-  id: 'thumbs-up',
-  emoji: '👍',
-  text: 'Looks good',
-  color: 'green',
-};
 
 const isEditableElement = (node: EventTarget | Element | null): boolean => {
   if (!(node instanceof Element)) return false;
@@ -33,9 +27,11 @@ interface AnnotationToolbarProps {
   onQuickLabel?: (label: QuickLabel) => void;
   /** Text to copy when the button is clicked */
   copyText?: string;
-  /** Comment-only surfaces (HTML / live-app viewer): hide the Delete action.
-   *  Markdown surfaces keep the full toolbar. Quick labels are already gated
-   *  by the presence of onQuickLabel. */
+  /** Comment-only surfaces (HTML / live-app viewer): hide the Delete action,
+   *  the quick-label picker, and the Alt+digit label shortcuts. A provided
+   *  onQuickLabel then renders ONLY the hardcoded 👍 "Looks good" button —
+   *  the one label affordance restored to these surfaces. Markdown surfaces
+   *  keep the full toolbar. */
   commentOnly?: boolean;
   /** Hide the copy button (set when a keyboard copy handler exists) */
   hideCopyButton?: boolean;
@@ -131,14 +127,17 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         return;
       }
 
-      // Alt+N applies quick label (picker closed)
+      // Alt+N applies quick label (picker closed). Comment-only surfaces
+      // suppress this path: their only label affordance is the 👍 button.
       const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
       if (isDigit && !e.ctrlKey && !e.metaKey && e.altKey) {
         e.preventDefault();
-        const digit = parseInt(e.code.slice(5), 10);
-        const index = digit === 0 ? 9 : digit - 1;
-        if (index < quickLabels.length) {
-          onQuickLabel?.(quickLabels[index]);
+        if (!commentOnly) {
+          const digit = parseInt(e.code.slice(5), 10);
+          const index = digit === 0 ? 9 : digit - 1;
+          if (index < quickLabels.length) {
+            onQuickLabel?.(quickLabels[index]);
+          }
         }
         return;
       }
@@ -151,8 +150,15 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     };
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, onRequestComment, onQuickLabel, quickLabels, showQuickLabels]);
+    // While this listener owns printable keys, the Shift+1..4 annotation-mode
+    // shortcuts must not fire: Shift+3 is "#", and a user typing "#" into a
+    // starting comment must not silently arm Redline (#1244 follow-up).
+    const releaseCapture = acquireTypeToCommentCapture();
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      releaseCapture();
+    };
+  }, [onClose, onRequestComment, onQuickLabel, quickLabels, showQuickLabels, commentOnly]);
 
   useDismissOnOutsideAndEscape({
     enabled: !showQuickLabels,
@@ -230,20 +236,22 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
         />
         {onQuickLabel && (
           <>
-            <ToolbarButton
-              ref={zapButtonRef}
-              onClick={() => setShowQuickLabels(prev => !prev)}
-              icon={<ZapIcon />}
-              label="Quick label"
-              className={showQuickLabels ? "text-amber-500 bg-amber-500/10" : "text-amber-500 hover:bg-amber-500/10"}
-            />
+            {!commentOnly && (
+              <ToolbarButton
+                ref={zapButtonRef}
+                onClick={() => setShowQuickLabels(prev => !prev)}
+                icon={<ZapIcon />}
+                label="Quick label"
+                className={showQuickLabels ? "text-amber-500 bg-amber-500/10" : "text-amber-500 hover:bg-amber-500/10"}
+              />
+            )}
             <ToolbarButton
               onClick={() => onQuickLabel(THUMBS_UP_LABEL)}
               icon={<span className="block w-4 h-4 text-sm leading-4 text-center">👍</span>}
               label="Looks good"
               className="hover:bg-green-500/10"
             />
-            {showQuickLabels && zapButtonRef.current && (
+            {!commentOnly && showQuickLabels && zapButtonRef.current && (
               <FloatingQuickLabelPicker
                 anchorEl={zapButtonRef.current}
                 onSelect={(label) => {

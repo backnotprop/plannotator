@@ -17,6 +17,7 @@ import type { Annotation, EditorMode, ImageAttachment, InputMethod } from "../..
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
 import { getIdentity } from "../../utils/identity";
+import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
 import {
   createVimHudCommand,
   getVimHudPhase,
@@ -877,10 +878,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               positionMode="center-above"
               element={hook.toolbarState.element}
               copyText={hook.toolbarState.selectionText}
-              // HTML/live surfaces are comment-only: no Delete, no quick
-              // labels (onQuickLabel deliberately not passed). The markdown
-              // surface keeps the full toolbar.
+              // HTML/live surfaces are comment-only: no Delete, no label
+              // picker, no Alt+digit labels (commentOnly). Exactly ONE label
+              // affordance is restored: the hardcoded 👍 "Looks good". The
+              // wrapper filters by id as defense in depth, so no present or
+              // future toolbar path can emit an arbitrary label here.
               commentOnly
+              onQuickLabel={(label) => {
+                if (label.id === THUMBS_UP_LABEL.id) hook.handleQuickLabel(label);
+              }}
               onAnnotate={hook.handleAnnotate}
               onRequestComment={hook.handleRequestComment}
               onClose={hook.handleToolbarClose}
@@ -898,6 +904,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={false}
               draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
+              // Pinpoint clicks open this composer directly, so it carries
+              // the surface's one-click "Looks good" (the global composer
+              // does not: a document-wide thumbs-up is not a thing).
+              onQuickLookGood={hook.handleCommentLooksGood}
               onClose={hook.handleCommentClose}
               skillReferences
               onAskAI={onAskAI}

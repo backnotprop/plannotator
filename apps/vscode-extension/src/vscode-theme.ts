@@ -4,6 +4,24 @@
  * Maps VS Code CSS custom properties to Plannotator's CSS variable system.
  * Used by the cookie proxy to inject a theme listener into the webview iframe,
  * and by the panel manager to read+send theme tokens from the wrapper page.
+ *
+ * Precedence contract (issue #1053): the app owns its own appearance. The
+ * bridge writes INLINE custom properties on <html>, the same element
+ * ThemeProvider stamps `theme-<palette>` / `light` on, and an inline property
+ * outranks every `.theme-*` rule in the cascade. So the bridge only fills in
+ * for a user who has expressed no conflicting preference:
+ *
+ *   - a palette the user picked always wins; the bridge stays off entirely;
+ *   - the mode the app is rendering always wins, so VS Code colors are only
+ *     painted while the app is already showing the same light/dark side the
+ *     IDE is on. Choosing Light in a dark IDE now yields Plannotator's light
+ *     theme instead of dark VS Code tokens under a `.light` class;
+ *   - "System" is the one mode that defers: inside VS Code the surrounding
+ *     system is the IDE, so the bridge maps it onto the IDE's theme kind.
+ *
+ * Anything the bridge painted is removed again the moment that stops holding,
+ * which is why every decision runs through `reconcile()` rather than being
+ * applied once on arrival.
  */
 
 // Each VS Code CSS variable can map to multiple Plannotator variables
@@ -29,6 +47,22 @@ const TOKEN_PAIRS: [string, string][] = [
 
 /** VS Code variable names the wrapper page needs to read */
 export const VSCODE_VARS = [...new Set(TOKEN_PAIRS.map(([v]) => v))];
+
+/**
+ * Plannotator's default palette (`DEFAULT_COLOR_THEME` in
+ * packages/ui/utils/themeRegistry.ts) as the class ThemeProvider puts on
+ * <html>. Seeing it means the user never picked a palette, which is the only
+ * case VS Code colors may stand in for one. If the id ever drifts, the bridge
+ * simply stops syncing and the app renders its own theme: the safe direction
+ * for this comparison to fail.
+ */
+export const DEFAULT_THEME_CLASS = "theme-plannotator";
+
+/**
+ * Cookie ThemeProvider persists the mode under (its default `storageKey`).
+ * Read to recognize System, the one mode that asks to follow the environment.
+ */
+export const THEME_MODE_COOKIE = "plannotator-theme";
 
 /**
  * Returns inline JS for the wrapper page (panel-manager.ts).
@@ -61,13 +95,21 @@ export function buildWrapperThemeScript(): string {
 
 /**
  * Returns inline JS injected into the iframe HTML (via cookie proxy).
- * Listens for theme messages from the wrapper and applies CSS overrides.
+ * Listens for theme messages from the wrapper and applies CSS overrides,
+ * subject to the precedence contract documented at the top of this file.
  */
 export function buildThemeListenerScript(): string {
   const pairsJson = JSON.stringify(TOKEN_PAIRS);
+  const defaultThemeClass = JSON.stringify(DEFAULT_THEME_CLASS);
+  const modeCookie = JSON.stringify(THEME_MODE_COOKIE);
   return `<script>(function(){
   window.__PLANNOTATOR_VSCODE=true;
   var pairs=${pairsJson};
+  var DEFAULT_THEME_CLASS=${defaultThemeClass};
+  var MODE_COOKIE=${modeCookie};
+  var root=document.documentElement;
+  var latest=null;
+  var applied=false;
   function hexToComponents(h){
     h=h.replace("#","");
     if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
@@ -81,25 +123,65 @@ export function buildThemeListenerScript(): string {
     var b=Math.min(255,Math.max(0,c[2]+amount));
     return"rgb("+r+","+g+","+b+")";
   }
-  window.addEventListener("message",function(e){
-    if(!e.data||e.data.type!=="plannotator-vscode-theme")return;
-    var tokens=e.data.tokens;
-    var kind=e.data.themeKind;
-    var root=document.documentElement;
+  function ideIsLight(kind){return kind==="vscode-light"||kind==="vscode-high-contrast-light";}
+  function appIsLight(){return root.classList.contains("light");}
+  /* The palette ThemeProvider is currently rendering, "" before it mounts. */
+  function appPalette(){
+    var list=root.classList;
+    for(var i=0;i<list.length;i++){if(list[i].indexOf("theme-")===0)return list[i];}
+    return"";
+  }
+  /* Read lazily: the virtual cookie jar is installed by a later script. */
+  function appMode(){
+    var parts=String(document.cookie||"").split("; ");
+    for(var i=0;i<parts.length;i++){
+      var eq=parts[i].indexOf("=");
+      if(eq>0&&parts[i].slice(0,eq)===MODE_COOKIE)return decodeURIComponent(parts[i].slice(eq+1));
+    }
+    return"";
+  }
+  function clearOverrides(){
+    if(!applied)return;
+    for(var i=0;i<pairs.length;i++)root.style.removeProperty(pairs[i][1]);
+    root.style.removeProperty("--muted");
+    applied=false;
+  }
+  function applyOverrides(){
+    var tokens=latest.tokens||{};
     for(var i=0;i<pairs.length;i++){
       var val=tokens[pairs[i][0]];
       if(val)root.style.setProperty(pairs[i][1],val);
     }
     var bg=tokens["--vscode-editor-background"];
     if(bg){
-      var isDark=kind==="vscode-dark"||kind==="vscode-high-contrast";
-      var muted=adjustBrightness(bg,isDark?20:-20);
+      var muted=adjustBrightness(bg,ideIsLight(latest.themeKind)?-20:20);
       if(muted)root.style.setProperty("--muted",muted);
     }
-    root.classList.remove("light");
-    if(kind==="vscode-light"||kind==="vscode-high-contrast-light"){
-      root.classList.add("light");
+    applied=true;
+  }
+  function reconcile(){
+    if(!latest)return;
+    /* A palette the user picked is never stood in for. */
+    if(appPalette()!==DEFAULT_THEME_CLASS){clearOverrides();return;}
+    var wantLight=ideIsLight(latest.themeKind);
+    /* System means "follow the environment", and here that is the IDE. */
+    if(appMode()==="system"&&appIsLight()!==wantLight){
+      if(wantLight)root.classList.add("light");
+      else root.classList.remove("light");
     }
+    /* Never paint one mode's colors onto the other mode's surface. */
+    if(appIsLight()!==wantLight){clearOverrides();return;}
+    applyOverrides();
+  }
+  window.addEventListener("message",function(e){
+    if(!e.data||e.data.type!=="plannotator-vscode-theme")return;
+    latest=e.data;
+    reconcile();
   });
+  /* ThemeProvider rewrites these classes whenever the user changes theme. */
+  if(typeof MutationObserver!=="undefined"){
+    new MutationObserver(function(){reconcile();})
+      .observe(root,{attributes:true,attributeFilter:["class"]});
+  }
 })();</script>`;
 }

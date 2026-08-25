@@ -7,11 +7,24 @@
 
 import { join } from "path";
 import { getPlannotatorDataDir } from "./data-dir";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  openSync,
+  writeSync,
+  closeSync,
+  statSync,
+  unlinkSync,
+  renameSync,
+  realpathSync,
+} from "fs";
 import { execSync } from "child_process";
 
 import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
+import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -32,7 +45,8 @@ export type PromptRuntime =
   | "copilot-cli"
   | "pi"
   | "codex"
-  | "gemini-cli";
+  | "gemini-cli"
+  | "oh-my-pi";
 
 interface PromptSectionConfig {
   [key: string]: string | Partial<Record<PromptRuntime, PromptSectionOverrides>> | undefined;
@@ -106,6 +120,24 @@ export interface PlannotatorConfig {
   conventionalComments?: boolean;
   /** null = explicitly cleared (use defaults), undefined = not set */
   conventionalLabels?: CCLabelConfig[] | null;
+  /**
+   * Where the annotate-mode Agent TUI docks: "left" (the historic default),
+   * "right", or "hidden" to keep it out of the layout until the user opens it
+   * for a session. Written by the UI through POST /api/config, because every
+   * annotate session runs on its own random port — a cookie alone would make
+   * the choice per-session rather than per-user.
+   *
+   * Typed from @plannotator/core rather than restating the union, so this
+   * field and `isAgentTerminalSide` cannot disagree with the client-side
+   * placement logic about which sides exist.
+   */
+  agentTerminalSide?: AnnotateAgentTerminalSide;
+  /**
+   * Which agent the annotate-mode Agent TUI preselects (an agent id such as
+   * "claude"). Unset means the first available agent wins. Persisted here for
+   * the same random-port reason as agentTerminalSide.
+   */
+  agentTerminalDefaultAgent?: string;
   /**
    * Enable `gh attestation verify` during CLI installation/upgrade.
    * Read by scripts/install.sh|ps1|cmd on every run (not by any runtime code).
@@ -280,13 +312,182 @@ export function loadConfig(): PlannotatorConfig {
   }
 }
 
+// --- config.json write serialization ----------------------------------------
+//
+// saveConfig is a read-merge-write, and one data dir is routinely shared by
+// several Plannotator processes (an annotate session and a review session at
+// once is ordinary). Two of them settling a POST /api/config in the same
+// window both read the pre-change file, both merge onto it, and the second
+// write silently drops the first writer's key while both callers are told the
+// save succeeded. An advisory lockfile makes the read-merge-write a critical
+// section across processes.
+//
+// Advisory, bounded, and never fatal, in that order of priority:
+//  - O_EXCL create of `${configDir}/config.json.lock` is the only primitive
+//    required, so this stays node:fs-only and portable to every runtime that
+//    vendors this file (no flock, no native deps, no fcntl semantics).
+//  - A lock whose mtime is older than the stale window is assumed to belong
+//    to a process that died holding it and is taken over. Holding the lock
+//    spans one read plus one write, i.e. microseconds, so a lock this old is
+//    not a live writer.
+//  - Waiting is bounded by the wait budget. When the budget runs out the
+//    write proceeds unlocked with a warning: a lost update is a bad outcome,
+//    a server wedged forever on a lockfile is a worse one.
+//
+// Residual failure mode, stated plainly: two writers that both judge the same
+// lock stale in the same instant can both take it, and one update is lost
+// exactly as it was before. That needs a >1.5s stall inside a critical
+// section that costs microseconds, and the cost of closing it (owner tokens,
+// re-verification, a second lock) is not worth paying for a settings file.
+
+const CONFIG_LOCK_SUFFIX = ".lock";
+const DEFAULT_CONFIG_LOCK_WAIT_BUDGET_MS = 3000;
+const DEFAULT_CONFIG_LOCK_STALE_MS = 1500;
+const CONFIG_LOCK_POLL_MS = 10;
+
+let configLockWaitBudgetMs = DEFAULT_CONFIG_LOCK_WAIT_BUDGET_MS;
+let configLockStaleMs = DEFAULT_CONFIG_LOCK_STALE_MS;
+
+/**
+ * Test-only seam for the lock windows. The bounded-wait and stale-takeover
+ * paths are otherwise only reachable by waiting out multi-second real time
+ * inside a synchronous function, which no test should do. Pass null to
+ * restore the shipping values.
+ */
+export function __setConfigLockTimingsForTest(
+  timings: { waitBudgetMs?: number; staleMs?: number } | null,
+): void {
+  configLockWaitBudgetMs = timings?.waitBudgetMs ?? DEFAULT_CONFIG_LOCK_WAIT_BUDGET_MS;
+  configLockStaleMs = timings?.staleMs ?? DEFAULT_CONFIG_LOCK_STALE_MS;
+}
+
+/**
+ * Test-only seam: runs inside the lock, after the config has been read and
+ * before the merged result is written. It exists so a test can inspect the
+ * critical section itself (is the lock actually held across the merge?)
+ * rather than racing two writers and hoping the interleaving reproduces.
+ */
+let configSaveMergeWindowHook: (() => void) | null = null;
+export function __setConfigSaveMergeWindowHookForTest(hook: (() => void) | null): void {
+  configSaveMergeWindowHook = hook;
+}
+
+export function getConfigLockPath(): string {
+  return getConfigPath() + CONFIG_LOCK_SUFFIX;
+}
+
+/** Block the calling thread without a timer: saveConfig is synchronous, so an
+ * event-loop-based sleep would never run. Falls back to a spin when
+ * SharedArrayBuffer/Atomics.wait is unavailable on the host runtime. */
+function sleepSync(ms: number): void {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const until = Date.now() + ms;
+    while (Date.now() < until) { /* spin */ }
+  }
+}
+
+/**
+ * Take the advisory config lock, or return false when the wait budget ran out
+ * (the caller then writes unlocked rather than hanging).
+ */
+function acquireConfigLock(lockPath: string): boolean {
+  const deadline = Date.now() + configLockWaitBudgetMs;
+  for (;;) {
+    try {
+      // wx: create-exclusive. Whoever wins the create owns the section.
+      const handle = openSync(lockPath, "wx");
+      try {
+        writeSync(handle, `${process.pid} ${new Date().toISOString()}\n`);
+      } catch { /* the lock is the file's existence, not its contents */ }
+      closeSync(handle);
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code !== "EEXIST") {
+        // Unwritable directory, read-only fs: locking is not available here,
+        // so do not let it block the write it was only meant to serialize.
+        return false;
+      }
+    }
+
+    // Held by someone else. Take it over once it is too old to be live.
+    try {
+      const age = Date.now() - statSync(lockPath).mtimeMs;
+      if (age > configLockStaleMs) {
+        unlinkSync(lockPath);
+        continue;
+      }
+    } catch { /* vanished between the create and the stat: just retry */ }
+
+    if (Date.now() >= deadline) return false;
+    sleepSync(CONFIG_LOCK_POLL_MS);
+  }
+}
+
+function releaseConfigLock(lockPath: string): void {
+  try {
+    unlinkSync(lockPath);
+  } catch { /* already gone (stale takeover by another writer): nothing to do */ }
+}
+
+/**
+ * Write config.json in one step so a concurrent reader never observes a
+ * half-written file: readers deliberately take no lock, and loadConfig treats
+ * malformed JSON as an empty config, which would silently present as "all
+ * settings reset". Writes through an existing symlink rather than replacing
+ * it, so a dotfile-managed config.json keeps its link.
+ */
+function writeConfigAtomic(configPath: string, contents: string): void {
+  let targetPath = configPath;
+  try {
+    if (existsSync(configPath)) targetPath = realpathSync(configPath);
+  } catch { /* unreadable link: fall back to the literal path */ }
+  // Rename replaces the destination's metadata with the temp file's, so carry
+  // the existing file's permissions across instead of re-deciding them.
+  let mode = 0o600;
+  try {
+    if (existsSync(targetPath)) mode = statSync(targetPath).mode & 0o777;
+  } catch { /* new file: keep the private default */ }
+  const tempPath = `${targetPath}.${process.pid}.${Math.random().toString(36).slice(2, 10)}.tmp`;
+  try {
+    writeFileSync(tempPath, contents, { encoding: "utf-8", mode });
+    renameSync(tempPath, targetPath);
+  } catch {
+    try {
+      unlinkSync(tempPath);
+    } catch { /* nothing to clean up */ }
+    // Same-directory rename should not fail, but a write that lands is better
+    // than a settings change that is lost to an exotic filesystem.
+    writeFileSync(targetPath, contents, "utf-8");
+  }
+}
+
 /**
  * Save config by merging partial values into the existing file.
  * Creates ~/.plannotator/ directory if needed.
+ *
+ * The read-merge-write runs under an advisory lockfile so concurrent writers
+ * (in this process or another one sharing the data dir) cannot drop each
+ * other's keys. See the lock notes above for the failure mode: it degrades to
+ * the old unlocked behavior with a warning, never to a hang.
  */
 export function saveConfig(partial: Partial<PlannotatorConfig>): void {
+  let lockPath: string | null = null;
+  let locked = false;
   try {
+    mkdirSync(getConfigDir(), { recursive: true });
+    lockPath = getConfigLockPath();
+    locked = acquireConfigLock(lockPath);
+    if (!locked) {
+      process.stderr.write(
+        `[plannotator] Warning: config.json lock unavailable after ${configLockWaitBudgetMs}ms; `
+        + `saving without it (a concurrent save may be overwritten).\n`,
+      );
+    }
+
     const current = loadConfig();
+    configSaveMergeWindowHook?.();
     const mergedDiffOptions = (current.diffOptions || partial.diffOptions)
       ? { ...current.diffOptions, ...partial.diffOptions }
       : undefined;
@@ -305,10 +506,11 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
       reviewAnalysis: mergedReviewAnalysis,
       prompts: mergedPrompts,
     };
-    mkdirSync(getConfigDir(), { recursive: true });
-    writeFileSync(getConfigPath(), JSON.stringify(merged, null, 2) + "\n", "utf-8");
+    writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);
+  } finally {
+    if (locked && lockPath) releaseConfigLock(lockPath);
   }
 }
 
@@ -338,6 +540,8 @@ export function getServerConfig(gitUser: string | null): {
   gitUser?: string;
   conventionalComments?: boolean;
   conventionalLabels?: CCLabelConfig[] | null;
+  agentTerminalSide?: PlannotatorConfig["agentTerminalSide"];
+  agentTerminalDefaultAgent?: string;
 } {
   const cfg = loadConfig();
   return {
@@ -355,7 +559,31 @@ export function getServerConfig(gitUser: string | null): {
     gitUser: gitUser ?? undefined,
     ...(cfg.conventionalComments !== undefined && { conventionalComments: cfg.conventionalComments }),
     ...(cfg.conventionalLabels !== undefined && { conventionalLabels: cfg.conventionalLabels }),
+    ...(isAgentTerminalSide(cfg.agentTerminalSide) && { agentTerminalSide: cfg.agentTerminalSide }),
+    ...(typeof cfg.agentTerminalDefaultAgent === "string" &&
+      cfg.agentTerminalDefaultAgent !== "" && {
+        agentTerminalDefaultAgent: cfg.agentTerminalDefaultAgent,
+      }),
   };
+}
+
+/**
+ * Guard for the annotate Agent TUI placement. config.json is hand-editable, so
+ * a bogus value must simply not be advertised — the client then keeps its own
+ * resolved default instead of adopting a side that does not exist.
+ *
+ * The set of sides has exactly one definition, `AnnotateAgentTerminalSide` in
+ * @plannotator/core: `PlannotatorConfig.agentTerminalSide` IS that type and
+ * this predicate delegates to that module's guard, so neither the union nor
+ * its membership test can drift on one side of the boundary. Direct import
+ * rather than a duplicated literal check: the Pi vendor step rewrites the
+ * relative specifier to the flat `./agent-terminal.ts` it already vendors
+ * from core, so both runtimes end up on the same implementation.
+ */
+export function isAgentTerminalSide(
+  value: unknown,
+): value is NonNullable<PlannotatorConfig["agentTerminalSide"]> {
+  return isAnnotateAgentTerminalSide(value);
 }
 
 /**

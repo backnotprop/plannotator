@@ -53,6 +53,14 @@ interface CommentPopoverProps {
   initialText?: string;
   /** Called on submit with comment text and optional images */
   onSubmit: (text: string, images?: ImageAttachment[]) => void;
+  /**
+   * One-click "Looks good" action (comment-only HTML/live surfaces, where
+   * pinpoint clicks open this composer directly and never see the selection
+   * toolbar's 👍). Renders a thumbs-up button in the footer; disabled once
+   * the user has typed or attached anything, so a click can never discard a
+   * draft. The parent owns annotation creation and closing.
+   */
+  onQuickLookGood?: () => void;
   /** Optional live draft observer for submit paths outside the popover. */
   onDraftChange?: (text: string, images?: ImageAttachment[]) => void;
   /** Called when popover is closed/cancelled */
@@ -148,6 +156,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   isGlobal,
   initialText = '',
   onSubmit,
+  onQuickLookGood,
   onDraftChange,
   onClose,
   draftKey,
@@ -521,6 +530,21 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     (allowEmptySubmit && initialText.trim().length > 0);
   const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
 
+  // Shared by both footers. Disabled once anything is typed or attached so a
+  // click can never discard a draft; with content present, Save is the path.
+  const quickLookGoodButton = onQuickLookGood ? (
+    <button
+      type="button"
+      onClick={onQuickLookGood}
+      disabled={hasUnsavedContent}
+      className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-green-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title={hasUnsavedContent ? 'Clear the comment to use Looks good' : 'Add "Looks good" without typing'}
+    >
+      <span aria-hidden="true">👍</span>
+      Looks good
+    </button>
+  ) : null;
+
   if (mode === 'dialog') {
     return createPortal(
       <div
@@ -632,6 +656,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               {!coarsePointer && (
                 <span className="text-[10px] text-muted-foreground">{submitHint}</span>
               )}
+              {quickLookGoodButton}
               {onAskAI && (
                 <button
                   onClick={handleAskAI}
@@ -781,6 +806,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {!coarsePointer && (
             <span className="text-[10px] text-muted-foreground">{submitHint}</span>
           )}
+          {quickLookGoodButton}
           {onAskAI && (
             <button
               onClick={handleAskAI}

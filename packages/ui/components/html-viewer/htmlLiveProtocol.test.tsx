@@ -506,6 +506,60 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
     bridgeWindow.getSelection()!.removeAllRanges();
   });
 
+  test('ARMED: a drifted click (>4px travel, no selection) still pinpoint-pins and never reaches the page', async () => {
+    // Trackpad reality: mousedown → a few pixels of travel → mouseup with
+    // nothing selected. The >4px drift alone must not arm the trailing-click
+    // suppression — that regression both swallowed the pin AND let the
+    // unprevented click through to the page.
+    const btn = probeButton();
+    bridgeWindow.getSelection()!.removeAllRanges();
+    let pageClicks = 0;
+    const pageListener = () => { pageClicks += 1; };
+    btn.addEventListener('click', pageListener);
+    try {
+      const before = selectionPosts().length;
+      btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, clientX: 5, clientY: 5 }));
+      btn.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, buttons: 1, clientX: 15, clientY: 12 }));
+      btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, clientX: 15, clientY: 12 }));
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 15, clientY: 12 });
+      btn.dispatchEvent(click);
+      // The click pinned the element under the pointer...
+      expect(click.defaultPrevented).toBe(true);
+      expect(selectionPosts().length).toBe(before + 1);
+      expect(selectionPosts().at(-1)!.data.pinpoint).toBe(true);
+      // ...and the page's own handler never saw it (capture-phase stop).
+      expect(pageClicks).toBe(0);
+      // No trailing drag-selection pass runs to clear the draft just opened.
+      const clearsBefore = primaryPosts('selection-clear').length;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(primaryPosts('selection-clear').length).toBe(clearsBefore);
+    } finally {
+      btn.removeEventListener('click', pageListener);
+    }
+    postToBridge({ type: 'plannotator-bridge-cancel-selection', token: bridgeToken });
+    bridgeWindow.getSelection()!.removeAllRanges();
+  });
+
+  test('Esc with only a hover outline: hover clears AND annotate-exit posts on the SAME press', () => {
+    // Armed from the previous test, no pending draft. Hover an element so the
+    // pinpoint outline is showing:
+    const btn = probeButton();
+    btn.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 }));
+    const box = bridgeDocument.querySelector<HTMLElement>('[data-plannotator-pinpoint-box]');
+    if (!box) throw new Error('pinpoint hover box missing');
+    expect(box.style.display).toBe('block');
+    const exitsBefore = primaryPosts('annotate-exit').length;
+    const clearsBefore = primaryPosts('selection-clear').length;
+    pressEscape();
+    // One press: the outline is gone AND the exit request went out. Clearing
+    // the outline is not a rung the user perceives — only a draft earns one.
+    expect(box.style.display).toBe('none');
+    expect(primaryPosts('annotate-exit').length).toBe(exitsBefore + 1);
+    expect(primaryPosts('selection-clear').length).toBe(clearsBefore);
+    // The bridge stays armed until the parent answers set-annotate-mode.
+    expect(bridgeDocument.body.hasAttribute('data-plannotator-pinpoint-cursor')).toBe(true);
+  });
+
   test('Esc ladder: a pending draft clears first, then Esc asks to exit Annotate; the parent flips the mode', () => {
     // Armed from the previous test. A fresh pending pinpoint draft:
     const probe = clickProbe(probeButton());
@@ -553,6 +607,30 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
     const native = clickProbe(probeButton());
     expect(native.prevented).toBe(false);
     expect(native.selections).toBe(0);
+  });
+
+  test('INTERACT: a drifted click reaches the page untouched', async () => {
+    // Same trackpad drift as the armed test above, but in Interact the click
+    // belongs to the page: nothing is prevented, nothing posts.
+    const btn = probeButton();
+    bridgeWindow.getSelection()!.removeAllRanges();
+    let pageClicks = 0;
+    const pageListener = () => { pageClicks += 1; };
+    btn.addEventListener('click', pageListener);
+    try {
+      const before = selectionPosts().length;
+      btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, clientX: 5, clientY: 5 }));
+      btn.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, buttons: 1, clientX: 15, clientY: 12 }));
+      btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, clientX: 15, clientY: 12 }));
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 15, clientY: 12 });
+      btn.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(false);
+      expect(pageClicks).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(selectionPosts().length).toBe(before);
+    } finally {
+      btn.removeEventListener('click', pageListener);
+    }
   });
 
   test('Mod+Shift+A inside the iframe forwards a toggle request to the parent in both modes', () => {

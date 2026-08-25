@@ -43,6 +43,15 @@ const CORE_SKILLS = [
   "plannotator-last",
 ] as const;
 
+// The knowledge-layer CLI reference skill (apps/skills/core/plannotator).
+// Installed to the same two scopes as CORE_SKILLS, but kept out of that list:
+// it never had a legacy slash command or a Codex-home era, so it must not
+// join LEGACY_COMMAND_NAMES (a user's own ~/.claude/commands/plannotator.md
+// would be collateral) or STALE_CODEX_SKILLS.
+const KNOWLEDGE_SKILLS = [
+  "plannotator",
+] as const;
+
 const EXTRA_SKILLS = [
   "plannotator-compound",
   "plannotator-setup-goal",
@@ -57,6 +66,10 @@ const LEGACY_COMMAND_NAMES = [
 const KIRO_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
+  // The knowledge skill installs into ~/.kiro/skills like the action skills.
+  // Safe to name here: this list only ever removes ~/.kiro/skills/<name>
+  // directories, never a command file a user may own.
+  "plannotator",
   "plannotator-setup-goal",
   "plannotator-visual-explainer",
   "plannotator-archive",
@@ -601,7 +614,7 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
-  for (const skill of CORE_SKILLS) {
+  for (const skill of [...CORE_SKILLS, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),
       request,
@@ -625,7 +638,7 @@ function removeInstalledFiles(
 
   cleanupStaleSkillLayout(
     join(paths.claudeDir, "skills", "core"),
-    CORE_SKILLS,
+    [...CORE_SKILLS, ...KNOWLEDGE_SKILLS],
     request,
     state,
   );
@@ -657,6 +670,21 @@ function removeInstalledFiles(
     for (const configDir of paths.configDirs) {
       removePath(
         join(configDir, "opencode", "commands", `${command}.md`),
+        request,
+        state,
+      );
+    }
+  }
+
+  // @plannotator/opencode's postinstall writes the knowledge skill here so
+  // OpenCode's `{skill,skills}/**/SKILL.md` scan under its config dir finds it.
+  // Skills only — the sibling commands/ sweep above is driven by
+  // LEGACY_COMMAND_NAMES precisely so a user's own commands/plannotator.md
+  // stays out of scope.
+  for (const skill of KNOWLEDGE_SKILLS) {
+    for (const configDir of paths.configDirs) {
+      removePath(
+        join(configDir, "opencode", "skills", skill),
         request,
         state,
       );

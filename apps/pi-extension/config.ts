@@ -22,7 +22,7 @@ export interface PhaseModelRef {
  */
 export interface PhaseProfile {
   model?: PhaseModelRef | null;
-  thinking?: ThinkingLevel | null;
+  thinking?: ConfiguredThinkingLevel | null;
   activeTools?: string[] | null;
   statusLabel?: string | null;
   /**
@@ -51,7 +51,7 @@ export interface LoadPlannotatorConfigOptions {
 
 export interface ResolvedPhaseProfile {
   model?: PhaseModelRef;
-  thinking?: ThinkingLevel;
+  thinking?: ConfiguredThinkingLevel;
   activeTools?: string[];
   statusLabel?: string;
   instructions?: string;
@@ -73,7 +73,27 @@ export interface PromptRenderResult {
 
 const INTERNAL_CONFIG_PATH = join(dirname(fileURLToPath(import.meta.url)), "plannotator.json");
 const PHASES: PhaseName[] = ["planning", "executing", "reviewing"];
-const THINKING_LEVELS = new Set<string>(["minimal", "low", "medium", "high", "xhigh"]);
+/**
+ * Thinking levels accepted in plannotator.json, in Pi's own order.
+ *
+ * This list is deliberately a SUPERSET of the `ThinkingLevel` union of the
+ * pinned `@earendil-works/pi-agent-core` floor (>=0.79.1, which stops at
+ * "xhigh"): Pi added "max" in 0.84 and clamps a level the running model does
+ * not support (`clampThinkingLevel`), so accepting a newer level costs nothing
+ * on an older Pi while silently rejecting it breaks the config on a newer one
+ * (#1304). The compile-time guard below runs the check in the other direction —
+ * every level the pinned Pi type knows must be accepted here — so the next
+ * level Pi adds fails the typecheck instead of being silently dropped.
+ */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+export type ConfiguredThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
+
+type AcceptedThinkingLevel<T extends ConfiguredThinkingLevel> = T;
+/** Compile-time assertion: adding a level to Pi's `ThinkingLevel` fails here until it is listed above. */
+export type AllPiThinkingLevelsAccepted = AcceptedThinkingLevel<ThinkingLevel>;
 
 function getAgentConfigDir(): string {
   const envDir = process.env.PI_CODING_AGENT_DIR;
@@ -105,13 +125,31 @@ function normalizeModel(value: unknown): PhaseModelRef | null | undefined {
   return { provider, id };
 }
 
-function normalizeThinking(value: unknown): ThinkingLevel | null | undefined {
-  if (value === null) return null;
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
+/**
+ * Where a profile came from, so a rejected value can name itself instead of
+ * disappearing. `scope` is the JSON path of the profile ("defaults",
+ * "phases.planning"); `path` is the config file it was read from.
+ */
+interface ProfileContext {
+  path: string;
+  scope: string;
+  warnings: string[];
+}
 
-  return THINKING_LEVELS.has(trimmed as ThinkingLevel) ? (trimmed as ThinkingLevel) : undefined;
+function normalizeThinking(value: unknown, key: string, ctx: ProfileContext): ConfiguredThinkingLevel | null | undefined {
+  if (value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (THINKING_LEVEL_SET.has(trimmed)) return trimmed as ConfiguredThinkingLevel;
+  }
+
+  // An unrecognized level falls through to the inherited one, which looks
+  // exactly like the configured level having been applied (#1304). Say so.
+  ctx.warnings.push(
+    `Ignoring unknown ${key} ${JSON.stringify(value)} at ${ctx.scope} in ${ctx.path}: expected one of ${THINKING_LEVELS.map((level) => `"${level}"`).join(", ")}. Keeping the inherited thinking level.`,
+  );
+  return undefined;
 }
 
 function normalizeTools(value: unknown): string[] | null | undefined {
@@ -136,15 +174,17 @@ function normalizePrompt(value: unknown): string | null | undefined {
   return value.length > 0 ? value : null;
 }
 
-function normalizeProfile(raw: unknown): PhaseProfile | null | undefined {
+function normalizeProfile(raw: unknown, ctx: ProfileContext): PhaseProfile | null | undefined {
   if (raw === null) return null;
   if (!isRecord(raw)) return undefined;
 
   const profile: PhaseProfile = {};
 
   if ("model" in raw) profile.model = normalizeModel(raw.model);
-  if ("thinking" in raw) profile.thinking = normalizeThinking(raw.thinking);
-  if ("thinkingLevel" in raw && profile.thinking === undefined) profile.thinking = normalizeThinking(raw.thinkingLevel);
+  if ("thinking" in raw) profile.thinking = normalizeThinking(raw.thinking, "thinking", ctx);
+  if ("thinkingLevel" in raw && profile.thinking === undefined) {
+    profile.thinking = normalizeThinking(raw.thinkingLevel, "thinkingLevel", ctx);
+  }
   if ("activeTools" in raw) profile.activeTools = normalizeTools(raw.activeTools);
   if ("statusLabel" in raw) profile.statusLabel = normalizeLabel(raw.statusLabel);
   if ("instructions" in raw) profile.instructions = normalizePrompt(raw.instructions);
@@ -207,12 +247,12 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
       `Ignoring unknown executionMode ${JSON.stringify(raw.executionMode)} in ${path}: expected "automatic" or "external". Falling back to automatic.`,
     );
   }
-  if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults);
+  if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults, { path, scope: "defaults", warnings });
 
   if ("phases" in raw && isRecord(raw.phases)) {
     const phases: Partial<Record<PhaseName, PhaseProfile | null>> = {};
     for (const phase of PHASES) {
-      const normalized = normalizeProfile(raw.phases[phase]);
+      const normalized = normalizeProfile(raw.phases[phase], { path, scope: `phases.${phase}`, warnings });
       if (normalized !== undefined) phases[phase] = normalized;
     }
     if (Object.keys(phases).length > 0) config.phases = phases;
@@ -294,7 +334,10 @@ function resolveModel(base: PhaseModelRef | null | undefined, override: PhaseMod
   return base ?? undefined;
 }
 
-function resolveThinking(base: ThinkingLevel | null | undefined, override: ThinkingLevel | null | undefined): ThinkingLevel | undefined {
+function resolveThinking(
+  base: ConfiguredThinkingLevel | null | undefined,
+  override: ConfiguredThinkingLevel | null | undefined,
+): ConfiguredThinkingLevel | undefined {
   if (override !== undefined) {
     return override ?? undefined;
   }

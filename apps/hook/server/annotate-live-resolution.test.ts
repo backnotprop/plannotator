@@ -188,6 +188,37 @@ describe("annotate URL resolution: live app probe", () => {
     }
   });
 
+  test("a failed probe announces the static downgrade on the log line, naming --app", async () => {
+    // The cold-dev-server case: the probe fails (server not up yet) and the
+    // session silently opened as a static conversion. The downgrade must be
+    // said out loud, with --app as the way to force live mode.
+    const lines: string[] = [];
+    await resolveAnnotateTarget({
+      rawFilePath: unreachableUrl,
+      projectRoot: process.cwd(),
+      noJina: true,
+      renderMarkdown: false,
+      log: (line) => lines.push(line),
+    });
+    const notice = lines.find((line) => line.includes("static conversion"));
+    expect(notice).toBeDefined();
+    expect(notice).toContain(unreachableUrl);
+    expect(notice).toContain("--app");
+  });
+
+  test("a live-eligible probe emits no downgrade notice", async () => {
+    const lines: string[] = [];
+    const result = await resolveAnnotateTarget({
+      rawFilePath: htmlUrl,
+      projectRoot: process.cwd(),
+      noJina: true,
+      renderMarkdown: false,
+      log: (line) => lines.push(line),
+    });
+    expect(result.ok).toBe(true);
+    expect(lines.some((line) => line.includes("static conversion"))).toBe(false);
+  });
+
   test("a 127.-prefixed DNS name is not loopback: --app rejects it before any probe", async () => {
     const result = await resolve("http://127.0.0.1.evil.example:5173/", { forceApp: true });
     expect(result.ok).toBe(false);

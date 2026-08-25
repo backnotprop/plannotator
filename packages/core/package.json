@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "type": "module",
   "exports": {
     "./agents": "./agents.ts",
@@ -15,6 +15,7 @@
     "./code-file": "./code-file.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
+    "./embed-insert": "./embed-insert.ts",
     "./external-annotation": "./external-annotation.ts",
     "./extract-code-paths": "./extract-code-paths.ts",
     "./favicon": "./favicon.ts",

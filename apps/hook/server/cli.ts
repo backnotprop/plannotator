@@ -169,7 +169,10 @@ export function formatTopLevelHelp(): string {
 // These exist so an agent (or human) probing `plannotator <sub> --help` gets
 // usage on stdout instead of accidentally launching the browser UI — running
 // `review --help` used to fall through to local review mode and open a tab.
-const SUBCOMMAND_HELP: Record<string, string> = {
+// Exported so the plannotator knowledge skill's freshness test
+// (plannotator-skill-reference.test.ts) can diff the documented surface
+// against the real one.
+export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
     "  plannotator review [--git | --gitbutler] [--local | --no-local] [--tailscale] [PR_URL]",
@@ -290,7 +293,8 @@ const SUBCOMMAND_HELP: Record<string, string> = {
 };
 
 // Aliases share another subcommand's help text.
-const SUBCOMMAND_HELP_ALIASES: Record<string, string> = {
+// Exported for the same freshness test as SUBCOMMAND_HELP.
+export const SUBCOMMAND_HELP_ALIASES: Record<string, string> = {
   last: "annotate-last",
 };
 
