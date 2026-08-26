@@ -11,6 +11,7 @@ interface FileTreeNodeProps {
   activeFileIndex: number;
   onSelectFile: (index: number) => void;
   onDoubleClickFile?: (index: number) => void;
+  onOpenFile?: (filePath: string) => void;
   viewedFiles: Set<string>;
   onToggleViewed?: (filePath: string) => void;
   showViewedControls?: boolean;
@@ -55,6 +56,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   activeFileIndex,
   onSelectFile,
   onDoubleClickFile,
+  onOpenFile,
   viewedFiles,
   onToggleViewed,
   showViewedControls = true,
@@ -114,6 +116,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             activeFileIndex={activeFileIndex}
             onSelectFile={onSelectFile}
             onDoubleClickFile={onDoubleClickFile}
+            onOpenFile={onOpenFile}
             viewedFiles={viewedFiles}
             onToggleViewed={onToggleViewed}
             showViewedControls={showViewedControls}
@@ -191,11 +194,38 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
             <span className="truncate">{node.name}</span>
             <AnnotationBadge count={annotationCount} />
           </div>
+          {onOpenFile && (
+            <span
+              role="button"
+              tabIndex={-1}
+              data-testid={`open-full-file:${node.path}`}
+              title="Open whole file"
+              aria-label={`Open whole file ${node.path}`}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 flex-shrink-0 px-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={(e) => {
+                // The row button owns the click; this affordance opens the
+                // whole file instead of the diff.
+                e.stopPropagation();
+                e.preventDefault();
+                onOpenFile(node.path);
+              }}
+            >
+              ⤢
+            </span>
+          )}
           <DiffCounts additions={node.file!.additions} deletions={node.file!.deletions} />
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="z-50">
           <ContextMenu.Popup className="min-w-[160px] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
+          {onOpenFile && (
+            <ContextMenu.Item
+              onClick={() => onOpenFile(node.path)}
+              className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
+            >
+              Open whole file
+            </ContextMenu.Item>
+          )}
           <ContextMenu.Item
             onClick={() => { void copyTextToClipboard(node.path); }}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"

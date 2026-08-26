@@ -162,6 +162,10 @@ import {
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
 import {
+	REPO_FILE_ERROR_STATUS,
+	readRepoFile,
+} from "../generated/repo-file.ts";
+import {
 	createDefaultSemanticDiffRuntime,
 	getSemanticDiffAvailability,
 	getSemanticDiffScratchCwd,
@@ -778,6 +782,28 @@ export async function startReviewServer(options: {
 			if (r.kind === "pending") return null; // warming up — don't fall back
 		}
 		return options.agentCwd && existsSync(options.agentCwd) ? options.agentCwd : null;
+	}
+	/**
+	 * Local working-tree root for /api/code-nav/file and /api/review-file.
+	 * Mirrors resolveLocalFileRoot in packages/server/review.ts. Synchronous
+	 * here because this server's cwd resolution is synchronous (resolveAgentCwd),
+	 * matching how the Pi code-nav routes already behaved.
+	 */
+	function resolveLocalFileRoot(
+		surface: "Code navigation" | "File viewing",
+	): { ok: true; root: string } | { ok: false; error: string; status: number } {
+		if (isGitButlerCommittedView()) {
+			return {
+				ok: false,
+				status: 400,
+				error: `${surface} is unavailable for committed GitButler views`,
+			};
+		}
+		const hasAccess = !!workspace || !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
+		if (!hasAccess) {
+			return { ok: false, status: 400, error: `${surface} requires local access` };
+		}
+		return { ok: true, root: resolveAgentCwd() };
 	}
 	async function ensurePRCallFlowCwd(): Promise<string | null> {
 		if (options.worktreePool && prMeta) {
@@ -2975,31 +3001,41 @@ export async function startReviewServer(options: {
 				json(res, { error: err instanceof Error ? err.message : "Code navigation failed" }, 500);
 			}
 		} else if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
-			if (isGitButlerCommittedView()) {
-				json(res, { error: "Code navigation is unavailable for committed GitButler views" }, 400);
+			// Hardened to go through readRepoFile — see the Bun mirror in
+			// packages/server/review.ts. This route previously had no size cap.
+			const rootResult = resolveLocalFileRoot("Code navigation");
+			if (!rootResult.ok) {
+				json(res, { error: rootResult.error }, rootResult.status);
 				return;
 			}
-			const hasCodeNavAccess = !!workspace || !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
-			if (!hasCodeNavAccess) {
-				json(res, { error: "Code navigation requires local access" }, 400);
+			const result = readRepoFile(rootResult.root, url.searchParams.get("path"));
+			if (!result.ok) {
+				json(res, { error: result.message }, REPO_FILE_ERROR_STATUS[result.reason]);
 				return;
 			}
-			const filePath = url.searchParams.get("path");
-			if (!filePath) {
-				json(res, { error: "Missing path" }, 400);
+			json(res, { content: result.content });
+		} else if (url.pathname === "/api/review-file" && req.method === "GET") {
+			// Full file content for the full-file review viewer. Serves the live
+			// working tree with no snapshot guard, by design — see the Bun mirror.
+			const rootResult = resolveLocalFileRoot("File viewing");
+			if (!rootResult.ok) {
+				json(res, { error: rootResult.error }, rootResult.status);
 				return;
 			}
-			try { validateFilePath(filePath); } catch {
-				json(res, { error: "Invalid path" }, 400);
+			const result = readRepoFile(rootResult.root, url.searchParams.get("path"));
+			if (!result.ok) {
+				json(
+					res,
+					{ error: result.message, reason: result.reason, size: result.size },
+					REPO_FILE_ERROR_STATUS[result.reason],
+				);
 				return;
 			}
-			try {
-				const navCwd = resolveAgentCwd();
-				const content = readFileSync(`${navCwd}/${filePath}`, "utf-8");
-				json(res, { content });
-			} catch {
-				json(res, { error: "File not found" }, 404);
-			}
+			json(res, {
+				filePath: result.filePath,
+				content: result.content,
+				size: result.size,
+			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
 				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; reviewAnalysis?: Record<string, unknown>; conventionalComments?: boolean };

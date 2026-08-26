@@ -77,3 +77,51 @@ export function isLineRangeInPatch(
   }
   return false;
 }
+
+/**
+ * Slice a 1-based, inclusive line range out of whole file contents.
+ *
+ * The patch-free counterpart of `extractLinesFromPatch`, for surfaces that
+ * hold the file rather than a diff of it (the full-file viewer) and for lines
+ * that exist in the file but not in any hunk (expanded diff context).
+ */
+export function extractLinesFromContent(
+  content: string,
+  lineStart: number,
+  lineEnd: number,
+): string {
+  if (!content) return '';
+  if (!Number.isInteger(lineStart) || !Number.isInteger(lineEnd)) return '';
+  if (lineStart < 1 || lineEnd < lineStart) return '';
+  return content
+    .split('\n')
+    .slice(lineStart - 1, lineEnd)
+    .join('\n');
+}
+
+/**
+ * The snippet an annotation should carry, preferring the patch and falling
+ * back to file contents.
+ *
+ * Why the fallback exists: `extractLinesFromPatch` only walks hunk lines, so
+ * annotating expanded context (or any line of a full-file view) produced an
+ * EMPTY `originalCode`. The annotation then reached the agent as a bare line
+ * number with no code attached, which is exactly the case where the agent
+ * most needs the code — the lines are not in the diff it was given.
+ *
+ * Only the new side falls back: `fileContent` is the working tree, so using
+ * it for an old-side range would quote the wrong text. An old-side range with
+ * no hunk coverage correctly yields nothing.
+ */
+export function resolveAnnotationSnippet(
+  patch: string,
+  fileContent: string | undefined,
+  lineStart: number,
+  lineEnd: number,
+  side: 'old' | 'new',
+): string {
+  const fromPatch = patch ? extractLinesFromPatch(patch, lineStart, lineEnd, side) : '';
+  if (fromPatch) return fromPatch;
+  if (side !== 'new' || !fileContent) return fromPatch;
+  return extractLinesFromContent(fileContent, lineStart, lineEnd);
+}

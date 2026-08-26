@@ -250,8 +250,27 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
       className="h-full flex flex-col border-t border-border/50"
     >
       <div className="flex-1 min-h-0 flex">
-        <div className="flex-1 min-w-0 overflow-auto border-r border-border/30">
-          <CodePreview preview={preview.previewData} isLoading={preview.isLoading} />
+        <div className="flex-1 min-w-0 flex flex-col border-r border-border/30">
+          {selectedLocation && state.onOpenFullFile && (
+            <div className="flex items-center gap-2 px-2 py-1 border-b border-border/30 text-[11px] text-muted-foreground flex-shrink-0">
+              <span className="font-mono truncate">
+                {selectedLocation.filePath}:{selectedLocation.line}
+              </span>
+              <button
+                type="button"
+                data-testid="code-nav-open-file"
+                className="ml-auto flex-shrink-0 px-1.5 py-0.5 rounded border border-border/50 hover:bg-muted hover:text-foreground"
+                onClick={() =>
+                  state.onOpenFullFile?.(selectedLocation.filePath, selectedLocation.line)
+                }
+              >
+                Open file
+              </button>
+            </div>
+          )}
+          <div className="flex-1 min-h-0 overflow-auto">
+            <CodePreview preview={preview.previewData} isLoading={preview.isLoading} />
+          </div>
         </div>
         <div className="w-[260px] flex-shrink-0 overflow-auto">
           <ReferenceList

@@ -19,7 +19,10 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
   const file = filePath
     ? state.files.find(candidate => candidate.path === filePath)
     : undefined;
-  const isFocusedFile = !!file && state.focusedFilePath === file.path;
+  const isFocusedFile =
+    !!file &&
+    state.focusedFilePath === file.path &&
+    state.fullFileFocusPath !== file.path;
 
   const fileAnnotations = useMemo(
     () => {

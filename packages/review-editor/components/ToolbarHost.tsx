@@ -26,6 +26,8 @@ export interface ToolbarHostHandle {
 
 interface ToolbarHostProps {
   patch: string;
+  /** Whole new-side file contents, when the surface has them (see useAnnotationToolbar). */
+  fileContent?: string;
   filePath: string;
   isFocused: boolean;
   onLineSelection: (range: SelectedLineRange | null) => void;
@@ -37,6 +39,7 @@ interface ToolbarHostProps {
     conventionalLabel?: ConventionalLabel,
     decorations?: ConventionalDecoration[],
     tokenMeta?: TokenAnnotationMeta,
+    selectionSnippet?: string,
   ) => void;
   onEditAnnotation: (
     id: string,
@@ -61,6 +64,7 @@ interface ToolbarHostProps {
 export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(function ToolbarHost(
   {
     patch,
+    fileContent,
     filePath,
     isFocused,
     onLineSelection,
@@ -76,6 +80,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
 ) {
   const toolbar = useAnnotationToolbar({
     patch,
+    fileContent,
     filePath,
     isFocused,
     onLineSelection,

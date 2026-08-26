@@ -65,6 +65,7 @@ import {
 import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, markJobReviewFailed } from "@plannotator/shared/agent-jobs";
 import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
+import { REPO_FILE_ERROR_STATUS, readRepoFile } from "@plannotator/shared/repo-file";
 import { getRepoInfo } from "./repo";
 import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
@@ -803,6 +804,39 @@ export async function startReviewServer(
       if (poolPath) return poolPath;
     }
     return resolveAgentCwd();
+  };
+  /**
+   * Local working-tree root for the surfaces that serve whole files:
+   * /api/code-nav/file and /api/review-file. Both need the identical gate
+   * (no committed GitButler views, local access required, PR checkouts must
+   * actually be warm), so it lives in one place rather than being copied and
+   * drifting. `surface` only picks the user-facing noun in the error text.
+   */
+  const resolveLocalFileRoot = async (
+    surface: "Code navigation" | "File viewing",
+  ): Promise<
+    { ok: true; root: string } | { ok: false; error: string; status: number }
+  > => {
+    if (isGitButlerCommittedView()) {
+      return {
+        ok: false,
+        status: 400,
+        error: `${surface} is unavailable for committed GitButler views`,
+      };
+    }
+    const hasAccess = !!workspace || !!gitContext || !!options.agentCwd || !!options.worktreePool;
+    if (!hasAccess) {
+      return { ok: false, status: 400, error: `${surface} requires local access` };
+    }
+    // PR mode: the checkout must actually exist — reading through a fallback
+    // directory returns confidently-wrong file contents.
+    const root = options.worktreePool && prMetadata
+      ? await ensurePRLocalCwd()
+      : await resolveAgentCwdReady();
+    if (!root) {
+      return { ok: false, status: 400, error: "Local checkout unavailable" };
+    }
+    return { ok: true, root };
   };
   const getWorkspacePromptContext = (): WorkspaceReviewPromptContext | undefined => {
     if (!workspace) return undefined;
@@ -2985,36 +3019,48 @@ export async function startReviewServer(
           }
 
           // API: Code navigation file preview (read file from working tree)
+          //
+          // Hardened to go through readRepoFile: this route previously read
+          // `${navCwd}/${filePath}` behind nothing but the lexical
+          // validateFilePath, with NO size cap at all.
           if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
-            if (isGitButlerCommittedView()) {
+            const rootResult = await resolveLocalFileRoot("Code navigation");
+            if (!rootResult.ok) {
+              return Response.json({ error: rootResult.error }, { status: rootResult.status });
+            }
+            const result = readRepoFile(rootResult.root, url.searchParams.get("path"));
+            if (!result.ok) {
               return Response.json(
-                { error: "Code navigation is unavailable for committed GitButler views" },
-                { status: 400 },
+                { error: result.message },
+                { status: REPO_FILE_ERROR_STATUS[result.reason] },
               );
             }
-            const hasCodeNavAccess = !!workspace || !!gitContext || !!options.agentCwd || !!options.worktreePool;
-            if (!hasCodeNavAccess) {
-              return Response.json({ error: "Code navigation requires local access" }, { status: 400 });
+            return Response.json({ content: result.content });
+          }
+
+          // API: Full file content for the full-file review viewer.
+          //
+          // Deliberately NOT snapshot-guarded: this serves the live working
+          // tree (the "new" side), same as the code-nav preview. The diff has
+          // its own staleness notice; a file panel showing the file as it is
+          // right now is the correct behavior for "open the file".
+          if (url.pathname === "/api/review-file" && req.method === "GET") {
+            const rootResult = await resolveLocalFileRoot("File viewing");
+            if (!rootResult.ok) {
+              return Response.json({ error: rootResult.error }, { status: rootResult.status });
             }
-            const filePath = url.searchParams.get("path");
-            if (!filePath) {
-              return Response.json({ error: "Missing path" }, { status: 400 });
+            const result = readRepoFile(rootResult.root, url.searchParams.get("path"));
+            if (!result.ok) {
+              return Response.json(
+                { error: result.message, reason: result.reason, size: result.size },
+                { status: REPO_FILE_ERROR_STATUS[result.reason] },
+              );
             }
-            try { validateFilePath(filePath); } catch {
-              return Response.json({ error: "Invalid path" }, { status: 400 });
-            }
-            try {
-              const navCwd = options.worktreePool && prMetadata
-                ? await ensurePRLocalCwd()
-                : await resolveAgentCwdReady();
-              if (!navCwd) {
-                return Response.json({ error: "Local checkout unavailable" }, { status: 400 });
-              }
-              const content = await Bun.file(`${navCwd}/${filePath}`).text();
-              return Response.json({ content });
-            } catch {
-              return Response.json({ error: "File not found" }, { status: 404 });
-            }
+            return Response.json({
+              filePath: result.filePath,
+              content: result.content,
+              size: result.size,
+            });
           }
 
           // API: Stage / unstage a file (disabled when VCS doesn't support it)

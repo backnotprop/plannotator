@@ -856,6 +856,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       <ToolbarHost
         ref={toolbarHostRef}
         patch={patch}
+        // Lets an annotation on EXPANDED CONTEXT carry real code. Those lines
+        // exist in the file but in no hunk, so the patch-only extractor
+        // returned an empty snippet for them.
+        fileContent={
+          fileContents?.forPath === filePath ? fileContents.new ?? undefined : undefined
+        }
         filePath={filePath}
         isFocused={isFocused}
         onLineSelection={onLineSelection}

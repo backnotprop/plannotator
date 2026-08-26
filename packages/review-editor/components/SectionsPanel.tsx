@@ -53,6 +53,8 @@ interface SectionsPanelProps {
   scrollHighlightIndex?: number;
   onSelectFile: (index: number) => void;
   onDoubleClickFile?: (index: number) => void;
+  /** Open a file whole in the full-file viewer (design doc phase 1). */
+  onOpenFile?: (filePath: string) => void;
   /** j/k/arrows/Home/End file navigation (disabled while modals are open). */
   enableKeyboardNav?: boolean;
   annotations: CodeAnnotation[];
@@ -145,6 +147,8 @@ const SectionRow: React.FC<{
   isStaged: boolean;
   isStaging: boolean;
   onStage?: () => void;
+  /** Open this file whole in the full-file viewer (design doc phase 1). */
+  onOpenFile?: (filePath: string) => void;
 }> = ({
   item,
   isActive,
@@ -161,6 +165,7 @@ const SectionRow: React.FC<{
   isStaged,
   isStaging,
   onStage,
+  onOpenFile,
 }) => {
   const { file } = item;
 
@@ -195,6 +200,25 @@ const SectionRow: React.FC<{
         <TruncatedPath path={file.path} />
         <AnnotationBadge count={annotationCount} />
       </div>
+      {onOpenFile && (
+        <span
+          role="button"
+          tabIndex={-1}
+          data-testid={`open-full-file:${file.path}`}
+          title="Open whole file"
+          aria-label={`Open whole file ${file.path}`}
+          className="opacity-0 group-hover:opacity-100 focus:opacity-100 flex-shrink-0 px-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+          onClick={(e) => {
+            // The row button owns the click; this affordance opens the whole
+            // file instead of the diff.
+            e.stopPropagation();
+            e.preventDefault();
+            onOpenFile(file.path);
+          }}
+        >
+          ⤢
+        </span>
+      )}
       <DiffCounts additions={file.additions} deletions={file.deletions} />
     </button>
   );
@@ -208,6 +232,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   scrollHighlightIndex,
   onSelectFile,
   onDoubleClickFile,
+  onOpenFile,
   enableKeyboardNav,
   annotations,
   viewedFiles,
@@ -456,6 +481,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
         isStaged={item.staged}
         isStaging={stagingFile === item.file.path}
         onStage={onStageFile ? () => onStageFile(item.file.path) : undefined}
+        onOpenFile={onOpenFile}
       />
     ));
 

@@ -106,6 +106,8 @@ import {
   REVIEW_CALL_FLOW_PANEL_ID,
   REVIEW_ALL_FILES_PANEL_ID,
   REVIEW_CODE_NAV_PANEL_ID,
+  REVIEW_FULL_FILE_PANEL_ID,
+  getReviewFullFilePanelFilePath,
 } from './dock/reviewPanelTypes';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
@@ -337,6 +339,9 @@ const ReviewApp: React.FC = () => {
   const apiModeRef = useRef(false);
   const analysisSettingsInitialized = useRef(false);
   const [isDiffPanelActive, setIsDiffPanelActive] = useState(false);
+  const [isFullFileActive, setIsFullFileActive] = useState(false);
+  /** Path the full-file panel currently holds — feeds diff-panel focus arbitration. */
+  const [fullFileActivePath, setFullFileActivePath] = useState<string | null>(null);
   const [allFilesVisibleFile, setAllFilesVisibleFile] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
   const [lineAnnotationComposeRequest, setLineAnnotationComposeRequest] =
@@ -712,6 +717,39 @@ const ReviewApp: React.FC = () => {
     setActiveFileIndex(files.findIndex(candidate => candidate.path === resolvedFilePath));
     needsInitialDiffPanel.current = false;
   }, [dockApi, files, clearPendingSelection]);
+
+  /**
+   * Open a file whole in the full-file panel (design doc phase 1).
+   *
+   * One reused panel retargeted per file, exactly like openDiffFile — the
+   * recommended model over tab-per-file, which cannot easily be walked back.
+   * Unlike openDiffFile this does NOT require the path to be in `files`: the
+   * point of the feature is opening files the patch never mentions (code-nav
+   * results, and later the repo tree).
+   */
+  const openFullFile = useCallback((filePath: string, line?: number) => {
+    if (!dockApi) return;
+    const title = filePath.split('/').pop() || filePath;
+    const existing = dockApi.getPanel(REVIEW_FULL_FILE_PANEL_ID);
+    if (existing) {
+      const existingFilePath = getReviewFullFilePanelFilePath(existing.params);
+      if (existingFilePath !== filePath || line != null) {
+        existing.api.updateParameters({ filePath, ...(line != null && { line }) });
+        existing.api.setTitle(title);
+      }
+      setFullFileActivePath(filePath);
+      existing.api.setActive();
+      return;
+    }
+    clearPendingSelection();
+    dockApi.addPanel({
+      id: REVIEW_FULL_FILE_PANEL_ID,
+      component: REVIEW_PANEL_TYPES.FULL_FILE,
+      title,
+      params: { filePath, ...(line != null && { line }) },
+    });
+    setFullFileActivePath(filePath);
+  }, [dockApi, clearPendingSelection]);
 
   const isCallFlowNodeInPatch = useCallback((node: CallFlowNode): boolean => {
     if (!node.file || !node.line) return false;
@@ -1138,6 +1176,7 @@ const ReviewApp: React.FC = () => {
         setIsPROverviewActive(false);
         setIsPRArtifactsActive(false);
         setIsDiffPanelActive(false);
+        setIsFullFileActive(false);
         return;
       }
       setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
@@ -1146,6 +1185,10 @@ const ReviewApp: React.FC = () => {
       setIsPROverviewActive(panel.id === REVIEW_PR_OVERVIEW_PANEL_ID);
       setIsPRArtifactsActive(panel.id === REVIEW_PR_ARTIFACTS_PANEL_ID);
       setIsDiffPanelActive(isReviewDiffPanelId(panel.id));
+      setIsFullFileActive(panel.id === REVIEW_FULL_FILE_PANEL_ID);
+      if (panel.id === REVIEW_FULL_FILE_PANEL_ID) {
+        setFullFileActivePath(getReviewFullFilePanelFilePath(panel.params));
+      }
       if (!isReviewDiffPanelId(panel.id)) return;
       const filePath = getReviewDiffPanelFilePath(panel.params);
       if (!filePath) return;
@@ -1841,11 +1884,19 @@ const ReviewApp: React.FC = () => {
     originalCode?: string,
     conventionalLabel?: ConventionalLabel,
     decorations?: ConventionalDecoration[],
-    tokenMeta?: TokenAnnotationMeta
+    tokenMeta?: TokenAnnotationMeta,
+    selectionSnippet?: string
   ) => {
     if (!pendingSelection) return;
     const lineStart = Math.min(pendingSelection.start, pendingSelection.end);
     const lineEnd = Math.max(pendingSelection.start, pendingSelection.end);
+    const side = pendingSelection.side === 'additions' ? 'new' : 'old';
+    // Stamp annotations whose lines the agent will NOT find in the patch:
+    // authored in the full-file viewer (file absent from the diff, or a range
+    // past every hunk) or on expanded diff context. Computed here rather than
+    // at export time because only this side of the app holds the patch.
+    const filePatch = files.find(candidate => candidate.path === filePath)?.patch ?? '';
+    const outsideDiff = !filePatch || !isLineRangeInPatch(filePatch, lineStart, lineEnd, side);
     const newAnnotation: CodeAnnotation = {
       id: generateId(),
       type,
@@ -1853,10 +1904,15 @@ const ReviewApp: React.FC = () => {
       filePath,
       lineStart,
       lineEnd,
-      side: pendingSelection.side === 'additions' ? 'new' : 'old',
+      side,
       text,
       suggestedCode,
-      originalCode,
+      // `originalCode` stays suggestion-only in-diff (it renders as
+      // "Replaces:"). For an out-of-diff annotation the selected lines are
+      // attached regardless, because the patch does not contain them and the
+      // export has to quote them for the agent to see anything at all.
+      originalCode: originalCode ?? (outsideDiff ? selectionSnippet : undefined),
+      ...(outsideDiff && { outsideDiff: true }),
       ...(tokenMeta && {
         charStart: tokenMeta.charStart,
         charEnd: tokenMeta.charEnd,
@@ -1869,7 +1925,7 @@ const ReviewApp: React.FC = () => {
     };
     setAnnotations(prev => [...prev, withPRContext(newAnnotation)]);
     clearPendingSelection();
-  }, [pendingSelection, identity, withPRContext, clearPendingSelection]);
+  }, [pendingSelection, identity, withPRContext, clearPendingSelection, files]);
 
   const handleAddCallFlowAnnotation = useCallback((
     targets: readonly CallFlowAnnotationTarget[],
@@ -2906,6 +2962,8 @@ const ReviewApp: React.FC = () => {
     // focus claim at the source instead of threading `guideOpen` through every
     // dock panel. Guide-side DiffViewers arbitrate focus among themselves.
     focusedFilePath: guideOpen ? null : (files[activeFileIndex]?.path ?? null),
+    fullFileFocusPath: isFullFileActive ? fullFileActivePath : null,
+    onOpenFullFile: openFullFile,
     diffStyle: effectiveDiffStyle,
     onDiffStyleChange: handleDiffStyleChange,
     isCompactTouchLayout,
@@ -4116,6 +4174,7 @@ const ReviewApp: React.FC = () => {
             >
               <SectionsPanel
                 files={files}
+                onOpenFile={openFullFile}
                 sections={sections!}
                 width={fileTreeResize.width}
                 activeFileIndex={isAllFilesActive || isSemanticDiffActive || isCallFlowActive || isPROverviewActive ? -1 : activeFileIndex}
@@ -4207,6 +4266,7 @@ const ReviewApp: React.FC = () => {
             >
               <FileTree
                 files={files}
+                onOpenFile={openFullFile}
                 activeFileIndex={activeFileIndex}
                 onSelectPROverview={() => completeNavigatorSelection(openPROverviewPanel)}
                 isPROverviewActive={isPROverviewActive}

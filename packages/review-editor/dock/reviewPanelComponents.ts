@@ -7,6 +7,7 @@ import { ReviewAllFilesDiffPanel } from './panels/ReviewAllFilesDiffPanel';
 import { ReviewCodeNavPanel } from './panels/ReviewCodeNavPanel';
 import { ReviewSemanticDiffPanel } from './panels/ReviewSemanticDiffPanel';
 import { ReviewCallFlowPanel } from './panels/ReviewCallFlowPanel';
+import { ReviewFullFilePanel } from './panels/ReviewFullFilePanel';
 
 /**
  * Component registry for dockview — maps panel type strings to React components.
@@ -21,4 +22,5 @@ export const reviewPanelComponents = {
   [REVIEW_PANEL_TYPES.CODE_NAV]: ReviewCodeNavPanel,
   [REVIEW_PANEL_TYPES.SEMANTIC_DIFF]: ReviewSemanticDiffPanel,
   [REVIEW_PANEL_TYPES.CALL_FLOW]: ReviewCallFlowPanel,
+  [REVIEW_PANEL_TYPES.FULL_FILE]: ReviewFullFilePanel,
 } as const;

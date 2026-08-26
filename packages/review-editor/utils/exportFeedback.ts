@@ -188,9 +188,12 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     const tokenSuffix = ann.tokenText
       ? ` — \`\`${ann.tokenText.replace(/`/g, '\\`')}\`\`${ann.charStart != null ? ` (chars ${ann.charStart}-${ann.charEnd})` : ''}`
       : '';
-    output += `${headingLevel} ${lineRange} (${ann.side})${tokenSuffix}\n`;
+    // Bracketed, matching the design doc's proposed "[Outside diff]" shape.
+    const outsideSuffix = ann.outsideDiff ? ' [Outside diff]' : '';
+    output += `${headingLevel} ${lineRange} (${ann.side})${tokenSuffix}${outsideSuffix}\n`;
     output += commitMismatchNote(ann, commitShaFromMode(currentDiff?.mode));
     output += gitButlerMismatchNote(ann, currentDiff);
+    output += outsideDiffNote(ann);
 
     if (ann.text) {
       output += `${prefix}${ann.text}\n`;
@@ -202,11 +205,41 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     }
     output += formatCallFlowAnnotationTargets(ann);
     output += formatSelectedTextBlock(ann);
+    output += formatOutsideDiffCode(ann);
     output += formatSuggestionBlocks(ann);
     output += '\n';
   }
 
   return output;
+}
+
+/**
+ * Tells the agent that an annotation's lines are not in the patch it was
+ * given, so it stops hunting for them there.
+ *
+ * Without this an out-of-diff line comment reads exactly like an in-diff one,
+ * and an agent asked to "address the review" looks up `src/foo.ts:500` in a
+ * diff whose only hunk is at line 3.
+ */
+function outsideDiffNote(ann: CodeAnnotation): string {
+  if (!ann.outsideDiff) return '';
+  return `_These lines are not part of the diff under review. The file content at review time is quoted below._\n`;
+}
+
+/**
+ * The code an out-of-diff annotation points at.
+ *
+ * The agent cannot recover these lines from the patch, so the comment is
+ * close to useless without them. Suppressed when a suggestion is present,
+ * because `formatSuggestionBlocks` already prints the same lines under
+ * "Replaces:" and printing them twice invites the agent to apply them twice.
+ */
+function formatOutsideDiffCode(ann: CodeAnnotation): string {
+  if (!ann.outsideDiff || !ann.originalCode) return '';
+  // A suggestion still prints these lines under "Replaces:", which is the
+  // right label there — don't print them twice.
+  if (ann.suggestedCode) return '';
+  return `\n**Code at these lines:**\n\`\`\`\n${ann.originalCode}\n\`\`\`\n`;
 }
 
 /**
@@ -239,6 +272,9 @@ function formatSelectedTextBlock(ann: CodeAnnotation): string {
  */
 function formatSuggestionBlocks(ann: CodeAnnotation): string {
   let output = '';
+  // An out-of-diff comment with no suggestion replaces nothing — its lines
+  // are printed by formatOutsideDiffCode under an honest heading instead.
+  if (ann.outsideDiff && !ann.suggestedCode) return output;
   if ((ann.suggestedCode || ann.text) && ann.originalCode) {
     output += `\n**Replaces:**\n\`\`\`\n${ann.originalCode}\n\`\`\`\n`;
   }

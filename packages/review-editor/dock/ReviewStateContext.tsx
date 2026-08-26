@@ -35,6 +35,18 @@ export interface ReviewState {
   rawPatch: string;
   focusedFileIndex: number;
   focusedFilePath: string | null;
+  /**
+   * Path currently claimed by an ACTIVE full-file panel, else null.
+   *
+   * Focus arbitration (design doc risk 1): ToolbarHost annotation drafts live
+   * in module-level maps keyed by filePath, so if a full-file panel and a diff
+   * panel both reported isFocused for the same path, draft handoff would
+   * corrupt on a last-write-wins basis. The diff panel yields while the
+   * full-file panel holds the same file.
+   */
+  fullFileFocusPath: string | null;
+  /** Open a path whole in the full-file panel, optionally revealing a line. */
+  onOpenFullFile?: (filePath: string, line?: number) => void;
   diffStyle: 'split' | 'unified';
   /** Compact touch shells use a session-only style so desktop preferences stay untouched. */
   onDiffStyleChange: (style: 'split' | 'unified') => void;
@@ -82,8 +94,8 @@ export interface ReviewState {
     targets: readonly CallFlowAnnotationTarget[],
     text: string,
   ) => boolean;
-  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
-  onAddAnnotationForFile: (filePath: string, type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
+  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta, selectionSnippet?: string) => void;
+  onAddAnnotationForFile: (filePath: string, type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta, selectionSnippet?: string) => void;
   /** EXPERIMENTAL edit-to-suggestion flag (cookie setting, default OFF). Only
    * the plain all-files panel consumes it — Guided Review surfaces stay off. */
   editSuggestionsEnabled: boolean;

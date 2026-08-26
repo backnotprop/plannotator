@@ -30,6 +30,8 @@ interface FileTreeProps {
   activeFileIndex: number;
   onSelectFile: (index: number) => void;
   onDoubleClickFile?: (index: number) => void;
+  /** Open a file whole in the full-file viewer (design doc phase 1). */
+  onOpenFile?: (filePath: string) => void;
   annotations: CodeAnnotation[];
   viewedFiles: Set<string>;
   onToggleViewed?: (filePath: string) => void;
@@ -127,6 +129,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   activeFileIndex,
   onSelectFile,
   onDoubleClickFile,
+  onOpenFile,
   annotations,
   viewedFiles,
   onToggleViewed,
@@ -565,6 +568,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                   scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
                   onSelectFile={onSelectFile}
                   onDoubleClickFile={onDoubleClickFile}
+                  onOpenFile={onOpenFile}
                   viewedFiles={viewedFiles}
                   onToggleViewed={onToggleViewed}
                   showViewedControls={showViewedControls}

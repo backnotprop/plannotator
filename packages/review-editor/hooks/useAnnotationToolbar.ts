@@ -6,7 +6,7 @@ import {
   shouldUseExpandedComposer,
   useVisibleViewportBounds,
 } from '@plannotator/ui/hooks/useViewportEnvironment';
-import { extractLinesFromPatch } from '../utils/patchParser';
+import { resolveAnnotationSnippet } from '../utils/patchParser';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 
 export interface TokenMeta {
@@ -30,10 +30,16 @@ export interface ToolbarState {
 
 interface UseAnnotationToolbarArgs {
   patch: string;
+  /**
+   * Whole new-side file contents, when the hosting surface has them. Lets a
+   * range with no hunk coverage (expanded context, or any line of the
+   * full-file viewer) still carry real code instead of an empty snippet.
+   */
+  fileContent?: string;
   filePath: string;
   isFocused: boolean;
   onLineSelection: (range: SelectedLineRange | null) => void;
-  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
+  onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta, selectionSnippet?: string) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
 }
 
@@ -58,7 +64,7 @@ function draftKey(filePath: string, range: SelectedLineRange): string {
   return `${filePath}:${range.side}:${start}-${end}`;
 }
 
-export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation }: UseAnnotationToolbarArgs) {
+export function useAnnotationToolbar({ patch, fileContent, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation }: UseAnnotationToolbarArgs) {
   const visibleBounds = useVisibleViewportBounds(16);
   const expandedComposerRequired = shouldUseExpandedComposer({
     bounds: visibleBounds,
@@ -188,10 +194,10 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
     const side = range.side === 'additions' ? 'new' : 'old';
     const start = Math.min(range.start, range.end);
     const end = Math.max(range.start, range.end);
-    setSelectedOriginalCode(extractLinesFromPatch(patch, start, end, side as 'old' | 'new'));
+    setSelectedOriginalCode(resolveAnnotationSnippet(patch, fileContent, start, end, side as 'old' | 'new'));
 
     onLineSelection(range);
-  }, [expandedComposerRequired, patch, filePath, onLineSelection, saveDraft]);
+  }, [expandedComposerRequired, patch, fileContent, filePath, onLineSelection, saveDraft]);
 
   // Handle line selection end (gutter clicks)
   const handleLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
@@ -251,6 +257,11 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
         conventionalLabel ?? undefined,
         decorations.length > 0 ? decorations : undefined,
         tokenMeta,
+        // The selected lines, ALWAYS — independent of `original`, which stays
+        // suggestion-only so in-diff export is unchanged. The consumer
+        // attaches it only when the lines are outside the diff, where the
+        // agent has no other way to see them.
+        selectedOriginalCode || undefined,
       );
     }
 
@@ -352,10 +363,10 @@ export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelecti
       const side = draft.range.side === 'additions' ? 'new' : 'old';
       const start = Math.min(draft.range.start, draft.range.end);
       const end = Math.max(draft.range.start, draft.range.end);
-      setSelectedOriginalCode(extractLinesFromPatch(patch, start, end, side as 'old' | 'new'));
+      setSelectedOriginalCode(resolveAnnotationSnippet(patch, fileContent, start, end, side as 'old' | 'new'));
       onLineSelection(draft.range);
     }
-  }, [expandedComposerRequired, filePath, isFocused, onLineSelection, patch]);
+  }, [expandedComposerRequired, fileContent, filePath, isFocused, onLineSelection, patch]);
 
   // Handle single token click — opens toolbar for one token
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {

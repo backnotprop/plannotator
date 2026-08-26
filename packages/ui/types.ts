@@ -277,6 +277,15 @@ export interface CodeAnnotation {
   gitButlerBase?: string;
   /** Exact server snapshot that supplied the GitButler line coordinates. */
   gitButlerSnapshotId?: string;
+  /**
+   * Set when the annotated lines are NOT in the diff the agent was given:
+   * authored in the full-file viewer, or on a changed file but outside every
+   * hunk. Stamped at creation (the surface knows; the exporter cannot), the
+   * way plan-diff annotations stamp `diffContext`. The export uses it to say
+   * so and to fence the code, because the agent has no other way to see
+   * lines the patch never contained.
+   */
+  outsideDiff?: boolean;
 }
 
 /** Token-level metadata passed from selection to annotation creation. */
