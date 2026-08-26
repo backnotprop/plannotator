@@ -13,10 +13,10 @@
   --muted-foreground: #d67ad6;
   --accent: #c06ec4;
   --accent-foreground: #1a0922;
-  --destructive: #ff2876;
-  --destructive-foreground: #f9f9f9;
-  --border: #4a1b5f;
-  --input: #46204f;
+  --destructive: #ff5796;
+  --destructive-foreground: #180518;
+  --border: #964bb2;
+  --input: #964bb2;
   --ring: #ff6bef;
   --chart-1: #ff6bef;
   --chart-2: #c359e3;
@@ -60,18 +60,18 @@
   --card-foreground: #91185c;
   --popover: #fff7fc;
   --popover-foreground: #91185c;
-  --primary: #e6067a;
+  --primary: #bf0060;
   --primary-foreground: #ffffff;
   --secondary: #ffd6ff;
   --secondary-foreground: #91185c;
   --muted: #ffe3f2;
-  --muted-foreground: #c04283;
-  --accent: #ffc1e3;
-  --accent-foreground: #91185c;
-  --destructive: #d13869;
+  --muted-foreground: #af2c70;
+  --accent: #9c145a;
+  --accent-foreground: #ffffff;
+  --destructive: #af1547;
   --destructive-foreground: #ffffff;
-  --border: #ffc7e6;
-  --input: #ffd6ff;
+  --border: #9c748f;
+  --input: #9c748f;
   --ring: #e6067a;
   --chart-1: #e6067a;
   --chart-2: #c44b97;
@@ -102,8 +102,8 @@
   /* Plannotator extended tokens */
   --success: oklch(0.45 0.20 150);
   --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.55 0.18 85);
-  --warning-foreground: oklch(0.18 0.02 260);
+  --warning: oklch(0.48 0.18 85);
+  --warning-foreground: oklch(1 0 0);
   --code-bg: oklch(0.96 0.005 260);
-  --focus-highlight: oklch(0.70 0.20 200);
+  --focus-highlight: oklch(0.55 0.18 200);
 }

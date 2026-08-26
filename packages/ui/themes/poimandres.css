@@ -1,23 +1,23 @@
 /* Poimandres — by drcmda */
 .theme-poimandres {
   --background: #1b1e28;
-  --foreground: #a6accd;
+  --foreground: #c2c8f2;
   --card: #303340;
-  --card-foreground: #a6accd;
+  --card-foreground: #c2c8f2;
   --popover: #303340;
-  --popover-foreground: #a6accd;
+  --popover-foreground: #c2c8f2;
   --primary: #add7ff;
   --primary-foreground: #1b1e28;
   --secondary: #252934;
-  --secondary-foreground: #767c9d;
+  --secondary-foreground: #989ec3;
   --muted: #252934;
-  --muted-foreground: #767c9d;
+  --muted-foreground: #989ec3;
   --accent: #5de4c7;
   --accent-foreground: #1b1e28;
-  --destructive: #d0679d;
+  --destructive: #fe92c8;
   --destructive-foreground: #1b1e28;
-  --border: #3b3f4f;
-  --input: #252934;
+  --border: #777c8d;
+  --input: #777c8d;
   --ring: #add7ff;
   --success: #5de4c7;
   --success-foreground: #1b1e28;
@@ -34,23 +34,23 @@
 
 .theme-poimandres.light {
   --background: #1b1e28;
-  --foreground: #a6accd;
+  --foreground: #c2c8f2;
   --card: #303340;
-  --card-foreground: #a6accd;
+  --card-foreground: #c2c8f2;
   --popover: #303340;
-  --popover-foreground: #a6accd;
+  --popover-foreground: #c2c8f2;
   --primary: #add7ff;
   --primary-foreground: #1b1e28;
   --secondary: #252934;
-  --secondary-foreground: #767c9d;
+  --secondary-foreground: #989ec3;
   --muted: #252934;
-  --muted-foreground: #767c9d;
+  --muted-foreground: #989ec3;
   --accent: #5de4c7;
   --accent-foreground: #1b1e28;
-  --destructive: #d0679d;
+  --destructive: #fe92c8;
   --destructive-foreground: #1b1e28;
-  --border: #3b3f4f;
-  --input: #252934;
+  --border: #777c8d;
+  --input: #777c8d;
   --ring: #add7ff;
   --success: #5de4c7;
   --success-foreground: #1b1e28;

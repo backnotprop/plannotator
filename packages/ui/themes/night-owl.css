@@ -6,19 +6,19 @@
   --card-foreground: #d6deeb;
   --popover: #0b2942;
   --popover-foreground: #d6deeb;
-  --primary: #7e57c2;
-  --primary-foreground: #ffffff;
+  --primary: #cb98ec;
+  --primary-foreground: #011627;
   --secondary: #0b253a;
   --secondary-foreground: #89a4bb;
   --muted: #0b253a;
-  --muted-foreground: #4b6479;
+  --muted-foreground: #7f9bb3;
   --accent: #82aaff;
   --accent-foreground: #011627;
-  --destructive: #ef5350;
+  --destructive: #ff7085;
   --destructive-foreground: #011627;
   --border: #5f7e97;
-  --input: #0b253a;
-  --ring: #7e57c2;
+  --input: #5f7e97;
+  --ring: #cb98ec;
   --success: #addb67;
   --success-foreground: #011627;
   --warning: #ffcb6b;
@@ -29,7 +29,7 @@
   --radius: 0.625rem;
 
   --code-bg: #0b2942;
-  --focus-highlight: #7e57c2;
+  --focus-highlight: #82aaff;
 }
 
 .theme-night-owl.light {
@@ -39,19 +39,19 @@
   --card-foreground: #d6deeb;
   --popover: #0b2942;
   --popover-foreground: #d6deeb;
-  --primary: #7e57c2;
-  --primary-foreground: #ffffff;
+  --primary: #cb98ec;
+  --primary-foreground: #011627;
   --secondary: #0b253a;
   --secondary-foreground: #89a4bb;
   --muted: #0b253a;
-  --muted-foreground: #4b6479;
+  --muted-foreground: #7f9bb3;
   --accent: #82aaff;
   --accent-foreground: #011627;
-  --destructive: #ef5350;
+  --destructive: #ff7085;
   --destructive-foreground: #011627;
   --border: #5f7e97;
-  --input: #0b253a;
-  --ring: #7e57c2;
+  --input: #5f7e97;
+  --ring: #cb98ec;
   --success: #addb67;
   --success-foreground: #011627;
   --warning: #ffcb6b;
@@ -62,5 +62,5 @@
   --radius: 0.625rem;
 
   --code-bg: #0b2942;
-  --focus-highlight: #7e57c2;
+  --focus-highlight: #82aaff;
 }

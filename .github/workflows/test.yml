@@ -47,6 +47,9 @@ jobs:
       - name: Run tests
         run: bun test
 
+      - name: Run strict theme contrast audit
+        run: bun run theme:audit -- --strict
+
       # The file-browser watcher test is timing-sensitive (a 120ms SSE debounce
       # asserted with real timers). Run it in its own process — matching the
       # historical config — so it isn't destabilized by sharing a process with

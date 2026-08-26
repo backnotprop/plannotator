@@ -1,28 +1,28 @@
 /* Everforest Soft — by sainnhe (low contrast) */
 .theme-everforest-soft {
   --background: #333C43;
-  --foreground: #D3C6AA;
+  --foreground: #f3e5ca;
   --card: #3A464C;
-  --card-foreground: #D3C6AA;
+  --card-foreground: #f3e5ca;
   --popover: #434F55;
-  --popover-foreground: #D3C6AA;
-  --primary: #A7C080;
-  --primary-foreground: #333C43;
+  --popover-foreground: #f3e5ca;
+  --primary: #b6d48d;
+  --primary-foreground: #293136;
   --secondary: #4D5960;
-  --secondary-foreground: #D3C6AA;
+  --secondary-foreground: #f3e5ca;
   --muted: #4D5960;
-  --muted-foreground: #859289;
-  --accent: #83C092;
-  --accent-foreground: #333C43;
-  --destructive: #E67E80;
-  --destructive-foreground: #333C43;
-  --border: #4D5960;
-  --input: #3A464C;
-  --ring: #A7C080;
-  --success: #83C092;
-  --success-foreground: #333C43;
-  --warning: #DBBC7F;
-  --warning-foreground: #333C43;
+  --muted-foreground: #c2d0c6;
+  --accent: #9de2af;
+  --accent-foreground: #293136;
+  --destructive: #ffbec0;
+  --destructive-foreground: #293136;
+  --border: #849199;
+  --input: #849199;
+  --ring: #b6d48d;
+  --success: #9de2af;
+  --success-foreground: #293136;
+  --warning: #eed08e;
+  --warning-foreground: #293136;
 
   --font-sans: system-ui, sans-serif;
   --font-mono: 'Fira Code', ui-monospace, monospace;
@@ -34,29 +34,30 @@
 
 .theme-everforest-soft.light {
   --background: #F3EAD3;
-  --foreground: #5C6A72;
+  --foreground: #38444a;
   --card: #EAE4CA;
-  --card-foreground: #5C6A72;
+  --card-foreground: #38444a;
   --popover: #E5DFC5;
-  --popover-foreground: #5C6A72;
-  --primary: #8DA101;
+  --popover-foreground: #38444a;
+  --primary: #2d3d00;
   --primary-foreground: #F3EAD3;
   --secondary: #DDD8BE;
-  --secondary-foreground: #5C6A72;
+  --secondary-foreground: #38444a;
   --muted: #DDD8BE;
-  --muted-foreground: #939F91;
-  --accent: #35A77C;
+  --muted-foreground: #525e51;
+  --accent: #00603f;
   --accent-foreground: #F3EAD3;
-  --destructive: #F85552;
+  --destructive: #9f0612;
   --destructive-foreground: #F3EAD3;
-  --border: #DDD8BE;
-  --input: #EAE4CA;
-  --ring: #8DA101;
-  --success: #35A77C;
+  --border: #858169;
+  --input: #858169;
+  --ring: #2d3d00;
+  --success: #00603f;
   --success-foreground: #F3EAD3;
-  --warning: #DFA000;
+  --warning: #744600;
   --warning-foreground: #F3EAD3;
 
+
   --code-bg: #E5DFC5;
-  --focus-highlight: #3A94C5;
+  --focus-highlight: #226f98;
 }

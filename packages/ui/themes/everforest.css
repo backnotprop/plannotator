@@ -1,28 +1,28 @@
 /* Everforest — by sainnhe (medium contrast, default) */
 .theme-everforest {
   --background: #2D353B;
-  --foreground: #D3C6AA;
+  --foreground: #e4d8be;
   --card: #343F44;
-  --card-foreground: #D3C6AA;
+  --card-foreground: #e4d8be;
   --popover: #3D484D;
-  --popover-foreground: #D3C6AA;
-  --primary: #A7C080;
-  --primary-foreground: #2D353B;
+  --popover-foreground: #e4d8be;
+  --primary: #b0cc88;
+  --primary-foreground: #232a2e;
   --secondary: #475258;
-  --secondary-foreground: #D3C6AA;
+  --secondary-foreground: #e4d8be;
   --muted: #475258;
-  --muted-foreground: #859289;
-  --accent: #83C092;
-  --accent-foreground: #2D353B;
-  --destructive: #E67E80;
-  --destructive-foreground: #2D353B;
-  --border: #475258;
-  --input: #343F44;
-  --ring: #A7C080;
-  --success: #83C092;
-  --success-foreground: #2D353B;
-  --warning: #DBBC7F;
-  --warning-foreground: #2D353B;
+  --muted-foreground: #b8c6bd;
+  --accent: #93d6a4;
+  --accent-foreground: #232a2e;
+  --destructive: #ffb1b3;
+  --destructive-foreground: #232a2e;
+  --border: #7e8b91;
+  --input: #7e8b91;
+  --ring: #b0cc88;
+  --success: #93d6a4;
+  --success-foreground: #232a2e;
+  --warning: #e5c586;
+  --warning-foreground: #232a2e;
 
   --font-sans: system-ui, sans-serif;
   --font-mono: 'Fira Code', ui-monospace, monospace;
@@ -34,29 +34,30 @@
 
 .theme-everforest.light {
   --background: #FDF6E3;
-  --foreground: #5C6A72;
+  --foreground: #404c53;
   --card: #F4F0D9;
-  --card-foreground: #5C6A72;
+  --card-foreground: #404c53;
   --popover: #EFEBD4;
-  --popover-foreground: #5C6A72;
-  --primary: #8DA101;
+  --popover-foreground: #404c53;
+  --primary: #334400;
   --primary-foreground: #FDF6E3;
   --secondary: #E6E2CC;
-  --secondary-foreground: #5C6A72;
+  --secondary-foreground: #404c53;
   --muted: #E6E2CC;
-  --muted-foreground: #939F91;
-  --accent: #35A77C;
+  --muted-foreground: #5a6659;
+  --accent: #006844;
   --accent-foreground: #FDF6E3;
-  --destructive: #F85552;
+  --destructive: #a60713;
   --destructive-foreground: #FDF6E3;
-  --border: #E6E2CC;
-  --input: #F4F0D9;
-  --ring: #8DA101;
-  --success: #35A77C;
+  --border: #8d8974;
+  --input: #8d8974;
+  --ring: #334400;
+  --success: #006844;
   --success-foreground: #FDF6E3;
-  --warning: #DFA000;
+  --warning: #7c4c00;
   --warning-foreground: #FDF6E3;
 
+
   --code-bg: #EFEBD4;
-  --focus-highlight: #3A94C5;
+  --focus-highlight: #226f98;
 }

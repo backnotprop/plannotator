@@ -325,15 +325,15 @@ const TreeNode: React.FC<{
   const isSelectionDisabled = isFileTreeSelectionDisabled(workspaceChange, editStatus);
   const editMarker =
     editStatus?.status === "conflict" || editStatus?.status === "error"
-      ? { label: "!", className: "bg-destructive/15 text-destructive", title: editStatus.status === "conflict" ? "Save conflict" : "Save failed" }
+      ? { label: "!", className: "bg-destructive/10 text-destructive", title: editStatus.status === "conflict" ? "Save conflict" : "Save failed" }
       : editStatus?.status === "missing"
-        ? { label: "!", className: "bg-warning/15 text-warning-foreground", title: "File missing on disk" }
+        ? { label: "!", className: "bg-warning/10 text-warning", title: "File missing on disk" }
       : editStatus?.status === "saving"
         ? { label: "...", className: "bg-primary/10 text-primary", title: "Saving" }
         : editStatus?.dirty
           ? { label: "•", className: "bg-primary/10 text-primary", title: "Unsaved edits" }
           : editStatus?.status === "saved"
-            ? { label: "✓", className: "bg-success/15 text-success", title: "Saved" }
+            ? { label: "✓", className: "bg-success/10 text-success", title: "Saved" }
             : null;
   const statusMarker = workspaceChange?.status === "added"
     ? { label: "A", className: "text-success", title: "Added file" }

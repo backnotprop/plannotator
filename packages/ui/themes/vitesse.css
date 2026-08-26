@@ -6,7 +6,7 @@
   --card-foreground: #dbd7ca;
   --popover: #181818;
   --popover-foreground: #dbd7ca;
-  --primary: #4d9375;
+  --primary: #5fae8c;
   --primary-foreground: #121212;
   --secondary: #1e1e1e;
   --secondary-foreground: #bfbaaa;
@@ -14,12 +14,12 @@
   --muted-foreground: #758575;
   --accent: #e6cc77;
   --accent-foreground: #121212;
-  --destructive: #cb7676;
+  --destructive: #d07c7c;
   --destructive-foreground: #121212;
-  --border: #252525;
-  --input: #181818;
-  --ring: #4d9375;
-  --success: #4d9375;
+  --border: #646464;
+  --input: #646464;
+  --ring: #5fae8c;
+  --success: #56a282;
   --success-foreground: #121212;
   --warning: #e6cc77;
   --warning-foreground: #121212;
@@ -29,7 +29,7 @@
   --radius: 0.625rem;
 
   --code-bg: #181818;
-  --focus-highlight: #4d9375;
+  --focus-highlight: #5fae8c;
 }
 
 .theme-vitesse.light {
@@ -39,24 +39,25 @@
   --card-foreground: #393a34;
   --popover: #ffffff;
   --popover-foreground: #393a34;
-  --primary: #1c6b48;
+  --primary: #115234;
   --primary-foreground: #ffffff;
   --secondary: #f0f0f0;
   --secondary-foreground: #4e4f47;
   --muted: #f7f7f7;
-  --muted-foreground: #a0ada0;
-  --accent: #bda437;
+  --muted-foreground: #647064;
+  --accent: #726200;
   --accent-foreground: #ffffff;
-  --destructive: #ab5959;
+  --destructive: #964242;
   --destructive-foreground: #ffffff;
-  --border: #f0f0f0;
-  --input: #f7f7f7;
-  --ring: #1c6b48;
-  --success: #1e754f;
+  --border: #8f8f8f;
+  --input: #8f8f8f;
+  --ring: #115234;
+  --success: #176342;
   --success-foreground: #ffffff;
-  --warning: #bda437;
+  --warning: #726200;
   --warning-foreground: #ffffff;
 
+
   --code-bg: #f0f0f0;
-  --focus-highlight: #1c6b48;
+  --focus-highlight: #115234;
 }

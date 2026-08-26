@@ -12,13 +12,13 @@
   --secondary: #434C5E;
   --secondary-foreground: #D8DEE9;
   --muted: #272c36;
-  --muted-foreground: #7b88a1;
+  --muted-foreground: #8a97b2;
   --accent: #8FBCBB;
   --accent-foreground: #1d2128;
-  --destructive: #BF616A;
-  --destructive-foreground: #ECEFF4;
-  --border: #3a4050;
-  --input: #272c36;
+  --destructive: #ee929c;
+  --destructive-foreground: #1d2128;
+  --border: #6e778d;
+  --input: #6e778d;
   --ring: #88C0D0;
   --success: #A3BE8C;
   --success-foreground: #1d2128;

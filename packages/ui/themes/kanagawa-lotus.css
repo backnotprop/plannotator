@@ -2,27 +2,27 @@
 .theme-kanagawa-lotus,
 .theme-kanagawa-lotus.light {
   --background: #f2ecbc;
-  --foreground: #545464;
+  --foreground: #484554;
   --card: #e5ddb0;
-  --card-foreground: #545464;
+  --card-foreground: #484554;
   --popover: #e5ddb0;
-  --popover-foreground: #545464;
-  --primary: #4d699b;
+  --popover-foreground: #484554;
+  --primary: #243961;
   --primary-foreground: #f2ecbc;
   --secondary: #dcd5ac;
-  --secondary-foreground: #545464;
+  --secondary-foreground: #484554;
   --muted: #e7dba0;
-  --muted-foreground: #716e61;
-  --accent: #624c83;
+  --muted-foreground: #635f52;
+  --accent: #563f77;
   --accent-foreground: #f2ecbc;
-  --destructive: #c84053;
+  --destructive: #942533;
   --destructive-foreground: #f2ecbc;
-  --border: #dcd5ac;
-  --input: #e7dba0;
-  --ring: #4d699b;
-  --success: #6f894e;
+  --border: #857d59;
+  --input: #857d59;
+  --ring: #243961;
+  --success: #3f5b24;
   --success-foreground: #f2ecbc;
-  --warning: #836f4a;
+  --warning: #685022;
   --warning-foreground: #f2ecbc;
 
   --font-sans: ui-sans-serif, system-ui, sans-serif;
@@ -30,5 +30,5 @@
   --radius: 0.625rem;
 
   --code-bg: #d5cea3;
-  --focus-highlight: #4e8ca2;
+  --focus-highlight: #357288;
 }

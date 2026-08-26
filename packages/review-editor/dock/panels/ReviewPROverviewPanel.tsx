@@ -169,7 +169,7 @@ export const ReviewPROverviewPanel: React.FC<IDockviewPanelProps> = () => {
   return (
     <div className={`h-full flex flex-col gap-2 ${isCompactTouchLayout ? 'p-2' : 'p-3'} bg-background`}>
       {prContextError && (
-        <div className="shrink-0 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+        <div className="shrink-0 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           PR context may be stale: {prContextError}
         </div>
       )}

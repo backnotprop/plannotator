@@ -16,8 +16,8 @@
   --accent-foreground: #101010;
   --destructive: #FF8080;
   --destructive-foreground: #101010;
-  --border: #282828;
-  --input: #1C1C1C;
+  --border: #636363;
+  --input: #636363;
   --ring: #FFC799;
   --success: #99FFE4;
   --success-foreground: #101010;
@@ -49,13 +49,14 @@
   --accent-foreground: #101010;
   --destructive: #FF8080;
   --destructive-foreground: #101010;
-  --border: #282828;
-  --input: #1C1C1C;
+  --border: #636363;
+  --input: #636363;
   --ring: #FFC799;
   --success: #99FFE4;
   --success-foreground: #101010;
   --warning: #FFC799;
   --warning-foreground: #101010;
+
 
   --code-bg: #1C1C1C;
   --focus-highlight: #FFC799;

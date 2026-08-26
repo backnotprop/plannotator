@@ -1,23 +1,23 @@
 /* One Dark Pro — by Binaryify */
 .theme-one-dark-pro {
   --background: #282c34;
-  --foreground: #abb2bf;
+  --foreground: #b0b7c4;
   --card: #21252b;
-  --card-foreground: #abb2bf;
+  --card-foreground: #b0b7c4;
   --popover: #21252b;
-  --popover-foreground: #abb2bf;
+  --popover-foreground: #b0b7c4;
   --primary: #61afef;
   --primary-foreground: #282c34;
   --secondary: #21252b;
-  --secondary-foreground: #abb2bf;
+  --secondary-foreground: #b0b7c4;
   --muted: #1d1f23;
-  --muted-foreground: #5c6370;
+  --muted-foreground: #8d93a1;
   --accent: #c678dd;
   --accent-foreground: #282c34;
-  --destructive: #e06c75;
+  --destructive: #ec7c85;
   --destructive-foreground: #282c34;
-  --border: #3e4452;
-  --input: #1d1f23;
+  --border: #707684;
+  --input: #707684;
   --ring: #528bff;
   --success: #98c379;
   --success-foreground: #282c34;
@@ -34,23 +34,23 @@
 
 .theme-one-dark-pro.light {
   --background: #282c34;
-  --foreground: #abb2bf;
+  --foreground: #b0b7c4;
   --card: #21252b;
-  --card-foreground: #abb2bf;
+  --card-foreground: #b0b7c4;
   --popover: #21252b;
-  --popover-foreground: #abb2bf;
+  --popover-foreground: #b0b7c4;
   --primary: #61afef;
   --primary-foreground: #282c34;
   --secondary: #21252b;
-  --secondary-foreground: #abb2bf;
+  --secondary-foreground: #b0b7c4;
   --muted: #1d1f23;
-  --muted-foreground: #5c6370;
+  --muted-foreground: #8d93a1;
   --accent: #c678dd;
   --accent-foreground: #282c34;
-  --destructive: #e06c75;
+  --destructive: #ec7c85;
   --destructive-foreground: #282c34;
-  --border: #3e4452;
-  --input: #1d1f23;
+  --border: #707684;
+  --input: #707684;
   --ring: #528bff;
   --success: #98c379;
   --success-foreground: #282c34;

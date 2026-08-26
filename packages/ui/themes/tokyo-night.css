@@ -11,13 +11,13 @@
   --secondary: #414868;
   --secondary-foreground: #c0caf5;
   --muted: #343a52;
-  --muted-foreground: #787c99;
+  --muted-foreground: #9aa5ce;
   --accent: #7dcfff;
   --accent-foreground: #1d202f;
   --destructive: #f7768e;
   --destructive-foreground: #1d202f;
-  --border: #414868;
-  --input: #343a52;
+  --border: #6674a9;
+  --input: #6674a9;
   --ring: #7aa2f7;
   --success: #9ece6a;
   --success-foreground: #1d202f;
@@ -34,29 +34,29 @@
 
 .theme-tokyo-night.light {
   --background: #e1e2e7;
-  --foreground: #3760bf;
+  --foreground: #294994;
   --card: #e9e9ed;
-  --card-foreground: #3760bf;
+  --card-foreground: #294994;
   --popover: #e9e9ed;
-  --popover-foreground: #3760bf;
-  --primary: #2e7de9;
-  --primary-foreground: #e1e2e7;
+  --popover-foreground: #294994;
+  --primary: #083c84;
+  --primary-foreground: #ffffff;
   --secondary: #a1a6c5;
-  --secondary-foreground: #3760bf;
+  --secondary-foreground: #1d202f;
   --muted: #d0d3e1;
-  --muted-foreground: #848cb5;
-  --accent: #007197;
-  --accent-foreground: #e1e2e7;
-  --destructive: #f52a65;
-  --destructive-foreground: #e1e2e7;
-  --border: #a1a6c5;
-  --input: #d0d3e1;
-  --ring: #2e7de9;
-  --success: #587539;
-  --success-foreground: #e1e2e7;
-  --warning: #8c6c3e;
-  --warning-foreground: #e1e2e7;
+  --muted-foreground: #4b5577;
+  --accent: #006488;
+  --accent-foreground: #ffffff;
+  --destructive: #a80f3c;
+  --destructive-foreground: #ffffff;
+  --border: #707a9e;
+  --input: #707a9e;
+  --ring: #083c84;
+  --success: #3d611e;
+  --success-foreground: #ffffff;
+  --warning: #74521c;
+  --warning-foreground: #ffffff;
 
   --code-bg: #d5d6db;
-  --focus-highlight: #007197;
+  --focus-highlight: #006488;
 }

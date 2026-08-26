@@ -1,26 +1,26 @@
 /* Min — by Miguel Solorio */
 .theme-min {
   --background: #1f1f1f;
-  --foreground: #b392f0;
+  --foreground: #c4a5ff;
   --card: #242424;
-  --card-foreground: #b392f0;
+  --card-foreground: #c4a5ff;
   --popover: #242424;
-  --popover-foreground: #b392f0;
+  --popover-foreground: #c4a5ff;
   --primary: #b392f0;
   --primary-foreground: #1f1f1f;
   --secondary: #2a2a2a;
   --secondary-foreground: #bbbbbb;
   --muted: #2a2a2a;
-  --muted-foreground: #6b737c;
+  --muted-foreground: #8e96a0;
   --accent: #79b8ff;
   --accent-foreground: #1f1f1f;
   --destructive: #ff7a84;
   --destructive-foreground: #1f1f1f;
-  --border: #383838;
-  --input: #383838;
+  --border: #6e6e6e;
+  --input: #6e6e6e;
   --ring: #b392f0;
-  --success: #3a632a;
-  --success-foreground: #ffffff;
+  --success: #5bb848;
+  --success-foreground: #1f1f1f;
   --warning: #cd9731;
   --warning-foreground: #1f1f1f;
 
@@ -39,22 +39,22 @@
   --card-foreground: #24292e;
   --popover: #f6f6f6;
   --popover-foreground: #24292e;
-  --primary: #6f42c1;
+  --primary: #5e2da8;
   --primary-foreground: #ffffff;
   --secondary: #eeeeee;
   --secondary-foreground: #212121;
   --muted: #f6f6f6;
-  --muted-foreground: #c2c3c5;
-  --accent: #1976d2;
+  --muted-foreground: #68707c;
+  --accent: #1565c0;
   --accent-foreground: #ffffff;
-  --destructive: #d32f2f;
+  --destructive: #b70002;
   --destructive-foreground: #ffffff;
-  --border: #e9e9e9;
-  --input: #e9e9e9;
-  --ring: #6f42c1;
-  --success: #77cc00;
+  --border: #888888;
+  --input: #888888;
+  --ring: #5e2da8;
+  --success: #006100;
   --success-foreground: #ffffff;
-  --warning: #f29718;
+  --warning: #874b00;
   --warning-foreground: #ffffff;
 
   --font-sans: system-ui, sans-serif;

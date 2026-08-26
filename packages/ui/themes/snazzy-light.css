@@ -6,22 +6,22 @@
   --card-foreground: #565869;
   --popover: #f3f4f5;
   --popover-foreground: #565869;
-  --primary: #09a1ed;
+  --primary: #00477c;
   --primary-foreground: #ffffff;
   --secondary: #e9eaeb;
   --secondary-foreground: #565869;
   --muted: #e9eaeb;
-  --muted-foreground: #9194a2;
-  --accent: #2dae58;
+  --muted-foreground: #666876;
+  --accent: #0e6d2e;
   --accent-foreground: #ffffff;
-  --destructive: #ff5c56;
+  --destructive: #af1d18;
   --destructive-foreground: #ffffff;
-  --border: #dedfe0;
-  --input: #e9eaeb;
-  --ring: #09a1ed;
-  --success: #2dae58;
+  --border: #8b8d8f;
+  --input: #8b8d8f;
+  --ring: #00477c;
+  --success: #0b6329;
   --success-foreground: #ffffff;
-  --warning: #cf9c00;
+  --warning: #805200;
   --warning-foreground: #ffffff;
 
   --font-sans: system-ui, sans-serif;
@@ -29,7 +29,7 @@
   --radius: 0.625rem;
 
   --code-bg: #e9eaeb;
-  --focus-highlight: #09a1ed;
+  --focus-highlight: #00477c;
 }
 
 .theme-snazzy-light.light {
@@ -39,22 +39,22 @@
   --card-foreground: #565869;
   --popover: #f3f4f5;
   --popover-foreground: #565869;
-  --primary: #09a1ed;
+  --primary: #00477c;
   --primary-foreground: #ffffff;
   --secondary: #e9eaeb;
   --secondary-foreground: #565869;
   --muted: #e9eaeb;
-  --muted-foreground: #9194a2;
-  --accent: #2dae58;
+  --muted-foreground: #666876;
+  --accent: #0e6d2e;
   --accent-foreground: #ffffff;
-  --destructive: #ff5c56;
+  --destructive: #af1d18;
   --destructive-foreground: #ffffff;
-  --border: #dedfe0;
-  --input: #e9eaeb;
-  --ring: #09a1ed;
-  --success: #2dae58;
+  --border: #8b8d8f;
+  --input: #8b8d8f;
+  --ring: #00477c;
+  --success: #0b6329;
   --success-foreground: #ffffff;
-  --warning: #cf9c00;
+  --warning: #805200;
   --warning-foreground: #ffffff;
 
   --font-sans: system-ui, sans-serif;
@@ -62,5 +62,5 @@
   --radius: 0.625rem;
 
   --code-bg: #e9eaeb;
-  --focus-highlight: #09a1ed;
+  --focus-highlight: #00477c;
 }

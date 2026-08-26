@@ -6,22 +6,22 @@
   --card-foreground: #383a42;
   --popover: #eaeaeb;
   --popover-foreground: #383a42;
-  --primary: #526fff;
+  --primary: #1631a8;
   --primary-foreground: #ffffff;
   --secondary: #e5e5e6;
   --secondary-foreground: #383a42;
   --muted: #eaeaeb;
-  --muted-foreground: #a0a1a7;
-  --accent: #4078f2;
+  --muted-foreground: #676971;
+  --accent: #1d54ce;
   --accent-foreground: #ffffff;
-  --destructive: #e45649;
+  --destructive: #ab2418;
   --destructive-foreground: #ffffff;
-  --border: #dbdbdc;
-  --input: #dbdbdc;
-  --ring: #526fff;
-  --success: #3bba54;
+  --border: #868688;
+  --input: #868688;
+  --ring: #1631a8;
+  --success: #0c6225;
   --success-foreground: #ffffff;
-  --warning: #c18401;
+  --warning: #794e00;
   --warning-foreground: #ffffff;
 
   --font-sans: system-ui, sans-serif;
@@ -29,7 +29,7 @@
   --radius: 0.625rem;
 
   --code-bg: #e5e5e6;
-  --focus-highlight: #526fff;
+  --focus-highlight: #1631a8;
 }
 
 .theme-one-light.light {
@@ -39,22 +39,22 @@
   --card-foreground: #383a42;
   --popover: #eaeaeb;
   --popover-foreground: #383a42;
-  --primary: #526fff;
+  --primary: #1631a8;
   --primary-foreground: #ffffff;
   --secondary: #e5e5e6;
   --secondary-foreground: #383a42;
   --muted: #eaeaeb;
-  --muted-foreground: #a0a1a7;
-  --accent: #4078f2;
+  --muted-foreground: #676971;
+  --accent: #1d54ce;
   --accent-foreground: #ffffff;
-  --destructive: #e45649;
+  --destructive: #ab2418;
   --destructive-foreground: #ffffff;
-  --border: #dbdbdc;
-  --input: #dbdbdc;
-  --ring: #526fff;
-  --success: #3bba54;
+  --border: #868688;
+  --input: #868688;
+  --ring: #1631a8;
+  --success: #0c6225;
   --success-foreground: #ffffff;
-  --warning: #c18401;
+  --warning: #794e00;
   --warning-foreground: #ffffff;
 
   --font-sans: system-ui, sans-serif;
@@ -62,5 +62,5 @@
   --radius: 0.625rem;
 
   --code-bg: #e5e5e6;
-  --focus-highlight: #526fff;
+  --focus-highlight: #1631a8;
 }

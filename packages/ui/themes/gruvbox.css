@@ -6,30 +6,30 @@
   --card-foreground: #ebdbb2;
   --popover: #3c3836;
   --popover-foreground: #ebdbb2;
-  --primary: #458588;
-  --primary-foreground: #ebdbb2;
+  --primary: #98c8b6;
+  --primary-foreground: #1d2021;
   --secondary: #504945;
   --secondary-foreground: #ebdbb2;
   --muted: #504945;
-  --muted-foreground: #a89984;
+  --muted-foreground: #c7b7a1;
   --accent: #b8bb26;
-  --accent-foreground: #282828;
-  --destructive: #fb4934;
-  --destructive-foreground: #282828;
-  --border: #504945;
-  --input: #3c3836;
-  --ring: #458588;
-  --success: #8ec07c;
-  --success-foreground: #282828;
+  --accent-foreground: #1d2021;
+  --destructive: #ffa691;
+  --destructive-foreground: #1d2021;
+  --border: #8a827e;
+  --input: #8a827e;
+  --ring: #98c8b6;
+  --success: #a2d290;
+  --success-foreground: #1d2021;
   --warning: #fabd2f;
-  --warning-foreground: #282828;
+  --warning-foreground: #1d2021;
 
   --font-sans: system-ui, sans-serif;
   --font-mono: 'Fira Code', ui-monospace, monospace;
   --radius: 0.625rem;
 
   --code-bg: #32302f;
-  --focus-highlight: #83a598;
+  --focus-highlight: #98c8b6;
 }
 
 .theme-gruvbox.light {
@@ -39,24 +39,24 @@
   --card-foreground: #3c3836;
   --popover: #f2e5bc;
   --popover-foreground: #3c3836;
-  --primary: #076678;
+  --primary: #044654;
   --primary-foreground: #fbf1c7;
   --secondary: #d5c4a1;
   --secondary-foreground: #3c3836;
   --muted: #ebdbb2;
   --muted-foreground: #665c54;
-  --accent: #79740e;
+  --accent: #656006;
   --accent-foreground: #fbf1c7;
   --destructive: #9d0006;
   --destructive-foreground: #fbf1c7;
-  --border: #d5c4a1;
-  --input: #ebdbb2;
-  --ring: #076678;
-  --success: #689d6a;
+  --border: #8f7f5e;
+  --input: #8f7f5e;
+  --ring: #044654;
+  --success: #28572a;
   --success-foreground: #fbf1c7;
-  --warning: #b57614;
+  --warning: #764400;
   --warning-foreground: #fbf1c7;
 
   --code-bg: #ebdbb2;
-  --focus-highlight: #076678;
+  --focus-highlight: #044654;
 }

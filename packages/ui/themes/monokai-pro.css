@@ -12,17 +12,17 @@
   --secondary: #5b595c;
   --secondary-foreground: #fcfcfa;
   --muted: #403e41;
-  --muted-foreground: #727072;
+  --muted-foreground: #adaaae;
   --accent: #78dce8;
   --accent-foreground: #2d2a2e;
-  --destructive: #ff6188;
+  --destructive: #ffb0c7;
   --destructive-foreground: #2d2a2e;
-  --border: #5b595c;
-  --input: #403e41;
+  --border: #8f8c91;
+  --input: #8f8c91;
   --ring: #ffd866;
   --success: #a9dc76;
   --success-foreground: #2d2a2e;
-  --warning: #fc9867;
+  --warning: #ffb58c;
   --warning-foreground: #2d2a2e;
 
   --font-sans: system-ui, sans-serif;

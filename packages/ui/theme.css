@@ -1277,7 +1277,7 @@ html:not(.transitions-ready) * {
 }
 
 .annotation-highlight.deletion {
-  background: oklch(from var(--destructive) l c h / 0.35);
+  background: oklch(from var(--destructive) l c h / 0.25);
   text-decoration: line-through;
   text-decoration-color: var(--destructive);
   text-decoration-thickness: 2px;
@@ -1604,7 +1604,7 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
 }
 
 .annotation-highlight.deletion {
-  background: oklch(from var(--destructive) l c h / 0.35);
+  background: oklch(from var(--destructive) l c h / 0.25);
   text-decoration: line-through;
   text-decoration-color: var(--destructive);
   text-decoration-thickness: 2px;

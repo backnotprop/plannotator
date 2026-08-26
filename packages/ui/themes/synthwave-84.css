@@ -15,10 +15,10 @@
   --muted-foreground: #ffffff99;
   --accent: #72f1b8;
   --accent-foreground: #262335;
-  --destructive: #fe4450;
-  --destructive-foreground: #ffffff;
-  --border: #495495;
-  --input: #2a2139;
+  --destructive: #ff707b;
+  --destructive-foreground: #262335;
+  --border: #5d6ab0;
+  --input: #5d6ab0;
   --ring: #ff7edb;
   --success: #72f1b8;
   --success-foreground: #262335;

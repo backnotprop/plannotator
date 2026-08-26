@@ -876,7 +876,7 @@ export const ReviewPRArtifactsPanel: React.FC<IDockviewPanelProps> = () => {
 
       <section className="flex min-w-0 flex-1 flex-col">
         {prContextError && (
-          <div className="shrink-0 border-b border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+          <div className="shrink-0 border-b border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
             PR artifacts may be stale: {prContextError}
           </div>
         )}

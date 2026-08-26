@@ -6,19 +6,19 @@
   --card-foreground: rgb(29, 29, 38);
   --popover: rgb(255, 255, 255);
   --popover-foreground: rgb(29, 29, 38);
-  --primary: rgb(0, 203, 255);
+  --primary: rgb(0, 75, 160);
   --primary-foreground: rgb(255, 255, 255);
   --secondary: rgb(203, 203, 240);
   --secondary-foreground: rgb(29, 29, 38);
   --muted: rgb(213, 214, 243);
-  --muted-foreground: rgb(99, 102, 103);
-  --accent: rgb(0, 206, 202);
-  --accent-foreground: rgb(29, 29, 38);
-  --destructive: rgb(255, 51, 153);
+  --muted-foreground: rgb(85, 88, 90);
+  --accent: rgb(0, 122, 120);
+  --accent-foreground: rgb(255, 255, 255);
+  --destructive: rgb(190, 0, 95);
   --destructive-foreground: rgb(255, 255, 255);
-  --border: rgb(213, 214, 243);
-  --input: rgb(213, 214, 243);
-  --ring: rgb(0, 203, 255);
+  --border: rgb(135, 137, 175);
+  --input: rgb(135, 137, 175);
+  --ring: rgb(0, 75, 160);
   --chart-1: rgb(255, 51, 153);
   --chart-2: rgb(0, 211, 100);
   --chart-3: rgb(255, 204, 102);
@@ -50,8 +50,8 @@
   /* Plannotator extended tokens */
   --success: oklch(0.45 0.20 150);
   --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.55 0.18 85);
-  --warning-foreground: oklch(0.18 0.02 260);
+  --warning: oklch(0.48 0.18 85);
+  --warning-foreground: oklch(1 0 0);
   --code-bg: rgb(240, 240, 248);
-  --focus-highlight: oklch(0.70 0.20 200);
+  --focus-highlight: oklch(0.55 0.18 200);
 }

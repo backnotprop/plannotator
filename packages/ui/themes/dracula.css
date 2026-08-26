@@ -2,9 +2,9 @@
 .theme-dracula.light {
   --background: rgb(40, 42, 54);
   --foreground: rgb(248, 248, 242);
-  --card: rgb(68, 71, 90);
+  --card: rgb(33, 34, 44);
   --card-foreground: rgb(248, 248, 242);
-  --popover: rgb(68, 71, 90);
+  --popover: rgb(33, 34, 44);
   --popover-foreground: rgb(248, 248, 242);
   --primary: rgb(189, 147, 249);
   --primary-foreground: rgb(40, 42, 54);
@@ -14,10 +14,10 @@
   --muted-foreground: rgb(188, 190, 206);
   --accent: rgb(139, 233, 253);
   --accent-foreground: rgb(40, 42, 54);
-  --destructive: rgb(255, 85, 85);
-  --destructive-foreground: rgb(248, 248, 242);
-  --border: rgb(68, 71, 90);
-  --input: rgb(68, 71, 90);
+  --destructive: rgb(255, 105, 105);
+  --destructive-foreground: rgb(40, 42, 54);
+  --border: rgb(98, 114, 164);
+  --input: rgb(98, 114, 164);
   --ring: rgb(189, 147, 249);
   --success: rgb(80, 250, 123);
   --success-foreground: rgb(40, 42, 54);
