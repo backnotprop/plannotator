@@ -21,6 +21,17 @@ afterEach(() => {
 
 type SharingResult = ReturnType<typeof useSharing>;
 
+// The paste POST is only issued after compress + encrypt, which take several
+// event-loop turns; invalidating before it exists leaves the request promise
+// unresolvable (the resolver is captured per call) and the test hangs. How
+// many turns that takes depends on what ran earlier in the same process.
+async function waitForPasteRequest(issued: () => boolean): Promise<void> {
+  for (let i = 0; i < 50 && !issued(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  expect(issued()).toBe(true);
+}
+
 function Harness({
   revision,
   annotationText = '',
@@ -85,7 +96,7 @@ describe.if(hasDom)('useSharing request invalidation', () => {
     let pendingShortUrl: Promise<string | null> | null = null;
     await act(async () => {
       pendingShortUrl = latest?.generateShortUrl() ?? null;
-      await Promise.resolve();
+      await waitForPasteRequest(() => resolvePaste !== null);
     });
     expect(latest?.isGeneratingShortUrl).toBe(true);
 
@@ -119,7 +130,7 @@ describe.if(hasDom)('useSharing request invalidation', () => {
     let pendingShortUrl: Promise<string | null> | null = null;
     await act(async () => {
       pendingShortUrl = latest?.generateShortUrl() ?? null;
-      await Promise.resolve();
+      await waitForPasteRequest(() => resolvePaste !== null);
     });
 
     await act(async () => {
@@ -195,13 +206,8 @@ describe.if(hasDom)('useSharing request invalidation', () => {
     let pendingShortUrl: Promise<string | null> = Promise.resolve(null);
     await act(async () => {
       pendingShortUrl = latest?.generateShortUrl() ?? Promise.resolve(null);
-      // The share-html fetch, setShareHtml re-render, and compression pipeline
-      // all need event-loop turns before the paste POST is issued.
-      for (let i = 0; i < 50 && !resolvePaste; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      await waitForPasteRequest(() => resolvePaste !== null);
     });
-    expect(resolvePaste).not.toBeNull();
 
     let shortUrl: string | null = null;
     await act(async () => {
