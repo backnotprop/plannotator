@@ -5,14 +5,8 @@
  * slash commands. Extracted from the event hook for modularity.
  */
 
-import {
-  startReviewServer,
-  handleReviewServerReady,
-} from "@plannotator/server/review";
-import {
-  startAnnotateServer,
-  handleAnnotateServerReady,
-} from "@plannotator/server/annotate";
+import { startReviewServer, handleReviewServerReady } from "@plannotator/server/review";
+import { startAnnotateServer, handleAnnotateServerReady } from "@plannotator/server/annotate";
 import { type DiffType, prepareLocalReviewDiff, detectManagedVcs } from "@plannotator/server/vcs";
 import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
@@ -41,10 +35,60 @@ import { statSync } from "fs";
 import path from "path";
 import { resolveValidatedTargetAgent } from "./agent-switch";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import { clearSessionUrl, writeSessionUrl } from "./session-url";
+
+/** Run fn with stderr temporarily silenced (prevents TUI overlay corruption). */
+function withStderrSuppressed(fn: () => void | Promise<void>): void {
+  const orig = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (() => true) as any;
+  try {
+    const result = fn();
+    if (result && typeof (result as any).catch === "function") (result as any).catch(() => {});
+  } finally {
+    process.stderr.write = orig;
+  }
+}
+
+/**
+ * Resolve the hostname for a toast URL in the server-plugin context.
+ *
+ * Uses `ctx.serverUrl` (passed through CommandDeps) — a getter on the
+ * opencode server's actual listen address (`Server.url`), evaluated lazily
+ * so it reflects the resolved hostname even though the SDK client's
+ * `baseUrl` was snapshotted at plugin init time. Falls back to
+ * "localhost" when serverUrl is unavailable (e.g. test stubs).
+ *
+ * This is intentionally separate from the TUI's `getServerHostname()`:
+ * the TUI resolves via `api.client.client.getConfig().baseUrl` and
+ * `api.state.config.server.hostname` (TUI-only sources), while the server
+ * plugin has direct access to `ctx.serverUrl`.
+ */
+function resolveToastHost(serverUrl: URL | undefined): string {
+  return serverUrl?.hostname ?? "localhost";
+}
+
+/** Show a Plannotator toast notification (best-effort, non-blocking). */
+function showPlannotatorToast(client: any, serverUrl: URL | undefined, url: string, label: string): void {
+  const host = resolveToastHost(serverUrl);
+  let displayUrl = url;
+  try {
+    const port = new URL(url).port;
+    if (port) displayUrl = `http://${host}:${port}`;
+  } catch { /* use original URL */ }
+  try {
+    const result = client.tui?.showToast?.({
+      body: { title: "Plannotator", message: `Open ${label}: ${displayUrl} (URL also in sidebar)`, variant: "info" },
+    });
+    if (result && typeof result.catch === "function") result.catch(() => {});
+  } catch {}
+}
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
   client: any;
+  /** The opencode server's actual listen URL (ctx.serverUrl from PluginInput).
+   *  Used to resolve a reachable hostname for toast notifications. */
+  serverUrl?: URL;
   htmlContent: string;
   reviewHtmlContent: string;
   getSharingEnabled: () => Promise<boolean>;
@@ -63,7 +107,7 @@ export async function handleReviewCommand(
   event: any,
   deps: CommandDeps
 ) {
-  const { client, reviewHtmlContent, getSharingEnabled, getShareBaseUrl, directory } = deps;
+  const { client, serverUrl, reviewHtmlContent, getSharingEnabled, getShareBaseUrl, directory } = deps;
 
   // @ts-ignore - Event properties contain arguments
   const reviewArgs = parseReviewArgs(event.properties?.arguments || "");
@@ -148,6 +192,9 @@ export async function handleReviewCommand(
     }
   }
 
+  // @ts-ignore - Event properties contain sessionID
+  const sessionId = event.properties?.sessionID;
+  let sessionUrl: string | undefined;
   const server = await startReviewServer({
     rawPatch,
     gitRef,
@@ -164,23 +211,24 @@ export async function handleReviewCommand(
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
     onReady: (url, isRemote, port) => {
-      handleReviewServerReady(url, isRemote, port);
-      client.app.log({ level: "info", message: `[Plannotator] Open code review: ${url}` });
+      sessionUrl = url;
+      withStderrSuppressed(() => handleReviewServerReady(url, isRemote, port));
+      void client.app.log({ level: "info", message: `[Plannotator] Open code review: ${url}` });
+      showPlannotatorToast(client, serverUrl, url, "code review");
+      writeSessionUrl(url, sessionId);
     },
   });
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+  clearSessionUrl(sessionUrl);
 
   if (result.exit) {
     return;
   }
 
   if (result.feedback) {
-    // @ts-ignore - Event properties contain sessionID
-    const sessionId = event.properties?.sessionID;
-
     if (sessionId) {
       const targetAgent = await resolveValidatedTargetAgent({
         client,
@@ -216,7 +264,7 @@ export async function handleAnnotateCommand(
   event: any,
   deps: CommandDeps
 ) {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
+  const { client, serverUrl, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
@@ -367,6 +415,7 @@ export async function handleAnnotateCommand(
   // and Pi runtimes, which both pass it (otherwise history lands in the
   // shared "_unknown" bucket).
   const annotateProject = (await detectProjectName()) ?? undefined;
+  let sessionUrl: string | undefined;
   const server = await startServer({
     markdown,
     filePath: absolutePath,
@@ -387,14 +436,18 @@ export async function handleAnnotateCommand(
     agentCwd,
     htmlContent,
     onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
-      client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
+      sessionUrl = url;
+      withStderrSuppressed(() => handleAnnotateServerReady(url, isRemote, port));
+      void client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
+      showPlannotatorToast(client, serverUrl, url, "annotation UI");
+      writeSessionUrl(url, sessionId);
     },
   });
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+  clearSessionUrl(sessionUrl);
 
   if (result.exit || (result.approved && !result.feedback)) {
     return;
@@ -440,7 +493,7 @@ export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
 ): Promise<{ approved: boolean; feedback: string } | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+  const { client, serverUrl, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
@@ -490,6 +543,7 @@ export async function handleAnnotateLastCommand(
   const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
 
   const lastProject = (await detectProjectName()) ?? undefined;
+  let sessionUrl: string | undefined;
   const server = await startServer({
     markdown: lastText,
     filePath: "last-message",
@@ -504,14 +558,18 @@ export async function handleAnnotateLastCommand(
     approvalNotesSupported: true,
     htmlContent,
     onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
-      client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
+      sessionUrl = url;
+      withStderrSuppressed(() => handleAnnotateServerReady(url, isRemote, port));
+      void client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
+      showPlannotatorToast(client, serverUrl, url, "annotation UI");
+      writeSessionUrl(url, sessionId);
     },
   });
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+  clearSessionUrl(sessionUrl);
 
   if (result.exit || (result.approved && !result.feedback)) {
     return null;

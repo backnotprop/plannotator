@@ -7,6 +7,7 @@ describe("OpenCode package entrypoints", () => {
     // OpenCode 1 checks ./server before main, so that subpath must remain absent.
     expect(packageJson.exports).toEqual({
       ".": "./dist/server.js",
+      "./tui": "./dist/tui.js",
     });
   });
 
