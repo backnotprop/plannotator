@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -137,5 +137,79 @@ describe.if(hasDom)('useSharing request invalidation', () => {
       expect(await pendingShortUrl).toBeNull();
     });
     expect(latest?.shortShareUrl).toBe('');
+  });
+
+  // Guards the failure where the resolver's own success invalidated the
+  // request: App's resolveRawHtmlForShare caches the portable HTML via
+  // setShareHtml and is memoized on shareHtml, so its identity changes
+  // mid-request. With the resolver in the request-context deps, the first
+  // short-link generation on an HTML session discarded its own paste result
+  // and the loading flag never cleared.
+  test('keeps a short link whose resolver cached portable HTML mid-request', async () => {
+    let resolvePaste: ((response: Response) => void) | null = null;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/share-html')) {
+        return Response.json({ shareHtml: '<h1>Portable</h1>' });
+      }
+      return new Promise<Response>((resolve) => { resolvePaste = resolve; });
+    }) as unknown as typeof fetch;
+
+    function CachingResolverHarness({ onResult }: { onResult: (result: SharingResult) => void }) {
+      const [markdown, setMarkdown] = useState('');
+      // Stable identity: a fresh [] per render would invalidate the request
+      // context on its own and mask what this test isolates.
+      const [annotations] = useState<Annotation[]>([]);
+      const setAnnotations = (() => {}) as Parameters<typeof useSharing>[4];
+      const [attachments, setAttachments] = useState<Parameters<typeof useSharing>[2]>([]);
+      const [rawHtml, setRawHtml] = useState('<h1>Doc</h1>');
+      const [shareHtml, setShareHtml] = useState('');
+      const [, setRenderAs] = useState<'markdown' | 'html'>('html');
+      // Mirrors App.tsx resolveRawHtmlForShare: memoized on shareHtml, sets it on success.
+      const resolveRawHtmlForShare = useCallback(async (): Promise<string | null> => {
+        if (shareHtml) return shareHtml;
+        const res = await fetch('/api/share-html');
+        const data = (await res.json()) as { shareHtml: string };
+        setShareHtml(data.shareHtml);
+        return data.shareHtml;
+      }, [shareHtml]);
+      const result = useSharing(
+        markdown, annotations, attachments, setMarkdown, setAnnotations, setAttachments,
+        undefined, 'https://share.example.test', 'https://paste.example.test',
+        rawHtml, resolveRawHtmlForShare, setRawHtml, setShareHtml, setRenderAs, 0,
+      );
+      onResult(result);
+      return null;
+    }
+
+    let latest: SharingResult | null = null;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(<CachingResolverHarness onResult={(result) => { latest = result; }} />);
+    });
+
+    // Kick off the click and let the share-html fetch, setShareHtml, and the
+    // resulting re-render land while the paste POST is still on the wire —
+    // the ordering a real network round-trip always produces.
+    let pendingShortUrl: Promise<string | null> = Promise.resolve(null);
+    await act(async () => {
+      pendingShortUrl = latest?.generateShortUrl() ?? Promise.resolve(null);
+      // The share-html fetch, setShareHtml re-render, and compression pipeline
+      // all need event-loop turns before the paste POST is issued.
+      for (let i = 0; i < 50 && !resolvePaste; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    });
+    expect(resolvePaste).not.toBeNull();
+
+    let shortUrl: string | null = null;
+    await act(async () => {
+      resolvePaste?.(Response.json({ id: 'ok123' }));
+      shortUrl = await pendingShortUrl;
+    });
+
+    expect(shortUrl).not.toBeNull();
+    expect(latest?.isGeneratingShortUrl).toBe(false);
   });
 });
