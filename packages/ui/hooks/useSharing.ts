@@ -116,6 +116,12 @@ export function useSharing(
   const [pendingSharedAnnotations, setPendingSharedAnnotations] = useState<Annotation[] | null>(null);
   const [sharedGlobalAttachments, setSharedGlobalAttachments] = useState<ImageAttachment[] | null>(null);
   const [shareLoadError, setShareLoadError] = useState('');
+  // Identity token for in-flight share requests: a new token invalidates any
+  // response still on the wire. Content inputs only — resolveRawHtmlForShare
+  // is deliberately NOT a dependency: its identity changes when it caches the
+  // portable HTML mid-request (App memoizes it on shareHtml), and listing it
+  // would make the first short-link generation on an HTML session discard its
+  // own result. HTML refreshes invalidate through contentRevision instead.
   const shareRequestContext = useMemo(() => ({}), [
     markdown,
     annotations,
@@ -123,7 +129,6 @@ export function useSharing(
     shareBaseUrl,
     pasteApiUrl,
     rawHtml,
-    resolveRawHtmlForShare,
     contentRevision,
   ]);
   const latestShareRequestContextRef = useRef(shareRequestContext);
