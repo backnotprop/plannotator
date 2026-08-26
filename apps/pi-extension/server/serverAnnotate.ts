@@ -60,7 +60,7 @@ import {
 	type FolderAnnotateHistory,
 } from "./reference.ts";
 import { closeAllFileBrowserWatchers, handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
-import { getExtraMarkdownExtensions, resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
+import { getExtraMarkdownExtensions, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "../generated/resolve-file.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
@@ -462,9 +462,24 @@ export async function startAnnotateServer(options: {
 		}
 
 		try {
-			const htmlContent = options.renderHtml && options.rawHtml && requestedPath === sourcePath
-				? options.rawHtml
-				: readFileSync(requestedPath, "utf-8");
+			let htmlContent: string;
+			if (options.renderHtml && options.rawHtml && requestedPath === sourcePath) {
+				// The root document is shared from its CURRENT bytes, not the startup
+				// snapshot: the client re-fetches this after a Refresh, and a share
+				// link must carry the page the annotations were placed on. The
+				// snapshot is only the fallback when the file no longer exists.
+				if (existsSync(sourcePath)) {
+					if (statSync(sourcePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
+						json(res, { error: "File too large to share (max 2MB)" }, 413);
+						return;
+					}
+					htmlContent = readFileSync(sourcePath, "utf-8");
+				} else {
+					htmlContent = options.rawHtml;
+				}
+			} else {
+				htmlContent = readFileSync(requestedPath, "utf-8");
+			}
 			json(res, { shareHtml: htmlAssets.inlineHtml(htmlContent, requestedPath) });
 		} catch {
 			json(res, { error: "Failed to prepare share HTML" }, 500);

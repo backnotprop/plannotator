@@ -17,7 +17,7 @@ import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
-import { getExtraMarkdownExtensions, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
+import { getExtraMarkdownExtensions, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash, deleteDraft } from "./draft";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
@@ -420,9 +420,24 @@ export async function startAnnotateServer(
     }
 
     try {
-      const html = renderHtml && rawHtml && requestedPath === sourcePath
-        ? rawHtml
-        : await Bun.file(requestedPath).text();
+      let html: string;
+      if (renderHtml && rawHtml && requestedPath === sourcePath) {
+        // The root document is shared from its CURRENT bytes, not the startup
+        // snapshot: the client re-fetches this after a Refresh, and a share
+        // link must carry the page the annotations were placed on. The
+        // snapshot is only the fallback when the file no longer exists.
+        const file = Bun.file(sourcePath);
+        if (await file.exists()) {
+          if (file.size > MAX_ANNOTATABLE_FILE_BYTES) {
+            return Response.json({ error: "File too large to share (max 2MB)" }, { status: 413 });
+          }
+          html = await file.text();
+        } else {
+          html = rawHtml;
+        }
+      } else {
+        html = await Bun.file(requestedPath).text();
+      }
       return Response.json({ shareHtml: htmlAssets.inlineHtml(html, requestedPath) });
     } catch {
       return Response.json({ error: "Failed to prepare share HTML" }, { status: 500 });

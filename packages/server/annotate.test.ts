@@ -197,6 +197,46 @@ describe("annotate server: /api/share-html symlink containment", () => {
       server.stop();
     }
   });
+
+  // The client re-fetches /api/share-html after a Refresh; serving the startup
+  // snapshot here would put the pre-refresh page into the share link.
+  test("shares the root document's current bytes after the file changes on disk", async () => {
+    // realpath so the deleted-file fallback below is reachable: containment
+    // realpaths the root but keeps a missing target's lexical path, which on a
+    // symlinked tmpdir (macOS) would never match.
+    const docDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-sharehtml-refresh-")));
+    const pagePath = join(docDir, "page.html");
+    const startupHtml = "<html><body>STARTUP_VERSION</body></html>";
+    writeFileSync(pagePath, startupHtml, "utf-8");
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = mkdtempSync(join(tmpdir(), "plannotator-sharehtml-data-"));
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: pagePath,
+      htmlContent: MINIMAL_HTML,
+      rawHtml: startupHtml,
+      renderHtml: true,
+    });
+
+    try {
+      writeFileSync(pagePath, "<html><body>REFRESHED_VERSION</body></html>", "utf-8");
+      const refreshed = await (await fetch(
+        `${server.url}/api/share-html?path=${encodeURIComponent(pagePath)}`,
+      )).json() as { shareHtml: string };
+      expect(refreshed.shareHtml).toContain("REFRESHED_VERSION");
+      expect(refreshed.shareHtml).not.toContain("STARTUP_VERSION");
+
+      // A deleted source keeps the startup snapshot as the only remaining source.
+      unlinkSync(pagePath);
+      const fallback = await (await fetch(`${server.url}/api/share-html`)).json() as { shareHtml: string };
+      expect(fallback.shareHtml).toContain("STARTUP_VERSION");
+    } finally {
+      server.stop();
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+    }
+  });
 });
 
 describe("annotate server: source save", () => {
