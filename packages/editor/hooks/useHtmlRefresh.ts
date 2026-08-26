@@ -64,6 +64,11 @@ export function useHtmlRefresh({
       onSnapshot(result.snapshot.rawHtml);
       const nextGeneration = reloadGenerationRef.current + 1;
       reloadGenerationRef.current = nextGeneration;
+      // Armed until the remounted viewer's bridge reports its restore. The
+      // bridge emits "unanchored" only when the set CHANGES from its initial
+      // empty state, so a pass that restores everything never posts and this
+      // stays armed; that is harmless because the next refresh replaces it
+      // and a path change clears it.
       restorePendingRef.current = { path: requestPath, generation: nextGeneration };
       setReloadGeneration(nextGeneration);
       toast.success('Refreshed HTML from disk');
