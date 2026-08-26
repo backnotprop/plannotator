@@ -12,7 +12,11 @@ afterEach(() => {
 });
 
 describe.if(hasDom)('HtmlViewer Vim HUD bridge', () => {
-  test('reports annotations that no longer match after the iframe reloads', async () => {
+  // Guards the parent-side plumbing the refresh flow depends on: a bridge
+  // "unanchored" report from the viewer's own iframe reaches
+  // onUnanchoredChange. No reload happens here; the bridge's restore pass is
+  // simulated by dispatching the message it would post.
+  test('forwards the bridge unanchored report to onUnanchoredChange', async () => {
     if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
     const host = document.createElement('div');
     document.body.appendChild(host);
