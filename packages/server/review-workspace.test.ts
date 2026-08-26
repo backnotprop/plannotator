@@ -109,6 +109,32 @@ function makeMockSem(dir: string, options: {
   return semPath;
 }
 
+function makeMockEslintProject(dir: string): void {
+  mkdirSync(join(dir, "src"), { recursive: true });
+  mkdirSync(join(dir, "node_modules", "eslint", "bin"), { recursive: true });
+  writeFileSync(join(dir, "src", "app.ts"), "export const value = 1;\n", "utf-8");
+  writeFileSync(join(dir, "eslint.config.js"), "export default [];\n", "utf-8");
+  writeFileSync(join(dir, "node_modules", "eslint", "package.json"), JSON.stringify({
+    version: "9.12.0",
+    bin: { eslint: "bin/eslint.cjs" },
+  }), "utf-8");
+  writeFileSync(join(dir, "node_modules", "eslint", "bin", "eslint.cjs"), [
+    'const { join } = require("node:path");',
+    "process.stdout.write(JSON.stringify([{",
+    '  filePath: join(process.cwd(), "src", "app.ts"),',
+    "  messages: [{",
+    '    ruleId: "react-hooks/exhaustive-deps",',
+    "    severity: 1,",
+    '    message: "React Hook has a missing dependency.",',
+    "    line: 1,",
+    "    column: 1,",
+    "  }],",
+    "}]));",
+    "process.exitCode = 1;",
+    "",
+  ].join("\n"), "utf-8");
+}
+
 function makeBlockingSem(dir: string): { semPath: string; startedPath: string; releasePath: string } {
   const semPath = join(dir, "sem-blocking");
   const startedPath = join(dir, "started");
@@ -155,6 +181,70 @@ afterEach(() => {
 });
 
 describe("review-workspace", () => {
+  describe("ESLint check API", () => {
+    it("advertises and runs the reviewed project's local ESLint for the current snapshot", async () => {
+      const dir = makeTempDir("plannotator-eslint-server-");
+      makeMockEslintProject(dir);
+      initRepo(dir);
+      const gitContext = await getVcsContext(dir, "git");
+      const rawPatch = [
+        "diff --git a/src/app.ts b/src/app.ts",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/src/app.ts",
+        "@@ -0,0 +1 @@",
+        "+export const value = 1;",
+        "",
+      ].join("\n");
+      const server = await startReviewServer({
+        rawPatch,
+        gitRef: "test",
+        diffType: "uncommitted",
+        gitContext,
+        origin: "claude-code",
+        htmlContent: "<!doctype html><html><body>review</body></html>",
+      });
+
+      try {
+        const diffPayload = await fetch(`${server.url}/api/diff`).then((response) => response.json()) as {
+          snapshotId: string;
+          eslintCheck?: { available: boolean; fileCount?: number; projectCount?: number };
+        };
+        expect(diffPayload.eslintCheck).toEqual({ available: true, fileCount: 1, projectCount: 1 });
+
+        const response = await fetch(`${server.url}/api/eslint-check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshotId: diffPayload.snapshotId }),
+        });
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({
+          status: "ok",
+          eslintVersions: ["9.12.0"],
+          summary: { errors: 0, warnings: 1, changedLineWarnings: 1 },
+          diagnostics: [{ filePath: "src/app.ts", line: 1, onChangedLine: true }],
+        });
+
+        writeFileSync(join(dir, "src", "app.ts"), "export const value = 2;\n", "utf-8");
+        const changedResponse = await fetch(`${server.url}/api/eslint-check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshotId: diffPayload.snapshotId }),
+        });
+        expect(changedResponse.status).toBe(409);
+
+        const staleResponse = await fetch(`${server.url}/api/eslint-check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshotId: "stale" }),
+        });
+        expect(staleResponse.status).toBe(409);
+      } finally {
+        server.stop();
+      }
+    });
+  });
+
   describe("semantic diff API", () => {
     const rawPatch = [
       "diff --git a/src/app.ts b/src/app.ts",

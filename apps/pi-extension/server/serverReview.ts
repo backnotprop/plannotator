@@ -171,6 +171,13 @@ import {
 	SemanticDiffResponseCache,
 } from "../generated/semantic-diff.ts";
 import type { SemanticDiffAvailability, SemanticDiffResponse } from "../generated/semantic-diff-types.ts";
+import {
+	buildEslintCheckInput,
+	getEslintCheckAvailability,
+	isEslintCheckCompatibleReviewView,
+	runEslintCheck,
+} from "../generated/eslint-check.ts";
+import type { EslintCheckAdvert, EslintCheckResponse } from "../generated/eslint-check-types.ts";
 import { CallFlowService } from "../generated/call-flow.ts";
 import { CallFlowInstallCoordinator, callFlowInstallOriginAllowed } from "../generated/call-flow-install.ts";
 import { parseCallFlowInstallRequest, resolveCallFlowInstallTargets } from "../generated/call-flow-languages.ts";
@@ -1008,6 +1015,77 @@ export async function startReviewServer(options: {
 			snapshotSupported: !workspace && (isPRMode || vcsSupportsSnapshot(sessionVcsType ?? "git", diffType)),
 			rawPatch: currentPatch,
 		});
+	}
+
+	function eslintCheckCompatibleView(): boolean {
+		return isEslintCheckCompatibleReviewView({ isPRMode, isWorkspaceMode: !!workspace, diffType: currentDiffType as string });
+	}
+
+	function eslintCheckUnavailableReason(): string {
+		if (isPRMode) return "pr-review-unsupported";
+		return eslintCheckCompatibleView() ? "local-checkout-unavailable" : "snapshot-not-working-tree";
+	}
+
+	function resolveEslintCheckInput() {
+		if (!eslintCheckCompatibleView()) return null;
+		const cwd = workspace?.root ?? (isPRMode ? resolvePRLocalCwd() : resolveAgentCwd());
+		if (!cwd) return null;
+		return buildEslintCheckInput(currentPatch, cwd, workspace?.repos.map((repo) => ({ label: repo.label, cwd: repo.cwd })));
+	}
+
+	function getEslintCheckAdvert(): EslintCheckAdvert {
+		const input = resolveEslintCheckInput();
+		return input ? getEslintCheckAvailability(input) : { available: false, reason: eslintCheckUnavailableReason() };
+	}
+
+	interface EslintCheckBaseline {
+		snapshotId: string;
+		fingerprintGeneration: number;
+		fingerprint: string | null;
+	}
+
+	async function resolveEslintCheckBaseline(requestedSnapshotId: string | undefined): Promise<EslintCheckBaseline | null> {
+		if (requestedSnapshotId !== currentSnapshotId()) return null;
+		const baselineGeneration = fingerprintGeneration;
+		let baseline = currentFingerprint;
+		if (pendingFingerprintCapture) baseline = await pendingFingerprintCapture;
+		if (baselineGeneration !== fingerprintGeneration || requestedSnapshotId !== currentSnapshotId()) return null;
+		const freshFingerprint = await computeDiffFingerprint();
+		if (baseline && freshFingerprint && baseline !== freshFingerprint) return null;
+		return { snapshotId: requestedSnapshotId, fingerprintGeneration: baselineGeneration, fingerprint: baseline };
+	}
+
+	function sameEslintCheckBaseline(left: EslintCheckBaseline, right: EslintCheckBaseline): boolean {
+		return left.snapshotId === right.snapshotId
+			&& left.fingerprintGeneration === right.fingerprintGeneration
+			&& left.fingerprint === right.fingerprint;
+	}
+
+	let eslintCheckCache: { baseline: EslintCheckBaseline; response: EslintCheckResponse } | null = null;
+
+	async function getEslintCheck(requestedSnapshotId: string | undefined): Promise<EslintCheckResponse> {
+		const baseline = await resolveEslintCheckBaseline(requestedSnapshotId);
+		if (!baseline) return { status: "error", reason: "stale-snapshot", message: "The reviewed diff changed before ESLint started. Run the check again." };
+		if (eslintCheckCache && sameEslintCheckBaseline(eslintCheckCache.baseline, baseline)) return eslintCheckCache.response;
+		const input = resolveEslintCheckInput();
+		if (!input) {
+			return {
+				status: "unavailable",
+				reason: eslintCheckUnavailableReason(),
+				message: isPRMode
+					? "ESLint is currently available only for local code reviews."
+					: eslintCheckCompatibleView()
+						? "ESLint requires a local checkout of the code under review."
+						: "ESLint is available only when the review's new side is the current working tree.",
+			};
+		}
+		const response = await runEslintCheck(input);
+		const completedBaseline = await resolveEslintCheckBaseline(requestedSnapshotId);
+		if (!completedBaseline || !sameEslintCheckBaseline(baseline, completedBaseline)) {
+			return { status: "error", reason: "stale-snapshot", message: "The reviewed diff changed while ESLint was running. Run the check again." };
+		}
+		if (response.status === "ok") eslintCheckCache = { baseline, response };
+		return response;
 	}
 
 	async function getCallFlow(url: URL): Promise<CallFlowResponse> {
@@ -1998,6 +2076,7 @@ export async function startReviewServer(options: {
 				...(baseBehindRemote && { baseBehindRemote: true }),
 				...(servedError && { error: servedError }),
 				semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
+				eslintCheck: getEslintCheckAdvert(),
 				callFlow: await getCallFlowAdvert(servedDiffType as DiffType),
 				serverConfig: getServerConfig(gitUser),
 			});
@@ -2082,6 +2161,11 @@ export async function startReviewServer(options: {
 			});
 		} else if (url.pathname === "/api/semantic-diff" && req.method === "GET") {
 			json(res, await getSemanticDiff(url));
+		} else if (url.pathname === "/api/eslint-check" && req.method === "POST") {
+			const body = await parseBody(req) as { snapshotId?: unknown };
+			const requestedSnapshotId = typeof body.snapshotId === "string" ? body.snapshotId : undefined;
+			const result = await getEslintCheck(requestedSnapshotId);
+			json(res, result, result.status === "error" && result.reason === "stale-snapshot" ? 409 : 200);
 		} else if (url.pathname === "/api/call-flow" && req.method === "GET") {
 			// A throw here must never escape the handler: on Node it becomes an
 			// unhandled rejection, and Pi's process-level handler exits the whole
@@ -2272,6 +2356,7 @@ export async function startReviewServer(options: {
 						hideWhitespace: currentHideWhitespace,
 						...(currentError ? { error: currentError } : {}),
 						semanticDiff: await getSemanticDiffAdvert(),
+						eslintCheck: getEslintCheckAdvert(),
 						callFlow: await getCallFlowAdvert(),
 					});
 					return;
@@ -2392,6 +2477,7 @@ export async function startReviewServer(options: {
 					...(updatedContext ? { gitContext: updatedContext } : {}),
 					...(currentError ? { error: currentError } : {}),
 					semanticDiff: switchSemanticDiff,
+					eslintCheck: getEslintCheckAdvert(),
 					callFlow: switchCallFlow,
 				});
 			} catch (err) {
@@ -2493,6 +2579,7 @@ export async function startReviewServer(options: {
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
 						...((currentError ?? upgradeError) ? { error: currentError ?? upgradeError } : {}),
 						semanticDiff: await getSemanticDiffAdvert(),
+						eslintCheck: getEslintCheckAdvert(),
 						callFlow: await getCallFlowAdvert(),
 					});
 					return;
@@ -2530,6 +2617,7 @@ export async function startReviewServer(options: {
 					snapshotId: currentSnapshotId(),
 					prDiffScope: currentPRDiffScope,
 					semanticDiff: await getSemanticDiffAdvert(),
+					eslintCheck: getEslintCheckAdvert(),
 					callFlow: await getCallFlowAdvert(),
 				});
 			} catch (err) {
@@ -2625,6 +2713,7 @@ export async function startReviewServer(options: {
 					...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
 					...(currentError ? { error: currentError } : {}),
 					semanticDiff: await getSemanticDiffAdvert(),
+					eslintCheck: getEslintCheckAdvert(),
 					callFlow: await getCallFlowAdvert(),
 				});
 			} catch (err) {

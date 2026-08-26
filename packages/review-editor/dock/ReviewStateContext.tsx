@@ -244,6 +244,9 @@ export interface ReviewState {
   /** Opt-in runtime install controller backing the Dock's install funnel. */
   callFlowInstall: CallFlowInstallController;
 
+  snapshotId: string | null;
+  eslintCheckAvailable: boolean;
+
   // Tour
   openTourPanel: (jobId: string) => void;
 

@@ -8,7 +8,7 @@ import type {
 } from '@plannotator/shared/types';
 import { BaseBranchPicker } from './BaseBranchPicker';
 import { PanelViewToggle } from './PanelViewToggle';
-import { SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
+import { SemanticDiffRow, EslintCheckRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 import {
   ViewedControl,
@@ -91,6 +91,9 @@ interface SectionsPanelProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+  onSelectEslintCheck?: () => void;
+  isEslintCheckActive?: boolean;
+  eslintCheckFileCount?: number;
   onSelectCallFlow?: () => void;
   isCallFlowActive?: boolean;
   callFlowEnabled?: boolean;
@@ -236,6 +239,9 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive,
   semanticDiffAvailable,
+  onSelectEslintCheck,
+  isEslintCheckActive,
+  eslintCheckFileCount,
   onSelectCallFlow,
   isCallFlowActive,
   callFlowEnabled,
@@ -580,6 +586,13 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
             )}
             {semanticDiffAvailable && onSelectSemanticDiff && (
               <SemanticDiffRow active={isSemanticDiffActive ?? false} onClick={onSelectSemanticDiff} />
+            )}
+            {onSelectEslintCheck && (
+              <EslintCheckRow
+                active={isEslintCheckActive ?? false}
+                onClick={onSelectEslintCheck}
+                fileCount={eslintCheckFileCount}
+              />
             )}
             {onSelectAllFiles && (
               <AllFilesRow

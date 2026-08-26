@@ -15,6 +15,7 @@ import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
+import type { EslintCheckAdvert } from '@plannotator/shared/eslint-check-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
@@ -103,6 +104,7 @@ import {
   REVIEW_PR_OVERVIEW_PANEL_ID,
   REVIEW_PR_ARTIFACTS_PANEL_ID,
   REVIEW_SEMANTIC_DIFF_PANEL_ID,
+  REVIEW_ESLINT_CHECK_PANEL_ID,
   REVIEW_CALL_FLOW_PANEL_ID,
   REVIEW_ALL_FILES_PANEL_ID,
   REVIEW_CODE_NAV_PANEL_ID,
@@ -175,6 +177,7 @@ interface DiffData {
   prDiffScope?: PRDiffScope;
   prDiffScopeOptions?: PRDiffScopeOption[];
   semanticDiff?: SemanticDiffAdvert;
+  eslintCheck?: EslintCheckAdvert;
   callFlow?: CallFlowAdvert;
 }
 
@@ -324,10 +327,14 @@ const ReviewApp: React.FC = () => {
   const isAllFilesActiveRef = useRef(isAllFilesActive);
   isAllFilesActiveRef.current = isAllFilesActive;
   const [isSemanticDiffActive, setIsSemanticDiffActive] = useState(false);
+  const [isEslintCheckActive, setIsEslintCheckActive] = useState(false);
   const [isCallFlowActive, setIsCallFlowActive] = useState(false);
   const [isPROverviewActive, setIsPROverviewActive] = useState(false);
   const [isPRArtifactsActive, setIsPRArtifactsActive] = useState(false);
   const [semanticDiffAvailable, setSemanticDiffAvailable] = useState(false);
+  const [eslintCheckAdvert, setEslintCheckAdvert] = useState<EslintCheckAdvert>({ available: false });
+  const [showEslintConsent, setShowEslintConsent] = useState(false);
+  const eslintConsentGranted = useRef(false);
   const [callFlowAdvert, setCallFlowAdvert] = useState<CallFlowAdvert>({
     enabled: false,
     available: false,
@@ -1134,6 +1141,7 @@ const ReviewApp: React.FC = () => {
       if (!panel) {
         setIsAllFilesActive(false);
         setIsSemanticDiffActive(false);
+        setIsEslintCheckActive(false);
         setIsCallFlowActive(false);
         setIsPROverviewActive(false);
         setIsPRArtifactsActive(false);
@@ -1142,6 +1150,7 @@ const ReviewApp: React.FC = () => {
       }
       setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
       setIsSemanticDiffActive(panel.id === REVIEW_SEMANTIC_DIFF_PANEL_ID);
+      setIsEslintCheckActive(panel.id === REVIEW_ESLINT_CHECK_PANEL_ID);
       setIsCallFlowActive(panel.id === REVIEW_CALL_FLOW_PANEL_ID);
       setIsPROverviewActive(panel.id === REVIEW_PR_OVERVIEW_PANEL_ID);
       setIsPRArtifactsActive(panel.id === REVIEW_PR_ARTIFACTS_PANEL_ID);
@@ -1435,6 +1444,28 @@ const ReviewApp: React.FC = () => {
     });
   }, [callFlowEnabled, dockApi]);
 
+  const openEslintCheckPanel = useCallback(() => {
+    if (!dockApi || !eslintCheckAdvert.available) return;
+    const existing = dockApi.getPanel(REVIEW_ESLINT_CHECK_PANEL_ID);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    dockApi.addPanel({
+      id: REVIEW_ESLINT_CHECK_PANEL_ID,
+      component: REVIEW_PANEL_TYPES.ESLINT_CHECK,
+      title: 'ESLint',
+    });
+  }, [dockApi, eslintCheckAdvert.available]);
+
+  const requestEslintCheck = useCallback(() => {
+    if (eslintConsentGranted.current) {
+      openEslintCheckPanel();
+      return;
+    }
+    setShowEslintConsent(true);
+  }, [openEslintCheckPanel]);
+
   const handleSemanticDiffUnavailable = useCallback(() => {
     semanticDiffAutoFallbackPending.current = false;
     setSemanticDiffAvailable(false);
@@ -1469,6 +1500,15 @@ const ReviewApp: React.FC = () => {
       if (isSemanticDiffActive) openAllFilesPanel();
     }
   }, [dockApi, isSemanticDiffActive, openAllFilesPanel]);
+
+  const applyEslintCheckAdvert = useCallback((advert?: EslintCheckAdvert) => {
+    if (!advert) return;
+    setEslintCheckAdvert(advert);
+    if (!advert.available) {
+      dockApi?.getPanel(REVIEW_ESLINT_CHECK_PANEL_ID)?.api.close();
+      if (isEslintCheckActive) openAllFilesPanel();
+    }
+  }, [dockApi, isEslintCheckActive, openAllFilesPanel]);
 
   const applyCallFlowAdvert = useCallback((callFlow?: CallFlowAdvert) => {
     if (!callFlow) return;
@@ -1709,6 +1749,7 @@ const ReviewApp: React.FC = () => {
         error?: string;
         isWSL?: boolean;
         semanticDiff?: SemanticDiffAdvert;
+        eslintCheck?: EslintCheckAdvert;
         callFlow?: CallFlowAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
@@ -1736,6 +1777,7 @@ const ReviewApp: React.FC = () => {
           diffOptions: data.diffOptions,
           sharingEnabled: data.sharingEnabled,
           semanticDiff: data.semanticDiff,
+          eslintCheck: data.eslintCheck,
           callFlow: data.callFlow,
         });
         setFiles(apiFiles);
@@ -1774,6 +1816,7 @@ const ReviewApp: React.FC = () => {
         if (data.error) setDiffError(data.error);
         if (data.isWSL) setIsWSL(true);
         setSemanticDiffAvailable(data.semanticDiff?.available === true);
+        setEslintCheckAdvert(data.eslintCheck ?? { available: false });
         if (data.callFlow) setCallFlowAdvert(data.callFlow);
         setSections(data.sections ?? null);
         setCommitInfo(data.commitInfo ?? null);
@@ -2211,6 +2254,7 @@ const ReviewApp: React.FC = () => {
     repoInfo?: { display: string; branch?: string };
     viewedFiles?: string[]; error?: string;
     semanticDiff?: SemanticDiffAdvert;
+    eslintCheck?: EslintCheckAdvert;
     callFlow?: CallFlowAdvert;
     agentCwd?: string | null;
   }) {
@@ -2246,6 +2290,7 @@ const ReviewApp: React.FC = () => {
     }
     setDiffError(data.error || null);
     applySemanticDiffAdvert(data.semanticDiff);
+    applyEslintCheckAdvert(data.eslintCheck);
     applyCallFlowAdvert(data.callFlow);
     // The PR's local checkout changes on switch (and warms in later). Use the
     // server's value when present; otherwise clear it on a switch so the Open-in
@@ -2300,6 +2345,7 @@ const ReviewApp: React.FC = () => {
         diffOptions?: DiffOption[];
         error?: string;
         semanticDiff?: SemanticDiffAdvert;
+        eslintCheck?: EslintCheckAdvert;
         callFlow?: CallFlowAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
@@ -2323,6 +2369,7 @@ const ReviewApp: React.FC = () => {
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
       applySemanticDiffAdvert(data.semanticDiff);
+      applyEslintCheckAdvert(data.eslintCheck);
       applyCallFlowAdvert(data.callFlow);
       setSections(data.sections ?? null);
       setCommitInfo(data.commitInfo ?? null);
@@ -3029,6 +3076,8 @@ const ReviewApp: React.FC = () => {
     isCallFlowActive,
     openCallFlowPanel,
     callFlowInstall,
+    snapshotId: snapshotId ?? null,
+    eslintCheckAvailable: eslintCheckAdvert.available,
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
@@ -3059,6 +3108,7 @@ const ReviewApp: React.FC = () => {
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
+    snapshotId, eslintCheckAdvert.available,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
   ]);
@@ -4118,7 +4168,7 @@ const ReviewApp: React.FC = () => {
                 files={files}
                 sections={sections!}
                 width={fileTreeResize.width}
-                activeFileIndex={isAllFilesActive || isSemanticDiffActive || isCallFlowActive || isPROverviewActive ? -1 : activeFileIndex}
+                activeFileIndex={isAllFilesActive || isSemanticDiffActive || isEslintCheckActive || isCallFlowActive || isPROverviewActive ? -1 : activeFileIndex}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
                 onSelectFile={(index) => completeNavigatorSelection(() => handleFilePreview(index))}
                 onDoubleClickFile={(index) => completeNavigatorSelection(() => handleFilePinned(index))}
@@ -4150,6 +4200,9 @@ const ReviewApp: React.FC = () => {
                 onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
                 isSemanticDiffActive={isSemanticDiffActive}
                 semanticDiffAvailable={semanticDiffUsable}
+                onSelectEslintCheck={eslintCheckAdvert.available ? () => completeNavigatorSelection(requestEslintCheck) : undefined}
+                isEslintCheckActive={isEslintCheckActive}
+                eslintCheckFileCount={eslintCheckAdvert.fileCount}
                 onSelectCallFlow={() => completeNavigatorSelection(openCallFlowPanel)}
                 isCallFlowActive={isCallFlowActive}
                 callFlowEnabled={callFlowEnabled}
@@ -4218,6 +4271,9 @@ const ReviewApp: React.FC = () => {
                 onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
                 isSemanticDiffActive={isSemanticDiffActive}
                 semanticDiffAvailable={semanticDiffUsable}
+                onSelectEslintCheck={eslintCheckAdvert.available ? () => completeNavigatorSelection(requestEslintCheck) : undefined}
+                isEslintCheckActive={isEslintCheckActive}
+                eslintCheckFileCount={eslintCheckAdvert.fileCount}
                 onSelectCallFlow={() => completeNavigatorSelection(openCallFlowPanel)}
                 isCallFlowActive={isCallFlowActive}
                 callFlowEnabled={callFlowEnabled}
@@ -4473,6 +4529,21 @@ const ReviewApp: React.FC = () => {
             </div>
           )}
         </div>
+
+        <ConfirmDialog
+          isOpen={showEslintConsent}
+          onClose={() => setShowEslintConsent(false)}
+          onConfirm={() => {
+            eslintConsentGranted.current = true;
+            setShowEslintConsent(false);
+            openEslintCheckPanel();
+          }}
+          title="Run Project ESLint?"
+          message="This runs the reviewed project's local ESLint configuration and plugins with your user permissions."
+          confirmText="Run ESLint"
+          cancelText="Cancel"
+          showCancel
+        />
 
         {/* Export Modal */}
         {showExportModal && (

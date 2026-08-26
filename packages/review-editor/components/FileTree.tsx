@@ -22,7 +22,7 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { GitHubIcon } from '@plannotator/ui/components/GitHubIcon';
 import { Paperclip } from 'lucide-react';
 
-import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
+import { SidebarActionRow, SemanticDiffRow, EslintCheckRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 
 interface FileTreeProps {
@@ -94,6 +94,9 @@ interface FileTreeProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+  onSelectEslintCheck?: () => void;
+  isEslintCheckActive?: boolean;
+  eslintCheckFileCount?: number;
   onSelectCallFlow?: () => void;
   isCallFlowActive?: boolean;
   callFlowEnabled?: boolean;
@@ -181,6 +184,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
+  onSelectEslintCheck,
+  isEslintCheckActive = false,
+  eslintCheckFileCount,
   onSelectCallFlow,
   isCallFlowActive = false,
   callFlowEnabled = false,
@@ -518,6 +524,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
           {semanticDiffAvailable && onSelectSemanticDiff && (
             <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
           )}
+          {onSelectEslintCheck && (
+            <EslintCheckRow
+              active={isEslintCheckActive}
+              onClick={onSelectEslintCheck}
+              fileCount={eslintCheckFileCount}
+            />
+          )}
           {onSelectAllFiles && (
             <AllFilesRow
               active={isAllFilesActive}
@@ -556,6 +569,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                   activeFileIndex={
                     isAllFilesActive ||
                     isSemanticDiffActive ||
+                    isEslintCheckActive ||
                     isCallFlowActive ||
                     isPROverviewActive ||
                     isPRArtifactsActive
