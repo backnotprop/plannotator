@@ -42,6 +42,9 @@ export const resetDocPreviewFetcher = (): void => {
   docPreviewFetcher = defaultDocPreviewFetcher;
 };
 
+/** Read the active fetcher at call time (so a late override is honored). */
+export const getDocPreviewFetcher = (): DocPreviewFetcher => docPreviewFetcher;
+
 /**
  * Decide how a candidate code-file path should render based on validation state:
  *   - 'link'           → clickable, opens directly via onOpenCodeFile(resolvedOrInput)

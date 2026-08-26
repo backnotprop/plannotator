@@ -8,6 +8,7 @@ import { setDraftTransport, type DraftTransport } from './hooks/useAnnotationDra
 import { setExternalAnnotationTransport, type ExternalAnnotationTransport } from './hooks/useExternalAnnotations';
 import { setAITransport, type AITransport } from './hooks/useAIChat';
 import { setSkillCatalogTransport, setSkillContentTransport, type SkillCatalogTransport, type SkillContentTransport } from './utils/skillCatalog';
+import { setWebMcpPolicy, type WebMcpPolicy } from './webmcp/policy';
 import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
 import type { ExternalAnnotationEvent, VaultNode } from './types';
@@ -31,6 +32,7 @@ export type {
   SkillCatalogTransport,
   SkillContentTransport,
   ServerSyncFn,
+  WebMcpPolicy,
 };
 
 type ExternalAnnotationBase = { id: string; source?: string };
@@ -56,6 +58,13 @@ export interface PlannotatorUIConfig {
   /** Human-only skill contents request for feedback injection. Default: `GET /api/skills/content?name=` on the page origin. */
   skillContentTransport?: SkillContentTransport;
   serverSync?: ServerSyncFn;
+  /**
+   * WebMCP provider policy: `{ enabled, namePrefix }`. Default: enabled
+   * whenever the browser exposes `document.modelContext`, with the
+   * `plannotator.` prefix. There is no confirmation seam because the catalog
+   * exposes nothing consequential: no tool decides, submits or closes.
+   */
+  webmcp?: WebMcpPolicy;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */
   loadSettingsFromBackend?: boolean;
 }
@@ -73,6 +82,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.skillCatalogTransport) setSkillCatalogTransport(config.skillCatalogTransport);
   if (config.skillContentTransport) setSkillContentTransport(config.skillContentTransport);
   if (config.serverSync) configStore.setServerSync(config.serverSync);
+  if (config.webmcp) setWebMcpPolicy(config.webmcp);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();
 }

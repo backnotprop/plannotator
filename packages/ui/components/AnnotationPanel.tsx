@@ -38,6 +38,52 @@ const TrashCardIcon = () => (
   </svg>
 );
 
+/**
+ * Order annotations so every reply follows its parent (replies among
+ * themselves stay in creation order). A reply whose parent is absent renders
+ * as a top-level card. Without any `inReplyTo` the input order is returned
+ * unchanged, so annotations without replies render exactly as before.
+ */
+export function threadReplies(sorted: Annotation[]): Array<{ annotation: Annotation; isReply: boolean }> {
+  if (!sorted.some((a) => a.inReplyTo)) return sorted.map((annotation) => ({ annotation, isReply: false }));
+  const ids = new Set(sorted.map((a) => a.id));
+  const byParent = new Map<string, Annotation[]>();
+  for (const a of sorted) {
+    if (a.inReplyTo && ids.has(a.inReplyTo) && a.inReplyTo !== a.id) {
+      const list = byParent.get(a.inReplyTo) ?? [];
+      list.push(a);
+      byParent.set(a.inReplyTo, list);
+    }
+  }
+  const out: Array<{ annotation: Annotation; isReply: boolean }> = [];
+  const emitted = new Set<string>();
+  const emit = (a: Annotation, isReply: boolean) => {
+    if (emitted.has(a.id)) return;
+    emitted.add(a.id);
+    out.push({ annotation: a, isReply });
+    for (const reply of byParent.get(a.id) ?? []) emit(reply, true);
+  };
+  for (const a of sorted) {
+    if (a.inReplyTo && ids.has(a.inReplyTo) && a.inReplyTo !== a.id) continue;
+    emit(a, false);
+  }
+  for (const a of sorted) emit(a, false);
+  return out;
+}
+
+/** Timeline position of an annotation: its own time, or its thread root's for replies. */
+function threadTs(annotation: Annotation, all: Annotation[]): number {
+  let current = annotation;
+  const seen = new Set<string>();
+  while (current.inReplyTo && !seen.has(current.id)) {
+    seen.add(current.id);
+    const parent = all.find((a) => a.id === current.inReplyTo);
+    if (!parent) break;
+    current = parent;
+  }
+  return current.createdA;
+}
+
 interface DirectEditsPanelItem {
   id: string;
   title?: string;
@@ -123,10 +169,19 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
   const sortedAnnotations = [...annotations].sort((a, b) => a.createdA - b.createdA);
   const sortedCodeAnnotations = [...codeAnnotations].sort((a, b) => a.createdAt - b.createdAt);
+  // Replies (`inReplyTo`) thread under their parent: each reply is lifted to
+  // sit right after its parent (and the parent's earlier replies) at the
+  // parent's timeline position. With no replies the order is untouched.
+  const threadedAnnotations = threadReplies(sortedAnnotations);
   const timelineEntries = [
-    ...sortedAnnotations.map(annotation => ({ kind: 'plan' as const, ts: annotation.createdA, annotation })),
-    ...sortedCodeAnnotations.map(annotation => ({ kind: 'code' as const, ts: annotation.createdAt, annotation })),
-  ].sort((a, b) => a.ts - b.ts);
+    ...threadedAnnotations.map(({ annotation, isReply }) => ({ kind: 'plan' as const, ts: annotation.createdA, annotation, isReply })),
+    ...sortedCodeAnnotations.map(annotation => ({ kind: 'code' as const, ts: annotation.createdAt, annotation, isReply: false })),
+  ].sort((a, b) => {
+    const ta = a.kind === 'plan' ? threadTs(a.annotation, sortedAnnotations) : a.ts;
+    const tb = b.kind === 'plan' ? threadTs(b.annotation, sortedAnnotations) : b.ts;
+    if (ta !== tb) return ta - tb;
+    return a.ts - b.ts;
+  });
   const totalCount = annotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
 
   // Scroll selected annotation card into view
@@ -221,6 +276,24 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
           <>
             {timelineEntries.map(entry => (
               entry.kind === 'plan' ? (
+                entry.isReply ? (
+                  <div
+                    key={entry.annotation.id}
+                    data-annotation-reply="true"
+                    className="ml-3 border-l-2 border-border/40 pl-1.5"
+                  >
+                    <AnnotationCard
+                      annotation={entry.annotation}
+                      isSelected={selectedId === entry.annotation.id}
+                      isMe={isCurrentUser(entry.annotation.author)}
+                      onSelect={() => onSelect(entry.annotation.id)}
+                      onDelete={() => onDelete(entry.annotation.id)}
+                      onEdit={onEdit ? (updates: Partial<Annotation>) => onEdit(entry.annotation.id, updates) : undefined}
+                      readOnly={readOnly}
+                      footer={renderCardFooter?.(entry.annotation)}
+                    />
+                  </div>
+                ) : (
                 <AnnotationCard
                   key={entry.annotation.id}
                   annotation={entry.annotation}
@@ -232,6 +305,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   readOnly={readOnly}
                   footer={renderCardFooter?.(entry.annotation)}
                 />
+                )
               ) : (
                 <CodeAnnotationCard
                   key={entry.annotation.id}

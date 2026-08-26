@@ -1208,6 +1208,38 @@ export const exportAnnotations = (
     ];
   }
 
+  // Threaded replies (`inReplyTo`): a reply is emitted as a nested exchange
+  // under its parent's entry rather than as its own numbered entry, so the
+  // coding agent reads the conversation in order. Replies whose parent is
+  // not in the export render as ordinary entries. With no `inReplyTo`
+  // anywhere the output is byte-identical to the ungrouped export.
+  const exportedIds = new Set(sortedAnns.map((a: any) => a.id));
+  const isReply = (a: any) => typeof a.inReplyTo === 'string' && a.inReplyTo !== a.id && exportedIds.has(a.inReplyTo);
+  const hasReplies = sortedAnns.some(isReply);
+  const repliesOf = (parent: any): any[] =>
+    hasReplies ? sortedAnns.filter((a: any) => isReply(a) && a.inReplyTo === parent.id).sort((a: any, b: any) => a.createdA - b.createdA) : [];
+  if (hasReplies) {
+    emitOrder = emitOrder.filter((a) => !isReply(a));
+    // Numbers stay consecutive over the entries that are actually emitted.
+    annotationNumbers.clear();
+    emitOrder.forEach((ann, index) => annotationNumbers.set(ann, index + 1));
+  }
+  const replyBlock = (parent: any, depth = 0): string => {
+    let block = '';
+    for (const reply of repliesOf(parent)) {
+      const who = reply.author ? `${reply.author}` : 'reply';
+      const indent = '  '.repeat(depth);
+      block += `${indent}- **Reply (${who}):** ${String(reply.text ?? '').replace(/\r?\n/g, `\n${indent}  `)}\n`;
+      if (reply.images && reply.images.length > 0) {
+        reply.images.forEach((img: ImageAttachment) => {
+          block += `${indent}  - [${img.name}] \`${img.path}\`\n`;
+        });
+      }
+      block += replyBlock(reply, depth + 1);
+    }
+    return block;
+  };
+
   let lastEmittedPage: string | null = null;
   emitOrder.forEach((ann) => {
     if (hasPageGroups && ann.pageUrl && ann.pageUrl !== lastEmittedPage) {
@@ -1266,6 +1298,12 @@ export const exportAnnotations = (
       ann.images.forEach((img: ImageAttachment) => {
         output += `- [${img.name}] \`${img.path}\`\n`;
       });
+    }
+
+    // Threaded replies nest under the entry they answer.
+    if (hasReplies) {
+      const thread = replyBlock(ann);
+      if (thread) output += `**Replies:**\n${thread}`;
     }
 
     output += '\n';

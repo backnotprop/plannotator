@@ -152,6 +152,10 @@ jobs:
           packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
           packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
+          packages/ui/webmcp/useToolset.seam.test.tsx
+          packages/ui/components/AnnotationPanel.inReplyTo.test.tsx
+          packages/editor/webmcp/useDocumentWebMcp.toggle.test.tsx
+          packages/editor/components/AppHeader.webmcpIndicator.test.tsx
 
   opencode-v2:
     name: OpenCode 2 installed package

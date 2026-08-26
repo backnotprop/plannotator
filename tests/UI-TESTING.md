@@ -9,6 +9,7 @@ steps to ensure your changes work correctly.
 2. [Development Workflow](#development-workflow)
 3. [Quick Testing Guide](#quick-testing-guide)
 4. [Debugging Common Issues](#debugging-common-issues)
+5. [WebMCP Manual Checklist](#webmcp-manual-checklist)
 
 ---
 
@@ -375,6 +376,31 @@ Build failed with X errors
 - Use `echo` statements to add debug output to scripts
 
 ---
+
+## WebMCP Manual Checklist
+
+Not CI. Run this in Chrome or Edge with the API on: `chrome://flags/#enable-webmcp-testing`, or launch with `--enable-features=WebMCPTesting`. Use a fresh profile so the first-run dialogs and a recovered draft do not get in the way. The Model Context Tool Inspector extension can call tools too, but the page console is enough: `const tools = await document.modelContext.getTools()` lists them, and `JSON.parse(await document.modelContext.executeTool(tools.find((t) => t.name === 'plannotator.read_document'), {}))` calls one.
+
+Before the flows, confirm the footprint rules:
+
+- Load `plannotator annotate <file.md>` and do nothing. Six `plannotator.*` tools are listed, but the header shows no "Agent" marker, no banner, and `document.cookie` has no `plannotator-webmcp-tools` entry.
+- Load the same session in a browser without the API. Nothing in the page changes, and the Settings General tab has no "Agent tools" row.
+
+The five flows from the design (section 3.7):
+
+1. **What is going on in this page right now?** Call `read_document` with no arguments. Expect `session.mode`, the full text, the outline with per-section counts, the annotations, `otherDocuments`, and `cursor`. Calling it again returns the same comments with `isNew: false`.
+2. **The user just annotated something, what do they want?** Open the comment composer in the page; a `read_document` while it is open carries `composer_open`. Submit the comment; the next `read_document` carries `annotations_new` naming its id and the entry has `isNew: true`.
+3. **Leave a comment on section X.** Call `add_comments` with `{ section: "<outline id>", quote: "<exact text>", text: "..." }`. Expect `anchoredBy: "quote"`, a highlight in the document, and a `browser-agent` card in the panel. Repeat the same call with the same `requestId`: `created: 0`, `deduplicated: true`. Delete the card from the panel and repeat once more: the item answers `conflict` and nothing is re-created.
+4. **Reply to the user's comment.** Call `add_comments` with `{ inReplyTo: "<the human's id>", text: "..." }`. The reply renders indented under the human's card and `read_document` lists it in the parent's `replies`. `update_comment` and `remove_comments` on the human's id answer `forbidden`; on the reply they succeed.
+5. **Several files in a folder session.** Run `plannotator annotate <folder>`, open one document, comment in it, then open another. Call `read_document`: `otherDocuments` names the first document with its count, and an `other_document_active` nudge carries the exact `read_document { path }` call. Call `list_documents`: every file in the tree is listed. Call `reveal { annotationId, path }` for a comment in the first document: the view navigates there and the card is selected.
+
+Then the remaining surfaces:
+
+- `reveal { section }` scrolls to the heading; `nudge_user` shows one banner that the dismiss button removes; a 281-character message answers `invalid_input`.
+- The "Agent" marker appears in the header only after the first successful call.
+- Settings, General, "Agent tools" off: `getTools()` is empty and `document.cookie` now has `plannotator-webmcp-tools=false`. Back on: six tools again and the cookie is gone.
+- `plannotator annotate <file.html>` and `plannotator annotate http://localhost:<port>`: from inside the iframe, `document.modelContext.getTools()` and `registerTool()` reject with `NotAllowedError`; the parent page still lists Plannotator's tools.
+- Approve or send feedback from the page: the write tools disappear from `getTools()` and `read_document` carries `session_decided`.
 
 ## Need Help?
 

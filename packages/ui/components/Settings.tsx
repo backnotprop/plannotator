@@ -4,6 +4,7 @@ import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal
 import type { Origin } from '@plannotator/core/agents';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType } from '../config';
+import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
 import { loadDiffFont } from '../utils/diffFonts';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity, isIdentityEditable } from '../utils/identity';
@@ -107,6 +108,10 @@ interface SettingsProps {
    *  from a Hidden position, but offering it where no terminal can ever run
    *  would just be a dead control. */
   agentTerminalAvailable?: boolean;
+  /** The browser exposes WebMCP (`document.modelContext`), so the "Agent
+   *  tools" opt-out is worth showing. Default false: a browser without the
+   *  API gets no row at all (the provider registers nothing there). */
+  webmcpAvailable?: boolean;
 }
 
 // --- Review-mode Display tab (diff display options) ---
@@ -848,7 +853,8 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', onUIPreferencesChange, externalOpen, onExternalClose, aiProviders = [], gitUser, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false }) => {
+  const webmcpTools = useWebMcpToolsEnabled();
   const [showDialog, setShowDialog] = useState(false);
   const settingsWasOpenRef = useRef(false);
   const [themePreview, setThemePreview] = useState(false);
@@ -1281,6 +1287,39 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         )}
                       </div>
                     </div>
+
+                    {/* Agent tools (WebMCP). Shown only when the browser
+                        exposes document.modelContext; off unregisters the
+                        tools for this browser. Cookie-only and idle at its
+                        default: no cookie exists until the user opts out. */}
+                    {webmcpAvailable && (
+                      <>
+                        <div className="border-t border-border" />
+                        <div className="flex items-center justify-between" data-webmcp-setting="true">
+                          <div>
+                            <div className="text-sm font-medium">Agent tools</div>
+                            <div className="text-xs text-muted-foreground">
+                              Let your browser's agent read this document and leave comments. Approving and sending feedback stay yours.
+                            </div>
+                          </div>
+                          <button
+                            role="switch"
+                            aria-checked={webmcpTools}
+                            aria-label="Agent tools"
+                            onClick={() => setWebMcpToolsEnabled(!webmcpTools)}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                              webmcpTools ? 'bg-primary' : 'bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                                webmcpTools ? 'translate-x-6' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </>
+                    )}
 
                     {/* Permission Mode (Claude Code only) */}
                     {origin === 'claude-code' && mode === 'plan' && (

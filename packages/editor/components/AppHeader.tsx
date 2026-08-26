@@ -78,6 +78,12 @@ interface AppHeaderProps {
   gitUser: string | undefined;
   /** This session offers the Agent TUI, so Settings shows its Position row. */
   agentTerminalAvailable: boolean;
+  /** The browser exposes WebMCP, so Settings shows the "Agent tools" opt-out.
+   *  Nothing in the header renders for this alone. */
+  webmcpAvailable?: boolean;
+  /** A browser agent has completed at least one tool call in this session.
+   *  Only then does the unobtrusive "Agent" indicator appear. */
+  agentConnected?: boolean;
 
   // Handlers — App owns all decision logic, header just calls these
   onCallbackFeedback: () => void;
@@ -166,6 +172,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   mobileSettingsOpen,
   gitUser,
   agentTerminalAvailable,
+  webmcpAvailable = false,
+  agentConnected = false,
   onCallbackFeedback,
   onCallbackApprove,
   onAnnotateExit,
@@ -399,6 +407,21 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </button>
         )}
 
+        {/* WebMCP activity indicator. Deliberately absent until a browser
+            agent has completed a tool call: the API merely existing must not
+            change the page (maintainer ruling). Non-interactive; the opt-out
+            lives in Settings. */}
+        {!compactTouchLayout && agentConnected && (
+          <span
+            data-webmcp-indicator="true"
+            className="hidden md:inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            title="A browser agent has used Plannotator's tools in this session. Its comments are marked browser-agent. Turn the tools off in Settings."
+          >
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
+            Agent
+          </span>
+        )}
+
         {/* Annotations panel toggle */}
         {!compactTouchLayout && !goalSetupMode && (
           <button
@@ -451,6 +474,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             onExternalClose={onCloseSettings}
             gitUser={gitUser}
             agentTerminalAvailable={agentTerminalAvailable}
+            webmcpAvailable={webmcpAvailable}
           />
         </div>
 
