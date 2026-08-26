@@ -87,7 +87,7 @@ export function useHtmlRefresh({
 
     restorePendingRef.current = null;
     if (missingIds.length === 0) return;
-    toast(`${missingIds.length} annotation${missingIds.length === 1 ? '' : 's'} no longer match the HTML`, {
+    toast(`${missingIds.length} annotation${missingIds.length === 1 ? ' no longer matches' : 's no longer match'} the HTML`, {
       description: 'Their comments remain available in the annotations panel.',
       duration: 5000,
     });
