@@ -146,6 +146,7 @@ const TablePopoutImpl: React.FC<TablePopoutProps> = ({
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M10 18a8 8 0 100-16 8 8 0 000 16z" />
           </svg>
           <input
+            data-pn-mobile-editable
             type="text"
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}

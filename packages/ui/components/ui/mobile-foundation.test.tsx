@@ -7,6 +7,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Button as LegacyButton } from '../core/button';
 import { Button } from './button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './dialog';
+import { Textarea as LegacyTextarea } from '../core/textarea';
+import { Textarea } from './textarea';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -39,6 +41,20 @@ describe('shared mobile control foundation', () => {
     expect(theme).toContain('touch-action: manipulation');
     expect(theme).not.toContain('@media (any-pointer: coarse)');
     expect(theme).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(theme).toContain("[data-pn-mobile-editable-surface] [contenteditable='true']");
+    expect(theme).toContain('[data-pn-secondary-input-dialog]');
+    expect(theme).toContain('input[data-pn-mobile-editable]');
+    expect(theme).toContain('[data-pn-secondary-input-picker]');
+  });
+
+  test('marks canonical multiline editors for the compact 16px floor', () => {
+    const current = renderToStaticMarkup(<Textarea placeholder="Current" />);
+    const legacy = renderToStaticMarkup(<LegacyTextarea placeholder="Legacy" />);
+
+    expect(current).toContain('data-pn-mobile-editable="true"');
+    expect(legacy).toContain('data-pn-mobile-editable="true"');
+    expect(current).toContain('md:text-sm');
+    expect(legacy).toContain('text-sm');
   });
 
   test('marks canonical buttons without changing their visual size classes', () => {

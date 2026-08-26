@@ -877,7 +877,8 @@ body:has([data-pn-document-scroll="true"]) > #root {
  * metrically identical to the transparent textarea above it. */
 @media (pointer: coarse), (max-width: 639px) {
   [data-pn-mobile-editable],
-  [data-pn-mobile-editable-mirror] {
+  [data-pn-mobile-editable-mirror],
+  [data-pn-mobile-editable-surface] [contenteditable='true'] {
     font-size: 1rem !important;
   }
 }
@@ -893,8 +894,66 @@ html:has([data-pn-compact-touch-layout='true']) [data-pn-touch-target] {
 }
 
 html:has([data-pn-compact-touch-layout='true'])
+  input[data-pn-mobile-editable] {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-secondary-input-picker]
+  button {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+html:has([data-pn-compact-touch-layout='true'])
   [data-pn-touch-target][data-pn-touch-target-icon] {
   min-inline-size: var(--pn-touch-target);
+}
+
+/* Legacy input dialogs predate the shared Button primitive. Their wrapper is
+ * the migration seam so every nested action becomes a reliable touch target
+ * without changing the dense desktop controls. */
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-secondary-input-dialog]
+  button {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-secondary-input-dialog]
+  button[aria-label] {
+  min-inline-size: var(--pn-touch-target);
+}
+
+.pn-suggestion-dialog {
+  width: 60rem;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+@media (pointer: coarse), (max-width: 639px), (max-width: 900px) and (max-height: 419px) {
+  .pn-suggestion-dialog {
+    height: 100%;
+  }
+
+  .pn-suggestion-panes {
+    flex-direction: column;
+  }
+
+  .pn-suggestion-original {
+    border-right-width: 0 !important;
+    border-bottom-width: 1px;
+  }
+
+  .pn-suggestion-layout-toggle {
+    display: none;
+  }
+
+  .suggested-code-input {
+    min-height: 0 !important;
+  }
 }
 
 html:has([data-pn-compact-touch-layout='true'])

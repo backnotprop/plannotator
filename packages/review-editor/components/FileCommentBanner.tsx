@@ -105,6 +105,7 @@ export const FileCommentCard: React.FC<{
       {isEditing ? (
         <div className="mt-1" onClick={(e) => e.stopPropagation()}>
           <textarea
+            data-pn-mobile-editable
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

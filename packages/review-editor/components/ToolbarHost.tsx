@@ -1,4 +1,4 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import type {
   CodeAnnotation,
   CodeAnnotationType,
@@ -86,6 +86,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
   const conventionalCommentsEnabled = useConfigValue('conventionalComments');
   const conventionalLabelsJson = useConfigValue('conventionalLabels');
   const enabledLabels = useMemo(() => getEnabledLabels(conventionalLabelsJson), [conventionalLabelsJson]);
+  const restoreSuggestionFocusRef = useRef(false);
 
   // Replaces the parent's `onMouseMove={toolbar.handleMouseMove}` on its scroll
   // container — the hook only stashes clientX/Y for toolbar placement, so a
@@ -107,7 +108,18 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     [toolbar.handleLineSelectionEnd, toolbar.openLineAnnotation, toolbar.handleTokenClick, toolbar.startEdit],
   );
 
-  const handleCloseCodeModal = useCallback(() => toolbar.setShowCodeModal(false), [toolbar.setShowCodeModal]);
+  const handleCloseCodeModal = useCallback(() => {
+    restoreSuggestionFocusRef.current = true;
+    toolbar.setShowCodeModal(false);
+  }, [toolbar.setShowCodeModal]);
+  useEffect(() => {
+    if (toolbar.showCodeModal || !restoreSuggestionFocusRef.current) return;
+    restoreSuggestionFocusRef.current = false;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById('pn-suggestion-editor-trigger')?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [toolbar.showCodeModal]);
   const handleCollapseCommentModal = useCallback(() => {
     if (toolbar.expandedComposerRequired) {
       toolbar.handleDismiss();

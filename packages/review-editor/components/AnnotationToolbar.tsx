@@ -233,6 +233,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[10px] text-muted-foreground">Suggested code</span>
                 <button
+                  id="pn-suggestion-editor-trigger"
                   onClick={() => setShowCodeModal(true)}
                   className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                   title="Expand editor"
@@ -243,6 +244,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 </button>
               </div>
               <textarea
+                data-pn-mobile-editable
                 ref={suggestedCodeRef}
                 value={suggestedCode}
                 onChange={(e) => setSuggestedCode(e.target.value)}

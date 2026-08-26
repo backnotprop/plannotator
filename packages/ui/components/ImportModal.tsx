@@ -2,14 +2,16 @@
  * Import Modal for loading teammate annotations from a share URL
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useCallback, useId, useState, useRef } from 'react';
 import type { ImportResult } from '../hooks/useSharing';
+import { useModalFocusLifecycle } from '../hooks/useModalFocusLifecycle';
 
 interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (url: string) => Promise<ImportResult>;
   shareBaseUrl?: string;
+  restoreFocusId?: string;
 }
 
 export const ImportModal: React.FC<ImportModalProps> = ({
@@ -17,11 +19,25 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   onClose,
   onImport,
   shareBaseUrl,
+  restoreFocusId,
 }) => {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleId = useId();
+
+  const handleClose = useCallback(() => {
+    if (autoCloseTimer.current) {
+      clearTimeout(autoCloseTimer.current);
+      autoCloseTimer.current = null;
+    }
+    setUrl('');
+    setResult(null);
+    onClose();
+  }, [onClose]);
+
+  useModalFocusLifecycle(isOpen, handleClose, { fallbackFocusId: restoreFocusId });
 
   if (!isOpen) return null;
 
@@ -43,16 +59,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
   };
 
-  const handleClose = () => {
-    if (autoCloseTimer.current) {
-      clearTimeout(autoCloseTimer.current);
-      autoCloseTimer.current = null;
-    }
-    setUrl('');
-    setResult(null);
-    onClose();
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !loading) {
       handleImport();
@@ -60,18 +66,24 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+    <div className="pn-visible-viewport-overlay z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
       <div
-        className="bg-card border border-border rounded-xl w-full max-w-lg flex flex-col shadow-2xl"
+        data-pn-secondary-input-dialog
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="p-4 border-b border-border">
           <div className="flex justify-between items-center">
-            <h3 className="font-semibold text-sm">Import Teammate Review</h3>
+            <h3 id={titleId} className="font-semibold text-sm">Import Teammate Review</h3>
             <button
+              type="button"
               onClick={handleClose}
               className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Close import review"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -81,12 +93,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-2">
               Plannotator Share Link
             </label>
             <input
+              data-pn-mobile-editable
               type="text"
               value={url}
               onChange={e => setUrl(e.target.value)}
@@ -127,12 +140,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         {/* Footer */}
         <div className="p-4 border-t border-border flex justify-end gap-2">
           <button
+            type="button"
             onClick={handleClose}
             className="px-3 py-1.5 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleImport}
             disabled={!url.trim() || loading}
             className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"

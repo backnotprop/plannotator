@@ -5771,6 +5771,7 @@ const App: React.FC = () => {
           isApiMode={isApiMode && !documentReadOnly}
           initialTab={initialExportTab}
           wrapCopiedAnnotations={wrapCopiedFeedback}
+          restoreFocusId={isCompactTouchLayout ? 'pn-compact-plan-options-trigger' : 'pn-plan-options-trigger'}
         />
 
         {/* Import Modal */}
@@ -5779,6 +5780,7 @@ const App: React.FC = () => {
           onClose={() => setShowImport(false)}
           onImport={importFromShareUrl}
           shareBaseUrl={shareBaseUrl}
+          restoreFocusId={isCompactTouchLayout ? 'pn-compact-plan-options-trigger' : 'pn-plan-options-trigger'}
         />
 
         {/* Feedback prompt dialog */}

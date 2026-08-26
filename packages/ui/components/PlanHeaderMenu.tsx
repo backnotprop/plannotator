@@ -88,7 +88,7 @@ export const PlanHeaderMenu: React.FC<PlanHeaderMenuProps> = ({
       }
       renderTrigger={({ isOpen, toggleMenu }) => (
         <button
-          id={compactTouchLayout ? 'pn-compact-plan-options-trigger' : undefined}
+          id={compactTouchLayout ? 'pn-compact-plan-options-trigger' : 'pn-plan-options-trigger'}
           data-pn-touch-target={compactTouchLayout || undefined}
           data-pn-touch-target-icon={compactTouchLayout || undefined}
           onClick={() => {

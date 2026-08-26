@@ -6,13 +6,14 @@
  * Notes tab: Save plan to Obsidian/Bear without approving
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useId, useState, useEffect } from 'react';
 import { getObsidianSettings, getEffectiveVaultPath } from '../utils/obsidian';
 import { getBearSettings } from '../utils/bear';
 import { getOctarineSettings } from '../utils/octarine';
 import { wrapFeedbackForAgent } from '../utils/parser';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { OverlayScrollArea } from './OverlayScrollArea';
+import { useModalFocusLifecycle } from '../hooks/useModalFocusLifecycle';
 
 /** POST body shape sent to the notes endpoint (mirrors what the Notes tab builds today). */
 interface SaveToNotesPayload {
@@ -65,6 +66,7 @@ interface ExportModalProps {
    * plan-review behavior).
    */
   wrapCopiedAnnotations?: (feedback: string) => string;
+  restoreFocusId?: string;
 }
 
 type Tab = 'share' | 'annotations' | 'notes';
@@ -90,12 +92,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   initialTab,
   onSaveToNotes = defaultSaveToNotes,
   wrapCopiedAnnotations = wrapFeedbackForAgent,
+  restoreFocusId,
 }) => {
   const defaultTab = initialTab || (sharingEnabled ? 'share' : 'annotations');
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [copied, setCopied] = useState<'short' | 'full' | 'annotations' | false>(false);
   const [saveStatus, setSaveStatus] = useState<Record<SaveTarget, SaveStatus>>({ obsidian: 'idle', bear: 'idle', octarine: 'idle' });
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const titleId = useId();
+
+  useModalFocusLifecycle(isOpen, onClose, { fallbackFocusId: restoreFocusId });
 
   // Reset tab when modal opens
   useEffect(() => {
@@ -209,9 +215,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const showTabs = sharingEnabled || showNotesTab;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+    <div className="pn-visible-viewport-overlay z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
       <div
-        className="bg-card border border-border rounded-xl w-full max-w-2xl flex flex-col max-h-[80vh] shadow-2xl relative"
+        data-pn-secondary-input-dialog
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="relative flex max-h-[min(80vh,100%)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
         {taterSprite}
@@ -219,14 +229,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         {/* Header */}
         <div className="p-4 border-b border-border">
           <div className="flex justify-between items-center">
-            <h3 className="font-semibold text-sm">Export</h3>
+            <h3 id={titleId} className="font-semibold text-sm">Export</h3>
             <div className="flex items-center gap-3">
               <span className="text-xs text-muted-foreground">
                 {annotationCount} annotation{annotationCount !== 1 ? 's' : ''}
               </span>
               <button
+                type="button"
                 onClick={onClose}
                 className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Close export"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -290,6 +302,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   </label>
                   <div className="relative group">
                     <input
+                      data-pn-mobile-editable
                       readOnly
                       value={shortShareUrl}
                       className="w-full bg-muted rounded-lg p-3 pr-20 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-accent/50"
@@ -353,6 +366,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </label>
                 <div className="relative group">
                   <textarea
+                    data-pn-mobile-editable
                     readOnly
                     value={shareUrl}
                     className="w-full h-24 bg-muted rounded-lg p-3 pr-20 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-accent/50"

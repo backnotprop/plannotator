@@ -63,6 +63,7 @@ describe('ExpandedCommentDialog mobile composition', () => {
     const suggestButton = Array.from(document.querySelectorAll('button'))
       .find(button => button.textContent?.trim() === 'Suggest code');
     expect(suggestButton).not.toBeNull();
+    expect(suggestButton?.id).toBe('pn-suggestion-editor-trigger');
     await act(async () => suggestButton?.click());
     expect(suggestionOpens).toBe(1);
   });

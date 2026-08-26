@@ -324,6 +324,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
+            data-pn-mobile-editable
             ref={searchInputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}

@@ -17,6 +17,7 @@ import {
 } from '@plannotator/ui/components/AgentsTab';
 import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from '@plannotator/ui/components/AgentControls';
 import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
+import { shouldAutoFocusPassiveSearch } from '@plannotator/ui/hooks/useViewportEnvironment';
 
 type Option = { value: string; label: string };
 
@@ -84,14 +85,16 @@ function InlinePicker({
         <>
           <div className="fixed inset-0 z-10" onClick={close} />
           <div
-            className={`absolute left-0 top-full z-20 mt-1 rounded-lg border border-border/50 bg-popover shadow-xl ${
+            data-pn-secondary-input-picker
+            className={`absolute left-0 top-full z-20 mt-1 max-w-[calc(100vw-2rem)] rounded-lg border border-border/50 bg-popover shadow-xl ${
               searchable ? 'w-[340px]' : 'min-w-[140px]'
             }`}
           >
             {searchable && (
               <div className="p-1 pb-0">
                 <input
-                  autoFocus
+                  data-pn-mobile-editable
+                  autoFocus={shouldAutoFocusPassiveSearch()}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -443,6 +446,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
           {showOutput && capturedPayload !== null && (
             <div className="mt-2.5 w-full">
               <textarea
+                data-pn-mobile-editable
                 value={editedPayload}
                 onChange={(e) => setEditedPayload(e.target.value)}
                 spellCheck={false}
@@ -515,6 +519,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
             {showInstructions && (
               <div className="mt-1.5 max-w-[560px]">
                 <textarea
+                  data-pn-mobile-editable
                   value={instructions}
                   onChange={(e) => handleInstructionsChange(e.target.value)}
                   maxLength={GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS}

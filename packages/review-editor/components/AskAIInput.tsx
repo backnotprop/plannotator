@@ -60,6 +60,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
       </div>
 
       <textarea
+        data-pn-mobile-editable
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
         placeholder="Ask about this code..."

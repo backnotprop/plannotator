@@ -82,28 +82,32 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
           onClick={handleBackdropClick}
           aria-hidden="true"
         />
-        <Dialog.Popup
-          className={`fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-background border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden ${className ?? 'w-[calc(100vw-4rem)] max-w-[min(calc(100vw-4rem),1500px)] max-h-[calc(100vh-4rem)]'}`}
-          data-popout="true"
-          initialFocus={false}
-          {...dataAttributes}
-        >
-          <Dialog.Title className="sr-only">{title}</Dialog.Title>
-          <Dialog.Close
-            render={
-              <button
-                className="absolute top-3 right-3 z-20 p-1.5 rounded-md text-muted-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
-                aria-label="Close"
-              />
-            }
+        <div className="pn-visible-viewport-overlay pointer-events-none z-50 flex items-center justify-center">
+          <Dialog.Popup
+            className={`pointer-events-auto relative z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl ${className ?? 'w-[calc(var(--pn-viewport-width,100vw)-4rem)] max-w-[min(calc(var(--pn-viewport-width,100vw)-4rem),1500px)] max-h-[calc(var(--pn-viewport-height,100vh)-4rem)]'}`}
+            data-popout="true"
+            initialFocus={false}
+            {...dataAttributes}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </Dialog.Close>
+            <Dialog.Title className="sr-only">{title}</Dialog.Title>
+            <Dialog.Close
+              render={
+                <button
+                  data-pn-touch-target
+                  data-pn-touch-target-icon
+                  className="absolute top-3 right-3 z-20 p-1.5 rounded-md text-muted-foreground/70 hover:bg-muted hover:text-foreground transition-colors"
+                  aria-label="Close"
+                />
+              }
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </Dialog.Close>
 
-          {children}
-        </Dialog.Popup>
+            {children}
+          </Dialog.Popup>
+        </div>
       </Dialog.Portal>
     </Dialog.Root>
   );

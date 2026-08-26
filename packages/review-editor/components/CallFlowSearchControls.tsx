@@ -35,6 +35,7 @@ export function CallFlowSearchControls({
         <Search aria-hidden="true" size={13} strokeWidth={1.75} />
         <span className="sr-only">{label}</span>
         <input
+          data-pn-mobile-editable
           ref={inputRef}
           type="search"
           value={query}
@@ -59,6 +60,8 @@ export function CallFlowSearchControls({
         {matchCount === 0 ? '0/0' : `${Math.min(currentMatchIndex + 1, matchCount)}/${matchCount}`}
       </span>
       <button
+        data-pn-touch-target
+        data-pn-touch-target-icon
         type="button"
         className="call-flow-icon-button"
         onClick={() => onMoveMatch(-1)}
@@ -69,6 +72,8 @@ export function CallFlowSearchControls({
         <ChevronUp aria-hidden="true" size={14} />
       </button>
       <button
+        data-pn-touch-target
+        data-pn-touch-target-icon
         type="button"
         className="call-flow-icon-button"
         onClick={() => onMoveMatch(1)}
@@ -79,6 +84,8 @@ export function CallFlowSearchControls({
         <ChevronDown aria-hidden="true" size={14} />
       </button>
       <button
+        data-pn-touch-target
+        data-pn-touch-target-icon
         type="button"
         className="call-flow-icon-button"
         onClick={onClose}

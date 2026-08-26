@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { shouldAutoFocusPassiveSearch } from '../hooks/useViewportEnvironment';
 
 // --- Launch-control primitives (ported from the prototype's sidebar) ---
 
@@ -143,15 +144,17 @@ export function SelectMenu({ value, options, onChange, icon, placeholder, footer
         <>
           <div className="fixed inset-0 z-10" onClick={close} />
           <div
+            data-pn-secondary-input-picker
             className={cn(
-              'absolute right-0 top-full left-0 z-20 mt-1 rounded-xl bg-card shadow-[var(--card-shadow)] ring-1 ring-border/20',
+              'absolute right-0 top-full left-0 z-20 mt-1 max-w-[calc(100vw-2rem)] rounded-xl bg-card shadow-[var(--card-shadow)] ring-1 ring-border/20',
               searchable && 'min-w-[240px]',
             )}
           >
             {searchable && (
               <div className="p-1 pb-0">
                 <input
-                  autoFocus
+                  data-pn-mobile-editable
+                  autoFocus={shouldAutoFocusPassiveSearch()}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {

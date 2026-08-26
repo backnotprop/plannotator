@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import {
   calculateVisibleViewportBounds,
   calculateViewportEnvironment,
+  shouldAutoFocusPassiveSearch,
   shouldUseExpandedComposer,
   useViewportEnvironment,
 } from './useViewportEnvironment';
@@ -16,6 +17,26 @@ const VIEWPORT_PROPERTIES = [
   '--pn-viewport-offset-left',
   '--pn-keyboard-inset',
 ] as const;
+
+function pointerMatchMedia(coarse: boolean): (query: string) => MediaQueryList {
+  return (query: string): MediaQueryList => ({
+    matches: coarse && query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  });
+}
+
+describe('passive search focus policy', () => {
+  test('preserves keyboard-first desktop search without summoning a touch keyboard', () => {
+    expect(shouldAutoFocusPassiveSearch({ matchMedia: pointerMatchMedia(false) })).toBe(true);
+    expect(shouldAutoFocusPassiveSearch({ matchMedia: pointerMatchMedia(true) })).toBe(false);
+  });
+});
 
 let roots: Root[] = [];
 let hosts: HTMLElement[] = [];

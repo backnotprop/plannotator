@@ -745,6 +745,7 @@ const QuestionAnswerControls: React.FC<{
                 {answer.customAnswer.trim() ? <Check className="h-2 w-2" strokeWidth={3} /> : <Plus className="h-2 w-2" strokeWidth={3} />}
               </span>
               <input
+                data-pn-mobile-editable
                 value={answer.customAnswer}
                 onChange={(event) => updateCustomOption(event.target.value)}
                 placeholder="Other…"

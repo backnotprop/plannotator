@@ -2,6 +2,7 @@ import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
 import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { shouldAutoFocusPassiveSearch } from '@plannotator/ui/hooks/useViewportEnvironment';
 
 interface AIConfigBarProps {
   providers: AIProviderOption[];
@@ -162,16 +163,17 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
             </button>
 
             {openMenu === 'model' && (
-              <div className="ai-config-menu">
+              <div data-pn-secondary-input-picker className="ai-config-menu">
                 {models.length > 8 && (
                   <div className="ai-config-menu-search">
                     <input
+                      data-pn-mobile-editable
                       ref={searchInputRef}
                       type="text"
                       placeholder="Filter models…"
                       value={modelSearch}
                       onChange={e => setModelSearch(e.target.value)}
-                      autoFocus
+                      autoFocus={shouldAutoFocusPassiveSearch()}
                     />
                   </div>
                 )}

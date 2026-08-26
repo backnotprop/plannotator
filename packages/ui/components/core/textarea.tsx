@@ -14,6 +14,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(({
   ...props
 }, ref) => (
   <textarea
+    data-pn-mobile-editable
     ref={ref}
     className={cx(
       'min-h-24 w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/60 focus:ring-2 focus:ring-primary/15',

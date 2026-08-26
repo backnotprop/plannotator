@@ -93,10 +93,12 @@ interface MarkdownEditorProps {
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ gridEnabled, mode, ...props }) => {
   const { resolvedMode } = useTheme();
   return (
-    <PackagedMarkdownEditor
-      {...props}
-      mode={mode ?? resolvedMode}
-      cardClassName={gridEnabled ? GRID_CARD_CLASSES : undefined}
-    />
+    <div data-pn-mobile-editable-surface="true" className="contents">
+      <PackagedMarkdownEditor
+        {...props}
+        mode={mode ?? resolvedMode}
+        cardClassName={gridEnabled ? GRID_CARD_CLASSES : undefined}
+      />
+    </div>
   );
 };

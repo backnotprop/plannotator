@@ -343,6 +343,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
               {/* Manual path input */}
               <div className="flex gap-2">
                 <input
+                  data-pn-mobile-editable
                   type="text"
                   value={manualPath}
                   onChange={(e) => setManualPath(e.target.value)}

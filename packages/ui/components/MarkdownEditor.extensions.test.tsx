@@ -59,8 +59,10 @@ describe('MarkdownEditor shim: extensions passthrough', () => {
       // The editorAttributes facet writes onto the editor's outer DOM element —
       // reachable only if the engine composed our extension into its state.
       const probed = host.querySelector('[data-extensions-probe="reached-engine"]');
+      const mobileEditableSurface = host.querySelector('[data-pn-mobile-editable-surface="true"]');
       expect(probed).not.toBeNull();
       expect(probed?.classList.contains('cm-editor')).toBe(true);
+      expect(mobileEditableSurface?.contains(probed)).toBe(true);
 
       // Byte fidelity is unaffected by a decoration-only consumer extension.
       expect(handleRef.current?.getMarkdown()).toBe(SOURCE);

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback, type ReactElement, type ReactNode } from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from './Popover';
+import { shouldAutoFocusPassiveSearch } from '../hooks/useViewportEnvironment';
 
 interface SearchableSelectProps<T extends { id: string }> {
   items: T[];
@@ -87,9 +88,10 @@ export function SearchableSelect<T extends { id: string }>({
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger render={renderTrigger({ open })} />
       <PopoverContent
+        data-pn-secondary-input-picker
         align={align}
         className={`${width} p-0`}
-        initialFocus={inputRef}
+        initialFocus={shouldAutoFocusPassiveSearch() ? inputRef : false}
       >
         {/* Search row */}
         <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">

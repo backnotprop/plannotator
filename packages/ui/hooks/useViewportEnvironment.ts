@@ -184,10 +184,17 @@ export function shouldUseExpandedComposer({
 }
 
 /** Returns whether the device's primary pointing input is coarse. */
-export function hasPrimaryCoarsePointer(targetWindow?: Window): boolean {
+export function hasPrimaryCoarsePointer(targetWindow?: Pick<Window, 'matchMedia'>): boolean {
   const resolvedWindow = targetWindow ?? (typeof window === 'undefined' ? undefined : window);
   if (!resolvedWindow?.matchMedia) return false;
   return resolvedWindow.matchMedia('(pointer: coarse)').matches;
+}
+
+/** Passive searchable pickers keep their opener focused on touch devices. */
+export function shouldAutoFocusPassiveSearch(
+  targetWindow?: Pick<Window, 'matchMedia'>,
+): boolean {
+  return !hasPrimaryCoarsePointer(targetWindow);
 }
 
 function readViewportEnvironment(targetWindow: Window): ViewportEnvironment {

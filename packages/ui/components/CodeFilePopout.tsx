@@ -218,6 +218,7 @@ const CodeInlineAnnotation: React.FC<{
       {isEditing ? (
         <div className="mt-2 space-y-2">
           <textarea
+            data-pn-mobile-editable
             ref={textareaRef}
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
@@ -479,7 +480,7 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
         onClose={onClose}
         title={requestedPath ?? displayName}
         container={container}
-        className="w-[min(520px,calc(100vw-4rem))]"
+        className="w-[min(520px,calc(var(--pn-viewport-width,100vw)-4rem))]"
       >
         <div className="flex flex-col gap-2 px-5 py-6 text-sm">
           <div className="font-medium text-foreground">{error}</div>
@@ -503,7 +504,7 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
       onClose={onClose}
       title={displayName}
       container={container}
-      className="w-[calc(100vw-4rem)] max-w-[min(calc(100vw-4rem),1500px)] h-[calc(100vh-4rem)]"
+      className="h-[calc(var(--pn-viewport-height,100vh)-4rem)] w-[calc(var(--pn-viewport-width,100vw)-4rem)] max-w-[min(calc(var(--pn-viewport-width,100vw)-4rem),1500px)]"
     >
       <div className="flex items-center gap-3 px-5 pt-4 pb-3 pr-12">
         <div className="flex items-center gap-2 min-w-0">

@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import type { WorktreeInfo } from '@plannotator/shared/types';
+import { shouldAutoFocusPassiveSearch } from '@plannotator/ui/hooks/useViewportEnvironment';
 
 interface WorktreePickerProps {
   worktrees: WorktreeInfo[];
@@ -92,8 +93,9 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
           <Popover.Popup
-            className="w-72 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
-            initialFocus={() => {
+            data-pn-secondary-input-picker
+            className="w-72 max-w-[calc(100vw-2rem)] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
+            initialFocus={shouldAutoFocusPassiveSearch() ? () => {
               // Only override the default focus when the search input is
               // actually rendered — otherwise arrow keys would bubble out to
               // the file-tree nav. For short worktree lists, returning null
@@ -101,11 +103,12 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
               // tabbable); undefined would mean "do nothing" and leave focus
               // on the trigger.
               return searchRef.current;
-            }}
+            } : false}
           >
           {worktrees.length > 3 && (
             <div className="p-2 border-b border-border/50">
               <input
+                data-pn-mobile-editable
                 ref={searchRef}
                 type="text"
                 value={query}

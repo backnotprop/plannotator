@@ -147,6 +147,7 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
               )}
               {onEditSuggestion && (
                 <button
+                  id="pn-suggestion-editor-trigger"
                   type="button"
                   onClick={onEditSuggestion}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"

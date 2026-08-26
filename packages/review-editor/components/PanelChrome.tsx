@@ -381,6 +381,7 @@ export function PanelSearchField({
           />
         </svg>
         <input
+          data-pn-mobile-editable
           ref={inputRef}
           type="text"
           value={query}
@@ -399,6 +400,8 @@ export function PanelSearchField({
             </span>
           )}
           <button
+            data-pn-touch-target
+            data-pn-touch-target-icon
             type="button"
             onClick={hasQuery ? onClear : onClose}
             className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-background/50 hover:text-foreground"

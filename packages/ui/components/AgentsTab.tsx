@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bot,
   Play,
@@ -24,6 +25,8 @@ import type { AgentEngine, AgentMode, ReviewEngine } from '../hooks/useAgentSett
 import type { AgentLaunchParams } from '../hooks/useAgentJobs';
 import { ConfigRow, SegmentedPicker, Toggle, SelectMenu } from './AgentControls';
 import { CODEX_MODELS, CODEX_EFFORT_LABELS, codexReasoningOptions } from '../utils/codexModels';
+import { shouldAutoFocusPassiveSearch } from '../hooks/useViewportEnvironment';
+import { useModalFocusLifecycle } from '../hooks/useModalFocusLifecycle';
 
 export type { AgentLaunchParams } from '../hooks/useAgentJobs';
 
@@ -274,6 +277,9 @@ function AddReviewDialog({
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const titleId = useId();
+
+  useModalFocusLifecycle(true, onClose);
 
   useEffect(() => {
     let alive = true;
@@ -317,13 +323,19 @@ function AddReviewDialog({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+  return createPortal(
+    <div className="pn-visible-viewport-overlay z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-10 flex max-h-[70vh] w-full max-w-sm flex-col overflow-hidden rounded-xl bg-card shadow-[var(--card-shadow)] ring-1 ring-border/20">
+      <div
+        data-pn-secondary-input-dialog
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="relative z-10 flex max-h-[min(70vh,100%)] w-full max-w-sm flex-col overflow-hidden rounded-xl bg-card shadow-[var(--card-shadow)] ring-1 ring-border/20"
+      >
         <div className="flex items-center justify-between border-b border-border/40 px-3 py-2.5">
-          <span className="text-[12px] font-medium text-foreground">Add a review</span>
-          <button type="button" onClick={onClose} className="text-muted-foreground/50 hover:text-foreground">
+          <span id={titleId} className="text-[12px] font-medium text-foreground">Add a review</span>
+          <button type="button" onClick={onClose} className="text-muted-foreground/50 hover:text-foreground" aria-label="Close add review">
             <X size={13} />
           </button>
         </div>
@@ -332,7 +344,8 @@ function AddReviewDialog({
           <div className="flex items-center gap-2 rounded-lg border border-border/30 bg-surface-1/30 px-2.5 py-1.5">
             <Search className="shrink-0 text-muted-foreground/40" size={12} />
             <input
-              autoFocus
+              data-pn-mobile-editable
+              autoFocus={shouldAutoFocusPassiveSearch()}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Filter your skills"
@@ -369,7 +382,8 @@ function AddReviewDialog({
 
         {error && <p className="border-t border-border/40 px-3 py-2 text-[10px] text-red-500">{error}</p>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

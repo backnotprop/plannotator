@@ -309,6 +309,7 @@ const GeneralInput: React.FC<{
     <div className="border-t border-border/50 p-2">
       <div className="flex items-end gap-1.5">
         <textarea
+          data-pn-mobile-editable
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}

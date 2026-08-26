@@ -543,6 +543,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
           >
             <Search size={12} className="shrink-0 text-muted-foreground/55" aria-hidden="true" />
             <input
+              data-pn-mobile-editable
               ref={inputRef}
               type="search"
               value={filterQuery}

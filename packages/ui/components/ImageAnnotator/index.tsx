@@ -4,6 +4,7 @@ import { Toolbar } from './Toolbar';
 import { renderStroke } from './utils';
 import type { Point, AnnotatorState } from './types';
 import { DEFAULT_STATE } from './types';
+import { useModalFocusLifecycle } from '../../hooks/useModalFocusLifecycle';
 
 interface ImageAnnotatorProps {
   imageSrc: string;
@@ -26,6 +27,11 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   const [name, setName] = useState(initialName);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // This surface already gives Escape a two-stage meaning (blur the name
+  // field, then accept). Reuse only the focus-restoration half of the legacy
+  // modal lifecycle so that behavior remains intact.
+  useModalFocusLifecycle(isOpen, onClose, { dismissOnEscape: false });
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -200,12 +206,16 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-background/90 backdrop-blur-sm"
+      data-pn-secondary-input-dialog
+      className="pn-visible-viewport-overlay z-[200] flex items-center justify-center bg-background/90 backdrop-blur-sm"
       data-popover-layer
       onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Annotate image"
     >
       {/* Canvas with image and toolbar */}
-      <div className="relative flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+      <div className="relative flex max-h-full max-w-full flex-col items-center gap-3 overflow-y-auto overscroll-contain" onClick={(e) => e.stopPropagation()}>
         {/* Toolbar - above image */}
         <Toolbar
           tool={state.tool}
@@ -237,6 +247,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           <div className="flex items-center gap-2 w-full max-w-xs">
             <label className="text-xs text-muted-foreground whitespace-nowrap">Name</label>
             <input
+              data-pn-mobile-editable
               ref={nameInputRef}
               type="text"
               value={name}
