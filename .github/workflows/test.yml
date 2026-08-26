@@ -103,6 +103,7 @@ jobs:
           packages/ui/components/SkillReferenceMenu.placement.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
+          packages/review-editor/components/CommentActions.test.tsx
           packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
           packages/review-editor/components/AnnotationToolbar.placement.test.tsx
           packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx

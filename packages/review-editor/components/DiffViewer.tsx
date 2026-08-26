@@ -189,6 +189,8 @@ interface DiffViewerProps {
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   isViewed?: boolean;
   onToggleViewed?: () => void;
   /** Chrome preference (#1277): false hides the header Viewed button; the `V`
@@ -254,6 +256,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onEditAnnotation,
   onSelectAnnotation,
   onDeleteAnnotation,
+  onExplainAnnotation,
+  agentFindingSources,
   isViewed = false,
   onToggleViewed,
   showViewedControls = true,
@@ -643,9 +647,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onSelect={onSelectAnnotation}
         onEdit={handleEdit}
         onDelete={onDeleteAnnotation}
+        onExplain={onExplainAnnotation}
+        agentFindingSources={agentFindingSources}
+        explainDisabled={isAILoading}
       />
     );
-  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
+  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onExplainAnnotation, isAILoading, onClickAIMarker]);
 
   const handleLineSelectionInteraction = useCallback((
     source: LineSelectionSource,
@@ -816,6 +823,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           onSelect={onSelectAnnotation}
           onEdit={onEditAnnotation}
           onDelete={onDeleteAnnotation}
+          onExplain={onExplainAnnotation}
+          agentFindingSources={agentFindingSources}
+          explainDisabled={isAILoading}
         />
         <div className="p-4" ref={diffContentRef}>
           <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>

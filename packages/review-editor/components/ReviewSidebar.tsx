@@ -18,6 +18,7 @@ import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
+import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
 export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
 
@@ -34,6 +35,8 @@ interface ReviewSidebarProps {
   /** Sidebar row click → select AND scroll the diff to the comment. */
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation?: (id: string) => void;
+  agentFindingSources: ReadonlySet<string>;
   feedbackMarkdown?: string;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
@@ -140,6 +143,8 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onSelectAnnotation,
   onNavigateToAnnotation,
   onDeleteAnnotation,
+  onExplainAnnotation,
+  agentFindingSources,
   feedbackMarkdown,
   width,
   editorAnnotations,
@@ -307,6 +312,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           </div>
         )}
         <CommentActions
+          onExplain={isAgentGeneratedFinding(annotation, agentFindingSources) && onExplainAnnotation
+            ? () => onExplainAnnotation(annotation.id)
+            : undefined}
+          explainDisabled={isAICreatingSession || isAIStreaming}
           copyText={annotation.text ? commentCopyText(annotation, scope) : undefined}
           onDelete={() => onDeleteAnnotation(annotation.id)}
         />
