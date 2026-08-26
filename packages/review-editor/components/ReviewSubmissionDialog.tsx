@@ -72,6 +72,7 @@ interface ReviewSubmissionDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
+  confirmLabel?: string;
   recoveryPersistsRefresh: boolean;
   mrLabel: string;
   platformLabel: string;
@@ -320,6 +321,7 @@ export function ReviewSubmissionDialog({
   onConfirm,
   onCancel,
   isSubmitting,
+  confirmLabel,
   recoveryPersistsRefresh,
   mrLabel,
   platformLabel,
@@ -335,6 +337,15 @@ export function ReviewSubmissionDialog({
   const hasFailed = submission.targets.some(t => t.status === 'failed');
   const hasPartial = submission.targets.some(t => t.status === 'partial');
   const hasBlocked = submission.targets.some(t => t.status === 'blocked');
+  const confirmButtonLabel = isSubmitting
+    ? 'Posting...'
+    : hasBlocked
+      ? 'Retry blocked'
+      : hasPartial
+        ? 'Retry Unposted'
+        : hasFailed
+          ? 'Retry Failed'
+          : confirmLabel ?? (isApprove ? 'Approve' : 'Post Comments');
   const bodyLocked = hasPartial || hasBlocked;
 
   return (
@@ -573,17 +584,7 @@ export function ReviewSubmissionDialog({
                   : 'bg-primary text-primary-foreground hover:opacity-90'
             }`}
           >
-            {isSubmitting
-              ? 'Posting...'
-              : hasBlocked
-                ? 'Retry blocked'
-              : hasPartial
-                ? 'Retry Unposted'
-                : hasFailed
-                  ? 'Retry Failed'
-                  : isApprove
-                    ? 'Approve'
-                    : 'Post Comments'}
+            {confirmButtonLabel}
           </button>
         </div>
         </div>

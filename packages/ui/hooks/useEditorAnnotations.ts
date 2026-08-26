@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { EditorAnnotation } from '../types';
 
 const POLL_INTERVAL = 500;
-const IS_VSCODE = typeof window !== 'undefined' && (window as any).__PLANNOTATOR_VSCODE === true;
+const IS_VSCODE = typeof window !== 'undefined' && (window as { __PLANNOTATOR_VSCODE?: boolean }).__PLANNOTATOR_VSCODE === true;
 
 interface UseEditorAnnotationsReturn {
   editorAnnotations: EditorAnnotation[];

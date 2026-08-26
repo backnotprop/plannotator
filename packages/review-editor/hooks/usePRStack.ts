@@ -76,9 +76,9 @@ export function usePRStack(callbacksRef: RefObject<PRStackCallbacks | null>) {
     }
   }, [callbacksRef]);
 
-  const handlePRSwitch = useCallback(async (prUrl: string) => {
+  const handlePRSwitch = useCallback(async (prUrl: string): Promise<boolean> => {
     const cb = callbacksRef.current;
-    if (!cb) return;
+    if (!cb) return false;
     setIsSwitchingPRScope(true);
     try {
       const res = await fetch('/api/pr-switch', {
@@ -91,8 +91,10 @@ export function usePRStack(callbacksRef: RefObject<PRStackCallbacks | null>) {
         throw new Error(data.error ?? 'Failed to switch PR');
       }
       cb.applyPRResponse(data);
+      return true;
     } catch (err) {
       cb.onError(err instanceof Error ? err.message : 'Failed to switch PR');
+      return false;
     } finally {
       setIsSwitchingPRScope(false);
     }
