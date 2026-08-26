@@ -187,6 +187,8 @@ describe("default uninstall", () => {
       "plannotator-review",
       "plannotator-annotate",
       "plannotator-last",
+      // The knowledge-layer CLI reference skill, installed to the same scopes.
+      "plannotator",
     ]) {
       writeText(join(homeDir, ".claude", "skills", skill, "SKILL.md"));
       writeText(join(homeDir, ".agents", "skills", skill, "SKILL.md"));
@@ -379,6 +381,8 @@ describe("default uninstall", () => {
     expect(result.ok).toBe(true);
     expect(existsSync(binary)).toBe(false);
     expect(existsSync(join(homeDir, ".claude", "skills", "plannotator-review"))).toBe(false);
+    expect(existsSync(join(homeDir, ".claude", "skills", "plannotator"))).toBe(false);
+    expect(existsSync(join(homeDir, ".agents", "skills", "plannotator"))).toBe(false);
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-compound"))).toBe(true);
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-archive"))).toBe(false);
     expect(existsSync(join(homeDir, ".kiro", "skills", "plannotator-setup-goal"))).toBe(false);
@@ -458,6 +462,60 @@ describe("default uninstall", () => {
       `${customKiroAgent} (custom or unrecognized Kiro agent)`,
     );
     expect(fixture.commandCalls).toEqual([]);
+  });
+
+  test("removes the knowledge skill from every scope that installs it, and only those", async () => {
+    // The knowledge skill is named `plannotator` — the same bare name as a
+    // legacy slash command and as anything else a user might name after the
+    // product. That is exactly why KNOWLEDGE_SKILLS is a separate list from
+    // CORE_SKILLS: folding it into CORE_SKILLS would put `plannotator` into
+    // LEGACY_COMMAND_NAMES and STALE_CODEX_SKILLS, and uninstall would start
+    // deleting a user's own commands/plannotator.md. This test is the wall.
+    const fixture = createFixture();
+    const { homeDir } = fixture;
+    const alternateConfig = join(fixture.root, "xdg-config");
+    fixture.environment = {
+      ...fixture.environment,
+      env: { XDG_CONFIG_HOME: alternateConfig },
+    };
+
+    // Scopes an install actually writes the knowledge skill to.
+    const installedScopes = [
+      join(homeDir, ".claude", "skills", "plannotator"),
+      join(homeDir, ".agents", "skills", "plannotator"),
+      join(homeDir, ".kiro", "skills", "plannotator"),
+      join(alternateConfig, "opencode", "skills", "plannotator"),
+      // Pre-0.27 Claude layout; cleanupStaleSkillLayout must know the
+      // knowledge skill too, or an upgrader keeps a dead copy forever.
+      join(homeDir, ".claude", "skills", "core", "plannotator"),
+    ];
+    for (const scope of installedScopes) {
+      writeText(join(scope, "SKILL.md"), "# Plannotator CLI Reference");
+    }
+
+    // Paths that merely share the name and are NOT ours to delete.
+    const userOwned = [
+      join(homeDir, ".claude", "commands", "plannotator.md"),
+      join(alternateConfig, "opencode", "commands", "plannotator.md"),
+      join(homeDir, ".codex", "skills", "plannotator", "SKILL.md"),
+    ];
+    for (const path of userOwned) {
+      writeText(path, "the user's own file");
+    }
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      fixture.environment,
+    );
+
+    expect(result.ok).toBe(true);
+    for (const scope of installedScopes) {
+      expect(existsSync(scope), `${scope} should have been removed`).toBe(false);
+    }
+    for (const path of userOwned) {
+      expect(existsSync(path), `${path} must survive uninstall`).toBe(true);
+      expect(readFileSync(path, "utf8")).toBe("the user's own file");
+    }
   });
 
   test("dry-run reports work without mutating files or invoking hosts", async () => {

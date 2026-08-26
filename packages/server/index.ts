@@ -8,8 +8,8 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  *   PLANNOTATOR_ORIGIN - Explicit origin override; validated against AGENT_CONFIG
  *                        in packages/shared/agents.ts. Supported values:
- *                        "claude-code", "opencode", "codex", "copilot-cli",
- *                        "gemini-cli", "pi".
+ *                        "claude-code", "amp", "droid", "kiro-cli", "opencode",
+ *                        "codex", "copilot-cli", "gemini-cli", "pi", "oh-my-pi".
  */
 
 import type { Origin } from "@plannotator/shared/agents";

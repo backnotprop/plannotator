@@ -13,6 +13,7 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Annotation } from '../../types';
+import { AnnotationType } from '../../types';
 
 const hasDom = typeof document !== 'undefined';
 const hookModule = hasDom ? await import('./useHtmlAnnotation') : null;
@@ -274,16 +275,39 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
   });
 
-  test('the HTML selection toolbar is comment-only: no Delete, no quick labels', async () => {
+  test('the HTML selection toolbar is comment-only plus the restored thumbs-up: no Delete, no label picker', async () => {
+    // The restricted restore: exactly ONE label affordance (the hardcoded
+    // 👍 "Looks good") came back to HTML surfaces. Delete and the Zap
+    // picker staying gone is what preserves the comment-only ruling.
     const { postSelection } = await mountViewer({ mode: 'selection', onAdd: () => {} });
     await postSelection({ ...selectionMessage, anchor: undefined });
     const toolbar = document.querySelector('.annotation-toolbar');
     if (!toolbar) throw new Error('toolbar missing');
     const titles = Array.from(toolbar.querySelectorAll('button')).map((b) => b.title);
     expect(titles).toContain('Comment');
+    expect(titles).toContain('Looks good');
     expect(titles).not.toContain('Delete');
     expect(titles).not.toContain('Quick label');
-    expect(titles).not.toContain('Looks good');
+  });
+
+  test('the toolbar thumbs-up creates an isQuickLabel comment annotation', async () => {
+    // Guards the restricted handler wiring in HtmlViewer: the 👍 must
+    // produce the same labeled-comment shape the markdown surface produces,
+    // never a DELETION and never a bare comment.
+    const added: Annotation[] = [];
+    const { postSelection } = await mountViewer({ mode: 'selection', onAdd: (ann) => added.push(ann) });
+    await postSelection({ ...selectionMessage, anchor: undefined });
+    const toolbar = document.querySelector('.annotation-toolbar');
+    if (!toolbar) throw new Error('toolbar missing');
+    const thumbs = Array.from(toolbar.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.title === 'Looks good',
+    );
+    if (!thumbs) throw new Error('thumbs-up missing');
+    await act(async () => thumbs.click());
+    expect(added).toHaveLength(1);
+    expect(added[0]?.type).toBe(AnnotationType.COMMENT);
+    expect(added[0]?.isQuickLabel).toBe(true);
+    expect(added[0]?.text).toBe('Looks good');
   });
 
   test('redline mode is CLAMPED on HTML surfaces: a pinpoint selection opens the composer instead of auto-deleting', async () => {

@@ -143,10 +143,12 @@ type PersistedPlannotatorState = {
 
 /**
  * One-shot countermand delivered on the first prompt after a planning or
- * executing phase returns to idle (#1320). The idle context filter silently
- * strips the phase framing, but the model's own plan-mode turns — and any
- * blocked-write tool results — stay in history and keep steering it, so the
- * end of plan mode must be stated, not just implied by removal.
+ * executing phase returns to idle (#1320). It is the SOLE mechanism ending
+ * plan mode in the conversation: delivered framing stays in history untouched
+ * (#1380 — removing it from mid-history shifted every later message and
+ * invalidated the provider's cached prefix), so the model's plan-mode steering
+ * — its own turns, blocked-write tool results, and the framing itself — is
+ * neutralized by this explicit notice, never by silent removal.
  */
 const PLAN_MODE_OFF_NOTICE = `[PLANNOTATOR - PLAN MODE OFF]
 Plannotator plan mode has ended. Disregard all earlier Plannotator planning or execution instructions from this session: the planning restrictions (markdown-only writes, plan submission for review) and the execution checklist protocol ([DONE:n] markers) no longer apply, and the plan-submission tool is no longer available. Full tool access is restored — respond and use tools normally. If the user wants planning again, they will re-enable plan mode.`;
@@ -277,6 +279,19 @@ function sendUserMessageWithCurrentSessionFallback(
 		throw err;
 	}
 }
+
+/**
+ * Warning for hosts whose extension context lacks `ctx.isProjectTrusted`
+ * (#1353). Two audiences reach this path: real Pi older than 0.79.1 (the
+ * release that added the capability) and forks like oh-my-pi that have not
+ * adopted it. Neither Pi's nor oh-my-pi's extension context exposes a host
+ * name or version, so the two are not reliably distinguishable at runtime —
+ * the message states the capability gap without guessing which host it is,
+ * and must stay true for both. "Bundled and global config still load" is a
+ * fact of loadPlannotatorConfig: only project-local config is trust-gated.
+ */
+export const PROJECT_TRUST_CAPABILITY_WARNING =
+	"This host does not expose project trust (ctx.isProjectTrusted, Pi 0.79.1+). Project-local config (.pi/plannotator.json) is disabled; bundled and global config still load.";
 
 export default function plannotator(pi: ExtensionAPI): void {
 	const currentPiSession = registerCurrentPiSession(pi);
@@ -520,7 +535,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		if (profile?.thinking) {
-			pi.setThinkingLevel(profile.thinking);
+			// The config accepts every level current Pi knows, which is a superset
+			// of the `ThinkingLevel` union of the pinned Pi floor (#1304). Pi clamps
+			// a level the running model does not support, so handing it one this
+			// build's types have not heard of yet is safe.
+			pi.setThinkingLevel(profile.thinking as ThinkingLevel);
 		}
 
 		updateStatus(ctx);
@@ -716,10 +735,16 @@ export default function plannotator(pi: ExtensionAPI): void {
 			// Split known annotate flags from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
-			// (scoped-package-style names).
-			let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
+			// (scoped-package-style names). liveFlags: Pi supports live app
+			// sessions, so --app / --static are recognized here.
+			let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina, app: appFlag, static: staticFlag } = parseAnnotateArgs(args ?? "", { liveFlags: true });
+			// Same flag-conflict-first ordering as the Bun CLI.
+			if (appFlag && staticFlag) {
+				ctx.ui.notify("--app and --static are mutually exclusive", "error");
+				return;
+			}
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--app] [--static] [--gate] [--json]", "error");
 				return;
 			}
 
@@ -767,28 +792,91 @@ export default function plannotator(pi: ExtensionAPI): void {
 			let rawHtml: string | undefined;
 			let absolutePath: string;
 			let folderPath: string | undefined;
-			let mode: "annotate" | "annotate-folder" | undefined;
+			let mode: "annotate" | "annotate-folder" | "annotate-app" | undefined;
 			let sourceInfo: string | undefined;
 			let sourceConverted = false;
 			let isFolder = false;
+			let liveTargetUrl: string | undefined;
 
 			// --- URL annotation ---
 			const isUrl = /^https?:\/\//i.test(filePath);
 
+			// --app is contracted to fail loudly whenever it cannot apply; a
+			// file or folder target silently swallowing it would hide the
+			// flag's typo'd use (same contract as the Bun CLI).
+			if (!isUrl && appFlag) {
+				const { LIVE_APP_REQUIRES_URL_MESSAGE } = await import("./generated/live-probe.ts");
+				ctx.ui.notify(LIVE_APP_REQUIRES_URL_MESSAGE, "error");
+				return;
+			}
+
 			if (isUrl) {
-				const useJina = resolveUseJina(noJina, loadConfig());
-				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
-				try {
-					const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.ts");
-					const result = await urlToMarkdown(filePath, { useJina });
-					markdown = result.markdown;
-					sourceConverted = isConvertedSource(result.source);
-				} catch (err) {
-					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+				// --- Live app detection (shared probe: same 3s timeout, same
+				// "< 500 + HTML + same loopback origin" gate as the Bun CLI) ---
+				const {
+					LIVE_APP_REMOTE_MESSAGE,
+					LIVE_APP_REQUIRES_HTTP_MESSAGE,
+					LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
+					buildForceAppFailureMessage,
+					buildLiveProbeFallbackNotice,
+					classifyLiveAppCandidate,
+					probeLiveAppTarget,
+				} = await import("./generated/live-probe.ts");
+				const { parsed: parsedUrl, loopback } = classifyLiveAppCandidate(filePath);
+
+				if (appFlag && !loopback) {
+					ctx.ui.notify(LIVE_APP_REQUIRES_LOOPBACK_MESSAGE, "error");
 					return;
 				}
-				absolutePath = filePath;
-				sourceInfo = filePath;
+				if (appFlag && parsedUrl?.protocol === "https:") {
+					// The live proxy is http-only.
+					ctx.ui.notify(LIVE_APP_REQUIRES_HTTP_MESSAGE, "error");
+					return;
+				}
+
+				if (loopback && parsedUrl?.protocol === "http:" && !staticFlag) {
+					const probe = await probeLiveAppTarget(filePath, parsedUrl);
+					if (probe.liveEligible) {
+						// Remote hard-off (layer 1 of 2; the server throw in
+						// serverAnnotate.ts backstops it): a live proxy relays
+						// the user's authenticated dev app, and a remote Pi
+						// session is reachable beyond loopback.
+						if (isRemoteSession()) {
+							ctx.ui.notify(LIVE_APP_REMOTE_MESSAGE, "error");
+							return;
+						}
+						liveTargetUrl = filePath;
+						mode = "annotate-app";
+						ctx.ui.notify(`Live app: ${filePath}`, "info");
+					} else if (appFlag) {
+						ctx.ui.notify(buildForceAppFailureMessage(filePath, probe), "error");
+						return;
+					} else if (probe.probeError !== null) {
+						// A dev server still starting up probes as unreachable;
+						// say so instead of silently downgrading to static.
+						ctx.ui.notify(buildLiveProbeFallbackNotice(filePath, probe.probeError), "info");
+					}
+				}
+
+				if (liveTargetUrl) {
+					markdown = "";
+					absolutePath = filePath;
+					sourceInfo = filePath;
+				} else {
+					const useJina = resolveUseJina(noJina, loadConfig());
+					ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
+					try {
+						const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.ts");
+						const result = await urlToMarkdown(filePath, { useJina });
+						markdown = result.markdown;
+						sourceConverted = isConvertedSource(result.source);
+					} catch (err) {
+						ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+						return;
+					}
+					absolutePath = filePath;
+					sourceInfo = filePath;
+				}
 			} else {
 				// Pick the interpretation of the user input that actually exists:
 				// stripped form first (reference-mode primary), literal as fallback
@@ -864,6 +952,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					rawHtml,
 					!!rawHtml,
 					renderMarkdownFlag,
+					undefined,
+					liveTargetUrl,
 				);
 				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session
@@ -1300,14 +1390,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 		if (phase !== "planning" && phase !== "executing") {
 			// Idle injects nothing (#1269) — with one exception: the first
 			// prompt after a planning/executing → idle transition delivers a
-			// one-shot plan-mode-off countermand (#1320). The idle filter
-			// strips the phase framing silently, but the model's own plan-mode
-			// turns and blocked-write tool results remain in history and keep
-			// steering it, so the end of plan mode must be said out loud.
-			// Cache-wise this is free: the notice is a conversation-suffix
-			// append at a boundary where stripping the framing has already
-			// invalidated the cached prefix. Fresh idle sessions never arm the
-			// latch and keep their byte-stable prefix.
+			// one-shot plan-mode-off countermand (#1320). Delivered framing
+			// stays in history (#1380), so this notice is what ends plan mode:
+			// the model's plan-mode turns, blocked-write tool results, and the
+			// framing itself keep steering it until the end is said out loud.
+			// Cache-wise the notice is free unconditionally — a pure
+			// conversation-suffix append on a prefix nothing else perturbs.
+			// Fresh idle sessions never arm the latch and inject nothing.
 			if (phase !== "idle" || !idleNoticePending) return;
 			idleNoticePending = false;
 			persistState();
@@ -1425,79 +1514,20 @@ Mark completed steps with [DONE:n] in your response.`
 		};
 	});
 
-	// Keep plannotator conversation messages coherent with the current phase.
-	// While idle, everything plannotator injected is filtered out — except the
-	// newest plan-mode-off notice (details.phase === "idle"), which is the
-	// countermand for the framing this very filter removes (#1320); stripping
-	// it too would re-create the silent-removal bug it exists to fix.
-	// During a phase, only the newest framing for the CURRENT phase survives:
-	// framing from other phases or earlier cycles is dropped (stale planning
-	// rules cannot leak into execution), along with todo-status messages that
-	// predate the current cycle's framing. The filter is deterministic within a
-	// phase, so it never perturbs the provider's cached prefix mid-phase; the
-	// only mid-history changes happen at phase transitions.
-	pi.on("context", async (event) => {
-		if (phase === "idle") {
-			// Anchor search mirrors the per-phase logic below: the newest idle
-			// framing (the plan-mode-off notice) survives, every other injected
-			// message is stripped. Deterministic across idle turns, so the
-			// filter itself never perturbs the provider's cached prefix while
-			// idle — sessions that never entered plan mode filter nothing.
-			let idleAnchor = -1;
-			for (let i = event.messages.length - 1; i >= 0; i--) {
-				const msg = event.messages[i] as { customType?: string; details?: unknown };
-				if (
-					msg.customType === "plannotator-framing" &&
-					(msg.details as { phase?: string } | undefined)?.phase === "idle"
-				) {
-					idleAnchor = i;
-					break;
-				}
-			}
-			return {
-				messages: event.messages.filter((m, index) => {
-					const msg = m as { customType?: string; role?: string; content?: unknown };
-					if (msg.customType === "plannotator-framing") return index === idleAnchor;
-					if (msg.customType === "plannotator-context") return false;
-					if (msg.role !== "user") return true;
-
-					const content = msg.content;
-					if (typeof content === "string") {
-						return !content.includes("[PLANNOTATOR -");
-					}
-					if (Array.isArray(content)) {
-						return !content.some(
-							(c) =>
-								c.type === "text" &&
-								(c as { text?: string }).text?.includes("[PLANNOTATOR -"),
-						);
-					}
-					return true;
-				}),
-			};
-		}
-
-		let anchor = -1;
-		for (let i = event.messages.length - 1; i >= 0; i--) {
-			const msg = event.messages[i] as { customType?: string; details?: unknown };
-			if (
-				msg.customType === "plannotator-framing" &&
-				(msg.details as { phase?: string } | undefined)?.phase === phase
-			) {
-				anchor = i;
-				break;
-			}
-		}
-
-		return {
-			messages: event.messages.filter((m, index) => {
-				const msg = m as { customType?: string };
-				if (msg.customType === "plannotator-framing") return index === anchor;
-				if (msg.customType === "plannotator-context") return anchor === -1 || index > anchor;
-				return true;
-			}),
-		};
-	});
+	// There is deliberately NO "context" handler (#1380). One existed here and
+	// stripped plannotator-injected messages at phase transitions; Pi applies a
+	// context handler's result only to the outgoing LLM request (the runner
+	// structuredClones history and transformContext shapes the request in
+	// streamAssistantResponse), but the provider's prompt cache keys on the
+	// exact request prefix, so removing an already-sent mid-history message
+	// shifted every later message and re-billed the whole tail as uncached
+	// input (the reporter measured 88 of 119 messages invalidated on one plan
+	// completion). The conversation is append-only instead: delivered framing
+	// and todo snapshots stay in history for the life of the session, and
+	// stale instructions are neutralized by countermands — the executing
+	// framing supersedes planning, and PLAN_MODE_OFF_NOTICE supersedes both —
+	// which models follow by recency. Compaction remains the one boundary that
+	// rewrites history, and it invalidates the provider cache by itself.
 
 	// Track execution progress
 	pi.on("turn_end", async (event, ctx) => {
@@ -1690,13 +1720,18 @@ Mark completed steps with [DONE:n] in your response.`
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
+		// Project trust gate (#1291). Capability absent = fail closed: the
+		// project-local config is skipped and the honest capability warning
+		// fires (see PROJECT_TRUST_CAPABILITY_WARNING). A host that provides
+		// the function is honored verbatim — including one that hardcodes
+		// `true` because it has no project-trust gate by policy (oh-my-pi's
+		// planned shim). A throwing trustFn (real Pi throws on a stale
+		// context) propagates deliberately: config loading never runs, so
+		// project-local config still cannot load.
 		const trustFn = ctx.isProjectTrusted as (() => boolean) | undefined;
 		const projectTrusted = typeof trustFn === "function" ? trustFn.call(ctx) : false;
 		if (typeof trustFn !== "function") {
-			ctx.ui.notify(
-				"Plannotator requires Pi 0.79.1 or newer. Update Pi; project-local config is disabled on this host.",
-				"warning",
-			);
+			ctx.ui.notify(PROJECT_TRUST_CAPABILITY_WARNING, "warning");
 		}
 		const loadedConfig = loadPlannotatorConfig(ctx.cwd, {
 			projectTrusted,
@@ -1717,8 +1752,10 @@ Mark completed steps with [DONE:n] in your response.`
 	// Compaction summarizes conversation history and can swallow the delivered
 	// framing message (custom messages are ordinary compactable messages), so
 	// reopen the latch: the next prompt re-delivers the phase framing. If the
-	// framing survived in the kept tail, the context filter keeps only the
-	// newest copy, so re-delivery never duplicates.
+	// framing survived in the kept tail, re-delivery duplicates it — accepted
+	// (#1380): the copies are identical instructions, the newest governs, and
+	// compaction already invalidated the cached prefix, so appending a fresh
+	// copy costs nothing while removing the survivor would cost the cache.
 	pi.on("session_compact", async () => {
 		if (phase !== "planning" && phase !== "executing") return;
 		framingDelivered = false;

@@ -43,7 +43,7 @@ import {
   type AnnotateClientLeaseStreamSession,
 } from "@plannotator/shared/annotate-client-lease";
 import { createAnnotateDecisionSettler } from "@plannotator/shared/annotate-decision";
-import { saveConfig, detectGitUser, getServerConfig, loadConfig, resolveAIEnabled, resolveAnnotateHistory } from "./config";
+import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory } from "./config";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
@@ -55,6 +55,12 @@ import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
+import {
+  buildLiveAppUrl,
+  buildLiveEditorOrigins,
+  composeLiveBridgeJs,
+  liveAppDraftIdentity,
+} from "@plannotator/shared/live-proxy-core";
 import { randomBytes } from "node:crypto";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
 
@@ -177,6 +183,39 @@ export interface AnnotateServerResult {
 // --- Server Implementation ---
 
 /**
+ * Run shutdown disposal steps with per-step isolation, then close the
+ * listener. One throwing step (agent-terminal teardown is historically
+ * fragile, #1314) must never skip the steps after it — before this guard, a
+ * throw mid-sequence orphaned the live proxy's listener and its upstream
+ * WebSockets. Failures are reported through `log` (stderr by default) with
+ * the step's name; `closeListener` runs unconditionally, even against a
+ * pathological throw outside the steps.
+ */
+export function runGuardedShutdown(
+  steps: ReadonlyArray<readonly [name: string, dispose: () => void]>,
+  closeListener: () => void,
+  log: (message: string, error: unknown) => void = (message, error) =>
+    console.error(message, error),
+): void {
+  try {
+    for (const [name, dispose] of steps) {
+      try {
+        dispose();
+      } catch (error) {
+        log(`[plannotator] annotate shutdown: ${name} disposal failed:`, error);
+      }
+    }
+  } finally {
+    closeListener();
+  }
+}
+
+// Stable identity for a live app session's annotation draft — moved to the
+// shared live-proxy core so the Pi mirror keys drafts identically; re-exported
+// here for existing import sites.
+export { liveAppDraftIdentity } from "@plannotator/shared/live-proxy-core";
+
+/**
  * Start the Annotate server
  *
  * Handles:
@@ -290,10 +329,23 @@ export async function startAnnotateServer(
     folderAnnotateHistoryCache.set(resolvedFilePath, result);
     return result;
   }
+  // Draft identity. Content-derived for the modes that HAVE content, and
+  // path-derived for the modes that do not.
+  //
+  // A live app session has no document body at all: annotate-app resolves
+  // `markdown` to "" by construction, because the page lives behind the
+  // proxy rather than in a string the server holds. Hashing that empty body
+  // gave EVERY live session on the machine the one hash of "", so two
+  // sessions against different dev servers shared a single draft slot and
+  // deterministically overwrote each other's in-progress annotations. The
+  // session's target is its identity here, exactly as the folder path is the
+  // folder session's identity.
   const draftSource =
-    mode === "annotate-folder" && folderPath
-      ? `folder:${resolvePath(folderPath)}`
-      : renderHtml && rawHtml ? rawHtml : markdown;
+    mode === "annotate-app" && liveApp
+      ? `annotate-app\0${liveAppDraftIdentity(liveApp.targetUrl)}`
+      : mode === "annotate-folder" && folderPath
+        ? `folder:${resolvePath(folderPath)}`
+        : renderHtml && rawHtml ? rawHtml : markdown;
   const draftKey = contentHash(draftSource);
 
   // Durable submit records (#678): the caller consuming waitForDecision() may
@@ -715,7 +767,7 @@ export async function startAnnotateServer(
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
             try {
-              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
+              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
               const toSave: Record<string, unknown> = {};
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
@@ -723,6 +775,8 @@ export async function startAnnotateServer(
               if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
+              if (isAgentTerminalSide(body.agentTerminalSide)) toSave.agentTerminalSide = body.agentTerminalSide;
+              if (typeof body.agentTerminalDefaultAgent === "string") toSave.agentTerminalDefaultAgent = body.agentTerminalDefaultAgent;
               if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
               return Response.json({ ok: true });
             } catch {
@@ -1084,50 +1138,28 @@ export async function startAnnotateServer(
   const serverUrl = buildAdvertisedUrl(port);
 
   if (liveApp) {
-    // Compose the proxy-served bridge body: JSON config prelude (the token
-    // this server owns, both editor origin forms with the localhost one
-    // first to match the advertised URL, and the annotation CSS), then the
-    // bootstrap that installs the CSS, then the bridge itself.
+    // Compose the proxy-served bridge body via the shared assembly (config
+    // prelude with the token this server owns, both editor origin forms
+    // with the localhost one first to match the advertised URL, then the
+    // bootstrap that installs the CSS, then the bridge itself).
     liveSessionToken = randomBytes(16).toString("hex");
-    const editorOrigins = [
-      `http://localhost:${port}`,
-      `http://127.0.0.1:${port}`,
-    ];
-    const bridgeJs =
-      "window.__plannotatorLiveConfig = "
-      + JSON.stringify({
-        live: true,
-        token: liveSessionToken,
-        editorOrigins,
-        css: liveApp.annotationCss,
-      })
-      + ";\n"
-      + liveApp.bridgeBootstrap
-      + "\n"
-      + liveApp.bridgeScript;
+    const editorOrigins = buildLiveEditorOrigins(port);
     liveProxy = startLiveAppProxy({
       targetUrl: liveApp.targetUrl,
       editorOrigins,
-      bridgeJs,
+      bridgeJs: composeLiveBridgeJs({
+        token: liveSessionToken,
+        editorOrigins,
+        annotationCss: liveApp.annotationCss,
+        bridgeBootstrap: liveApp.bridgeBootstrap,
+        bridgeScript: liveApp.bridgeScript,
+      }),
     });
     // Advertise the proxy under the LOCALHOST spelling, carrying the target
-    // URL's own path and query. localhost keeps the framed app same-site
-    // with the editor page (buildAdvertisedUrl advertises localhost locally)
-    // and shares the dev app's host-only localhost cookies and storage,
-    // which a 127.0.0.1 spelling would not (and Safari ITP blocks all
-    // cookies in cross-site iframes). The proxy itself still BINDS the
-    // 127.0.0.1 literal; browsers that resolve localhost to ::1 first fall
-    // back to IPv4 on the refused loopback connect. The path matters too:
-    // annotating http://localhost:5173/admin must open /admin, not the app
-    // root. PLANNOTATOR_URL_HOST is still never applied here.
-    let targetPath = "/";
-    try {
-      const parsedTarget = new URL(liveApp.targetUrl);
-      targetPath = parsedTarget.pathname + parsedTarget.search;
-    } catch {
-      targetPath = "/";
-    }
-    liveAppUrl = `http://localhost:${liveProxy.port}${targetPath}`;
+    // URL's own path and query (see buildLiveAppUrl in live-proxy-core for
+    // the same-site/cookie rationale). PLANNOTATOR_URL_HOST is still never
+    // applied here.
+    liveAppUrl = buildLiveAppUrl(liveProxy.port, liveApp.targetUrl);
   }
 
   // The cache warm must never gate the listening socket. Its async filesystem
@@ -1135,17 +1167,25 @@ export async function startAnnotateServer(
   void warmFileListCache(process.cwd(), "code");
 
   const stop = () => {
-    // try/finally: a throwing disposal must never leave the listener bound.
-    try {
-      closeAllFileBrowserWatchers();
-      clientLease.cancel();
-      clientLease.closeSessions();
-      aiRuntime?.dispose();
-      agentTerminal.dispose();
-      liveProxy?.stop();
-    } finally {
-      server.stop();
-    }
+    // Every disposal step is guarded individually (runGuardedShutdown):
+    // agent-terminal teardown is historically fragile (#1314), and in a flat
+    // sequence one throwing step would skip everything after it — notably
+    // liveProxy.stop(), orphaning the live proxy's listener and its upstream
+    // WebSockets. A failed step is reported and the rest still run; the
+    // listener itself closes regardless.
+    runGuardedShutdown(
+      [
+        ["file browser watchers", () => closeAllFileBrowserWatchers()],
+        ["client lease", () => {
+          clientLease.cancel();
+          clientLease.closeSessions();
+        }],
+        ["AI runtime", () => aiRuntime?.dispose()],
+        ["agent terminal", () => agentTerminal.dispose()],
+        ["live proxy", () => liveProxy?.stop()],
+      ],
+      () => server.stop(),
+    );
   };
 
   // Notify caller that server is ready. An async ready handler that rejects

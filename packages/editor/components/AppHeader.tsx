@@ -76,6 +76,8 @@ interface AppHeaderProps {
   taterMode: boolean;
   mobileSettingsOpen: boolean;
   gitUser: string | undefined;
+  /** This session offers the Agent TUI, so Settings shows its Position row. */
+  agentTerminalAvailable: boolean;
 
   // Handlers — App owns all decision logic, header just calls these
   onCallbackFeedback: () => void;
@@ -163,6 +165,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   taterMode,
   mobileSettingsOpen,
   gitUser,
+  agentTerminalAvailable,
   onCallbackFeedback,
   onCallbackApprove,
   onAnnotateExit,
@@ -447,6 +450,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             externalOpen={mobileSettingsOpen}
             onExternalClose={onCloseSettings}
             gitUser={gitUser}
+            agentTerminalAvailable={agentTerminalAvailable}
           />
         </div>
 

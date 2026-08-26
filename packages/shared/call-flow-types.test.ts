@@ -133,13 +133,45 @@ describe("parseCallDiffWorkerResult", () => {
     expect(() => parseCallDiffWorkerResult(responseForFile(`${"a".repeat(2_100)}/../secret.ts`))).toThrow("unsafe source path");
   });
 
-  test("rejects rather than truncating an over-budget tree list", () => {
+  test("keeps a big-but-valid tree list instead of rejecting it (#1351)", () => {
     const tree = { entry: "x", tree: { key: "x", label: "x", status: "same", children: [] } };
+    const parsed = parseCallDiffWorkerResult({
+      protocol: 1,
+      ok: true,
+      version: "0.4.1",
+      result: { from: "a", to: "b", ascii: "raw", trees: Array.from({ length: 470 }, (_unused, index) => ({ ...tree, entry: `entry-${index}` })) },
+    });
+    expect(parsed.trees).toHaveLength(470);
+    expect(parsed.diagnostics).toEqual([]);
+  });
+
+  test("truncates an over-budget tree list and reports the omission (#1351)", () => {
+    const tree = { entry: "x", tree: { key: "x", label: "x", status: "same", children: [] } };
+    const parsed = parseCallDiffWorkerResult({
+      protocol: 1,
+      ok: true,
+      version: "0.4.1",
+      result: { from: "a", to: "b", ascii: "raw", trees: Array.from({ length: 2_001 }, (_unused, index) => ({ ...tree, entry: `entry-${index}` })) },
+    });
+    expect(parsed.trees).toHaveLength(2_000);
+    expect(parsed.trees[0]?.entry).toBe("entry-0");
+    expect(parsed.diagnostics).toHaveLength(1);
+    expect(parsed.diagnostics[0]?.level).toBe("warning");
+    expect(parsed.diagnostics[0]?.message).toContain("2,000");
+    expect(parsed.diagnostics[0]?.message).toContain("2,001");
+  });
+
+  test("still rejects results whose node budget is genuinely exceeded", () => {
+    const child = { key: "c", label: "c", status: "same", children: [] };
+    const wideTree = {
+      entry: "x",
+      tree: { key: "x", label: "x", status: "same", children: Array.from({ length: 5_001 }, () => child) },
+    };
     expect(() => parseCallDiffWorkerResult({
       protocol: 1,
       ok: true,
       version: "0.4.1",
-      result: { from: "a", to: "b", ascii: "raw", trees: Array.from({ length: 101 }, () => tree) },
+      result: { from: "a", to: "b", ascii: "raw", trees: [wideTree] },
     })).toThrow("tree limits");
   });
 

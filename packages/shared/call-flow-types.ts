@@ -160,7 +160,7 @@ export interface ParsedCallDiffWorkerResult {
   diagnostics: CallFlowDiagnostic[];
 }
 
-const MAX_TREES = 100;
+const MAX_TREES = 2_000;
 const MAX_NODES = 5_000;
 const MAX_TREE_DEPTH = 32;
 const MAX_DIAGNOSTICS = 100;
@@ -217,9 +217,16 @@ export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerR
   if (!isRecord(value.result) || !Array.isArray(value.result.trees)) {
     throw new Error("CallDiff worker response is missing its diff trees.");
   }
-  if (value.result.trees.length > MAX_TREES) {
-    throw new Error("CallDiff result exceeded Plannotator's tree limits.");
-  }
+  // A large-but-valid result (many small entry trees — common in Swift, TS,
+  // and other per-function languages) degrades instead of failing: keep the
+  // first MAX_TREES trees and say so in diagnostics (#1351). The caps that
+  // guard against genuinely unbounded worker output (total nodes, depth, raw
+  // length) still throw below.
+  const totalTreeCount = value.result.trees.length;
+  const truncatedTrees = totalTreeCount > MAX_TREES;
+  const boundedTreeCandidates = truncatedTrees
+    ? value.result.trees.slice(0, MAX_TREES)
+    : value.result.trees;
 
   let nodeCount = 0;
   const parseNode = (candidate: unknown, depth: number): CallFlowNode => {
@@ -253,7 +260,7 @@ export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerR
   };
 
   const raw = boundedRaw(value.result.ascii);
-  const trees = value.result.trees.map((candidate): CallFlowTree => {
+  const trees = boundedTreeCandidates.map((candidate): CallFlowTree => {
     if (!isRecord(candidate)) throw new Error("CallDiff worker returned an invalid tree.");
     const entry = boundedString(candidate.entry, "tree entry");
     const tree = parseNode(candidate.tree, 0);
@@ -285,6 +292,12 @@ export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerR
         message: candidate.message.slice(0, MAX_TEXT_LENGTH),
       });
     }
+  }
+  if (truncatedTrees) {
+    diagnostics.push({
+      level: "warning",
+      message: `Showing the first ${MAX_TREES.toLocaleString("en-US")} of ${totalTreeCount.toLocaleString("en-US")} call trees; the rest were truncated to bound the result.`,
+    });
   }
 
   return {

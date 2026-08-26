@@ -1741,6 +1741,10 @@ checkout_failed=0
         copy_skill_if_present apps/skills/claude/plannotator-review "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-annotate "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-last "$CLAUDE_SKILLS_DIR"
+        # The plannotator knowledge skill (CLI reference) has no Claude-only
+        # injection form — its body is pure prose — so Claude installs the
+        # same single-sourced copy Codex gets from apps/skills/core.
+        copy_skill_if_present apps/skills/core/plannotator "$CLAUDE_SKILLS_DIR"
         echo "Installed Claude Code skills to ${CLAUDE_SKILLS_DIR}/"
     else
         echo "Tag ${latest_tag} predates the per-agent skill layout — skipping Claude Code skill install"
@@ -1750,6 +1754,7 @@ checkout_failed=0
         copy_skill_if_present apps/skills/core/plannotator-review "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-annotate "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-last "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/core/plannotator "$AGENTS_SKILLS_DIR"
         echo "Installed shared agent skills to ${AGENTS_SKILLS_DIR}/"
     else
         echo "Tag ${latest_tag} predates the core/extra skill layout — skipping shared agent skill install"
@@ -1776,6 +1781,10 @@ checkout_failed=0
         # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
         copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
+        # The plannotator knowledge skill (CLI reference) has no Kiro-specific
+        # form, so Kiro receives the single-sourced core copy like every other
+        # scope. Without it, Kiro users get the action skills but no reference.
+        copy_skill_if_present apps/skills/core/plannotator "$KIRO_SKILLS_DIR"
         # Extras come from apps/skills/extra (not duplicated into apps/kiro-cli/skills).
         copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"

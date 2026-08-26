@@ -1,10 +1,16 @@
 /**
- * Loopback reverse proxy for live local app annotation (phase 1).
+ * Loopback reverse proxy for live local app annotation — Bun transport.
  *
  * Mirrors the whole target origin (a local dev server) on a dedicated
  * loopback port and injects the annotation bridge into every HTML response,
  * so the editor can frame the user's own running app and drive the same
  * pinpoint annotation experience the srcdoc surface provides.
+ *
+ * Every DECISION here (Host/Origin validation, injector state machine,
+ * CSP/X-Frame-Options policy, redirect rewrite, WS origin gate) lives in
+ * @plannotator/shared/live-proxy-core, shared byte-for-byte with the Node
+ * transport the Pi extension runs (packages/shared/live-proxy-node.ts).
+ * This file is only the Bun.serve plumbing around those decisions.
  *
  * Security posture (binding is the contract, not a default):
  * - Binds 127.0.0.1 UNCONDITIONALLY. Never the shared env-dependent hostname
@@ -19,40 +25,42 @@
  *   origin.
  */
 
+import {
+  HOP_BY_HOP_HEADERS,
+  LIVE_PROXY_BRIDGE_PATH,
+  LIVE_PROXY_MAX_PENDING_WS_MESSAGES,
+  LIVE_PROXY_RESERVED_PREFIX,
+  applyHtmlFramingHeaders,
+  buildFrameAncestorsPolicy,
+  createHtmlInjector,
+  isAllowedBridgeFetchSite,
+  isAllowedProxyHost,
+  isAllowedWsUpgradeOrigin,
+  isDocumentIntentRequest,
+  isHtmlContentType,
+  rewriteLoopbackLocation,
+  type LiveAppProxy,
+  type LiveAppProxyOptions,
+} from "@plannotator/shared/live-proxy-core";
+
+// Re-export the shared decisions under their historical names: this module
+// is the import site for the Bun CLI (annotate-resolution.ts), the annotate
+// server, and the transport test suite.
+export {
+  LIVE_PROXY_BRIDGE_PATH,
+  LIVE_PROXY_RESERVED_PREFIX,
+  createHtmlInjector,
+  isAllowedProxyHost,
+  isAllowedProxyOrigin,
+  isDocumentIntentRequest,
+  isLoopbackHostname,
+  rewriteLoopbackLocation,
+  type LiveAppProxy,
+  type LiveAppProxyOptions,
+} from "@plannotator/shared/live-proxy-core";
+
+// The literal loopback address is the security contract (see header).
 const LOOPBACK_HOST = "127.0.0.1";
-
-/** Reserved path namespace never forwarded upstream. */
-export const LIVE_PROXY_RESERVED_PREFIX = "/__plannotator__/";
-export const LIVE_PROXY_BRIDGE_PATH = "/__plannotator__/bridge.js";
-
-/** RFC 7230 hop-by-hop headers, stripped in both directions. */
-const HOP_BY_HOP_HEADERS = [
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-];
-
-const MAX_PENDING_WS_MESSAGES = 200;
-
-export interface LiveAppProxyOptions {
-  /** Upstream dev server origin, e.g. http://localhost:5173 (http, loopback). */
-  targetUrl: string;
-  /** Editor origins allowed to frame the proxied app (frame-ancestors). */
-  editorOrigins: string[];
-  /** Fully composed bridge body (config prelude + bootstrap + bridge). */
-  bridgeJs: string;
-}
-
-export interface LiveAppProxy {
-  port: number;
-  origin: string;
-  stop(): void;
-}
 
 type LiveProxySocketData = {
   upstream: WebSocket | null;
@@ -60,232 +68,6 @@ type LiveProxySocketData = {
   pathAndQuery: string;
   protocols: string | null;
 };
-
-/** True for hostnames that name the local loopback: localhost, the IPv6
- * loopback, or a LITERAL IPv4 address in 127.0.0.0/8. A string-prefix test
- * would also match DNS names like 127.0.0.1.evil.example that resolve
- * anywhere, so the 127/8 rung requires exactly four numeric octets. WHATWG
- * URL parsing canonicalizes numeric spellings (127.1, 0177.0.0.1,
- * 2130706433) to dotted-decimal before a hostname reaches this check. */
-export function isLoopbackHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host === "::1" || host === "[::1]") return true;
-  const octets = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!octets) return false;
-  return Number(octets[1]) <= 255 && Number(octets[2]) <= 255 && Number(octets[3]) <= 255;
-}
-
-/** True when the Host header names this proxy on loopback. */
-export function isAllowedProxyHost(hostHeader: string | null, port: number): boolean {
-  if (!hostHeader) return false;
-  return (
-    hostHeader === `127.0.0.1:${port}`
-    || hostHeader === `localhost:${port}`
-    || hostHeader === `[::1]:${port}`
-  );
-}
-
-/** True when a browser-supplied Origin header names this proxy itself. */
-export function isAllowedProxyOrigin(origin: string, port: number): boolean {
-  return (
-    origin === `http://127.0.0.1:${port}`
-    || origin === `http://localhost:${port}`
-    || origin === `http://[::1]:${port}`
-  );
-}
-
-/**
- * Rewrite an absolute redirect Location that names the upstream dev server
- * back to the proxy origin, or return null to pass it through untouched.
- * The match is by loopback hostname plus the upstream's port, not a string
- * prefix, so it covers alternate loopback spellings (target given as
- * localhost:5173, Location saying 127.0.0.1:5173) and never mangles
- * prefix look-alikes (localhost:51730 is a different service). Relative
- * Locations already resolve against the proxy origin and pass through.
- */
-export function rewriteLoopbackLocation(
-  location: string,
-  target: URL,
-  proxyOrigin: string,
-): string | null {
-  if (!/^http:\/\//i.test(location)) return null;
-  let locUrl: URL;
-  try {
-    locUrl = new URL(location);
-  } catch {
-    return null;
-  }
-  if (!isLoopbackHostname(locUrl.hostname)) return null;
-  if ((locUrl.port || "80") !== (target.port || "80")) return null;
-  return proxyOrigin + locUrl.pathname + locUrl.search + locUrl.hash;
-}
-
-/** Document-intent requests get Accept-Encoding stripped so HTML arrives
- * decodable for injection; asset requests keep their encoding untouched. */
-export function isDocumentIntentRequest(headers: Headers): boolean {
-  const dest = headers.get("sec-fetch-dest");
-  if (dest === "document" || dest === "iframe" || dest === "frame") return true;
-  const accept = headers.get("accept");
-  return !!accept && accept.includes("text/html");
-}
-
-// --- Streaming HTML injection -----------------------------------------------
-//
-// Injects exactly one script tag per document, in priority order:
-//  1. immediately after the end of the first <head ...> open tag (so
-//     streaming SSR gets the bridge before the body streams),
-//  2. before </head> when no head open tag was seen,
-//  3. appended at end of stream when neither appears.
-// Byte-level scan (the markers are ASCII, safe in UTF-8) holding back at most
-// 8 bytes across chunk boundaries; a head open tag split across chunks is
-// handled by a state machine rather than unbounded buffering.
-
-const HEAD_OPEN = "<head";
-const HEAD_CLOSE = "</head>";
-const HOLDBACK = 8;
-
-type InjectorState = "searching" | "in-head-open-tag" | "done";
-
-export function createHtmlInjector(injection: string) {
-  const encoder = new TextEncoder();
-  const injectionBytes = encoder.encode(injection);
-  let state: InjectorState = "searching";
-  let carry = new Uint8Array(0);
-
-  function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
-    const out = new Uint8Array(a.length + b.length);
-    out.set(a, 0);
-    out.set(b, a.length);
-    return out;
-  }
-
-  function lowerAt(buf: Uint8Array, index: number): number {
-    const byte = buf[index]!;
-    return byte >= 0x41 && byte <= 0x5a ? byte + 0x20 : byte;
-  }
-
-  function matchesAt(buf: Uint8Array, index: number, marker: string): boolean {
-    if (index + marker.length > buf.length) return false;
-    for (let i = 0; i < marker.length; i++) {
-      if (lowerAt(buf, index + i) !== marker.charCodeAt(i)) return false;
-    }
-    return true;
-  }
-
-  /** True when the byte after "<head" terminates the tag name. */
-  function isHeadBoundary(byte: number): boolean {
-    return byte === 0x3e /* > */
-      || byte === 0x2f /* / */
-      || byte === 0x20
-      || byte === 0x09
-      || byte === 0x0a
-      || byte === 0x0c
-      || byte === 0x0d;
-  }
-
-  /** Process buffered bytes, returning output and retaining a small carry. */
-  function scan(buf: Uint8Array, flush: boolean): Uint8Array[] {
-    const out: Uint8Array[] = [];
-    let cursor = 0;
-
-    while (cursor < buf.length && state !== "done") {
-      if (state === "in-head-open-tag") {
-        const gt = buf.indexOf(0x3e, cursor);
-        if (gt === -1) {
-          out.push(buf.subarray(cursor));
-          cursor = buf.length;
-          buf = new Uint8Array(0);
-          break;
-        }
-        out.push(buf.subarray(cursor, gt + 1));
-        out.push(injectionBytes);
-        state = "done";
-        cursor = gt + 1;
-        break;
-      }
-
-      // searching: look for the earliest full or partial marker.
-      let emitted = false;
-      for (let i = cursor; i < buf.length; i++) {
-        if (lowerAt(buf, i) !== 0x3c /* < */) continue;
-        // Full </head> (no head open tag seen): inject before it.
-        if (matchesAt(buf, i, HEAD_CLOSE)) {
-          out.push(buf.subarray(cursor, i));
-          out.push(injectionBytes);
-          state = "done";
-          cursor = i;
-          emitted = true;
-          break;
-        }
-        // <head followed by a boundary char: enter the open tag.
-        if (matchesAt(buf, i, HEAD_OPEN) && i + HEAD_OPEN.length < buf.length) {
-          if (isHeadBoundary(buf[i + HEAD_OPEN.length]!)) {
-            out.push(buf.subarray(cursor, i));
-            cursor = i;
-            state = "in-head-open-tag";
-            emitted = true;
-            break;
-          }
-          continue; // <header> etc.
-        }
-        // Partial marker at the buffer tail: defer to the holdback below.
-      }
-      if (!emitted && state === "searching") break;
-    }
-
-    if (state === "done") {
-      // Everything after the injection point passes through untouched.
-      if (cursor < buf.length) out.push(buf.subarray(cursor));
-      carry = new Uint8Array(0);
-      return out;
-    }
-
-    if (state === "in-head-open-tag") {
-      // scan() loop above consumed the buffer searching for '>'.
-      if (cursor < buf.length) {
-        out.push(buf.subarray(cursor));
-      }
-      carry = new Uint8Array(0);
-      return out;
-    }
-
-    // searching: hold back the trailing bytes that could begin a marker.
-    if (flush) {
-      out.push(buf.subarray(cursor));
-      out.push(injectionBytes);
-      state = "done";
-      carry = new Uint8Array(0);
-      return out;
-    }
-    const keepFrom = Math.max(cursor, buf.length - HOLDBACK);
-    out.push(buf.subarray(cursor, keepFrom));
-    carry = buf.slice(keepFrom);
-    return out;
-  }
-
-  return {
-    push(chunk: Uint8Array): Uint8Array[] {
-      const buf = carry.length ? concat(carry, chunk) : chunk;
-      carry = new Uint8Array(0);
-      return scan(buf, false);
-    },
-    flush(): Uint8Array[] {
-      const buf = carry;
-      carry = new Uint8Array(0);
-      if (state === "done") return buf.length ? [buf] : [];
-      if (state === "in-head-open-tag") {
-        // Stream ended inside the head open tag: emit what we have plus the
-        // injection so the bridge still ships.
-        state = "done";
-        const encoderOut: Uint8Array[] = [];
-        if (buf.length) encoderOut.push(buf);
-        encoderOut.push(injectionBytes);
-        return encoderOut;
-      }
-      return scan(buf, true);
-    },
-  };
-}
 
 function stripHopByHop(headers: Headers): void {
   for (const name of HOP_BY_HOP_HEADERS) headers.delete(name);
@@ -317,7 +99,7 @@ export function startLiveAppProxy(opts: LiveAppProxyOptions): LiveAppProxy {
   }
   const targetOrigin = target.origin;
   const targetHost = target.host;
-  const frameAncestors = `frame-ancestors ${opts.editorOrigins.join(" ")}`;
+  const frameAncestors = buildFrameAncestorsPolicy(opts.editorOrigins);
   const wsUpstreams = new Set<WebSocket>();
   let warnedEncodedHtml = false;
 
@@ -328,26 +110,34 @@ export function startLiveAppProxy(opts: LiveAppProxyOptions): LiveAppProxy {
     idleTimeout: 0,
 
     async fetch(req, srv) {
-      const url = new URL(req.url);
-
-      // Host validation first: anything not naming this loopback proxy is
-      // refused before any upstream contact or upgrade.
+      // Host validation FIRST, before req.url is even parsed: an HTTP/1.0
+      // request with no Host header leaves req.url a bare "/", and letting
+      // `new URL` throw on it hands the client Bun's ~67KB internal error
+      // page (stack trace and all) from a port whose whole contract is that
+      // it refuses anything not naming this loopback proxy. The invariant is
+      // "Host validation runs before any upstream contact" for ALL inputs,
+      // well-formed or not.
       if (!isAllowedProxyHost(req.headers.get("host"), srv.port!)) {
+        return new Response("Forbidden", { status: 403, headers: { "Content-Type": "text/plain" } });
+      }
+
+      // A Host that passed the check should always yield a parseable URL, but
+      // parsing must not be the thing that decides: an unparseable request
+      // takes the same refusal path rather than any error page.
+      let url: URL;
+      try {
+        url = new URL(req.url);
+      } catch {
         return new Response("Forbidden", { status: 403, headers: { "Content-Type": "text/plain" } });
       }
 
       // Reserved namespace: never forwarded upstream.
       if (url.pathname.startsWith(LIVE_PROXY_RESERVED_PREFIX)) {
         if (url.pathname === LIVE_PROXY_BRIDGE_PATH && (req.method === "GET" || req.method === "HEAD")) {
-          // The bridge body embeds the per-session token, and a <script src>
-          // include is not subject to CORS: a hostile page that guesses the
-          // proxy port could otherwise read the token off the config global.
-          // Browsers stamp subresource requests with Sec-Fetch-Site; only the
-          // proxied page's own same-origin include (and direct navigation)
-          // passes. Header-less clients (curl, tests) pass; this is defense
-          // in depth on top of the parent's source and origin checks.
-          const fetchSite = req.headers.get("sec-fetch-site");
-          if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+          // The bridge body embeds the per-session token; only same-origin
+          // includes and direct navigation may fetch it (see
+          // isAllowedBridgeFetchSite in live-proxy-core).
+          if (!isAllowedBridgeFetchSite(req.headers.get("sec-fetch-site"))) {
             return new Response("Forbidden", { status: 403, headers: { "Content-Type": "text/plain" } });
           }
           return new Response(req.method === "HEAD" ? null : opts.bridgeJs, {
@@ -360,17 +150,12 @@ export function startLiveAppProxy(opts: LiveAppProxyOptions): LiveAppProxy {
         return new Response("Not found", { status: 404 });
       }
 
-      // WebSocket passthrough (HMR): upgrade after Host validation.
+      // WebSocket passthrough (HMR): upgrade after Host validation. The
+      // Origin gate keeps a hostile page's cross-site connect from being
+      // laundered into the origin-less shape dev servers trust (see
+      // isAllowedWsUpgradeOrigin in live-proxy-core).
       if ((req.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
-        // Browsers stamp cross-site WS connects with their Origin, and the
-        // upstream connection below carries no Origin header at all. Piping
-        // a hostile page's connect through would launder it into exactly the
-        // origin-less shape dev servers trust as a non-browser client
-        // (bypassing e.g. Vite's CVE-2025-24010 cross-site WS protection).
-        // An Origin, when present, must name this proxy itself; header-less
-        // clients (non-browser tools) pass.
-        const wsOrigin = req.headers.get("origin");
-        if (wsOrigin !== null && !isAllowedProxyOrigin(wsOrigin, srv.port!)) {
+        if (!isAllowedWsUpgradeOrigin(req.headers.get("origin"), srv.port!)) {
           return new Response("Forbidden", { status: 403, headers: { "Content-Type": "text/plain" } });
         }
         const upgraded = srv.upgrade(req, {
@@ -433,23 +218,13 @@ export function startLiveAppProxy(opts: LiveAppProxyOptions): LiveAppProxy {
         if (rewritten !== null) responseHeaders.set("location", rewritten);
       }
 
-      const contentType = responseHeaders.get("content-type") ?? "";
-      const isHtml = contentType.includes("text/html");
+      const isHtml = isHtmlContentType(responseHeaders.get("content-type"));
 
       if (isHtml) {
         // Decided posture: drop any app CSP on HTML and replace it with our
-        // frame-ancestors policy. Amending an arbitrary CSP correctly for the
-        // injected script plus a runtime <style> is unpredictable; dev
-        // servers almost never ship CSP, and this is a dev-only loopback
-        // proxy. Non-HTML responses keep their CSP, and their
-        // X-Frame-Options: the anti-framing strip exists solely so the
-        // editor can frame the app document, and the frame-ancestors
-        // replacement lands only on HTML, so a non-HTML response must keep
-        // whatever framing protection the app shipped with it.
-        responseHeaders.delete("x-frame-options");
-        responseHeaders.delete("content-security-policy");
-        responseHeaders.delete("content-security-policy-report-only");
-        responseHeaders.set("content-security-policy", frameAncestors);
+        // frame-ancestors policy; non-HTML responses keep their CSP and
+        // X-Frame-Options (see applyHtmlFramingHeaders in live-proxy-core).
+        applyHtmlFramingHeaders(responseHeaders, frameAncestors);
       }
 
       const hasEncoding = !!responseHeaders.get("content-encoding");
@@ -551,7 +326,7 @@ export function startLiveAppProxy(opts: LiveAppProxyOptions): LiveAppProxy {
           upstream.send(payload);
           return;
         }
-        if (ws.data.pending.length >= MAX_PENDING_WS_MESSAGES) {
+        if (ws.data.pending.length >= LIVE_PROXY_MAX_PENDING_WS_MESSAGES) {
           // Overflow closes both sides rather than buffering unboundedly.
           ws.close();
           if (upstream) upstream.close();

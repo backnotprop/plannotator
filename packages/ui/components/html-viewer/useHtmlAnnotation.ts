@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type RefObject } from "react";
 import { AnnotationType, type Annotation, type EditorMode, type HtmlAnnotationTarget, type HtmlElementAnchor, type ImageAttachment } from "../../types";
-import type { QuickLabel } from "../../utils/quickLabels";
+import { THUMBS_UP_LABEL, type QuickLabel } from "../../utils/quickLabels";
 import { getIdentity } from "../../utils/identity";
 import type {
   ToolbarState,
@@ -377,6 +377,9 @@ export function useHtmlAnnotation({
   flashDraftTarget: (key: string) => void;
   /** Bumped after every target add/remove so the composer can refocus its textarea. */
   composerFocusToken: number;
+  /** Composer one-click "Looks good": submits the hardcoded positive label
+   *  with the same anchor and multi-select targets a typed comment would carry. */
+  handleCommentLooksGood: () => void;
 } {
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
@@ -810,6 +813,50 @@ export function useHtmlAnnotation({
     [post],
   );
 
+  // The composer's one-click "Looks good" (the restored thumbs-up for
+  // comment-only surfaces, where pinpoint clicks land straight in the
+  // composer and never see the selection toolbar). Mirrors
+  // handleCommentSubmit — same anchor, same multi-select targets — but
+  // emits the hardcoded positive label instead of typed prose.
+  const handleCommentLooksGood = useCallback(() => {
+    if (!enabledRef.current) return;
+    const text = commentPopoverRef.current?.selectedText || pendingTextRef.current;
+    if (!text) return;
+
+    const targets = draftTargetsRef.current;
+    const additionalTargets: HtmlAnnotationTarget[] | undefined =
+      targets.length > 1
+        ? targets.slice(1, 1 + MAX_ADDITIONAL_TARGETS).map((t) => ({
+            label: t.label,
+            text: t.text,
+            anchor: t.anchor ?? undefined,
+          }))
+        : undefined;
+
+    const id = nextHtmlAnnId();
+    post({ type: `${PREFIX}create-mark`, id, annotationType: "comment" });
+    onAddRef.current?.({
+      id,
+      blockId: "",
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.COMMENT,
+      text: THUMBS_UP_LABEL.text,
+      originalText: text,
+      isQuickLabel: true,
+      quickLabelTip: THUMBS_UP_LABEL.tip,
+      author: getIdentity(),
+      createdA: Date.now(),
+      htmlAnchor: pendingAnchorRef.current ?? undefined,
+      htmlAdditionalTargets: additionalTargets,
+    });
+
+    setCommentPopover(null);
+    setDraftTargets([]);
+    pendingTextRef.current = "";
+    pendingAnchorRef.current = null;
+  }, [post]);
+
   const handleCommentClose = useCallback(() => {
     post({ type: `${PREFIX}cancel-selection` });
     setCommentPopover(null);
@@ -931,6 +978,7 @@ export function useHtmlAnnotation({
     handleToolbarClose,
     handleRequestComment,
     handleCommentSubmit,
+    handleCommentLooksGood,
     handleCommentClose,
     handleFloatingQuickLabel,
     handleQuickLabelPickerDismiss,
