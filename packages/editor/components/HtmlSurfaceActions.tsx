@@ -18,9 +18,13 @@ export function HtmlSurfaceActions({
       {canRefresh && (
         <button
           type="button"
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          className="flex items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+          data-html-refresh
+          // aria-disabled rather than disabled: a disabled control drops
+          // keyboard focus to body when activated. useHtmlRefresh already
+          // dedups in-flight requests, so an extra click is harmless.
+          onClick={isRefreshing ? undefined : onRefresh}
+          aria-disabled={isRefreshing}
+          className="flex items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-disabled:cursor-wait aria-disabled:opacity-70"
           title={isRefreshing ? 'Refreshing HTML from disk' : 'Refresh HTML from disk'}
           aria-label={isRefreshing ? 'Refreshing HTML from disk' : 'Refresh HTML from disk'}
         >

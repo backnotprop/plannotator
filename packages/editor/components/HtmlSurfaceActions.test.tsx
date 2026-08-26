@@ -35,32 +35,42 @@ function renderActions(props?: Partial<React.ComponentProps<typeof HtmlSurfaceAc
   return container;
 }
 
+const refreshButton = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-html-refresh]');
+const toolsToggle = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-html-tools-toggle]');
+
 describe.if(hasDom)('HtmlSurfaceActions', () => {
-  test('offers manual refresh and annotation-tool visibility actions', () => {
+  test('refresh fires the handler and the tools toggle keeps its pressed state', () => {
     let refreshCount = 0;
     const element = renderActions({ onRefresh: () => { refreshCount += 1; } });
 
-    const refresh = element.querySelector<HTMLButtonElement>('[aria-label="Refresh HTML from disk"]');
-    expect(refresh).not.toBeNull();
-    expect(element.textContent).toContain('Refresh');
-    expect(element.textContent).toContain('Hide tools');
-
+    const refresh = refreshButton(element);
+    expect(refresh?.getAttribute('aria-disabled')).toBe('false');
     act(() => refresh?.click());
     expect(refreshCount).toBe(1);
+    expect(toolsToggle(element)?.getAttribute('aria-pressed')).toBe('false');
   });
 
-  test('communicates refresh progress and prevents duplicate requests', () => {
-    const element = renderActions({ isRefreshing: true });
-    const refresh = element.querySelector<HTMLButtonElement>('[aria-label="Refreshing HTML from disk"]');
+  test('an in-flight refresh ignores clicks without dropping focus', () => {
+    let refreshCount = 0;
+    const element = renderActions({ isRefreshing: true, onRefresh: () => { refreshCount += 1; } });
+    const refresh = refreshButton(element);
 
-    expect(refresh?.disabled).toBe(true);
-    expect(element.textContent).toContain('Refreshing');
+    // aria-disabled keeps the control focusable (a disabled button drops
+    // keyboard focus to body) while the click stays inert.
+    expect(refresh?.getAttribute('aria-disabled')).toBe('true');
+    expect(refresh?.disabled).toBe(false);
+    refresh?.focus();
+    act(() => refresh?.click());
+    expect(refreshCount).toBe(0);
+    expect(document.activeElement).toBe(refresh);
   });
 
   test('omits refresh when the active HTML source is not refreshable', () => {
     const element = renderActions({ canRefresh: false, toolsHidden: true });
 
-    expect(element.querySelector('[aria-label*="HTML from disk"]')).toBeNull();
-    expect(element.textContent).toContain('Show tools');
+    expect(refreshButton(element)).toBeNull();
+    // The tools toggle is the only way back from a hidden state, so it must
+    // render regardless of refresh availability.
+    expect(toolsToggle(element)?.getAttribute('aria-pressed')).toBe('true');
   });
 });
