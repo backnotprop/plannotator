@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState, useCallback, type RefObject } from 'react';
 import Highlighter from '@plannotator/web-highlighter';
+import type { SelectedNode } from '@plannotator/web-highlighter/dist/types';
 import type { Annotation, EditorMode, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
@@ -97,6 +98,20 @@ const selectionContainsNode = (range: Range, node: Node): boolean => {
   } catch {
     return false;
   }
+};
+
+const trimWhitespaceOnlyBoundaryNodes = (selectedNodes: SelectedNode[]): SelectedNode[] => {
+  let start = 0;
+  while (start < selectedNodes.length && !/\S/.test(selectedNodes[start].$node.textContent ?? '')) {
+    start += 1;
+  }
+
+  let end = selectedNodes.length;
+  while (end > start && !/\S/.test(selectedNodes[end - 1].$node.textContent ?? '')) {
+    end -= 1;
+  }
+
+  return selectedNodes.slice(start, end);
 };
 
 const mathSourceFromElement = (element: HTMLElement): MathAnnotationSource | null => {
@@ -844,6 +859,12 @@ export function useAnnotationHighlighter({
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
     });
+
+    // Chromium can extend a triple-clicked line into empty or indentation nodes of the next block.
+    // Trim only boundary whitespace so spacing inside genuine multi-node selections stays highlighted.
+    highlighter.hooks.Render.SelectedNodes.tap((_id, selectedNodes: SelectedNode[]) =>
+      trimWhitespaceOnlyBoundaryNodes(selectedNodes),
+    );
 
     highlighterRef.current = highlighter;
 
