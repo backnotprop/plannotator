@@ -1663,7 +1663,12 @@ describe("mapPiEvent", () => {
 // OpenCode event mapping
 // ---------------------------------------------------------------------------
 
-import { mapOpenCodeEvent } from "./providers/opencode-sdk.ts";
+import {
+  assistantTextFromPartUpdate,
+  fallbackAssistantText,
+  mapOpenCodeEvent,
+  openCodeEventSessionId,
+} from "./providers/opencode-sdk.ts";
 
 describe("mapOpenCodeEvent", () => {
   const SESSION_ID = "oc_session_1";
@@ -1826,5 +1831,58 @@ describe("mapOpenCodeEvent", () => {
     expect(mapOpenCodeEvent("session.updated", { sessionID: SESSION_ID }, SESSION_ID)).toEqual([]);
     expect(mapOpenCodeEvent("server.connected", {}, SESSION_ID)).toEqual([]);
     expect(mapOpenCodeEvent("file.edited", { file: "foo.ts" }, SESSION_ID)).toEqual([]);
+  });
+
+  test("message.part.updated text snapshots are not streamed as deltas", () => {
+    expect(
+      mapOpenCodeEvent("message.part.updated", {
+        sessionID: SESSION_ID,
+        part: { type: "text", text: "pong", sessionID: SESSION_ID },
+      }, SESSION_ID),
+    ).toEqual([]);
+  });
+
+  test("openCodeEventSessionId reads nested part and info ids", () => {
+    expect(openCodeEventSessionId({ sessionID: SESSION_ID })).toBe(SESSION_ID);
+    expect(
+      openCodeEventSessionId({ info: { sessionID: SESSION_ID } }),
+    ).toBe(SESSION_ID);
+    expect(
+      openCodeEventSessionId({ part: { sessionID: SESSION_ID } }),
+    ).toBe(SESSION_ID);
+  });
+
+  test("assistantTextFromPartUpdate keeps only non-empty assistant text parts", () => {
+    expect(
+      assistantTextFromPartUpdate({ type: "text", text: "pong" }),
+    ).toBe("pong");
+    expect(assistantTextFromPartUpdate({ type: "text", text: "" })).toBeUndefined();
+    expect(
+      assistantTextFromPartUpdate({ type: "reasoning", text: "thinking" }),
+    ).toBeUndefined();
+  });
+
+  test("fallbackAssistantText emits the snapshot only when deltas were missed", () => {
+    expect(
+      fallbackAssistantText({
+        turnStarted: true,
+        sawTextDelta: false,
+        lastAssistantText: "pong",
+      }),
+    ).toEqual([{ type: "text_delta", delta: "pong" }]);
+    expect(
+      fallbackAssistantText({
+        turnStarted: true,
+        sawTextDelta: true,
+        lastAssistantText: "pong",
+      }),
+    ).toEqual([]);
+    expect(
+      fallbackAssistantText({
+        turnStarted: false,
+        sawTextDelta: false,
+        lastAssistantText: "pong",
+      }),
+    ).toEqual([]);
   });
 });

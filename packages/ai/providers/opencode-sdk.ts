@@ -280,7 +280,7 @@ class OpenCodeSession extends BaseSession {
 			yield BaseSession.BUSY_ERROR;
 			return;
 		}
-		const { gen } = started;
+		const { gen, signal } = started;
 
 		try {
 			// Build model param if specified
@@ -293,11 +293,26 @@ class OpenCodeSession extends BaseSession {
 				}
 			}
 
-			// Subscribe to SSE events
-			const { stream } = await this.config.client.event.subscribe();
+			// Open the SSE stream and wait for the first frame *before* prompting.
+			// OpenCode 1.18+ can finish a short turn before a late subscriber
+			// connects; Ask AI then hangs until the browser reports Failed to fetch.
+			const { stream } = await this.config.client.event.subscribe(
+				undefined,
+				{ signal },
+			);
+			const iterator = stream[Symbol.asyncIterator]();
 
 			try {
-				// Send prompt asynchronously
+				const first = await iterator.next();
+				if (first.done) {
+					yield {
+						type: "error",
+						error: "OpenCode event stream closed before the prompt was sent.",
+						code: "provider_error",
+					};
+					return;
+				}
+
 				try {
 					await this.config.client.session.promptAsync({
 						path: { id: this.config.sessionId },
@@ -320,29 +335,80 @@ class OpenCodeSession extends BaseSession {
 				}
 				this._firstQuerySent = true;
 
-				// Drain SSE events filtered by session ID
-				for await (const event of stream) {
-					const eventType = event.type as string;
-					const props = event.properties as Record<string, unknown> | undefined;
-					if (!props) continue;
+				let turnStarted = false;
+				let sawTextDelta = false;
+				let lastAssistantText = "";
+				let completed = false;
 
-					// Filter: only events for our session
-					const eventSessionId =
-						(props.sessionID as string) ??
-						((props.info as Record<string, unknown>)?.sessionID as string) ??
-						((props.part as Record<string, unknown>)?.sessionID as string);
-					if (eventSessionId && eventSessionId !== this.config.sessionId) continue;
+				const handle = function* (
+					event: { type?: string; properties?: Record<string, unknown> },
+				): Generator<AIMessage> {
+					const eventType = event.type as string;
+					const props = event.properties;
+					if (props == null) return;
+
+					const eventSessionId = openCodeEventSessionId(props);
+					if (eventSessionId && eventSessionId !== this.config.sessionId) return;
+
+					if (eventType === "session.status") {
+						const status = props.status as Record<string, unknown> | undefined;
+						if (status?.type === "busy") turnStarted = true;
+					}
+
+					if (eventType === "message.part.updated" && turnStarted) {
+						const snapshot = assistantTextFromPartUpdate(
+							props.part as Record<string, unknown> | undefined,
+						);
+						if (snapshot) lastAssistantText = snapshot;
+					}
 
 					const mapped = mapOpenCodeEvent(eventType, props, this.id);
 					for (const msg of mapped) {
+						if (msg.type === "text_delta") sawTextDelta = true;
+						if (msg.type === "result") {
+							if (!turnStarted) continue;
+							for (const fallback of fallbackAssistantText({
+								turnStarted,
+								sawTextDelta,
+								lastAssistantText,
+							})) {
+								yield fallback;
+							}
+							completed = true;
+						}
 						yield msg;
-						if (msg.type === "result" || (msg.type === "error" && isTerminalEvent(eventType))) {
+					}
+				}.bind(this);
+
+				for (const msg of handle(first.value)) {
+					yield msg;
+					if (msg.type === "result" || (msg.type === "error" && isTerminalEvent(String(first.value?.type)))) {
+						return;
+					}
+				}
+
+				while (!signal.aborted) {
+					const next = await iterator.next();
+					if (next.done) break;
+					for (const msg of handle(next.value)) {
+						yield msg;
+						if (msg.type === "result" || (msg.type === "error" && isTerminalEvent(String(next.value?.type)))) {
 							return;
 						}
 					}
 				}
+
+				if (!completed) {
+					yield {
+						type: "error",
+						error: signal.aborted
+							? "OpenCode query aborted."
+							: "OpenCode event stream ended without a result.",
+						code: "provider_error",
+					};
+				}
 			} finally {
-				stream.return?.();
+				await iterator.return?.();
 			}
 		} catch (err) {
 			yield {
@@ -385,6 +451,49 @@ function isTerminalEvent(eventType: string): boolean {
 	return eventType === "session.error" || eventType === "session.status";
 }
 
+export function openCodeEventSessionId(
+	props: Record<string, unknown>,
+): string | undefined {
+	return (
+		(props.sessionID as string | undefined) ??
+		((props.info as Record<string, unknown> | undefined)?.sessionID as
+			| string
+			| undefined) ??
+		((props.part as Record<string, unknown> | undefined)?.sessionID as
+			| string
+			| undefined)
+	);
+}
+
+/**
+ * OpenCode 1.18 still emits `message.part.delta` for streaming text, but some
+ * turns only land a final `message.part.updated` snapshot (or a late
+ * subscriber misses the deltas). Capture assistant text parts so Ask AI can
+ * still render an answer.
+ */
+export function assistantTextFromPartUpdate(
+	part: Record<string, unknown> | undefined,
+): string | undefined {
+	if (!part || part.type !== "text") return undefined;
+	const text = part.text;
+	return typeof text === "string" && text.length > 0 ? text : undefined;
+}
+
+/**
+ * If this turn never streamed `message.part.delta` text, emit the last
+ * assistant snapshot so Ask AI still has something to render.
+ */
+export function fallbackAssistantText(opts: {
+	turnStarted: boolean;
+	sawTextDelta: boolean;
+	lastAssistantText: string;
+}): AIMessage[] {
+	if (!opts.turnStarted || opts.sawTextDelta || !opts.lastAssistantText) {
+		return [];
+	}
+	return [{ type: "text_delta", delta: opts.lastAssistantText }];
+}
+
 /**
  * Map an OpenCode SSE event to AIMessage[].
  *
@@ -404,6 +513,8 @@ export function mapOpenCodeEvent(
 		case "message.part.delta": {
 			const field = props.field as string;
 			const delta = props.delta as string;
+			// Reasoning/thinking deltas share this event; Ask AI only renders
+			// assistant answer text.
 			if (field === "text" && delta) {
 				return [{ type: "text_delta", delta }];
 			}
