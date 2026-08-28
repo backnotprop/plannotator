@@ -189,6 +189,7 @@ async function runPlanReview(input: {
   abortSignal: AbortSignal;
   cwd?: string;
   bridge: OpenCodeBridgeContext;
+  currentModel?: { providerID: string; modelID: string };
 }): Promise<OpenCodePlanReviewResult> {
   input.abortSignal.throwIfAborted();
   if (input.runtime === "embedded" && !hasEmbeddedRuntime()) {
@@ -207,6 +208,7 @@ async function runPlanReview(input: {
         htmlContent: input.htmlContent,
         timeoutSeconds: input.timeoutSeconds,
         abortSignal: input.abortSignal,
+        currentModel: input.currentModel,
         logReady: (url) => logPlannotatorReady(input.client, "plan review", url),
       });
     } catch (error) {
@@ -228,6 +230,7 @@ async function runPlanReview(input: {
     timeoutSeconds: input.timeoutSeconds,
     abortSignal: input.abortSignal,
     bridge: input.bridge,
+    currentModel: input.currentModel,
   });
 }
 
@@ -555,6 +558,11 @@ Do NOT proceed with implementation until your plan is approved.`;
               abortSignal: context.abort,
               cwd: ctx.directory,
               bridge: await getBridgeContext(),
+              currentModel: await getAssistantMessageModel({
+                client: ctx.client,
+                sessionId: context.sessionID,
+                messageId: context.messageID,
+              }),
             }),
             resolveTargetAgent: async ({ requestedAgent, directory, delivery }) =>
               await resolveValidatedTargetAgent({

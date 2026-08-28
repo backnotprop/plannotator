@@ -19,6 +19,7 @@ export interface EmbeddedPlanReviewInput {
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
   logReady: (url: string, isRemote: boolean, port: number) => void;
+  currentModel?: { providerID: string; modelID: string };
 }
 
 export interface EmbeddedPlanReviewResult {
@@ -80,6 +81,7 @@ export async function runEmbeddedPlanReview(
     pasteApiUrl: input.pasteApiUrl,
     htmlContent: input.htmlContent,
     opencodeClient: input.client,
+    currentModel: input.currentModel,
     onReady: async (url, isRemote, port) => {
       await handleServerReady(url, isRemote, port);
       input.logReady(url, isRemote, port);

@@ -86,6 +86,9 @@ export interface ServerOptions {
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
+  /** The model the current OpenCode session is running (OpenCode only), used to
+   *  show the actual model name in the Approve dropdown's "current model" preview. */
+  currentModel?: { providerID: string; modelID: string };
   /** When set to "archive", server runs in read-only archive browser mode */
   mode?: "archive";
   /** Custom plan save path — used by archive mode to find saved plans */
@@ -128,7 +131,7 @@ export interface ServerResult {
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
+  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath, currentModel } = options;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -288,7 +291,7 @@ export async function startPlannotatorServer(
                 serverConfig: getServerConfig(gitUser),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser), currentModel });
           }
 
           // API: Serve a linked markdown document

@@ -72,6 +72,7 @@ interface AppHeaderProps {
   canShareCurrentSession: boolean;
   agentName: string;
   availableAgents: Agent[];
+  currentModel?: { providerID: string; modelID: string };
   showAnnotationsWarning: boolean;
   annotateApproveLabel: string;
   annotateApproveTitle: string;
@@ -171,6 +172,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   canShareCurrentSession,
   agentName,
   availableAgents,
+  currentModel,
   showAnnotationsWarning,
   annotateApproveLabel,
   annotateApproveTitle,
@@ -343,6 +345,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
                 <ApproveDropdown
                   onApprove={onApprove}
                   agents={availableAgents}
+                  currentModel={currentModel}
                   disabled={isSubmitting}
                   isLoading={isSubmitting}
                 />

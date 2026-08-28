@@ -564,6 +564,14 @@ function getBridgePasteApiUrl(input: OpenCodeBridgeInput): string | undefined {
   return typeof input.pasteApiUrl === "string" && input.pasteApiUrl ? input.pasteApiUrl : pasteApiUrl;
 }
 
+function parseBridgeModel(value: unknown): { providerID: string; modelID: string } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.providerID !== "string" || !record.providerID) return undefined;
+  if (typeof record.modelID !== "string" || !record.modelID) return undefined;
+  return { providerID: record.providerID, modelID: record.modelID };
+}
+
 function normalizeOpenCodeBridgeAgents(value: unknown): OpenCodeBridgeAgent[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
@@ -1635,7 +1643,7 @@ if (args[0] === "sessions") {
   // that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ plan?: unknown; timeoutSeconds?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ plan?: unknown; timeoutSeconds?: unknown; currentModel?: unknown }>(
     "opencode-plan",
     inputJson,
   );
@@ -1664,6 +1672,7 @@ if (args[0] === "sessions") {
     pasteApiUrl: bridgePasteApiUrl,
     htmlContent: planHtmlContent,
     opencodeClient: makeOpenCodeBridgeClient(input.agents),
+    currentModel: parseBridgeModel(input.currentModel),
     onReady: async (url, isRemote, port) => {
       await handleServerReady(url, isRemote, port);
 

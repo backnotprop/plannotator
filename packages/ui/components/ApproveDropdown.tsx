@@ -11,6 +11,8 @@ import {
 interface ApproveDropdownProps {
   onApprove: () => void;
   agents: Agent[];
+  /** The model this session is currently running (OpenCode only), when known. */
+  currentModel?: { providerID: string; modelID: string };
   disabled?: boolean;
   isLoading?: boolean;
 }
@@ -31,9 +33,13 @@ function getMatchedAgent(setting: AgentSwitchSettings, agents: Agent[]): Agent |
 }
 
 /** Short model preview shown next to the target agent name in the split button. */
-function getModelPreview(setting: AgentSwitchSettings, agents: Agent[]): string | null {
+function getModelPreview(
+  setting: AgentSwitchSettings,
+  agents: Agent[],
+  currentModel?: { providerID: string; modelID: string },
+): string | null {
   if (setting.switchTo === 'disabled') return null;
-  if (getEffectiveModelPreference(setting) === 'current') return 'current model';
+  if (getEffectiveModelPreference(setting) === 'current') return currentModel?.modelID ?? 'current model';
   return getMatchedAgent(setting, agents)?.model?.modelID ?? null;
 }
 
@@ -52,6 +58,7 @@ const Checkmark = () => (
 export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   onApprove,
   agents,
+  currentModel,
   disabled = false,
   isLoading = false,
 }) => {
@@ -91,7 +98,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   };
 
   const agentLabel = getSelectedLabel(setting, agents);
-  const modelPreview = getModelPreview(setting, agents);
+  const modelPreview = getModelPreview(setting, agents, currentModel);
   const modelPreference = getEffectiveModelPreference(setting);
   const matchedAgent = getMatchedAgent(setting, agents);
   const isNoSwitch = setting.switchTo === 'disabled';
@@ -134,7 +141,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
                 <span className="max-w-[120px] truncate">{agentLabel}</span>
                 {notFound && <span className="opacity-60 text-[10px]">(?)</span>}
                 {modelPreview && (
-                  <span className="opacity-60 text-[10px] truncate max-w-[90px]">&middot; {modelPreview}</span>
+                  <span className="opacity-60 text-[10px] truncate max-w-[110px]">&middot; {modelPreview}</span>
                 )}
               </span>
             ) : 'Approve'
@@ -153,7 +160,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-border bg-popover shadow-xl z-[70] overflow-hidden py-1">
+        <div className="absolute right-0 top-full mt-1 w-72 rounded-lg border border-border bg-popover shadow-xl z-[70] overflow-hidden py-1">
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
             Switch to agent
           </div>
@@ -172,7 +179,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
                 <span className="w-4 flex-shrink-0">{selected && <Checkmark />}</span>
                 <span className="truncate">{agent.name}</span>
                 {agent.model?.modelID && (
-                  <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[70px]">
+                  <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[110px]">
                     {agent.model.modelID}
                   </span>
                 )}
@@ -216,7 +223,12 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
                 }`}
               >
                 <span className="w-4 flex-shrink-0">{modelPreference === 'current' && <Checkmark />}</span>
-                Keep current model
+                <span className="truncate">
+                  Keep current model
+                  {currentModel?.modelID && (
+                    <span className="text-muted-foreground"> ({currentModel.modelID})</span>
+                  )}
+                </span>
               </button>
               <button
                 onClick={() => handleModelPreferenceSelect('agent-default')}
