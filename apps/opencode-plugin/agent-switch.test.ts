@@ -3,9 +3,15 @@ import {
   getAssistantMessageModel,
   resolveTargetAgent,
   resolveValidatedTargetAgent,
+  shouldPreserveActiveModel,
 } from "./agent-switch";
 
 describe("OpenCode agent switch validation", () => {
+  test("preserves the active model unless the target agent's default is explicitly requested", () => {
+    expect(shouldPreserveActiveModel(undefined)).toBe(true);
+    expect(shouldPreserveActiveModel("current")).toBe(true);
+    expect(shouldPreserveActiveModel("agent-default")).toBe(false);
+  });
   test("reads the model from the assistant message that submitted the plan", async () => {
     const message = mock(async () => ({
       data: {

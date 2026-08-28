@@ -105,6 +105,7 @@ export interface ServerResult {
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
+    agentModelPreference?: string;
     permissionMode?: string;
   }>;
   /** Wait for user to close (archive mode only) */
@@ -169,6 +170,7 @@ export async function startPlannotatorServer(
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
+    agentModelPreference?: string;
     permissionMode?: string;
   }) => void;
   let decisionPromise: Promise<{
@@ -176,6 +178,7 @@ export async function startPlannotatorServer(
     feedback?: string;
     savedPath?: string;
     agentSwitch?: string;
+    agentModelPreference?: string;
     permissionMode?: string;
   }>;
 
@@ -462,6 +465,7 @@ export async function startPlannotatorServer(
             // Check for note integrations and optional feedback
             let feedback: string | undefined;
             let agentSwitch: string | undefined;
+            let agentModelPreference: string | undefined;
             let requestedPermissionMode: string | undefined;
             let planSaveEnabled = true; // default to enabled for backwards compat
             let planSaveCustomPath: string | undefined;
@@ -473,6 +477,7 @@ export async function startPlannotatorServer(
                 octarine?: OctarineConfig;
                 feedback?: string;
                 agentSwitch?: string;
+                agentModelPreference?: string;
                 planSave?: { enabled: boolean; customPath?: string };
                 permissionMode?: string;
                 draftGeneration?: number;
@@ -487,6 +492,7 @@ export async function startPlannotatorServer(
               // Capture agent switch setting for OpenCode
               if (body.agentSwitch) {
                 agentSwitch = body.agentSwitch;
+                agentModelPreference = body.agentModelPreference;
               }
 
               // Capture permission mode from client request (Claude Code)
@@ -539,7 +545,7 @@ export async function startPlannotatorServer(
 
             // Use permission mode from client request if provided, otherwise fall back to hook input
             const effectivePermissionMode = requestedPermissionMode || permissionMode;
-            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, permissionMode: effectivePermissionMode });
+            resolveDecision({ approved: true, feedback, savedPath, agentSwitch, agentModelPreference, permissionMode: effectivePermissionMode });
             return Response.json({ ok: true, savedPath });
           }
 

@@ -38,6 +38,7 @@ export interface OpenCodePlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  agentModelPreference?: string;
 }
 
 export interface OpenCodeBridgeAgent {

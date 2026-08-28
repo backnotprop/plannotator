@@ -65,6 +65,16 @@ export async function getAssistantMessageModel(input: {
   }
 }
 
+/**
+ * Whether the approval handoff should look up and pin the session's active
+ * model. False only when the user explicitly opted into the target agent's
+ * own configured model ('agent-default'); any other value (including
+ * unset) keeps today's default of preserving the active model.
+ */
+export function shouldPreserveActiveModel(agentModelPreference?: string): boolean {
+  return agentModelPreference !== "agent-default";
+}
+
 function warnAgentUnavailable(
   client: OpenCodeClientLike,
   targetAgent: string,

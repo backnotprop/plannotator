@@ -47,7 +47,7 @@ import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTO
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils/octarine';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
-import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
+import { getAgentSwitchSettings, getEffectiveAgentName, getEffectiveModelPreference } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
@@ -3358,7 +3358,7 @@ const App: React.FC = () => {
         : autoSaveResultsRef.current;
 
       // Build request body - include integrations if enabled
-      const body: { draftGeneration: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
+      const body: { draftGeneration: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; agentModelPreference?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
         draftGeneration: getDraftGeneration(),
       };
 
@@ -3367,9 +3367,11 @@ const App: React.FC = () => {
         body.permissionMode = permissionMode;
       }
 
-      const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings('plan'));
+      const agentSwitchSettings = getAgentSwitchSettings('plan');
+      const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
       if (effectiveAgent) {
         body.agentSwitch = effectiveAgent;
+        body.agentModelPreference = getEffectiveModelPreference(agentSwitchSettings);
       }
 
       // Include plan save settings

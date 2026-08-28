@@ -1703,6 +1703,7 @@ if (args[0] === "sessions") {
     ...(result.feedback && { feedback: result.feedback }),
     ...(result.savedPath && { savedPath: result.savedPath }),
     ...(result.agentSwitch && { agentSwitch: result.agentSwitch }),
+    ...(result.agentModelPreference && { agentModelPreference: result.agentModelPreference }),
   }));
   process.exit(0);
 
