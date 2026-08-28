@@ -76,46 +76,57 @@ function codexHome(): string {
 }
 
 /**
- * Find the Codex rollout file for a given thread ID.
- * The thread ID is the UUID portion of the filename:
- *   rollout-<timestamp>-<uuid>.jsonl
+ * Find all Codex rollout files for a given thread ID, sorted by modification
+ * time (most recent first).
  *
- * Scans $CODEX_HOME/sessions/ (default ~/.codex/sessions/) for a matching file.
+ * Scans $CODEX_HOME/sessions/ (default ~/.codex/sessions/) across YYYY/MM/DD
+ * directories for all matching rollout JSONL files.
  */
-export function findCodexRolloutByThreadId(threadId: string): string | null {
+export function findCodexRolloutsByThreadId(threadId: string): string[] {
   const sessionsDir = join(codexHome(), "sessions");
+  const matches: { path: string; mtime: number }[] = [];
 
   try {
-    // Walk YYYY/MM/DD directories in reverse order (most recent first)
     const years = readdirSync(sessionsDir).sort().reverse();
     for (const year of years) {
       const yearDir = join(sessionsDir, year);
       if (!isDir(yearDir)) continue;
-
       const months = readdirSync(yearDir).sort().reverse();
       for (const month of months) {
         const monthDir = join(yearDir, month);
         if (!isDir(monthDir)) continue;
-
         const days = readdirSync(monthDir).sort().reverse();
         for (const day of days) {
           const dayDir = join(monthDir, day);
           if (!isDir(dayDir)) continue;
-
-          const files = readdirSync(dayDir);
+          let files: string[];
+          try {
+            files = readdirSync(dayDir);
+          } catch {
+            continue;
+          }
           for (const file of files) {
-            if (file.endsWith(".jsonl") && file.includes(threadId)) {
-              return join(dayDir, file);
+            if (!file.endsWith(".jsonl") || !file.includes(threadId)) continue;
+            const fullPath = join(dayDir, file);
+            try {
+              matches.push({ path: fullPath, mtime: statSync(fullPath).mtimeMs });
+            } catch {
+              // File disappeared or became inaccessible.
             }
           }
         }
       }
     }
   } catch {
-    return null;
+    return [];
   }
 
-  return null;
+  return matches.sort((a, b) => b.mtime - a.mtime).map((match) => match.path);
+}
+
+/** Find the newest Codex rollout file for a thread, if one exists. */
+export function findCodexRolloutByThreadId(threadId: string): string | null {
+  return findCodexRolloutsByThreadId(threadId)[0] ?? null;
 }
 
 function isDir(path: string): boolean {
@@ -330,26 +341,23 @@ function pickLatestPreferredPlan(
  * Extracts output_text blocks from payload.content.
  */
 export function getLastCodexMessage(
-  rolloutPath: string,
+  rolloutPathOrPaths: string | string[],
   options: GetLastCodexMessageOptions = {}
 ): { text: string } | null {
-  const entries = parseRolloutEntries(rolloutPath);
-  const activeTurnStart = options.beforeActiveTurn
-    ? findActiveTurnStartIndex(entries)
-    : -1;
-  const endIndex = activeTurnStart === -1 ? entries.length - 1 : activeTurnStart - 1;
-
-  // Walk backward
-  for (let i = endIndex; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry.type !== "response_item") continue;
-    if (entry.payload?.type !== "message") continue;
-    if (entry.payload?.role !== "assistant") continue;
-
-    const messageText = getMessageText(entry, ["output_text"]);
-    if (messageText) return { text: messageText };
+  const paths = Array.isArray(rolloutPathOrPaths) ? rolloutPathOrPaths : [rolloutPathOrPaths];
+  for (const rolloutPath of paths) {
+    const entries = parseRolloutEntries(rolloutPath);
+    const activeTurnStart = options.beforeActiveTurn ? findActiveTurnStartIndex(entries) : -1;
+    const endIndex = activeTurnStart === -1 ? entries.length - 1 : activeTurnStart - 1;
+    for (let i = endIndex; i >= 0; i--) {
+      const entry = entries[i];
+      if (entry.type !== "response_item") continue;
+      if (entry.payload?.type !== "message") continue;
+      if (entry.payload?.role !== "assistant") continue;
+      const messageText = getMessageText(entry, ["output_text"]);
+      if (messageText) return { text: messageText };
+    }
   }
-
   return null;
 }
 
@@ -368,34 +376,28 @@ export interface CodexRecentMessage {
 }
 
 export function getRecentCodexMessages(
-  rolloutPath: string,
+  rolloutPathOrPaths: string | string[],
   limit: number,
   options: GetLastCodexMessageOptions = {}
 ): CodexRecentMessage[] {
   if (limit <= 0) return [];
-  const entries = parseRolloutEntries(rolloutPath);
-  const activeTurnStart = options.beforeActiveTurn
-    ? findActiveTurnStartIndex(entries)
-    : -1;
-  const endIndex = activeTurnStart === -1 ? entries.length - 1 : activeTurnStart - 1;
-
+  const paths = Array.isArray(rolloutPathOrPaths) ? rolloutPathOrPaths : [rolloutPathOrPaths];
   const messages: CodexRecentMessage[] = [];
-  for (let i = endIndex; i >= 0; i--) {
+  for (const rolloutPath of paths) {
     if (messages.length >= limit) break;
-    const entry = entries[i];
-    if (entry.type !== "response_item") continue;
-    if (entry.payload?.type !== "message") continue;
-    if (entry.payload?.role !== "assistant") continue;
-
-    const text = getMessageText(entry, ["output_text"]);
-    if (!text) continue;
-    // Codex doesn't expose a stable message id in the rollout format we read,
-    // so fall back to an index-based id. Stable within a single rollout read.
-    messages.push({
-      messageId: `codex-msg-${i}`,
-      text,
-      timestamp: entry.timestamp,
-    });
+    const entries = parseRolloutEntries(rolloutPath);
+    const activeTurnStart = options.beforeActiveTurn ? findActiveTurnStartIndex(entries) : -1;
+    const endIndex = activeTurnStart === -1 ? entries.length - 1 : activeTurnStart - 1;
+    for (let i = endIndex; i >= 0; i--) {
+      if (messages.length >= limit) break;
+      const entry = entries[i];
+      if (entry.type !== "response_item") continue;
+      if (entry.payload?.type !== "message") continue;
+      if (entry.payload?.role !== "assistant") continue;
+      const text = getMessageText(entry, ["output_text"]);
+      if (!text) continue;
+      messages.push({ messageId: `codex-msg-${messages.length}`, text, timestamp: entry.timestamp });
+    }
   }
   return messages;
 }
@@ -411,7 +413,7 @@ export function getRecentCodexMessages(
  * - no plan after the last hook prompt => null
  * - identical plan after the last hook prompt => null
  */
-export function getLatestCodexPlan(
+function extractLatestCodexPlanFromRollout(
   rolloutPath: string,
   options: GetLatestCodexPlanOptions = {}
 ): CodexPlanResult | null {
@@ -467,4 +469,17 @@ export function getLatestCodexPlan(
     text: latestAfterHookPrompt.text,
     source: latestAfterHookPrompt.source,
   };
+}
+
+
+export function getLatestCodexPlan(
+  rolloutPathOrPaths: string | string[],
+  options: GetLatestCodexPlanOptions = {}
+): CodexPlanResult | null {
+  const paths = Array.isArray(rolloutPathOrPaths) ? rolloutPathOrPaths : [rolloutPathOrPaths];
+  for (const rolloutPath of paths) {
+    const plan = extractLatestCodexPlanFromRollout(rolloutPath, options);
+    if (plan) return plan;
+  }
+  return null;
 }
