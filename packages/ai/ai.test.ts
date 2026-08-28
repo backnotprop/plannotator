@@ -1665,9 +1665,10 @@ describe("mapPiEvent", () => {
 
 import {
   assistantTextFromPartUpdate,
+  consumeOpenCodeEvent,
+  createOpenCodeQueryState,
   fallbackAssistantText,
   mapOpenCodeEvent,
-  openCodeEventSessionId,
 } from "./providers/opencode-sdk.ts";
 
 describe("mapOpenCodeEvent", () => {
@@ -1839,57 +1840,117 @@ describe("mapOpenCodeEvent", () => {
     expect(
       mapOpenCodeEvent("message.part.updated", {
         sessionID: SESSION_ID,
-        part: { type: "text", text: "pong", sessionID: SESSION_ID },
+        part: { type: "text", text: "pong", sessionID: SESSION_ID, time: { start: 1 } },
       }, SESSION_ID),
     ).toEqual([]);
   });
 
-  // Session filter used to miss events whose id lived only on info/part.
-  test("openCodeEventSessionId reads nested part and info ids", () => {
-    expect(openCodeEventSessionId({ sessionID: SESSION_ID })).toBe(SESSION_ID);
+  // User prompt snapshots have no `time`. Using them as the answer would echo
+  // the question into the Ask AI bubble (#514 empty-bubble / #907).
+  test("assistantTextFromPartUpdate ignores user prompts and reasoning", () => {
     expect(
-      openCodeEventSessionId({ info: { sessionID: SESSION_ID } }),
-    ).toBe(SESSION_ID);
-    expect(
-      openCodeEventSessionId({ part: { sessionID: SESSION_ID } }),
-    ).toBe(SESSION_ID);
-  });
-
-  // Reasoning parts share the same snapshot event; using them as the answer
-  // would dump thinking into the Ask AI bubble.
-  test("assistantTextFromPartUpdate keeps only non-empty assistant text parts", () => {
-    expect(
-      assistantTextFromPartUpdate({ type: "text", text: "pong" }),
+      assistantTextFromPartUpdate({ type: "text", text: "pong", time: { start: 1 } }),
     ).toBe("pong");
-    expect(assistantTextFromPartUpdate({ type: "text", text: "" })).toBeUndefined();
     expect(
-      assistantTextFromPartUpdate({ type: "reasoning", text: "thinking" }),
+      assistantTextFromPartUpdate({ type: "text", text: "Reply with pong" }),
+    ).toBeUndefined();
+    expect(
+      assistantTextFromPartUpdate({ type: "reasoning", text: "thinking", time: { start: 1 } }),
     ).toBeUndefined();
   });
 
-  // Failure this guards: Ask AI hangs with Failed to fetch when deltas never
-  // arrive. Idle-before-busy must not emit leftover text from another turn.
   test("fallbackAssistantText emits the snapshot only when deltas were missed", () => {
     expect(
       fallbackAssistantText({
-        turnStarted: true,
         sawTextDelta: false,
         lastAssistantText: "pong",
       }),
     ).toEqual([{ type: "text_delta", delta: "pong" }]);
     expect(
       fallbackAssistantText({
-        turnStarted: true,
         sawTextDelta: true,
         lastAssistantText: "pong",
       }),
     ).toEqual([]);
-    expect(
-      fallbackAssistantText({
-        turnStarted: false,
-        sawTextDelta: false,
-        lastAssistantText: "pong",
-      }),
-    ).toEqual([]);
+  });
+
+  // Failure this guards: Ask AI hangs with Failed to fetch (#514 / #907)
+  // when the turn only lands a snapshot, never message.part.delta.
+  test("consumeOpenCodeEvent falls back to the assistant snapshot on idle", () => {
+    const state = createOpenCodeQueryState();
+    consumeOpenCodeEvent(
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: SESSION_ID,
+          part: { type: "text", text: "Reply with pong", sessionID: SESSION_ID },
+        },
+      },
+      SESSION_ID,
+      state,
+    );
+    consumeOpenCodeEvent(
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: SESSION_ID,
+          part: {
+            type: "text",
+            text: "pong",
+            sessionID: SESSION_ID,
+            time: { start: 1, end: 2 },
+          },
+        },
+      },
+      SESSION_ID,
+      state,
+    );
+    const idle = consumeOpenCodeEvent(
+      {
+        type: "session.status",
+        properties: { sessionID: SESSION_ID, status: { type: "idle" } },
+      },
+      SESSION_ID,
+      state,
+    );
+    expect(idle.done).toBe(true);
+    expect(idle.messages).toEqual([
+      { type: "text_delta", delta: "pong" },
+      { type: "result", sessionId: SESSION_ID, success: true },
+    ]);
+  });
+
+  test("consumeOpenCodeEvent does not duplicate streamed deltas", () => {
+    const state = createOpenCodeQueryState();
+    consumeOpenCodeEvent(
+      {
+        type: "message.part.delta",
+        properties: { sessionID: SESSION_ID, field: "text", delta: "pong" },
+      },
+      SESSION_ID,
+      state,
+    );
+    consumeOpenCodeEvent(
+      {
+        type: "message.part.updated",
+        properties: {
+          sessionID: SESSION_ID,
+          part: { type: "text", text: "pong", sessionID: SESSION_ID, time: { start: 1 } },
+        },
+      },
+      SESSION_ID,
+      state,
+    );
+    const idle = consumeOpenCodeEvent(
+      {
+        type: "session.status",
+        properties: { sessionID: SESSION_ID, status: { type: "idle" } },
+      },
+      SESSION_ID,
+      state,
+    );
+    expect(idle.messages).toEqual([
+      { type: "result", sessionId: SESSION_ID, success: true },
+    ]);
   });
 });

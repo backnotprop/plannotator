@@ -303,6 +303,9 @@ class OpenCodeSession extends BaseSession {
 			const iterator = stream[Symbol.asyncIterator]();
 
 			try {
+				// First frame only proves the subscriber is live. Do not treat it as
+				// this turn — it can be server.connected or leftover idle from a
+				// previous query on the same session.
 				const first = await iterator.next();
 				if (first.done) {
 					yield {
@@ -335,78 +338,26 @@ class OpenCodeSession extends BaseSession {
 				}
 				this._firstQuerySent = true;
 
-				let turnStarted = false;
-				let sawTextDelta = false;
-				let lastAssistantText = "";
-				let completed = false;
-
-				const handle = function* (
-					event: { type?: string; properties?: Record<string, unknown> },
-				): Generator<AIMessage> {
-					const eventType = event.type as string;
-					const props = event.properties;
-					if (props == null) return;
-
-					const eventSessionId = openCodeEventSessionId(props);
-					if (eventSessionId && eventSessionId !== this.config.sessionId) return;
-
-					if (eventType === "session.status") {
-						const status = props.status as Record<string, unknown> | undefined;
-						if (status?.type === "busy") turnStarted = true;
-					}
-
-					if (eventType === "message.part.updated" && turnStarted) {
-						const snapshot = assistantTextFromPartUpdate(
-							props.part as Record<string, unknown> | undefined,
-						);
-						if (snapshot) lastAssistantText = snapshot;
-					}
-
-					const mapped = mapOpenCodeEvent(eventType, props, this.id);
-					for (const msg of mapped) {
-						if (msg.type === "text_delta") sawTextDelta = true;
-						if (msg.type === "result") {
-							if (!turnStarted) continue;
-							for (const fallback of fallbackAssistantText({
-								turnStarted,
-								sawTextDelta,
-								lastAssistantText,
-							})) {
-								yield fallback;
-							}
-							completed = true;
-						}
-						yield msg;
-					}
-				}.bind(this);
-
-				for (const msg of handle(first.value)) {
-					yield msg;
-					if (msg.type === "result" || (msg.type === "error" && isTerminalEvent(String(first.value?.type)))) {
-						return;
-					}
-				}
-
+				const state = createOpenCodeQueryState();
 				while (!signal.aborted) {
 					const next = await iterator.next();
 					if (next.done) break;
-					for (const msg of handle(next.value)) {
-						yield msg;
-						if (msg.type === "result" || (msg.type === "error" && isTerminalEvent(String(next.value?.type)))) {
-							return;
-						}
-					}
+					const { messages, done } = consumeOpenCodeEvent(
+						next.value,
+						this.config.sessionId,
+						state,
+					);
+					for (const msg of messages) yield msg;
+					if (done) return;
 				}
 
-				if (!completed) {
-					yield {
-						type: "error",
-						error: signal.aborted
-							? "OpenCode query aborted."
-							: "OpenCode event stream ended without a result.",
-						code: "provider_error",
-					};
-				}
+				yield {
+					type: "error",
+					error: signal.aborted
+						? "OpenCode query aborted."
+						: "OpenCode event stream ended without a result.",
+					code: "provider_error",
+				};
 			} finally {
 				await iterator.return?.();
 			}
@@ -469,29 +420,74 @@ export function openCodeEventSessionId(
  * OpenCode 1.18 still emits `message.part.delta` for streaming text, but some
  * turns only land a final `message.part.updated` snapshot (or a late
  * subscriber misses the deltas). Capture assistant text parts so Ask AI can
- * still render an answer.
+ * still render an answer. User-prompt snapshots have no `time` stamp.
  */
 export function assistantTextFromPartUpdate(
 	part: Record<string, unknown> | undefined,
 ): string | undefined {
 	if (!part || part.type !== "text") return undefined;
+	if (part.time == null) return undefined;
 	const text = part.text;
 	return typeof text === "string" && text.length > 0 ? text : undefined;
 }
 
-/**
- * If this turn never streamed `message.part.delta` text, emit the last
- * assistant snapshot so Ask AI still has something to render.
- */
-export function fallbackAssistantText(opts: {
-	turnStarted: boolean;
+export interface OpenCodeQueryState {
 	sawTextDelta: boolean;
 	lastAssistantText: string;
-}): AIMessage[] {
-	if (!opts.turnStarted || opts.sawTextDelta || !opts.lastAssistantText) {
-		return [];
+}
+
+export function createOpenCodeQueryState(): OpenCodeQueryState {
+	return { sawTextDelta: false, lastAssistantText: "" };
+}
+
+/**
+ * If this turn never streamed `message.part.delta` text, emit the last
+ * assistant snapshot so Ask AI still has something to render (#514 / #907).
+ */
+export function fallbackAssistantText(state: OpenCodeQueryState): AIMessage[] {
+	if (state.sawTextDelta || !state.lastAssistantText) return [];
+	return [{ type: "text_delta", delta: state.lastAssistantText }];
+}
+
+/**
+ * Consume one OpenCode SSE event after promptAsync. Returns mapped Ask AI
+ * messages and whether the query should stop. Pre-prompt leftover idle is
+ * ignored by only calling this after the prompt is sent.
+ */
+export function consumeOpenCodeEvent(
+	event: { type?: string; properties?: Record<string, unknown> },
+	sessionId: string,
+	state: OpenCodeQueryState,
+): { messages: AIMessage[]; done: boolean } {
+	const eventType = event.type as string;
+	const props = event.properties;
+	if (props == null) return { messages: [], done: false };
+
+	const eventSessionId = openCodeEventSessionId(props);
+	if (eventSessionId && eventSessionId !== sessionId) {
+		return { messages: [], done: false };
 	}
-	return [{ type: "text_delta", delta: opts.lastAssistantText }];
+
+	if (eventType === "message.part.updated") {
+		const snapshot = assistantTextFromPartUpdate(
+			props.part as Record<string, unknown> | undefined,
+		);
+		if (snapshot) state.lastAssistantText = snapshot;
+	}
+
+	const mapped = mapOpenCodeEvent(eventType, props, sessionId);
+	const messages: AIMessage[] = [];
+	let done = false;
+	for (const msg of mapped) {
+		if (msg.type === "text_delta") state.sawTextDelta = true;
+		if (msg.type === "result") {
+			messages.push(...fallbackAssistantText(state));
+			done = true;
+		}
+		messages.push(msg);
+		if (msg.type === "error" && isTerminalEvent(eventType)) done = true;
+	}
+	return { messages, done };
 }
 
 /**
