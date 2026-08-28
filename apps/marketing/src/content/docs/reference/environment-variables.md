@@ -31,6 +31,13 @@ All Plannotator environment variables and their defaults.
 
 \* If you use the VS Code extension, make sure `PLANNOTATOR_DATA_DIR` is visible to both your terminal and VS Code. On macOS, apps launched from the Dock don't inherit shell env vars — launch VS Code from the terminal (`code .`) or set the variable via `launchctl setenv`.
 
+## AI provider variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ORCAROUTER_API_KEY` | (none) | API key for the [OrcaRouter](https://www.orcarouter.ai) Ask AI provider. When set, OrcaRouter is registered as a provider in Settings > AI. The key is read from the server environment and never written to Plannotator-managed files. |
+| `ORCAROUTER_BASE_URL` | `https://api.orcarouter.ai/v1` | Base URL of the OrcaRouter gateway. Override when self-hosting or proxying the gateway. |
+
 ## Glimpse (native window)
 
 | Variable | Default | Description |

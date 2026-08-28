@@ -30,6 +30,16 @@ export const OpenCodeIcon: React.FC<{ className?: string }> = ({ className = 'w-
   </svg>
 );
 
+/** OrcaRouter icon — a stylized routing node mark */
+export const OrcaRouterIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" className={className}>
+    <circle cx="16" cy="16" r="6.5" fill="currentColor" />
+    <path d="M16 9.5c2.6 0 4.7-1.5 4.7-3.4 0-1.9-2.1-3.4-4.7-3.4S11.3 4.2 11.3 6.1c0 1.9 2.1 3.4 4.7 3.4z" fill="currentColor" opacity={0.7}/>
+    <path d="M20.7 22.5c-2.6 0-4.7 1.5-4.7 3.4 0 1.9 2.1 3.4 4.7 3.4s4.7-1.5 4.7-3.4c0-1.9-2.1-3.4-4.7-3.4z" fill="currentColor" opacity={0.7}/>
+    <path d="M11.3 22.5c-2.6 0-4.7 1.5-4.7 3.4 0 1.9 2.1 3.4 4.7 3.4s4.7-1.5 4.7-3.4c0-1.9-2.1-3.4-4.7-3.4z" fill="currentColor" opacity={0.7}/>
+  </svg>
+);
+
 /** Generic fallback icon for unknown providers */
 const GenericProviderIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
@@ -43,6 +53,7 @@ export const PROVIDER_META: Record<string, { label: string; icon: React.FC<{ cla
   'codex-sdk': { label: 'Codex', icon: CodexIcon },
   'pi-sdk': { label: 'Pi', icon: PiIcon },
   'opencode-sdk': { label: 'OpenCode', icon: OpenCodeIcon },
+  'orcarouter': { label: 'OrcaRouter', icon: OrcaRouterIcon },
 };
 
 /** Get provider metadata, with fallback for unknown providers. */

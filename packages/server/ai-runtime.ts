@@ -5,6 +5,7 @@ import {
   ProviderRegistry,
   SessionManager,
   type AIEndpoints,
+  type OrcaRouterConfig,
   type PiSDKConfig,
 } from "@plannotator/ai";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
@@ -98,6 +99,26 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     }
   } catch {
     // OpenCode not available.
+  }
+
+  // OrcaRouter is a gateway, not a local agent runtime: it activates whenever
+  // ORCAROUTER_API_KEY is present, no CLI to detect. The key never leaves the
+  // server and is never logged.
+  if (process.env.ORCAROUTER_API_KEY) {
+    try {
+      await import("@plannotator/ai/providers/orcarouter");
+      const provider = await createProvider({
+        type: "orcarouter",
+        cwd,
+        apiKey: process.env.ORCAROUTER_API_KEY,
+        ...(process.env.ORCAROUTER_BASE_URL
+          ? { baseUrl: process.env.ORCAROUTER_BASE_URL }
+          : {}),
+      } as OrcaRouterConfig);
+      registry.register(provider);
+    } catch {
+      // OrcaRouter not reachable — skip rather than fail the runtime.
+    }
   }
 
   const endpoints = createAIEndpoints({

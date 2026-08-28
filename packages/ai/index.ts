@@ -75,6 +75,7 @@ export type {
   CodexSDKConfig,
   PiSDKConfig,
   OpenCodeConfig,
+  OrcaRouterConfig,
 } from "./types.ts";
 
 // Provider registry

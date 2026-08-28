@@ -58,6 +58,21 @@ Requires the `opencode` CLI installed and authenticated. Plannotator spawns `ope
 
 OpenCode supports session forking, resuming, and runtime permission approvals — the richest capability set of all four providers.
 
+### OrcaRouter (via OrcaRouter API)
+
+Requires an `ORCAROUTER_API_KEY`. Unlike the other providers, OrcaRouter is not a local CLI — Plannotator talks to the [OrcaRouter](https://www.orcarouter.ai) gateway directly over its Anthropic-compatible endpoint and streams responses over SSE. It exposes a provider/model namespace across many models (including Claude via OrcaRouter), plus its own adaptive-routing models (`orcarouter/fusion`, `orcarouter/auto`).
+
+**Models:**
+
+- OrcaRouter Fusion (default)
+- OrcaRouter Fusion Flash
+- OrcaRouter Fusion Mini
+- OrcaRouter Auto
+- Claude Sonnet 5 (via OrcaRouter)
+- Claude Haiku 4.5 (via OrcaRouter)
+
+The gateway is a model endpoint rather than an agent runtime, so OrcaRouter sessions are text-only — no tool execution or permission requests. The API key is read from the server environment and never managed by Plannotator.
+
 ## Configuration
 
 Provider and model selection is available in **Settings > AI**. These persist via cookies across sessions.
@@ -78,6 +93,8 @@ A session is created lazily on your first question. Until then, no resources are
 
 **OpenCode sessions** pass the review context via the `system` field on the prompt API. OpenCode supports forking from a parent session and resuming previous sessions. Permission requests work the same as Claude — approval cards appear inline.
 
+**OrcaRouter sessions** send the review context in the `system` field of the Anthropic Messages API and stream plain text back. OrcaRouter is a stateless model gateway — sessions keep conversation history locally in Plannotator, so follow-up questions stay in context, but there is no forking or resuming.
+
 **Context handling:** Large plans, documents, and diffs are truncated to stay within context limits. When you ask from a selection, the selected text or selected code is always sent alongside the question regardless of truncation. In folder annotation mode, Ask AI is scoped to the currently opened document only.
 
 ## Permission requests
@@ -90,6 +107,8 @@ OpenCode supports the same permission approval flow as Claude — tool calls tha
 
 Pi does not expose a permission approval gate over RPC, so tool execution is handled entirely by Pi's own runtime.
 
+OrcaRouter is a model endpoint with no tool execution, so there are no permission requests.
+
 ## Reasoning effort
 
 Codex supports a reasoning effort setting with four levels: **Low**, **Medium**, **High**, and **Max**. This is available in the config bar at the bottom of the AI sidebar. Higher effort means slower but more thorough responses.
@@ -100,7 +119,7 @@ This setting only applies to Codex — Claude, Pi, and OpenCode do not expose a 
 
 | Setting | Description | Provider |
 |---------|-------------|----------|
-| Provider | Claude, Codex, Pi, or OpenCode | All |
+| Provider | Claude, Codex, Pi, OpenCode, or OrcaRouter | All |
 | Model | Model selection per provider | All |
 | Reasoning effort | Low / Medium / High / Max | Codex only |
 | Default tools | Read, Glob, Grep, WebSearch | Claude only |

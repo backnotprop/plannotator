@@ -318,3 +318,14 @@ export interface OpenCodeConfig extends AIProviderConfig {
   /** Port for the OpenCode server. Default: 4096. */
   port?: number;
 }
+
+export interface OrcaRouterConfig extends AIProviderConfig {
+  type: "orcarouter";
+  /**
+   * Base URL of the OrcaRouter gateway. Defaults to the public gateway at
+   * https://api.orcarouter.ai/v1 (override with `ORCAROUTER_BASE_URL`).
+   */
+  baseUrl?: string;
+  /** API key for the gateway. Read from `ORCAROUTER_API_KEY`. */
+  apiKey?: string;
+}

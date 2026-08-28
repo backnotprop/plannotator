@@ -15,6 +15,7 @@
     "./providers/command-path": "./providers/command-path.ts",
     "./providers/pi-sdk": "./providers/pi-sdk.ts",
     "./providers/opencode-sdk": "./providers/opencode-sdk.ts",
+    "./providers/orcarouter": "./providers/orcarouter.ts",
     "./providers/pi-sdk-node": "./providers/pi-sdk-node.ts"
   },
   "dependencies": {
