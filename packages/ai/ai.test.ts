@@ -1833,6 +1833,8 @@ describe("mapOpenCodeEvent", () => {
     expect(mapOpenCodeEvent("file.edited", { file: "foo.ts" }, SESSION_ID)).toEqual([]);
   });
 
+  // OpenCode 1.18 lands the answer as a text snapshot. Mapping that as a
+  // delta would duplicate streamed tokens; Ask AI would show "pongpong".
   test("message.part.updated text snapshots are not streamed as deltas", () => {
     expect(
       mapOpenCodeEvent("message.part.updated", {
@@ -1842,6 +1844,7 @@ describe("mapOpenCodeEvent", () => {
     ).toEqual([]);
   });
 
+  // Session filter used to miss events whose id lived only on info/part.
   test("openCodeEventSessionId reads nested part and info ids", () => {
     expect(openCodeEventSessionId({ sessionID: SESSION_ID })).toBe(SESSION_ID);
     expect(
@@ -1852,6 +1855,8 @@ describe("mapOpenCodeEvent", () => {
     ).toBe(SESSION_ID);
   });
 
+  // Reasoning parts share the same snapshot event; using them as the answer
+  // would dump thinking into the Ask AI bubble.
   test("assistantTextFromPartUpdate keeps only non-empty assistant text parts", () => {
     expect(
       assistantTextFromPartUpdate({ type: "text", text: "pong" }),
@@ -1862,6 +1867,8 @@ describe("mapOpenCodeEvent", () => {
     ).toBeUndefined();
   });
 
+  // Failure this guards: Ask AI hangs with Failed to fetch when deltas never
+  // arrive. Idle-before-busy must not emit leftover text from another turn.
   test("fallbackAssistantText emits the snapshot only when deltas were missed", () => {
     expect(
       fallbackAssistantText({
