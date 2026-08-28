@@ -7,10 +7,13 @@
 
 import { useEffect, useRef, useState, useCallback, type RefObject } from 'react';
 import Highlighter from '@plannotator/web-highlighter';
-import type { SelectedNode } from '@plannotator/web-highlighter/dist/types';
 import type { Annotation, EditorMode, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
+import {
+  trimWhitespaceOnlyBoundaryNodes,
+  type SelectedNodeLike,
+} from '../utils/selectionBoundary';
 import { getIdentity } from '../utils/identity';
 import { transformPlainText } from '../utils/inlineTransforms';
 
@@ -98,20 +101,6 @@ const selectionContainsNode = (range: Range, node: Node): boolean => {
   } catch {
     return false;
   }
-};
-
-const trimWhitespaceOnlyBoundaryNodes = (selectedNodes: SelectedNode[]): SelectedNode[] => {
-  let start = 0;
-  while (start < selectedNodes.length && !/\S/.test(selectedNodes[start].$node.textContent ?? '')) {
-    start += 1;
-  }
-
-  let end = selectedNodes.length;
-  while (end > start && !/\S/.test(selectedNodes[end - 1].$node.textContent ?? '')) {
-    end -= 1;
-  }
-
-  return selectedNodes.slice(start, end);
 };
 
 const mathSourceFromElement = (element: HTMLElement): MathAnnotationSource | null => {
@@ -862,9 +851,12 @@ export function useAnnotationHighlighter({
 
     // Chromium can extend a triple-clicked line into empty or indentation nodes of the next block.
     // Trim only boundary whitespace so spacing inside genuine multi-node selections stays highlighted.
-    highlighter.hooks.Render.SelectedNodes.tap((_id, selectedNodes: SelectedNode[]) =>
-      trimWhitespaceOnlyBoundaryNodes(selectedNodes),
-    );
+    // The hook's callback type is `(...args: unknown[]) => SelectedNode[]`; a SelectedNode
+    // structurally satisfies SelectedNodeLike, so the trimmed subset goes back through the
+    // hook's own callback type rather than importing SelectedNode from the package's dist/.
+    type SelectedNodesTap = Parameters<typeof highlighter.hooks.Render.SelectedNodes.tap>[0];
+    highlighter.hooks.Render.SelectedNodes.tap(((...args: unknown[]) =>
+      trimWhitespaceOnlyBoundaryNodes(args[1] as SelectedNodeLike[])) as SelectedNodesTap);
 
     highlighterRef.current = highlighter;
 
