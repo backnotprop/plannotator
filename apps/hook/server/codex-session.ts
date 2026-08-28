@@ -17,6 +17,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+import { normalizePlanText } from "./plan-normalization";
+
 // --- Types ---
 
 type CodexPlanSource = "plan-item" | "assistant-message";
@@ -57,6 +59,8 @@ export interface GetLatestCodexPlanOptions {
   turnId?: string;
   stopHookActive?: boolean;
 }
+
+export type CodexStopSkipReason = "missing-turn-id" | "missing-turn-marker";
 
 const TURN_START_TYPES = new Set(["task_started", "turn_started"]);
 const TURN_COMPLETE_TYPES = new Set(["task_complete", "turn_completed"]);
@@ -170,10 +174,6 @@ function extractLastProposedPlan(text: string): string | null {
   return latest || null;
 }
 
-function normalizePlan(text: string): string {
-  return text.replace(/\r\n/g, "\n").trim();
-}
-
 function findLastIndex(
   entries: RolloutEntry[],
   predicate: (entry: RolloutEntry) => boolean
@@ -184,23 +184,26 @@ function findLastIndex(
   return -1;
 }
 
-function findTurnStartIndex(entries: RolloutEntry[], turnId?: string): number {
-  const matchingTurnStart = findLastIndex(
+function findMatchingTurnMarkerIndex(
+  entries: RolloutEntry[],
+  turnId: string,
+): number {
+  return findLastIndex(
     entries,
     (entry) =>
-      entry.type === "event_msg" &&
-      TURN_START_TYPES.has(entry.payload?.type || "") &&
-      (!turnId || entry.payload?.turn_id === turnId)
+      (
+        (entry.type === "event_msg" && TURN_START_TYPES.has(entry.payload?.type || "")) ||
+        entry.type === "turn_context"
+      ) &&
+      getTurnId(entry) === turnId,
   );
-  if (matchingTurnStart !== -1) return matchingTurnStart;
+}
 
-  const matchingTurnContext = findLastIndex(
-    entries,
-    (entry) =>
-      entry.type === "turn_context" &&
-      (!turnId || entry.payload?.turn_id === turnId)
-  );
-  if (matchingTurnContext !== -1) return matchingTurnContext;
+function findTurnStartIndex(entries: RolloutEntry[], turnId?: string): number {
+  const matchingTurnStart = turnId
+    ? findMatchingTurnMarkerIndex(entries, turnId)
+    : -1;
+  if (matchingTurnStart !== -1) return matchingTurnStart;
 
   const lastTurnStart = findLastIndex(
     entries,
@@ -280,22 +283,64 @@ function getAssistantProposedPlanText(entry: RolloutEntry): string | null {
   return extractLastProposedPlan(messageText);
 }
 
+function getTurnId(entry: RolloutEntry): string | null {
+  const turnId = entry.payload?.turn_id;
+  return typeof turnId === "string" && turnId ? turnId : null;
+}
+
+export function getCodexStopSkipReason(
+  rolloutPath: string,
+  turnId?: string,
+): CodexStopSkipReason | null {
+  if (!turnId?.trim()) return "missing-turn-id";
+  const entries = parseRolloutEntries(rolloutPath);
+  return findMatchingTurnMarkerIndex(entries, turnId) === -1
+    ? "missing-turn-marker"
+    : null;
+}
+
+export function logCodexStopSkip(
+  reason: CodexStopSkipReason,
+  opts: {
+    debug?: string;
+    write?: (message: string) => void;
+  } = {},
+): void {
+  if (!opts.debug) return;
+  const detail =
+    reason === "missing-turn-id"
+      ? "missing Stop payload turn_id."
+      : "missing id-carrying rollout turn marker.";
+  (opts.write ?? console.error)(`[DEBUG] Codex Stop plan review skipped: ${detail}`);
+}
+
 function collectPlanCandidates(
   entries: RolloutEntry[],
   startIndex: number,
   turnId?: string
 ): CodexPlanCandidate[] {
   const candidates: CodexPlanCandidate[] = [];
+  let activeTurnId: string | null = null;
 
   for (let i = Math.max(startIndex, 0); i < entries.length; i++) {
     const entry = entries[i];
+    if (
+      (entry.type === "event_msg" && TURN_START_TYPES.has(entry.payload?.type || "")) ||
+      entry.type === "turn_context"
+    ) {
+      const boundaryTurnId = getTurnId(entry);
+      if (boundaryTurnId) activeTurnId = boundaryTurnId;
+    }
 
     const planItemText = getPlanItemText(entry, turnId);
     if (planItemText) {
       candidates.push({ index: i, text: planItemText, source: "plan-item" });
     }
 
-    const assistantPlanText = getAssistantProposedPlanText(entry);
+    const assistantPlanText =
+      !turnId || activeTurnId === turnId
+        ? getAssistantProposedPlanText(entry)
+        : null;
     if (assistantPlanText) {
       candidates.push({
         index: i,
@@ -417,6 +462,9 @@ export function getLatestCodexPlan(
 ): CodexPlanResult | null {
   const entries = parseRolloutEntries(rolloutPath);
   if (entries.length === 0) return null;
+  // Stop payloads without a turn id cannot safely distinguish a new plan from
+  // a previous assistant <proposed_plan>; fail closed instead of resurfacing it.
+  if (!options.turnId) return null;
 
   const turnStartIndex = findTurnStartIndex(entries, options.turnId);
   const candidates = collectPlanCandidates(
@@ -457,8 +505,8 @@ export function getLatestCodexPlan(
 
   if (
     latestBeforeHookPrompt &&
-    normalizePlan(latestBeforeHookPrompt.text) ===
-      normalizePlan(latestAfterHookPrompt.text)
+    normalizePlanText(latestBeforeHookPrompt.text) ===
+      normalizePlanText(latestAfterHookPrompt.text)
   ) {
     return null;
   }
