@@ -45,7 +45,7 @@ import {
   type OpenCodeBridgeContext,
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
-import { resolveValidatedTargetAgent } from "./agent-switch";
+import { getAssistantMessageModel, resolveValidatedTargetAgent } from "./agent-switch";
 import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
@@ -564,10 +564,16 @@ Do NOT proceed with implementation until your plan is approved.`;
                 delivery,
               }),
             sendApprovalHandoff: async ({ sessionId, targetAgent, text }) => {
+              const model = await getAssistantMessageModel({
+                client: ctx.client,
+                sessionId,
+                messageId: context.messageID,
+              });
               await ctx.client.session.prompt({
                 path: { id: sessionId },
                 body: {
                   agent: targetAgent,
+                  ...(model && { model }),
                   noReply: true,
                   parts: [{ type: "text", text }],
                 },
