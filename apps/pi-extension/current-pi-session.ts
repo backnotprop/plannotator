@@ -6,23 +6,6 @@ type NotificationType = "info" | "warning" | "error";
 
 type IdleProbeHost = { isIdle?: () => boolean };
 
-/**
- * Pass `deliverAs` only while the agent is streaming.
- *
- * Pi documents `deliverAs` as the streaming queue selector ("When the agent is
- * streaming, use deliverAs to specify how to queue the message") and starts a
- * turn when the session is idle. oh-my-pi instead honors an explicit
- * `deliverAs` unconditionally — its contract reads "idle starts a turn;
- * streaming queues as steer unless deliverAs is set" — so
- * `{ deliverAs: "followUp" }` on an IDLE oh-my-pi session parks the prompt as
- * a pending follow-up and never starts a turn. Annotate/review feedback is
- * then persisted and acknowledged in the browser ("Feedback Sent") while the
- * agent never sees it.
- *
- * Both hosts expose `isIdle()` on the extension context (`ctx.isIdle`), so
- * drop only `deliverAs` while idle and keep every other caller option. Hosts
- * predating the capability, or a probe that throws, keep the caller's options unchanged.
- */
 export function resolveIdleDeliveryOptions(
 	host: IdleProbeHost,
 	options?: SendUserMessageOptions,
