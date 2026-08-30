@@ -19,6 +19,7 @@ import type { Annotation, ImageAttachment } from '../types';
 const hasDom = typeof document !== 'undefined';
 
 const noopViewerHandle: ViewerHandle = {
+  scrollToAnchor: () => false,
   removeHighlight: () => {},
   clearAllHighlights: () => {},
   applySharedAnnotations: () => {},
