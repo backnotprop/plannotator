@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { configStore } from '../config/configStore';
 import { readThemePairCookies, writeThemePairCookies } from '../config/settings';
 import { useConfigValue } from '../config/useConfig';
+import { loadFont, resolveFontFamily } from '../utils/typography';
 import { faviconDataUrl } from '@plannotator/core/favicon';
 import { storage } from '../utils/storage';
 import {
@@ -143,6 +144,7 @@ export function ThemeProvider({
   const [, setSeedApplied] = useState(false);
 
   const storePair = useConfigValue('themePair');
+  const typography = useConfigValue('typography');
   const pair = pendingSeed.current ?? storePair;
   const mode = pair.mode;
   const faviconStyle = useConfigValue('faviconStyle');
@@ -203,6 +205,23 @@ export function ThemeProvider({
   useEffect(() => {
     applyThemeClasses(colorTheme, resolvedMode);
   }, [resolvedMode, colorTheme]);
+
+  // Typography overrides are scoped by each app root. Keep palette tokens
+  // untouched: they remain the inheritance fallback for unset roles.
+  useEffect(() => {
+    const root = document.documentElement;
+    for (const surface of ['plan', 'annotate', 'review'] as const) {
+      const selection = typography[surface];
+      for (const role of ['display', 'mono'] as const) {
+        const font = selection?.[role];
+        void loadFont(font);
+        const value = resolveFontFamily(font);
+        const property = `--pn-${surface}-${role}-font`;
+        if (value) root.style.setProperty(property, value);
+        else root.style.removeProperty(property);
+      }
+    }
+  }, [typography]);
 
   // Enable color transitions after mount settles — prevents the global *
   // transition rule from firing during initial load.

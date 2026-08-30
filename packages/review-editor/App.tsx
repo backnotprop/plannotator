@@ -25,7 +25,7 @@ import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo } from '
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
-import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
+import { legacyDiffFontSelection, loadFont, migrateLegacyDiffFont, resolveFontFamily } from '@plannotator/ui/utils/typography';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
@@ -373,6 +373,7 @@ const ReviewApp: React.FC = () => {
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
   const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
+  const typography = useConfigValue('typography');
   const diffFontSize = useConfigValue('diffFontSize');
   const diffTabSize = useConfigValue('diffTabSize');
   const reviewShowViewedControls = useConfigValue('reviewShowViewedControls');
@@ -386,21 +387,24 @@ const ReviewApp: React.FC = () => {
   // choice even though the visual result applies to plan/document surfaces.
   const gridEnabled = useConfigValue('gridEnabled');
 
-  // Load custom diff font and override --font-mono for surrounding review elements
+  // A pre-migration session (or the read-only viewer, which has no typography
+  // plumbing) can still be carrying the legacy value; migrateLegacyDiffFont
+  // normally retires it before first paint.
+  const reviewMono = resolveFontFamily(typography.review?.mono) ?? diffFontFamily;
+
   useEffect(() => {
-    if (diffFontFamily) {
-      loadDiffFont(diffFontFamily);
-      document.documentElement.style.setProperty('--diff-font-override', `'${diffFontFamily}', monospace`);
-    } else {
-      document.documentElement.style.removeProperty('--diff-font-override');
-    }
+    if (!typography.review?.mono) void loadFont(legacyDiffFontSelection(diffFontFamily));
     if (diffFontSize) {
       document.documentElement.style.setProperty('--diff-font-size-override', diffFontSize);
     } else {
       document.documentElement.style.removeProperty('--diff-font-size-override');
     }
     document.documentElement.style.setProperty('--diffs-tab-size', String(diffTabSize));
-  }, [diffFontFamily, diffFontSize, diffTabSize]);
+  }, [diffFontFamily, typography.review?.mono, diffFontSize, diffTabSize]);
+
+  // Braces matter: React reads an effect's return value as its cleanup
+  // function, and a Promise is not callable.
+  useEffect(() => { void loadFont(typography.review?.mono); }, [typography.review?.mono]);
 
   const reviewSidebar = useSidebar<ReviewSidebarTab>(false, 'annotations');
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
@@ -1728,6 +1732,9 @@ const ReviewApp: React.FC = () => {
         apiModeRef.current = true;
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
+        // The Code Font picker is gone; fold any value it left behind into
+        // typography.review.mono before anything reads the review face.
+        migrateLegacyDiffFont(configStore);
         // gitUser drives the "Use git name" button in Settings; stays undefined (button hidden) when unavailable
         setGitUser(data.serverConfig?.gitUser);
         setSnapshotId(data.snapshotId);
@@ -2923,7 +2930,7 @@ const ReviewApp: React.FC = () => {
     disableLineNumbers: !diffShowLineNumbers,
     disableBackground: !diffShowBackground,
     expandUnchanged: diffExpandUnchanged,
-    fontFamily: diffFontFamily || undefined,
+    fontFamily: reviewMono || undefined,
     fontSize: diffFontSize || undefined,
     // Only propagate base for modes where it affects old/new content. Avoids
     // needless file-content re-fetches when switching to uncommitted/staged/etc.
@@ -3046,7 +3053,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions,
+    diffExpandUnchanged, reviewMono, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions,
     allAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -3570,6 +3577,7 @@ const ReviewApp: React.FC = () => {
       {isSwitchingPRScope && <PRSwitchOverlay />}
       <div
         className="pn-app-viewport flex flex-col bg-background overflow-hidden"
+        data-pn-surface="review"
         data-pn-compact-touch-layout={isCompactTouchLayout ? 'true' : undefined}
         data-pn-compact-review-shell={isCompactTouchLayout || undefined}
         data-pn-browser-canvas="background"

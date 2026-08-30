@@ -2,20 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { useTheme } from './ThemeProvider';
 import { THEME_MODES } from './themeModes';
 import { themesForHalf, type ThemeHalf } from '../utils/themeRegistry';
-import { configStore } from '../config/configStore';
-import { useConfigValue } from '../config/useConfig';
+import { configStore, useConfigValue } from '../config';
 import { faviconDataUrl, type FaviconStyle } from '@plannotator/core/favicon';
+import { FONT_CATALOG, getFontLoadStatus, isSafeCustomFontFamily, loadFont, resolveFontFamily, type FontCatalogRole, type FontLoadStatus } from '../utils/typography';
+import type { FontSelection, TypographyRole, TypographySurface } from '@plannotator/core/config-types';
 
 interface ThemeTabProps {
   onPreview?: () => void;
   compact?: boolean;
+  typographySurface?: TypographySurface;
 }
 
 const HALVES: { id: ThemeHalf; label: string }[] = [
   { id: 'light', label: 'Light' },
   { id: 'dark', label: 'Dark' },
 ];
-
+const TYPOGRAPHY_SURFACES: { id: TypographySurface; label: string }[] = [
+  { id: 'plan', label: 'Plan' },
+  { id: 'annotate', label: 'Annotate' },
+  { id: 'review', label: 'Review' },
+];
 const FAVICON_STYLES: { id: FaviconStyle; label: string }[] = [
   { id: 'totman', label: 'Totman' },
   { id: 'classic', label: 'Classic P' },
@@ -23,16 +29,10 @@ const FAVICON_STYLES: { id: FaviconStyle; label: string }[] = [
 
 const SyntaxLinesIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h7" />
   </svg>
 );
 
-/**
- * The favicon style choices. Rendered in both layouts, so it lives in one place.
- * The compact layout drops the visible "Favicon" heading the full layout has, so
- * the group carries its own accessible name and two unlabelled image buttons are
- * never all a screen reader gets.
- */
 const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected }) => (
   <div className="flex gap-1" role="group" aria-label="Favicon style">
     {FAVICON_STYLES.map(({ id, label }) => (
@@ -56,7 +56,7 @@ const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected })
   </div>
 );
 
-export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
+export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact, typographySurface: forcedTypographySurface }) => {
   const {
     mode,
     setMode,
@@ -71,6 +71,8 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
 
   // Which half the grid assigns to. Follows the mode you are actually seeing,
   // so opening Settings in dark mode edits the dark half first.
+  const typography = useConfigValue('typography');
+  const [typographySurface, setTypographySurface] = useState<TypographySurface>(forcedTypographySurface ?? 'plan');
   const [half, setHalf] = useState<ThemeHalf>(preferredMode);
   useEffect(() => setHalf(preferredMode), [preferredMode]);
 
@@ -107,7 +109,6 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
           {THEME_MODES.map(({ id, label, Icon }) => (
             <button
               key={id}
-              type="button"
               onClick={() => setMode(id)}
               className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 mode === id
@@ -231,6 +232,130 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
           })}
         </div>
       </div>
+
+      {!compact && (
+        <TypographySettings
+          surface={forcedTypographySurface ?? typographySurface}
+          setSurface={setTypographySurface}
+          showSurfacePicker={!forcedTypographySurface}
+          typography={typography}
+        />
+      )}
     </div>
   );
 };
+
+function TypographySettings({ surface, setSurface, typography, showSurfacePicker }: {
+  surface: TypographySurface;
+  setSurface: (surface: TypographySurface) => void;
+  typography: ReturnType<typeof useConfigValue<'typography'>>;
+  showSurfacePicker: boolean;
+}) {
+  const setRole = (role: TypographyRole, selection: FontSelection | undefined) => {
+    const current = configStore.get('typography');
+    const nextSurface = { ...current[surface], ...(selection ? { [role]: selection } : {}) };
+    if (!selection) delete nextSurface[role];
+    configStore.set('typography', { ...current, [surface]: nextSurface });
+  };
+  return (
+    <section className="space-y-3 border-t border-border pt-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Typography</label>
+          <p className="mt-1 text-[11px] text-muted-foreground/70">Set the reading and code face for this surface.</p>
+        </div>
+        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">{surface}</span>
+      </div>
+      {showSurfacePicker && <div className="flex gap-1 rounded-lg bg-muted/50 p-0.5">
+        {TYPOGRAPHY_SURFACES.map(item => <button key={item.id} onClick={() => setSurface(item.id)} className={`flex-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${surface === item.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{item.label}</button>)}
+      </div>}
+      <FontControl label="Display font" role="display" selection={typography[surface]?.display} onChange={setRole} />
+      <FontControl label="Code font" role="mono" selection={typography[surface]?.mono} onChange={setRole} />
+    </section>
+  );
+}
+
+function FontChoice({ selected, onClick, label, preview, detail, family }: {
+  selected: boolean;
+  onClick: () => void;
+  label: string;
+  preview: string;
+  detail: string;
+  family?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`relative rounded-md border p-2 text-left transition-colors ${selected ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground/30 hover:bg-muted/30'}`}
+      style={{ fontFamily: family }}
+    >
+      <span className="mb-1.5 block text-lg leading-none text-foreground">{preview}</span>
+      <span className="block truncate text-xs text-foreground">{label}</span>
+      <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{detail}</span>
+      {selected && <svg className="absolute bottom-2 right-2 size-3 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+    </button>
+  );
+}
+
+function FontControl({ label, role, selection, onChange }: {
+  label: string;
+  role: TypographyRole;
+  selection: FontSelection | undefined;
+  onChange: (role: TypographyRole, selection: FontSelection | undefined) => void;
+}) {
+  const [custom, setCustom] = useState(selection?.source === 'custom' ? selection.family ?? '' : '');
+  const [editingCustom, setEditingCustom] = useState(selection?.source === 'custom');
+  const [customError, setCustomError] = useState<string | null>(null);
+  const [status, setStatus] = useState<FontLoadStatus>(() => selection?.source === 'catalog' ? getFontLoadStatus(selection.family as never) : 'idle');
+  useEffect(() => {
+    setCustom(selection?.source === 'custom' ? selection.family ?? '' : '');
+    setEditingCustom(selection?.source === 'custom');
+    setCustomError(null);
+  }, [selection]);
+  const fonts = FONT_CATALOG.filter(font => (font.roles as readonly FontCatalogRole[]).includes(role as FontCatalogRole));
+  useEffect(() => {
+    let active = true;
+    void loadFont(selection).then(next => { if (active) setStatus(next); });
+    setStatus(selection?.source === 'catalog' ? getFontLoadStatus(selection.family as never) : 'idle');
+    return () => { active = false; };
+  }, [selection?.family, selection?.source]);
+  const preview = resolveFontFamily(selection);
+  const isSelected = (id: string) => selection?.source === 'catalog' && selection.family === id;
+  const choose = (font: typeof fonts[number]) => {
+    setEditingCustom(false);
+    onChange(role, { family: font.id, source: 'catalog' });
+  };
+  return (
+    <section className="space-y-2.5 rounded-lg border border-border/80 bg-background/35 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">{label}</h3>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{role === 'mono' ? 'Code, diffs, and shortcuts' : 'Reading and interface text'}</p>
+        </div>
+        {selection && <button type="button" onClick={() => { setEditingCustom(false); onChange(role, undefined); }} className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Use theme</button>}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <FontChoice selected={!selection} onClick={() => { setEditingCustom(false); onChange(role, undefined); }} label="Theme default" preview="Aa" detail="Follow palette" />
+        {fonts.map(font => <FontChoice key={font.id} selected={isSelected(font.id)} onClick={() => choose(font)} label={font.label} preview="Aa" detail="Font family" family={font.family} />)}
+        <FontChoice selected={editingCustom} onClick={() => setEditingCustom(open => !open)} label="Custom local" preview="+" detail="CSS stack" />
+      </div>
+      {editingCustom && (
+        <>
+          <input autoFocus value={custom} onChange={event => { setCustom(event.target.value); setCustomError(null); }} onBlur={() => {
+            const value = custom.trim();
+            if (!value) { onChange(role, undefined); return; }
+            if (!isSafeCustomFontFamily(value)) { setCustomError('Use a font-family stack without braces or semicolons.'); return; }
+            onChange(role, { family: value, source: 'custom' });
+          }} placeholder={'e.g. "Berkeley Mono", monospace'} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
+          {customError && <p className="text-[11px] text-destructive">{customError}</p>}
+        </>
+      )}
+      <div className="border-t border-border/60 pt-2 text-sm text-foreground" style={{ fontFamily: preview }}>
+        {role === 'mono' ? 'const font = "preview";' : 'The quick brown fox jumps over the lazy dog.'}
+      </div>
+      {selection?.source === 'catalog' && <p className="text-[11px] text-muted-foreground/70">{status === 'loading' ? 'Loading font…' : status === 'error' ? 'Could not load font; using fallback.' : status === 'ready' ? 'Loaded' : 'Waiting to load'}</p>}
+    </section>
+  );
+}

@@ -8,6 +8,7 @@ export {
   resolveCursorSandbox,
   resolveGuideHistory,
   parseReviewAnalysisConfig,
+  parseTypographyConfig,
   isAgentTerminalSide,
   type PlannotatorConfig,
   type DiffOptions,

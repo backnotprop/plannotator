@@ -5133,6 +5133,7 @@ const App: React.FC = () => {
       <TooltipProvider delayDuration={900} skipDelayDuration={200} disableHoverableContent>
       <div
         data-print-region="root"
+        data-pn-surface={annotateMode ? 'annotate' : 'plan'}
         data-pn-browser-canvas={browserCanvas}
         data-pn-compact-touch-layout={usesDocumentScroll ? 'true' : undefined}
         data-pn-document-scroll={usesDocumentScroll ? 'true' : undefined}

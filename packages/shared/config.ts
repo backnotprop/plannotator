@@ -22,10 +22,11 @@ import {
 } from "fs";
 import { execSync } from "child_process";
 
-import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig } from '@plannotator/core/config-types';
+import { parseTypographyConfig, type DefaultDiffType, type DiffLineBgIntensity, type DiffOptions, type ThemeConfig, type TypographyConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
-export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
+export { parseTypographyConfig };
+export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, TypographyConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -102,6 +103,7 @@ export function mergePromptConfig(
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  typography?: TypographyConfig;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
     /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
@@ -494,6 +496,19 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
     const mergedTheme = (current.theme || partial.theme)
       ? { ...current.theme, ...partial.theme }
       : undefined;
+    // A typography update is a complete profile snapshot. Replacing it makes
+    // Reset durable instead of deep-merging deleted roles back from disk.
+    // When the incoming value is absent or invalid we keep what is on disk —
+    // including a value that does not parse. saveConfig is called for every
+    // unrelated setting, so dropping an unparsable key here would silently
+    // delete a hand-edited typography block on the next theme toggle instead
+    // of leaving it there to be fixed. Readers already ignore it (both
+    // getServerConfig and the client validate before use).
+    const currentTypography = parseTypographyConfig(current.typography);
+    const partialTypography = parseTypographyConfig(partial.typography);
+    const mergedTypography = partial.typography !== undefined && partialTypography.ok
+      ? partialTypography.value
+      : (currentTypography.ok ? currentTypography.value : current.typography);
     const mergedReviewAnalysis = (current.reviewAnalysis || partial.reviewAnalysis)
       ? { ...current.reviewAnalysis, ...partial.reviewAnalysis }
       : undefined;
@@ -503,6 +518,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
       ...partial,
       diffOptions: mergedDiffOptions,
       theme: mergedTheme,
+      typography: mergedTypography,
       reviewAnalysis: mergedReviewAnalysis,
       prompts: mergedPrompts,
     };
@@ -535,6 +551,7 @@ export function getServerConfig(gitUser: string | null): {
   displayName?: string;
   diffOptions?: DiffOptions;
   theme?: ThemeConfig;
+  typography?: TypographyConfig;
   favicon?: FaviconStyle;
   reviewAnalysis: NonNullable<PlannotatorConfig["reviewAnalysis"]>;
   gitUser?: string;
@@ -544,10 +561,12 @@ export function getServerConfig(gitUser: string | null): {
   agentTerminalDefaultAgent?: string;
 } {
   const cfg = loadConfig();
+  const typography = parseTypographyConfig(cfg.typography);
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
     ...(cfg.theme !== undefined && { theme: cfg.theme }),
+    ...(typography.ok && { typography: typography.value }),
     ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
     // These values gate server-side work, so always make the resolved defaults
     // explicit. The client must not revive a stale cookie that disagrees with
