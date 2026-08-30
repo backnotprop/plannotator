@@ -31,3 +31,22 @@ export function classifyAnnotateOutcome(
 		promptKind: result.feedback ? "feedback" : null,
 	};
 }
+
+/**
+ * Whether last-message feedback should carry the annotated-response excerpt
+ * (#1334). Anchoring re-sends up to 1,000 characters of the target response,
+ * which is redundant when the model still holds it in context — so it is
+ * gated on the config seam and on the target being possibly stale. Pure so
+ * the gating is testable without an ExtensionContext.
+ */
+export function shouldPrependMessageAnchor(
+	options: {
+		feedbackScope?: "message" | "messages";
+		anchoringEnabled: boolean;
+		targetMayBeStale: boolean;
+	},
+): boolean {
+	if (options.feedbackScope === "messages") return false;
+	if (!options.anchoringEnabled) return false;
+	return options.targetMayBeStale;
+}

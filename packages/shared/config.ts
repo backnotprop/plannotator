@@ -181,6 +181,15 @@ export interface PlannotatorConfig {
    */
   annotateHistory?: boolean;
   /**
+   * Prepend the annotated assistant-response excerpt when the Pi extension
+   * delivers message-annotation feedback (/plannotator-last, #1334). The
+   * excerpt re-sends up to 1,000 characters of a response the model usually
+   * still has in its own context, so users who find it redundant can disable
+   * it. Default: true (anchor when the target message may have scrolled out
+   * of the working context — different session or entries added after it).
+   */
+  annotateMessageAnchoring?: boolean;
+  /**
    * Extra file extensions annotate treats as markdown (#1307), e.g.
    * [".livemd"] for Livebook notebooks. Listed extensions are accepted
    * everywhere .md is accepted on the annotate path and render as markdown.
@@ -645,6 +654,21 @@ export function resolveAnnotateHistory(config: PlannotatorConfig): boolean {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
   return coerceConfigBoolean(config.annotateHistory, true);
+}
+
+/**
+ * Resolve whether the Pi extension prepends the annotated-response excerpt
+ * when delivering message-annotation feedback (#1334).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_ANNOTATE_MESSAGE_ANCHORING env var  →  config.annotateMessageAnchoring  →  default true
+ */
+export function resolveAnnotateMessageAnchoring(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_ANNOTATE_MESSAGE_ANCHORING;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  return coerceConfigBoolean(config.annotateMessageAnchoring, true);
 }
 
 /**

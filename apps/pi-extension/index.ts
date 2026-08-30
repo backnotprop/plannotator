@@ -31,7 +31,7 @@ import {
 	markCompletedSteps,
 	parseChecklist,
 } from "./generated/checklist.ts";
-import { loadConfig, resolveUseJina } from "./generated/config.ts";
+import { loadConfig, resolveUseJina, resolveAnnotateMessageAnchoring } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
 import {
@@ -74,7 +74,7 @@ import {
 } from "./tool-scope.ts";
 import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
-import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
+import { classifyAnnotateOutcome, shouldPrependMessageAnchor } from "./annotate-outcome.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -1068,9 +1068,16 @@ export default function plannotator(pi: ExtensionAPI): void {
 							const target = result.selectedMessageId && result.selectedMessageId !== snapshot.entryId
 								? findAssistantMessageByEntryId(ctx, result.selectedMessageId) ?? snapshot
 								: snapshot;
-							const feedback = result.feedbackScope !== "messages" && shouldAnchorLastMessageFeedback(ctx, target.entryId, origin)
-									? anchorMessageFeedback(outcome.feedback, target.text)
-									: outcome.feedback;
+							// Anchoring re-sends up to 1,000 characters of a response the model
+							// usually still holds in its own context (#1334); keep it for
+							// possibly-stale targets, let users turn it off when it is noise.
+							const feedback = shouldPrependMessageAnchor({
+								feedbackScope: result.feedbackScope,
+								anchoringEnabled: resolveAnnotateMessageAnchoring(loadConfig()),
+								targetMayBeStale: shouldAnchorLastMessageFeedback(ctx, target.entryId, origin),
+							})
+								? anchorMessageFeedback(outcome.feedback, target.text)
+								: outcome.feedback;
 							const {
 								getAnnotateApprovedWithNotesPrompt,
 								getAnnotateMessageFeedbackPrompt,
