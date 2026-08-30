@@ -5,6 +5,7 @@ import {
 	notifyCurrentPiSession,
 	registerCurrentPiSession,
 	sendUserMessageToCurrentPiSession,
+	resolveIdleDeliveryOptions,
 	type CurrentPiSessionRegistration,
 } from "./current-pi-session.ts";
 
@@ -66,5 +67,119 @@ describe("current Pi session feedback routing", () => {
 		expect(oldNotifications).toEqual([]);
 		expect(replacementMessages).toEqual(["annotation feedback"]);
 		expect(replacementNotifications).toEqual(["feedback delivered"]);
+	});
+});
+
+describe("resolveIdleDeliveryOptions", () => {
+	test("idle host drops deliverAs so the host starts a turn", () => {
+		expect(
+			resolveIdleDeliveryOptions({ isIdle: () => true }, { deliverAs: "followUp" }),
+		).toBeUndefined();
+	});
+
+	test("streaming host keeps deliverAs", () => {
+		expect(
+			resolveIdleDeliveryOptions({ isIdle: () => false }, { deliverAs: "followUp" }),
+		).toEqual({ deliverAs: "followUp" });
+	});
+
+	test("idle host keeps sibling options and drops only deliverAs", () => {
+		expect(
+			resolveIdleDeliveryOptions(
+				{ isIdle: () => true },
+				{ deliverAs: "followUp", expandPromptTemplates: true },
+			),
+		).toEqual({ expandPromptTemplates: true });
+	});
+
+	test("host without isIdle passes options through unchanged", () => {
+		expect(resolveIdleDeliveryOptions({}, { deliverAs: "followUp" })).toEqual({
+			deliverAs: "followUp",
+		});
+	});
+
+	test("probe that throws passes options through unchanged", () => {
+		expect(
+			resolveIdleDeliveryOptions(
+				{
+					isIdle: () => {
+						throw new Error("probe exploded");
+					},
+				},
+				{ deliverAs: "followUp" },
+			),
+		).toEqual({ deliverAs: "followUp" });
+	});
+
+	test("undefined options stay undefined", () => {
+		expect(resolveIdleDeliveryOptions({ isIdle: () => true })).toBeUndefined();
+	});
+
+	test("options without deliverAs are untouched even when idle", () => {
+		expect(
+			resolveIdleDeliveryOptions({ isIdle: () => true }, { expandPromptTemplates: true }),
+		).toEqual({ expandPromptTemplates: true });
+	});
+
+	test("steer is also dropped when idle", () => {
+		expect(
+			resolveIdleDeliveryOptions({ isIdle: () => true }, { deliverAs: "steer" }),
+		).toBeUndefined();
+	});
+});
+
+describe("idle delivery through the current-session send path", () => {
+	test("idle replacement runtime drops deliverAs so the host starts a turn", () => {
+		const oldRuntime = registerSessionRuntime("same-session", [], []);
+		const origin = getPiSessionIdentity(oldRuntime.ctx);
+
+		const captured: Array<{ content: unknown; options: unknown }> = [];
+		const idlePi = {
+			isIdle: () => true,
+			sendUserMessage: (content: unknown, options?: unknown) => {
+				captured.push({ content, options });
+			},
+		} as unknown as ExtensionAPI;
+		const replacement = registerCurrentPiSession(idlePi);
+		registrations.push(replacement);
+		replacement.update(createContext("same-session", []));
+		oldRuntime.registration.clear();
+
+		const result = sendUserMessageToCurrentPiSession(
+			"annotation feedback",
+			{ deliverAs: "followUp" },
+			origin,
+		);
+
+		expect(result).toEqual({ ok: true });
+		expect(captured).toEqual([{ content: "annotation feedback", options: undefined }]);
+	});
+
+	test("streaming replacement runtime keeps deliverAs", () => {
+		const oldRuntime = registerSessionRuntime("same-session", [], []);
+		const origin = getPiSessionIdentity(oldRuntime.ctx);
+
+		const captured: Array<{ content: unknown; options: unknown }> = [];
+		const streamingPi = {
+			isIdle: () => false,
+			sendUserMessage: (content: unknown, options?: unknown) => {
+				captured.push({ content, options });
+			},
+		} as unknown as ExtensionAPI;
+		const replacement = registerCurrentPiSession(streamingPi);
+		registrations.push(replacement);
+		replacement.update(createContext("same-session", []));
+		oldRuntime.registration.clear();
+
+		const result = sendUserMessageToCurrentPiSession(
+			"annotation feedback",
+			{ deliverAs: "followUp" },
+			origin,
+		);
+
+		expect(result).toEqual({ ok: true });
+		expect(captured).toEqual([
+			{ content: "annotation feedback", options: { deliverAs: "followUp" } },
+		]);
 	});
 });

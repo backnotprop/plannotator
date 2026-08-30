@@ -4,6 +4,42 @@ type SendUserMessageContent = Parameters<ExtensionAPI["sendUserMessage"]>[0];
 type SendUserMessageOptions = Parameters<ExtensionAPI["sendUserMessage"]>[1];
 type NotificationType = "info" | "warning" | "error";
 
+type IdleProbeHost = { isIdle?: () => boolean };
+
+/**
+ * Pass `deliverAs` only while the agent is streaming.
+ *
+ * Pi documents `deliverAs` as the streaming queue selector ("When the agent is
+ * streaming, use deliverAs to specify how to queue the message") and starts a
+ * turn when the session is idle. oh-my-pi instead honors an explicit
+ * `deliverAs` unconditionally — its contract reads "idle starts a turn;
+ * streaming queues as steer unless deliverAs is set" — so
+ * `{ deliverAs: "followUp" }` on an IDLE oh-my-pi session parks the prompt as
+ * a pending follow-up and never starts a turn. Annotate/review feedback is
+ * then persisted and acknowledged in the browser ("Feedback Sent") while the
+ * agent never sees it.
+ *
+ * Both hosts expose `isIdle()` on the extension API, so drop only `deliverAs`
+ * while idle and keep every other caller option. Hosts predating the
+ * capability, or a probe that throws, keep the caller's options unchanged.
+ */
+export function resolveIdleDeliveryOptions(
+	host: IdleProbeHost,
+	options?: SendUserMessageOptions,
+): SendUserMessageOptions | undefined {
+	if (!options || options.deliverAs === undefined) return options;
+	const probe = host.isIdle;
+	if (typeof probe !== "function") return options;
+	try {
+		if (!probe.call(host)) return options;
+	} catch {
+		return options;
+	}
+	const next = { ...options };
+	delete next.deliverAs;
+	return Object.keys(next).length > 0 ? next : undefined;
+}
+
 type CurrentPiSession = {
 	token: symbol;
 	sendUserMessage: (content: SendUserMessageContent, options?: SendUserMessageOptions) => void;
@@ -96,7 +132,7 @@ function setCurrentPiSession(token: symbol, pi: ExtensionAPI, ctx?: ExtensionCon
 	const current: CurrentPiSession = {
 		token,
 		sendUserMessage: (content, options) => {
-			pi.sendUserMessage(content, options);
+			pi.sendUserMessage(content, resolveIdleDeliveryOptions(pi, options));
 		},
 	};
 	if (ctx) {

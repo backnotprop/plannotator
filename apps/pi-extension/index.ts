@@ -61,6 +61,7 @@ import {
 	notifyCurrentPiSession,
 	type PiSessionIdentity,
 	registerCurrentPiSession,
+	resolveIdleDeliveryOptions,
 	sendUserMessageToCurrentPiSession,
 	withCurrentPiSessionFallbackHeader,
 } from "./current-pi-session.ts";
@@ -272,7 +273,7 @@ function sendUserMessageWithCurrentSessionFallback(
 	if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
 
 	try {
-		pi.sendUserMessage(content, options);
+		pi.sendUserMessage(content, resolveIdleDeliveryOptions(pi, options));
 		return;
 	} catch (err) {
 		if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
