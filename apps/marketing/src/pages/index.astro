@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import HeroSection from '../components/landing/HeroSection.astro';
+import AnnounceBar from '../components/landing/AnnounceBar.astro';
 import SocialProofBar from '../components/landing/SocialProofBar.astro';
 import AnnoReplace from '../components/landing/AnnoReplace.astro';
 ---
@@ -13,6 +14,8 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
   <div class="min-h-screen bg-background text-foreground">
     <Nav />
 
+    <AnnounceBar />
+
     <!-- Contained column — editorial feel -->
     <div class="max-w-4xl mx-auto border-x border-border/30">
 
@@ -21,6 +24,14 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
 
       <!-- Social Proof -->
       <SocialProofBar />
+
+      <!-- Herdr Annotate demo strip -->
+      <a href="https://x.com/plannotator/status/2093419561077154287?s=20" class="herdr-demo-strip landing-reveal">
+        <svg class="herdr-demo-play" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5 L10 6 L3 10.5 Z" fill="currentColor"/></svg>
+        <span class="herdr-demo-name">Herdr Annotate</span>
+        <span class="herdr-demo-copy">watch the demo</span>
+        <span aria-hidden="true">&rarr;</span>
+      </a>
 
       <!-- Capabilities -->
       <section class="py-16 px-8 border-t border-border/30 landing-reveal">
@@ -408,7 +419,7 @@ import AnnoReplace from '../components/landing/AnnoReplace.astro';
       <section class="workspaces-cta-band py-14 px-8 border-t border-border/30 landing-reveal">
         <div class="relative z-10 max-w-2xl mx-auto text-center">
           <span class="workspaces-cta-pill mb-4">
-            <span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+            <span class="workspaces-cta-corners" aria-hidden="true"></span>
             Plannotator Workspaces · waitlist
           </span>
           <h2 class="font-display text-xl sm:text-2xl font-semibold tracking-tight mb-3">

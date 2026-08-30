@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   AGENT_TERMINAL_WEBTUI_VERSION,
+  buildAgentTerminalRuntimePackageJson,
   installAgentTerminalRuntime,
   resolveBundledAgentTerminalSidecarPath,
+  verifyAgentTerminalNativeBinary,
 } from "./agent-terminal-runtime";
 
 let tmp = "";
@@ -62,6 +64,51 @@ describe("agent terminal runtime", () => {
       if (previousDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
     }
+  });
+
+  test("runtime manifest approves node-pty install scripts by name", () => {
+    const manifest = buildAgentTerminalRuntimePackageJson() as {
+      allowScripts?: Record<string, unknown>;
+    };
+
+    // npm 12 blocks dependency install scripts unless the installing project
+    // names the package (#1409). Name-only is load-bearing: npm matches these
+    // keys as exact strings, so `node-pty@1.1.0` would stop matching as soon
+    // as webtui's `^1.1.0` range resolved to a newer patch.
+    expect(manifest.allowScripts?.["node-pty"]).toBe(true);
+    expect(Object.keys(manifest.allowScripts ?? {})).toEqual(["node-pty"]);
+  });
+
+  test("native binary check accepts either a compiled build or a platform prebuild", () => {
+    const packageDir = join(tmp, "node_modules", "node-pty");
+
+    const compiled = join(packageDir, "build", "Release");
+    mkdirSync(compiled, { recursive: true });
+    writeFileSync(join(compiled, "pty.node"), "");
+    expect(verifyAgentTerminalNativeBinary(tmp).ok).toBe(true);
+    rmSync(join(packageDir, "build"), { recursive: true, force: true });
+
+    const prebuild = join(packageDir, "prebuilds", `${process.platform}-${process.arch}`);
+    mkdirSync(prebuild, { recursive: true });
+    writeFileSync(join(prebuild, "pty.node"), "");
+    expect(verifyAgentTerminalNativeBinary(tmp).ok).toBe(true);
+  });
+
+  test("native binary check reports blocked install scripts when node-pty was not built", () => {
+    mkdirSync(join(tmp, "node_modules", "node-pty"), { recursive: true });
+
+    const result = verifyAgentTerminalNativeBinary(tmp);
+    expect(result.ok).toBe(false);
+    // The remedy has to be in the message: npm's blocking is silent, so this
+    // is the only place a user learns why an install that exited 0 cannot run.
+    const message = result.ok ? "" : result.message;
+    expect(message).toContain("install scripts");
+    expect(message).toContain("npm rebuild node-pty");
+    expect(message).toContain(tmp);
+  });
+
+  test("native binary check stays out of the way when node-pty is not in the tree", () => {
+    expect(verifyAgentTerminalNativeBinary(tmp).ok).toBe(true);
   });
 
   test("WebTUI vendor version is pinned consistently", () => {

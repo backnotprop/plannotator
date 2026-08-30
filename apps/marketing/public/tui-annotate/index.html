@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://plannotator.ai/tui-annotate/">
+<link rel="icon" type="image/png" sizes="256x256" href="/favicon.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://plannotator.ai/tui-annotate/">
+<meta property="og:title" content="Herdr Annotate">
+<meta property="og:description" content="Annotate anything in your terminal and send it straight back to your agents. A Herdr plugin built on Plannotator TUI.">
+<meta property="og:image" content="https://plannotator.ai/tui-annotate/assets/full-poster.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<title>Herdr Annotate</title>
+<meta name="description" content="Annotate anything in your terminal and send it straight back to the agent. A Herdr plugin built on Plannotator TUI.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@1,700&display=swap">
+<style>
+  :root {
+    --bg: #111322;
+    --surface: #181a30;
+    --surface-2: #1f2240;
+    --line: #2c2f50;
+    --line-strong: #454a7a;
+    --text: #efedff;
+    --text-2: #c9c6f1;
+    --muted: #9a96c4;
+    --gold: #f7ca5e;
+    --gold-2: #ec9d3f;
+    --red: #e0403a;
+    --green: #7ddc8a;
+    --focus: #f7ca5e;
+    --radius: 12px;
+    --measure: 62ch;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 16px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { color: var(--text-2); text-decoration-thickness: from-font; text-underline-offset: 0.15em; }
+  a:hover { color: var(--text); }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+  code, kbd, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  kbd {
+    font-size: 0.82em; padding: 0.1em 0.45em; border: 1px solid var(--line-strong); border-bottom-width: 2px;
+    border-radius: 6px; background: var(--surface-2); color: var(--text); white-space: nowrap;
+  }
+  .wrap { width: min(1080px, 100% - 40px); margin-inline: auto; }
+  .display { font-family: "Instrument Sans", Inter, system-ui, sans-serif; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; text-wrap: balance; }
+  h2.display { font-size: clamp(26px, 3.2vw, 34px); margin: 0 0 12px; }
+  .eyebrow { font: 600 12px/1 Inter, system-ui, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); margin: 0 0 14px; }
+  p { text-wrap: pretty; }
+  .lead { color: var(--text-2); max-width: var(--measure); margin: 0; }
+  section { padding: 72px 0 0; }
+
+  /* nav */
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 18px 0; flex-wrap: wrap; }
+  .nav a { text-decoration: none; }
+  .brand { display: inline-flex; align-items: baseline; gap: 10px; color: var(--text); font-weight: 600; white-space: nowrap; }
+  .nav-links { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; color: var(--muted); }
+  .nav-links a { color: var(--text-2); }
+  .corner {
+    --c: var(--line-strong); --l: 9px; --t: 1px;
+    display: inline-block; padding: 9px 14px; font: 500 13px/1 "JetBrains Mono", ui-monospace, monospace; color: var(--text-2);
+    text-decoration: none; white-space: nowrap; transition: color 160ms ease;
+    background:
+      linear-gradient(var(--c), var(--c)) top left / var(--l) var(--t) no-repeat,
+      linear-gradient(var(--c), var(--c)) top left / var(--t) var(--l) no-repeat,
+      linear-gradient(var(--c), var(--c)) top right / var(--l) var(--t) no-repeat,
+      linear-gradient(var(--c), var(--c)) top right / var(--t) var(--l) no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom left / var(--l) var(--t) no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom left / var(--t) var(--l) no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom right / var(--l) var(--t) no-repeat,
+      linear-gradient(var(--c), var(--c)) bottom right / var(--t) var(--l) no-repeat;
+  }
+  .corner:hover { --c: var(--gold); color: var(--text); }
+  .nav-links { gap: 8px 10px; }
+
+  /* hero */
+  .hero { padding: 16px 0 0; }
+  .hero-banner { display: block; width: min(520px, 100%); height: auto; margin: 0 0 22px; }
+  .hero h1 { font-size: clamp(26px, 3.2vw, 38px); margin: 0 0 10px; max-width: 26ch; }
+  .hero h1 em { font-style: italic; color: var(--gold); }
+  .hero .lead { font-size: 17px; }
+  .hero-links { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: 16px 0 0; font-size: 14.5px; color: var(--muted); }
+  .hero-links .core a { color: var(--gold); font-weight: 600; }
+  .hero-links .corner { font-size: 13.5px; }
+  .u {
+    background: linear-gradient(90deg, var(--red), var(--red)) no-repeat 0 100% / 100% 3px;
+    padding-bottom: 2px;
+  }
+
+  /* install cards */
+  .installs { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 28px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px 18px 16px; display: grid; gap: 10px; align-content: start;
+  }
+  .card > * { min-width: 0; }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .card-title { font-family: "Instrument Sans", Inter, sans-serif; font-weight: 700; font-style: italic; font-size: 24px; letter-spacing: -0.03em; line-height: 1.15; display: inline-block; padding-inline-end: 0.15em; }
+  .card.full .card-title { background: linear-gradient(90deg, var(--gold), var(--gold-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .card.lite .card-title { color: var(--text-2); }
+  .card-note { font-size: 13px; color: var(--muted); }
+  .card p { margin: 0; color: var(--text-2); font-size: 14.5px; }
+  .cmd {
+    display: flex; align-items: center; gap: 8px; margin: 2px 0 0; min-width: 0;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px 8px 10px;
+    font-size: 12.5px;
+  }
+  .cmd code { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; color: var(--text); }
+  .cmd code::before { content: "$ "; color: var(--muted); }
+  .copy {
+    flex: none; font: 500 12px/1 Inter, system-ui, sans-serif; color: var(--text-2);
+    background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px; padding: 7px 8px; cursor: pointer;
+    transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease;
+  }
+  .copy:hover { background: #262048; }
+  .copy:active { transform: scale(0.96); }
+  .copy[data-done="true"] { color: var(--green); border-color: var(--green); }
+  .card-links { display: flex; gap: 16px; font-size: 13.5px; margin-top: 0; }
+  .card .caps { background: none; border: 0; border-radius: 0; margin: 0; }
+  .card .caps summary { padding: 2px 0; font: 600 13.5px/1.4 Inter, system-ui, sans-serif; color: var(--text-2); justify-content: flex-start; gap: 8px; }
+  .card .caps summary::after { font-size: 16px; }
+  .card .caps p { margin: 6px 0 8px; font-size: 14px; }
+  .card .caps ul { margin: 0 0 4px; padding-inline-start: 18px; display: grid; gap: 5px; font-size: 13.5px; color: var(--text-2); }
+  .card .caps li::marker { color: var(--muted); }
+  .card-links a { color: var(--text-2); }
+
+
+
+  /* shared ascii frame: corner marks, mono, title in the top border */
+  .abox {
+    --c: var(--line-strong);
+    position: relative; border: 1px solid var(--line); padding: 22px 20px 16px; min-width: 0;
+    font: 400 13px/1.6 "JetBrains Mono", ui-monospace, monospace; color: var(--text-2); background: var(--bg);
+    background-image:
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c));
+    background-repeat: no-repeat;
+    background-size: 12px 1px, 1px 12px, 12px 1px, 1px 12px, 12px 1px, 1px 12px, 12px 1px, 1px 12px;
+    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+  }
+  .abox > header { position: absolute; top: -0.75em; inset-inline: 12px; display: flex; justify-content: space-between; gap: 12px; pointer-events: none; }
+  .abox > header > * { background: var(--bg); padding: 0 8px; line-height: 1.5; margin: 0; font: inherit; }
+  .abox > header .a-title { font-weight: 600; letter-spacing: 0.14em; color: var(--c); text-transform: uppercase; }
+  .abox > header .a-meta { color: var(--muted); }
+  .abox.full { --c: var(--gold); }
+  .abox.lite { --c: var(--text-2); }
+  .abox.both { --c: var(--text-2); }
+  .abox a { color: var(--text-2); }
+
+  /* flows as ascii boxes */
+  .flows { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 22px; margin-top: 34px; }
+  .flow .a-desc { margin: 0 0 12px; color: var(--muted); }
+  .flow .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; counter-reset: step; }
+  .flow .steps li { position: relative; padding-inline-start: 26px; }
+  .flow .steps li::before { content: counter(step) "."; counter-increment: step; position: absolute; inset-inline-start: 0; color: var(--c); }
+  .flow kbd { font-size: 0.92em; }
+
+  /* keys as ascii boxes */
+  details.keys { background: var(--bg); border-radius: 0; margin-bottom: 18px; padding: 14px 20px 16px; }
+  details.keys > summary { padding: 0; margin: 0 0 4px; display: block; font: inherit; color: var(--text-2); }
+  details.keys > summary::before { content: "▸ "; color: var(--muted); }
+  details.keys[open] > summary::before { content: "▾ "; }
+  details.keys > summary::after, details.keys[open] > summary::after { content: none; }
+  details.keys > summary b { font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--c); }
+  details.keys > summary small { color: var(--muted); margin-inline-start: 12px; font-size: inherit; }
+  @media (max-width: 640px) { details.keys > summary small { display: block; margin: 2px 0 0 1.4em; } }
+  details.keys pre { margin: 10px 0 0; padding: 12px 14px; border: 1px dashed var(--line-strong); font-size: 12.5px; line-height: 1.55; color: var(--text-2); overflow-x: auto; }
+  details.keys .pre-wrap { position: relative; }
+  details.keys .pre-wrap .copy { top: 20px; inset-inline-end: 12px; }
+  .note.mono { font: 400 13px/1.6 "JetBrains Mono", ui-monospace, monospace; }
+
+  /* built-on commands in the dashed ascii style */
+  .tui .cmds { display: grid; gap: 10px; margin-top: 18px; }
+  .tui .cmds .a-cmd { display: flex; align-items: baseline; gap: 12px; margin: 0; padding: 8px 10px; border: 1px dashed var(--line-strong); font: 400 13px/1.6 "JetBrains Mono", ui-monospace, monospace; min-width: 0; }
+  .tui .cmds .a-cmd code { flex: 1; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+
+  /* copy feedback: the block tints and fades, the button becomes a check without reflowing */
+  .cmd, .a-cmd, .pre-wrap pre { transition: background-color 700ms ease; }
+  .cmd.copied, .a-cmd.copied, .pre-wrap.copied pre { background-color: rgba(125, 220, 138, 0.14); transition: background-color 120ms ease; }
+  .copy { min-width: 3.4em; text-align: center; }
+  .a-copy { min-width: 5em; }
+  .copy[data-done="true"] { color: var(--green); }
+
+  /* install cards: the card's body and label with the ascii frame and terminal details */
+  .installs.hy .card {
+    --c: var(--line-strong);
+    border-radius: 0; border-color: var(--line); background-color: var(--surface);
+    background-image:
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c)),
+      linear-gradient(var(--c), var(--c)), linear-gradient(var(--c), var(--c));
+    background-repeat: no-repeat;
+    background-size: 12px 1px, 1px 12px, 12px 1px, 1px 12px, 12px 1px, 1px 12px, 12px 1px, 1px 12px;
+    background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+    padding-top: 18px;
+  }
+  .installs.hy .card.full { --c: var(--gold); }
+  .installs.hy .card.lite { --c: var(--text-2); }
+  .installs.hy .card-head { position: relative; }
+  .installs.hy .card-note { position: absolute; top: -26px; inset-inline-end: -8px; background: var(--surface); padding: 0 8px; font: 500 12px/1.5 "JetBrains Mono", ui-monospace, monospace; color: var(--muted); }
+  .installs.hy .card .caps summary { font: 500 13px/1.5 "JetBrains Mono", ui-monospace, monospace; color: var(--muted); }
+  .installs.hy .card .caps summary::after { content: none; }
+  .installs.hy .card .caps summary::before { content: "▸ "; }
+  .installs.hy .card .caps[open] summary::before { content: "▾ "; }
+  .installs.hy .cmd { border-radius: 0; border: 1px dashed var(--line-strong); background: var(--bg); }
+  .installs.hy .copy { border-radius: 0; font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .installs.hy .card-links { font: 500 13px/1.5 "JetBrains Mono", ui-monospace, monospace; }
+  .installs.hy .card-links a { text-decoration: none; }
+  .installs.hy .card-links a::before { content: "→ "; color: var(--muted); }
+  .installs.hy .card-links a:hover { text-decoration: underline; }
+
+  /* lean mobile cut */
+  .corner .short { display: none; }
+  @media (max-width: 640px) {
+    section { padding: 44px 0 0; }
+    .m-hide { display: none !important; }
+    .nav-links a[href*="plannotator-tui"] { display: none; }
+    .corner .long { display: none; }
+    .corner .short { display: inline; }
+    .hero-banner { width: min(340px, 100%); margin-bottom: 16px; }
+    .hero-links .corner { display: none; }
+    .hero-links { margin-top: 10px; }
+    .installs { margin-top: 20px; gap: 14px; }
+    .tabs { margin: 12px 0 14px; }
+    .tab { padding: 10px 14px 10px 12px; font-size: 14px; }
+    .caption-row { margin-top: 10px; }
+    .flows { margin-top: 24px; gap: 26px; }
+    details.keys pre { font-size: 11.5px; }
+    .tui { gap: 20px; }
+    footer { margin-top: 56px; }
+  }
+
+  /* showcase */
+  .tabs { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 18px; }
+  .tab {
+    display: inline-flex; align-items: center; gap: 10px; font: 600 15px/1 Inter, system-ui, sans-serif; color: var(--text-2);
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: 12px 18px 12px 14px; cursor: pointer;
+    transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+  }
+  .tab:hover { border-color: var(--text-2); }
+  .tab:active { transform: scale(0.96); }
+  .tab .play { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); font-size: 9px; padding-inline-start: 2px; }
+  .tab small { font-weight: 500; color: var(--muted); }
+  .tab[aria-selected="true"] { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+  .tab[aria-selected="true"] .play { background: rgba(17, 19, 34, 0.18); }
+  .tab[aria-selected="true"] small { color: rgba(17, 19, 34, 0.7); }
+  .tab[aria-selected="true"].lite { background: var(--text-2); border-color: var(--text-2); }
+  .show-head { display: block; }
+  .show-head .lead { margin-top: 4px; }
+  .caption-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 24px; margin-top: 14px; }
+  .caption-row .caption { margin: 0; }
+  .other { font: 600 14px/1.5 Inter, system-ui, sans-serif; color: var(--gold); white-space: nowrap; text-decoration: none; }
+  .other:hover { color: var(--gold); text-decoration: underline; }
+  .other.lite { color: var(--text-2); }
+  .frame {
+    position: relative; border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden; background: #1d2130;
+    box-shadow: 0 30px 80px -30px rgba(0,0,0,0.7);
+  }
+  .frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10.07; background: #1d2130; }
+  .frame .unavailable {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 10px;
+    font: 600 15px/1 Inter, system-ui, sans-serif; color: var(--text); text-decoration: none;
+    background: rgba(9, 10, 22, 0.35);
+  }
+  .frame .unavailable .play { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--gold); color: var(--bg); font-size: 16px; padding-inline-start: 4px; }
+  .frame .unavailable:hover { background: rgba(9, 10, 22, 0.5); }
+  .caption { margin: 14px 0 0; color: var(--muted); font-size: 14px; max-width: var(--measure); }
+  .caption strong { color: var(--text-2); font-weight: 600; }
+
+  /* stills */
+  .stills { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; margin-top: 40px; width: min(1320px, 100vw - 40px); margin-inline: calc(50% - min(1320px, 100vw - 40px) / 2); }
+  .stills figure { margin: 0; }
+  .stills img { display: block; width: 100%; height: auto; aspect-ratio: 1600 / 1008; object-fit: cover; border: 1px solid var(--line); border-radius: 10px; background: #1d2130; }
+  .stills figcaption { margin-top: 10px; font-size: 14px; color: var(--muted); }
+  .zoom { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 10px; }
+  .zoom img { transition: border-color 160ms ease; }
+  .zoom:hover img { border-color: var(--line-strong); }
+  .zoom:focus-visible { outline-offset: 4px; }
+  #lightbox { padding: 0; border: 0; background: transparent; max-width: min(96vw, 1600px); max-height: 96dvh; overflow: visible; }
+  #lightbox::backdrop { background: rgba(9, 10, 22, 0.88); }
+  #lightbox[open] { animation: lb-in 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+  @keyframes lb-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { #lightbox[open] { animation: lb-in 160ms ease; } @keyframes lb-in { from { opacity: 0; } to { opacity: 1; } } }
+  .lb-body { display: grid; gap: 12px; justify-items: start; }
+  .lb-body img { display: block; max-width: min(96vw, 1600px); max-height: 86dvh; width: auto; height: auto; border: 1px solid var(--line-strong); border-radius: 12px; background: #1d2130; }
+  .lb-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; width: 100%; font-size: 14px; color: var(--text-2); }
+  .lb-foot p { margin: 0; }
+  .lb-close { flex: none; font: 500 13px/1 Inter, system-ui, sans-serif; color: var(--text); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px; padding: 8px 12px; cursor: pointer; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .lb-close:active { transform: scale(0.96); }
+  .stills figcaption strong { color: var(--text-2); font-weight: 600; display: block; }
+
+  /* flows */
+  .tag { display: inline-block; font: 600 11px/1 Inter, system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 7px; border-radius: 5px; margin-inline-start: 8px; vertical-align: middle; }
+  .tag.full { color: var(--bg); background: var(--gold); }
+  .tag.lite { color: var(--bg); background: var(--text-2); }
+  .tag.lead { margin-inline-start: 0; margin-inline-end: 8px; }
+  .agents { margin: 26px 0 0; font-size: 14px; color: var(--muted); }
+  .agents span { color: var(--text-2); }
+
+  /* keys */
+  .note { margin: 0 0 16px; font-size: 15px; color: var(--text-2); max-width: var(--measure); }
+  .note b { margin-inline-end: 6px; }
+  .note b { color: var(--gold); }
+  details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 12px; }
+  summary { cursor: pointer; padding: 14px 18px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--muted); font-weight: 400; font-size: 20px; line-height: 1; }
+  details[open] summary::after { content: "–"; }
+  summary small { color: var(--muted); font-weight: 400; margin-inline-start: 8px; }
+  details pre { margin: 0; padding: 4px 18px 18px; font-size: 13px; line-height: 1.55; color: var(--text-2); overflow-x: auto; }
+  details pre .c { color: var(--muted); }
+  details pre .k { color: var(--gold); }
+  .pre-wrap { position: relative; }
+  .pre-wrap .copy { position: absolute; top: 0; inset-inline-end: 14px; }
+  .reload { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
+  .reload code { color: var(--text-2); }
+
+  /* tui */
+  .tui { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+  .tui-banner { display: block; width: 100%; max-width: 520px; height: auto; border: 1px solid var(--line); border-radius: 10px; background: #000; }
+  .tui .cmds { display: grid; gap: 10px; margin-top: 18px; }
+  .tui .cmds > * { min-width: 0; }
+  .tui-links { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 18px 0 0; font-size: 14px; }
+  .tui .lead { font-size: 16px; }
+  @media (max-width: 760px) { .tui { grid-template-columns: 1fr; } }
+
+  /* footer */
+  footer { margin-top: 88px; padding: 28px 0 40px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: space-between; align-items: baseline; }
+  footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<header class="wrap nav">
+  <a class="brand" href="https://plannotator.ai">Plannotator</a>
+  <nav class="nav-links" aria-label="Project links">
+    <a class="corner" href="https://github.com/plannotator/plannotator-tui">plannotator-tui ↗</a>
+    <a class="corner" href="https://github.com/plannotator/herdr-annotate"><span class="long">github.com/plannotator/herdr-annotate ↗</span><span class="short">GitHub ↗</span></a>
+  </nav>
+</header>
+
+<main>
+  <section class="wrap hero" aria-labelledby="h1">
+    <img class="hero-banner" src="/tui-annotate/assets/banner.webp" width="2172" height="724" alt="Herdr Annotate" fetchpriority="high">
+    <h1 id="h1" class="display">Annotate anything in your terminal. <em>Send it back to your agents.</em></h1>
+    <p class="lead">Comment on any text in your terminal, review plans, specs, wikis and your agent's replies, and send the comments with a native human-in-the-loop UX.</p>
+    <p class="hero-links"><a class="corner" href="https://github.com/plannotator/herdr-annotate">GitHub ↗</a><span class="core">Don't use Herdr? The core is <a href="#tui">plannotator-tui</a>, a standalone terminal app.</span></p>
+
+
+    <div class="installs hy">
+      <article class="card full">
+        <div class="card-head">
+          <span class="card-title">Full</span>
+          <span class="card-note">macOS · Linux</span>
+        </div>
+        <details class="caps">
+          <summary>What you get</summary>
+          <p>Comment on terminal text. Review plans, specs, wikis and agent replies with <a href="https://github.com/plannotator/plannotator-tui">Plannotator TUI</a>.</p>
+          <ul>
+            <li>Comment on any terminal text: select, <kbd>prefix</kbd>+<kbd>a</kbd></li>
+            <li>Review plans, specs, wikis: any Markdown file or folder, with a file tree: <kbd>prefix</kbd>+<kbd>o</kbd></li>
+            <li>Review the agent's last reply: <kbd>prefix</kbd>+<kbd>Shift</kbd>+<kbd>o</kbd></li>
+            <li>Per selection: comment, looks good, or delete</li>
+            <li>Send: the comments become the agent's next message</li>
+            <li>Ctrl-click a <code>file://…md</code> link to open it</li>
+            <li>Overlay, split, or popup placement</li>
+            <li>Claude Code, Codex, pi, Copilot CLI, Droid, omp, Hermes, OpenCode</li>
+            <li>Bundles plannotator-tui (macOS and Linux)</li>
+          </ul>
+        </details>
+        <div class="cmd"><code>herdr plugin install plannotator/herdr-annotate</code><button class="copy" type="button" data-copy="herdr plugin install plannotator/herdr-annotate">Copy</button></div>
+        <div class="card-links"><a href="#showcase" data-show="full">Watch the Full install demo</a><a class="m-hide" href="#keys">Keys</a></div>
+      </article>
+      <article class="card lite">
+        <div class="card-head">
+          <span class="card-title">Lite</span>
+          <span class="card-note">macOS · Linux · Windows</span>
+        </div>
+        <details class="caps">
+          <summary>What you get</summary>
+          <p>Comment on terminal text only. Select, press <kbd>prefix</kbd>+<kbd>a</kbd>, type. Nothing to download.</p>
+          <ul>
+            <li>Comment on any terminal text: select, <kbd>prefix</kbd>+<kbd>a</kbd></li>
+            <li>Manage comments: list, copy one, copy all, archive: <kbd>prefix</kbd>+<kbd>m</kbd></li>
+            <li>Copy every comment as Markdown: <kbd>prefix</kbd>+<kbd>Shift</kbd>+<kbd>a</kbd></li>
+            <li>Works over SSH and <code>herdr --remote</code> with two server settings</li>
+            <li>TypeScript only, runs on Bun; macOS, Linux, Windows</li>
+          </ul>
+        </details>
+        <div class="cmd"><code>herdr plugin install plannotator/herdr-annotate/lite</code><button class="copy" type="button" data-copy="herdr plugin install plannotator/herdr-annotate/lite">Copy</button></div>
+        <div class="card-links"><a href="#showcase" data-show="lite">Watch the Lite install demo</a><a class="m-hide" href="#keys">Keys</a></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="wrap" id="showcase" aria-labelledby="h-show">
+    <div class="show-head">
+      <p class="eyebrow">Demo</p>
+      <h2 id="h-show" class="display">See it in Herdr</h2>
+      <p class="lead m-hide">One video per install. The Full demo covers documents first, then the agent's last reply.</p>
+      <div class="tabs" role="tablist" aria-label="Demo">
+        <button class="tab full" role="tab" id="tab-full" aria-selected="true" aria-controls="demo" data-show="full"><span class="play" aria-hidden="true">▶</span>Full install demo <small>1:17</small></button>
+        <button class="tab lite" role="tab" id="tab-lite" aria-selected="false" aria-controls="demo" data-show="lite"><span class="play" aria-hidden="true">▶</span>Lite install demo <small>0:39</small></button>
+      </div>
+    </div>
+    <div class="frame" id="demo" role="tabpanel" aria-labelledby="tab-full">
+      <video id="video" controls muted playsinline preload="metadata" poster="/tui-annotate/assets/full-poster.jpg" width="2560" height="1612">
+        <source src="https://media.plannotator.ai/tui-annotate/full-demo-v1.mp4" type="video/mp4">
+      </video>
+      <a class="unavailable" id="unavailable" href="https://x.com/plannotator/status/2093419561077154287" hidden><span class="play" aria-hidden="true">▶</span>Watch on X</a>
+    </div>
+    <div class="caption-row">
+    <p class="caption" id="cap" data-full="<strong>Full.</strong> First a folder: select lines, add comments, press Send. Then the agent's last reply, annotated the same way. The agent receives the comments as its next message." data-lite="<strong>Lite.</strong> Select terminal text, press <kbd>prefix</kbd>+<kbd>a</kbd>, type a comment. Copy the comments and paste them into the agent."><strong>Full.</strong> First a folder: select lines, add comments, press Send. Then the agent's last reply, annotated the same way. The agent receives the comments as its next message.</p>
+    <a class="other" id="other" href="#showcase" data-show="lite">Watch the Lite install demo →</a>
+    </div>
+
+    <div class="stills m-hide">
+      <figure>
+        <button class="zoom" type="button" data-full="/tui-annotate/assets/still-full-review.jpg" aria-label="Enlarge: Plannotator TUI inside Herdr: a file tree on the left, a Markdown document with a selected line and a comment box that says Write a."><img src="/tui-annotate/assets/still-full-review.jpg" width="1600" height="1008" loading="lazy" alt="Plannotator TUI inside Herdr: a Markdown document with a green looks-good highlight, a yellow comment highlight and a red struck-through line, each with its bubble in the rail on the right, and a Send button in the header."></button>
+        <figcaption><strong><span class="tag full lead">Full</span>Review in place</strong>Select a line, then comment, mark it good, or mark it for deletion.</figcaption>
+      </figure>
+      <figure>
+        <button class="zoom" type="button" data-full="/tui-annotate/assets/still-full-sent.jpg" aria-label="Enlarge: The agent's prompt showing four numbered pieces of feedback with line ranges and quoted text."><img src="/tui-annotate/assets/still-full-sent.jpg" width="1600" height="1008" loading="lazy" alt="The agent's prompt showing four numbered pieces of feedback with line ranges and quoted text."></button>
+        <figcaption><strong><span class="tag full lead">Full</span>Send</strong>Each comment arrives in the agent with its line numbers and the quoted text.</figcaption>
+      </figure>
+      <figure>
+        <button class="zoom" type="button" data-full="/tui-annotate/assets/still-lite-manage.jpg" aria-label="Enlarge: The Lite annotations popover over a pi session, listing five annotations with the selected text and comment on the right."><img src="/tui-annotate/assets/still-lite-manage.jpg" width="1600" height="1008" loading="lazy" alt="The Lite annotations popover over a pi session, listing five annotations with the selected text and comment on the right."></button>
+        <figcaption><strong><span class="tag lite lead">Lite</span>Manage</strong><kbd>prefix</kbd>+<kbd>m</kbd> lists your comments. Copy one, copy all, or archive them.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="wrap" aria-labelledby="h-how">
+    <p class="eyebrow">How it works</p>
+    <h2 id="h-how" class="display">What you can annotate</h2>
+    <div class="flows">
+      <article class="flow abox both">
+        <header><h3 class="a-title">terminal text</h3><span class="a-meta">lite + full</span></header>
+        <p class="a-desc">Any text on screen: logs, diffs, agent output.</p>
+        <ol class="steps">
+          <li>Select the text with the mouse</li>
+          <li>Press <kbd>prefix</kbd>+<kbd>a</kbd>, type the comment, press <kbd>Ctrl</kbd>+<kbd>S</kbd></li>
+          <li><kbd>prefix</kbd>+<kbd>Shift</kbd>+<kbd>a</kbd> copies all comments as Markdown</li>
+        </ol>
+      </article>
+      <article class="flow abox full">
+        <header><h3 class="a-title">documents</h3><span class="a-meta">full</span></header>
+        <p class="a-desc">Markdown files: plans, specs, wikis, READMEs, or a whole folder.</p>
+        <ol class="steps">
+          <li><kbd>prefix</kbd>+<kbd>o</kbd> opens the current folder with a file tree</li>
+          <li>Select with the mouse or <kbd>v</kbd>. <kbd>c</kbd> comment, <kbd>a</kbd> looks good, <kbd>d</kbd> delete</li>
+          <li>Press <strong>Send</strong> (or <kbd>E</kbd>). Comments from every file go to the agent</li>
+        </ol>
+      </article>
+      <article class="flow abox full">
+        <header><h3 class="a-title">agent replies</h3><span class="a-meta">full</span></header>
+        <p class="a-desc">The agent's last reply, read from its session.</p>
+        <ol class="steps">
+          <li><kbd>prefix</kbd>+<kbd>Shift</kbd>+<kbd>o</kbd> opens the agent's last reply</li>
+          <li>Comment on it the same way as a document</li>
+          <li>Press <strong>Send</strong>. The comments go back to the same session</li>
+        </ol>
+      </article>
+    </div>
+    <p class="agents m-hide">Agent replies work with <span>Claude Code</span>, <span>Codex</span>, <span>pi</span>, <span>Copilot CLI</span>, <span>Droid</span>, <span>omp</span>, <span>Hermes</span> and <span>OpenCode</span>. Ctrl-click a <code>file://…md</code> link to open that file. The review opens as an overlay, a split, or a popup; set it in <code>~/.config/plannotator-tui/config.toml</code>.</p>
+  </section>
+
+  <section class="wrap" id="keys" aria-labelledby="h-keys">
+    <p class="eyebrow">Setup</p>
+    <h2 id="h-keys" class="display">Bind the keys.</h2>
+    <p class="note mono"><b>Required.</b> The plugin does not add key bindings. Copy one block into <code>~/.config/herdr/config.toml</code>.</p>
+    <details open class="keys abox full">
+      <summary><b>full install keys</b><small>terminal + documents + agent replies</small></summary>
+      <div class="pre-wrap">
+        <button class="copy a-copy" type="button" data-copy-from="toml-full">[ copy ]</button>
+<pre id="toml-full"><span class="c"># Terminal annotations</span>
+[[keys.command]]
+key = <span class="k">"prefix+a"</span>
+type = "plugin_action"
+command = "annotate.capture"
+description = "annotate text"
+
+[[keys.command]]
+key = <span class="k">"prefix+shift+a"</span>
+type = "plugin_action"
+command = "annotate.copy-context"
+description = "copy annotations as context"
+
+[[keys.command]]
+key = <span class="k">"prefix+m"</span>
+type = "plugin_action"
+command = "annotate.manage"
+description = "manage annotations"
+
+<span class="c"># Document review (plannotator-tui)</span>
+[[keys.command]]
+key = <span class="k">"prefix+o"</span>
+type = "plugin_action"
+command = "annotate.open"
+description = "review documents in this folder"
+
+[[keys.command]]
+key = <span class="k">"prefix+shift+o"</span>
+type = "plugin_action"
+command = "annotate.last"
+description = "review the agent's last reply"</pre>
+      </div>
+    </details>
+    <details class="keys abox lite">
+      <summary><b>lite install keys</b><small>terminal annotations only</small></summary>
+      <div class="pre-wrap">
+        <button class="copy a-copy" type="button" data-copy-from="toml-lite">[ copy ]</button>
+<pre id="toml-lite">[[keys.command]]
+key = <span class="k">"prefix+a"</span>
+type = "plugin_action"
+command = "annotate.capture"
+description = "annotate text"
+
+[[keys.command]]
+key = <span class="k">"prefix+shift+a"</span>
+type = "plugin_action"
+command = "annotate.copy-context"
+description = "copy annotations as context"
+
+[[keys.command]]
+key = <span class="k">"prefix+m"</span>
+type = "plugin_action"
+command = "annotate.manage"
+description = "manage annotations"</pre>
+      </div>
+    </details>
+    <p class="reload">Then run <code>herdr config check</code> and <code>herdr server reload-config</code>. Remote sessions need two settings on the server; see the <a href="https://github.com/plannotator/herdr-annotate#remote-sessions">README</a>.</p>
+  </section>
+
+  <section class="wrap" id="tui" aria-labelledby="h-tui">
+    <p class="eyebrow">Built on</p>
+    <h2 id="h-tui" class="display">Plannotator TUI works without Herdr.</h2>
+    <div class="tui">
+      <div>
+        <p class="lead">The document review is Plannotator TUI, a standalone program written in Rust. Open a plan, a spec, a wiki page or a whole folder, add comments, and export them as Markdown for any agent. It runs in any terminal.</p>
+        <div class="cmds">
+          <div class="a-cmd"><code>$ brew trust plannotator/tap &amp;&amp; brew install plannotator/tap/plannotator-tui</code><button class="copy a-copy" type="button" data-copy="brew trust plannotator/tap && brew install plannotator/tap/plannotator-tui">[ copy ]</button></div>
+          <div class="a-cmd"><code>$ cargo install plannotator-tui</code><button class="copy a-copy" type="button" data-copy="cargo install plannotator-tui">[ copy ]</button></div>
+          <div class="a-cmd"><code>$ plannotator-tui plan.md</code><button class="copy a-copy" type="button" data-copy="plannotator-tui plan.md">[ copy ]</button></div>
+        </div>
+        <nav class="tui-links" aria-label="Plannotator TUI resources">
+          <a href="https://github.com/plannotator/plannotator-tui">GitHub</a>
+          <a href="https://github.com/plannotator/plannotator-tui/releases/latest">Releases</a>
+          <a href="https://crates.io/crates/plannotator-tui">crates.io</a>
+          <a href="https://github.com/plannotator/plannotator-tui#readme">Keys and command-line tools</a>
+          <a href="https://plannotator.ai">Part of Plannotator</a>
+        </nav>
+      </div>
+      <a class="m-hide" href="https://github.com/plannotator/plannotator-tui" aria-label="Plannotator TUI on GitHub"><img class="tui-banner" src="/tui-annotate/assets/tui-banner.webp" width="1814" height="322" loading="lazy" alt="Plannotator TUI"></a>
+    </div>
+  </section>
+</main>
+<dialog id="lightbox" aria-label="Screenshot">
+  <div class="lb-body">
+    <img id="lb-img" src="" alt="">
+    <div class="lb-foot"><p id="lb-cap"></p><button class="lb-close" type="button" id="lb-close">Close</button></div>
+  </div>
+</dialog>
+
+
+<footer>
+  <div class="wrap">
+    <span>Herdr Annotate is free and open source (MIT).</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/plannotator/herdr-annotate">herdr-annotate</a>
+      <a href="https://github.com/plannotator/plannotator-tui">plannotator-tui</a>
+      <a href="https://plannotator.ai">Plannotator</a>
+      <a href="https://herdr.dev">Herdr</a>
+      <a href="https://x.com/plannotator">@plannotator</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const cap = document.getElementById('cap');
+  const panel = document.getElementById('demo');
+  const tabs = [...document.querySelectorAll('.tab')];
+  // Videos are served from the media host (R2), not from the site bucket. Object names are
+  // versioned because they are cached as immutable: a re-encode gets a new name, never a purge.
+  const MEDIA_BASE = 'https://media.plannotator.ai/tui-annotate';
+  const src = { full: `${MEDIA_BASE}/full-demo-v1.mp4`, lite: `${MEDIA_BASE}/lite-demo-v1.mp4` };
+  const poster = { full: '/tui-annotate/assets/full-poster.jpg', lite: '/tui-annotate/assets/lite-poster.jpg' };
+  const post = { full: 'https://x.com/plannotator/status/2093419561077154287', lite: 'https://x.com/plannotator/status/2092757422322627008' };
+  let current = 'full';
+
+  function show(which, play) {
+    if (!src[which]) return;
+    tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.show === which)));
+    panel.setAttribute('aria-labelledby', 'tab-' + which);
+    cap.innerHTML = cap.dataset[which];
+    if (which !== current) {
+      current = which;
+      video.pause();
+      unavailable.hidden = true;
+      video.poster = poster[which];
+      sourceEl.src = src[which];
+      video.load();
+      setTimeout(checkUnavailable, 1500);
+    }
+    unavailable.href = post[which];
+    if (play) video.play().catch(() => {});
+    syncOther();
+  }
+  const unavailable = document.getElementById('unavailable');
+  // The media host may not exist yet (or a viewer may be offline): keep the poster, offer the post.
+  // State-based, because a fast DNS failure can happen before any listener is attached.
+  const sourceEl = video.querySelector('source');
+  function checkUnavailable() {
+    const failed = Boolean(video.error) || video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE;
+    unavailable.hidden = !failed;
+    video.controls = !failed;
+  }
+  sourceEl.addEventListener('error', checkUnavailable);
+  video.addEventListener('error', checkUnavailable);
+  video.addEventListener('loadedmetadata', () => { unavailable.hidden = true; video.controls = true; });
+  video.addEventListener('emptied', () => { unavailable.hidden = true; video.controls = true; });
+  checkUnavailable();
+  setTimeout(checkUnavailable, 1500);
+  const other = document.getElementById('other');
+  function syncOther() {
+    const next = current === 'full' ? 'lite' : 'full';
+    other.dataset.show = next;
+    other.textContent = `Watch the ${next === 'full' ? 'Full' : 'Lite'} install demo →`;
+    other.classList.toggle('lite', next === 'lite');
+  }
+  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.show, false)));
+  other.addEventListener('click', e => { e.preventDefault(); show(other.dataset.show, true); });
+  document.querySelectorAll('a[data-show]').forEach(a => {
+    a.addEventListener('click', () => show(a.dataset.show, true));
+  });
+
+  // Small screens: the key blocks start collapsed.
+  if (matchMedia('(max-width: 640px)').matches) {
+    document.querySelectorAll('details.keys[open]').forEach(d => d.removeAttribute('open'));
+  }
+
+  // Lightbox: the still at full size; Esc, the Close button, or a click outside closes it.
+  const lb = document.getElementById('lightbox');
+  const lbImg = document.getElementById('lb-img');
+  const lbCap = document.getElementById('lb-cap');
+  let opener = null;
+  document.querySelectorAll('.zoom').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const img = btn.querySelector('img');
+      lbImg.src = btn.dataset.full; lbImg.alt = img.alt;
+      const fc = btn.closest('figure')?.querySelector('figcaption'); lbCap.textContent = fc ? [...fc.childNodes].map(n => n.textContent.trim()).filter(Boolean).join(' — ') : '';
+      opener = btn;
+      lb.showModal();
+    });
+  });
+  document.getElementById('lb-close').addEventListener('click', () => lb.close());
+  lb.addEventListener('click', e => { if (e.target === lb) lb.close(); });
+  lb.addEventListener('close', () => { lbImg.src = ''; opener?.focus(); });
+
+  // Pause when scrolled away; a looping showcase should not run off-screen.
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(entries => {
+      entries.forEach(e => { if (!e.isIntersecting && !video.paused) video.pause(); });
+    }, { threshold: 0.2 }).observe(video);
+  }
+
+  // Copy buttons: clipboard when available, else select the text so the user can copy it.
+  document.querySelectorAll('.copy').forEach(btn => {
+    const idle = btn.textContent;
+    const done = btn.classList.contains('a-copy') ? '[ ✓ ]' : '✓';
+    btn.addEventListener('click', async () => {
+      const text = btn.dataset.copy ?? document.getElementById(btn.dataset.copyFrom)?.innerText ?? '';
+      const box = btn.closest('.cmd, .a-cmd, .pre-wrap');
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.dataset.done = 'true'; btn.textContent = done; btn.setAttribute('aria-label', 'Copied');
+        box?.classList.add('copied');
+        setTimeout(() => { box?.classList.remove('copied'); }, 250);
+        setTimeout(() => { btn.dataset.done = 'false'; btn.textContent = idle; btn.removeAttribute('aria-label'); }, 1400);
+      } catch {
+        const target = btn.dataset.copyFrom ? document.getElementById(btn.dataset.copyFrom) : btn.previousElementSibling;
+        if (target) { const r = document.createRange(); r.selectNodeContents(target); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+      }
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

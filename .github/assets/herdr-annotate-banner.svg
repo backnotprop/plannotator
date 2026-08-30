@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 140" role="img" aria-label="Herdr Annotate plugin banner">
+  <defs>
+    <linearGradient id="ha-gold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f7ca5e"/>
+      <stop offset="1" stop-color="#ec9d3f"/>
+    </linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="637" height="137" rx="18" fill="#171429" stroke="#312b52" stroke-width="3"/>
+  <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif" font-weight="800" font-style="italic">
+    <text x="70" y="84" font-size="58" fill="#c9c6f1">Herdr</text>
+    <text x="238" y="84" font-size="58" fill="url(#ha-gold)">Annotate</text>
+  </g>
+  <path d="M74 104 C 180 114, 300 96, 390 102 S 520 108, 530 101" fill="none" stroke="#e0403a" stroke-width="8" stroke-linecap="round"/>
+  <g transform="translate(58 104) rotate(28)">
+    <rect x="-34" y="-6" width="28" height="12" rx="3" fill="#e0403a"/>
+    <polygon points="-6,-6 10,0 -6,6" fill="#f2cda4"/>
+    <polygon points="6,-1.6 10,0 6,1.6" fill="#4a2c17"/>
+  </g>
+  <g fill="#c9c6f1">
+    <path d="M584 34 l4.5 11 11 4.5 -11 4.5 -4.5 11 -4.5 -11 -11 -4.5 11 -4.5 z"/>
+    <path d="M612 66 l2.5 6 6 2.5 -6 2.5 -2.5 6 -2.5 -6 -6 -2.5 6 -2.5 z" opacity="0.7"/>
+  </g>
+</svg>
