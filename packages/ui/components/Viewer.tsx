@@ -148,6 +148,8 @@ export interface ViewerHandle {
   removeHighlight: (id: string) => void;
   clearAllHighlights: () => void;
   applySharedAnnotations: (annotations: Annotation[]) => void;
+  /** Scroll a heading anchor into view. Returns false when it is not in this document. */
+  scrollToAnchor: (hash: string) => boolean;
 }
 
 interface CodeBlockToolbarTarget {
@@ -684,6 +686,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   // Imperative handle — delegates to hook, extends removeHighlight for code blocks
   useImperativeHandle(ref, () => ({
+    scrollToAnchor,
     removeHighlight: (id: string) => {
       // The re-highlight below notifies the swap listener, which would happily
       // paint this annotation's mark straight back in — the host has not
@@ -710,7 +713,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     },
     clearAllHighlights,
     applySharedAnnotations: applyAnnotations,
-  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks]);
+  }), [hookRemoveHighlight, clearAllHighlights, applyAnnotations, blocks, scrollToAnchor]);
 
   // --- Viewer-specific: code block annotation ---
 
