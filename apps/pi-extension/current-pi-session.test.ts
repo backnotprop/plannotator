@@ -15,7 +15,7 @@ afterEach(() => {
 	for (const registration of registrations.splice(0)) registration.clear();
 });
 
-function createContext(sessionId: string, notifications: string[]): ExtensionContext {
+function createContext(sessionId: string, notifications: string[], idle = true): ExtensionContext {
 	return {
 		cwd: "/tmp",
 		mode: "tui",
@@ -25,6 +25,7 @@ function createContext(sessionId: string, notifications: string[]): ExtensionCon
 			getSessionName: () => sessionId,
 		},
 		ui: { notify: (message: string) => notifications.push(message) },
+		isIdle: () => idle,
 	} as unknown as ExtensionContext;
 }
 
@@ -134,15 +135,14 @@ describe("idle delivery through the current-session send path", () => {
 		const origin = getPiSessionIdentity(oldRuntime.ctx);
 
 		const captured: Array<{ content: unknown; options: unknown }> = [];
-		const idlePi = {
-			isIdle: () => true,
+		const replacementPi = {
 			sendUserMessage: (content: unknown, options?: unknown) => {
 				captured.push({ content, options });
 			},
 		} as unknown as ExtensionAPI;
-		const replacement = registerCurrentPiSession(idlePi);
+		const replacement = registerCurrentPiSession(replacementPi);
 		registrations.push(replacement);
-		replacement.update(createContext("same-session", []));
+		replacement.update(createContext("same-session", [], true));
 		oldRuntime.registration.clear();
 
 		const result = sendUserMessageToCurrentPiSession(
@@ -160,15 +160,42 @@ describe("idle delivery through the current-session send path", () => {
 		const origin = getPiSessionIdentity(oldRuntime.ctx);
 
 		const captured: Array<{ content: unknown; options: unknown }> = [];
-		const streamingPi = {
-			isIdle: () => false,
+		const replacementPi = {
 			sendUserMessage: (content: unknown, options?: unknown) => {
 				captured.push({ content, options });
 			},
 		} as unknown as ExtensionAPI;
-		const replacement = registerCurrentPiSession(streamingPi);
+		const replacement = registerCurrentPiSession(replacementPi);
 		registrations.push(replacement);
-		replacement.update(createContext("same-session", []));
+		replacement.update(createContext("same-session", [], false));
+		oldRuntime.registration.clear();
+
+		const result = sendUserMessageToCurrentPiSession(
+			"annotation feedback",
+			{ deliverAs: "followUp" },
+			origin,
+		);
+
+		expect(result).toEqual({ ok: true });
+		expect(captured).toEqual([
+			{ content: "annotation feedback", options: { deliverAs: "followUp" } },
+		]);
+	});
+
+	test("isIdle on ExtensionAPI is ignored; the context is the probe", () => {
+		const oldRuntime = registerSessionRuntime("same-session", [], []);
+		const origin = getPiSessionIdentity(oldRuntime.ctx);
+
+		const captured: Array<{ content: unknown; options: unknown }> = [];
+		const lyingPi = {
+			isIdle: () => true,
+			sendUserMessage: (content: unknown, options?: unknown) => {
+				captured.push({ content, options });
+			},
+		} as unknown as ExtensionAPI;
+		const replacement = registerCurrentPiSession(lyingPi);
+		registrations.push(replacement);
+		replacement.update(createContext("same-session", [], false));
 		oldRuntime.registration.clear();
 
 		const result = sendUserMessageToCurrentPiSession(

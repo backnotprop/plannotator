@@ -19,9 +19,9 @@ type IdleProbeHost = { isIdle?: () => boolean };
  * then persisted and acknowledged in the browser ("Feedback Sent") while the
  * agent never sees it.
  *
- * Both hosts expose `isIdle()` on the extension API, so drop only `deliverAs`
- * while idle and keep every other caller option. Hosts predating the
- * capability, or a probe that throws, keep the caller's options unchanged.
+ * Both hosts expose `isIdle()` on the extension context (`ctx.isIdle`), so
+ * drop only `deliverAs` while idle and keep every other caller option. Hosts
+ * predating the capability, or a probe that throws, keep the caller's options unchanged.
  */
 export function resolveIdleDeliveryOptions(
 	host: IdleProbeHost,
@@ -132,7 +132,7 @@ function setCurrentPiSession(token: symbol, pi: ExtensionAPI, ctx?: ExtensionCon
 	const current: CurrentPiSession = {
 		token,
 		sendUserMessage: (content, options) => {
-			pi.sendUserMessage(content, resolveIdleDeliveryOptions(pi, options));
+			pi.sendUserMessage(content, resolveIdleDeliveryOptions(ctx ?? {}, options));
 		},
 	};
 	if (ctx) {
