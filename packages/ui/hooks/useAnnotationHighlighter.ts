@@ -11,7 +11,7 @@ import type { Annotation, EditorMode, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import { getIdentity } from '../utils/identity';
-import { transformPlainText } from '../utils/inlineTransforms';
+import { stripInlineMarkdown, stripTableCellDelimiters, transformPlainText } from '../utils/inlineTransforms';
 
 // --- Exported state types ---
 
@@ -469,16 +469,61 @@ export function useAnnotationHighlighter({
       return null;
     };
 
-    // First try the literal text. If that misses, re-try with the same
-    // transform the renderer applies to plain text (emoji shortcodes +
-    // smart punctuation) so annotations made before those transforms
-    // shipped can still re-bind to their target after reload.
+    // The tiers below make the needle shorter and more generic, and
+    // `searchOnce` takes the FIRST hit — so a stripped quote that now appears
+    // in two places would silently highlight the wrong one. A highlight on
+    // text the comment was never about is worse than no highlight, so the
+    // permissive tiers refuse to guess: they anchor only when the transformed
+    // needle is unique. The literal tiers keep first-match-wins, which is the
+    // behavior that already shipped.
+    const searchIfUnique = (needle: string): Range | null => {
+      const container = containerRef.current;
+      if (!needle || !container) return null;
+      const collapse = (v: string) => v.replace(/\s+/g, ' ').trim();
+      const haystack = collapse(container.textContent || '');
+      const target = collapse(needle);
+      if (!target) return null;
+      let count = 0;
+      let from = haystack.indexOf(target);
+      while (from !== -1 && count < 2) {
+        count += 1;
+        from = haystack.indexOf(target, from + target.length);
+      }
+      if (count !== 1) return null;
+      return searchOnce(needle);
+    };
+
+    // Tiers, least destructive first. Each re-tries the search with one more
+    // of the transforms the renderer applies, so a quote taken from the
+    // document's SOURCE can still find its RENDERED target. A quote that
+    // matches the page verbatim returns on the first tier and never reaches
+    // the rest.
     const direct = searchOnce(searchText);
     if (direct) return direct;
 
+    // Emoji shortcodes + smart punctuation, so annotations made before those
+    // transforms shipped still re-bind to their target after reload.
     const transformed = transformPlainText(searchText);
     if (transformed !== searchText) {
-      return searchOnce(transformed);
+      const viaTransform = searchOnce(transformed);
+      if (viaTransform) return viaTransform;
+    }
+
+    // Inline markdown the renderer consumes. An external annotation quotes
+    // the markdown a tool read from the server, where `code` still carries
+    // its backticks; the DOM has none of that syntax.
+    const stripped = stripInlineMarkdown(searchText);
+    if (stripped !== searchText) {
+      const viaStrip = searchIfUnique(stripped);
+      if (viaStrip) return viaStrip;
+    }
+
+    // Last: a table row, whose cells render as adjacent elements with nothing
+    // between them. Deleting the padding around a `|` mangles ordinary prose,
+    // which is why it is only reached once everything else has failed.
+    const withoutCells = stripTableCellDelimiters(searchText);
+    if (withoutCells !== stripped) {
+      return searchIfUnique(withoutCells);
     }
 
     return null;

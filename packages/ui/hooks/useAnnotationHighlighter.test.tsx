@@ -353,3 +353,126 @@ describe('useAnnotationHighlighter math annotations', () => {
     host.remove();
   });
 });
+
+// --- Source-markdown quotes anchoring against rendered text -----------------
+
+function QuoteHarness({ annotations }: { annotations: Annotation[] }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const hook = useAnnotationHighlighter({
+    containerRef,
+    annotations: [],
+    selectedAnnotationId: null,
+    mode: 'comment',
+    onAddAnnotation: () => {},
+  });
+
+  React.useEffect(() => {
+    // Mirrors the external-annotation restore path: no startMeta/endMeta, so
+    // the quote is the only address the annotation has.
+    const timer = setTimeout(() => hook.applyAnnotations(annotations), 0);
+    return () => clearTimeout(timer);
+  }, [annotations]);
+
+  return (
+    <div ref={containerRef}>
+      {/* What the renderer produces: no backticks, no asterisks, and table
+          cells with nothing between them. */}
+      <p data-block-id="block-1">
+        The <code>config.ts</code> switch is <strong>required</strong> here.
+      </p>
+      <p data-block-id="block-2">A duplicated phrase.</p>
+      <p data-block-id="block-3">A duplicated phrase.</p>
+      <table>
+        <tbody>
+          <tr data-block-id="block-4">
+            <td>WP5</td>
+            <td>mcpAuth.ts</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const quoteAnnotation = (id: string, originalText: string): Annotation => ({
+  id,
+  blockId: 'external',
+  startOffset: 0,
+  endOffset: 0,
+  type: AnnotationType.COMMENT,
+  text: 'a remark',
+  originalText,
+  createdA: 1,
+});
+
+async function mountQuotes(annotations: Annotation[]) {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(<QuoteHarness annotations={annotations} />);
+  });
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+  });
+  return {
+    host,
+    cleanup: () => {
+      act(() => root.unmount());
+      host.remove();
+    },
+  };
+}
+
+describe.if(hasDom)('useAnnotationHighlighter — source-markdown quotes', () => {
+  test('anchors a quote whose inline markdown the renderer consumed', async () => {
+    // The quote is verbatim from the SOURCE, where the code span still has
+    // its backticks and the emphasis its asterisks. Before the strip tiers
+    // this found nothing and the annotation stayed sidebar-only.
+    const { host, cleanup } = await mountQuotes([
+      quoteAnnotation('a1', 'The `config.ts` switch is **required** here.'),
+    ]);
+    try {
+      expect(host.querySelectorAll('[data-bind-id="a1"]').length).toBeGreaterThan(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('anchors a table row, whose cells render with nothing between them', async () => {
+    const { host, cleanup } = await mountQuotes([
+      quoteAnnotation('a2', '| WP5 | `mcpAuth.ts` |'),
+    ]);
+    try {
+      expect(host.querySelectorAll('[data-bind-id="a2"]').length).toBeGreaterThan(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('refuses to guess when the stripped quote is no longer unique', async () => {
+    // Stripping shortens the needle, and the search takes the first hit — so a
+    // quote that becomes ambiguous must anchor nowhere rather than highlight
+    // whichever paragraph happens to come first.
+    const { host, cleanup } = await mountQuotes([
+      quoteAnnotation('a3', 'A **duplicated** phrase.'),
+    ]);
+    try {
+      expect(host.querySelectorAll('[data-bind-id="a3"]').length).toBe(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('still anchors a quote that matches the page verbatim', async () => {
+    // The literal tier is unchanged: first-match-wins, no uniqueness demand.
+    const { host, cleanup } = await mountQuotes([
+      quoteAnnotation('a4', 'A duplicated phrase.'),
+    ]);
+    try {
+      expect(host.querySelectorAll('[data-bind-id="a4"]').length).toBeGreaterThan(0);
+    } finally {
+      cleanup();
+    }
+  });
+});
