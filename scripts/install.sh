@@ -1377,7 +1377,7 @@ fi
 # CI runs without a terminal never prompt. CLI flags win over everything.
 PREFS_FILE="$_config_dir/install-prefs"
 CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last"
-EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer"
+EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer plannotator-markup"
 
 saved_extras=""
 saved_invocable=""

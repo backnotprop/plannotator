@@ -1052,7 +1052,7 @@ if exist "!PREFS_FILE!" (
 REM Extras already on disk? Then the extras question is moot - they still
 REM count toward the picker list, and we never launch the npx flow over them.
 set "EXTRAS_PRESENT=0"
-for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
+for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer plannotator-markup) do (
     if exist "!CLAUDE_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
     if exist "!AGENTS_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
 )
@@ -1769,10 +1769,11 @@ set "SKILL_1=plannotator-review"
 set "SKILL_2=plannotator-annotate"
 set "SKILL_3=plannotator-last"
 if "!EXTRAS_CHOICE!"=="yes" (
-    set "SKILL_COUNT=6"
+    set "SKILL_COUNT=7"
     set "SKILL_4=plannotator-compound"
     set "SKILL_5=plannotator-setup-goal"
     set "SKILL_6=plannotator-visual-explainer"
+    set "SKILL_7=plannotator-markup"
 )
 REM Preselect previously chosen skills. NOTE: no pipes here - each side of a
 REM cmd pipe runs in a child without delayed expansion, so !vars! would pass

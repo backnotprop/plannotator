@@ -54,7 +54,8 @@ plannotator/
 │       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra --global`
 │           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
 │           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
-│           └── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
+│           ├── plannotator-visual-explainer/ # Visual HTML generator (plans, diagrams, PR explainers) with Plannotator theming
+│           └── plannotator-markup/          # Agent answers as annotations on a document (external-annotations API driver)
 ├── packages/
 │   ├── server/                   # Shared server implementation
 │   │   ├── index.ts              # startPlannotatorServer(), handleServerReady()
