@@ -56,7 +56,8 @@ afterEach(() => {
 
 describe("handleAnnotateCommand", () => {
   test("advertises approval notes only when an OpenCode session is available", async () => {
-    const projectRoot = makeTempDir();
+    const projectRoot = path.join(makeTempDir(), "session-project");
+    mkdirSync(projectRoot);
     const filePath = path.join(projectRoot, "plan.md");
     writeFileSync(filePath, "# Plan\n");
 
@@ -67,6 +68,7 @@ describe("handleAnnotateCommand", () => {
       withSession,
     );
     expect(startAnnotateServerMock.mock.calls[0]?.[0].approvalNotesSupported).toBe(true);
+    expect(startAnnotateServerMock.mock.calls[0]?.[0].project).toBe("session-project");
 
     startAnnotateServerMock.mockClear();
     const withoutSession = makeDeps();
@@ -266,6 +268,8 @@ describe("handleAnnotateLastCommand", () => {
 
   test("forwards pasteApiUrl for annotate-last sessions", async () => {
     const deps = makeDeps();
+    deps.directory = path.join(makeTempDir(), "last-session-project");
+    mkdirSync(deps.directory);
     deps.client.session.messages = mock(async (_input: unknown) => ({
       data: [
         {
@@ -286,5 +290,6 @@ describe("handleAnnotateLastCommand", () => {
     expect(options.filePath).toBe("last-message");
     expect(options.pasteApiUrl).toBe("https://paste.example.test");
     expect(options.markdown).toBe("Latest assistant message");
+    expect(options.project).toBe("last-session-project");
   });
 });

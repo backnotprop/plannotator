@@ -38,7 +38,7 @@ Install OpenCode 2 from npm's `beta` tag, then add Plannotator to the V2 `plugin
 }
 ```
 
-Restart OpenCode 2 and verify that `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last` appear in the command menu.
+Restart OpenCode 2 and run `/plannotator-annotate README.md`. The annotation UI should open directly without sending the command through the model; the other native commands are `/plannotator-review` and `/plannotator-last`.
 
 OpenCode 2 support is experimental while its plugin API is in beta. The core `submit_plan` review flow and native `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last` commands work, but the current API has these limitations:
 

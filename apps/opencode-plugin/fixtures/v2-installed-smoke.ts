@@ -19,6 +19,7 @@ const PLUGIN_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_PLUGIN_TIMEOUT_MS", 300
 // Per-request cap so one wedged request can never swallow the whole budget: the loop has to
 // keep polling (and keep reporting) instead of blocking on a single fetch that never settles.
 const REQUEST_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_REQUEST_TIMEOUT_MS", 15_000);
+const COMMAND_TIMEOUT_MS = readTimeout("PLANNOTATOR_SMOKE_COMMAND_TIMEOUT_MS", 60_000);
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const PROGRESS_INTERVAL_MS = 15_000;
 
@@ -30,11 +31,15 @@ const packageJson = JSON.parse(readFileSync(path.join(import.meta.dir, "..", "pa
 const root = mkdtempSync(path.join(tmpdir(), "plannotator-opencode-v2-smoke-"));
 const port = await getFreePort();
 const registryPort = await getFreePort();
+const annotatePort = await getFreePort();
 const url = `http://127.0.0.1:${port}`;
 const registryUrl = `http://127.0.0.1:${registryPort}`;
+const annotateUrl = `http://127.0.0.1:${annotatePort}`;
+const commandTarget = path.join(root, "native-command.md");
 mkdirSync(path.join(root, "config"), { recursive: true });
 mkdirSync(path.join(root, "data"), { recursive: true });
 mkdirSync(path.join(root, "cache"), { recursive: true });
+await Bun.write(commandTarget, "# Native command smoke\n\nClose this annotation session.\n");
 
 const env = {
   ...process.env,
@@ -48,6 +53,8 @@ const env = {
   OPENCODE_LOG_LEVEL: "DEBUG",
   OPENCODE_PASSWORD: "plannotator-smoke",
   OPENCODE_SERVER_PASSWORD: "plannotator-smoke",
+  PLANNOTATOR_DATA_DIR: path.join(root, "plannotator"),
+  PLANNOTATOR_PORT: String(annotatePort),
   NPM_CONFIG_REGISTRY: registryUrl,
   npm_config_registry: registryUrl,
 };
@@ -88,7 +95,7 @@ const registry = Bun.serve({
 console.error(`opencode2 binary: ${opencodeBin} (${resolveOpencodeVersion()})`);
 console.error(`plugin tarball: ${path.resolve(pluginTarball)}`);
 console.error(`plugin package: ${packageJson.name}@${packageJson.version}`);
-console.error(`server ${url} · throwaway registry ${registryUrl} · sandbox ${root}`);
+console.error(`server ${url} · annotate server ${annotateUrl} · throwaway registry ${registryUrl} · sandbox ${root}`);
 
 const startedAt = Date.now();
 const server = Bun.spawn([
@@ -112,7 +119,7 @@ try {
   await waitForHealthyServer(url);
   const plugins = await waitForPlugin(url);
   const commands = await getCommands(url);
-  await executeCommand(url, commands);
+  await executeCommand(url, commands, commandTarget, annotateUrl);
   console.log(JSON.stringify({ plugins, commands }));
 } catch (error) {
   failed = true;
@@ -242,7 +249,12 @@ async function getCommands(url: string): Promise<Array<{ name: string }>> {
   return commands.filter((command) => expected.includes(command.name));
 }
 
-async function executeCommand(url: string, commands: Array<{ name: string }>): Promise<void> {
+async function executeCommand(
+  url: string,
+  commands: Array<{ name: string }>,
+  target: string,
+  annotateUrl: string,
+): Promise<void> {
   const sessionResponse = await fetch(`${url}/api/session`, {
     method: "POST",
     headers: { ...authHeaders(), "content-type": "application/json" },
@@ -258,13 +270,23 @@ async function executeCommand(url: string, commands: Array<{ name: string }>): P
 
   const command = commands.find((item) => item.name === "plannotator-annotate")?.name;
   if (!command) throw new Error("Native annotate command was not available for execution.");
-  const sentinel = `plannotator-native-command-smoke-${Date.now()}`;
-  const response = await fetch(`${url}/api/session/${sessionID}/command`, {
+  const commandResponse = fetch(`${url}/api/session/${sessionID}/command`, {
     method: "POST",
     headers: { ...authHeaders(), "content-type": "application/json" },
-    body: JSON.stringify({ command, text: sentinel }),
+    body: JSON.stringify({ command, text: target }),
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  });
+  await waitForAnnotateServer(annotateUrl);
+  const exitResponse = await fetch(`${annotateUrl}/api/exit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+  const exitOutput = await exitResponse.text();
+  if (!exitResponse.ok) throw new Error(`Plannotator exit API returned ${exitResponse.status}: ${exitOutput}`);
+
+  const response = await commandResponse;
   const output = await response.text();
   if (!response.ok) throw new Error(`OpenCode command execution returned ${response.status}: ${output}`);
 
@@ -285,10 +307,29 @@ async function executeCommand(url: string, commands: Array<{ name: string }>): P
   if (!inboxResponse.ok) {
     throw new Error(`OpenCode session inbox returned ${inboxResponse.status}: ${inboxOutput}`);
   }
-  if (contextOutput.includes(sentinel) || inboxOutput.includes(sentinel)) {
+  if (contextOutput.includes(target) || inboxOutput.includes(target)) {
     throw new Error("The V1 Markdown command overrode the native callback and submitted a model prompt.");
   }
-  console.error("native command callback executed without a model prompt");
+  console.error("native command opened and closed the annotation server without a model prompt");
+}
+
+async function waitForAnnotateServer(url: string): Promise<void> {
+  const deadline = Date.now() + COMMAND_TIMEOUT_MS;
+  let lastSeen = "no response yet";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${url}/api/plan`, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const output = await response.text();
+      if (response.ok) return;
+      lastSeen = `HTTP ${response.status}: ${output.slice(0, 500)}`;
+    } catch (error) {
+      lastSeen = `${(error as Error).name}: ${(error as Error).message}`;
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error(`Native annotate command did not open its server within ${COMMAND_TIMEOUT_MS}ms. Last result: ${lastSeen}`);
 }
 
 // A stuck teardown used to turn a failing smoke into a multi-minute CI wall-clock burn that

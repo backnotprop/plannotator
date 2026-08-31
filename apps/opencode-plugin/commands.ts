@@ -366,7 +366,7 @@ export async function handleAnnotateCommand(
   // Per-project scoping for the annotate version history — matches the hook
   // and Pi runtimes, which both pass it (otherwise history lands in the
   // shared "_unknown" bucket).
-  const annotateProject = (await detectProjectName()) ?? undefined;
+  const annotateProject = (await detectProjectName(directory)) ?? undefined;
   const server = await startServer({
     markdown,
     filePath: absolutePath,
@@ -440,7 +440,7 @@ export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
 ): Promise<{ approved: boolean; feedback: string } | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
@@ -489,7 +489,7 @@ export async function handleAnnotateLastCommand(
 
   const pickerMessages = recentMessages.length > 1 ? recentMessages : undefined;
 
-  const lastProject = (await detectProjectName()) ?? undefined;
+  const lastProject = (await detectProjectName(directory)) ?? undefined;
   const server = await startServer({
     markdown: lastText,
     filePath: "last-message",

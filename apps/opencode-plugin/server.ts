@@ -312,10 +312,7 @@ const serverPlugin = {
                 directory,
                 delivery,
             }),
-            sendApprovalHandoff: async ({ sessionId, targetAgent }) => {
-              const session = ctx.session as unknown as V2SessionApi;
-              await session.switchAgent?.({ sessionID: sessionId, agent: targetAgent });
-            },
+            sendApprovalHandoff: async (handoff) => await sendV2ApprovalHandoff(ctx, handoff),
           });
 
           return { content: result };
@@ -383,6 +380,20 @@ export function createV2Client(
       },
     },
   };
+}
+
+export async function sendV2ApprovalHandoff(
+  ctx: { session: unknown },
+  input: { sessionId: string; targetAgent: string; text: string },
+): Promise<void> {
+  const session = ctx.session as V2SessionApi;
+  if (!session.switchAgent) return;
+  await session.switchAgent({ sessionID: input.sessionId, agent: input.targetAgent });
+  await session.prompt({
+    sessionID: input.sessionId,
+    text: input.text,
+    delivery: "steer",
+  });
 }
 
 async function restoreNativeCommandsAfterConfigPlugin(

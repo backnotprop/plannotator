@@ -3,6 +3,7 @@ import serverPlugin, {
   createV2Client,
   pushComposedSystemReminder,
   replacePlanningSystemParts,
+  sendV2ApprovalHandoff,
 } from "./server";
 
 const originalAllowSubagents = process.env.PLANNOTATOR_ALLOW_SUBAGENTS;
@@ -189,6 +190,32 @@ describe("OpenCode V2 server plugin", () => {
       sessionID: "session-1",
       text: "Address this feedback.",
       delivery: "queue",
+    });
+  });
+
+  test("switches agents before steering the approved plan handoff", async () => {
+    const calls: string[] = [];
+    const switchAgent = mock(async () => {
+      calls.push("switch");
+    });
+    const prompt = mock(async () => {
+      calls.push("prompt");
+    });
+
+    await sendV2ApprovalHandoff({
+      session: { switchAgent, prompt },
+    }, {
+      sessionId: "session-1",
+      targetAgent: "build",
+      text: "Proceed with implementation",
+    });
+
+    expect(calls).toEqual(["switch", "prompt"]);
+    expect(switchAgent).toHaveBeenCalledWith({ sessionID: "session-1", agent: "build" });
+    expect(prompt).toHaveBeenCalledWith({
+      sessionID: "session-1",
+      text: "Proceed with implementation",
+      delivery: "steer",
     });
   });
 
