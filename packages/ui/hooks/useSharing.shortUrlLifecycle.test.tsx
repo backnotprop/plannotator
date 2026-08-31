@@ -208,6 +208,59 @@ describe.if(hasDom)('useSharing short URL lifecycle', () => {
     expect(postCount).toBe(2);
   });
 
+  test('clears a failed short-link error only after the represented content changes', async () => {
+    let postCount = 0;
+    // SAFETY: This boundary fake implements the paste POST exercised by useSharing.
+    globalThis.fetch = (async (_input, init) => {
+      if (init?.method === 'POST') {
+        postCount += 1;
+        if (postCount === 1) {
+          return Response.json({ id: 'LocalSuccess' }, { status: 201 });
+        }
+        return Response.json({ error: 'Unavailable' }, { status: 503 });
+      }
+      return Response.json({ error: 'Unexpected request' }, { status: 500 });
+    }) as typeof fetch;
+
+    const capture: HarnessCapture = {
+      result: null,
+      controls: null,
+    };
+    await mountHarness(0, capture);
+
+    await act(async () => {
+      capture.controls?.setMarkdown('# Local plan\n\nOriginal content');
+    });
+    await waitFor(() => Boolean(capture.result?.shareUrl));
+
+    let initialShortUrl: string | null = null;
+    await act(async () => {
+      initialShortUrl = await capture.result?.generateShortUrl() ?? null;
+    });
+    expect(initialShortUrl).toContain('/p/LocalSuccess#key=');
+    expect(capture.result?.shortShareUrl).toBe(initialShortUrl);
+
+    await act(async () => {
+      expect(await capture.result?.generateShortUrl()).toBeNull();
+    });
+    expect(postCount).toBe(2);
+    expect(capture.result?.shortShareUrl).toBe('');
+    expect(capture.result?.shortUrlError).toBe('Short URL service unavailable');
+
+    await act(async () => {
+      renderHarness(0, capture);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(capture.result?.shortUrlError).toBe('Short URL service unavailable');
+
+    await act(async () => {
+      capture.controls?.setMarkdown('# Local plan\n\nEdited content');
+    });
+    expect(capture.result?.shortShareUrl).toBe('');
+    expect(capture.result?.shortUrlError).toBe('');
+    expect(postCount).toBe(2);
+  });
+
   test('invalidates a hydrated HTML short URL when the portable content revision changes', async () => {
     const payload: SharePayload = {
       p: '',

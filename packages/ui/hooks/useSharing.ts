@@ -80,7 +80,8 @@ type ShortShareUrlLifecycle =
   | { readonly _tag: 'none' }
   | { readonly _tag: 'incoming-hydration' }
   | { readonly _tag: 'generating'; readonly requestContext: object }
-  | { readonly _tag: 'associated'; readonly requestContext: object };
+  | { readonly _tag: 'associated'; readonly requestContext: object }
+  | { readonly _tag: 'failed'; readonly requestContext: object };
 
 // Share payloads are base64url-encoded deflate output: charset [A-Za-z0-9_-],
 // realistically >=30 chars, and virtually always mixed-case because deflate
@@ -154,9 +155,10 @@ export function useSharing(
       const pathMatch = window.location.pathname.match(/^\/p\/([A-Za-z0-9]{6,16})$/);
       if (pathMatch) {
         const pasteId = pathMatch[1];
-        // Capture before the async fetch. React Strict Mode may invoke this
-        // mount effect twice; the first completion removes /p/<id> from
-        // history, but both completions must preserve the original short URL.
+        // Capture before the async fetch. Concurrent loads (including the
+        // development Strict Mode replay) can complete after an earlier load
+        // removes /p/<id> from history; every completion must preserve the
+        // original short URL.
         const incomingShortUrl = window.location.href;
 
         // Extract key and optional paste origin from fragment: #key=<k>&paste=<base64url>
@@ -315,6 +317,10 @@ export function useSharing(
     const lifecycle = shortShareUrlLifecycleRef.current;
     if (lifecycle._tag === 'incoming-hydration') {
       if (!shortShareUrl) return;
+      // Hydration writes fresh annotation and attachment arrays, so this first
+      // committed request context represents the loaded snapshot. If those
+      // setters ever preserve identity, replace this consume-on-next-effect
+      // handoff with an explicit post-hydration signal.
       shortShareUrlLifecycleRef.current = {
         _tag: 'associated',
         requestContext: shareRequestContext,
@@ -322,7 +328,11 @@ export function useSharing(
       return;
     }
     if (
-      (lifecycle._tag === 'generating' || lifecycle._tag === 'associated')
+      (
+        lifecycle._tag === 'generating'
+        || lifecycle._tag === 'associated'
+        || lifecycle._tag === 'failed'
+      )
       && lifecycle.requestContext === shareRequestContext
     ) {
       return;
@@ -374,14 +384,14 @@ export function useSharing(
         setShortShareUrl(result.shortUrl);
         return result.shortUrl;
       } else {
-        shortShareUrlLifecycleRef.current = { _tag: 'none' };
+        shortShareUrlLifecycleRef.current = { _tag: 'failed', requestContext };
         setShortShareUrl('');
         setShortUrlError('Short URL service unavailable');
         return null;
       }
     } catch (e) {
       if (latestShareRequestContextRef.current !== requestContext) return null;
-      shortShareUrlLifecycleRef.current = { _tag: 'none' };
+      shortShareUrlLifecycleRef.current = { _tag: 'failed', requestContext };
       setShortShareUrl('');
       setShortUrlError(e instanceof Error ? e.message : 'Failed to generate short URL');
       return null;
