@@ -152,7 +152,6 @@ jobs:
           packages/ui/components/AnnotationPanel.unanchored.test.tsx
           packages/ui/hooks/useHtmlRefresh.test.tsx
           packages/ui/hooks/useSharing.contentRevision.test.tsx
-          packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
           packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
           packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
@@ -162,6 +161,9 @@ jobs:
           packages/editor/components/AppHeader.webmcpIndicator.test.tsx
           packages/ui/components/MathBlock.firstPaint.test.tsx
           packages/ui/components/DiagramBlock.lazyRetry.test.tsx
+
+      - name: Run short URL lifecycle DOM test
+        run: DOM_TESTS=1 bun test packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
 
   opencode-v2:
     name: OpenCode 2 installed package
