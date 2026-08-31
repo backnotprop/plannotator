@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import serverPlugin, {
+  createV2Client,
   pushComposedSystemReminder,
   replacePlanningSystemParts,
 } from "./server";
@@ -21,8 +22,10 @@ type SessionContextHook = (event: {
 function createContext(
   options: Record<string, unknown> = {},
   agents: Array<{ id: string; description?: string; mode: string; hidden: boolean }> = [],
+  commandPluginLoaded?: (commands: Record<string, any>[]) => void,
 ) {
   let toolDefinition: Record<string, any> | undefined;
+  const commandDefinitions: Record<string, any>[] = [];
   let sessionContextHook: SessionContextHook | undefined;
   const sessionGet = mock(async () => ({ location: { directory: "/project" } }));
 
@@ -35,9 +38,29 @@ function createContext(
       },
       session: {
         get: sessionGet,
+        context: mock(async () => ({ data: [] })),
+        prompt: mock(async () => ({})),
+        switchAgent: mock(async () => {}),
         hook: async (name: string, callback: SessionContextHook) => {
           if (name === "context") sessionContextHook = callback;
           return { dispose: async () => {} };
+        },
+      },
+      command: {
+        transform: async (callback: (draft: { add: (command: Record<string, any>) => void }) => void) => {
+          callback({
+            add(command) {
+              commandDefinitions.push(command);
+            },
+          });
+          return { dispose: async () => {} };
+        },
+      },
+      event: {
+        subscribe: async function* () {
+          if (!commandPluginLoaded) return;
+          commandPluginLoaded(commandDefinitions);
+          yield { type: "plugin.added", data: { id: "opencode.config.command" } };
         },
       },
       tool: {
@@ -52,6 +75,7 @@ function createContext(
       },
     },
     getToolDefinition: () => toolDefinition,
+    getCommandDefinitions: () => commandDefinitions,
     getSessionContextHook: () => sessionContextHook,
     sessionGet,
   };
@@ -95,6 +119,77 @@ describe("OpenCode V2 server plugin", () => {
     });
     expect(tool?.options).toEqual({ codemode: false });
     expect(tool?.execute).toBeInstanceOf(Function);
+  });
+
+  test("registers native callbacks for all manual commands", async () => {
+    const testContext = createContext({ workflow: "manual" });
+    await serverPlugin.setup(testContext.context as never);
+
+    expect(testContext.getToolDefinition()).toBeUndefined();
+    expect(testContext.getCommandDefinitions().map((command) => command.name)).toEqual([
+      "plannotator-review",
+      "plannotator-annotate",
+      "plannotator-last",
+    ]);
+    expect(testContext.getCommandDefinitions().every((command) => typeof command.execute === "function")).toBe(true);
+  });
+
+  test("restores native callbacks after V1 Markdown commands overwrite them", async () => {
+    const testContext = createContext({ workflow: "manual" }, [], (commands) => {
+      for (const name of ["plannotator-review", "plannotator-annotate", "plannotator-last"]) {
+        commands.push({ name, description: "Markdown stub" });
+      }
+    });
+    await serverPlugin.setup(testContext.context as never);
+    await Bun.sleep(0);
+
+    const active = new Map(
+      testContext.getCommandDefinitions().map((command) => [command.name, command]),
+    );
+    expect([...active.keys()]).toEqual([
+      "plannotator-review",
+      "plannotator-annotate",
+      "plannotator-last",
+    ]);
+    expect([...active.values()].every((command) => typeof command.execute === "function")).toBe(true);
+  });
+
+  test("adapts V2 message history and deliberate feedback prompts for command handlers", async () => {
+    const context = mock(async () => [{
+      id: "message-1",
+      type: "assistant",
+      time: { created: 123 },
+      content: [
+        { type: "reasoning", text: "Hidden reasoning" },
+        { type: "text", text: "Latest answer" },
+      ],
+    }]);
+    const prompt = mock(async () => ({}));
+    const switchAgent = mock(async () => {});
+    const client = createV2Client({
+      session: { context, prompt, switchAgent, get: mock(async () => ({})) },
+    }, async () => [], "queue");
+
+    expect(await client.session.messages({ path: { id: "session-1" } })).toEqual({
+      data: [{
+        info: { id: "message-1", role: "assistant", time: { created: 123 } },
+        parts: [{ type: "text", text: "Latest answer" }],
+      }],
+    });
+
+    await client.session.prompt({
+      path: { id: "session-1" },
+      body: {
+        agent: "build",
+        parts: [{ type: "text", text: "Address this feedback." }],
+      },
+    });
+    expect(switchAgent).toHaveBeenCalledWith({ sessionID: "session-1", agent: "build" });
+    expect(prompt).toHaveBeenCalledWith({
+      sessionID: "session-1",
+      text: "Address this feedback.",
+      delivery: "queue",
+    });
   });
 
   test("resolves cwd from the V2 session and returns V2 tool content", async () => {

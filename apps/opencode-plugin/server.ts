@@ -17,12 +17,14 @@ import {
   type RuntimeMode,
 } from "./workflow";
 import {
+  handleCliCommand,
   runCliPlanReview,
   type OpenCodeBridgeAgent,
   type OpenCodeBridgeContext,
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
-import { resolveTargetAgent } from "./agent-switch";
+import { resolveValidatedTargetAgent } from "./agent-switch";
+import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
@@ -36,6 +38,54 @@ type V2Client = {
     agents: () => Promise<{ data: OpenCodeBridgeAgent[] }>;
     log: (entry: { level: "info" | "error"; message: string }) => void;
   };
+  session: {
+    messages: (input: { path: { id: string } }) => Promise<{ data: LegacyMessage[] }>;
+    prompt: (input: LegacyPromptInput) => Promise<unknown>;
+  };
+};
+
+type LegacyMessage = {
+  info: {
+    id?: string;
+    role: string;
+    time?: { created?: string | number | Date };
+  };
+  parts: Array<{ type: string; text?: string }>;
+};
+
+type LegacyPromptInput = {
+  path: { id: string };
+  body: {
+    agent?: string;
+    parts: Array<{ type: string; text?: string }>;
+  };
+};
+
+type NativeCommandInvocation = {
+  sessionID: string;
+  prompt: { text: string };
+  delivery: "steer" | "queue";
+};
+
+type NativeCommandDefinition = {
+  name: string;
+  description: string;
+  execute: (input: NativeCommandInvocation) => Promise<void>;
+};
+
+type NativeCommandDraft = {
+  add?: (definition: NativeCommandDefinition) => void;
+};
+
+type V2SessionApi = {
+  context: (input: { sessionID: string }) => Promise<unknown>;
+  get: (input: { sessionID: string }) => Promise<unknown>;
+  prompt: (input: {
+    sessionID: string;
+    text: string;
+    delivery?: "steer" | "queue";
+  }) => Promise<unknown>;
+  switchAgent?: (input: { sessionID: string; agent: string }) => Promise<unknown>;
 };
 
 type EmbeddedRuntimeModule = {
@@ -50,7 +100,41 @@ type EmbeddedRuntimeModule = {
     abortSignal?: AbortSignal;
     logReady: (url: string, isRemote: boolean, port: number) => void;
   }) => Promise<OpenCodePlanReviewResult>;
+  handleEmbeddedCommand: (
+    command: string,
+    event: { properties: { sessionID: string; arguments: string } },
+    deps: {
+      client: V2Client;
+      htmlContent: string;
+      reviewHtmlContent: string;
+      getSharingEnabled: () => Promise<boolean>;
+      getShareBaseUrl: () => string | undefined;
+      getPasteApiUrl: () => string | undefined;
+      directory?: string;
+    },
+  ) => Promise<{ approved?: boolean; feedback?: string | null }>;
+  deliverEmbeddedAnnotateMessagePrompt: (input: {
+    client: V2Client;
+    sessionId: string;
+    approved: boolean;
+    feedback: string;
+  }) => Promise<void>;
 };
+
+const nativeCommands = [
+  {
+    name: "plannotator-review",
+    description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider",
+  },
+  {
+    name: "plannotator-annotate",
+    description: "Open interactive annotation UI for a file, folder, or URL",
+  },
+  {
+    name: "plannotator-last",
+    description: "Annotate the last assistant message",
+  },
+] as const;
 
 // `Plugin.define` is an identity function in @opencode-ai/plugin; keeping the import
 // type-only avoids shipping a runtime dependency on an exact prerelease nightly.
@@ -64,7 +148,8 @@ const serverPlugin = {
       if (cachedAgents) return cachedAgents;
       try {
         const response = await ctx.agent.list();
-        cachedAgents = response.data.map((agent) => ({
+        const agents = unwrapData(response);
+        cachedAgents = (Array.isArray(agents) ? agents : []).map((agent) => ({
           name: agent.id,
           description: agent.description,
           mode: agent.mode,
@@ -75,6 +160,33 @@ const serverPlugin = {
       }
       return cachedAgents;
     };
+
+    const client = createV2Client(ctx, getAgents);
+
+    const registerNativeCommands = async () => {
+      await ctx.command.transform((commands) => {
+        const draft = commands as NativeCommandDraft;
+        // Older V2 nightlies expose command transforms but not executable definitions.
+        if (typeof draft.add !== "function") return;
+        addNativeCommands(draft, async (command, input) => {
+          const session = unwrapData(await ctx.session.get({ sessionID: input.sessionID })) as {
+            location?: { directory?: string };
+          };
+          await runNativeCommand({
+            command,
+            sessionID: input.sessionID,
+            arguments: input.prompt.text,
+            directory: session.location?.directory ?? process.cwd(),
+            runtime: workflowOptions.runtime,
+            client: createV2Client(ctx, getAgents, input.delivery),
+            bridge: await getBridgeContext(getAgents),
+          });
+        });
+      });
+    };
+
+    await registerNativeCommands();
+    void restoreNativeCommandsAfterConfigPlugin(ctx, registerNativeCommands);
 
     if (shouldModifyPrompts(workflowOptions)) {
       await ctx.session.hook("context", async (event) => {
@@ -173,9 +285,8 @@ const serverPlugin = {
         options: { codemode: false },
         execute: async (input, toolContext) => {
           const session = await ctx.session.get({ sessionID: toolContext.sessionID });
-          const directory = session.location.directory;
+          const directory = (unwrapData(session) as { location: { directory: string } }).location.directory;
           const bridge = await getBridgeContext(getAgents);
-          const client = createV2Client(getAgents);
           const result = await executeSubmitPlan({
             edits: getPlanEdits(input),
             invokingAgent: toolContext.agent,
@@ -194,19 +305,17 @@ const serverPlugin = {
               directory,
               bridge,
             }),
-            resolveTargetAgent: async ({ requestedAgent }) => {
-              const targetAgent = resolveTargetAgent(requestedAgent);
-              if (!targetAgent) return undefined;
-              const available = (await getAgents()).some((agent) => agent.name === targetAgent);
-              if (!available) {
-                console.error(`[Plannotator] Configured OpenCode agent "${targetAgent}" is not available; approving the plan without switching agents.`);
-                return undefined;
-              }
-              // The current OpenCode 2 API exposes no session-agent switch operation to plugins.
-              console.error("[Plannotator] OpenCode 2 does not currently expose agent switching to plugins; approving the plan without switching agents.");
-              return undefined;
+            resolveTargetAgent: async ({ requestedAgent, directory, delivery }) =>
+              await resolveValidatedTargetAgent({
+                client,
+                targetAgent: requestedAgent,
+                directory,
+                delivery,
+            }),
+            sendApprovalHandoff: async ({ sessionId, targetAgent }) => {
+              const session = ctx.session as unknown as V2SessionApi;
+              await session.switchAgent?.({ sessionID: sessionId, agent: targetAgent });
             },
-            sendApprovalHandoff: async () => {},
           });
 
           return { content: result };
@@ -233,10 +342,13 @@ function getPlanTimeoutSeconds(): number | null {
   return parsed === 0 ? null : parsed;
 }
 
-function createV2Client(
+export function createV2Client(
+  ctx: { session: unknown },
   getAgents: () => Promise<OpenCodeBridgeAgent[]>,
+  delivery: "steer" | "queue" = "steer",
 ): V2Client {
   const loggedUrls = new Set<string>();
+  const session = ctx.session as V2SessionApi;
   return {
     app: {
       agents: async () => ({ data: await getAgents() }),
@@ -247,7 +359,148 @@ function createV2Client(
         console.error(message);
       },
     },
+    session: {
+      messages: async ({ path }) => {
+        const messages = unwrapData(await session.context({ sessionID: path.id }));
+        return {
+          data: Array.isArray(messages)
+            ? messages.flatMap(toLegacyMessage)
+            : [],
+        };
+      },
+      prompt: async ({ path, body }) => {
+        if (body.agent && session.switchAgent) {
+          await session.switchAgent({ sessionID: path.id, agent: body.agent });
+        }
+        return await session.prompt({
+          sessionID: path.id,
+          text: body.parts
+            .filter((part) => part.type === "text" && part.text)
+            .map((part) => part.text)
+            .join("\n"),
+          delivery,
+        });
+      },
+    },
   };
+}
+
+async function restoreNativeCommandsAfterConfigPlugin(
+  ctx: { event: { subscribe: () => AsyncIterable<unknown> } },
+  register: () => Promise<void>,
+): Promise<void> {
+  try {
+    for await (const event of ctx.event.subscribe()) {
+      if (
+        !event
+        || typeof event !== "object"
+        || Reflect.get(event, "type") !== "plugin.added"
+      ) continue;
+      const data = Reflect.get(event, "data");
+      if (!data || typeof data !== "object" || Reflect.get(data, "id") !== "opencode.config.command") continue;
+
+      // Config commands load after package plugins and overwrite duplicate names.
+      // Register once more so these executable callbacks win over the V1 stubs.
+      await register();
+      return;
+    }
+  } catch (error) {
+    console.error(`[Plannotator] Could not finalize native command registration: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function unwrapData(value: unknown): unknown {
+  if (!value || typeof value !== "object" || !("data" in value)) return value;
+  return Reflect.get(value, "data");
+}
+
+function toLegacyMessage(message: unknown): LegacyMessage[] {
+  if (!message || typeof message !== "object" || Reflect.get(message, "type") !== "assistant") return [];
+  const content = Reflect.get(message, "content");
+  if (!Array.isArray(content)) return [];
+  return [{
+    info: {
+      id: typeof Reflect.get(message, "id") === "string" ? Reflect.get(message, "id") : undefined,
+      role: "assistant",
+      time: Reflect.get(message, "time") as LegacyMessage["info"]["time"],
+    },
+    parts: content.flatMap((part) =>
+      part && typeof part === "object" && Reflect.get(part, "type") === "text"
+        ? [{ type: "text", text: String(Reflect.get(part, "text") ?? "") }]
+        : []
+    ),
+  }];
+}
+
+function addNativeCommands(
+  draft: NativeCommandDraft,
+  execute: (command: string, input: NativeCommandInvocation) => Promise<void>,
+): void {
+  if (!draft.add) return;
+  for (const command of nativeCommands) {
+    draft.add({
+      ...command,
+      execute: async (input) => await execute(command.name, input),
+    });
+  }
+}
+
+async function runNativeCommand(input: {
+  command: string;
+  sessionID: string;
+  arguments: string;
+  directory?: string;
+  runtime: RuntimeMode;
+  client: V2Client;
+  bridge: OpenCodeBridgeContext;
+}): Promise<void> {
+  const event = {
+    properties: {
+      sessionID: input.sessionID,
+      arguments: input.arguments,
+    },
+  };
+
+  if (input.runtime !== "cli" && hasEmbeddedRuntime()) {
+    try {
+      const embedded = await importEmbeddedRuntime();
+      const result = await embedded.handleEmbeddedCommand(input.command, event, {
+        client: input.client,
+        htmlContent: getPlanHtml(),
+        reviewHtmlContent: getReviewHtml(),
+        getSharingEnabled: async () => input.bridge.sharingEnabled ?? true,
+        getShareBaseUrl: () => input.bridge.shareBaseUrl,
+        getPasteApiUrl: () => input.bridge.pasteApiUrl,
+        directory: input.directory,
+      });
+      if (input.command === "plannotator-last" && result.feedback) {
+        await embedded.deliverEmbeddedAnnotateMessagePrompt({
+          client: input.client,
+          sessionId: input.sessionID,
+          approved: Boolean(result.approved),
+          feedback: result.feedback,
+        });
+      }
+      return;
+    } catch (error) {
+      if (!shouldFallbackAfterEmbeddedError(input.runtime, error)) throw error;
+      console.error(`[Plannotator] Embedded runtime unavailable; falling back to CLI: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (input.runtime === "embedded") {
+    console.error("[Plannotator] runtime \"embedded\" requires a Bun-hosted OpenCode plugin runtime. Use runtime \"auto\" or \"cli\" with this OpenCode host.");
+    return;
+  }
+
+  await handleCliCommand({
+    command: input.command,
+    client: input.client,
+    sessionId: input.sessionID,
+    rawArgs: input.arguments,
+    cwd: input.directory,
+    bridge: input.bridge,
+  });
 }
 
 function allowSubagents(): boolean {
@@ -289,6 +542,16 @@ function getPlanHtml(): string {
   if (!htmlPath) throw new Error("Could not find bundled HTML asset: plannotator.html");
   planHtml = readFileSync(htmlPath, "utf-8");
   return planHtml;
+}
+
+function getReviewHtml(): string {
+  const candidates = [
+    path.join(moduleDir, "review-editor.html"),
+    path.join(moduleDir, "..", "review-editor.html"),
+  ];
+  const htmlPath = candidates.find((candidate) => existsSync(candidate));
+  if (!htmlPath) throw new Error("Could not find bundled HTML asset: review-editor.html");
+  return readFileSync(htmlPath, "utf-8");
 }
 
 async function runPlanReview(input: {

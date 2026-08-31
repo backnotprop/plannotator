@@ -433,8 +433,8 @@ export async function handleAnnotateCommand(
 
 /**
  * Handle /plannotator-last command.
- * Called from command.execute.before — returns approval-aware feedback so the
- * caller can choose the correct prompt semantics before injecting it.
+ * Returns approval-aware feedback so the command adapter can choose the
+ * correct prompt semantics before injecting it.
  */
 export async function handleAnnotateLastCommand(
   event: any,

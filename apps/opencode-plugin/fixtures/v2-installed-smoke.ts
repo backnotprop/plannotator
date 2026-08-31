@@ -111,7 +111,9 @@ let failed = false;
 try {
   await waitForHealthyServer(url);
   const plugins = await waitForPlugin(url);
-  console.log(JSON.stringify(plugins));
+  const commands = await getCommands(url);
+  await executeCommand(url, commands);
+  console.log(JSON.stringify({ plugins, commands }));
 } catch (error) {
   failed = true;
   throw error;
@@ -223,6 +225,70 @@ async function waitForPlugin(url: string): Promise<unknown> {
     `Plannotator did not activate in OpenCode 2 within ${PLUGIN_TIMEOUT_MS}ms (waited ${elapsed()}). ` +
       `Last response: ${lastOutput}`,
   );
+}
+
+async function getCommands(url: string): Promise<Array<{ name: string }>> {
+  const response = await fetch(`${url}/api/command?directory=${encodeURIComponent(process.cwd())}`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const output = await response.text();
+  if (!response.ok) throw new Error(`OpenCode command API returned ${response.status}: ${output}`);
+  const commands = (JSON.parse(output) as { data?: Array<{ name: string }> }).data ?? [];
+  const expected = ["plannotator-review", "plannotator-annotate", "plannotator-last"];
+  const missing = expected.filter((name) => !commands.some((command) => command.name === name));
+  if (missing.length > 0) throw new Error(`OpenCode did not register native commands: ${missing.join(", ")}`);
+  console.error(`native commands registered: ${expected.join(", ")}`);
+  return commands.filter((command) => expected.includes(command.name));
+}
+
+async function executeCommand(url: string, commands: Array<{ name: string }>): Promise<void> {
+  const sessionResponse = await fetch(`${url}/api/session`, {
+    method: "POST",
+    headers: { ...authHeaders(), "content-type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const sessionOutput = await sessionResponse.text();
+  if (!sessionResponse.ok) {
+    throw new Error(`OpenCode session API returned ${sessionResponse.status}: ${sessionOutput}`);
+  }
+  const sessionID = (JSON.parse(sessionOutput) as { data?: { id?: string } }).data?.id;
+  if (!sessionID) throw new Error(`OpenCode session API returned no session ID: ${sessionOutput}`);
+
+  const command = commands.find((item) => item.name === "plannotator-annotate")?.name;
+  if (!command) throw new Error("Native annotate command was not available for execution.");
+  const sentinel = `plannotator-native-command-smoke-${Date.now()}`;
+  const response = await fetch(`${url}/api/session/${sessionID}/command`, {
+    method: "POST",
+    headers: { ...authHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ command, text: sentinel }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const output = await response.text();
+  if (!response.ok) throw new Error(`OpenCode command execution returned ${response.status}: ${output}`);
+
+  const contextResponse = await fetch(`${url}/api/session/${sessionID}/context`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const contextOutput = await contextResponse.text();
+  if (!contextResponse.ok) {
+    throw new Error(`OpenCode session context returned ${contextResponse.status}: ${contextOutput}`);
+  }
+
+  const inboxResponse = await fetch(`${url}/api/session/${sessionID}/inbox`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const inboxOutput = await inboxResponse.text();
+  if (!inboxResponse.ok) {
+    throw new Error(`OpenCode session inbox returned ${inboxResponse.status}: ${inboxOutput}`);
+  }
+  if (contextOutput.includes(sentinel) || inboxOutput.includes(sentinel)) {
+    throw new Error("The V1 Markdown command overrode the native callback and submitted a model prompt.");
+  }
+  console.error("native command callback executed without a model prompt");
 }
 
 // A stuck teardown used to turn a failing smoke into a multi-minute CI wall-clock burn that

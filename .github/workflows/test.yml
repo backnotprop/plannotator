@@ -184,7 +184,7 @@ jobs:
         # zizmor: ignore[adhoc-packages] This integration test requires the exact
         # globally installed CLI. Owner: maintainers; reassess a locked fixture
         # by 2027-08-11.
-        run: npm install --global @opencode-ai/cli@0.0.0-next-16775
+        run: npm install --global @opencode-ai/cli@0.0.0-beta-18684
 
       - name: Build OpenCode plugin assets
         run: bun run build:review && bun run build:hook && bun run build:opencode
