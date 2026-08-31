@@ -374,8 +374,17 @@ export async function openBrowser(url: string): Promise<{
 
 		if (browser) {
 			if (plannotatorBrowser && platform === "darwin") {
-				cmd = "open";
-				args = ["-a", plannotatorBrowser, url];
+				if (
+					plannotatorBrowser.includes("/") &&
+					!plannotatorBrowser.endsWith(".app")
+				) {
+					// Script/executable path — run directly (open -a fails with -10811)
+					cmd = plannotatorBrowser;
+					args = [url];
+				} else {
+					cmd = "open";
+					args = ["-a", plannotatorBrowser, url];
+				}
 			} else if (viaCmdExe) {
 				cmd = "cmd.exe";
 				args = ["/c", "start", "", plannotatorBrowser, url];
