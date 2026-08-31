@@ -175,6 +175,31 @@ const selectionHasNonMathContent = (
   return false;
 };
 
+// Chrome for the UI's own sake — today the ambiguous code-file link's
+// match-count <sup> — is not document text, and a quote of the markdown source
+// can never anticipate it. Its renderer marks it aria-hidden, the same signal a
+// screen reader uses to skip it, so restore reads the DOM through that filter
+// rather than through `textContent`.
+const VISIBLE_TEXT: NodeFilter = {
+  acceptNode: (node) =>
+    node.parentElement?.closest('[aria-hidden="true"]')
+      ? NodeFilter.FILTER_REJECT
+      : NodeFilter.FILTER_ACCEPT,
+};
+
+const visibleText = (root: HTMLElement): string => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, VISIBLE_TEXT);
+  let text = '';
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text | null)) text += node.textContent || '';
+  return text;
+};
+
+// Markdown syntax the renderer consumes, plus the pipes/whitespace a table row
+// loses on its way to sibling <td>s. Dropped from the DOM text as well as the
+// quote, so restore stops depending on which side of the render the noise is on.
+const MARKDOWN_NOISE = /[`*_~|[\]\s]/;
+
 const annotationId = (): string => {
   const cryptoRef = globalThis.crypto;
   if (cryptoRef && typeof cryptoRef.randomUUID === 'function') {
@@ -365,7 +390,7 @@ export function useAnnotationHighlighter({
         const walker = document.createTreeWalker(
           containerRef.current!,
           NodeFilter.SHOW_TEXT,
-          null
+          VISIBLE_TEXT
         );
 
         let charCount = 0;
@@ -402,13 +427,17 @@ export function useAnnotationHighlighter({
         return null;
       };
 
-      const normalizeWithMap = (text: string): { text: string; map: number[] } => {
+      const normalizeWithMap = (
+        text: string,
+        dropNoise = false,
+      ): { text: string; map: number[] } => {
         let normalized = '';
         const map: number[] = [];
         let inWhitespace = false;
 
         for (let i = 0; i < text.length; i++) {
           const ch = text[i];
+          if (dropNoise && MARKDOWN_NOISE.test(ch)) continue;
           if (/\s/.test(ch)) {
             if (!inWhitespace) {
               normalized += ' ';
@@ -436,7 +465,7 @@ export function useAnnotationHighlighter({
       const walker = document.createTreeWalker(
         containerRef.current,
         NodeFilter.SHOW_TEXT,
-        null
+        VISIBLE_TEXT
       );
 
       let node: Text | null;
@@ -451,7 +480,7 @@ export function useAnnotationHighlighter({
         }
       }
 
-      const fullText = containerRef.current.textContent || '';
+      const fullText = visibleText(containerRef.current);
       const searchIndex = fullText.indexOf(needle);
       if (searchIndex !== -1) {
         return rangeFromTextOffsets(searchIndex, searchIndex + needle.length);
@@ -463,6 +492,24 @@ export function useAnnotationHighlighter({
       if (normalizedNeedle && normalizedIndex !== -1) {
         const originalStart = haystack.map[normalizedIndex];
         const originalEnd = haystack.map[normalizedIndex + normalizedNeedle.length - 1] + 1;
+        return rangeFromTextOffsets(originalStart, originalEnd);
+      }
+
+      // Last resort: drop markdown noise from BOTH sides. The candidate ladder
+      // below only rewrites the needle, which cannot reach the two cases where
+      // the divergence is on the haystack side too:
+      //   - a table row (`| a | b |`) renders as sibling <td>s, so the pipes
+      //     and their padding exist in the source and nowhere in the DOM;
+      //   - a code span keeps its `*_` (`` `JIRA_*` `` renders as JIRA_*),
+      //     while the needle-only strip has already removed them.
+      // Whitespace goes too, because the same table row is the case where the
+      // source has spaces the DOM does not.
+      const canonical = normalizeWithMap(fullText, true);
+      const canonicalNeedle = normalizeWithMap(needle, true).text;
+      const canonicalIndex = canonical.text.indexOf(canonicalNeedle);
+      if (canonicalNeedle && canonicalIndex !== -1) {
+        const originalStart = canonical.map[canonicalIndex];
+        const originalEnd = canonical.map[canonicalIndex + canonicalNeedle.length - 1] + 1;
         return rangeFromTextOffsets(originalStart, originalEnd);
       }
 

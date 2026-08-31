@@ -266,7 +266,10 @@ const CodeFileLink: React.FC<{
         {display}
         <CodeFileIcon />
         {isAmbiguous && (
-          <sup className="text-[0.6rem] opacity-70 -ml-0.5">{(gate as { matches: string[] }).matches.length}</sup>
+          // aria-hidden: a count the `title` already states, and text the
+          // document does not contain — annotation restore searches this DOM
+          // for quotes of the markdown source and must not see it.
+          <sup aria-hidden="true" className="text-[0.6rem] opacity-70 -ml-0.5">{(gate as { matches: string[] }).matches.length}</sup>
         )}
       </code>
       {hoverPreview && hasLineRef && (
