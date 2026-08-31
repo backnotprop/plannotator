@@ -75,10 +75,12 @@ jobs:
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
-      # (not the whole ui suite) to keep this process light.
+      # (not the whole ui suite) to keep this process light. Files get isolated
+      # globals because theme, storage, and DOM test state must not leak between
+      # suites when Bun schedules them differently across platforms.
       - name: Run UI seam-contract + DOM tests
         run: >-
-          DOM_TESTS=1 bun test
+          DOM_TESTS=1 bun test --isolate
           packages/ui/markdownEditorFidelity.test.tsx
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
@@ -152,6 +154,7 @@ jobs:
           packages/ui/components/AnnotationPanel.unanchored.test.tsx
           packages/ui/hooks/useHtmlRefresh.test.tsx
           packages/ui/hooks/useSharing.contentRevision.test.tsx
+          packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
           packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
           packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
@@ -161,9 +164,6 @@ jobs:
           packages/editor/components/AppHeader.webmcpIndicator.test.tsx
           packages/ui/components/MathBlock.firstPaint.test.tsx
           packages/ui/components/DiagramBlock.lazyRetry.test.tsx
-
-      - name: Run short URL lifecycle DOM test
-        run: DOM_TESTS=1 bun test packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
 
   opencode-v2:
     name: OpenCode 2 installed package
