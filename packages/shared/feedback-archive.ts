@@ -19,6 +19,19 @@
  * users grep it; it is written only for records that carry content (a bare
  * approval or a dismissal is a decision-only line).
  *
+ * SHARED INDEX, not a Plannotator-private store. Several tools that share this
+ * data dir append to the SAME `feedback/{project}/index.jsonl`, distinguished
+ * by the `client` field on every line rather than by separate files. Known
+ * writers: `plannotator` (this module) and `plannotator-tui`, the Rust
+ * terminal client; `herdr-annotate` is reserved for a possible future Lite
+ * writer. A record's meaning is the same whoever wrote it, so an analyzer
+ * reads one file, sorts by `ts`, and filters by `client` only when it actually
+ * cares who submitted. Consequences worth respecting when changing this file:
+ * the line shape is a cross-tool contract (fields are added, never
+ * repurposed), other clients suffix their id onto their sidecar filenames
+ * (`{stamp}-{surface}-{decision}-plannotator-tui.md`), and unknown fields must
+ * be ignored rather than rejected.
+ *
  * Contract, shared with `persistAnnotateSubmission` (#678):
  *  - This module NEVER throws. Any failure is logged once and reported as
  *    `null`, so a full disk can never turn a reviewer's submit into a 500.
@@ -40,9 +53,14 @@ import { extractDirName, extractRepoName, sanitizeTag } from "./project";
 /** Schema version carried on every line. Bump only on a breaking shape change. */
 export const FEEDBACK_RECORD_VERSION = 1;
 
-/** Tool that authored the record. See the interop note in the design doc: a
- *  client tool MAY emit this same line shape under its own `clients/` namespace
- *  and the records merge cleanly (sort by `ts`, filter by `client`). */
+/**
+ * Tool that authored the record, and the only thing separating writers in a
+ * shared index: every client appends its own lines to the same
+ * `feedback/{project}/index.jsonl` and stamps itself here. Known values today
+ * are `plannotator` (this module) and `plannotator-tui`; `herdr-annotate` is
+ * reserved. Readers must treat this as an open set, never an enum to validate
+ * against.
+ */
 export const FEEDBACK_RECORD_CLIENT = "plannotator";
 
 export type FeedbackSurface =
@@ -107,6 +125,23 @@ export interface FeedbackTarget {
    * to disk; the archive opt-out is the control for that.
    */
   url?: string;
+  /**
+   * Provenance for surfaces whose subject is an AGENT SESSION rather than a
+   * file or a diff: annotate-last and the other message-shaped surfaces, where
+   * "what was reviewed" is a transcript, not a path.
+   *
+   * Declared in v1 so the field name is reserved across every client sharing
+   * the index (plannotator-tui populates it); this module does not write it
+   * yet. Readers must tolerate its absence.
+   */
+  agent?: {
+    /** Agent host that produced the session, e.g. "claude-code" or "pi". */
+    host?: string;
+    /** Host-assigned session id. */
+    session?: string;
+    /** Path or id of the transcript the reviewed message came from. */
+    transcript?: string;
+  };
   review?: FeedbackReviewTarget;
 }
 
@@ -136,6 +171,15 @@ export interface FeedbackRecord {
   v: number;
   ts: string;
   client: string;
+  /**
+   * Version of the writing client, when it knows its own. Additive and
+   * optional: this module does not populate it (packages/shared has no
+   * runtime-agnostic version constant, and reading package.json from a
+   * vendored module would be a new filesystem dependency for cosmetic data),
+   * but the field is named in v1 so clients that DO know their version write
+   * it under one agreed key instead of inventing three.
+   */
+  clientVersion?: string;
   project: string;
   origin?: string;
   surface: FeedbackSurface;
@@ -347,6 +391,12 @@ export function appendFeedbackRecord(input: FeedbackArchiveInput): string | null
     if (hasContent) {
       const recordsDir = join(projectDir, "records");
       mkdirSync(recordsDir, { recursive: true });
+      // {stamp}-{surface}-{decision}[-N].md. Other clients writing into this
+      // shared archive suffix their own id (plannotator-tui writes
+      // `{stamp}-{surface}-{decision}-plannotator-tui.md`), which is why the
+      // records directory holds more shapes than this line produces and why
+      // nothing may parse a sidecar name: `recordFile` is the only handle, and
+      // any value it carries is valid.
       const base = `${stamp(now)}-${input.surface}-${input.decision}`;
       let name = `${base}.md`;
       const body = renderFeedbackRecordMarkdown(record);
@@ -355,7 +405,16 @@ export function appendFeedbackRecord(input: FeedbackArchiveInput): string | null
           writeFileSync(join(recordsDir, name), body, { encoding: "utf-8", flag: "wx" });
           break;
         } catch (err) {
-          if ((err as NodeJS.ErrnoException)?.code !== "EEXIST" || n > 100) throw err;
+          if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
+          // Exhausting the counter is not an ordinary collision: the stamp is
+          // per-millisecond, so 100 taken names in one millisecond means a
+          // stopped clock or a runaway writer. Say so, or the outer catch logs
+          // a bare EEXIST that reads like a transient disk problem.
+          if (n > 100) {
+            throw new Error(
+              `sidecar name collision exceeded 100 attempts for ${base}.md (clock stuck or runaway writer)`,
+            );
+          }
           name = `${base}-${n}.md`;
         }
       }
@@ -366,13 +425,18 @@ export function appendFeedbackRecord(input: FeedbackArchiveInput): string | null
 
     const indexPath = join(projectDir, "index.jsonl");
     // JSON.stringify can never emit a raw newline, so one record is always one
-    // line. Concurrent servers sharing a data dir rely on O_APPEND for those
-    // lines not to interleave, which POSIX guarantees on local filesystems but
-    // NFS and SMB do NOT: on a network-mounted data dir two simultaneous
-    // appends can interleave, and an interleave damages BOTH records involved,
-    // not just the later one. Readers skip unparsable lines (parseFeedbackIndex),
-    // so the blast radius is bounded at the two records that raced; every other
-    // line in the file stays readable.
+    // line, and the whole line is handed to a single append-mode write.
+    //
+    // That is a practical guarantee, not a formal one, and the honest model is
+    // worth stating: appendFileSync itself loops internally (fs writes until
+    // the buffer is drained), so "one syscall" is wrong even locally. What
+    // holds in practice is that an O_APPEND write of a line-sized buffer
+    // completes without interleaving on a local filesystem. NFS and SMB do not
+    // promise even that, and a genuine interleave damages BOTH records that
+    // raced, not just the later one. The backstop is the reader:
+    // parseFeedbackIndex skips unparsable lines, so the blast radius is bounded
+    // at those records and every other line in the file stays readable. Several
+    // clients share this index, which is exactly when the caveat matters.
     appendFileSync(indexPath, `${JSON.stringify(record)}\n`, "utf-8");
     return indexPath;
   } catch (error) {
@@ -389,6 +453,12 @@ export function appendFeedbackRecord(input: FeedbackArchiveInput): string | null
  * The read path in v1 is "the files on disk" (jq/grep); this helper exists so
  * the servers' own tests and any future in-process reader agree on the
  * torn-line tolerance the append contract promises. Never throws.
+ *
+ * Structural gate only: a line counts as a record when it parses and carries a
+ * numeric `v`. It deliberately does NOT filter by version or by `client`, so a
+ * newer writer's lines are still returned. An analyzer that depends on v1
+ * SEMANTICS should filter `v <= 1` itself; fields are only ever added, never
+ * repurposed, so a v2 would mean a real shape change rather than new keys.
  */
 export function parseFeedbackIndex(contents: string): FeedbackRecord[] {
   const records: FeedbackRecord[] = [];

@@ -225,6 +225,42 @@ describe("feedback archive: append durability", () => {
   });
 });
 
+describe("feedback archive: shared index", () => {
+  test("another client's lines survive our reader, unknown fields and all", () => {
+    // The index is shared: plannotator-tui appends to the same file. A reader
+    // that validated `client` against an enum, rejected unknown fields, or
+    // parsed sidecar filenames would silently drop every line another tool
+    // wrote. Fields are added and never repurposed, so tolerance is the rule.
+    const dataDir = useTempDataDir();
+    appendFeedbackRecord({ project: PROJECT, surface: "review", decision: "lgtm" });
+    const indexPath = join(projectDir(dataDir), "index.jsonl");
+    const foreign = {
+      v: 1,
+      ts: "2026-09-01T09:00:00.000Z",
+      client: "plannotator-tui",
+      clientVersion: "0.3.1",
+      project: PROJECT,
+      surface: "annotate-last",
+      decision: "feedback",
+      target: { agent: { host: "claude-code", session: "s-1", transcript: "/t/1.jsonl" } },
+      feedback: "from the terminal client",
+      counts: { annotations: 0, external: 0, images: 0 },
+      recordFile: "records/2026-09-01T09-00-00-000Z-annotate-last-feedback-plannotator-tui.md",
+      somethingWeHaveNeverHeardOf: { nested: true },
+    };
+    writeFileSync(indexPath, readFileSync(indexPath, "utf-8") + JSON.stringify(foreign) + "\n", "utf-8");
+
+    const records = readIndex(dataDir);
+    expect(records.length).toBe(2);
+    expect(records.map((r) => r.client)).toEqual(["plannotator", "plannotator-tui"]);
+    // The suffixed sidecar name round-trips untouched: recordFile is a handle,
+    // never something to parse.
+    expect(records[1].recordFile).toEndWith("-plannotator-tui.md");
+    expect(records[1].target?.agent?.host).toBe("claude-code");
+    expect(records[1].clientVersion).toBe("0.3.1");
+  });
+});
+
 describe("feedback archive: changed-file counting", () => {
   test("a rename counts once, a delete counts once, an empty patch counts zero", () => {
     // Regression: extractChangedFiles (code-nav) UNIONS the a/ and b/ sides so
