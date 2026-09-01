@@ -236,6 +236,11 @@ raising the "No Annotations" dialog. The caret opens a right-anchored panel with
 a multi-line note field (Enter is a newline, `Mod+Enter` submits, `Escape` closes
 and KEEPS the text, outside pointerdown closes) whose own distinct action reads
 **Send with additional feedback**. The two actions are always different buttons.
+While the panel (or the compact dialog) is open, the header's primary Send
+Feedback fades to 40% and is disabled so the panel's action is unmistakably the
+submit; every close path restores it. The panel action itself always renders
+full-strength — an empty-note click is a no-op that refocuses the field (on
+touch, that raises the keyboard).
 
 The note is materialized at submit time by `commitReviewNote` in
 `packages/review-editor/App.tsx` as a `scope: 'general'` `CodeAnnotation`

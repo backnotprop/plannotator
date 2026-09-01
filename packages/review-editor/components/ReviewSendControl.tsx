@@ -168,9 +168,26 @@ export const ReviewNoteDialog: React.FC<{
   const isCompactTouchLayout = useCompactTouchLayout();
   const [text, setText] = useState('');
   const canSend = text.trim().length > 0;
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Mirror the desktop panel: if the surface goes busy/submitted while the
+  // dialog is open, close it rather than leaving an editable field whose
+  // action can no longer do anything.
+  useEffect(() => {
+    if (disabled && isOpen) onClose();
+  }, [disabled, isOpen, onClose]);
 
   const submit = useCallback(() => {
-    if (disabled || !canSend) return;
+    if (disabled) return;
+    if (!canSend) {
+      // Same contract as the desktop panel: the action renders full-strength
+      // and an empty-note tap refocuses the field — on touch this also raises
+      // the keyboard, which is the affordance the tap was asking for.
+      contentRef.current
+        ?.querySelector<HTMLTextAreaElement>('[data-review-note-input]')
+        ?.focus();
+      return;
+    }
     note.onSubmit(text);
     setText('');
     onClose();
@@ -179,6 +196,7 @@ export const ReviewNoteDialog: React.FC<{
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
+        ref={contentRef}
         data-review-note-composer="dialog"
         // Opening the sheet must not raise the touch keyboard on its own.
         initialFocus={isCompactTouchLayout ? false : undefined}
