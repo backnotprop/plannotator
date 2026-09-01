@@ -129,6 +129,14 @@ The srcdoc then carries one classic `<script src>` in the exact place the inline
 - **`@plannotator/ui/shortcuts`**: the declarative keyboard-shortcut engine (`defineShortcutScope`, `useShortcutScope`) and the per-surface scopes, including `useHtmlAnnotateShortcuts` for the Mod+Shift+A Annotate/Interact chord on HTML surfaces. Pure React plus `utils/platform`; no backend.
 - **`@plannotator/ui/utils/inputMethod`**: `getInputMethod(surface)` / `saveInputMethod(method, surface)` / `refreshInputMethodStamp(method)`, the per-surface pinpoint-or-drag preference with its TTL, persisted through the `storageBackend` seam.
 
+#### Toolstrip host props (0.35.0)
+
+`components/AnnotationToolstrip` is supported host surface: the annotation mode toolstrip with per-tool opt-outs, all defaulting to today's rendering.
+
+- **`hideQuickLabel`** omits the Quick Label tool. `StickyHeaderLane` forwards it, so the pinned scroll header stays consistent. It hides the button only — it does not clamp the mode, so keep host mode state out of `'quickLabel'` (including preferences restored through `utils/editorMode`).
+- **`showHelpLink={false}`** for hosts: the default help modal embeds Plannotator's own video walkthroughs.
+- **`hideInputMethodSwitch`** omits the pinpoint/drag input-method switch.
+
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
 The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.modelContext`) call in-page tools on a document surface. Feature-detected once; a browser without the API sees no registration, no DOM, no network, no timers. Seam: `configurePlannotatorUI({ webmcp: { enabled, namePrefix } })`, default enabled with the `plannotator.` prefix; pass `enabled: false` to keep a host page tool-free, or your own prefix to namespace the tools beside your own. There is deliberately no confirmation seam: the catalog is read-and-comment only (no approve / submit / close tools), and the agent may only edit or remove comments stamped `source: "browser-agent"`.

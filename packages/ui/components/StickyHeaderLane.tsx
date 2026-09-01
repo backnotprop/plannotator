@@ -65,6 +65,8 @@ interface StickyHeaderLaneProps {
   mode: EditorMode;
   onModeChange: (mode: EditorMode) => void;
   taterMode?: boolean;
+  /** Omit the Quick Label tool in the compact toolstrip (mirrors AnnotationToolstripProps.hideQuickLabel). */
+  hideQuickLabel?: boolean;
 
   // Badge state
   repoInfo?: { display: string; branch?: string } | null;
@@ -95,6 +97,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   mode,
   onModeChange,
   taterMode,
+  hideQuickLabel,
   repoInfo,
   planDiffStats,
   isPlanDiffActive,
@@ -252,6 +255,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
               mode={mode}
               onModeChange={onModeChange}
               taterMode={taterMode}
+              hideQuickLabel={hideQuickLabel}
               compact
               iconOnly={isNarrow || isToolstripIconOnly}
             />
