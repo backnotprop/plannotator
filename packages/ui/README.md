@@ -146,11 +146,16 @@ behavior: hidden and inert at rest, then visible with card chrome once stuck.
 - **`visibility="always"`** keeps the existing measured left lane visible and
   interactive at rest as well as while stuck. Resting lanes have no background,
   border, backdrop, shadow, or new document padding; stuck lanes retain the
-  incumbent chrome.
+  incumbent chrome. The lane remains zero-height and absolutely positioned, so
+  the host must reserve a clear header-height region; otherwise its visible
+  controls can cover and intercept interaction with document content below.
 - **`sticky={false}`** uses non-sticky positioning, creates no intersection
   observer, and scrolls away normally. Pass the same value to
   `Viewer.stickyActions` so the left lane and right action cluster follow one
-  policy. Combine it with `visibility="always"` for a visible non-sticky header.
+  policy. By itself it leaves the default stuck-only lane permanently hidden;
+  combine it with `visibility="always"` for a visible non-sticky header. The
+  measured Viewer-actions width is still reserved because both clusters share
+  the lane at rest before they scroll away together.
 - Wide, tight icon-only, and narrow stacked layouts continue to derive from the
   wrapper width and the measured action-cluster width. `hideQuickLabel` is still
   forwarded to the compact toolstrip.

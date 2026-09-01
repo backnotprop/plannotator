@@ -76,12 +76,15 @@ export interface StickyHeaderLaneProps {
   /**
    * Show the lane only after it sticks, or keep it visible at rest too.
    * Defaults to `'stuck'`, preserving the incumbent ghost-header behavior.
+   * Hosts using `'always'` must reserve a clear header-height region because
+   * the lane remains zero-height and absolutely positioned over its sibling.
    */
   visibility?: StickyHeaderLaneVisibility;
   /**
    * Keep the lane pinned while its scroll viewport moves. Pass the same value
    * to `Viewer.stickyActions` so both measured header lanes share one policy.
-   * Defaults to true.
+   * Defaults to true. Pair false with `visibility="always"`; the default
+   * stuck-only visibility cannot become visible when stickiness is disabled.
    */
   sticky?: boolean;
 
@@ -137,6 +140,10 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   const scrollViewport = useScrollViewport();
   const laneIsStuck = sticky && isStuck;
   const isVisible = visibility === 'always' || laneIsStuck;
+  // Preserve the incumbent ghost lane exactly: its chrome remains mounted
+  // while the whole hidden bar fades out. Only the new always-visible mode
+  // removes chrome at rest for the supported chrome-free presentation.
+  const showChrome = visibility === 'always' ? laneIsStuck : true;
 
   // Space available for the bar in the shared lane = wrapper width, minus
   // the bar's left offset, minus the action buttons' measured width, minus
@@ -257,9 +264,9 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
             `inert` removes the bar from the tab order whenever it is hidden. */}
         <div
           inert={!isVisible || undefined}
-          className={`absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 motion-reduce:transform-none ${
-            laneIsStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm border border-border/30' : ''
-          } ${
+          className={`absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 ${
+            showChrome ? 'bg-card/95 backdrop-blur-sm shadow-sm border border-border/30' : ''
+          } motion-reduce:transform-none ${
             isVisible
               ? 'opacity-100 translate-y-0 pointer-events-auto'
               : 'opacity-0 -translate-y-1 pointer-events-none'

@@ -181,6 +181,13 @@ function expectNoChrome(element: HTMLElement): void {
   expect(element.classList.contains('border')).toBe(false);
 }
 
+function expectChrome(element: HTMLElement): void {
+  expect(element.classList.contains('bg-card/95')).toBe(true);
+  expect(element.classList.contains('backdrop-blur-sm')).toBe(true);
+  expect(element.classList.contains('shadow-sm')).toBe(true);
+  expect(element.classList.contains('border')).toBe(true);
+}
+
 beforeEach(() => {
   FakeResizeObserver.instances.length = 0;
   FakeIntersectionObserver.instances.length = 0;
@@ -216,15 +223,23 @@ afterEach(async () => {
 });
 
 describe.if(hasDom)('StickyHeaderLane host seams', () => {
-  test('defaults to an inert, hidden lane at rest', async () => {
+  test('default props preserve main resting markup and chrome while hidden', async () => {
     await mount();
 
-    expect(laneWrapper().classList.contains('sticky')).toBe(true);
+    expect(laneWrapper().className).toBe(
+      'sticky z-[60] w-full self-center pointer-events-none top-3',
+    );
+    expect(laneBar().className).toBe(
+      'absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 bg-card/95 backdrop-blur-sm shadow-sm border border-border/30 motion-reduce:transform-none opacity-0 -translate-y-1 pointer-events-none',
+    );
     expect(laneBar().hasAttribute('inert')).toBe(true);
-    expect(laneBar().classList.contains('opacity-0')).toBe(true);
-    expect(laneBar().classList.contains('pointer-events-none')).toBe(true);
+    expect(laneBar().style.paddingLeft).toBe('12px');
+    expect(laneBar().style.paddingRight).toBe('12px');
+    expect(laneBar().style.transition).toBe(
+      'opacity 180ms cubic-bezier(0.2, 0, 0, 1), transform 180ms cubic-bezier(0.2, 0, 0, 1)',
+    );
     expect(FakeIntersectionObserver.instances).toHaveLength(1);
-    expectNoChrome(laneBar());
+    expectChrome(laneBar());
   });
 
   test('always is visible and interactive at rest without sticky chrome', async () => {
@@ -242,8 +257,8 @@ describe.if(hasDom)('StickyHeaderLane host seams', () => {
     expect(buttonFor('Pinpoint')?.getAttribute('aria-pressed')).toBe('true');
   });
 
-  test('adds chrome only for the sticky intersection state', async () => {
-    await mount();
+  test('always adds chrome only for the sticky intersection state', async () => {
+    await mount({ visibility: 'always' });
     const observer = FakeIntersectionObserver.instances[0];
     if (!observer) throw new Error('Expected sticky observer to be active');
 
@@ -255,7 +270,8 @@ describe.if(hasDom)('StickyHeaderLane host seams', () => {
     expect(laneBar().classList.contains('border')).toBe(true);
 
     await act(async () => observer.emit(true));
-    expect(laneBar().classList.contains('opacity-0')).toBe(true);
+    expect(laneBar().classList.contains('opacity-100')).toBe(true);
+    expect(laneBar().hasAttribute('inert')).toBe(false);
     expectNoChrome(laneBar());
   });
 
