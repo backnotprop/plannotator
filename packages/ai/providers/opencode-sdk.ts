@@ -62,6 +62,12 @@ export class OpenCodeProvider implements AIProvider {
 	private client: OpencodeClient | null = null;
 	private startPromise: Promise<void> | null = null;
 	private exitHandler: (() => void) | null = null;
+	/**
+	 * Bumped by dispose() to invalidate an in-flight doStart: a spawn that
+	 * completes after its epoch has passed reaps its own server instead of
+	 * resurrecting a provider the runtime already considers disposed.
+	 */
+	private startEpoch = 0;
 
 	constructor(config: OpenCodeConfig) {
 		this.config = config;
@@ -78,6 +84,7 @@ export class OpenCodeProvider implements AIProvider {
 	}
 
 	private async doStart(): Promise<void> {
+		const epoch = this.startEpoch;
 		const { createOpencodeServer, createOpencodeClient } = await getSDK();
 		// port 0 asks opencode for an OS-assigned free port (the SDK reads the
 		// real URL back from the child's "listening" line), so every Plannotator
@@ -88,25 +95,52 @@ export class OpenCodeProvider implements AIProvider {
 			port: this.config.port ?? 0,
 			timeout: 15_000,
 		});
-		this.server = server;
 		// A SIGINT/SIGTERM death is routed through process.exit() by the CLI, so
 		// an "exit" handler is what keeps Ctrl-C from orphaning the spawned
-		// `opencode serve` child (server.close() kills it synchronously). No
-		// SIGHUP listener: that would override the ignored disposition `nohup`
-		// depends on.
-		this.exitHandler = () => {
+		// `opencode serve` child (server.close() kills it synchronously). The
+		// closure captures ITS server — never `this.server`, which a failed
+		// retry could have replaced, leaving the first child unreachable by any
+		// cleanup. No SIGHUP listener: that would override the ignored
+		// disposition `nohup` depends on.
+		const exitHandler = () => {
 			try {
-				this.server?.close();
+				server.close();
 			} catch {
 				// Best effort — the process is exiting either way.
 			}
 		};
-		process.once("exit", this.exitHandler);
+		process.once("exit", exitHandler);
 
-		this.client = createOpencodeClient({
-			baseUrl: server.url,
-			directory: this.config.cwd ?? process.cwd(),
-		});
+		const reap = () => {
+			process.removeListener("exit", exitHandler);
+			try {
+				server.close();
+			} catch {
+				// Best effort — the child may already be gone.
+			}
+		};
+
+		if (epoch !== this.startEpoch) {
+			// dispose() ran while the spawn was in flight: the runtime no longer
+			// wants this provider, so reap the just-spawned server instead of
+			// resurrecting a disposed provider with a live child.
+			reap();
+			throw new Error("OpenCode provider was disposed during startup.");
+		}
+
+		try {
+			this.client = createOpencodeClient({
+				baseUrl: server.url,
+				directory: this.config.cwd ?? process.cwd(),
+			});
+		} catch (err) {
+			// A post-spawn failure must not leak the child: close it and drop the
+			// handler so a retry starts from a clean slate.
+			reap();
+			throw err;
+		}
+		this.server = server;
+		this.exitHandler = exitHandler;
 	}
 
 	private getClient(): OpencodeClient {
@@ -181,6 +215,9 @@ export class OpenCodeProvider implements AIProvider {
 	}
 
 	dispose(): void {
+		// Invalidate any in-flight doStart so a spawn completing after this
+		// point reaps itself instead of resurrecting the provider.
+		this.startEpoch++;
 		if (this.exitHandler) {
 			process.removeListener("exit", this.exitHandler);
 			this.exitHandler = null;

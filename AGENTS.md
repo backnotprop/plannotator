@@ -262,6 +262,8 @@ Automatic resolution is session-only and never writes a preference. Explicit per
 
 > **Codex transport note:** the `codex-sdk` provider id is a stable identifier only — it no longer uses `@openai/codex-sdk` / `codex exec`. It drives a long-lived `codex app-server` process over JSON-RPC (`packages/ai/providers/codex-app-server.ts`), which respects the user's/enterprise-managed approval policy and supports interactive Allow/Deny approvals. The id stays `codex-sdk` to preserve saved cookie preferences, the `agents.ts` mapping, and the UI reasoning-effort gate.
 
+> **OpenCode transport note:** the `opencode-sdk` provider spawns its own `opencode serve` per process on an OS-assigned port (`port: 0`) and never attaches to a server it did not spawn (an attached server can't be cleaned up by us, and opencode's per-directory instances accumulate in it without eviction). The spawned server is closed on dispose and on process exit. Model discovery is deferred behind the provider initializer (`?activate=` from the model picker, or the first opencode session) exactly like Codex — nothing spawns at server boot, so the picker lists opencode with an empty model list until first activation. Regression-pinned by `packages/ai/providers/opencode-sdk.test.ts`.
+
 ## Annotate Flow
 
 ```
