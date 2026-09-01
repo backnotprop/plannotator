@@ -156,8 +156,8 @@ function noteToggle(): HTMLButtonElement | null {
   return document.querySelector<HTMLButtonElement>("[data-annotate-note-toggle]");
 }
 
-function noteInput(): HTMLInputElement | null {
-  return document.querySelector<HTMLInputElement>("[data-annotate-note-input]");
+function noteInput(): HTMLTextAreaElement | null {
+  return document.querySelector<HTMLTextAreaElement>("[data-annotate-note-input]");
 }
 
 async function settle(): Promise<void> {
@@ -189,17 +189,17 @@ async function typeNote(text: string): Promise<void> {
   const input = noteInput();
   if (!input) throw new Error("note field is not open");
   await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
     setter.call(input, text);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
 
-async function pressKey(key: string): Promise<void> {
+async function pressKey(key: string, init: KeyboardEventInit = {}): Promise<void> {
   const input = noteInput();
   if (!input) throw new Error("note field is not open");
   await act(async () => {
-    input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }));
   });
   await settle();
 }
@@ -241,7 +241,7 @@ describe.if(hasDom)("annotate submit-with-note", () => {
     expect(submissions).toHaveLength(0);
   });
 
-  test("Enter sends the note as a GLOBAL_COMMENT in one step", async () => {
+  test("Mod+Enter sends the note as a GLOBAL_COMMENT in one step", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
     await mountAnnotate();
@@ -249,7 +249,10 @@ describe.if(hasDom)("annotate submit-with-note", () => {
     await act(async () => noteToggle()!.click());
     await settle();
     await typeNote("looks fine, watch the migration");
+    // The field is multi-line now: a bare Enter is a newline, never a send.
     await pressKey("Enter");
+    expect(submissions).toHaveLength(0);
+    await pressKey("Enter", { metaKey: true });
 
     expect(submissions).toHaveLength(1);
     const body = submissions[0]!;
@@ -282,7 +285,7 @@ describe.if(hasDom)("annotate submit-with-note", () => {
     await act(async () => noteToggle()!.click());
     await settle();
     await typeNote("also: ship it");
-    await pressKey("Enter");
+    await pressKey("Enter", { metaKey: true });
 
     expect(submissions).toHaveLength(1);
     const annotations = submissions[0]!.annotations ?? [];
@@ -326,7 +329,7 @@ describe.if(hasDom)("annotate submit-with-note", () => {
     await act(async () => noteToggle()!.click());
     await settle();
     await typeNote("the header spacing is off");
-    await pressKey("Enter");
+    await pressKey("Enter", { ctrlKey: true });
 
     expect(submissions).toHaveLength(1);
     const notes = (submissions[0]!.annotations ?? []).filter((a) => a.type === "GLOBAL_COMMENT");
