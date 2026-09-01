@@ -2,7 +2,8 @@ import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
 import type { EditorMode, InputMethod } from '../types';
 import { TaterSpritePullup } from './TaterSpritePullup';
 
-interface AnnotationToolstripProps {
+/** Props for the shared annotation input and action mode toolstrip. */
+export interface AnnotationToolstripProps {
   inputMethod: InputMethod;
   onInputMethodChange: (method: InputMethod) => void;
   mode: EditorMode;
@@ -30,8 +31,14 @@ interface AnnotationToolstripProps {
    * pinpoint-only, so the switch would be a dead control there.
    */
   hideInputMethodSwitch?: boolean;
+  /**
+   * Omit only the Quick Label action. Defaults to false so existing consumers
+   * retain the complete action-mode group.
+   */
+  hideQuickLabel?: boolean;
 }
 
+/** Render the shared input-method and annotation-mode controls. */
 export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   inputMethod,
   onInputMethodChange,
@@ -42,6 +49,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   showHelpLink = true,
   iconOnly = false,
   hideInputMethodSwitch = false,
+  hideQuickLabel = false,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
   const [helpTab, setHelpTab] = useState<'selection' | 'plannotator'>('selection');
@@ -142,20 +150,22 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
               </svg>
             }
           />
-          <ToolstripButton
-            active={mode === 'quickLabel'}
-            onClick={() => onModeChange('quickLabel')}
-            label="Label"
-            color="warning"
-            mounted={mounted}
-            compact={compact}
-            iconOnly={iconOnly}
-            icon={
-              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            }
-          />
+          {!hideQuickLabel && (
+            <ToolstripButton
+              active={mode === 'quickLabel'}
+              onClick={() => onModeChange('quickLabel')}
+              label="Label"
+              color="warning"
+              mounted={mounted}
+              compact={compact}
+              iconOnly={iconOnly}
+              icon={
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              }
+            />
+          )}
         </div>
 
         {/* Help */}

@@ -41,6 +41,8 @@
     "utils/inputMethod.ts",
     "components/ThemeProvider.tsx",
     "test-consumer/theme-modes.tsx",
+    "components/AnnotationToolstrip.tsx",
+    "test-consumer/annotation-toolstrip.tsx",
     "test-consumer/image-annotator-legacy.tsx",
     "components/ImageThumbnail.tsx",
     "components/AttachmentsButton.tsx",
