@@ -88,3 +88,44 @@ describe('parseSectionRefs', () => {
     expect(parseSectionRefs('#Overview', new Map())).toEqual(['#Overview']);
   });
 });
+
+describe('headings whose rendered text differs from their markdown', () => {
+  // A reader copies the heading off the page, not out of the source. Each row
+  // is a heading whose two spellings diverge, and the comment as it would
+  // actually be typed. Before both spellings were indexed, every one of these
+  // rendered as plain text.
+  const resolved = (headingText: string, comment: string) => {
+    const index = buildSectionRefIndex([heading('b1', headingText)]);
+    return parseSectionRefs(comment, index).filter((p) => typeof p !== 'string');
+  };
+
+  it.each([
+    ['**Install** now', '#Install now', 'emphasis'],
+    ['Setup `bun`', '#Setup bun', 'code span'],
+    ['[Setup](./s.md) guide', '#Setup guide', 'link'],
+    ['Part 1 --- end', '#Part 1 — end', 'smart punctuation'],
+    [':rocket: Launch', '#🚀 Launch', 'emoji shortcode'],
+  ])('%p referenced as %p resolves (%s)', (headingText, comment) => {
+    expect(resolved(headingText as string, comment as string)).toHaveLength(1);
+  });
+
+  it('still resolves the raw markdown spelling', () => {
+    // The panel is not the only writer — an agent quoting `/api/plan` sees the
+    // source. Adding the rendered key must not cost the source key.
+    expect(resolved('**Install** now', '#**Install** now')).toHaveLength(1);
+  });
+
+  it('drops a title two different headings both claim after stripping', () => {
+    const index = buildSectionRefIndex([
+      heading('b1', 'Install'),
+      heading('b2', '**Install**'),
+    ]);
+    expect(index.has('Install')).toBe(false);
+  });
+
+  it('keeps a heading whose two spellings are identical', () => {
+    // Registering the same anchor twice is one heading, not a collision.
+    const index = buildSectionRefIndex([heading('b1', 'Overview')]);
+    expect(index.get('Overview')).toBe('overview');
+  });
+});

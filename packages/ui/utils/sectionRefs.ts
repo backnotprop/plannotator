@@ -13,6 +13,7 @@
  */
 
 import { buildHeadingSlugMap } from './slugify';
+import { stripInlineMarkdown, transformPlainText } from './inlineTransforms';
 
 export interface SectionRefSegment {
   /** The heading text, rendered as the link label. */
@@ -24,31 +25,51 @@ export interface SectionRefSegment {
 export type SectionRefPart = string | SectionRefSegment;
 
 /**
- * heading content → anchor id, for headings whose text is unambiguous.
+ * heading text → anchor id, for headings whose text is unambiguous.
  *
- * A title used by two headings is dropped rather than resolved to the first:
- * a reference that could mean either is not a reference.
+ * Each heading is registered under two spellings, because the writer of a
+ * comment and the storage of a heading do not see the same string. A block's
+ * `content` is raw markdown (`**Install** \`bun\``), while the panel and the
+ * document show what `InlineMarkdown` made of it (`Install bun`) — so a reader
+ * copying the heading off the page produced a reference that resolved against
+ * nothing. Registering the rendered approximation alongside the raw text is
+ * what makes the reference work whichever one they typed; it is also the only
+ * way a heading containing a code span can be referenced at all, since
+ * `splitOnCodeSpans` removes the backticked run from the comment before lookup.
+ *
+ * A title claimed by two DIFFERENT headings is dropped rather than resolved to
+ * the first: a reference that could mean either is not a reference. Anchors are
+ * already deduplicated per heading, so an anchor identifies its heading and a
+ * repeat under the same anchor is just one heading's two spellings.
  */
 export function buildSectionRefIndex(
   blocks: Array<{ id: string; type: string; content: string }>,
 ): Map<string, string> {
   const slugs = buildHeadingSlugMap(blocks);
   const index = new Map<string, string>();
-  const duplicated = new Set<string>();
+  const ambiguous = new Set<string>();
+
+  const register = (title: string, anchor: string) => {
+    const key = title.trim();
+    if (!key) return;
+    const existing = index.get(key);
+    if (existing === undefined) {
+      index.set(key, anchor);
+      return;
+    }
+    if (existing !== anchor) ambiguous.add(key);
+  };
 
   for (const block of blocks) {
     if (block.type !== 'heading') continue;
-    const title = block.content.trim();
+    const raw = block.content.trim();
     const anchor = slugs.get(block.id);
-    if (!title || !anchor) continue;
-    if (index.has(title)) {
-      duplicated.add(title);
-      continue;
-    }
-    index.set(title, anchor);
+    if (!raw || !anchor) continue;
+    register(raw, anchor);
+    register(transformPlainText(stripInlineMarkdown(raw)), anchor);
   }
 
-  for (const title of duplicated) index.delete(title);
+  for (const title of ambiguous) index.delete(title);
   return index;
 }
 
