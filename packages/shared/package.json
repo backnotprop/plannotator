@@ -37,6 +37,7 @@
     "./favicon": "./favicon.ts",
     "./code-file": "./code-file.ts",
     "./resolve-file": "./resolve-file.ts",
+    "./doc-resolve": "./doc-resolve.ts",
     "./annotate-reference-roots-node": "./annotate-reference-roots-node.ts",
     "./extract-code-paths": "./extract-code-paths.ts",
     "./external-annotation": "./external-annotation.ts",

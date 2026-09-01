@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -350,5 +350,144 @@ describe("annotatable document size cap", () => {
 
 		expect(res.status).toBe(413);
 		expect(data.error).toBe("File too large (max 2MB)");
+	});
+});
+
+// Each branch resolves its own path, so a symlink escaping the root has to be
+// denied on all six. A single-vector test passes against a fix that missed one.
+describe("symlink containment", () => {
+	function makeEscapeFixture(): { root: string; outside: string } {
+		const root = makeTempDir("plannotator-symlink-root-");
+		const outside = makeTempDir("plannotator-symlink-outside-");
+		writeTempFile(outside, "secret.md", "SECRET-MD\n");
+		writeTempFile(outside, "secret.html", "<p>SECRET-HTML</p>");
+		writeTempFile(outside, "secret.ts", "// SECRET-TS\n");
+		writeTempFile(outside, "deep.md", "SECRET-DEEP\n");
+		writeTempFile(root, "sibling.md", "sibling\n");
+		symlinkSync(join(outside, "secret.md"), join(root, "link.md"));
+		symlinkSync(join(outside, "secret.html"), join(root, "link.html"));
+		symlinkSync(join(outside, "secret.ts"), join(root, "link.ts"));
+		symlinkSync(outside, join(root, "linkdir"));
+		return { root, outside };
+	}
+
+	const escapeVectors: { branch: string; path: (root: string) => string; withBase?: boolean }[] = [
+		{ branch: "base-relative document", path: () => "link.md", withBase: true },
+		{ branch: "markdown resolver, bare name", path: () => "link.md" },
+		{ branch: "markdown resolver, absolute path", path: (root) => join(root, "link.md") },
+		{ branch: "raw HTML", path: () => "link.html" },
+		{ branch: "code file", path: () => "link.ts" },
+		{ branch: "symlinked directory", path: () => "linkdir/deep.md" },
+	];
+
+	for (const vector of escapeVectors) {
+		test(`denies an escaping symlink via the ${vector.branch} branch`, async () => {
+			const { root } = makeEscapeFixture();
+
+			const res = await getDoc(vector.path(root), {
+				rootPaths: [root],
+				base: vector.withBase ? root : undefined,
+			});
+
+			expect(res.status).toBe(403);
+			expect(await res.text()).not.toContain("SECRET");
+		});
+	}
+
+	test("ordinary in-root siblings are still served", async () => {
+		const { root } = makeEscapeFixture();
+
+		const res = await getDoc("sibling.md", { rootPaths: [root] });
+		const data = await res.json() as { markdown?: string };
+
+		expect(res.status).toBe(200);
+		expect(data.markdown).toBe("sibling\n");
+	});
+
+	test("doc/exists reports an escaping symlink as missing, not found", async () => {
+		const { root } = makeEscapeFixture();
+
+		const data = await postDocExists({ paths: ["link.ts"] }, { rootPath: root });
+
+		expect(data.results["link.ts"]).toEqual({ status: "missing" });
+	});
+
+	test("refuses a base directory that reaches outside the root through a symlink", async () => {
+		const { root } = makeEscapeFixture();
+
+		const res = await getDoc("deep.md", { rootPaths: [root], base: join(root, "linkdir") });
+
+		expect(res.status).toBe(404);
+		expect(await res.text()).not.toContain("SECRET");
+	});
+
+	test("answers 403 for an escaping absolute path whether or not it exists", async () => {
+		const { root, outside } = makeEscapeFixture();
+
+		const existing = await getDoc(join(outside, "secret.md"), { rootPaths: [root] });
+		const absent = await getDoc(join(outside, "absent.md"), { rootPaths: [root] });
+
+		expect(existing.status).toBe(403);
+		expect(absent.status).toBe(403);
+	});
+});
+
+// A root addressed through a symlink is searched under both its spellings, so
+// the one file it finds twice must stay one match.
+describe("symlinked root", () => {
+	test("serves a bare filename from a root given as a symlink", async () => {
+		const real = makeTempDir("plannotator-symroot-real-");
+		const parent = makeTempDir("plannotator-symroot-parent-");
+		const link = join(parent, "docs");
+		writeTempFile(real, "note.md", "note\n");
+		symlinkSync(real, link);
+
+		const res = await getDoc("note.md", { rootPaths: [link] });
+		const data = await res.json() as { markdown?: string };
+
+		expect(res.status).toBe(200);
+		expect(data.markdown).toBe("note\n");
+	});
+});
+
+describe("ambiguous resolution", () => {
+	test.each<{ name: string; file: string; request: string; error: string }>([
+		{
+			name: "code paths report the code shape",
+			file: "dup.ts",
+			request: "dup.ts",
+			error: "Ambiguous path 'dup.ts'",
+		},
+		{
+			name: "document names report the count shape",
+			file: "dup.md",
+			request: "dup.md",
+			error: "Ambiguous filename 'dup.md': found 2 matches",
+		},
+	])("$name", async ({ file, request, error }) => {
+		const root = makeTempDir("plannotator-ambiguous-");
+		writeTempFile(root, join("a", file), "a");
+		writeTempFile(root, join("b", file), "b");
+
+		const res = await getDoc(request, { rootPaths: [root] });
+		const data = await res.json() as { error?: string; matches?: string[] };
+
+		expect(res.status).toBe(400);
+		expect(data.error).toBe(error);
+		expect(data.matches?.slice().sort()).toEqual([join("a", file), join("b", file)]);
+	});
+});
+
+describe("raw HTML size cap", () => {
+	test("rejects an oversized .html with 413 whether or not a base is given", async () => {
+		const root = makeTempDir("plannotator-html-cap-");
+		writeFileSync(join(root, "huge.html"), `<p>${"x".repeat(2 * 1024 * 1024 + 1)}</p>`);
+
+		const withoutBase = await getDoc("huge.html", { rootPaths: [root] });
+		const withBase = await getDoc("huge.html", { rootPaths: [root], base: root });
+
+		expect(withoutBase.status).toBe(413);
+		expect(withBase.status).toBe(413);
+		expect((await withBase.json() as { error?: string }).error).toBe("File too large (max 2MB)");
 	});
 });
