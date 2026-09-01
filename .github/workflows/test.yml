@@ -37,6 +37,12 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Smoke-test published UI package
+        # This packs the real tarball and installs it with a pinned pnpm CLI in
+        # a temp consumer outside the monorepo. It prevents workspace protocols
+        # from leaking into the manifest published to external consumers.
+        run: bun run --cwd packages/ui smoke:package
+
       # The extension has its own tsconfig (Node libs, no DOM) and is not part
       # of the root typecheck, so nothing was checking it. A type error in the
       # panel cookie seed shipped that way; this is the step that would have

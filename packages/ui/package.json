@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.35.0",
+  "version": "0.35.1",
   "type": "module",
   "exports": {
     "./components/*": "./components/*.tsx",
@@ -74,7 +74,7 @@
     "@lezer/highlight": "^1.2.3",
     "@pierre/diffs": "1.3.2",
     "@plannotator/atomic-editor": "^0.8.0",
-    "@plannotator/core": "workspace:*",
+    "@plannotator/core": "0.25.0",
     "@plannotator/markdown-editor": "^0.4.0",
     "@plannotator/web-highlighter": "^0.8.1",
     "@tanstack/react-table": "^8.21.3",
@@ -113,6 +113,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:css": "vite build --config vite.css.config.ts && rm -f styles.js",
     "build:bridge-assets": "bun run scripts/build-bridge-assets.ts",
+    "smoke:package": "bun run scripts/package-smoke.ts",
     "prepack": "bun run build:css && bun run build:bridge-assets"
   }
 }
