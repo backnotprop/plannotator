@@ -104,14 +104,21 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 					type: "opencode-sdk",
 					cwd,
 				});
+				const providerId = registry.register(provider);
+				// Deferred like Codex: fetchModels spawns `opencode serve`, so it
+				// must NOT run eagerly at startup — that spawned a server on every
+				// session for every user with opencode installed, and interrupted
+				// sessions orphaned it. The initializer runs on first explicit
+				// activation (?activate= from the model picker) or first opencode
+				// session.
 				if (provider && "fetchModels" in provider) {
-					modelDiscovery.push(
-						(provider as { fetchModels: () => Promise<void> })
-							.fetchModels()
-							.catch(() => {}),
+					providerInitializers.set(
+						providerId,
+						ai.createBestEffortOnce(
+							() => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
+						),
 					);
 				}
-				registry.register(provider);
 			}
 		} catch {
 			// OpenCode not available.
