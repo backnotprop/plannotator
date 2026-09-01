@@ -735,6 +735,10 @@ if (args[0] === "sessions") {
 
   const reviewArgs = parseReviewArgs(args.slice(1));
   const urlArg = reviewArgs.prUrl;
+  if (reviewArgs.patchFile && urlArg) {
+    console.error("--patch-file cannot be combined with a PR/MR URL");
+    process.exit(1);
+  }
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
 
@@ -751,7 +755,18 @@ if (args[0] === "sessions") {
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
   let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
 
-  if (isPRMode) {
+  if (reviewArgs.patchFile) {
+    try {
+      rawPatch = reviewArgs.patchFile === "-"
+        ? await Bun.stdin.text()
+        : await Bun.file(reviewArgs.patchFile).text();
+      gitRef = reviewArgs.patchFile === "-" ? "stdin patch" : reviewArgs.patchFile;
+      initialDiffType = "static-patch";
+    } catch (err) {
+      console.error(`Failed to read patch file: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  } else if (isPRMode) {
     // --- PR Review Mode ---
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
@@ -1036,7 +1051,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
-    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
+    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
     initialFingerprint,
     prMetadata,
@@ -1720,6 +1735,10 @@ if (args[0] === "sessions") {
     inputJson,
   );
   const reviewArgs = parseReviewArgs(typeof input.arguments === "string" ? input.arguments : "");
+  if (reviewArgs.patchFile) {
+    console.error("--patch-file is only supported by the direct plannotator review CLI");
+    process.exit(1);
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
 

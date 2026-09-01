@@ -651,6 +651,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 			try {
 				const { parseReviewArgs } = await import("./generated/review-args.ts");
 				const reviewArgs = parseReviewArgs(args ?? "");
+				if (reviewArgs.patchFile) {
+					ctx.ui.notify("--patch-file is only supported by the direct plannotator review CLI", "error");
+					return;
+				}
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType,

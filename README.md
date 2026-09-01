@@ -127,6 +127,7 @@ Need a realistic document to try? Copy the [product requirements document templa
 /plannotator-review <github-pr-url>    # Review a GitHub pull request
 /plannotator-review <gitlab-mr-url>    # Review a GitLab merge request
 plannotator review --gitbutler         # Review an active GitButler workspace
+plannotator review --patch-file reading.diff # Review a static caller-supplied unified diff
 ```
 
 GitButler users can review the whole workspace, one stack, or one branch layer. See the [GitButler workflow guide](https://docs.plannotator.ai/open-source/workflows/gitbutler).

@@ -69,4 +69,30 @@ describe("parseReviewArgs", () => {
       useLocal: true,
     });
   });
+
+  test("parses one external patch file", () => {
+    // given
+    const input = ["--patch-file", "reading.diff"];
+
+    // when
+    const result = parseReviewArgs(input);
+
+    // then
+    expect(result.patchFile).toBe("reading.diff");
+    expect(result.prUrl).toBeUndefined();
+  });
+
+  test("rejects a missing or duplicate patch file", () => {
+    // given
+    const missingPath = ["--patch-file"];
+    const duplicatePath = ["--patch-file", "one.diff", "--patch-file", "two.diff"];
+
+    // when
+    const parseMissingPath = () => parseReviewArgs(missingPath);
+    const parseDuplicatePath = () => parseReviewArgs(duplicatePath);
+
+    // then
+    expect(parseMissingPath).toThrow("--patch-file requires a path or -");
+    expect(parseDuplicatePath).toThrow("--patch-file may only be specified once");
+  });
 });
