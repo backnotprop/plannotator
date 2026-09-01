@@ -224,6 +224,36 @@ Send Feedback → feedback sent to agent session
 Approve → "LGTM" sent to agent session
 ```
 
+### Send with additional feedback
+
+The agent-mode review toolbar's Send Feedback is a joined split pill
+`[Send Feedback | v]` (`packages/review-editor/components/ReviewSendControl.tsx`,
+wired through `AgentReviewActions`'s optional `note` prop — omit it and the
+incumbent `FeedbackButton` renders unchanged). The LEFT segment never changes
+meaning: same label, icon, `labelBreakpoint="lg"` spans and `handleSendFeedback`
+as before, except that with nothing to send it opens the panel rather than
+raising the "No Annotations" dialog. The caret opens a right-anchored panel with
+a multi-line note field (Enter is a newline, `Mod+Enter` submits, `Escape` closes
+and KEEPS the text, outside pointerdown closes) whose own distinct action reads
+**Send with additional feedback**. The two actions are always different buttons.
+
+The note is materialized at submit time by `commitReviewNote` in
+`packages/review-editor/App.tsx` as a `scope: 'general'` `CodeAnnotation`
+(`filePath: ''`, `lineStart/lineEnd: 0` — the documented sentinels), so it rides
+the sidebar's General group, `renderGeneralComments`'s `## General` export
+section, `buildFileScopedBody`, the draft, and the `/api/feedback` annotations
+array with **zero server change** (`annotations` is `unknown[]` on both runtimes
+and is only counted and forwarded). It is deliberately NOT recorded in review
+undo history (it lives for one submit) and NOT stamped with PR context, so it
+survives an in-place PR switch or a layer/full-stack toggle. Submission waits one
+render, because `feedbackMarkdown` and `handleSendFeedback` close over
+`allAnnotations`. Compact/touch gets the same commit path through an additive
+`note` row in the header `ActionMenu` opening `ReviewNoteDialog`; platform (PR)
+mode deliberately has no caret, since `ReviewSubmissionDialog` already owns the
+general-comment field there. LGTM-with-a-note is a separate, coupled phase (four
+consumer call sites discard `result.feedback` on the approved path) and is not
+built.
+
 ### Since-main default review view
 
 The default code-review diff is **`since-base`** — a composite of `merge-base(base, HEAD)` vs the working tree plus untracked files ("everything a PR would show if you committed and pushed now"). It can render as a three-section **git status** panel (Committed / Changes / Untracked) via `SectionsPanel`, with a `Tree | Git status | Commits` toggle (`PanelViewToggle`). The Commits segment (git-local sessions only) is a linear `--first-parent` history rail (`CommitsPanel`): clicking a commit opens its own diff (`commit:<sha>`, vs its first parent) as the all-files view headed by the commit message rendered as markdown. The Commits view is a self-contained detour: entering it memoizes the previously active diff, exiting to Tree restores that diff verbatim (exiting to Git status resets to `since-base` as always), the memo clears whenever any non-commit diff is applied, and a reload that serves a commit-family diff with a non-Commits panel view snaps once to the session default so the commit diff cannot outlive the visit. The toggle never writes the persisted `reviewPanelView`/`defaultDiffType` pair (no server writes from a toggle click), but it does record a cookie-only last-used memo (`reviewPanelViewLastUsed`, `sections` | `tree` — never `commits`; the Commits view is session-only). A review OPENS on session choice ?? last-used memo ?? persisted `reviewPanelView` (cookie-only, written only by Settings and `ReviewSetupDialog` through `setReviewPanelView()`, which also syncs the memo so an explicit choice is never shadowed by a stale one — except the App self-heal, which passes `recordLastUsed: false` to repair the diff half of a conflicted pair without touching the memo). The first-run initializer marks review-setup-seen when it seeds the cookie-only Tree choice, not only on dismiss, so it is genuinely one-time per browser and cannot overwrite a returning reviewer's persisted or last-used view; it inherits the resolved `defaultDiffType` without a server config write. The persisted pair is coupled: the Sections view only renders `since-base`, so choosing a classic diff default snaps the persisted view to Tree and vice-versa (enforced in `ReviewSetupDialog`, the Settings Git tab, and the App first-run initializer).

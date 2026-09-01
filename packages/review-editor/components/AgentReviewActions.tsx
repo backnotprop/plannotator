@@ -1,5 +1,6 @@
 import React from 'react';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
+import { ReviewSendControl, type ReviewSubmitNoteControl } from './ReviewSendControl';
 
 interface AgentReviewActionsProps {
   totalAnnotationCount: number;
@@ -9,17 +10,20 @@ interface AgentReviewActionsProps {
   onSendFeedback: () => void;
   onApprove: () => void;
   onExit: () => void;
+  /** Enables the note half of the split Send control. Omitted (a host that
+   *  does not wire a note) falls back to the incumbent FeedbackButton. */
+  note?: ReviewSubmitNoteControl;
 }
 
 /**
  * Toolbar actions for agent review mode (all non-platform origins).
  *
- * The left button flips based on whether there are annotations:
- *   No annotations → [Close]  [Approve]
- *   Has annotations → [Send Feedback]  [Approve]
- *
  * - Close (Exit): closes the session without sending feedback
- * - Send Feedback: primary action when annotations exist
+ * - Send Feedback: the incumbent send. With a `note` it is the left segment of
+ *   a split pill whose caret opens a review-level note composer; the segment's
+ *   label, icon, breakpoints and handler are unchanged either way, and with no
+ *   note wired it is the plain FeedbackButton shown only when annotations
+ *   exist.
  * - Approve: LGTM; dimmed when annotations exist (they won't be sent)
  */
 export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
@@ -30,6 +34,7 @@ export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
   onSendFeedback,
   onApprove,
   onExit,
+  note,
 }) => {
   const busy = isSendingFeedback || isApproving || isExiting;
   const hasAnnotations = totalAnnotationCount > 0;
@@ -43,7 +48,15 @@ export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
         labelBreakpoint="lg"
       />
 
-      {hasAnnotations && (
+      {note ? (
+        <ReviewSendControl
+          hasFeedback={hasAnnotations}
+          disabled={busy}
+          isLoading={isSendingFeedback}
+          onSend={onSendFeedback}
+          note={note}
+        />
+      ) : hasAnnotations ? (
         <FeedbackButton
           onClick={onSendFeedback}
           disabled={busy}
@@ -54,7 +67,7 @@ export const AgentReviewActions: React.FC<AgentReviewActionsProps> = ({
           title="Send feedback"
           labelBreakpoint="lg"
         />
-      )}
+      ) : null}
 
       <div className="relative group/approve inline-flex items-center">
         <ApproveButton

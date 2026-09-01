@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { AgentReviewActions } from './components/AgentReviewActions';
+import { ReviewNoteDialog, type ReviewSubmitNoteControl } from './components/ReviewSendControl';
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { storage } from '@plannotator/ui/utils/storage';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
@@ -3563,6 +3564,61 @@ const ReviewApp: React.FC = () => {
     }
   }, [getDraftGeneration]);
 
+  // --- Review-level note ("Send with additional feedback") ---------------
+  // The note is materialized at submit time as a scope:'general' annotation so
+  // it rides the existing export (## General) and the /api/feedback annotations
+  // array with no server change. Deliberately NOT recorded in review history
+  // (it lives for one submit) and deliberately NOT stamped with PR context, so
+  // it survives an in-place PR switch or a layer/full-stack toggle.
+  const [compactNoteOpen, setCompactNoteOpen] = useState(false);
+  const [pendingNoteId, setPendingNoteId] = useState<string | null>(null);
+
+  const commitReviewNote = useCallback((text: string): string | null => {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    const note: CodeAnnotation = {
+      id: `review-note-${Date.now()}`,
+      type: 'comment',
+      scope: 'general',
+      filePath: '',
+      lineStart: 0,
+      lineEnd: 0,
+      side: 'new',
+      text: trimmed,
+      createdAt: Date.now(),
+      ...(identity ? { author: identity } : {}),
+    };
+    annotationsRef.current = [...annotationsRef.current, note];
+    setAnnotations(annotationsRef.current);
+    return note.id;
+  }, [identity]);
+
+  const handleSubmitReviewNote = useCallback((text: string) => {
+    if (isSendingFeedback || isApproving || isExiting || submitted) return;
+    const id = commitReviewNote(text);
+    if (!id) {
+      // Nothing typed: fall back to the incumbent send when there is something
+      // to send, and otherwise do nothing (an empty note is not a submission).
+      if (totalAnnotationCount > 0) void handleSendFeedback();
+      return;
+    }
+    setPendingNoteId(id);
+  }, [commitReviewNote, handleSendFeedback, isApproving, isExiting, isSendingFeedback, submitted, totalAnnotationCount]);
+
+  // feedbackMarkdown and handleSendFeedback close over allAnnotations, so the
+  // send has to wait for the render that carries the note.
+  useEffect(() => {
+    if (!pendingNoteId) return;
+    if (!allAnnotations.some(a => a.id === pendingNoteId)) return;
+    setPendingNoteId(null);
+    void handleSendFeedback();
+  }, [allAnnotations, handleSendFeedback, pendingNoteId]);
+
+  const reviewNoteControl = useMemo<ReviewSubmitNoteControl>(
+    () => ({ onSubmit: handleSubmitReviewNote }),
+    [handleSubmitReviewNote],
+  );
+
   // Submit reviews to one or more PRs via /api/pr-action
   const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', plan: ReviewSubmission, generalComment?: string) => {
     setIsPlatformActioning(true);
@@ -3917,6 +3973,15 @@ const ReviewApp: React.FC = () => {
             onSelect: () => totalAnnotationCount > 0 ? setShowExitWarning(true) : handleExit(),
             disabled: compactActionBusy,
           },
+          ...(!platformMode
+            ? [{
+                id: 'note' as const,
+                label: 'Add a note',
+                ...(totalAnnotationCount > 0 ? { subtitle: 'Sent with your annotations' } : {}),
+                onSelect: () => setCompactNoteOpen(true),
+                disabled: compactActionBusy,
+              }]
+            : []),
           ...(totalAnnotationCount > 0
             ? [{
                 id: 'feedback' as const,
@@ -4289,6 +4354,7 @@ const ReviewApp: React.FC = () => {
                     onSendFeedback={handleSendFeedback}
                     onApprove={() => totalAnnotationCount > 0 ? setShowApproveWarning(true) : handleApprove()}
                     onExit={() => totalAnnotationCount > 0 ? setShowExitWarning(true) : handleExit()}
+                    note={submitted ? undefined : reviewNoteControl}
                   />
                 ) : (
                   <>
@@ -4966,6 +5032,15 @@ const ReviewApp: React.FC = () => {
             variant="info"
           />
         )}
+
+        {/* Compact/touch review-level note composer */}
+        <ReviewNoteDialog
+          isOpen={compactNoteOpen}
+          onClose={() => setCompactNoteOpen(false)}
+          note={reviewNoteControl}
+          disabled={compactActionBusy || !!submitted}
+          annotationCount={totalAnnotationCount}
+        />
 
         {/* No annotations dialog */}
         <ConfirmDialog

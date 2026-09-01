@@ -69,4 +69,50 @@ describe('ReviewHeaderMenu compact review actions', () => {
     expect(onFeedback).toHaveBeenCalledTimes(1);
     expect(host?.textContent).not.toContain('Post comments');
   });
+
+  // Standing toolbar-integrity rule: the additive 'note' row must not remove,
+  // reorder, or disable any incumbent compact action. The closed-union id edit
+  // is where that actually risks breaking.
+  test.skipIf(!hasDom)('the additive note row joins the incumbent rows without displacing them', async () => {
+    const onNote = mock(() => {});
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+
+    await act(async () => root?.render(
+      <ThemeProvider defaultTheme="dark">
+        <ReviewHeaderMenu
+          onOpenSettings={() => {}}
+          onOpenExport={() => {}}
+          onCopyAgentInstructions={() => {}}
+          onToggleFileTree={() => {}}
+          onToggleSidebar={() => {}}
+          isFileTreeOpen={false}
+          isSidebarOpen={false}
+          compactTouchLayout
+          compactActions={[
+            { id: 'exit', label: 'Exit review', onSelect: () => {} },
+            { id: 'note', label: 'Add a note', subtitle: 'Sent with your annotations', onSelect: onNote },
+            { id: 'feedback', label: 'Send feedback', subtitle: '2 annotations', onSelect: () => {} },
+            { id: 'approve', label: 'Approve', onSelect: () => {} },
+          ]}
+          agentInstructionsEnabled={false}
+          appVersion="test"
+        />
+      </ThemeProvider>,
+    ));
+
+    await act(async () => host?.querySelector<HTMLButtonElement>('button[aria-label="Options"]')?.click());
+
+    const labels = ['Exit review', 'Add a note', 'Send feedback', 'Approve'];
+    const rows = Array.from(host?.querySelectorAll('button') ?? [])
+      .filter((button) => labels.some((label) => button.textContent?.includes(label)));
+    expect(rows.length).toBe(4);
+    expect(rows.map((button) => labels.find((label) => button.textContent?.includes(label)))).toEqual(labels);
+    expect(rows.every((button) => !button.disabled)).toBe(true);
+
+    const noteRow = rows[1];
+    await act(async () => noteRow.click());
+    expect(onNote).toHaveBeenCalledTimes(1);
+  });
 });

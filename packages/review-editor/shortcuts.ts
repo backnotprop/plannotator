@@ -8,6 +8,7 @@ import {
   reviewAllFilesDiffShortcuts,
   reviewAnnotationToolbarShortcuts,
   reviewFileTreeShortcuts,
+  reviewNoteShortcuts,
   reviewPrCommentsShortcuts,
   reviewSuggestionModalShortcuts,
   reviewTourDialogShortcuts,
@@ -110,6 +111,7 @@ export const useReviewEditorDoubleTap = createDoubleTapShortcutsHook(reviewEdito
 
 export const reviewSettingsShortcutRegistry = createShortcutRegistry([
   reviewEditorShortcuts,
+  reviewNoteShortcuts,
   historyShortcuts,
   reviewFileTreeShortcuts,
   reviewAllFilesDiffShortcuts,

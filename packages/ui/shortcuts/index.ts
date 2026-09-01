@@ -33,3 +33,4 @@ export { reviewAllFilesDiffShortcuts, useReviewAllFilesDiffShortcuts } from './c
 export { reviewAiShortcuts, useReviewAiShortcuts } from './code-review/ai.shortcuts';
 export { reviewSuggestionModalShortcuts, useReviewSuggestionModalShortcuts } from './code-review/suggestionModal.shortcuts';
 export { reviewTourDialogShortcuts, useReviewTourDialogShortcuts } from './code-review/tourDialog.shortcuts';
+export { reviewNoteShortcuts } from './code-review/reviewNote.shortcuts';
