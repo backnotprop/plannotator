@@ -167,6 +167,7 @@ jobs:
           packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
           packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
           packages/ui/components/AnnotationToolstrip.test.tsx
+          packages/ui/components/StickyHeaderLane.test.tsx
           packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
           packages/ui/webmcp/useToolset.seam.test.tsx

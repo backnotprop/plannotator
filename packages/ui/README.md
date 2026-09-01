@@ -137,6 +137,24 @@ The srcdoc then carries one classic `<script src>` in the exact place the inline
 - **`showHelpLink={false}`** for hosts: the default help modal embeds Plannotator's own video walkthroughs.
 - **`hideInputMethodSwitch`** omits the pinpoint/drag input-method switch.
 
+#### Sticky header lane host props
+
+`components/StickyHeaderLane` is the measured compact companion to `Viewer`'s
+`[data-sticky-actions]` cluster. Its defaults preserve Plannotator's ghost-header
+behavior: hidden and inert at rest, then visible with card chrome once stuck.
+
+- **`visibility="always"`** keeps the existing measured left lane visible and
+  interactive at rest as well as while stuck. Resting lanes have no background,
+  border, backdrop, shadow, or new document padding; stuck lanes retain the
+  incumbent chrome.
+- **`sticky={false}`** uses non-sticky positioning, creates no intersection
+  observer, and scrolls away normally. Pass the same value to
+  `Viewer.stickyActions` so the left lane and right action cluster follow one
+  policy. Combine it with `visibility="always"` for a visible non-sticky header.
+- Wide, tight icon-only, and narrow stacked layouts continue to derive from the
+  wrapper width and the measured action-cluster width. `hideQuickLabel` is still
+  forwarded to the compact toolstrip.
+
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
 The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.modelContext`) call in-page tools on a document surface. Feature-detected once; a browser without the API sees no registration, no DOM, no network, no timers. Seam: `configurePlannotatorUI({ webmcp: { enabled, namePrefix } })`, default enabled with the `plannotator.` prefix; pass `enabled: false` to keep a host page tool-free, or your own prefix to namespace the tools beside your own. There is deliberately no confirmation seam: the catalog is read-and-comment only (no approve / submit / close tools), and the agent may only edit or remove comments stamped `source: "browser-agent"`.

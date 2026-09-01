@@ -43,6 +43,8 @@
     "test-consumer/theme-modes.tsx",
     "components/AnnotationToolstrip.tsx",
     "test-consumer/annotation-toolstrip.tsx",
+    "components/StickyHeaderLane.tsx",
+    "test-consumer/sticky-header-lane.tsx",
     "test-consumer/image-annotator-legacy.tsx",
     "components/ImageThumbnail.tsx",
     "components/AttachmentsButton.tsx",
