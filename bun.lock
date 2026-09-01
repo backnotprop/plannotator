@@ -191,7 +191,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.0",
+      "version": "0.25.1",
       "devDependencies": {
         "typescript": "~5.8.2",
       },
@@ -290,7 +290,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.35.1",
+      "version": "0.35.2",
       "dependencies": {
         "@base-ui/react": "^1.6.0",
         "@codemirror/autocomplete": "^6.20.3",
