@@ -606,6 +606,7 @@ async function createCodeReviewBrowserSession(
 		gitRef,
 		error: diffError,
 		origin: "pi",
+		project: detectProjectName(),
 		diffType,
 		gitContext: gitCtx,
 		initialBase,

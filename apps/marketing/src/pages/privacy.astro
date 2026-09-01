@@ -25,8 +25,10 @@ import Footer from '../components/Footer.astro';
         <ul>
           <li>plan and annotate version history</li>
           <li>annotation drafts and saved review decisions</li>
+          <li>a durable archive of the feedback you submit, under <code>~/.plannotator/feedback/</code></li>
           <li>configuration, session records, guide history, and diagnostic logs</li>
         </ul>
+        <p>The feedback archive is on by default. Every plan decision, code review submission, and annotate submission is recorded locally so a review is not lost when an agent times out or a terminal is closed. Each record holds your own review text, the document or code excerpts it quotes, and annotation metadata; it does not hold the diff itself. Nothing prunes the directory, so records are kept until you delete them. Set <code>PLANNOTATOR_FEEDBACK_HISTORY=0</code> to never write it, and delete <code>~/.plannotator/feedback/</code> (or one project subdirectory inside it) to forget what is there. Like the rest of this data, it stays on your machine and is never sent to the Plannotator project owner.</p>
         <p>Some UI preferences are stored as functional browser cookies. Plannotator does not send this local review data to the Plannotator project owner as telemetry or analytics.</p>
 
         <h2>3. Automatic network requests</h2>
@@ -84,6 +86,7 @@ import Footer from '../components/Footer.astro';
           <li>Set <code>PLANNOTATOR_SHARE=disabled</code> to hide the open source sharing controls.</li>
           <li>Set <code>PLANNOTATOR_JINA=0</code> or use <code>--no-jina</code> to prevent URL annotation from using Jina. The requested URL is still fetched directly.</li>
           <li>Set <code>PLANNOTATOR_AI=disabled</code> to disable the in-app AI and review-agent surfaces.</li>
+          <li>Set <code>PLANNOTATOR_FEEDBACK_HISTORY=0</code> to stop archiving submitted feedback locally, or delete <code>~/.plannotator/feedback/</code> to remove what has been archived.</li>
           <li>Self-host the share portal and paste service, or do not use link sharing.</li>
           <li>Do not send a share link through a service you do not trust with the content or key in that link.</li>
           <li>The automatic GitHub release check currently has no opt-out setting.</li>

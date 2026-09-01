@@ -112,7 +112,8 @@ import {
   extractMarkerNonce,
   type MarkerEngineId,
 } from "./marker-review";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveCursorSandbox, resolveGuideHistory } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory } from "./config";
+import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
 import {
@@ -196,6 +197,15 @@ export interface ReviewServerOptions {
    * once a pool checkout is ready.
    */
   prPatchIncomplete?: boolean;
+  /**
+   * Detected project name, used to key the durable feedback archive
+   * (`feedback/{project}/`). Mirrors the annotate server's `project` option.
+   * Callers should pass `detectProjectName()`; without it the server falls
+   * back to deriving a name from the review's working directory, which is
+   * wrong in PR mode (no `gitContext`, and `--local` points `agentCwd` at a
+   * `pool/pr-<n>` checkout, so records would bucket under `pr-123`).
+   */
+  project?: string;
   /** Working directory for agent processes (e.g., --local worktree). Independent of diff pipeline. */
   agentCwd?: string;
   /** Per-PR worktree pool. When set, pr-switch creates worktrees instead of checking out. */
@@ -835,6 +845,88 @@ export async function startReviewServer(
   // mode round-trips.
   const currentSnapshotId = (): string =>
     `${draftKey}:${currentDiffType}${isPRMode ? `:${currentPRDiffScope}` : ""}${currentContextRevision ? `:${currentContextRevision}` : ""}`;
+
+  // --- Durable feedback archive --------------------------------------------
+  //
+  // Code review was the headline gap: /api/feedback deleted the draft, settled
+  // the decision promise, and persisted NOTHING. When the invoking agent had
+  // already timed out, the review existed nowhere — the exact failure #678
+  // fixed for annotate. Every submission now appends one record to
+  // feedback/{project}/index.jsonl (plus a markdown sidecar when it carries
+  // content) BEFORE the draft is deleted.
+  //
+  // Project bucketing: prefer the caller's detected project name. The cwd
+  // fallback is only right for a plain local review — PR mode has no
+  // gitContext, and `--local` sets agentCwd to a `pool/pr-<n>` checkout, so
+  // deriving from cwd there would file every PR review under `pr-123`.
+  //
+  // Known limitation, deliberately not chased here: a caller that passes no
+  // project AND reviews a moved/renamed working directory buckets under the
+  // new directory name, exactly like the rest of the data dir does.
+  const feedbackProject = (): string =>
+    options.project?.trim()
+      ? options.project
+      : deriveFeedbackProject(gitContext?.cwd ?? options.agentCwd ?? process.cwd());
+
+  // Diff IDENTITY only: refs, view, snapshot id, and size metadata. The patch
+  // bytes are deliberately not archived (guide history already showed what
+  // uncapped patch copies cost); the user can regenerate the diff from these.
+  const feedbackReviewTarget = (): FeedbackReviewTarget => {
+    const target: FeedbackReviewTarget = {
+      diffType: String(currentDiffType),
+      base: currentBase,
+      gitRef: currentGitRef,
+      snapshotId: currentSnapshotId(),
+      changedFiles: countChangedFiles(currentPatch),
+      patchBytes: currentPatch.length,
+    };
+    if (sessionVcsType) target.vcsType = sessionVcsType;
+    else if (workspace) target.vcsType = "workspace";
+    const cwd = gitContext?.cwd ?? options.agentCwd;
+    if (cwd) target.cwd = cwd;
+    if (prMetadata) {
+      target.pr = {
+        provider: prMetadata.platform,
+        repo:
+          prMetadata.platform === "github"
+            ? `${prMetadata.owner}/${prMetadata.repo}`
+            : prMetadata.projectPath,
+        number: prMetadata.platform === "github" ? prMetadata.number : prMetadata.iid,
+      };
+    }
+    return target;
+  };
+
+  /**
+   * Append the archive record for one submission.
+   *
+   * Returns whether the draft delete may proceed: true when the record was
+   * written, when the archive is switched off, or when there was no user
+   * content to lose; false only when a durable write was expected and failed,
+   * in which case the caller keeps the draft as the recovery copy.
+   */
+  const archiveReviewSubmission = (
+    feedback: unknown,
+    annotations: unknown,
+    decision: FeedbackDecision,
+  ): boolean => {
+    if (!resolveFeedbackHistory(loadConfig())) return true;
+    const feedbackText = typeof feedback === "string" ? feedback : "";
+    const annotationList = Array.isArray(annotations) ? annotations : [];
+    const hasContent = feedbackText.trim().length > 0 || annotationList.length > 0;
+    const written = appendFeedbackRecord({
+      project: feedbackProject(),
+      origin,
+      surface: "review",
+      decision,
+      target: { review: feedbackReviewTarget() },
+      feedback: feedbackText,
+      annotations: annotationList,
+    });
+    // A failed decision-only line has nothing to recover, so it must not
+    // change the legacy draft behavior.
+    return written !== null || !hasContent;
+  };
 
   const buildCurrentAiReviewContext = (
     patch: string = currentPatch,
@@ -3276,6 +3368,10 @@ export async function startReviewServer(
 
           // API: Exit review session without feedback
           if (url.pathname === "/api/exit" && req.method === "POST") {
+            // Decision-only line: a dismissal carries no content, and how
+            // often reviews are closed without feedback is exactly the
+            // behavior data the archive exists to answer.
+            archiveReviewSubmission("", [], "dismissed");
             deleteDraft(draftKey, readDraftGenerationFromUrl(req));
             resolveDecision({ approved: false, feedback: "", annotations: [], exit: true });
             return Response.json({ ok: true });
@@ -3292,11 +3388,26 @@ export async function startReviewServer(
                 draftGeneration?: number;
               };
 
-              deleteDraft(draftKey, readDraftGenerationFromBody(body));
+              // Archive BEFORE the draft delete: a failed write keeps the
+              // draft as the reviewer's recovery copy (#678 ordering).
+              // Defensive on the body's own types: a malformed value must
+              // degrade to the legacy behavior (settle + 200), never throw.
+              const approved = body.approved ?? false;
+              const feedbackValue = body.feedback || "";
+              const annotationsValue = body.annotations || [];
+              const hasContent =
+                (typeof feedbackValue === "string" && feedbackValue.trim().length > 0) ||
+                (Array.isArray(annotationsValue) && annotationsValue.length > 0);
+              const durable = archiveReviewSubmission(
+                feedbackValue,
+                annotationsValue,
+                approved ? (hasContent ? "approved-with-notes" : "lgtm") : "feedback",
+              );
+              if (durable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
               resolveDecision({
-                approved: body.approved ?? false,
-                feedback: body.feedback || "",
-                annotations: body.annotations || [],
+                approved,
+                feedback: feedbackValue,
+                annotations: annotationsValue,
                 agentSwitch: body.agentSwitch,
               });
 

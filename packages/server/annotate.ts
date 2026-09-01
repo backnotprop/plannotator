@@ -43,7 +43,8 @@ import {
   type AnnotateClientLeaseStreamSession,
 } from "@plannotator/shared/annotate-client-lease";
 import { createAnnotateDecisionSettler } from "@plannotator/shared/annotate-decision";
-import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory } from "./config";
+import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory, resolveFeedbackHistory } from "./config";
+import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
@@ -373,6 +374,58 @@ export async function startAnnotateServer(
   // written, when there was no user content to lose, or when the session
   // does not persist; false only when a durable write was expected and
   // failed — the draft then stays behind as the recovery copy.
+  // --- Durable feedback archive --------------------------------------------
+  //
+  // Unlike the legacy #678 record above, the archive covers EVERY annotate
+  // session type (single file, folder, URL, live app, agent message): it
+  // stores what the reviewer submitted, not a copy of the annotated document.
+  // That is a deliberate, release-noted behavior change — with defaults, URL /
+  // annotate-last / live-app / folder submissions now leave a durable record
+  // for the first time.
+  //
+  // Both gates apply. PLANNOTATOR_ANNOTATE_HISTORY=0 still means "no annotate
+  // content in the data dir at all", and submitted feedback quotes that
+  // content, so it suppresses archive records for every annotate surface and
+  // the documented fully-stateless annotate session stays verbatim true.
+  const annotateFeedbackSurface: FeedbackSurface =
+    mode === "annotate-app"
+      ? "annotate-app"
+      : mode === "annotate-last"
+        ? "annotate-last"
+        : mode === "annotate-folder"
+          ? "annotate-folder"
+          : singleFileLocalAnnotate
+            ? "annotate"
+            : "annotate-url";
+
+  const archiveAnnotateDecision = (
+    feedbackText: string,
+    annotationList: unknown[],
+    decision: FeedbackDecision,
+  ): boolean => {
+    if (!resolveFeedbackHistory(loadConfig())) return true;
+    if (!annotateHistoryEnabled) return true;
+    const isUrlTarget = /^https?:\/\//i.test(filePath);
+    return (
+      appendFeedbackRecord({
+        project: annotateProjectName,
+        origin,
+        surface: annotateFeedbackSurface,
+        decision,
+        target:
+          mode === "annotate-app" && liveApp
+            ? { url: liveApp.targetUrl }
+            : isUrlTarget
+              ? { url: filePath }
+              : mode === "annotate-last"
+                ? { filePath }
+                : { filePath: resolvePath(filePath) },
+        feedback: feedbackText,
+        annotations: annotationList,
+      }) !== null
+    );
+  };
+
   const persistSubmittedDecision = (
     feedback: unknown,
     annotations: unknown,
@@ -383,18 +436,26 @@ export async function startAnnotateServer(
     // behavior (settle + delete draft + 200), never throw into a 500.
     const feedbackText = typeof feedback === "string" ? feedback : "";
     const annotationList = Array.isArray(annotations) ? annotations : [];
-    if (!feedbackText.trim() && annotationList.length === 0) return true; // contentless (e.g. bare approve)
-    if (!annotateHistoryEnabled) return true; // opt-out: stateless annotate sessions
-    if (!singleFileLocalAnnotate) return true; // stateless modes stay stateless
-    return (
-      persistAnnotateSubmission({
-        project: annotateProjectName,
-        sessionPath: resolvePath(filePath),
-        feedback: feedbackText,
-        annotations: annotationList,
-        approved,
-      }) !== null
+    const hasContent = feedbackText.trim().length > 0 || annotationList.length > 0;
+    const archived = archiveAnnotateDecision(
+      feedbackText,
+      annotationList,
+      approved ? (hasContent ? "approved-with-notes" : "approved") : "feedback",
     );
+    // Legacy #678 record: unchanged scope (single local files with content).
+    let legacyDurable = true;
+    if (hasContent && annotateHistoryEnabled && singleFileLocalAnnotate) {
+      legacyDurable =
+        persistAnnotateSubmission({
+          project: annotateProjectName,
+          sessionPath: resolvePath(filePath),
+          feedback: feedbackText,
+          annotations: annotationList,
+          approved,
+        }) !== null;
+    }
+    // A failed write only holds the draft back when there was content to lose.
+    return legacyDurable && (archived || !hasContent);
   };
   const externalAnnotations = createExternalAnnotationHandler("plan");
   const aiRuntime = resolveAIEnabled() ? await createAIRuntime() : null;
@@ -1082,6 +1143,9 @@ export async function startAnnotateServer(
             if (!decision.settle({ feedback: "", annotations: [], exit: true })) {
               return alreadyDecided();
             }
+            // Decision-only line — a dismissal has no content, so a failed
+            // write must not change the legacy draft behavior.
+            archiveAnnotateDecision("", [], "dismissed");
             deleteDraft(draftKey, readDraftGenerationFromUrl(req));
             clientLease.cancel();
             return Response.json({ ok: true });

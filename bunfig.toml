@@ -5,4 +5,4 @@ minimumReleaseAge = 604800  # 7 days in seconds
 minimumReleaseAgeExcludes = ["@opencode-ai/ai", "@opencode-ai/client", "@opencode-ai/plugin", "@opencode-ai/protocol", "@opencode-ai/schema", "@pierre/diffs", "@pierre/theme", "@pierre/theming", "@plannotator/atomic-editor", "@plannotator/markdown-editor", "@plannotator/webtui"]
 
 [test]
-preload = ["./packages/ui/test-setup/happy-dom.ts"]
+preload = ["./packages/ui/test-setup/happy-dom.ts", "./tests/setup/feedback-archive-off.ts"]

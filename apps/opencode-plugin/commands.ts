@@ -153,6 +153,7 @@ export async function handleReviewCommand(
     gitRef,
     error: diffError,
     origin: "opencode",
+    project: (await detectProjectName()) ?? undefined,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialFingerprint,

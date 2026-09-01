@@ -6,6 +6,7 @@ export {
   resolveAIEnabled,
   resolveAnnotateHistory,
   resolveCursorSandbox,
+  resolveFeedbackHistory,
   resolveGuideHistory,
   parseReviewAnalysisConfig,
   isAgentTerminalSide,
