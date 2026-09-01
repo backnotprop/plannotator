@@ -134,6 +134,10 @@ interface ReviewNoteSendButtonProps {
   disabled: boolean;
 }
 
+/** Always renders full-strength: while the panel is open this is THE submit,
+ *  and a grayed action beside the deliberately faded header primary read as
+ *  "everything is disabled" in maintainer review. An empty-note click is a
+ *  no-op that refocuses the field instead. */
 const ReviewNoteSendButton: React.FC<ReviewNoteSendButtonProps> = ({ onClick, disabled }) => (
   <Button
     variant="outline"
@@ -196,7 +200,7 @@ export const ReviewNoteDialog: React.FC<{
         />
         <div className="mt-3 flex items-center justify-between gap-2">
           <span className="text-[11px] leading-snug text-muted-foreground">{submitHint}</span>
-          <ReviewNoteSendButton onClick={submit} disabled={disabled || !canSend} />
+          <ReviewNoteSendButton onClick={submit} disabled={disabled} />
         </div>
       </DialogContent>
     </Dialog>
@@ -251,6 +255,14 @@ export const ReviewSendControl: React.FC<ReviewSendControlProps> = ({
 
   const submitNote = useCallback(
     (value: string) => {
+      if (value.trim().length === 0) {
+        // Empty note: keep the panel open and put the cursor back in the
+        // field. The action stays visually live (see ReviewNoteSendButton).
+        containerRef.current
+          ?.querySelector<HTMLTextAreaElement>('[data-review-note-input]')
+          ?.focus();
+        return;
+      }
       setOpen(false);
       setText('');
       note.onSubmit(value);
@@ -266,8 +278,6 @@ export const ReviewSendControl: React.FC<ReviewSendControlProps> = ({
     else setOpen(true);
   }, [hasFeedback, onSend]);
 
-  const canSubmitNote = text.trim().length > 0;
-
   return (
     <div ref={containerRef} className="relative">
       {/* One pill, two segments: a hairline divider where they meet. */}
@@ -276,10 +286,16 @@ export const ReviewSendControl: React.FC<ReviewSendControlProps> = ({
           variant="outline"
           size="xs"
           onClick={primaryAction}
-          disabled={disabled}
-          title={hasFeedback ? 'Send feedback' : 'Send Feedback: write a quick note'}
+          disabled={disabled || open}
+          title={
+            open
+              ? 'Close the note to send without it'
+              : hasFeedback
+                ? 'Send feedback'
+                : 'Send Feedback: write a quick note'
+          }
           iconLeft={<Send className="size-3.5" />}
-          className="rounded-r-none border-r-0"
+          className={`rounded-r-none border-r-0 transition-opacity ${open ? 'opacity-40' : ''}`}
         >
           {/* Same responsive spans FeedbackButton renders at
               labelBreakpoint="lg", so the toolbar width is unchanged. */}
@@ -325,7 +341,7 @@ export const ReviewSendControl: React.FC<ReviewSendControlProps> = ({
             <span className="text-[11px] leading-snug text-muted-foreground">{submitHint}</span>
             <ReviewNoteSendButton
               onClick={() => submitNote(text)}
-              disabled={disabled || !canSubmitNote}
+              disabled={disabled}
             />
           </div>
         </div>

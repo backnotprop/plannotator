@@ -117,13 +117,34 @@ describe('ReviewSendControl', () => {
   // Guards the most likely "helpful" regression: merging the two actions into
   // one button, at which point a reviewer who typed a note and clicked Send
   // loses it silently.
-  test.skipIf(!hasDom)('the left segment sends plainly and never carries the note', async () => {
+  test.skipIf(!hasDom)('the left segment sends plainly when the panel is closed', async () => {
     const { onSend, onSubmit } = await mount({ hasFeedback: true });
-    await openPanel();
-    await type('rebase before merging');
     await act(async () => primary().click());
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  // Guards the maintainer-directed disambiguation: an open note panel fades
+  // and disables the header's primary send, so a typed note can never be
+  // silently dropped by a muscle-memory click on Send Feedback. Closing the
+  // panel restores it.
+  test.skipIf(!hasDom)('an open panel fades and disables the primary; closing restores it', async () => {
+    const { onSend } = await mount({ hasFeedback: true });
+    expect(primary().disabled).toBe(false);
+    expect(primary().className).not.toContain('opacity-40');
+
+    await openPanel();
+    await type('do not lose me');
+    expect(primary().disabled).toBe(true);
+    expect(primary().className).toContain('opacity-40');
+    await act(async () => primary().click());
+    expect(onSend).not.toHaveBeenCalled();
+
+    await key({ key: 'Escape' });
+    expect(primary().disabled).toBe(false);
+    expect(primary().className).not.toContain('opacity-40');
+    await act(async () => primary().click());
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   // Guards a revert to a one-line field, which would truncate a multi-line note
@@ -182,16 +203,24 @@ describe('ReviewSendControl', () => {
 
   // Guards submitting an empty scope:'general' annotation, which would export
   // as a blank bullet under ## General.
-  test.skipIf(!hasDom)('the distinct action is disabled for empty and whitespace-only text', async () => {
+  // Guards the maintainer-directed visual rule: the panel's action must stay
+  // full-strength (never grayed) while the panel is open — only the header
+  // primary fades. An empty or whitespace-only note is a click no-op.
+  test.skipIf(!hasDom)('the distinct action stays enabled-looking; empty text is a no-op', async () => {
     const { onSubmit } = await mount();
     await openPanel();
-    expect(noteSend().disabled).toBe(true);
-    await type('   \n  ');
-    expect(noteSend().disabled).toBe(true);
-    await key({ key: 'Enter', metaKey: true });
-    expect(onSubmit).not.toHaveBeenCalled();
-    await type('real');
     expect(noteSend().disabled).toBe(false);
+    await act(async () => noteSend().click());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(panel()).not.toBeNull();
+
+    await type('   ');
+    await act(async () => noteSend().click());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await type('real note');
+    await act(async () => noteSend().click());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   // Guards a regression that raises the "No Annotations" dialog from a button
