@@ -949,6 +949,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     }, [iframeReadyVersion, hostTheme]);
 
     useImperativeHandle(ref, () => ({
+      // Raw HTML pages have no markdown heading blocks, so there is nothing for
+      // a `#Heading` reference in a comment to resolve to on this surface.
+      scrollToAnchor: () => false,
       removeHighlight: hook.removeHighlight,
       clearAllHighlights: hook.clearAllHighlights,
       // Shared/draft restores respect the live page filter too.

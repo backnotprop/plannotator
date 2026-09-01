@@ -129,6 +129,18 @@ The srcdoc then carries one classic `<script src>` in the exact place the inline
 - **`@plannotator/ui/shortcuts`**: the declarative keyboard-shortcut engine (`defineShortcutScope`, `useShortcutScope`) and the per-surface scopes, including `useHtmlAnnotateShortcuts` for the Mod+Shift+A Annotate/Interact chord on HTML surfaces. Pure React plus `utils/platform`; no backend.
 - **`@plannotator/ui/utils/inputMethod`**: `getInputMethod(surface)` / `saveInputMethod(method, surface)` / `refreshInputMethodStamp(method)`, the per-surface pinpoint-or-drag preference with its TTL, persisted through the `storageBackend` seam.
 
+### Section references in comment text (`AnnotationPanel` `onNavigateAnchor`; unreleased)
+
+A comment that says "this contradicts 3.1" hands the reader the cross-referencing work the annotation surface exists to remove. Writing `#3.1 Single source of truth` instead renders that heading text as a link that scrolls the document to it.
+
+- **`AnnotationPanel` `onNavigateAnchor?: (hash: string) => void`**: opt in by passing it. Plannotator wires it to the viewer handle; a host passing nothing renders comment text exactly as before (one `<p>`, no parsing, no links). The panel already receives `blocks`, so the resolution index costs the host nothing extra.
+- **`ViewerHandle.scrollToAnchor(hash) => boolean`**: the scroll executor, previously internal to `Viewer`. Returns `false` when the anchor is not in the current document. `HtmlViewer` implements it as a no-op — raw HTML pages carry no markdown heading blocks for a reference to resolve to.
+- **`utils/sectionRefs`** (pure): `buildSectionRefIndex(blocks)` maps heading text to its anchor id, dropping any title used by two headings; `parseSectionRefs(text, index)` splits comment text into plain runs and resolved references.
+
+Resolution is **exact match against the document's own headings** — there is no grammar of section numbers, so nothing has to be taught about `3.1` versus `A.` versus `IV.`. A reference that matches nothing stays plain text, which is what keeps `#fff`, `#123`, `C#`, and a `#` followed by a space inert. Backtick spans are skipped. Longest match wins, so a heading whose title extends another's resolves to the longer one.
+
+Not applied to `CodeAnnotationCard`: code-review annotations address files and lines, not headings.
+
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
 The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.modelContext`) call in-page tools on a document surface. Feature-detected once; a browser without the API sees no registration, no DOM, no network, no timers. Seam: `configurePlannotatorUI({ webmcp: { enabled, namePrefix } })`, default enabled with the `plannotator.` prefix; pass `enabled: false` to keep a host page tool-free, or your own prefix to namespace the tools beside your own. There is deliberately no confirmation seam: the catalog is read-and-comment only (no approve / submit / close tools), and the agent may only edit or remove comments stamped `source: "browser-agent"`.

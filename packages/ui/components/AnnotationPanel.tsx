@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type EditorAnnotation } from '../types';
+import { buildSectionRefIndex, parseSectionRefs } from '../utils/sectionRefs';
 import { isCurrentUser } from '../utils/identity';
 import { ImageThumbnail } from './ImageThumbnail';
 import { EditorAnnotationCard } from './EditorAnnotationCard';
@@ -110,6 +111,8 @@ interface PanelProps {
   editorAnnotations?: EditorAnnotation[];
   onDeleteEditorAnnotation?: (id: string) => void;
   onClose?: () => void;
+  /** Navigate the document to a heading anchor, for `#Heading` references in comment text. */
+  onNavigateAnchor?: (hash: string) => void;
   /** Copy the full feedback payload. May resolve a success boolean; resolving
     *  `false` suppresses the "Copied" flash. A void resolution (existing hosts)
     *  is treated as success, preserving the original behavior. */
@@ -142,6 +145,7 @@ interface PanelProps {
 export const AnnotationPanel: React.FC<PanelProps> = ({
   isOpen,
   annotations,
+  blocks,
   onSelect,
   onDelete,
   onEdit,
@@ -164,7 +168,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   readOnly = false,
   presentation = 'panel',
   unanchoredIds,
+  onNavigateAnchor,
 }) => {
+  const sectionRefs = React.useMemo(() => buildSectionRefIndex(blocks), [blocks]);
   const isMobile = useIsMobile();
   const embedded = presentation === 'embedded';
   const mobilePanel = isMobile && !embedded;
@@ -290,6 +296,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   >
                     <AnnotationCard
                       annotation={entry.annotation}
+                      sectionRefs={sectionRefs}
+                      onNavigateAnchor={onNavigateAnchor}
                       isSelected={selectedId === entry.annotation.id}
                       isMe={isCurrentUser(entry.annotation.author)}
                       onSelect={() => onSelect(entry.annotation.id)}
@@ -304,6 +312,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                 <AnnotationCard
                   key={entry.annotation.id}
                   annotation={entry.annotation}
+                  sectionRefs={sectionRefs}
+                  onNavigateAnchor={onNavigateAnchor}
                   isSelected={selectedId === entry.annotation.id}
                   isMe={isCurrentUser(entry.annotation.author)}
                   onSelect={() => onSelect(entry.annotation.id)}
@@ -531,6 +541,47 @@ const DirectEditsCard: React.FC<{
   );
 };
 
+/**
+ * Annotation body text, with `#Heading text` turned into a link to that heading.
+ * Falls back to the raw string whenever nothing resolves, so the common comment
+ * renders exactly as it did before this existed.
+ */
+const AnnotationText: React.FC<{
+  text: string;
+  className: string;
+  sectionRefs?: Map<string, string>;
+  onNavigateAnchor?: (hash: string) => void;
+}> = ({ text, className, sectionRefs, onNavigateAnchor }) => {
+  const parts = React.useMemo(
+    () => (sectionRefs && onNavigateAnchor ? parseSectionRefs(text, sectionRefs) : [text]),
+    [text, sectionRefs, onNavigateAnchor],
+  );
+
+  return (
+    <p className={className}>
+      {parts.map((part, i) =>
+        typeof part === 'string' ? (
+          part
+        ) : (
+          <button
+            key={i}
+            type="button"
+            title={`Go to "${part.label}"`}
+            className="text-primary font-medium hover:underline"
+            onClick={(e) => {
+              // The card's own onSelect would scroll to the annotation instead.
+              e.stopPropagation();
+              onNavigateAnchor!(`#${part.anchor}`);
+            }}
+          >
+            {part.label}
+          </button>
+        ),
+      )}
+    </p>
+  );
+};
+
 const AnnotationCard: React.FC<{
   annotation: Annotation;
   isSelected: boolean;
@@ -542,7 +593,9 @@ const AnnotationCard: React.FC<{
   footer?: React.ReactNode;
   /** The annotation has no live location in the document (host-reported). */
   unanchored?: boolean;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, unanchored = false }) => {
+  sectionRefs?: Map<string, string>;
+  onNavigateAnchor?: (hash: string) => void;
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, unanchored = false, sectionRefs, onNavigateAnchor }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -688,9 +741,12 @@ const AnnotationCard: React.FC<{
         isEditing ? (
           editComposer
         ) : (
-          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
-            {annotation.text}
-          </p>
+          <AnnotationText
+            text={annotation.text || ''}
+            className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90"
+            sectionRefs={sectionRefs}
+            onNavigateAnchor={onNavigateAnchor}
+          />
         )
       ) : (
         <>
@@ -705,9 +761,12 @@ const AnnotationCard: React.FC<{
               editComposer
             ) : (
               annotation.text && (
-                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
-                  {annotation.text}
-                </p>
+                <AnnotationText
+                  text={annotation.text}
+                  className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90"
+                  sectionRefs={sectionRefs}
+                  onNavigateAnchor={onNavigateAnchor}
+                />
               )
             )
           )}

@@ -36,6 +36,29 @@ function smartypants(s: string): string {
     .replace(/'/g, '’');
 }
 
+/**
+ * Approximate the renderer's inline output for a fragment of source markdown:
+ * drop the syntax that `InlineMarkdown` consumes without rendering.
+ *
+ * This is the inverse direction from the rest of this module — not a transform
+ * the renderer applies, but an undo of the markup it swallows — and it exists
+ * because two features match SOURCE text against the RENDERED DOM: external
+ * annotations quote `/api/plan`'s markdown and are restored by searching the
+ * page, and heading slugs are built from raw block content.
+ *
+ * Deliberately crude, and shared with `slugifyHeading` verbatim so anchors and
+ * text restore agree. It strips every `*_`~` rather than only paired ones, so
+ * `snake_case` becomes `snakecase`. That is safe where it is used: both callers
+ * try the literal text first, and a needle that survives the literal pass never
+ * reaches this function.
+ */
+export function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`~]/g, '');
+}
+
 export function transformPlainText(text: string): string {
   return smartypants(replaceEmoji(text));
 }

@@ -5371,6 +5371,7 @@ const App: React.FC = () => {
       isOpen={isOpen}
       presentation={presentation}
       blocks={blocks}
+      onNavigateAnchor={(hash) => viewerRef.current?.scrollToAnchor(hash)}
       annotations={allAnnotations}
       selectedId={selectedAnnotationId ?? selectedCodeAnnotationId}
       onSelect={handleSelectAnnotation}

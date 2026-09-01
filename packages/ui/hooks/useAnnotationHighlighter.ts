@@ -11,7 +11,7 @@ import type { Annotation, EditorMode, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import { getIdentity } from '../utils/identity';
-import { transformPlainText } from '../utils/inlineTransforms';
+import { stripInlineMarkdown, transformPlainText } from '../utils/inlineTransforms';
 
 // --- Exported state types ---
 
@@ -174,6 +174,31 @@ const selectionHasNonMathContent = (
 
   return false;
 };
+
+// Chrome for the UI's own sake — today the ambiguous code-file link's
+// match-count <sup> — is not document text, and a quote of the markdown source
+// can never anticipate it. Its renderer marks it aria-hidden, the same signal a
+// screen reader uses to skip it, so restore reads the DOM through that filter
+// rather than through `textContent`.
+const VISIBLE_TEXT: NodeFilter = {
+  acceptNode: (node) =>
+    node.parentElement?.closest('[aria-hidden="true"]')
+      ? NodeFilter.FILTER_REJECT
+      : NodeFilter.FILTER_ACCEPT,
+};
+
+const visibleText = (root: HTMLElement): string => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, VISIBLE_TEXT);
+  let text = '';
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text | null)) text += node.textContent || '';
+  return text;
+};
+
+// Markdown syntax the renderer consumes, plus the pipes/whitespace a table row
+// loses on its way to sibling <td>s. Dropped from the DOM text as well as the
+// quote, so restore stops depending on which side of the render the noise is on.
+const MARKDOWN_NOISE = /[`*_~|[\]\s]/;
 
 const annotationId = (): string => {
   const cryptoRef = globalThis.crypto;
@@ -365,7 +390,7 @@ export function useAnnotationHighlighter({
         const walker = document.createTreeWalker(
           containerRef.current!,
           NodeFilter.SHOW_TEXT,
-          null
+          VISIBLE_TEXT
         );
 
         let charCount = 0;
@@ -402,13 +427,17 @@ export function useAnnotationHighlighter({
         return null;
       };
 
-      const normalizeWithMap = (text: string): { text: string; map: number[] } => {
+      const normalizeWithMap = (
+        text: string,
+        dropNoise = false,
+      ): { text: string; map: number[] } => {
         let normalized = '';
         const map: number[] = [];
         let inWhitespace = false;
 
         for (let i = 0; i < text.length; i++) {
           const ch = text[i];
+          if (dropNoise && MARKDOWN_NOISE.test(ch)) continue;
           if (/\s/.test(ch)) {
             if (!inWhitespace) {
               normalized += ' ';
@@ -436,7 +465,7 @@ export function useAnnotationHighlighter({
       const walker = document.createTreeWalker(
         containerRef.current,
         NodeFilter.SHOW_TEXT,
-        null
+        VISIBLE_TEXT
       );
 
       let node: Text | null;
@@ -451,7 +480,7 @@ export function useAnnotationHighlighter({
         }
       }
 
-      const fullText = containerRef.current.textContent || '';
+      const fullText = visibleText(containerRef.current);
       const searchIndex = fullText.indexOf(needle);
       if (searchIndex !== -1) {
         return rangeFromTextOffsets(searchIndex, searchIndex + needle.length);
@@ -466,19 +495,51 @@ export function useAnnotationHighlighter({
         return rangeFromTextOffsets(originalStart, originalEnd);
       }
 
+      // Last resort: drop markdown noise from BOTH sides. The candidate ladder
+      // below only rewrites the needle, which cannot reach the two cases where
+      // the divergence is on the haystack side too:
+      //   - a table row (`| a | b |`) renders as sibling <td>s, so the pipes
+      //     and their padding exist in the source and nowhere in the DOM;
+      //   - a code span keeps its `*_` (`` `JIRA_*` `` renders as JIRA_*),
+      //     while the needle-only strip has already removed them.
+      // Whitespace goes too, because the same table row is the case where the
+      // source has spaces the DOM does not.
+      const canonical = normalizeWithMap(fullText, true);
+      const canonicalNeedle = normalizeWithMap(needle, true).text;
+      const canonicalIndex = canonical.text.indexOf(canonicalNeedle);
+      if (canonicalNeedle && canonicalIndex !== -1) {
+        const originalStart = canonical.map[canonicalIndex];
+        const originalEnd = canonical.map[canonicalIndex + canonicalNeedle.length - 1] + 1;
+        return rangeFromTextOffsets(originalStart, originalEnd);
+      }
+
       return null;
     };
 
-    // First try the literal text. If that misses, re-try with the same
-    // transform the renderer applies to plain text (emoji shortcodes +
-    // smart punctuation) so annotations made before those transforms
-    // shipped can still re-bind to their target after reload.
-    const direct = searchOnce(searchText);
-    if (direct) return direct;
-
-    const transformed = transformPlainText(searchText);
-    if (transformed !== searchText) {
-      return searchOnce(transformed);
+    // The needle is source text; the haystack is the rendered DOM. Every rung
+    // below is a closer approximation of what the renderer made of this
+    // source, tried in order and only when the cheaper one missed.
+    //
+    // Rung 1 covers text selected in the page (already rendered) and source
+    // that carries no markup. Rung 2 covers the plain-text transforms
+    // (`--- ` → em dash, `:rocket:` → emoji), which also re-binds annotations
+    // made before those transforms shipped. Rungs 3 and 4 cover a quote taken
+    // from the markdown SOURCE — what `/api/plan` serves and therefore what an
+    // agent posting external annotations copies from: `**Install** now`,
+    // `` `bun` `` and `[Setup](./s.md)` are faithful quotes that never appear
+    // in the DOM, because the renderer consumed that syntax. Without them the
+    // annotation is accepted, listed, and silently never highlighted.
+    const seen = new Set<string>();
+    for (const candidate of [
+      searchText,
+      transformPlainText(searchText),
+      stripInlineMarkdown(searchText),
+      transformPlainText(stripInlineMarkdown(searchText)),
+    ]) {
+      if (!candidate || seen.has(candidate)) continue;
+      seen.add(candidate);
+      const range = searchOnce(candidate);
+      if (range) return range;
     }
 
     return null;
