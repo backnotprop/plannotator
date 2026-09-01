@@ -40,17 +40,18 @@ function smartypants(s: string): string {
  * Approximate the renderer's inline output for a fragment of source markdown:
  * drop the syntax that `InlineMarkdown` consumes without rendering.
  *
- * This is the inverse direction from the rest of this module — not a transform
- * the renderer applies, but an undo of the markup it swallows — and it exists
- * because two features match SOURCE text against the RENDERED DOM: external
- * annotations quote `/api/plan`'s markdown and are restored by searching the
- * page, and heading slugs are built from raw block content.
+ * Only `slugifyHeading` calls this now. Annotation restore used to, and that is
+ * what made leaving the crudeness in place affordable; it now asks the renderer
+ * directly (`utils/renderedText`), because approximating an inverse that does
+ * not exist cost four rungs of a ladder and still could not see text the DOM
+ * ADDS — a bullet, an ordered numeral, a match-count badge.
  *
- * Deliberately crude, and shared with `slugifyHeading` verbatim so anchors and
- * text restore agree. It strips every `*_`~` rather than only paired ones, so
- * `snake_case` becomes `snakecase`. That is safe where it is used: both callers
- * try the literal text first, and a needle that survives the literal pass never
- * reaches this function.
+ * Slugs stay here on purpose. `slugifyHeading` is pure and runs where no DOM
+ * exists, which `renderedText` cannot do, and its output is anchor ids that
+ * live in URLs — so the one place the two would disagree (`snake_case` slugging
+ * to `snakecase` rather than `snake-case`) is a link-stability question, not a
+ * correctness one. Stripping every `*_`~` rather than only paired ones is safe
+ * for that caller: a heading is slugged whole, never matched against anything.
  */
 export function stripInlineMarkdown(text: string): string {
   return text

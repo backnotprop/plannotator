@@ -15,6 +15,18 @@ import React from 'react';
  *
  * Interactivity is opt-in: the Viewer passes `interactive` + `onToggle`
  * for click-to-toggle checkboxes; the diff view leaves both undefined.
+ *
+ * The glyph spans carry `data-decorative`: a bullet and a numeral are drawn by
+ * the renderer and are not text the document contains, so annotation anchoring
+ * (`utils/renderedText`) must not see them. This matters most for ordered
+ * items, whose numeral comes from the item's POSITION — CommonMark renumbers
+ * `1. / 2. / 5.` as 1, 2, 3 — while a quote of that source line rendered on its
+ * own has no list to be positioned in.
+ *
+ * Deliberately not `aria-hidden`: these divs carry no list semantics, so the
+ * glyph is the only thing telling assistive tech this is a list item. The flag
+ * also sits on the glyphs rather than the wrapper, which is the checkbox itself
+ * when interactive.
  */
 interface ListMarkerProps {
   level: number;
@@ -51,7 +63,7 @@ export const ListMarker: React.FC<ListMarkerProps> = ({
       aria-checked={interactive ? checked : undefined}
     >
       {showNumeral && (
-        <span className="text-primary/60 tabular-nums text-right" style={{ minWidth: '1.5rem' }}>
+        <span data-decorative="true" className="text-primary/60 tabular-nums text-right" style={{ minWidth: '1.5rem' }}>
           {orderedIndex}.
         </span>
       )}
@@ -66,7 +78,7 @@ export const ListMarker: React.FC<ListMarkerProps> = ({
           </svg>
         )
       ) : !showNumeral ? (
-        <span className="text-primary/60">{bullet}</span>
+        <span data-decorative="true" className="text-primary/60">{bullet}</span>
       ) : null}
     </span>
   );

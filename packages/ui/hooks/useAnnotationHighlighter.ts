@@ -11,7 +11,7 @@ import type { Annotation, EditorMode, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import { getIdentity } from '../utils/identity';
-import { stripInlineMarkdown, transformPlainText } from '../utils/inlineTransforms';
+import { renderMarkdownToText, visibleText, VISIBLE_TEXT } from '../utils/renderedText';
 
 // --- Exported state types ---
 
@@ -175,29 +175,9 @@ const selectionHasNonMathContent = (
   return false;
 };
 
-// Chrome for the UI's own sake — today the ambiguous code-file link's
-// match-count <sup> — is not document text, and a quote of the markdown source
-// can never anticipate it. Its renderer marks it aria-hidden, the same signal a
-// screen reader uses to skip it, so restore reads the DOM through that filter
-// rather than through `textContent`.
-const VISIBLE_TEXT: NodeFilter = {
-  acceptNode: (node) =>
-    node.parentElement?.closest('[aria-hidden="true"]')
-      ? NodeFilter.FILTER_REJECT
-      : NodeFilter.FILTER_ACCEPT,
-};
-
-const visibleText = (root: HTMLElement): string => {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, VISIBLE_TEXT);
-  let text = '';
-  let node: Text | null;
-  while ((node = walker.nextNode() as Text | null)) text += node.textContent || '';
-  return text;
-};
-
-// Markdown syntax the renderer consumes, plus the pipes/whitespace a table row
-// loses on its way to sibling <td>s. Dropped from the DOM text as well as the
-// quote, so restore stops depending on which side of the render the noise is on.
+// Markdown syntax and the whitespace element boundaries add and remove, for the
+// last-resort rung below. Dropped from the DOM text as well as the quote, so a
+// half-rendered fragment can still be matched from either side.
 const MARKDOWN_NOISE = /[`*_~|[\]\s]/;
 
 const annotationId = (): string => {
@@ -495,15 +475,12 @@ export function useAnnotationHighlighter({
         return rangeFromTextOffsets(originalStart, originalEnd);
       }
 
-      // Last resort: drop markdown noise from BOTH sides. The candidate ladder
-      // below only rewrites the needle, which cannot reach the two cases where
-      // the divergence is on the haystack side too:
-      //   - a table row (`| a | b |`) renders as sibling <td>s, so the pipes
-      //     and their padding exist in the source and nowhere in the DOM;
-      //   - a code span keeps its `*_` (`` `JIRA_*` `` renders as JIRA_*),
-      //     while the needle-only strip has already removed them.
-      // Whitespace goes too, because the same table row is the case where the
-      // source has spaces the DOM does not.
+      // Last resort, and the only rung the renderer cannot replace: a quote
+      // that starts or ends INSIDE a block. `Install** now` is half of an
+      // emphasis span, so rendering it leaves the `**` literal — the render is
+      // faithful, the fragment just isn't what the document rendered. Dropping
+      // markdown noise from BOTH sides (whitespace included, since element
+      // boundaries add and remove it) still lands such a fragment on its text.
       const canonical = normalizeWithMap(fullText, true);
       const canonicalNeedle = normalizeWithMap(needle, true).text;
       const canonicalIndex = canonical.text.indexOf(canonicalNeedle);
@@ -516,25 +493,23 @@ export function useAnnotationHighlighter({
       return null;
     };
 
-    // The needle is source text; the haystack is the rendered DOM. Every rung
-    // below is a closer approximation of what the renderer made of this
-    // source, tried in order and only when the cheaper one missed.
+    // The needle is source text; the haystack is the rendered DOM.
     //
-    // Rung 1 covers text selected in the page (already rendered) and source
-    // that carries no markup. Rung 2 covers the plain-text transforms
-    // (`--- ` → em dash, `:rocket:` → emoji), which also re-binds annotations
-    // made before those transforms shipped. Rungs 3 and 4 cover a quote taken
-    // from the markdown SOURCE — what `/api/plan` serves and therefore what an
-    // agent posting external annotations copies from: `**Install** now`,
-    // `` `bun` `` and `[Setup](./s.md)` are faithful quotes that never appear
-    // in the DOM, because the renderer consumed that syntax. Without them the
-    // annotation is accepted, listed, and silently never highlighted.
+    // Rung 1 is the literal quote: text selected in the page is already
+    // rendered, and source carrying no markup renders to itself.
+    //
+    // Rung 2 asks the renderer. A quote taken from the markdown SOURCE — what
+    // `/api/plan` serves, and therefore what an agent posting external
+    // annotations copies from — is not what the page shows: `**Install** now`,
+    // `` `bun` ``, `[Setup](./s.md)`, `| a | b |` and `- item` all render to
+    // something else, and the last two also gain text (a bullet) that no
+    // rewrite of the needle could produce. Running the real renderer over the
+    // quote settles all of it at once, and settles the next markdown feature
+    // for free. This replaced four rungs of regex approximation.
     const seen = new Set<string>();
     for (const candidate of [
       searchText,
-      transformPlainText(searchText),
-      stripInlineMarkdown(searchText),
-      transformPlainText(stripInlineMarkdown(searchText)),
+      renderMarkdownToText(searchText),
     ]) {
       if (!candidate || seen.has(candidate)) continue;
       seen.add(candidate);
