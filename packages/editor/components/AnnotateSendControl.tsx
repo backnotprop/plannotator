@@ -180,6 +180,15 @@ export const AnnotateSendControl: React.FC<AnnotateSendControlProps> = ({
 
   const submitNote = useCallback(
     (value: string) => {
+      if (value.trim().length === 0) {
+        // Empty note: keep the panel open and put the cursor back in the
+        // field. The action stays visually live — a grayed action beside the
+        // deliberately faded header primary read as "everything is disabled".
+        containerRef.current
+          ?.querySelector<HTMLTextAreaElement>('[data-annotate-note-input]')
+          ?.focus();
+        return;
+      }
       setOpen(false);
       setText('');
       note.onSubmit(value);
@@ -195,8 +204,6 @@ export const AnnotateSendControl: React.FC<AnnotateSendControlProps> = ({
     else setOpen(true);
   }, [hasFeedback, onSend]);
 
-  const canSubmitNote = text.trim().length > 0;
-
   return (
     <div ref={containerRef} className="relative">
       {/* One pill, two segments: a hairline divider where they meet. */}
@@ -205,10 +212,16 @@ export const AnnotateSendControl: React.FC<AnnotateSendControlProps> = ({
           variant="outline"
           size="xs"
           onClick={primaryAction}
-          disabled={disabled}
-          title={hasFeedback ? 'Send Feedback' : 'Send Feedback: write a quick note'}
+          disabled={disabled || open}
+          title={
+            open
+              ? 'Close the note to send without it'
+              : hasFeedback
+                ? 'Send Feedback'
+                : 'Send Feedback: write a quick note'
+          }
           iconLeft={<Send className="size-3.5" />}
-          className="rounded-r-none border-r-0"
+          className={`rounded-r-none border-r-0 transition-opacity ${open ? 'opacity-40' : ''}`}
         >
           {isLoading ? 'Sending...' : 'Send Feedback'}
         </Button>
@@ -254,7 +267,7 @@ export const AnnotateSendControl: React.FC<AnnotateSendControlProps> = ({
               size="xs"
               data-annotate-note-send="true"
               onClick={() => submitNote(text)}
-              disabled={disabled || !canSubmitNote}
+              disabled={disabled}
               title="Send with additional feedback"
               iconLeft={<Send className="size-3.5" />}
             >
