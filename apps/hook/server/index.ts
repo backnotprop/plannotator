@@ -177,6 +177,7 @@ import {
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
 } from "./cli";
+import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import {
   annotateStartupFailureExitCode,
@@ -383,6 +384,8 @@ if (helpSubcommand) {
   console.log(formatSubcommandHelp(helpSubcommand));
   process.exit(0);
 }
+
+exitOnUnknownSubcommand(args);
 
 if (args[0] === "uninstall") {
   let options: ReturnType<typeof parseUninstallOptions>;
