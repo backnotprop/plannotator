@@ -545,6 +545,10 @@ describe("V2 session URL delivery", () => {
   // Regression: without `resume: false` upstream calls `execution.wake`
   // (packages/core/src/session/session.ts), so merely showing a URL would start
   // a model turn the reviewer never asked for and burn tokens on every command.
+  // #1459 extension: resume: false only defers the immediate wake; the host
+  // default delivery is "steer", which any later wake (including spurious
+  // idle wakes on OpenCode 2 betas) promotes into its own model turn. The
+  // notice must therefore also pin queue delivery.
   test("the notice never wakes a model turn", async () => {
     const { synthetic, ctx } = makeSyntheticCtx();
     const client = createV2BridgeClient({ ctx, getAgents: async () => [], sessionID: "session-1" });
@@ -552,7 +556,7 @@ describe("V2 session URL delivery", () => {
     pushUrlLine(client);
     await Promise.resolve();
 
-    expect(synthetic.mock.calls[0]![0]).toMatchObject({ resume: false });
+    expect(synthetic.mock.calls[0]![0]).toMatchObject({ resume: false, delivery: "queue" });
   });
 
   // Regression: `session.synthetic` is absent on older V2 hosts, and a session
