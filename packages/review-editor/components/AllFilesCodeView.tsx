@@ -26,7 +26,7 @@ import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
-import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
+import { buildCodeNavRequest, buildTokenHoverRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { hashString } from '../utils/hashString';
@@ -252,6 +252,12 @@ export interface AllFilesCodeViewProps {
   activeSearchMatch?: ReviewSearchMatch | null;
   // Token code navigation (P7). Cmd/Ctrl-click a token resolves symbol defs/refs.
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
+  /** Token hover cards. Absent (the default) means the feature is not wired at all. */
+  onTokenHoverEnter?: (
+    request: import('@plannotator/shared/code-nav').CodeNavRequest,
+    tokenElement: HTMLElement,
+  ) => void;
+  onTokenHoverLeave?: () => void;
   // File-tree active-file highlight follows scroll. The second argument
   // reports whether the newly active item is COLLAPSED, which auto-mark-viewed
   // needs (a folded card shows no content, so time parked on it is not
@@ -578,6 +584,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   activeSearchMatchId = null,
   activeSearchMatch = null,
   onCodeNavRequest,
+  onTokenHoverEnter,
+  onTokenHoverLeave,
   onVisibleFileChange,
   onFileScrolledPast,
   fileScrollTarget,
@@ -1969,7 +1977,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const handleTokenClick = useStableCallback(
     (props: DiffTokenEventBaseProps, event: MouseEvent, item: CodeViewItem<DiffAnnotationMetadata>) => {
       if (!onCodeNavRequest || item.type !== 'diff') return;
-      if (!(event.metaKey || event.ctrlKey)) return;
+      // Alt is an unadvertised alias for the same References-panel path; the
+      // meta/ctrl branch itself is unchanged.
+      if (!(event.metaKey || event.ctrlKey || event.altKey)) return;
       const filePath = itemIdToFilePath.get(item.id);
       if (filePath == null) return;
       onCodeNavRequest(buildCodeNavRequest(props, filePath));
@@ -1977,15 +1987,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   );
 
   const handleTokenEnter = useStableCallback(
-    (props: DiffTokenEventBaseProps, event: PointerEvent) => {
+    (props: DiffTokenEventBaseProps, event: PointerEvent, item: CodeViewItem<DiffAnnotationMetadata>) => {
       if (onCodeNavRequest && (event.metaKey || event.ctrlKey)) {
         props.tokenElement.classList.add('pn-token-nav');
       }
+      if (!onTokenHoverEnter || item.type !== 'diff') return;
+      // File identity comes from the owning item, exactly as handleTokenClick
+      // resolves it — never from an active-file side channel.
+      const filePath = itemIdToFilePath.get(item.id);
+      if (filePath == null) return;
+      const request = buildTokenHoverRequest(props, filePath);
+      if (request) onTokenHoverEnter(request, props.tokenElement);
     },
   );
 
   const handleTokenLeave = useStableCallback((props: DiffTokenEventBaseProps) => {
     props.tokenElement.classList.remove('pn-token-nav');
+    onTokenHoverLeave?.();
   });
 
   // --- Active-file tracking via CodeView rendered items (no header geometry) ---
@@ -2520,7 +2538,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // the final arg to every shared callback (same as the selection/gutter
       // callbacks), so file identity comes from context.item — no geometry or
       // active-file inference. Only wired when onCodeNavRequest is provided.
-      ...(onCodeNavRequest && {
+      ...((onCodeNavRequest || onTokenHoverEnter) && {
         // Pierre's renderer-options builder drops onToken* before it evaluates
         // shouldUseTokenTransformer, so the handlers alone never wrap tokens
         // (no data-char) and token events never fire. Enable it explicitly.
@@ -2528,8 +2546,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onTokenClick(props, event, context) {
           handleTokenClick(props, event, context.item);
         },
-        onTokenEnter(props, event, _context) {
-          handleTokenEnter(props, event);
+        onTokenEnter(props, event, context) {
+          handleTokenEnter(props, event, context.item);
         },
         onTokenLeave(props, _event, _context) {
           handleTokenLeave(props);
@@ -2560,6 +2578,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       handleLineSelectionEnd,
       handleGutterUtilityClick,
       onCodeNavRequest,
+      onTokenHoverEnter,
       handleTokenClick,
       handleTokenEnter,
       handleTokenLeave,

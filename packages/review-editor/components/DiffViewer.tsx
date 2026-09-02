@@ -8,7 +8,7 @@ import { useWorkerPoolThemeSync } from '../workerPool';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
 import { detectLanguage } from '../utils/detectLanguage';
-import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
+import { buildCodeNavRequest, buildTokenHoverRequest } from '../utils/buildCodeNavRequest';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
@@ -222,6 +222,12 @@ interface DiffViewerProps {
   aiHistoryMessages?: AIChatEntry[];
   // Code navigation
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
+  /** Token hover cards. Absent (the default) means the feature is not wired at all. */
+  onTokenHoverEnter?: (
+    request: import('@plannotator/shared/code-nav').CodeNavRequest,
+    tokenElement: HTMLElement,
+  ) => void;
+  onTokenHoverLeave?: () => void;
 }
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
@@ -278,6 +284,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onClickAIMarker,
   aiHistoryMessages = [],
   onCodeNavRequest,
+  onTokenHoverEnter,
+  onTokenHoverLeave,
 }) => {
   const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
   // Worker-pool highlighting: keep the pool's theme pair in step with the UI
@@ -710,7 +718,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   // Token interaction handlers (code area clicks)
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
-    if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
+    // Alt is an unadvertised alias for the same References-panel path; the
+    // meta/ctrl branch itself is unchanged.
+    if ((event.metaKey || event.ctrlKey || event.altKey) && onCodeNavRequest) {
       onCodeNavRequest(buildCodeNavRequest(props, filePath));
       return;
     }
@@ -722,12 +732,17 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
       props.tokenElement.classList.add('pn-token-nav');
     }
-  }, [onCodeNavRequest]);
+    if (onTokenHoverEnter) {
+      const request = buildTokenHoverRequest(props, filePath);
+      if (request) onTokenHoverEnter(request, props.tokenElement);
+    }
+  }, [filePath, onCodeNavRequest, onTokenHoverEnter]);
 
   const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {
     props.tokenElement.classList.remove('pn-token-hover');
     props.tokenElement.classList.remove('pn-token-nav');
-  }, []);
+    onTokenHoverLeave?.();
+  }, [onTokenHoverLeave]);
 
   const splitGridStyle = useMemo(() => {
     if (!isSplitLayout || diffOverflow === 'wrap') return undefined;

@@ -42,6 +42,8 @@ import type { EditSelectionComment } from './edit/useEditSession';
 import { useAIChat } from './hooks/useAIChat';
 import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
+import { useTokenHover } from './hooks/useTokenHover';
+import { TokenHoverCard } from './components/TokenHoverCard';
 import { useCallFlowAnalysis } from './hooks/useCallFlowAnalysis';
 import { useCallFlowInstall } from './hooks/useCallFlowInstall';
 import { useCallFlowAutoInstall } from './hooks/useCallFlowAutoInstall';
@@ -424,6 +426,7 @@ const ReviewApp: React.FC = () => {
   const diffTabSize = useConfigValue('diffTabSize');
   const reviewShowViewedControls = useConfigValue('reviewShowViewedControls');
   const reviewShowStageControls = useConfigValue('reviewShowStageControls');
+  const tokenHoverCardsEnabled = useConfigValue('tokenHoverCards');
   // EXPERIMENTAL: edit code in place to author suggestions (default OFF).
   const editSuggestionsEnabled = useConfigValue('editSuggestions');
   const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
@@ -1047,6 +1050,7 @@ const ReviewApp: React.FC = () => {
   } = aiChat;
 
   const codeNav = useCodeNav();
+  const tokenHover = useTokenHover(snapshotId);
 
   const handleCodeNavRequest = useCallback((request: CodeNavRequest) => {
     if (!gitContext && !agentCwd) {
@@ -1372,11 +1376,32 @@ const ReviewApp: React.FC = () => {
     () => canUseLiveWorkspaceActions ? editorAnnotations : [],
     [canUseLiveWorkspaceActions, editorAnnotations],
   );
+  // Token hover cards ride the same gate as Cmd+click code navigation, plus
+  // their own setting. Off means no handler props reach the diff views, so
+  // there are no listeners, no requests and no card in the tree.
+  const tokenHoverEnabled = canUseLiveWorkspaceActions && tokenHoverCardsEnabled;
+  const hoveredTokenRequest = tokenHover.hover?.request;
+  const closeTokenHover = tokenHover.close;
   useEffect(() => {
     if (canUseLiveWorkspaceActions) return;
     codeNav.clear();
+    closeTokenHover();
     dockApi?.getPanel(REVIEW_CODE_NAV_PANEL_ID)?.api.close();
-  }, [canUseLiveWorkspaceActions, codeNav.clear, dockApi]);
+  }, [canUseLiveWorkspaceActions, codeNav.clear, closeTokenHover, dockApi]);
+  const handleTokenHoverSelectLocation = useCallback(
+    (location: { filePath: string; line: number }) => {
+      closeTokenHover();
+      if (!hoveredTokenRequest) return;
+      // Same References flow Cmd+click opens, anchored at the clicked location
+      // so the panel ranks that file first.
+      handleCodeNavRequest({
+        ...hoveredTokenRequest,
+        filePath: location.filePath,
+        line: location.line,
+      });
+    },
+    [handleCodeNavRequest, hoveredTokenRequest, closeTokenHover],
+  );
   const { withPRContext } = useAnnotationFactory(
     prMetadata,
     prStackInfo ? prDiffScope : undefined,
@@ -3382,6 +3407,8 @@ const ReviewApp: React.FC = () => {
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
+    onTokenHoverEnter: tokenHoverEnabled ? tokenHover.onTokenHoverEnter : undefined,
+    onTokenHoverLeave: tokenHoverEnabled ? tokenHover.onTokenHoverLeave : undefined,
     codeNavResult: codeNav.result,
     codeNavIsLoading: codeNav.isLoading,
     codeNavActiveSymbol: codeNav.activeSymbol,
@@ -3412,6 +3439,7 @@ const ReviewApp: React.FC = () => {
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
+    tokenHoverEnabled, tokenHover.onTokenHoverEnter, tokenHover.onTokenHoverLeave,
   ]);
 
   // Separate context for high-frequency job logs — prevents re-rendering all panels on every SSE event
@@ -5165,6 +5193,17 @@ const ReviewApp: React.FC = () => {
           {tourDialogJobId === DEMO_TOUR_ID ? 'Close tour' : 'Demo tour'}
         </button>
       )}
+
+    {/* One instance for the whole app, portaled to <body> so it escapes the
+        Dockview panels' overflow and stacking context. */}
+    {tokenHoverEnabled && tokenHover.hover && (
+      <TokenHoverCard
+        hover={tokenHover.hover}
+        onPointerEnter={tokenHover.onCardEnter}
+        onPointerLeave={tokenHover.onCardLeave}
+        onSelectLocation={handleTokenHoverSelectLocation}
+      />
+    )}
 
     <Toaster
       position="bottom-center"

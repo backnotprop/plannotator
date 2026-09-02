@@ -276,6 +276,21 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
+  // Hovering a token in a code-review diff opens a card with what the search
+  // backend knows about that symbol. Cookie-only like the other review-chrome
+  // preferences: it is presentational, per-browser, and changes no review
+  // semantics — off simply means no listeners, no requests and no card.
+  tokenHoverCards: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-token-hover-cards');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-token-hover-cards', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   reviewShowStageControls: {
     defaultValue: true as boolean,
     fromCookie: () => {

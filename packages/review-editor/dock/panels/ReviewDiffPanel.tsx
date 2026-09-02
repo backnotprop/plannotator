@@ -126,6 +126,8 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         onClickAIMarker={state.onClickAIMarker}
         aiHistoryMessages={isFocusedFile ? state.aiHistoryForSelection : []}
         onCodeNavRequest={state.onCodeNavRequest}
+        onTokenHoverEnter={state.onTokenHoverEnter}
+        onTokenHoverLeave={state.onTokenHoverLeave}
       />
     </div>
   );

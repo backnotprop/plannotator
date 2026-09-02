@@ -471,6 +471,7 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
   const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
+  const tokenHoverCards = useConfigValue('tokenHoverCards');
 
   // Load font for the preview swatch
   useEffect(() => {
@@ -489,6 +490,18 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
           onChange={(v) => configStore.set('editSuggestions', v)}
           label="Edit Code to Suggest"
           description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
+        />
+      </div>
+
+      <div className="border-t border-border" />
+
+      {/* Token hover cards */}
+      <div className="space-y-3">
+        <ToggleSwitch
+          checked={tokenHoverCards}
+          onChange={(v) => configStore.set('tokenHoverCards', v)}
+          label="Token hover cards"
+          description="Rest the pointer on a symbol in a diff to see where it is defined and who references it. Needs ripgrep and a local checkout; nothing appears when the search comes back empty."
         />
       </div>
 

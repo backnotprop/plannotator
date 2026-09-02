@@ -128,6 +128,9 @@ jobs:
           packages/guide-viewer/GuideViewportManager.test.tsx
           packages/review-editor/components/guide/GuideExportButton.test.tsx
           packages/review-editor/hooks/useReviewSearch.test.tsx
+          packages/review-editor/hooks/useTokenHover.test.tsx
+          packages/review-editor/components/TokenHoverCard.test.tsx
+          packages/review-editor/utils/stitchTokenIdentifier.test.ts
           packages/review-editor/hooks/useAutoViewed.test.tsx
           packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
           packages/review-editor/hooks/useCallFlowInstall.test.tsx
