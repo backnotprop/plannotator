@@ -281,7 +281,7 @@ const ViewerDocumentHeader: React.FC<ViewerDocumentHeaderProps> = ({
         data-print-hide
         data-viewer-document-header
         data-header-layout={geometry.layout}
-        className={`${sticky ? 'sticky top-3' : 'relative'} z-40 mb-3 md:mb-4 rounded-lg transition-colors duration-150 ${
+        className={`annotation-exclude ${sticky ? 'sticky top-3' : 'relative'} z-40 mb-3 md:mb-4 rounded-lg transition-colors duration-150 ${
           stuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''
         }`}
       >

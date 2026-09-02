@@ -196,7 +196,8 @@ const escapeAttrValue = (value: string): string => {
 const normalizeForRestoreCompare = (value: string): string =>
   value.replace(/\s+/g, ' ').trim();
 
-const ANNOTATION_EXCLUDED_SELECTOR = '[data-annotation-exclude]';
+// web-highlighter 0.8.x accepts only class, ID, and tag exclusions.
+const ANNOTATION_EXCLUDED_SELECTOR = '.annotation-exclude';
 
 const isAnnotationExcludedTextNode = (node: Node): boolean =>
   Boolean(node.parentElement?.closest(ANNOTATION_EXCLUDED_SELECTOR));
