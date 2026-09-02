@@ -26,7 +26,7 @@ import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
-import { buildCodeNavRequest, buildTokenHoverRequest } from '../utils/buildCodeNavRequest';
+import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { hashString } from '../utils/hashString';
@@ -252,11 +252,14 @@ export interface AllFilesCodeViewProps {
   activeSearchMatch?: ReviewSearchMatch | null;
   // Token code navigation (P7). Cmd/Ctrl-click a token resolves symbol defs/refs.
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
-  /** Token hover cards. Absent (the default) means the feature is not wired at all. */
-  onTokenHoverEnter?: (
-    request: import('@plannotator/shared/code-nav').CodeNavRequest,
-    tokenElement: HTMLElement,
-  ) => void;
+  /**
+   * Token hover cards. Absent (the default) means the feature is not wired at
+   * all. Deliberately raw: the view reports the token event and its file, and
+   * the caller decides what a hoverable symbol is. Stitching a fragmented
+   * identifier is app-only work, and this component is also compiled into the
+   * read-only portable guide viewer, which passes neither handler.
+   */
+  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => void;
   onTokenHoverLeave?: () => void;
   // File-tree active-file highlight follows scroll. The second argument
   // reports whether the newly active item is COLLAPSED, which auto-mark-viewed
@@ -1996,8 +1999,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // resolves it — never from an active-file side channel.
       const filePath = itemIdToFilePath.get(item.id);
       if (filePath == null) return;
-      const request = buildTokenHoverRequest(props, filePath);
-      if (request) onTokenHoverEnter(request, props.tokenElement);
+      onTokenHoverEnter(props, filePath);
     },
   );
 

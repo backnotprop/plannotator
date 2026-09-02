@@ -66,17 +66,17 @@ let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 let latest: UseTokenHoverResult | null = null;
 
-function Harness() {
-  latest = useTokenHover('snapshot-1');
+function Harness({ snapshotId = 'snapshot-1' }: { snapshotId?: string }) {
+  latest = useTokenHover(snapshotId);
   return null;
 }
 
-async function mount(): Promise<void> {
+async function mount(snapshotId?: string): Promise<void> {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<Harness />);
+    root!.render(<Harness snapshotId={snapshotId} />);
   });
 }
 
@@ -230,6 +230,152 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     }));
 
     expect(latest!.hover).toBeNull();
+  });
+
+  test('a neighbour answer never lands in an open card for another token', async () => {
+    // Drift onto a neighbour long enough to launch its request, then come
+    // back. Without the guard on the already-open branch, the neighbour's
+    // answer still passes the landing check and silently rewrites the open
+    // card to a symbol the pointer is not on.
+    await mount();
+    const tokenX = token();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, tokenX));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover!.data.symbol).toBe('charge');
+
+    const neighbour = { ...REQUEST, symbol: 'withRetry' };
+    await act(async () => latest!.onTokenHoverLeave());
+    await act(async () => latest!.onTokenHoverEnter(neighbour, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(2);
+
+    // Back onto the still-open card's token, then the neighbour answers.
+    await act(async () => latest!.onTokenHoverLeave());
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, tokenX));
+    expect(pending[1].signal?.aborted).toBe(true);
+    await settle(1, hoverResponse({ symbol: 'withRetry' }));
+
+    expect(latest!.hover).not.toBeNull();
+    expect(latest!.hover!.data.symbol).toBe('charge');
+  });
+
+  test('re-entering the same token joins the in-flight request', async () => {
+    // Leave and return inside the grace: the dwell re-arms while this key's
+    // own request is still running. A second launch would be one more
+    // ripgrep process for an answer already on its way.
+    await mount();
+    const tokenX = token();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, tokenX));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(1);
+
+    await act(async () => latest!.onTokenHoverLeave());
+    await act(async () => { jest.advanceTimersByTime(100); });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, tokenX));
+    await act(async () => { jest.advanceTimersByTime(350); });
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0].signal?.aborted).toBe(false);
+
+    // And the joined request still opens the card.
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+  });
+
+  test('a below-threshold answer for another token closes the stale card', async () => {
+    await mount();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+
+    await act(async () => latest!.onTokenHoverLeave());
+    await act(async () => {
+      latest!.onTokenHoverEnter({ ...REQUEST, symbol: 'gateway' }, token());
+    });
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(1, hoverResponse({
+      symbol: 'gateway',
+      definition: null,
+      references: [],
+      referenceCount: 0,
+    }));
+
+    // The card described a token the pointer has left, and the token it is on
+    // has nothing to say. Neither is a reason to keep showing the old one.
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('an answer for a token no longer in the DOM opens no card', async () => {
+    // Virtualized scroll recycles diff rows. A rect measured on a detached
+    // element is 0,0, which would pin the card to the viewport corner.
+    await mount();
+    const recycled = token();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, recycled));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    recycled.remove();
+    await settle(0, hoverResponse());
+
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('scrolling inside the card leaves it open; scrolling the pane closes it', async () => {
+    await mount();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+
+    // The signature block is a horizontal scroller: reading a long signature
+    // must not dismiss the thing being read.
+    const card = document.createElement('div');
+    card.setAttribute('data-token-hover-card', '');
+    const insideCard = document.createElement('pre');
+    card.appendChild(insideCard);
+    document.body.appendChild(card);
+    await act(async () => {
+      insideCard.dispatchEvent(new Event('wheel', { bubbles: true }));
+    });
+    expect(latest!.hover).not.toBeNull();
+
+    const pane = token();
+    await act(async () => {
+      pane.dispatchEvent(new Event('wheel', { bubbles: true }));
+    });
+    expect(latest!.hover).toBeNull();
+    card.remove();
+  });
+
+  test('a new diff snapshot flushes the cache', async () => {
+    // Line numbers from the previous diff are wrong for the new one, so a
+    // cached answer must never be served across a refresh.
+    await mount('snapshot-1');
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(pending).toHaveLength(1);
+
+    await act(async () => {
+      root!.render(<Harness snapshotId="snapshot-2" />);
+    });
+    expect(latest!.hover).toBeNull();
+
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(2);
+  });
+
+  test('unmounting abandons the pending request', async () => {
+    await mount();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(1);
+
+    const current = root!;
+    root = null;
+    await act(async () => current.unmount());
+
+    expect(pending[0].signal?.aborted).toBe(true);
   });
 
   test('scrolling closes the card and abandons the pending request', async () => {

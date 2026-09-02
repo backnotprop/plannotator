@@ -256,8 +256,8 @@ export interface ReviewState {
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
   /** Token hover cards. Undefined whenever the gate or the setting is off. */
   onTokenHoverEnter?: (
-    request: import('@plannotator/shared/code-nav').CodeNavRequest,
-    tokenElement: HTMLElement,
+    props: import('@pierre/diffs').DiffTokenEventBaseProps,
+    filePath: string,
   ) => void;
   onTokenHoverLeave?: () => void;
   codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;

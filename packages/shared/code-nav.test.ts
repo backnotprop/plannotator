@@ -653,6 +653,105 @@ describe("scanDocComment", () => {
     expect(scanDocComment(lines, 1, undefined)).toBeNull();
   });
 
+  // Tooling directives are addressed to a linter, never to a reader. Left in,
+  // they become the card's doc paragraph — the exact "garbage over nothing"
+  // failure this scan exists to prevent, and the most common comment line
+  // sitting directly above a definition in a real codebase.
+  test("a lone tooling directive is not documentation", () => {
+    const cases: Array<[string[], string | undefined]> = [
+      [["// eslint-disable-next-line no-console", "function charge() {}"], "typescript"],
+      [["// eslint-disable-line @typescript-eslint/no-explicit-any", "function charge() {}"], "typescript"],
+      [["// @ts-expect-error upstream types are wrong", "function charge() {}"], "typescript"],
+      [["// @ts-ignore", "function charge() {}"], "typescript"],
+      [["// @ts-nocheck", "function charge() {}"], "typescript"],
+      [["// prettier-ignore", "function charge() {}"], "typescript"],
+      [["// biome-ignore lint/suspicious/noExplicitAny: legacy", "function charge() {}"], "typescript"],
+      [["/* istanbul ignore next */", "function charge() {}"], "typescript"],
+      [["/// <reference types=\"node\" />", "function charge() {}"], "typescript"],
+      [["# noqa: E501", "def charge(amount):", "    pass"], "python"],
+      [["# type: ignore[arg-type]", "def charge(amount):", "    pass"], "python"],
+      [["// istanbul ignore next", "func Charge() {}"], "go"],
+    ];
+    for (const [lines, language] of cases) {
+      expect(scanDocComment(lines, lines.length - (language === "python" ? 2 : 1), language)).toBeNull();
+    }
+  });
+
+  test("a directive above real prose is dropped, the prose survives", () => {
+    const lines = [
+      "// eslint-disable-next-line no-console",
+      "// @ts-expect-error",
+      "// Charges the card.",
+      "// Retries on 5xx.",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 4, "typescript")).toBe(
+      "Charges the card.\nRetries on 5xx.",
+    );
+  });
+
+  test("a directive below the prose is dropped too, and only it", () => {
+    // The commonest real position: the directive sits on the line directly
+    // above the definition, which is the TRAILING end of the collected run.
+    // A leading-only strip would leak it onto the end of the paragraph.
+    const lines = [
+      "// Charges the card.",
+      "// Retries on 5xx.",
+      "// eslint-disable-next-line no-console",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 3, "typescript")).toBe(
+      "Charges the card.\nRetries on 5xx.",
+    );
+  });
+
+  test("directives at both ends are dropped, prose between them survives", () => {
+    const lines = [
+      "// @ts-nocheck",
+      "// Charges the card.",
+      "// prettier-ignore",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 3, "typescript")).toBe("Charges the card.");
+  });
+
+  test("a directive between two sentences is left alone", () => {
+    // Only the ends are trimmed: cutting inside prose would mean deciding
+    // what the surrounding sentences meant.
+    const lines = [
+      "// Charges the card.",
+      "// eslint-disable-next-line no-console",
+      "// Retries on 5xx.",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 3, "typescript")).toBe(
+      "Charges the card.\neslint-disable-next-line no-console\nRetries on 5xx.",
+    );
+  });
+
+  test("a JSDoc block whose body is only directives yields nothing", () => {
+    const lines = [
+      "/**",
+      " * eslint-disable no-console",
+      " * @ts-nocheck",
+      " */",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 4, "typescript")).toBeNull();
+  });
+
+  test("prose that merely mentions a directive is untouched", () => {
+    // Only a LEADING run of directives is stripped, and only lines that ARE
+    // one: a sentence about eslint is still documentation.
+    const lines = [
+      "// Callers must keep the eslint-disable in sync with this list.",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 1, "typescript")).toBe(
+      "Callers must keep the eslint-disable in sync with this list.",
+    );
+  });
+
   test("decoration with no letters is rejected", () => {
     const lines = ["// ----------------", "// ================", "function charge() {}"];
     expect(scanDocComment(lines, 2, "typescript")).toBeNull();
@@ -777,10 +876,9 @@ describe("resolveCodeNavHover", () => {
     expect(result.definition!.signature).toBe("export function charge(amount, key) {");
     expect(result.definition!.signatureApproximate).toBe(true);
     expect(result.definition!.doc).toBe("Charges the card.");
-    expect(result.definition!.preview).toEqual({
-      startLine: 2,
-      lines: ["export function charge(amount, key) {", "  return 1;", "}"],
-    });
+    // Declared in the shape for a later tier, deliberately unpopulated: the
+    // card renders the signature, so source lines nothing reads are pure cost.
+    expect(result.definition!.preview).toBeNull();
     expect(result.definition!.otherCandidateCount).toBe(0);
     expect(result.alternateDefinition).toBeNull();
     expect(result.references).toHaveLength(2);

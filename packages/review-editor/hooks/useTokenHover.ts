@@ -12,6 +12,12 @@ const DWELL_MS = 350;
 const LEAVE_GRACE_MS = 250;
 const MAX_CACHE_ENTRIES = 30;
 
+/**
+ * Marks the card's own subtree. The card carries this attribute and the scroll
+ * cancel reads it, so the two stay in step through one name.
+ */
+export const TOKEN_HOVER_CARD_SELECTOR = '[data-token-hover-card]';
+
 export interface TokenHoverState {
   request: CodeNavRequest;
   data: CodeNavHoverResponse;
@@ -66,7 +72,10 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
   const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** Which key the in-flight request belongs to, so a re-entry can join it. */
+  const inFlightKeyRef = useRef<string | null>(null);
   const activeKeyRef = useRef<string | null>(null);
+  const activeElementRef = useRef<HTMLElement | null>(null);
   const openKeyRef = useRef<string | null>(null);
   const cacheRef = useRef(new Map<string, CodeNavHoverResponse>());
 
@@ -80,16 +89,21 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
     graceTimerRef.current = null;
   }, []);
 
+  const abortInFlight = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    inFlightKeyRef.current = null;
+  }, []);
+
   const close = useCallback(() => {
     clearDwell();
     clearGrace();
-    abortRef.current?.abort();
-    abortRef.current = null;
+    abortInFlight();
     activeKeyRef.current = null;
     openKeyRef.current = null;
     setHover(null);
     setEngaged(false);
-  }, [clearDwell, clearGrace]);
+  }, [abortInFlight, clearDwell, clearGrace]);
 
   const readCache = useCallback((key: string): CodeNavHoverResponse | undefined => {
     const cache = cacheRef.current;
@@ -114,14 +128,28 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
   const open = useCallback(
     (key: string, request: CodeNavRequest, data: CodeNavHoverResponse, element: HTMLElement) => {
       if (!meetsRenderThreshold(data)) {
-        // Nothing to show. Stay quiet and stop holding the scroll listener.
-        if (openKeyRef.current == null) setEngaged(false);
+        // The answer for the token the pointer is on NOW says nothing. A card
+        // still standing for an earlier token is stale the moment that is
+        // true, so it goes with it rather than lingering over a symbol the
+        // reviewer has already left.
+        if (openKeyRef.current != null && openKeyRef.current !== key) {
+          openKeyRef.current = null;
+          setHover(null);
+        }
+        setEngaged(false);
+        return;
+      }
+      // The anchor was measured against an element that has since been
+      // recycled out of the diff (virtualized scroll, a diff swap). Its rect
+      // is 0,0 and would pin the card to the corner of the screen.
+      if (!element.isConnected) {
+        close();
         return;
       }
       openKeyRef.current = key;
       setHover({ request, data, rect: element.getBoundingClientRect() });
     },
-    [],
+    [close],
   );
 
   const onTokenHoverEnter = useCallback(
@@ -130,15 +158,30 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
       const key = cacheKey(request);
 
       // Crossing between fragments of the same identifier fires leave+enter.
-      // Keep the open card and its anchor exactly where they are.
-      if (openKeyRef.current === key) return;
+      // Keep the open card and its anchor exactly where they are — but this is
+      // also where the pointer lands after a brief drift onto a NEIGHBOUR, so
+      // the pending work for that neighbour has to die here. Without the three
+      // lines below, its answer arrives later, still passes the landing check,
+      // and replaces the open card's contents with another token's symbol.
+      if (openKeyRef.current === key) {
+        clearDwell();
+        activeKeyRef.current = key;
+        if (inFlightKeyRef.current !== null && inFlightKeyRef.current !== key) {
+          abortInFlight();
+        }
+        return;
+      }
 
       clearDwell();
       if (activeKeyRef.current !== key) {
-        abortRef.current?.abort();
-        abortRef.current = null;
+        if (inFlightKeyRef.current !== null && inFlightKeyRef.current !== key) {
+          abortInFlight();
+        }
       }
       activeKeyRef.current = key;
+      // A joined in-flight request must anchor to the span the pointer is on
+      // now, not the one it was on when the request launched.
+      activeElementRef.current = tokenElement;
       setEngaged(true);
 
       dwellTimerRef.current = setTimeout(() => {
@@ -151,8 +194,15 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
           return;
         }
 
+        // Leaving and coming back inside the grace window re-arms the dwell
+        // while this key's own request is still in flight. Joining it is the
+        // single-in-flight contract; launching a second is one more ripgrep
+        // process for an answer already on its way.
+        if (inFlightKeyRef.current === key) return;
+
         const controller = new AbortController();
         abortRef.current = controller;
+        inFlightKeyRef.current = key;
         void (async () => {
           try {
             const res = await fetch('/api/code-nav/hover', {
@@ -165,16 +215,19 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
             const data = (await res.json()) as CodeNavHoverResponse;
             if (controller.signal.aborted || activeKeyRef.current !== key) return;
             writeCache(key, data);
-            open(key, request, data, tokenElement);
+            open(key, request, data, activeElementRef.current ?? tokenElement);
           } catch {
             // Aborts, network failures and malformed answers are all "no card".
           } finally {
-            if (abortRef.current === controller) abortRef.current = null;
+            if (abortRef.current === controller) {
+              abortRef.current = null;
+              inFlightKeyRef.current = null;
+            }
           }
         })();
       }, DWELL_MS);
     },
-    [clearDwell, clearGrace, open, readCache, writeCache],
+    [abortInFlight, clearDwell, clearGrace, open, readCache, writeCache],
   );
 
   const startGrace = useCallback(() => {
@@ -195,12 +248,27 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
   const onCardEnter = useCallback(() => clearGrace(), [clearGrace]);
   const onCardLeave = useCallback(() => startGrace(), [startGrace]);
 
-  // The anchor rect is stale the moment the pane moves, so scrolling closes the
+  // The anchor rect is stale the moment the PANE moves, so scrolling closes the
   // card and abandons the pending fetch. Capture phase, because the scroll
   // happens inside the diff pane, not on the document.
+  //
+  // Scrolling INSIDE the card moves nothing the anchor depends on, and the
+  // signature block is a horizontal scroller: closing the card the moment the
+  // reviewer scrolls it to read the end of a long signature would make it
+  // unreadable by exactly the gesture meant to read it.
   useEffect(() => {
     if (!engaged) return;
-    const cancel = () => close();
+    const cancel = (event: Event) => {
+      const node = event.target;
+      const element =
+        node instanceof Element
+          ? node
+          : node instanceof Node
+            ? node.parentElement
+            : null;
+      if (element?.closest(TOKEN_HOVER_CARD_SELECTOR)) return;
+      close();
+    };
     document.addEventListener('scroll', cancel, true);
     document.addEventListener('wheel', cancel, { capture: true, passive: true });
     return () => {

@@ -175,7 +175,8 @@ describe('POST /api/code-nav/hover', () => {
         expect(definition.signature).toBe('export function charge(amount, key) {');
         expect(definition.signatureApproximate).toBe(true);
         expect(definition.doc).toBe('Charges the card.');
-        expect(definition.preview?.startLine).toBe(2);
+        // Present in the shape both runtimes owe, null until a consumer exists.
+        expect(definition.preview).toBeNull();
         // The two call sites, and only those — the definition line is not
         // double-counted as a reference.
         expect(data.referenceCount).toBe(2);

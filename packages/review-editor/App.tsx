@@ -44,6 +44,9 @@ import { toast, Toaster } from 'sonner';
 import { useCodeNav, type CodeNavRequest } from './hooks/useCodeNav';
 import { useTokenHover } from './hooks/useTokenHover';
 import { TokenHoverCard } from './components/TokenHoverCard';
+import { buildTokenHoverRequest } from './utils/buildCodeNavRequest';
+import { detectLanguage } from './utils/detectLanguage';
+import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { useCallFlowAnalysis } from './hooks/useCallFlowAnalysis';
 import { useCallFlowInstall } from './hooks/useCallFlowInstall';
 import { useCallFlowAutoInstall } from './hooks/useCallFlowAutoInstall';
@@ -1380,8 +1383,19 @@ const ReviewApp: React.FC = () => {
   // their own setting. Off means no handler props reach the diff views, so
   // there are no listeners, no requests and no card in the tree.
   const tokenHoverEnabled = canUseLiveWorkspaceActions && tokenHoverCardsEnabled;
-  const hoveredTokenRequest = tokenHover.hover?.request;
+  const hoveredTokenSymbol = tokenHover.hover?.request.symbol;
   const closeTokenHover = tokenHover.close;
+  const startTokenHover = tokenHover.onTokenHoverEnter;
+  // Stitching lives here, not in the diff views: rebuilding a fragmented
+  // identifier is app-only work, and both views are compiled into the portable
+  // guide viewer, which must not carry it.
+  const handleTokenHoverEnter = useCallback(
+    (props: DiffTokenEventBaseProps, filePath: string) => {
+      const request = buildTokenHoverRequest(props, filePath);
+      if (request) startTokenHover(request, props.tokenElement);
+    },
+    [startTokenHover],
+  );
   useEffect(() => {
     if (canUseLiveWorkspaceActions) return;
     codeNav.clear();
@@ -1389,18 +1403,23 @@ const ReviewApp: React.FC = () => {
     dockApi?.getPanel(REVIEW_CODE_NAV_PANEL_ID)?.api.close();
   }, [canUseLiveWorkspaceActions, codeNav.clear, closeTokenHover, dockApi]);
   const handleTokenHoverSelectLocation = useCallback(
-    (location: { filePath: string; line: number }) => {
+    (location: { filePath: string; line: number; column: number }) => {
       closeTokenHover();
-      if (!hoveredTokenRequest) return;
-      // Same References flow Cmd+click opens, anchored at the clicked location
-      // so the panel ranks that file first.
+      if (!hoveredTokenSymbol) return;
+      // Same References flow Cmd+click opens, but described from the CLICKED
+      // location: carrying the hover's own charStart and language would tell
+      // the server a column in another file and, for a cross-language jump, a
+      // language the target file is not written in.
       handleCodeNavRequest({
-        ...hoveredTokenRequest,
+        symbol: hoveredTokenSymbol,
         filePath: location.filePath,
         line: location.line,
+        charStart: location.column,
+        side: 'new',
+        language: detectLanguage(location.filePath),
       });
     },
-    [handleCodeNavRequest, hoveredTokenRequest, closeTokenHover],
+    [handleCodeNavRequest, hoveredTokenSymbol, closeTokenHover],
   );
   const { withPRContext } = useAnnotationFactory(
     prMetadata,
@@ -3407,7 +3426,7 @@ const ReviewApp: React.FC = () => {
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
-    onTokenHoverEnter: tokenHoverEnabled ? tokenHover.onTokenHoverEnter : undefined,
+    onTokenHoverEnter: tokenHoverEnabled ? handleTokenHoverEnter : undefined,
     onTokenHoverLeave: tokenHoverEnabled ? tokenHover.onTokenHoverLeave : undefined,
     codeNavResult: codeNav.result,
     codeNavIsLoading: codeNav.isLoading,
@@ -3439,7 +3458,7 @@ const ReviewApp: React.FC = () => {
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
-    tokenHoverEnabled, tokenHover.onTokenHoverEnter, tokenHover.onTokenHoverLeave,
+    tokenHoverEnabled, handleTokenHoverEnter, tokenHover.onTokenHoverLeave,
   ]);
 
   // Separate context for high-frequency job logs — prevents re-rendering all panels on every SSE event

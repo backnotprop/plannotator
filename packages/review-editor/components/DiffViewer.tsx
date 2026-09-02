@@ -8,7 +8,7 @@ import { useWorkerPoolThemeSync } from '../workerPool';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
 import { detectLanguage } from '../utils/detectLanguage';
-import { buildCodeNavRequest, buildTokenHoverRequest } from '../utils/buildCodeNavRequest';
+import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
@@ -222,11 +222,14 @@ interface DiffViewerProps {
   aiHistoryMessages?: AIChatEntry[];
   // Code navigation
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
-  /** Token hover cards. Absent (the default) means the feature is not wired at all. */
-  onTokenHoverEnter?: (
-    request: import('@plannotator/shared/code-nav').CodeNavRequest,
-    tokenElement: HTMLElement,
-  ) => void;
+  /**
+   * Token hover cards. Absent (the default) means the feature is not wired at
+   * all. Deliberately raw: the view reports the token event and its file, and
+   * the caller decides what a hoverable symbol is. Stitching a fragmented
+   * identifier is app-only work, and this component is also compiled into the
+   * read-only portable guide viewer, which passes neither handler.
+   */
+  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => void;
   onTokenHoverLeave?: () => void;
 }
 
@@ -732,10 +735,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
       props.tokenElement.classList.add('pn-token-nav');
     }
-    if (onTokenHoverEnter) {
-      const request = buildTokenHoverRequest(props, filePath);
-      if (request) onTokenHoverEnter(request, props.tokenElement);
-    }
+    onTokenHoverEnter?.(props, filePath);
   }, [filePath, onCodeNavRequest, onTokenHoverEnter]);
 
   const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {

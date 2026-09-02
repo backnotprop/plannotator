@@ -564,7 +564,6 @@ export const CODE_NAV_MAX_FILE_BYTES = 1024 * 1024;
 /** A hover answer that arrives after this is worse than no answer at all. */
 const HOVER_RG_TIMEOUT_MS = 3000;
 const HOVER_REFERENCE_LIMIT = 5;
-const PREVIEW_MAX_LINES = 12;
 const SIGNATURE_MAX_CHARS = 300;
 const SIGNATURE_READ_AHEAD_LINES = 2;
 const DOC_MAX_LINES = 10;
@@ -696,7 +695,56 @@ function scanPythonDocstring(lines: string[], defLineIdx: number): string[] {
   return scanLineCommentRun(lines, defLineIdx, ["#"], (t) => t.startsWith("@"));
 }
 
-function finishDoc(collected: string[]): string | null {
+/**
+ * Lines a linter, formatter or type checker addresses to a tool, never to a
+ * reader. A comment run that opens with these is machine bookkeeping that
+ * happens to sit above a definition, and rendering it as documentation is
+ * exactly the "garbage over nothing" failure the scan exists to avoid.
+ */
+const TOOLING_DIRECTIVE_PREFIXES = [
+  "eslint-disable",
+  "@ts-expect-error",
+  "@ts-ignore",
+  "@ts-nocheck",
+  "prettier-ignore",
+  "biome-ignore",
+  "istanbul ignore",
+  "noqa",
+  "type: ignore",
+];
+
+function isToolingDirective(line: string): boolean {
+  if (TOOLING_DIRECTIVE_PREFIXES.some((p) => line.startsWith(p))) return true;
+  // Triple-slash directives survive `//` stripping as `/ <reference … />`.
+  return /^\/*\s*<reference\b/.test(line);
+}
+
+/**
+ * Drop directives from BOTH ENDS of the run, never from the middle.
+ *
+ * Both ends, because the commonest real position for a directive is the line
+ * immediately above the definition — which is the TRAILING end of the run as
+ * collected — and a leading-only strip would leak it onto the end of the
+ * paragraph. Never the middle, because a directive surrounded by prose sits
+ * inside documentation whose shape we would have to interpret to cut safely.
+ */
+function stripEdgeDirectives(lines: string[]): string[] {
+  const isDroppable = (line: string): boolean => {
+    const trimmed = line.trim();
+    return trimmed === "" || isToolingDirective(trimmed);
+  };
+
+  let start = 0;
+  while (start < lines.length && isDroppable(lines[start])) start++;
+
+  let end = lines.length;
+  while (end > start && isDroppable(lines[end - 1])) end--;
+
+  return lines.slice(start, end);
+}
+
+function finishDoc(collectedLines: string[]): string | null {
+  const collected = stripEdgeDirectives(collectedLines);
   const kept = collected.map((l) => l.trim()).filter((l) => l.length > 0);
   if (kept.length === 0) return null;
   // Rule bars, boxes and other decoration carry no letters. Returning nothing
@@ -715,7 +763,13 @@ function finishDoc(collected: string[]): string | null {
 /**
  * Heuristic doc-comment scan around a definition line. Per-language and
  * deliberately narrow: an unknown language returns null rather than guessing,
- * and so does anything that scans to decoration.
+ * and so does anything that scans to decoration or to tooling directives.
+ *
+ * Only the five languages `DEFINITION_PATTERNS` covers are scanned at all.
+ * That is accepted, not an oversight: a generic "comment characters above the
+ * line" rule reads shell here-docs, SQL banners and C preprocessor lines as
+ * prose, and a wrong doc paragraph on the card is worse than none. Widening
+ * this set means adding a language's real comment rules, not loosening these.
  */
 export function scanDocComment(
   lines: string[],
@@ -830,12 +884,9 @@ export async function resolveCodeNavHover(
       doc: fileLines
         ? scanDocComment(fileLines, defLineIdx, request.language)
         : null,
-      preview: fileLines
-        ? {
-            startLine: top.line,
-            lines: fileLines.slice(defLineIdx, defLineIdx + PREVIEW_MAX_LINES),
-          }
-        : null,
+      // Declared for a later tier, populated when a consumer exists: the card
+      // renders the signature, so shipping source lines nothing reads is cost.
+      preview: null,
       otherCandidateCount: Math.max(0, resolved.definitions.length - 1),
     };
   }

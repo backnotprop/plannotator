@@ -14,7 +14,11 @@ export interface TokenHoverCardProps {
   onPointerEnter: () => void;
   onPointerLeave: () => void;
   /** Opens the References panel for the hovered symbol, anchored at a location. */
-  onSelectLocation: (location: { filePath: string; line: number }) => void;
+  onSelectLocation: (location: {
+    filePath: string;
+    line: number;
+    column: number;
+  }) => void;
 }
 
 function locationLabel(filePath: string, line: number): string {
@@ -50,7 +54,10 @@ export function TokenHoverCard({
     );
     let top = rect.bottom + ANCHOR_GAP;
     if (top + height > window.innerHeight - EDGE_MARGIN) {
-      top = rect.top - height - ANCHOR_GAP;
+      // Flipping a card taller than the space above the token would put its
+      // head off the top of the viewport, where the name and signature are
+      // unreachable. Clamp instead: the foot may overlap the token.
+      top = Math.max(EDGE_MARGIN, rect.top - height - ANCHOR_GAP);
     }
     setPlacement({ for: hover, left, top });
   }, [hover, rect]);
@@ -64,8 +71,12 @@ export function TokenHoverCard({
   return createPortal(
     <div
       ref={cardRef}
+      // Read by the hook's scroll cancel: a scroll inside the card is not a
+      // pane scroll and must not close it.
       data-token-hover-card
-      role="dialog"
+      // Not a dialog: nothing here takes focus, traps it, or must be
+      // dismissed. It is supplementary information about the hovered token.
+      role="tooltip"
       aria-label={`${data.symbol} details`}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
@@ -151,7 +162,7 @@ export function TokenHoverCard({
           ))}
           {remaining > 0 && (
             <div className="py-0.5 text-[11px] text-muted-foreground">
-              {remaining} more in the References panel
+              {`… ${remaining} more in the References panel`}
             </div>
           )}
         </div>

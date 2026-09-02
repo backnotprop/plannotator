@@ -169,16 +169,24 @@ describe.skipIf(!hasDom)('TokenHoverCard', () => {
 
     const text = card.textContent ?? '';
     expect(text).toContain('9 references');
-    expect(text).toContain('4 more in the References panel');
+    expect(text).toContain('… 4 more in the References panel');
     expect(card.querySelectorAll('button').length).toBe(6); // definition + 5 refs
   });
 
   test('renders no rank vocabulary, no source chip and no latency readout', async () => {
     const card = await render(
       <TokenHoverCard
+        // Every optional row is present, so the sweep covers the overflow line
+        // and the alternate-location line too, not just the always-on chrome.
         hover={state(response({
-          references: [{ filePath: 'src/other.js', line: 8, column: 2, snippet: 'charge(1)' }],
-          referenceCount: 1,
+          references: Array.from({ length: 5 }, (_, i) => ({
+            filePath: `src/f${i}.js`,
+            line: i + 1,
+            column: 2,
+            snippet: 'charge(1)',
+          })),
+          referenceCount: 12,
+          capped: true,
           alternateDefinition: { filePath: 'src/legacy.js', line: 31, column: 9 },
         }))}
         onPointerEnter={() => {}}
@@ -188,6 +196,9 @@ describe.skipIf(!hasDom)('TokenHoverCard', () => {
     );
 
     const text = card.textContent ?? '';
+    // Every optional row really is on screen for this sweep.
+    expect(text).toContain('or possibly');
+    expect(text).toContain('more in the References panel');
     for (const banned of ['ranked', 'likely', 'candidate', 'confidence', '38ms', 'rg ·']) {
       expect(text.toLowerCase()).not.toContain(banned.toLowerCase());
     }
