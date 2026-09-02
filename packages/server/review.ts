@@ -132,7 +132,7 @@ import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
-import { handleCodeNavResolve, extractChangedFiles } from "./code-nav";
+import { handleCodeNavResolve, handleCodeNavHover, extractChangedFiles } from "./code-nav";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "./review-skill-loader";
 import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shared/guide-instructions-store";
 import {
@@ -3074,6 +3074,34 @@ export async function startReviewServer(
             }
             const changedFiles = extractChangedFiles(currentPatch);
             return handleCodeNavResolve(req, navCwd, changedFiles);
+          }
+
+          // API: Code navigation hover card (same guards as /resolve — the
+          // hover pipeline reads exactly what Cmd+click reads).
+          if (url.pathname === "/api/code-nav/hover" && req.method === "POST") {
+            if (isGitButlerCommittedView()) {
+              return Response.json(
+                { error: "Code navigation is unavailable for committed GitButler views" },
+                { status: 400 },
+              );
+            }
+            const hasCodeNavAccess = !!workspace || !!gitContext || !!options.agentCwd || !!options.worktreePool;
+            if (!hasCodeNavAccess) {
+              return Response.json(
+                { error: "Code navigation requires local access" },
+                { status: 400 },
+              );
+            }
+            // PR mode: the checkout must actually exist — ripgrep over a
+            // fallback directory returns confidently-wrong results.
+            const navCwd = options.worktreePool && prMetadata
+              ? await ensurePRLocalCwd()
+              : await resolveAgentCwdReady();
+            if (!navCwd) {
+              return Response.json({ error: "Local checkout unavailable" }, { status: 400 });
+            }
+            const changedFiles = extractChangedFiles(currentPatch);
+            return handleCodeNavHover(req, navCwd, changedFiles);
           }
 
           // API: Code navigation file preview (read file from working tree)

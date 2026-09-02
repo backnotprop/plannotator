@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import { basename, resolve as resolvePath } from "node:path";
@@ -158,7 +158,9 @@ import {
 import {
 	type CodeNavRequest,
 	type CodeNavRuntime,
+	CODE_NAV_MAX_FILE_BYTES,
 	resolveCodeNav,
+	resolveCodeNavHover,
 	validateCodeNavRequest,
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
@@ -226,6 +228,18 @@ const piCodeNavRuntime: CodeNavRuntime = {
 				resolve({ stdout: "", stderr: "command not found", exitCode: 1 });
 			});
 		});
+	},
+
+	async readFile(path, options) {
+		try {
+			const full = options?.cwd ? `${options.cwd}/${path}` : path;
+			// Check the size before pulling bytes: rg would not have searched a
+			// file this large either.
+			if (statSync(full).size > CODE_NAV_MAX_FILE_BYTES) return null;
+			return readFileSync(full, "utf-8");
+		} catch {
+			return null;
+		}
 	},
 };
 
@@ -3051,6 +3065,32 @@ export async function startReviewServer(options: {
 				const navCwd = resolveAgentCwd();
 				const changedFiles = extractChangedFiles(currentPatch);
 				const result = await resolveCodeNav(piCodeNavRuntime, body, navCwd, changedFiles);
+				json(res, result);
+			} catch (err) {
+				json(res, { error: err instanceof Error ? err.message : "Code navigation failed" }, 500);
+			}
+		} else if (url.pathname === "/api/code-nav/hover" && req.method === "POST") {
+			// Same guards as /resolve — the hover pipeline reads exactly what
+			// Cmd+click reads.
+			if (isGitButlerCommittedView()) {
+				json(res, { error: "Code navigation is unavailable for committed GitButler views" }, 400);
+				return;
+			}
+			const hasCodeNavAccess = !!workspace || !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
+			if (!hasCodeNavAccess) {
+				json(res, { error: "Code navigation requires local access" }, 400);
+				return;
+			}
+			try {
+				const body = (await parseBody(req)) as unknown as CodeNavRequest;
+				const error = validateCodeNavRequest(body);
+				if (error) {
+					json(res, { error }, 400);
+					return;
+				}
+				const navCwd = resolveAgentCwd();
+				const changedFiles = extractChangedFiles(currentPatch);
+				const result = await resolveCodeNavHover(piCodeNavRuntime, body, navCwd, changedFiles);
 				json(res, result);
 			} catch (err) {
 				json(res, { error: err instanceof Error ? err.message : "Code navigation failed" }, 500);

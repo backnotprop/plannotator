@@ -454,6 +454,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/guide/:jobId/output` | GET | Fetch a failed guide job's captured raw output for manual repair (404 if none captured) |
 | `/api/guide/:jobId/submit` | POST | Manually submit corrected guide JSON for a failed job (body: `{ payload }`) |
 | `/api/code-nav/resolve` | POST | Search for symbol definitions and references via ripgrep (body: `{ symbol, filePath, line, charStart, side, language? }`) |
+| `/api/code-nav/hover` | POST | Token hover card resolution: the same body and the same guards as `/resolve`, over the same ripgrep search, returning one enriched definition (kind, approximate signature, heuristic doc comment, short preview), an optional runner-up candidate, and a five-reference sample. `backend: 'unavailable'` (rg missing) is a normal 200 and the client renders nothing. `source` is always `'search'` in Tier 0; the nullable `symbolKind` / `signature` / `doc` fields are what a later syntax- or index-backed tier would fill. |
 | `/api/code-nav/file` | GET | Read file from working tree for code-nav preview (`?path=`) |
 
 ### Annotate Server (`packages/server/annotate.ts`)

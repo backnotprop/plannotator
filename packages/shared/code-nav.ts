@@ -48,6 +48,82 @@ export interface CodeNavRuntime {
     args: string[],
     options?: { cwd?: string; timeoutMs?: number },
   ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  /**
+   * Read one repo-relative file for hover enrichment. Optional so the vendored
+   * type stays backward compatible and `/resolve` callers never provide it —
+   * without it hover degrades to the definition location plus references.
+   *
+   * Implementations must return `null` (never throw) for a missing or
+   * unreadable file, and for one larger than CODE_NAV_MAX_FILE_BYTES — the
+   * ceiling rg itself searches under (`--max-filesize 1M`).
+   */
+  readFile?: (
+    path: string,
+    options?: { cwd?: string },
+  ) => Promise<string | null>;
+}
+
+/**
+ * What a definition regex matched. Tier 0 reads it off the pattern that fired;
+ * later tiers fill it from an AST or an index.
+ */
+export type SymbolKind =
+  | "function"
+  | "method"
+  | "class"
+  | "interface"
+  | "type"
+  | "enum"
+  | "const"
+  | "variable"
+  | "struct"
+  | "trait"
+  | "module";
+
+export interface CodeNavHoverLocation {
+  filePath: string;
+  line: number;
+  column: number;
+}
+
+export interface CodeNavHoverDefinition extends CodeNavHoverLocation {
+  confidence: "likely" | "possible";
+  /** Tier 0: from the matched def-regex. Tier 1+: AST / SCIP. */
+  symbolKind: SymbolKind | null;
+  /** Tier 0: the matched line plus a short read-ahead. Tier 1+: exact. */
+  signature: string | null;
+  /** True in Tier 0 — the card renders a "matched line" cue. */
+  signatureApproximate: boolean;
+  /** Tier 0: heuristic comment scan. Tier 1+: the real doc node. */
+  doc: string | null;
+  preview: { startLine: number; lines: string[] } | null;
+  /** Ranked definitions beyond this one, within the search caps. */
+  otherCandidateCount: number;
+}
+
+export interface CodeNavHoverReference {
+  filePath: string;
+  line: number;
+  column: number;
+  snippet: string;
+}
+
+export interface CodeNavHoverResponse {
+  backend: "search" | "unavailable";
+  /** Tier 1 widens this to 'syntax', Tier 2 to 'index'. */
+  source: "search";
+  symbol: string;
+  definition: CodeNavHoverDefinition | null;
+  /**
+   * The runner-up definition, present only when the search found EXACTLY two
+   * candidates. Three or more means the top match is too weak to name a second
+   * on the card, and the extras belong in the References panel.
+   */
+  alternateDefinition: CodeNavHoverLocation | null;
+  references: CodeNavHoverReference[];
+  referenceCount: number;
+  capped: boolean;
+  stats: { elapsedMs: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -86,55 +162,80 @@ const RG_TYPE_MAP: Record<string, string> = {
 // Definition patterns
 // ---------------------------------------------------------------------------
 
+/**
+ * Each pattern carries the kind it proves. Alternations that used to span
+ * several kinds (`const|let|var`, `interface|type`, go's optional receiver)
+ * are split one-per-kind: the union of the patterns is unchanged, so
+ * definition-vs-reference classification is identical, but a match now also
+ * names WHAT was defined.
+ */
+interface DefinitionPattern {
+  pattern: string;
+  kind: SymbolKind;
+}
+
 interface DefinitionPatternSet {
   languages: string[];
-  patterns: string[];
+  patterns: DefinitionPattern[];
 }
 
 const DEFINITION_PATTERNS: DefinitionPatternSet[] = [
   {
     languages: ["typescript", "javascript"],
     patterns: [
-      String.raw`(?:export\s+)?(?:async\s+)?function\s+SYMBOL\b`,
-      String.raw`(?:export\s+)?(?:const|let|var)\s+SYMBOL\s*[=:]`,
-      String.raw`(?:export\s+)?class\s+SYMBOL\b`,
-      String.raw`(?:export\s+)?(?:interface|type)\s+SYMBOL\b`,
-      String.raw`(?:export\s+)?enum\s+SYMBOL\b`,
-      String.raw`^\s+(?:(?:async|static|readonly|get|set|private|protected|public)\s+)+SYMBOL\s*[(<:]`,
+      { pattern: String.raw`(?:export\s+)?(?:async\s+)?function\s+SYMBOL\b`, kind: "function" },
+      { pattern: String.raw`(?:export\s+)?const\s+SYMBOL\s*[=:]`, kind: "const" },
+      { pattern: String.raw`(?:export\s+)?(?:let|var)\s+SYMBOL\s*[=:]`, kind: "variable" },
+      { pattern: String.raw`(?:export\s+)?class\s+SYMBOL\b`, kind: "class" },
+      { pattern: String.raw`(?:export\s+)?interface\s+SYMBOL\b`, kind: "interface" },
+      { pattern: String.raw`(?:export\s+)?type\s+SYMBOL\b`, kind: "type" },
+      { pattern: String.raw`(?:export\s+)?enum\s+SYMBOL\b`, kind: "enum" },
+      {
+        pattern: String.raw`^\s+(?:(?:async|static|readonly|get|set|private|protected|public)\s+)+SYMBOL\s*[(<:]`,
+        kind: "method",
+      },
     ],
   },
   {
     languages: ["python"],
     patterns: [
-      String.raw`(?:^|\s)def\s+SYMBOL\s*\(`,
-      String.raw`(?:^|\s)class\s+SYMBOL\b`,
-      String.raw`^SYMBOL\s*=`,
+      { pattern: String.raw`(?:^|\s)def\s+SYMBOL\s*\(`, kind: "function" },
+      { pattern: String.raw`(?:^|\s)class\s+SYMBOL\b`, kind: "class" },
+      { pattern: String.raw`^SYMBOL\s*=`, kind: "variable" },
     ],
   },
   {
     languages: ["go"],
     patterns: [
-      String.raw`func\s+(?:\([^)]+\)\s+)?SYMBOL\s*\(`,
-      String.raw`type\s+SYMBOL\s`,
-      String.raw`var\s+SYMBOL\s`,
+      { pattern: String.raw`func\s+\([^)]+\)\s+SYMBOL\s*\(`, kind: "method" },
+      { pattern: String.raw`func\s+SYMBOL\s*\(`, kind: "function" },
+      { pattern: String.raw`type\s+SYMBOL\s`, kind: "type" },
+      { pattern: String.raw`var\s+SYMBOL\s`, kind: "variable" },
     ],
   },
   {
     languages: ["rust"],
     patterns: [
-      String.raw`(?:pub(?:\([^)]*\))?\s+)?fn\s+SYMBOL\b`,
-      String.raw`(?:pub(?:\([^)]*\))?\s+)?struct\s+SYMBOL\b`,
-      String.raw`(?:pub(?:\([^)]*\))?\s+)?enum\s+SYMBOL\b`,
-      String.raw`(?:pub(?:\([^)]*\))?\s+)?trait\s+SYMBOL\b`,
-      String.raw`(?:pub(?:\([^)]*\))?\s+)?type\s+SYMBOL\b`,
-      String.raw`(?:pub(?:\([^)]*\))?\s+)?mod\s+SYMBOL\b`,
+      { pattern: String.raw`(?:pub(?:\([^)]*\))?\s+)?fn\s+SYMBOL\b`, kind: "function" },
+      { pattern: String.raw`(?:pub(?:\([^)]*\))?\s+)?struct\s+SYMBOL\b`, kind: "struct" },
+      { pattern: String.raw`(?:pub(?:\([^)]*\))?\s+)?enum\s+SYMBOL\b`, kind: "enum" },
+      { pattern: String.raw`(?:pub(?:\([^)]*\))?\s+)?trait\s+SYMBOL\b`, kind: "trait" },
+      { pattern: String.raw`(?:pub(?:\([^)]*\))?\s+)?type\s+SYMBOL\b`, kind: "type" },
+      { pattern: String.raw`(?:pub(?:\([^)]*\))?\s+)?mod\s+SYMBOL\b`, kind: "module" },
     ],
   },
 ];
 
-const GENERIC_DEFINITION_PATTERNS: string[] = [
-  String.raw`(?:function|def|func|fn|class|struct|enum|trait|interface|type)\s+SYMBOL\b`,
-  String.raw`(?:const|let|var|val)\s+SYMBOL\s*[=:]`,
+const GENERIC_DEFINITION_PATTERNS: DefinitionPattern[] = [
+  { pattern: String.raw`(?:function|def|func|fn)\s+SYMBOL\b`, kind: "function" },
+  { pattern: String.raw`class\s+SYMBOL\b`, kind: "class" },
+  { pattern: String.raw`struct\s+SYMBOL\b`, kind: "struct" },
+  { pattern: String.raw`enum\s+SYMBOL\b`, kind: "enum" },
+  { pattern: String.raw`trait\s+SYMBOL\b`, kind: "trait" },
+  { pattern: String.raw`interface\s+SYMBOL\b`, kind: "interface" },
+  { pattern: String.raw`type\s+SYMBOL\b`, kind: "type" },
+  { pattern: String.raw`const\s+SYMBOL\s*[=:]`, kind: "const" },
+  { pattern: String.raw`(?:let|var|val)\s+SYMBOL\s*[=:]`, kind: "variable" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -245,11 +346,16 @@ export function parseRgJsonOutput(
 // Match classification
 // ---------------------------------------------------------------------------
 
-export function classifyMatch(
+/**
+ * Same decision as {@link classifyMatch}, but it also reports WHICH pattern
+ * fired. The kind is free information the classifier already computed and
+ * used to throw away; the hover card renders it as a badge.
+ */
+export function classifyMatchDetailed(
   snippet: string,
   symbol: string,
   language?: string,
-): "definition" | "reference" {
+): { kind: "definition" | "reference"; symbolKind: SymbolKind | null } {
   const escaped = escapeRegex(symbol);
 
   if (language) {
@@ -257,19 +363,27 @@ export function classifyMatch(
       p.languages.includes(language),
     );
     if (langPatterns) {
-      for (const pattern of langPatterns.patterns) {
+      for (const { pattern, kind } of langPatterns.patterns) {
         const re = new RegExp(pattern.replace("SYMBOL", escaped));
-        if (re.test(snippet)) return "definition";
+        if (re.test(snippet)) return { kind: "definition", symbolKind: kind };
       }
     }
   }
 
-  for (const pattern of GENERIC_DEFINITION_PATTERNS) {
+  for (const { pattern, kind } of GENERIC_DEFINITION_PATTERNS) {
     const re = new RegExp(pattern.replace("SYMBOL", escaped));
-    if (re.test(snippet)) return "definition";
+    if (re.test(snippet)) return { kind: "definition", symbolKind: kind };
   }
 
-  return "reference";
+  return { kind: "reference", symbolKind: null };
+}
+
+export function classifyMatch(
+  snippet: string,
+  symbol: string,
+  language?: string,
+): "definition" | "reference" {
+  return classifyMatchDetailed(snippet, symbol, language).kind;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +482,11 @@ export async function resolveCodeNav(
   request: CodeNavRequest,
   cwd: string,
   changedFiles: string[],
+  /**
+   * Additive: hover passes a shorter timeout than Cmd+click's 5s, because a
+   * 5s hover answer is useless. `/resolve` keeps the original default.
+   */
+  options?: { timeoutMs?: number },
 ): Promise<CodeNavResponse> {
   const start = Date.now();
 
@@ -394,7 +513,7 @@ export async function resolveCodeNav(
 
   const result = await runtime.runCommand("rg", args, {
     cwd,
-    timeoutMs: 5000,
+    timeoutMs: options?.timeoutMs ?? 5000,
   });
 
   // Exit code 1 = no matches (normal), exit code 2 = error
@@ -433,4 +552,310 @@ export async function resolveCodeNav(
 
 export function resetRgCache(): void {
   rgAvailable = null;
+}
+
+// ---------------------------------------------------------------------------
+// Hover enrichment (Tier 0)
+// ---------------------------------------------------------------------------
+
+/** Mirrors rg's own `--max-filesize 1M`: never read what rg would not search. */
+export const CODE_NAV_MAX_FILE_BYTES = 1024 * 1024;
+
+/** A hover answer that arrives after this is worse than no answer at all. */
+const HOVER_RG_TIMEOUT_MS = 3000;
+const HOVER_REFERENCE_LIMIT = 5;
+const PREVIEW_MAX_LINES = 12;
+const SIGNATURE_MAX_CHARS = 300;
+const SIGNATURE_READ_AHEAD_LINES = 2;
+const DOC_MAX_LINES = 10;
+const DOC_MAX_CHARS = 600;
+
+function parenBalance(text: string): number {
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+  }
+  return depth;
+}
+
+/**
+ * The matched definition line, extended by a short balanced-paren read-ahead
+ * when the signature obviously continues. Always approximate in Tier 0: it is
+ * a line of source, not a parsed declaration.
+ */
+export function buildSignature(
+  lines: string[],
+  defLineIdx: number,
+): { text: string; approximate: true } | null {
+  const first = lines[defLineIdx];
+  if (first === undefined) return null;
+
+  let text = first.trim();
+  if (!text) return null;
+
+  for (
+    let ahead = 1;
+    ahead <= SIGNATURE_READ_AHEAD_LINES && parenBalance(text) > 0;
+    ahead++
+  ) {
+    const next = lines[defLineIdx + ahead];
+    if (next === undefined) break;
+    text = `${text} ${next.trim()}`.trim();
+  }
+
+  if (text.length > SIGNATURE_MAX_CHARS) {
+    text = text.slice(0, SIGNATURE_MAX_CHARS).trimEnd() + "…";
+  }
+  return { text, approximate: true };
+}
+
+/** Contiguous run of line comments directly above the def, skipping `skip` lines. */
+function scanLineCommentRun(
+  lines: string[],
+  defLineIdx: number,
+  prefixes: string[],
+  skip: (trimmed: string) => boolean,
+): string[] {
+  let i = defLineIdx - 1;
+  while (i >= 0 && skip(lines[i].trim())) i--;
+
+  const collected: string[] = [];
+  while (i >= 0 && collected.length < DOC_MAX_LINES + 1) {
+    const trimmed = lines[i].trim();
+    const prefix = prefixes.find((p) => trimmed.startsWith(p));
+    // A blank line (or anything that is not a comment) breaks the association.
+    if (!prefix) break;
+    collected.unshift(trimmed.slice(prefix.length).trim());
+    i--;
+  }
+  return collected;
+}
+
+function scanJsDocComment(lines: string[], defLineIdx: number): string[] {
+  const above = lines[defLineIdx - 1];
+  if (above === undefined) return [];
+
+  if (above.trim().endsWith("*/")) {
+    const block: string[] = [];
+    let j = defLineIdx - 1;
+    while (j >= 0 && block.length <= DOC_MAX_LINES + 2) {
+      block.unshift(lines[j]);
+      if (lines[j].trim().startsWith("/*")) break;
+      j--;
+    }
+    // Only a real doc block (`/** … */`) counts; a plain `/* … */` is as
+    // likely to be commented-out code as documentation.
+    if (j < 0 || !block[0]?.trim().startsWith("/**")) return [];
+    return block.map((line) =>
+      line
+        .trim()
+        .replace(/^\/\*\*+/, "")
+        .replace(/\*\/$/, "")
+        .replace(/^\*+/, "")
+        .trim(),
+    );
+  }
+
+  return scanLineCommentRun(lines, defLineIdx, ["//"], () => false);
+}
+
+function scanPythonDocstring(lines: string[], defLineIdx: number): string[] {
+  const defLine = lines[defLineIdx] ?? "";
+  if (/^\s*(?:async\s+)?(?:def|class)\b/.test(defLine)) {
+    let i = defLineIdx + 1;
+    while (i < lines.length && lines[i].trim() === "") i++;
+    const opening = lines[i]?.trim() ?? "";
+    const quote = opening.startsWith('"""')
+      ? '"""'
+      : opening.startsWith("'''")
+        ? "'''"
+        : null;
+    if (quote) {
+      const head = opening.slice(quote.length);
+      if (head.endsWith(quote)) {
+        return [head.slice(0, -quote.length)];
+      }
+      const collected = [head];
+      for (
+        let j = i + 1;
+        j < lines.length && collected.length <= DOC_MAX_LINES;
+        j++
+      ) {
+        const closeAt = lines[j].indexOf(quote);
+        if (closeAt >= 0) {
+          collected.push(lines[j].slice(0, closeAt));
+          break;
+        }
+        collected.push(lines[j]);
+      }
+      return collected;
+    }
+  }
+  // No docstring: fall back to a `#` run above, looking through decorators.
+  return scanLineCommentRun(lines, defLineIdx, ["#"], (t) => t.startsWith("@"));
+}
+
+function finishDoc(collected: string[]): string | null {
+  const kept = collected.map((l) => l.trim()).filter((l) => l.length > 0);
+  if (kept.length === 0) return null;
+  // Rule bars, boxes and other decoration carry no letters. Returning nothing
+  // always beats returning garbage.
+  if (!kept.some((l) => /[A-Za-z]/.test(l))) return null;
+
+  let truncated = kept.length > DOC_MAX_LINES;
+  let text = kept.slice(0, DOC_MAX_LINES).join("\n");
+  if (text.length > DOC_MAX_CHARS) {
+    text = text.slice(0, DOC_MAX_CHARS).trimEnd();
+    truncated = true;
+  }
+  return truncated ? `${text}…` : text;
+}
+
+/**
+ * Heuristic doc-comment scan around a definition line. Per-language and
+ * deliberately narrow: an unknown language returns null rather than guessing,
+ * and so does anything that scans to decoration.
+ */
+export function scanDocComment(
+  lines: string[],
+  defLineIdx: number,
+  language?: string,
+): string | null {
+  if (defLineIdx < 0 || defLineIdx >= lines.length) return null;
+
+  switch (language) {
+    case "typescript":
+    case "javascript":
+      return finishDoc(scanJsDocComment(lines, defLineIdx));
+    case "python":
+      return finishDoc(scanPythonDocstring(lines, defLineIdx));
+    case "go":
+      // godoc convention: the comment run directly above the declaration.
+      return finishDoc(scanLineCommentRun(lines, defLineIdx, ["//"], () => false));
+    case "rust":
+      return finishDoc(
+        scanLineCommentRun(lines, defLineIdx, ["///", "//!"], (t) =>
+          t.startsWith("#["),
+        ),
+      );
+    default:
+      return null;
+  }
+}
+
+async function readDefinitionFile(
+  runtime: CodeNavRuntime,
+  filePath: string,
+  cwd: string,
+): Promise<string[] | null> {
+  if (!runtime.readFile) return null;
+  try {
+    validateFilePath(filePath);
+  } catch {
+    return null;
+  }
+  let content: string | null = null;
+  try {
+    content = await runtime.readFile(filePath, { cwd });
+  } catch {
+    return null;
+  }
+  if (content === null || content.length > CODE_NAV_MAX_FILE_BYTES) return null;
+  return content.split("\n");
+}
+
+/**
+ * The hover answer: the search pipeline `/resolve` already runs, plus the
+ * three cheap enrichments the card needs. Every enrichment degrades to null on
+ * its own — a definition location with no readable file still makes a card.
+ */
+export async function resolveCodeNavHover(
+  runtime: CodeNavRuntime,
+  request: CodeNavRequest,
+  cwd: string,
+  changedFiles: string[],
+): Promise<CodeNavHoverResponse> {
+  const resolved = await resolveCodeNav(runtime, request, cwd, changedFiles, {
+    timeoutMs: HOVER_RG_TIMEOUT_MS,
+  });
+
+  const base = {
+    source: "search" as const,
+    symbol: request.symbol,
+    stats: { elapsedMs: resolved.stats.elapsedMs },
+  };
+
+  if (resolved.backend === "unavailable") {
+    return {
+      ...base,
+      backend: "unavailable",
+      definition: null,
+      alternateDefinition: null,
+      references: [],
+      referenceCount: 0,
+      capped: false,
+    };
+  }
+
+  const references: CodeNavHoverReference[] = resolved.references
+    .slice(0, HOVER_REFERENCE_LIMIT)
+    .map(({ filePath, line, column, snippet }) => ({
+      filePath,
+      line,
+      column,
+      snippet,
+    }));
+
+  const [top, runnerUp] = resolved.definitions;
+  let definition: CodeNavHoverDefinition | null = null;
+
+  if (top) {
+    const fileLines = await readDefinitionFile(runtime, top.filePath, cwd);
+    const defLineIdx = top.line - 1;
+    const signature = fileLines ? buildSignature(fileLines, defLineIdx) : null;
+
+    definition = {
+      filePath: top.filePath,
+      line: top.line,
+      column: top.column,
+      confidence: top.confidence,
+      symbolKind: classifyMatchDetailed(
+        top.snippet,
+        request.symbol,
+        request.language,
+      ).symbolKind,
+      signature: signature?.text ?? null,
+      signatureApproximate: signature !== null,
+      doc: fileLines
+        ? scanDocComment(fileLines, defLineIdx, request.language)
+        : null,
+      preview: fileLines
+        ? {
+            startLine: top.line,
+            lines: fileLines.slice(defLineIdx, defLineIdx + PREVIEW_MAX_LINES),
+          }
+        : null,
+      otherCandidateCount: Math.max(0, resolved.definitions.length - 1),
+    };
+  }
+
+  return {
+    ...base,
+    backend: "search",
+    definition,
+    // Exactly two candidates: name the runner-up. Three or more and the top
+    // match is too weak to name a second, so the extras stay in the panel.
+    alternateDefinition:
+      resolved.definitions.length === 2 && runnerUp
+        ? {
+            filePath: runnerUp.filePath,
+            line: runnerUp.line,
+            column: runnerUp.column,
+          }
+        : null,
+    references,
+    referenceCount: resolved.references.length,
+    capped: resolved.stats.capped,
+  };
 }
