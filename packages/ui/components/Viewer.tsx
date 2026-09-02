@@ -277,6 +277,7 @@ const ViewerDocumentHeader: React.FC<ViewerDocumentHeaderProps> = ({
       {sticky && <div ref={sentinelRef} className="h-0 w-0" aria-hidden="true" />}
       <div
         ref={headerRef}
+        data-annotation-exclude
         data-print-hide
         data-viewer-document-header
         data-header-layout={geometry.layout}
@@ -758,7 +759,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     );
     observer.observe(stickySentinelRef.current);
     return () => observer.disconnect();
-  }, [stickyActions, scrollViewport]);
+  }, [hasViewerAnnotationHeader, stickyActions, scrollViewport]);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -780,8 +781,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const target = document.getElementById(anchor);
     if (!target || !container.contains(target)) return false;
 
-    const documentHeader = container.querySelector<HTMLElement>('[data-viewer-document-header]')
-      ?? container.querySelector<HTMLElement>('[data-sticky-actions]');
+    const documentHeader = stickyActions
+      ? container.querySelector<HTMLElement>('[data-viewer-document-header]')
+        ?? container.querySelector<HTMLElement>('[data-sticky-actions]')
+      : null;
     const stickyTop = documentHeader
       ? Number.parseFloat(window.getComputedStyle(documentHeader).top || '0') || 0
       : 0;
@@ -798,7 +801,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       behavior: 'smooth',
     });
     return true;
-  }, [scrollViewport]);
+  }, [scrollViewport, stickyActions]);
 
   useEffect(() => {
     if (!scrollViewport || !locationHash || lastAutoScrolledHashRef.current === locationHash) return;

@@ -59,8 +59,12 @@ function Harness({
   });
   return (
     <div ref={containerRef}>
+      <div data-annotation-exclude>
+        <button>Comment</button>
+      </div>
       <p data-block-id="b1">hello world</p>
       <p data-block-id="b2">goodbye world</p>
+      <p data-block-id="b3">Comment</p>
     </div>
   );
 }
@@ -135,5 +139,24 @@ describe('content-verifying restore', () => {
     expect(reported).toEqual([{ id: ann.id, restored: 'hello w' }]);
     // Nothing painted for this annotation.
     expect(paintedText(hook.current!, ann.id)).toBe('');
+  });
+
+  test.skipIf(!hasDom)('text fallback ignores explicitly excluded controls', async () => {
+    const hook = await mountHarness(true);
+    const ann: Annotation = {
+      id: 'ann-comment',
+      blockId: 'b3',
+      startOffset: 0,
+      endOffset: 7,
+      type: AnnotationType.COMMENT,
+      originalText: 'Comment',
+      createdA: 1,
+    };
+    await act(async () => {
+      hook.current!.applyAnnotations([ann]);
+    });
+
+    expect(document.querySelector('[data-annotation-exclude] mark')).toBeNull();
+    expect(document.querySelector('[data-block-id="b3"] mark')?.textContent).toBe('Comment');
   });
 });

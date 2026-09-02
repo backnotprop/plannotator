@@ -82,6 +82,10 @@ class FakeIntersectionObserver implements IntersectionObserver {
     return [];
   }
 
+  get observedCount(): number {
+    return this.observed.size;
+  }
+
   emit(isIntersecting: boolean): void {
     const rect = new DOMRectReadOnly();
     this.callback([...this.observed].map((target) => ({
@@ -139,6 +143,10 @@ async function mount(ui: React.ReactElement): Promise<void> {
   viewport = document.createElement('div');
   document.body.append(viewport, host);
   root = createRoot(host);
+  await render(ui);
+}
+
+async function render(ui: React.ReactElement): Promise<void> {
   await act(async () => {
     root?.render(
       <ScrollViewportProvider viewport={viewport}>
@@ -187,6 +195,7 @@ afterEach(async () => {
   host = null;
   viewport = null;
   if (hasDom) document.body.replaceChildren();
+  window.history.replaceState(null, '', window.location.pathname);
   Object.defineProperty(globalThis, 'ResizeObserver', {
     configurable: true,
     writable: true,
@@ -292,5 +301,54 @@ describe.if(hasDom)('Viewer annotationHeader', () => {
     expect(header().classList.contains('sticky')).toBe(false);
     expect(header().classList.contains('top-3')).toBe(false);
     expect(header().previousElementSibling).toBeNull();
+  });
+
+  test('reattaches sticky observation when the header branch changes at runtime', async () => {
+    await mount(<ControlledViewer />);
+    const firstObserver = FakeIntersectionObserver.instances[0];
+    expect(firstObserver?.observedCount).toBe(1);
+
+    await render(
+      <Viewer
+        blocks={blocks}
+        markdown="# Document title"
+        annotations={[]}
+        onAddAnnotation={() => {}}
+        onSelectAnnotation={() => {}}
+        selectedAnnotationId={null}
+        mode="selection"
+        taterMode={false}
+        stickyActions
+        disableCodePathValidation
+      />,
+    );
+
+    expect(host?.querySelector('[data-viewer-document-header]')).toBeNull();
+    expect(firstObserver?.observedCount).toBe(0);
+    expect(FakeIntersectionObserver.instances).toHaveLength(2);
+    expect(FakeIntersectionObserver.instances[1]?.observedCount).toBe(1);
+  });
+
+  test('does not reserve a non-sticky header when navigating to an anchor', async () => {
+    await mount(<ControlledViewer sticky={false} />);
+    const target = document.getElementById('document-title');
+    if (!target || !viewport) throw new Error('Expected heading and scroll viewport');
+
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, value: 100 });
+    viewport.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+    target.getBoundingClientRect = () => new DOMRect(0, 300, 400, 40);
+    header().getBoundingClientRect = () => new DOMRect(0, 0, 800, 80);
+    let requestedTop: number | undefined;
+    viewport.scrollTo = (options?: ScrollToOptions | number, y?: number) => {
+      requestedTop = typeof options === 'number' ? y : options?.top;
+    };
+
+    window.history.replaceState(null, '', '#document-title');
+    await act(async () => {
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    await act(async () => Bun.sleep(5));
+
+    expect(requestedTop).toBe(400);
   });
 });

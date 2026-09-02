@@ -188,6 +188,12 @@ All Viewer badge context moves into the same measured header. With
 chrome; with `false` it remains in flow and scrolls away. The complete header
 has `data-print-hide`, so it contributes no print layout.
 
+As with Viewer's legacy sticky actions and anchor navigation, hosts with a
+custom scroll element must wrap Viewer in `ScrollViewportProvider` from
+`@plannotator/ui/hooks/useScrollViewport` and pass that actual scroll element.
+Without the provider, CSS page stickiness can still apply, but Viewer cannot
+observe the host scroller to add stuck chrome or calculate anchor clearance.
+
 The config is intentionally typed rather than a React-node slot. Viewer reuses
 its existing `mode`, `inputMethod`, and `taterMode`; the config supplies only
 the state-change callbacks and optional `hideQuickLabel`. Compact toolstrips
