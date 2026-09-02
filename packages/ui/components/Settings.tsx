@@ -157,6 +157,7 @@ const DEFAULT_DIFF_TYPE_OPTIONS = [
   // "All Changes" belongs to since-base (the flagship composite); uncommitted
   // reverts to its plain name so the two stay distinguishable side by side.
   { value: 'since-base' as const, label: 'All Changes (Recommended)', description: "Everything since your branch split from main — committed, uncommitted, and untracked" },
+  { value: 'local-vs-remote' as const, label: 'Local vs Remote Branch', description: "Your local branch and working tree compared with its last-fetched remote-tracking branch" },
   { value: 'uncommitted' as const, label: 'Uncommitted', description: "Everything you've changed since your last commit" },
   { value: 'unstaged' as const, label: 'Unstaged', description: "Only changes you haven't staged yet" },
   { value: 'staged' as const, label: 'Staged', description: "Only changes you've staged for commit" },

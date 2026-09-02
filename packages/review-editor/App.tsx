@@ -1337,7 +1337,7 @@ const ReviewApp: React.FC = () => {
       const lastColon = rest.lastIndexOf(':');
       if (lastColon !== -1) {
         const sub = rest.slice(lastColon + 1);
-        if (['since-base', 'uncommitted', 'staged', 'unstaged', 'last-commit', 'branch', 'merge-base', 'all'].includes(sub)) {
+        if (['since-base', 'local-vs-remote', 'uncommitted', 'staged', 'unstaged', 'last-commit', 'branch', 'merge-base', 'all'].includes(sub)) {
           return { activeWorktreePath: rest.slice(0, lastColon), activeDiffBase: sub };
         }
       }
@@ -3902,6 +3902,7 @@ const ReviewApp: React.FC = () => {
       : undefined;
 
   const compactActionBusy = isSendingFeedback || isApproving || isExiting || isPlatformActioning;
+  const showsLocalVsRemoteEmptyState = activeDiffBase === 'local-vs-remote';
   const compactReviewActions: CompactReviewAction[] = !isCompactTouchLayout
     ? []
     : !origin
@@ -4783,6 +4784,7 @@ const ReviewApp: React.FC = () => {
                         <h3 className="text-sm font-medium text-foreground">No changes</h3>
                         <p className="text-xs text-muted-foreground mt-1">
                           {activeDiffBase === 'since-base' && `No changes since ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''} — committed, uncommitted, or untracked.`}
+                          {showsLocalVsRemoteEmptyState && `Your local branch matches its remote-tracking branch${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase.startsWith('commit:') && 'This commit has no changes.'}
                           {activeDiffBase === 'uncommitted' && `No uncommitted changes${activeWorktreePath ? ' in this worktree' : ' to review'}.`}
                           {activeDiffBase === 'staged' && "No staged changes. Stage some files with git add."}

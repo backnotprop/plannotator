@@ -56,6 +56,7 @@ export function getPersistedReviewPanelView(): 'sections' | 'tree' | undefined {
 
 export type ReviewDefaultDiffType =
   | 'since-base'
+  | 'local-vs-remote'
   | 'uncommitted'
   | 'unstaged'
   | 'staged'

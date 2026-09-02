@@ -65,6 +65,7 @@ function describeDiff(ctx: FeedbackDiffContext): string {
   }
   switch (mode) {
     case "uncommitted":  label = "Uncommitted changes"; break;
+    case "local-vs-remote": label = "Local vs remote branch (committed + uncommitted + untracked)"; break;
     case "staged":       label = "Staged changes"; break;
     case "unstaged":     label = "Unstaged changes"; break;
     case "last-commit":  label = "Last commit"; break;

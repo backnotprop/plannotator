@@ -208,6 +208,11 @@ export function getLocalDiffInstruction(
   }
 
   switch (effectiveDiffType) {
+    case "local-vs-remote":
+      return {
+        target: "the local branch and working tree compared with its configured remote-tracking branch, including committed, uncommitted, and untracked differences",
+        inspect: "Resolve the current upstream with `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}`, then run `git diff <upstream>` (no right-hand ref) and inspect untracked files from `git status --porcelain` separately.",
+      };
     case "since-base": {
       const base = defaultBranch || "main";
       return {

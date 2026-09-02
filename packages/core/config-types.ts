@@ -1,4 +1,4 @@
-export type DefaultDiffType = 'since-base' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+export type DefaultDiffType = 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
 export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 /**

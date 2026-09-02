@@ -21,7 +21,7 @@ interface UseGitAddReturn {
   stageError: string | null;
 }
 
-const STAGEABLE_DIFF_TYPES = new Set(['since-base', 'uncommitted', 'unstaged', 'workspace-current', 'workspace-unstaged']);
+const STAGEABLE_DIFF_TYPES = new Set(['since-base', 'local-vs-remote', 'uncommitted', 'unstaged', 'workspace-current', 'workspace-unstaged']);
 
 export function useGitAdd({ activeDiffBase, onFileViewed, sidecarStaged }: UseGitAddOptions): UseGitAddReturn {
   // Session intent per path: true = staged this session, false = unstaged

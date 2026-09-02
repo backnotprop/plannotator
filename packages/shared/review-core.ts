@@ -27,6 +27,7 @@ const MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES = 1024 * 1024;
 
 export type DiffType =
   | "since-base"
+  | "local-vs-remote"
   | "uncommitted"
   | "staged"
   | "unstaged"
@@ -656,6 +657,11 @@ export async function getGitContext(
       // first-run copy uses the short form "All changes".
       diffOptions.push({ id: "since-base", label: `All changes since ${displayRef(defaultBranch)}` });
     }
+  }
+
+  const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+  if (upstreamBranch) {
+    diffOptions.push({ id: "local-vs-remote", label: "Local vs remote branch" });
   }
 
   diffOptions.push(
@@ -1309,6 +1315,20 @@ export async function getWorkingTreeDiffFromBase(
   return removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
 }
 
+/** Resolve the remote-tracking branch configured for the current local branch. */
+export async function getCurrentUpstreamBranch(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+): Promise<string | null> {
+  const result = await runtime.runGit(
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    { cwd },
+  );
+  if (result.exitCode !== 0) return null;
+  const branch = result.stdout.trim();
+  return branch && branch !== "@{upstream}" ? branch : null;
+}
+
 /**
  * Build the exact, applyable patch used to materialize immutable analysis snapshots.
  *
@@ -1333,6 +1353,7 @@ export async function getGitSnapshotMaterializationPatch(
   }
   if (
     effectiveDiffType !== "since-base"
+    && effectiveDiffType !== "local-vs-remote"
     && effectiveDiffType !== "uncommitted"
     && effectiveDiffType !== "staged"
     && effectiveDiffType !== "unstaged"
@@ -1367,6 +1388,13 @@ export async function getGitSnapshotMaterializationPatch(
   if (!hasHead) return files.diff;
   if (effectiveDiffType === "uncommitted") {
     const tracked = await binaryDiff([...common, "HEAD"]);
+    return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
+  }
+
+  if (effectiveDiffType === "local-vs-remote") {
+    const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+    if (!upstreamBranch) throw new Error("The current branch does not have a remote tracking branch.");
+    const tracked = await binaryDiff([...common, "--end-of-options", upstreamBranch]);
     return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
   }
 
@@ -1422,6 +1450,7 @@ function assertGitSuccess(
 // extract the pure parser to a browser-safe module.
 const WORKTREE_SUB_TYPES = new Set([
   "since-base",
+  "local-vs-remote",
   "uncommitted",
   "staged",
   "unstaged",
@@ -1559,6 +1588,16 @@ export async function runGitDiff(
     } else if (effectiveDiffType.startsWith("commit:")) {
       return { patch: "", label: `Error: ${diffType}`, error: "Invalid commit ref" };
     } else switch (effectiveDiffType) {
+      case "local-vs-remote": {
+        const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+        if (!upstreamBranch) {
+          throw new Error("The current branch does not have a remote tracking branch.");
+        }
+        patch = await getWorkingTreeDiffFromBase(runtime, upstreamBranch, cwd, options);
+        label = `Local vs ${displayRef(upstreamBranch)}`;
+        break;
+      }
+
       case "since-base": {
         // The composite "GitHub view": merge-base(base, HEAD) vs the working
         // tree (note: no right-hand ref on the diff), plus untracked files.
@@ -1946,6 +1985,15 @@ export async function getGitDiffFingerprint(
       appendUntrackedFingerprint(runtime, runReadOnlyGit, parts, cwd);
 
     switch (effectiveDiffType) {
+      case "local-vs-remote": {
+        const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+        if (!upstreamBranch) return null;
+        const upstreamTip = await runReadOnlyGit(["rev-parse", "--end-of-options", upstreamBranch]);
+        parts.push(upstreamBranch, upstreamTip.exitCode === 0 ? upstreamTip.stdout.trim() : "no-upstream");
+        if (!(await hashDiffOutput(["--end-of-options", upstreamBranch]))) return null;
+        if (!(await hashUntracked())) return null;
+        break;
+      }
       case "since-base": {
         // Content hash of the mb→worktree diff catches edits; headSha (always
         // in `parts`) catches commits that only re-partition the sections;
@@ -2060,6 +2108,13 @@ export async function getFileContentsForDiff(
   }
 
   switch (effectiveDiffType) {
+    case "local-vs-remote": {
+      const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+      return {
+        oldContent: upstreamBranch ? await gitShow(upstreamBranch, oldFilePath) : null,
+        newContent: await readWorkingTree(filePath),
+      };
+    }
     case "since-base": {
       const mbResult = await runtime.runGit(["merge-base", "--end-of-options", defaultBranch, "HEAD"], { cwd });
       // Degrade to HEAD (matching runGitDiff), not defaultBranch — when the base

@@ -17,6 +17,7 @@ interface DiffTypePickerProps {
  */
 const OPTION_HINTS: Record<string, string> = {
   'since-base': "Everything since your branch split from the base — committed, uncommitted, and untracked. What a PR would show if you committed it all and pushed.",
+  'local-vs-remote': "Your local branch and working tree compared with its remote-tracking branch — committed, uncommitted, and untracked differences from the last fetch.",
   uncommitted: "All your local changes — anything you haven't committed yet.",
   staged: "Only what you've run `git add` on.",
   unstaged: "What `git diff` shows with no arguments.",

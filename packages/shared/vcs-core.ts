@@ -5,6 +5,7 @@ import {
   type GitDiffOptions,
   type ReviewGitRuntime,
   detectRemoteDefaultBranch,
+  getCurrentUpstreamBranch,
   getFileContentsForDiff as getGitFileContentsForDiff,
   getGitContext,
   getGitDiffFingerprint,
@@ -167,7 +168,7 @@ export interface PreparedLocalReviewDiff {
   fingerprint?: string;
 }
 
-const GIT_DIFF_TYPES = new Set(["since-base", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
+const GIT_DIFF_TYPES = new Set(["since-base", "local-vs-remote", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
 const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
 
 function selectNearestProvider(
@@ -231,6 +232,7 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       const effectiveDiffType = parseWorktreeDiffType(diffType)?.subType ?? diffType;
       return (
         effectiveDiffType === "since-base" ||
+        effectiveDiffType === "local-vs-remote" ||
         effectiveDiffType === "uncommitted" ||
         effectiveDiffType === "unstaged"
       );
@@ -722,6 +724,7 @@ function supportsGitSnapshot(diffType: string): boolean {
   const effective = parseWorktreeDiffType(diffType)?.subType ?? diffType;
   return effective !== "all" && (
     effective === "since-base"
+    || effective === "local-vs-remote"
     || effective === "uncommitted"
     || effective === "staged"
     || effective === "unstaged"
@@ -777,6 +780,14 @@ async function materializeGitSnapshot(
   if (diffType === "since-base") {
     const mergeBase = await git(runtime, cwd, ["merge-base", "--", options.base, "HEAD"]);
     return createSyntheticSnapshot(runtime, cwd, mergeBase, [patch]);
+  }
+  if (diffType === "local-vs-remote") {
+    const upstream = await getCurrentUpstreamBranch(runtime, cwd);
+    if (!upstream) {
+      throw new Error("The current branch does not have a remote tracking branch.");
+    }
+    const from = await resolveCommit(runtime, cwd, upstream);
+    return createSyntheticSnapshot(runtime, cwd, from, [patch]);
   }
   const head = await resolveCommit(runtime, cwd, "HEAD");
   if (diffType === "uncommitted" || diffType === "staged") {
@@ -882,4 +893,3 @@ async function materializeJjSnapshot(
     throw error;
   }
 }
-

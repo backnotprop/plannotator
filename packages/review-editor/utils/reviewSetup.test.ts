@@ -47,6 +47,17 @@ describe('initializeReviewSetup', () => {
     expect(store.get('defaultDiffType')).toBe('uncommitted');
   });
 
+  test('an unseen reviewer inherits a local-vs-remote default', () => {
+    installMemoryBackend({
+      'plannotator-default-diff-type': 'local-vs-remote',
+    });
+    const store = makeStore();
+
+    expect(initializeReviewSetup(store)).toBe(true);
+    expect(store.get('reviewPanelView')).toBe('tree');
+    expect(store.get('defaultDiffType')).toBe('local-vs-remote');
+  });
+
   test('an explicit persisted view survives a session that never tripped the seen gate', () => {
     // Non-git / workspace / PR / no-since-base sessions never reach the
     // initializer, so a reviewer can persist a view from Settings while

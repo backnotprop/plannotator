@@ -275,6 +275,14 @@ describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
 });
 
 describe("getLocalDiffInstruction", () => {
+  test("describes local-vs-remote as an upstream-to-working-tree comparison", () => {
+    const instruction = getLocalDiffInstruction("local-vs-remote");
+
+    expect(instruction?.target).toContain("remote-tracking branch");
+    expect(instruction?.inspect).toContain("@{upstream}");
+    expect(instruction?.inspect).toContain("untracked files");
+  });
+
   test("returns null for non-local diff types", () => {
     expect(getLocalDiffInstruction("p4-default")).toBeNull();
   });
