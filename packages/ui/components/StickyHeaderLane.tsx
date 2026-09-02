@@ -34,30 +34,14 @@ import {
 } from '../hooks/useScrollViewport';
 import type { EditorMode, InputMethod } from '../types';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
+import {
+  resolveCompactHeaderGeometry,
+  snapCompactHeaderWidth,
+} from './compactHeaderLayout';
 
-// Snap a measured pixel width to a 16px grid. ResizeObserver fires every
-// frame during a drag; without quantization the sticky bar would
-// re-render on every pixel. Hoisted to module scope so the effects
-// (which use [] deps) can't accidentally close over a stale instance.
-// Floor (not round) so wrapper undershoots and actions overshoots — both
-// errors push toward a more cautious layout, avoiding a one-bucket overlap
-// flash right at the 300/460 thresholds during a slow drag.
-const snap = (n: number) => Math.floor(n / 16) * 16;
-
-// Layout geometry — static tuning constants, hoisted alongside `snap`.
-// LEFT_OFFSET: matches the bar's `md:left-5` (20px).
-// GAP: minimum breathing room between the bar's right edge and the
-//      action button cluster's left edge when they share a lane.
-// Two-stage shared-lane shrinkage, mirroring the right side:
-//   WIDE_BAR_WIDTH: full toolstrip (active labels Pinpoint/Markup ~300px)
-//                   + badges (~140px) on a single line.
-//   MIN_BAR_WIDTH:  icon-only toolstrip (~140px) + badges (~140px).
-// Below MIN, even the icon-only bar can't fit beside the (likely also
-// icon-only) action cluster — stack as the final fallback.
+// Matches the bar's `md:left-5` inset. The remaining shared geometry lives
+// in compactHeaderLayout so Viewer-owned and standalone lanes cannot drift.
 const LEFT_OFFSET = 20;
-const GAP = 16;
-const WIDE_BAR_WIDTH = 460;
-const MIN_BAR_WIDTH = 300;
 
 /** Controls when the compact header lane is visible and interactive. */
 export type StickyHeaderLaneVisibility = 'stuck' | 'always';
@@ -145,27 +129,19 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   // removes chrome at rest for the supported chrome-free presentation.
   const showChrome = visibility === 'always' ? laneIsStuck : true;
 
-  // Space available for the bar in the shared lane = wrapper width, minus
-  // the bar's left offset, minus the action buttons' measured width, minus
-  // the breathing gap.
-  const availableForBar = wrapperWidth - LEFT_OFFSET - actionsWidth - GAP;
-
-  // Narrow = not enough room in the shared lane for even the icon-only
-  // bar. Falls back to a stacked row below the action buttons.
-  // actionsWidth=0 before measurement is treated as "don't know yet"
-  // (not narrow), so we don't flash the wrong layout on first paint.
-  const measured = wrapperWidth > 0 && actionsWidth > 0;
-  const isNarrow = measured && availableForBar < MIN_BAR_WIDTH;
-  // Tight = shared lane still fits, but only if the toolstrip drops its
-  // active labels and goes icon-only. Lets us stay horizontally aligned
-  // for an extra ~160px of width before stacking.
-  const isToolstripIconOnly =
-    measured && !isNarrow && availableForBar < WIDE_BAR_WIDTH;
+  const headerGeometry = resolveCompactHeaderGeometry({
+    containerWidth: wrapperWidth,
+    trailingWidth: actionsWidth,
+    leadingInset: LEFT_OFFSET,
+  });
+  const availableForBar = headerGeometry.availableForLeading;
+  const isNarrow = headerGeometry.layout === 'narrow';
+  const isToolstripIconOnly = headerGeometry.layout === 'tight';
 
   useEffect(() => {
     if (!wrapperRef.current) return;
     const ro = new ResizeObserver(([entry]) => {
-      const next = snap(entry.contentRect.width);
+      const next = snapCompactHeaderWidth(entry.contentRect.width);
       setWrapperWidth((prev) => (prev === next ? prev : next));
     });
     ro.observe(wrapperRef.current);
@@ -188,7 +164,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     const el = document.querySelector<HTMLElement>('[data-sticky-actions]');
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      const next = snap(entry.contentRect.width);
+      const next = snapCompactHeaderWidth(entry.contentRect.width);
       setActionsWidth((prev) => (prev === next ? prev : next));
     });
     ro.observe(el);

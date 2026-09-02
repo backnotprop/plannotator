@@ -194,7 +194,7 @@ export function VimTargetReticle({
         ? getScrollViewportRect(scrollViewport).top
         : containerRect.top;
       const stickyBottom = container
-        .querySelector<HTMLElement>('[data-sticky-actions]')
+        .querySelector<HTMLElement>('[data-viewer-document-header], [data-sticky-actions]')
         ?.getBoundingClientRect()
         .bottom;
       setPosition(relativePosition(

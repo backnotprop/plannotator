@@ -249,11 +249,15 @@ try {
     [
       'import { AnnotationPanel } from "@plannotator/ui/components/AnnotationPanel";',
       'import { StickyHeaderLane, type StickyHeaderLaneProps } from "@plannotator/ui/components/StickyHeaderLane";',
+      'import { Viewer, type ViewerAnnotationHeaderConfig } from "@plannotator/ui/components/Viewer";',
       'import * as parser from "@plannotator/ui/utils/parser";',
       "",
       'const laneProps: Pick<StickyHeaderLaneProps, "visibility" | "sticky"> = { visibility: "always", sticky: false };',
+      'const annotationHeader: ViewerAnnotationHeaderConfig = { onInputMethodChange: () => {}, onModeChange: () => {}, hideQuickLabel: true };',
       "void StickyHeaderLane;",
       "void laneProps;",
+      "void Viewer;",
+      "void annotationHeader;",
       "void AnnotationPanel;",
       "void parser;",
       "",
@@ -324,7 +328,7 @@ try {
   );
 
   console.log(
-    `Verified @plannotator/ui@${expectedUiVersion} packs, resolves AnnotationPanel/StickyHeaderLane/parser, and installs externally with @plannotator/core@${expectedCoreVersion}.`,
+    `Verified @plannotator/ui@${expectedUiVersion} packs, resolves AnnotationPanel/Viewer/StickyHeaderLane/parser, and installs externally with @plannotator/core@${expectedCoreVersion}.`,
   );
 } finally {
   rmSync(workDir, { recursive: true, force: true });

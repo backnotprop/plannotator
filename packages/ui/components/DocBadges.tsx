@@ -3,7 +3,8 @@
  *
  * Extracted from Viewer.tsx so the same markup can render in two places:
  *   - layout="column": original location at the top-left of the plan card (absolute)
- *   - layout="row":   inside the sticky header lane when the user scrolls
+ *   - layout="row":   compact context inside the legacy sticky header lane
+ *   - layout="header": complete context inside Viewer's in-flow shared header
  *
  * In row layout, the demo badge and linked-doc breadcrumb are dropped —
  * everything else is decorative top-of-doc context except the plan-diff
@@ -29,7 +30,7 @@ export interface LinkedDocBadgeInfo {
 }
 
 export interface DocBadgesProps {
-  layout: 'column' | 'row';
+  layout: 'column' | 'row' | 'header';
   repoInfo?: { display: string; branch?: string } | null;
   planDiffStats?: PlanDiffStats | null;
   isPlanDiffActive?: boolean;
@@ -68,6 +69,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   openInAppPath,
 }) => {
   const isRow = layout === 'row';
+  const isHorizontal = layout !== 'column';
   const canOpenInApp =
     !!openInAppPath && !/^https?:\/\//i.test(openInAppPath);
   const openInButton = canOpenInApp ? (
@@ -85,15 +87,16 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   if (!anything) return null;
 
   // Row layout: single horizontal line. Column layout: stacked rows.
-  const outerClass = isRow
-    ? 'flex flex-row items-center gap-1.5 text-[9px] text-muted-foreground/70 font-mono'
+  const outerClass = isHorizontal
+    ? `flex flex-row items-center gap-1.5 text-[9px] text-muted-foreground/70 font-mono ${layout === 'header' ? 'flex-wrap' : ''}`
     : 'flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono';
 
   return (
     <div className={outerClass}>
-      {/* Row layout (sticky lane) omits repo/branch to keep the bar compact —
+      {/* Legacy row layout omits repo/branch to keep the ghost bar compact —
           they'd otherwise push the container wide enough to visually extend
-          under the action buttons. Plan-diff badge still renders below. */}
+          under the action buttons. The Viewer-owned header measures and wraps
+          the complete badge set, so its `header` layout keeps this context. */}
       {repoInfo && !linkedDocInfo && !isRow && (
         <div className="flex items-center gap-1.5">
           <span
