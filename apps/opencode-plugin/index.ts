@@ -45,7 +45,7 @@ import {
   type OpenCodeBridgeContext,
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
-import { resolveValidatedTargetAgent } from "./agent-switch";
+import { getAssistantMessageModel, resolveValidatedTargetAgent, shouldPreserveActiveModel } from "./agent-switch";
 import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
@@ -199,6 +199,7 @@ async function runPlanReview(input: {
   abortSignal: AbortSignal;
   cwd?: string;
   bridge: OpenCodeBridgeContext;
+  currentModel?: { providerID: string; modelID: string };
 }): Promise<OpenCodePlanReviewResult> {
   input.abortSignal.throwIfAborted();
   if (input.runtime === "embedded" && !hasEmbeddedRuntime()) {
@@ -217,6 +218,7 @@ async function runPlanReview(input: {
         htmlContent: input.htmlContent,
         timeoutSeconds: input.timeoutSeconds,
         abortSignal: input.abortSignal,
+        currentModel: input.currentModel,
         logReady: (url) => logPlannotatorReady(input.client, "plan review", url),
       });
     } catch (error) {
@@ -238,6 +240,7 @@ async function runPlanReview(input: {
     timeoutSeconds: input.timeoutSeconds,
     abortSignal: input.abortSignal,
     bridge: input.bridge,
+    currentModel: input.currentModel,
   });
 }
 
@@ -571,6 +574,11 @@ Do NOT proceed with implementation until your plan is approved.`;
               abortSignal: context.abort,
               cwd: ctx.directory,
               bridge: await getBridgeContext(),
+              currentModel: await getAssistantMessageModel({
+                client: ctx.client,
+                sessionId: context.sessionID,
+                messageId: context.messageID,
+              }),
             }),
             resolveTargetAgent: async ({ requestedAgent, directory, delivery }) =>
               await resolveValidatedTargetAgent({
@@ -579,11 +587,19 @@ Do NOT proceed with implementation until your plan is approved.`;
                 directory,
                 delivery,
               }),
-            sendApprovalHandoff: async ({ sessionId, targetAgent, text }) => {
+            sendApprovalHandoff: async ({ sessionId, targetAgent, text, agentModelPreference }) => {
+              const model = shouldPreserveActiveModel(agentModelPreference)
+                ? await getAssistantMessageModel({
+                    client: ctx.client,
+                    sessionId,
+                    messageId: context.messageID,
+                  })
+                : undefined;
               await ctx.client.session.prompt({
                 path: { id: sessionId },
                 body: {
                   agent: targetAgent,
+                  ...(model && { model }),
                   noReply: true,
                   parts: [{ type: "text", text }],
                 },

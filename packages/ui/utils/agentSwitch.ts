@@ -17,13 +17,24 @@ import { storage } from './storage';
 
 const STORAGE_KEY = 'plannotator-agent-switch';
 const CUSTOM_NAME_KEY = 'plannotator-agent-custom';
+const MODEL_PREFERENCE_KEY = 'plannotator-agent-model-preference';
 
 // AgentSwitchOption is now a string to support dynamic agent names from OpenCode
 export type AgentSwitchOption = string;
 
+/**
+ * Which model OpenCode should use after switching agents on plan approval.
+ * 'current' keeps the model the session was already running (the default,
+ * fixed behavior); 'agent-default' opts into the target agent's own
+ * configured model from opencode.json. Plan-surface only; the review surface
+ * ignores this field.
+ */
+export type AgentModelPreference = 'current' | 'agent-default';
+
 export interface AgentSwitchSettings {
   switchTo: AgentSwitchOption;
   customName?: string;
+  modelPreference?: AgentModelPreference;
 }
 
 // Fallback options when API is unavailable or for non-OpenCode origins
@@ -38,6 +49,7 @@ export type AgentSwitchSurface = 'plan' | 'review';
 
 const PLAN_DEFAULT_SETTINGS: AgentSwitchSettings = {
   switchTo: 'build',
+  modelPreference: 'current',
 };
 
 const REVIEW_DEFAULT_SETTINGS: AgentSwitchSettings = {
@@ -61,12 +73,15 @@ export function getAgentSwitchDefaults(surface: AgentSwitchSurface = 'plan'): Ag
 export function getAgentSwitchSettings(surface: AgentSwitchSurface = 'plan'): AgentSwitchSettings {
   const stored = storage.getItem(STORAGE_KEY);
   const customName = storage.getItem(CUSTOM_NAME_KEY) || undefined;
+  const storedModelPreference = storage.getItem(MODEL_PREFERENCE_KEY);
+  const modelPreference: AgentModelPreference =
+    storedModelPreference === 'agent-default' ? 'agent-default' : 'current';
 
   // Accept any non-empty string (supports dynamic agent names from OpenCode)
   if (stored) {
-    return { switchTo: stored, customName };
+    return { switchTo: stored, customName, modelPreference };
   }
-  return getAgentSwitchDefaults(surface);
+  return { ...getAgentSwitchDefaults(surface), modelPreference };
 }
 
 /**
@@ -76,6 +91,9 @@ export function saveAgentSwitchSettings(settings: AgentSwitchSettings): void {
   storage.setItem(STORAGE_KEY, settings.switchTo);
   if (settings.customName) {
     storage.setItem(CUSTOM_NAME_KEY, settings.customName);
+  }
+  if (settings.modelPreference) {
+    storage.setItem(MODEL_PREFERENCE_KEY, settings.modelPreference);
   }
 }
 
@@ -94,4 +112,12 @@ export function getEffectiveAgentName(settings: AgentSwitchSettings): string | u
     return undefined;
   }
   return settings.switchTo;
+}
+
+/**
+ * Get the effective model preference, defaulting to 'current' (keep the
+ * session's active model) when unset.
+ */
+export function getEffectiveModelPreference(settings: AgentSwitchSettings): AgentModelPreference {
+  return settings.modelPreference ?? 'current';
 }

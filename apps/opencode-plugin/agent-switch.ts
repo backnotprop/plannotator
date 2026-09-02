@@ -4,6 +4,11 @@ export interface OpenCodeAgentLike {
   name?: string;
 }
 
+export interface OpenCodeModel {
+  providerID: string;
+  modelID: string;
+}
+
 interface OpenCodeClientLike {
   app?: {
     agents?: (input?: unknown) => Promise<{ data?: OpenCodeAgentLike[] }>;
@@ -11,6 +16,17 @@ interface OpenCodeClientLike {
   };
   tui?: {
     showToast?: (input: unknown) => unknown;
+  };
+  session?: {
+    message?: (input: unknown) => Promise<{
+      data?: {
+        info?: {
+          role?: string;
+          providerID?: string;
+          modelID?: string;
+        };
+      };
+    }>;
   };
 }
 
@@ -20,6 +36,45 @@ export type AgentSwitchDelivery = "feedback" | "plan-approval";
 export function resolveTargetAgent(agentSwitch?: string): string | undefined {
   const trimmed = agentSwitch?.trim();
   return trimmed && trimmed !== "disabled" ? trimmed : undefined;
+}
+
+/**
+ * The submit_plan tool context identifies the assistant message that made the
+ * request. Its recorded model is more reliable than an agent's configured
+ * default when approval hands work to a different agent.
+ */
+export async function getAssistantMessageModel(input: {
+  client: OpenCodeClientLike;
+  sessionId: string;
+  messageId: string;
+}): Promise<OpenCodeModel | undefined> {
+  try {
+    const response = await input.client.session?.message?.({
+      path: { id: input.sessionId, messageID: input.messageId },
+    });
+    const info = response?.data?.info;
+    if (
+      info?.role !== "assistant" ||
+      typeof info.providerID !== "string" || !info.providerID ||
+      typeof info.modelID !== "string" || !info.modelID
+    ) {
+      return undefined;
+    }
+    return { providerID: info.providerID, modelID: info.modelID };
+  } catch {
+    // Approval can still proceed when an older OpenCode host cannot fetch it.
+    return undefined;
+  }
+}
+
+/**
+ * Whether the approval handoff should look up and pin the session's active
+ * model. False only when the user explicitly opted into the target agent's
+ * own configured model ('agent-default'); any other value (including
+ * unset) keeps today's default of preserving the active model.
+ */
+export function shouldPreserveActiveModel(agentModelPreference?: string): boolean {
+  return agentModelPreference !== "agent-default";
 }
 
 function warnAgentUnavailable(

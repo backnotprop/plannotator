@@ -10,6 +10,8 @@ export interface Agent {
   id: string;
   name: string;
   description?: string;
+  /** The agent's configured default model, when OpenCode reports one. */
+  model?: { providerID: string; modelID: string };
 }
 
 export interface UseAgentsResult {

@@ -47,7 +47,7 @@ import { getObsidianSettings, getEffectiveVaultPath, isObsidianConfigured, CUSTO
 import { getBearSettings } from '@plannotator/ui/utils/bear';
 import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils/octarine';
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
-import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
+import { getAgentSwitchSettings, getEffectiveAgentName, getEffectiveModelPreference } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
@@ -471,6 +471,7 @@ const App: React.FC = () => {
     if (isApiMode) primeSkillCatalog();
   }, [isApiMode]);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  const [currentModel, setCurrentModel] = useState<{ providerID: string; modelID: string } | undefined>(undefined);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const updateInfo = useUpdateCheck();
@@ -3060,7 +3061,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
+      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates; currentModel?: { providerID: string; modelID: string } }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Extra extensions the user registered as markdown (#1307) — the
@@ -3174,6 +3175,7 @@ const App: React.FC = () => {
         }
         if (data.origin) {
           setOrigin(data.origin);
+          setCurrentModel(data.currentModel);
           // For Claude Code, check if user needs to configure permission mode.
           // Plan review only: the setting decides what happens after a plan is
           // APPROVED, which is meaningless in annotate / annotate-last /
@@ -3520,7 +3522,7 @@ const App: React.FC = () => {
         : autoSaveResultsRef.current;
 
       // Build request body - include integrations if enabled
-      const body: { draftGeneration: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
+      const body: { draftGeneration: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; agentModelPreference?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
         draftGeneration: getDraftGeneration(),
       };
 
@@ -3529,9 +3531,11 @@ const App: React.FC = () => {
         body.permissionMode = permissionMode;
       }
 
-      const effectiveAgent = getEffectiveAgentName(getAgentSwitchSettings('plan'));
+      const agentSwitchSettings = getAgentSwitchSettings('plan');
+      const effectiveAgent = getEffectiveAgentName(agentSwitchSettings);
       if (effectiveAgent) {
         body.agentSwitch = effectiveAgent;
+        body.agentModelPreference = getEffectiveModelPreference(agentSwitchSettings);
       }
 
       // Include plan save settings
@@ -5492,6 +5496,7 @@ const App: React.FC = () => {
           canShareCurrentSession={canShareCurrentSession}
           agentName={agentName}
           availableAgents={availableAgents}
+          currentModel={currentModel}
           showAnnotationsWarning={hasFeedbackToSend}
           annotateApproveLabel={annotateApprovalPolicy.label}
           annotateApproveTitle={annotateApprovalPolicy.title}

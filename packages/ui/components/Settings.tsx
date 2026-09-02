@@ -31,8 +31,10 @@ import {
 import {
   getAgentSwitchSettings,
   getAgentSwitchDefaults,
+  getEffectiveModelPreference,
   saveAgentSwitchSettings,
   AGENT_OPTIONS,
+  type AgentModelPreference,
   type AgentSwitchSettings,
   type AgentSwitchSurface,
 } from '../utils/agentSwitch';
@@ -1081,7 +1083,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   };
 
   const handleAgentChange = (switchTo: AgentSwitchSettings['switchTo'], customName?: string) => {
-    const newSettings = { switchTo, customName: customName ?? agent.customName };
+    const newSettings = { switchTo, customName: customName ?? agent.customName, modelPreference: agent.modelPreference };
+    setAgent(newSettings);
+    saveAgentSwitchSettings(newSettings);
+  };
+
+  const handleAgentModelPreferenceChange = (modelPreference: AgentModelPreference) => {
+    const newSettings = { ...agent, modelPreference };
     setAgent(newSettings);
     saveAgentSwitchSettings(newSettings);
   };
@@ -1447,6 +1455,27 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                 ? 'Stay on current agent after approval'
                                 : `Switch to ${agent.switchTo} agent after approval`}
                           </div>
+
+                          {agentSurface === 'plan' && agent.switchTo !== 'disabled' && (
+                            <div className="space-y-1.5 pt-1">
+                              <div className="text-xs text-muted-foreground">
+                                Model to use after switching agent
+                              </div>
+                              <SegmentedControl<AgentModelPreference>
+                                options={[
+                                  { value: 'current', label: 'Keep current model' },
+                                  { value: 'agent-default', label: "Use agent's default" },
+                                ]}
+                                value={getEffectiveModelPreference(agent)}
+                                onChange={handleAgentModelPreferenceChange}
+                              />
+                              <div className="text-[10px] text-muted-foreground/70">
+                                {getEffectiveModelPreference(agent) === 'current'
+                                  ? "Keeps the model this session is currently running, even when switching agent."
+                                  : `Uses the model configured for the ${agent.switchTo === 'custom' ? (agent.customName || 'target') : agent.switchTo} agent in opencode.json.`}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </>
                     )}

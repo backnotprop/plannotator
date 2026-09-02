@@ -100,7 +100,13 @@ export async function handleUpload(req: Request): Promise<Response> {
 export interface OpencodeClient {
   app: {
     agents: (options?: object) => Promise<{
-      data?: Array<{ name: string; description?: string; mode: string; hidden?: boolean }>;
+      data?: Array<{
+        name: string;
+        description?: string;
+        mode: string;
+        hidden?: boolean;
+        model?: { providerID: string; modelID: string };
+      }>;
     }>;
   };
 }
@@ -115,7 +121,7 @@ export async function handleAgents(opencodeClient?: OpencodeClient): Promise<Res
     const result = await opencodeClient.app.agents({});
     const agents = (result.data ?? [])
       .filter((a) => a.mode === "primary" && !a.hidden)
-      .map((a) => ({ id: a.name, name: a.name, description: a.description }));
+      .map((a) => ({ id: a.name, name: a.name, description: a.description, model: a.model }));
 
     return Response.json({ agents });
   } catch {

@@ -45,6 +45,7 @@ export interface OpenCodePlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  agentModelPreference?: string;
 }
 
 export interface OpenCodeBridgeAgent {
@@ -492,6 +493,7 @@ export async function runCliPlanReview(input: {
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
   bridge?: OpenCodeBridgeContext;
+  currentModel?: { providerID: string; modelID: string };
 }): Promise<OpenCodePlanReviewResult> {
   const result = await runPlannotatorCli({
     client: input.client,
@@ -500,6 +502,7 @@ export async function runCliPlanReview(input: {
     input: JSON.stringify({
       plan: input.planContent,
       timeoutSeconds: input.timeoutSeconds,
+      currentModel: input.currentModel,
       ...buildBridgePayload(input.bridge),
     }),
     readyLabel: "plan review",

@@ -1,10 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { Agent } from '../hooks/useAgents';
-import { getAgentSwitchSettings, saveAgentSwitchSettings, type AgentSwitchSettings } from '../utils/agentSwitch';
+import {
+  getAgentSwitchSettings,
+  getEffectiveModelPreference,
+  saveAgentSwitchSettings,
+  type AgentModelPreference,
+  type AgentSwitchSettings,
+} from '../utils/agentSwitch';
 
 interface ApproveDropdownProps {
   onApprove: () => void;
   agents: Agent[];
+  /** The model this session is currently running (OpenCode only), when known. */
+  currentModel?: { providerID: string; modelID: string };
   disabled?: boolean;
   isLoading?: boolean;
 }
@@ -16,6 +24,23 @@ function getSelectedLabel(setting: AgentSwitchSettings, agents: Agent[]): string
   }
   const match = agents.find(a => a.id.toLowerCase() === setting.switchTo.toLowerCase());
   return match?.name ?? setting.switchTo;
+}
+
+function getMatchedAgent(setting: AgentSwitchSettings, agents: Agent[]): Agent | undefined {
+  const name = setting.switchTo === 'custom' ? setting.customName : setting.switchTo;
+  if (!name) return undefined;
+  return agents.find(a => a.id.toLowerCase() === name.toLowerCase());
+}
+
+/** Short model preview shown next to the target agent name in the split button. */
+function getModelPreview(
+  setting: AgentSwitchSettings,
+  agents: Agent[],
+  currentModel?: { providerID: string; modelID: string },
+): string | null {
+  if (setting.switchTo === 'disabled') return null;
+  if (getEffectiveModelPreference(setting) === 'current') return currentModel?.modelID ?? 'current model';
+  return getMatchedAgent(setting, agents)?.model?.modelID ?? null;
 }
 
 function isSelected(agentId: string, setting: AgentSwitchSettings): boolean {
@@ -33,6 +58,7 @@ const Checkmark = () => (
 export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   onApprove,
   agents,
+  currentModel,
   disabled = false,
   isLoading = false,
 }) => {
@@ -58,12 +84,23 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   }, []);
 
   const handleSelect = (newSetting: AgentSwitchSettings) => {
-    setSetting(newSetting);
-    saveAgentSwitchSettings(newSetting);
+    const merged: AgentSwitchSettings = { ...newSetting, modelPreference: setting.modelPreference };
+    setSetting(merged);
+    saveAgentSwitchSettings(merged);
+    setIsOpen(false);
+  };
+
+  const handleModelPreferenceSelect = (modelPreference: AgentModelPreference) => {
+    const merged: AgentSwitchSettings = { ...setting, modelPreference };
+    setSetting(merged);
+    saveAgentSwitchSettings(merged);
     setIsOpen(false);
   };
 
   const agentLabel = getSelectedLabel(setting, agents);
+  const modelPreview = getModelPreview(setting, agents, currentModel);
+  const modelPreference = getEffectiveModelPreference(setting);
+  const matchedAgent = getMatchedAgent(setting, agents);
   const isNoSwitch = setting.switchTo === 'disabled';
   const isCustom = setting.switchTo === 'custom';
   const notFound = agentLabel && !isNoSwitch && !isCustom
@@ -103,6 +140,9 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
                 <span className="opacity-60">&rarr;</span>
                 <span className="max-w-[120px] truncate">{agentLabel}</span>
                 {notFound && <span className="opacity-60 text-[10px]">(?)</span>}
+                {modelPreview && (
+                  <span className="opacity-60 text-[10px] truncate max-w-[110px]">&middot; {modelPreview}</span>
+                )}
               </span>
             ) : 'Approve'
           )}
@@ -120,7 +160,7 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-border bg-popover shadow-xl z-[70] overflow-hidden py-1">
+        <div className="absolute right-0 top-full mt-1 w-72 rounded-lg border border-border bg-popover shadow-xl z-[70] overflow-hidden py-1">
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
             Switch to agent
           </div>
@@ -138,6 +178,11 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
               >
                 <span className="w-4 flex-shrink-0">{selected && <Checkmark />}</span>
                 <span className="truncate">{agent.name}</span>
+                {agent.model?.modelID && (
+                  <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[110px]">
+                    {agent.model.modelID}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -163,6 +208,46 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
             <span className="w-4 flex-shrink-0">{isNoSwitch && <Checkmark />}</span>
             No switch
           </button>
+          {!isNoSwitch && (
+            <>
+              <div className="border-t border-border my-1" />
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
+                Model after switch
+              </div>
+              <button
+                onClick={() => handleModelPreferenceSelect('current')}
+                className={`w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 ${
+                  modelPreference === 'current'
+                    ? 'text-primary bg-primary/10 font-medium'
+                    : 'text-popover-foreground hover:bg-muted'
+                }`}
+              >
+                <span className="w-4 flex-shrink-0">{modelPreference === 'current' && <Checkmark />}</span>
+                <span className="truncate">
+                  Keep current model
+                  {currentModel?.modelID && (
+                    <span className="text-muted-foreground"> ({currentModel.modelID})</span>
+                  )}
+                </span>
+              </button>
+              <button
+                onClick={() => handleModelPreferenceSelect('agent-default')}
+                className={`w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 ${
+                  modelPreference === 'agent-default'
+                    ? 'text-primary bg-primary/10 font-medium'
+                    : 'text-popover-foreground hover:bg-muted'
+                }`}
+              >
+                <span className="w-4 flex-shrink-0">{modelPreference === 'agent-default' && <Checkmark />}</span>
+                <span className="truncate">
+                  Use agent&apos;s default
+                  {matchedAgent?.model?.modelID && (
+                    <span className="text-muted-foreground"> ({matchedAgent.model.modelID})</span>
+                  )}
+                </span>
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

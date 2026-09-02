@@ -76,6 +76,35 @@ describe("executeSubmitPlan", () => {
     expect(result).toBe("Plan approved!");
   });
 
+  test("forwards the model preference chosen alongside the agent switch", async () => {
+    prepareDataDir();
+    const sendApprovalHandoff = mock(async () => {});
+
+    await executeSubmitPlan({
+      edits: [{ start: 1, content: "# Approved" }],
+      invokingAgent: "plan",
+      sessionId: "session-5",
+      abortSignal: new AbortController().signal,
+      directory: "/workspace/example",
+      workflowOptions: normalizeWorkflowOptions(undefined),
+    }, {
+      reviewPlan: async () => ({
+        approved: true,
+        agentSwitch: "build",
+        agentModelPreference: "agent-default",
+      }),
+      resolveTargetAgent: async () => "build",
+      sendApprovalHandoff,
+    });
+
+    expect(sendApprovalHandoff).toHaveBeenCalledWith({
+      sessionId: "session-5",
+      targetAgent: "build",
+      text: "Proceed with implementation",
+      agentModelPreference: "agent-default",
+    });
+  });
+
   test("preserves backing state when review startup fails", async () => {
     prepareDataDir();
 

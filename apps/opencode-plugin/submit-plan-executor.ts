@@ -27,6 +27,12 @@ export interface SubmitPlanReviewResult {
   feedback?: string;
   savedPath?: string;
   agentSwitch?: string;
+  /**
+   * 'current' (default when unset) keeps the model this session is already
+   * running; 'agent-default' opts into the target agent's own configured
+   * model from opencode.json.
+   */
+  agentModelPreference?: string;
 }
 
 export interface SubmitPlanInvocation {
@@ -52,6 +58,7 @@ export interface SubmitPlanHost {
     sessionId: string;
     targetAgent: string;
     text: string;
+    agentModelPreference?: string;
   }): Promise<void>;
 }
 
@@ -141,6 +148,7 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
         text: shouldStartImplementation
           ? "Proceed with implementation"
           : "Plan approved. Plan mode remains active; no implementation has been requested.",
+        agentModelPreference: reviewResult.agentModelPreference,
       });
     } catch {
       // The session can still be busy while the tool result is being delivered.

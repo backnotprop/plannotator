@@ -1,7 +1,61 @@
 import { describe, expect, mock, test } from "bun:test";
-import { resolveTargetAgent, resolveValidatedTargetAgent } from "./agent-switch";
+import {
+  getAssistantMessageModel,
+  resolveTargetAgent,
+  resolveValidatedTargetAgent,
+  shouldPreserveActiveModel,
+} from "./agent-switch";
 
 describe("OpenCode agent switch validation", () => {
+  test("preserves the active model unless the target agent's default is explicitly requested", () => {
+    expect(shouldPreserveActiveModel(undefined)).toBe(true);
+    expect(shouldPreserveActiveModel("current")).toBe(true);
+    expect(shouldPreserveActiveModel("agent-default")).toBe(false);
+  });
+  test("reads the model from the assistant message that submitted the plan", async () => {
+    const message = mock(async () => ({
+      data: {
+        info: {
+          role: "assistant",
+          providerID: "anthropic",
+          modelID: "claude-opus-5",
+        },
+      },
+    }));
+
+    await expect(getAssistantMessageModel({
+      client: { session: { message } },
+      sessionId: "session-1",
+      messageId: "message-1",
+    })).resolves.toEqual({ providerID: "anthropic", modelID: "claude-opus-5" });
+
+    expect(message).toHaveBeenCalledWith({
+      path: { id: "session-1", messageID: "message-1" },
+    });
+  });
+
+  test("omits unavailable or malformed assistant message models", async () => {
+    const malformed = await getAssistantMessageModel({
+      client: {
+        session: {
+          message: async () => ({
+            data: { info: { role: "assistant", providerID: "anthropic" } },
+          }),
+        },
+      },
+      sessionId: "session-1",
+      messageId: "message-1",
+    });
+    expect(malformed).toBeUndefined();
+
+    const unavailable = await getAssistantMessageModel({
+      client: { session: { message: async () => { throw new Error("not found"); } } },
+      sessionId: "session-1",
+      messageId: "message-1",
+    });
+    expect(unavailable).toBeUndefined();
+  });
+
   test("preserves no-agent defaults", () => {
     expect(resolveTargetAgent(undefined)).toBeUndefined();
     expect(resolveTargetAgent("disabled")).toBeUndefined();

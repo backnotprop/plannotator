@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { resetStorageBackend, setStorageBackend, type StorageBackend } from "./storage";
-import { getAgentSwitchSettings, getEffectiveAgentName, saveAgentSwitchSettings } from "./agentSwitch";
+import {
+  getAgentSwitchSettings,
+  getEffectiveAgentName,
+  getEffectiveModelPreference,
+  saveAgentSwitchSettings,
+} from "./agentSwitch";
 
 function memoryStorage(initial: Record<string, string> = {}): StorageBackend {
   const values = new Map(Object.entries(initial));
@@ -56,5 +61,25 @@ describe("agent switch settings", () => {
 
   test("does not emit custom as an agent when no custom name is set", () => {
     expect(getEffectiveAgentName({ switchTo: "custom" })).toBeUndefined();
+  });
+
+  test("defaults model preference to keeping the current session model", () => {
+    setStorageBackend(memoryStorage());
+
+    const settings = getAgentSwitchSettings("plan");
+
+    expect(settings.modelPreference).toBe("current");
+    expect(getEffectiveModelPreference(settings)).toBe("current");
+    expect(getEffectiveModelPreference({ switchTo: "build" })).toBe("current");
+  });
+
+  test("persists an explicit choice to use the target agent's default model", () => {
+    setStorageBackend(memoryStorage());
+
+    saveAgentSwitchSettings({ switchTo: "build", modelPreference: "agent-default" });
+
+    const settings = getAgentSwitchSettings("plan");
+    expect(settings.modelPreference).toBe("agent-default");
+    expect(getEffectiveModelPreference(settings)).toBe("agent-default");
   });
 });
