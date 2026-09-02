@@ -196,6 +196,12 @@ const escapeAttrValue = (value: string): string => {
 const normalizeForRestoreCompare = (value: string): string =>
   value.replace(/\s+/g, ' ').trim();
 
+// web-highlighter 0.8.x accepts only class, ID, and tag exclusions.
+const ANNOTATION_EXCLUDED_SELECTOR = '.annotation-exclude';
+
+const isAnnotationExcludedTextNode = (node: Node): boolean =>
+  Boolean(node.parentElement?.closest(ANNOTATION_EXCLUDED_SELECTOR));
+
 const applyMathAnnotationClass = (
   element: HTMLElement,
   id: string,
@@ -361,21 +367,28 @@ export function useAnnotationHighlighter({
     const searchOnce = (needle: string): Range | null => {
       if (!needle || !containerRef.current) return null;
 
-      const rangeFromTextOffsets = (startIndex: number, endIndex: number): Range | null => {
-        const walker = document.createTreeWalker(
-          containerRef.current!,
-          NodeFilter.SHOW_TEXT,
-          null
-        );
+      const walker = document.createTreeWalker(
+        containerRef.current,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: (node) => isAnnotationExcludedTextNode(node)
+            ? NodeFilter.FILTER_REJECT
+            : NodeFilter.FILTER_ACCEPT,
+        },
+      );
+      const textNodes: Text[] = [];
+      let currentNode: Text | null;
+      while ((currentNode = walker.nextNode() as Text | null)) {
+        textNodes.push(currentNode);
+      }
 
+      const rangeFromTextOffsets = (startIndex: number, endIndex: number): Range | null => {
         let charCount = 0;
         let startNode: Text | null = null;
         let startOffset = 0;
         let endNode: Text | null = null;
         let endOffset = 0;
-        let node: Text | null;
-
-        while ((node = walker.nextNode() as Text | null)) {
+        for (const node of textNodes) {
           const nodeLength = node.textContent?.length || 0;
 
           if (!startNode && charCount + nodeLength > startIndex) {
@@ -433,14 +446,7 @@ export function useAnnotationHighlighter({
         };
       };
 
-      const walker = document.createTreeWalker(
-        containerRef.current,
-        NodeFilter.SHOW_TEXT,
-        null
-      );
-
-      let node: Text | null;
-      while ((node = walker.nextNode() as Text | null)) {
+      for (const node of textNodes) {
         const text = node.textContent || '';
         const index = text.indexOf(needle);
         if (index !== -1) {
@@ -451,7 +457,7 @@ export function useAnnotationHighlighter({
         }
       }
 
-      const fullText = containerRef.current.textContent || '';
+      const fullText = textNodes.map((node) => node.textContent ?? '').join('');
       const searchIndex = fullText.indexOf(needle);
       if (searchIndex !== -1) {
         return rangeFromTextOffsets(searchIndex, searchIndex + needle.length);
@@ -840,7 +846,13 @@ export function useAnnotationHighlighter({
 
     const highlighter = new Highlighter({
       $root: containerRef.current,
-      exceptSelectors: ['.annotation-toolbar', 'button', '.math-annotatable', '.katex'],
+      exceptSelectors: [
+        '.annotation-toolbar',
+        'button',
+        '.math-annotatable',
+        '.katex',
+        ANNOTATION_EXCLUDED_SELECTOR,
+      ],
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
     });

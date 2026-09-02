@@ -137,6 +137,84 @@ The srcdoc then carries one classic `<script src>` in the exact place the inline
 - **`showHelpLink={false}`** for hosts: the default help modal embeds Plannotator's own video walkthroughs.
 - **`hideInputMethodSwitch`** omits the pinpoint/drag input-method switch.
 
+#### Sticky header lane host props
+
+`components/StickyHeaderLane` is the measured compact companion to `Viewer`'s
+`[data-sticky-actions]` cluster. Its defaults preserve Plannotator's ghost-header
+behavior: hidden and inert at rest, then visible with card chrome once stuck.
+
+- **`visibility="always"`** keeps the existing measured left lane visible and
+  interactive at rest as well as while stuck. Resting lanes have no background,
+  border, backdrop, shadow, or new document padding; stuck lanes retain the
+  incumbent chrome. The lane remains zero-height and absolutely positioned, so
+  the host must reserve a clear header-height region; otherwise its visible
+  controls can cover and intercept interaction with document content below.
+- **`sticky={false}`** uses non-sticky positioning, creates no intersection
+  observer, and scrolls away normally. Pass the same value to
+  `Viewer.stickyActions` so the left lane and right action cluster follow one
+  policy. By itself it leaves the default stuck-only lane permanently hidden;
+  combine it with `visibility="always"` for a visible non-sticky header. The
+  measured Viewer-actions width is still reserved because both clusters share
+  the lane at rest before they scroll away together.
+- Wide, tight icon-only, and narrow stacked layouts continue to derive from the
+  wrapper width and the measured action-cluster width. `hideQuickLabel` is still
+  forwarded to the compact toolstrip.
+
+#### Viewer-owned document header
+
+Use `Viewer.annotationHeader` when the compact annotation controls must be
+visible at rest. Viewer then owns one in-flow header containing those controls
+on the left and its existing Global comment / Copy actions on the right:
+
+```tsx
+<Viewer
+  mode={mode}
+  inputMethod={inputMethod}
+  stickyActions={stickyActions}
+  annotationHeader={{
+    onInputMethodChange: setInputMethod,
+    onModeChange: setMode,
+    hideQuickLabel: true,
+  }}
+  // ...the existing Viewer props
+/>
+```
+
+The trailing action cluster keeps full-width labels unless you also pass
+`actionsLabelMode` (`'full' | 'short' | 'icon'`); the header measures the real
+cluster either way, so omitting it costs earlier stacking on narrow columns,
+never breakage.
+
+The header reserves its real responsive height before document content. It
+keeps active labels in the wide layout, switches the compact toolstrip to
+icons in the tight layout, and stacks the two clusters when narrow or wrapped.
+All Viewer badge context moves into the same measured header. With
+`stickyActions={true}` the complete header pins and gains the existing stuck
+chrome; with `false` it remains in flow and scrolls away. The complete header
+has `data-print-hide`, so it contributes no print layout.
+
+As with Viewer's legacy sticky actions and anchor navigation, hosts with a
+custom scroll element must wrap Viewer in `ScrollViewportProvider` from
+`@plannotator/ui/hooks/useScrollViewport` and pass that actual scroll element.
+Without the provider, CSS page stickiness can still apply, but Viewer cannot
+observe the host scroller to add stuck chrome or calculate anchor clearance.
+
+The header reuses Viewer's `[data-sticky-actions]` cluster, so host CSS that
+restyled that selector for the legacy floating bar (negative margins are the
+common case) applies inside the header too and pulls the action cluster out of
+its row. Scope such rules away from the header, e.g.
+`[data-viewer-document-header] [data-sticky-actions] { margin-top: 0; margin-right: 0; }`.
+
+The config is intentionally typed rather than a React-node slot. Viewer reuses
+its existing `mode`, `inputMethod`, and `taterMode`; the config supplies only
+the state-change callbacks and optional `hideQuickLabel`. Compact toolstrips
+never render the Plannotator help modal. Hiding Quick Label does not clamp the
+mode, so hosts must still prevent stored `'quickLabel'` state from reaching
+Viewer. Omit `annotationHeader` to preserve the legacy floating action bar
+exactly. The standalone `StickyHeaderLane` remains supported for Plannotator's
+hidden-at-rest ghost lane, but its always-visible mode is an overlay and is not
+the in-flow host integration.
+
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
 The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.modelContext`) call in-page tools on a document surface. Feature-detected once; a browser without the API sees no registration, no DOM, no network, no timers. Seam: `configurePlannotatorUI({ webmcp: { enabled, namePrefix } })`, default enabled with the `plannotator.` prefix; pass `enabled: false` to keep a host page tool-free, or your own prefix to namespace the tools beside your own. There is deliberately no confirmation seam: the catalog is read-and-comment only (no approve / submit / close tools), and the agent may only edit or remove comments stamped `source: "browser-agent"`.
@@ -172,7 +250,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.35.2 depends exactly on `@plannotator/core` 0.25.1. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.37.0 depends exactly on `@plannotator/core` 0.25.1. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

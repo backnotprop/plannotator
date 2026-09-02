@@ -44,7 +44,7 @@ import { MermaidBlock } from './MermaidBlock';
 import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
-import { DocBadges, type LinkedDocBadgeInfo } from './DocBadges';
+import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBadges';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
 import { useAnnotationHighlighter } from '../hooks/useAnnotationHighlighter';
@@ -58,8 +58,24 @@ import {
 } from '../hooks/useScrollViewport';
 import { decodeAnchorHash } from '../utils/anchors';
 import { VimModeOverlay } from './VimModeOverlay';
+import { AnnotationToolstrip } from './AnnotationToolstrip';
+import {
+  resolveCompactHeaderGeometry,
+  snapCompactHeaderWidth,
+} from './compactHeaderLayout';
 
-interface ViewerProps {
+/** Typed controls required for Viewer's opt-in, in-flow annotation header. */
+export interface ViewerAnnotationHeaderConfig {
+  /** Persist and apply a Select or Pinpoint input-method change. */
+  readonly onInputMethodChange: (method: InputMethod) => void;
+  /** Persist and apply an annotation-mode change. */
+  readonly onModeChange: (mode: EditorMode) => void;
+  /** Omit Quick Label without changing or coercing the current mode. */
+  readonly hideQuickLabel?: boolean;
+}
+
+/** Public properties for the Markdown document Viewer. */
+export interface ViewerProps {
   blocks: Block[];
   markdown: string;
   frontmatter?: Frontmatter | null;
@@ -75,6 +91,14 @@ interface ViewerProps {
   onRemoveGlobalAttachment?: (path: string) => void;
   repoInfo?: { display: string; branch?: string; host?: string } | null;
   stickyActions?: boolean;
+  /**
+   * Render compact annotation controls and the existing document actions in
+   * one measured, in-flow header owned by Viewer. The header reserves its
+   * responsive height before document content and follows `stickyActions`.
+   * Omit this prop to retain the legacy floating action bar exactly. Read-only
+   * viewers suppress the annotation header rather than expose dead controls.
+   */
+  annotationHeader?: ViewerAnnotationHeaderConfig;
   /** Render the plan as a floating card on a grid background (shadow/border/padding). Default false. */
   gridEnabled?: boolean;
   onOpenLinkedDoc?: (path: string) => void;
@@ -189,6 +213,118 @@ const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }
   );
 };
 
+interface ViewerDocumentHeaderProps {
+  readonly config: ViewerAnnotationHeaderConfig;
+  readonly inputMethod: InputMethod;
+  readonly mode: EditorMode;
+  readonly taterMode: boolean;
+  readonly sticky: boolean;
+  readonly stuck: boolean;
+  readonly sentinelRef: React.RefObject<HTMLDivElement | null>;
+  readonly badges: Omit<DocBadgesProps, 'layout'>;
+  readonly actions: React.ReactNode;
+}
+
+/** Viewer-owned header that keeps leading controls and trailing actions in one flow. */
+const ViewerDocumentHeader: React.FC<ViewerDocumentHeaderProps> = ({
+  config,
+  inputMethod,
+  mode,
+  taterMode,
+  sticky,
+  stuck,
+  sentinelRef,
+  badges,
+  actions,
+}) => {
+  const headerRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [headerWidth, setHeaderWidth] = useState(0);
+  const [actionsWidth, setActionsWidth] = useState(0);
+
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = snapCompactHeaderWidth(entry.contentRect.width);
+      setHeaderWidth((current) => current === next ? current : next);
+    });
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const actionCluster = actionsRef.current;
+    if (!actionCluster) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = snapCompactHeaderWidth(entry.contentRect.width);
+      setActionsWidth((current) => current === next ? current : next);
+    });
+    observer.observe(actionCluster);
+    return () => observer.disconnect();
+  }, []);
+
+  const geometry = resolveCompactHeaderGeometry({
+    containerWidth: headerWidth,
+    trailingWidth: actionsWidth,
+    leadingInset: 0,
+  });
+  const narrow = geometry.layout === 'narrow';
+  const iconOnly = geometry.layout !== 'wide';
+
+  return (
+    <>
+      {sticky && <div ref={sentinelRef} className="h-0 w-0" aria-hidden="true" />}
+      <div
+        ref={headerRef}
+        data-annotation-exclude
+        data-print-hide
+        data-viewer-document-header
+        data-header-layout={geometry.layout}
+        className={`annotation-exclude ${sticky ? 'sticky top-3' : 'relative'} z-40 mb-3 md:mb-4 rounded-lg transition-colors duration-150 ${
+          stuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''
+        }`}
+      >
+        <div className={`flex min-w-0 ${
+          narrow
+            ? 'flex-col items-stretch gap-2'
+            : 'flex-row items-start justify-between gap-4'
+        }`}>
+          <div
+            data-viewer-annotation-controls
+            className={`inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-1 md:py-2 ${
+              narrow ? 'w-full' : 'flex-1'
+            }`}
+          >
+            <div className="flex-shrink-0">
+              <AnnotationToolstrip
+                inputMethod={inputMethod}
+                onInputMethodChange={config.onInputMethodChange}
+                mode={mode}
+                onModeChange={config.onModeChange}
+                taterMode={taterMode}
+                hideQuickLabel={config.hideQuickLabel}
+                compact
+                iconOnly={iconOnly}
+              />
+            </div>
+            <DocBadges layout="header" {...badges} />
+          </div>
+          <div
+            ref={actionsRef}
+            data-sticky-actions
+            className={`flex flex-shrink-0 items-start gap-1 rounded-lg p-1 md:gap-2 md:p-2 ${
+              narrow ? 'self-end' : ''
+            }`}
+          >
+            {actions}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
 /**
  * Render and annotate a parsed Markdown document.
  *
@@ -211,6 +347,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onRemoveGlobalAttachment,
   repoInfo,
   stickyActions = true,
+  annotationHeader,
   gridEnabled = false,
   planDiffStats,
   isPlanDiffActive,
@@ -242,6 +379,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   vimHudKeyPanelEnabled = true,
   onVimHudKeyPanelChange,
 }, ref) => {
+  const viewerAnnotationHeader = readOnly ? undefined : annotationHeader;
+  const hasViewerAnnotationHeader = viewerAnnotationHeader !== undefined;
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const [locationHash, setLocationHash] = useState(() => window.location.hash);
@@ -271,6 +410,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const docBadgesRef = useRef<HTMLDivElement | null>(null);
   const [badgeClearance, setBadgeClearance] = useState(0);
   useEffect(() => {
+    if (hasViewerAnnotationHeader) {
+      setBadgeClearance(0);
+      return;
+    }
     const el = docBadgesRef.current;
     const article = containerRef.current;
     if (!el || !article) { setBadgeClearance(0); return; }
@@ -284,7 +427,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     ro.observe(el);
     window.addEventListener('resize', measure);
     return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
-  }, [repoInfo, hasPreviousVersion, showDemoBadge, linkedDocInfo, archiveInfo, sourceInfo, planDiffStats, openInAppPath]);
+  }, [hasViewerAnnotationHeader, repoInfo, hasPreviousVersion, showDemoBadge, linkedDocInfo, archiveInfo, sourceInfo, planDiffStats, openInAppPath]);
 
   // Per-doc heading slug map with dedup — computed once per blocks array so
   // anchor ids stay stable across re-renders and duplicate heading texts get
@@ -605,14 +748,18 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // The IntersectionObserver root must be the actual scroll element — the
   // OverlayScrollArea viewport — not the <main> host, which doesn't scroll.
   useEffect(() => {
-    if (!stickyActions || !stickySentinelRef.current || !scrollViewport) return;
+    if (!stickyActions) {
+      setIsStuck(false);
+      return;
+    }
+    if (!stickySentinelRef.current || !scrollViewport) return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsStuck(!entry.isIntersecting),
       { root: getScrollViewportIntersectionRoot(scrollViewport), threshold: 0 }
     );
     observer.observe(stickySentinelRef.current);
     return () => observer.disconnect();
-  }, [stickyActions, scrollViewport]);
+  }, [hasViewerAnnotationHeader, stickyActions, scrollViewport]);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -634,12 +781,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     const target = document.getElementById(anchor);
     if (!target || !container.contains(target)) return false;
 
-    const stickyActionsEl = container.querySelector<HTMLElement>('[data-sticky-actions]');
-    const stickyTop = stickyActionsEl
-      ? Number.parseFloat(window.getComputedStyle(stickyActionsEl).top || '0') || 0
+    const documentHeader = stickyActions
+      ? container.querySelector<HTMLElement>('[data-viewer-document-header]')
+        ?? container.querySelector<HTMLElement>('[data-sticky-actions]')
+      : null;
+    const stickyTop = documentHeader
+      ? Number.parseFloat(window.getComputedStyle(documentHeader).top || '0') || 0
       : 0;
-    const headerOffset = stickyActionsEl
-      ? stickyActionsEl.getBoundingClientRect().height + stickyTop
+    const headerOffset = documentHeader
+      ? documentHeader.getBoundingClientRect().height + stickyTop
       : 0;
     const containerRect = getScrollViewportRect(scrollViewport);
     const targetRect = target.getBoundingClientRect();
@@ -651,7 +801,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       behavior: 'smooth',
     });
     return true;
-  }, [scrollViewport]);
+  }, [scrollViewport, stickyActions]);
 
   useEffect(() => {
     if (!scrollViewport || !locationHash || lastAutoScrolledHashRef.current === locationHash) return;
@@ -788,6 +938,82 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   const codePathValidation = useValidatedCodePaths(markdown, codePathBaseDir, disableCodePathValidation);
 
+  const documentActions = (
+    <>
+      {messagePickerInfo && (
+        <button
+          onClick={messagePickerInfo.onOpen}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+          title="Pick a different message to annotate"
+        >
+          <MessagesIcon />
+          {actionsLabelMode === 'full' && (
+            <span>Message {messagePickerInfo.current} of {messagePickerInfo.total}</span>
+          )}
+          {actionsLabelMode === 'short' && (
+            <span>{messagePickerInfo.current}/{messagePickerInfo.total}</span>
+          )}
+        </button>
+      )}
+
+      {!readOnly && onAddGlobalAttachment && onRemoveGlobalAttachment && (
+        <AttachmentsButton
+          images={globalAttachments}
+          onAdd={onAddGlobalAttachment}
+          onRemove={onRemoveGlobalAttachment}
+          variant="toolbar"
+          hideLabel={actionsLabelMode === 'icon'}
+        />
+      )}
+
+      {!readOnly && (
+        <button
+          ref={globalCommentButtonRef}
+          onClick={() => {
+            const anchorEl = globalCommentButtonRef.current;
+            if (!anchorEl) return;
+            setViewerCommentPopover({
+              anchorEl,
+              contextText: '',
+              isGlobal: true,
+            });
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+          title="Add global comment"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+          </svg>
+          {actionsLabelMode === 'full' && <span>Global comment</span>}
+          {actionsLabelMode === 'short' && <span>Comment</span>}
+        </button>
+      )}
+
+      <button
+        onClick={handleCopyPlan}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
+        title={copied ? 'Copied!' : copyLabel || (linkedDocInfo ? 'Copy file' : 'Copy plan')}
+      >
+        {copied ? (
+          <>
+            <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            Copied!
+          </>
+        ) : (
+          <>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            {actionsLabelMode === 'full' && <span>{copyLabel || (linkedDocInfo ? 'Copy file' : 'Copy plan')}</span>}
+            {actionsLabelMode === 'short' && <span>Copy</span>}
+          </>
+        )}
+      </button>
+    </>
+  );
+
   return (
     <CodePathValidationContext.Provider value={codePathValidation}>
     <div className="relative z-50 w-full" style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}>
@@ -810,8 +1036,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           ...(vimModeActive ? { outline: 'none' } : {}),
         } as React.CSSProperties}
       >
-        {/* Repo info + plan diff badge + demo badge + linked doc badge + archive badge - top left */}
-        {(repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || openInAppPath) && (
+        {/* Legacy badge placement remains byte-for-byte opt-out behavior. */}
+        {!viewerAnnotationHeader && (repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || openInAppPath) && (
           <div ref={docBadgesRef} data-print-hide className={`absolute top-3 md:top-4 ${gridEnabled ? 'left-3 md:left-5' : 'left-0'}`}>
             <DocBadges
               layout="column"
@@ -831,88 +1057,40 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           </div>
         )}
 
-        {/* Clearance so document content starts below the (absolute) badge cluster
-            when it outgrows the card's top padding — see the measuring effect above. */}
-        {badgeClearance > 0 && <div data-print-hide style={{ height: badgeClearance }} aria-hidden="true" />}
-
-        {/* Sentinel for sticky detection */}
-        {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
-
-        {/* Header buttons - top right */}
-        <div data-print-hide data-sticky-actions className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
-          {messagePickerInfo && (
-            <button
-              onClick={messagePickerInfo.onOpen}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
-              title="Pick a different message to annotate"
-            >
-              <MessagesIcon />
-              {actionsLabelMode === 'full' && (
-                <span>Message {messagePickerInfo.current} of {messagePickerInfo.total}</span>
-              )}
-              {actionsLabelMode === 'short' && (
-                <span>{messagePickerInfo.current}/{messagePickerInfo.total}</span>
-              )}
-            </button>
-          )}
-
-          {/* Attachments button */}
-          {!readOnly && onAddGlobalAttachment && onRemoveGlobalAttachment && (
-            <AttachmentsButton
-              images={globalAttachments}
-              onAdd={onAddGlobalAttachment}
-              onRemove={onRemoveGlobalAttachment}
-              variant="toolbar"
-              hideLabel={actionsLabelMode === 'icon'}
-            />
-          )}
-
-          {/* <span className="md:hidden">Comment</span><span className="hidden md:inline">Global comment</span> button */}
-          {!readOnly && (
-          <button
-            ref={globalCommentButtonRef}
-            onClick={() => {
-              setViewerCommentPopover({
-                anchorEl: globalCommentButtonRef.current!,
-                contextText: '',
-                isGlobal: true,
-              });
+        {viewerAnnotationHeader ? (
+          <ViewerDocumentHeader
+            config={viewerAnnotationHeader}
+            inputMethod={inputMethod}
+            mode={mode}
+            taterMode={taterMode}
+            sticky={stickyActions}
+            stuck={isStuck}
+            sentinelRef={stickySentinelRef}
+            badges={{
+              repoInfo,
+              planDiffStats,
+              isPlanDiffActive,
+              hasPreviousVersion,
+              onPlanDiffToggle,
+              planDiffBaselineLabel,
+              planDiffBaselineTooltip,
+              showDemoBadge,
+              archiveInfo,
+              linkedDocInfo,
+              sourceInfo,
+              openInAppPath,
             }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
-            title="Add global comment"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-            </svg>
-            {actionsLabelMode === 'full' && <span>Global comment</span>}
-            {actionsLabelMode === 'short' && <span>Comment</span>}
-          </button>
-          )}
-
-          {/* Copy plan/file button */}
-          <button
-            onClick={handleCopyPlan}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors"
-            title={copied ? 'Copied!' : copyLabel || (linkedDocInfo ? 'Copy file' : 'Copy plan')}
-          >
-            {copied ? (
-              <>
-                <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-                Copied!
-              </>
-            ) : (
-              <>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                {actionsLabelMode === 'full' && <span>{copyLabel || (linkedDocInfo ? 'Copy file' : 'Copy plan')}</span>}
-                {actionsLabelMode === 'short' && <span>Copy</span>}
-              </>
-            )}
-          </button>
-        </div>
+            actions={documentActions}
+          />
+        ) : (
+          <>
+            {badgeClearance > 0 && <div data-print-hide style={{ height: badgeClearance }} aria-hidden="true" />}
+            {stickyActions && <div ref={stickySentinelRef} className="h-0 w-0 float-right" aria-hidden="true" />}
+            <div data-print-hide data-sticky-actions className={`${stickyActions ? 'sticky top-3' : ''} z-30 float-right flex items-start gap-1 md:gap-2 rounded-lg p-1 md:p-2 transition-colors duration-150 ${isStuck ? 'bg-card/95 backdrop-blur-sm shadow-sm' : ''} ${gridEnabled ? '-mr-3 md:-mr-5 lg:-mr-7 xl:-mr-9' : '-mr-1 md:-mr-2'} mt-6 md:-mt-5 lg:-mt-7 xl:-mt-9`}>
+              {documentActions}
+            </div>
+          </>
+        )}
         {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} /></>}
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
         {groupBlocks(blocks).map(group =>
