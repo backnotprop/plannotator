@@ -29,13 +29,12 @@ interface ReviewSetupDialogProps {
 
 const WAITLIST_URL = 'https://plannotator.ai/workspaces';
 
-type DiffChoice = 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+type DiffChoice = 'since-base' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
 
 const DIFF_OPTIONS: { value: DiffChoice; label: string; tag?: string; desc: string }[] = [
   // "All changes" belongs to since-base (the flagship composite); uncommitted
   // keeps its plain name so the two stay distinguishable side by side.
   { value: 'since-base', label: 'All changes', tag: 'New', desc: 'Everything since your branch left main — committed, uncommitted, and untracked.' },
-  { value: 'local-vs-remote', label: 'Local vs remote branch', desc: 'Your branch and working tree compared with its last-fetched remote-tracking branch.' },
   { value: 'uncommitted', label: 'Uncommitted', desc: "Everything you've changed since your last commit." },
   { value: 'unstaged', label: 'Unstaged', desc: "Only changes you haven't staged yet." },
   { value: 'staged', label: 'Staged', desc: "Only changes you've staged for commit." },
