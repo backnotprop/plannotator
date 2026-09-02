@@ -14,6 +14,7 @@ This skill is the knowledge layer. The `plannotator-review`, `plannotator-annota
 | The user wants | Run |
 | --- | --- |
 | Review a plan you produced | Nothing. Plan review opens automatically on plan exit via hooks. Never run bare `plannotator` yourself. |
+| Review and explicitly approve a plan/spec saved as a file | `plannotator annotate <file> --gate --json` |
 | Review current code changes | `plannotator review` |
 | Review a GitHub PR or GitLab MR | `plannotator review <PR_URL>` |
 | Annotate a markdown, text, config, or HTML file | `plannotator annotate <file>` |
@@ -57,6 +58,8 @@ plannotator annotate <target> [--markdown] [--no-jina] [--app | --static] [--ren
 ```
 
 Opens one document, page, or app in the annotation UI and returns the human's annotations on stdout.
+
+Plain `annotate` is feedback-only: it shows **Close** but no **Approve** button. When the user asks to review, approve, accept, or gate a generated plan/spec/document saved as a file, always add `--gate --json`. Do not tell the user they can approve a plain `annotate` session. If the plan is being handed off through the host agent's native plan flow, do not launch `annotate`; let the plan-exit hook open the approval UI automatically.
 
 Targets:
 

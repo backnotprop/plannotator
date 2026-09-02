@@ -44,6 +44,16 @@ const SKILL_MD_PATH = join(
   "SKILL.md",
 );
 
+const ANNOTATE_SKILL_MD_PATH = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "skills",
+  "core",
+  "plannotator-annotate",
+  "SKILL.md",
+);
+
 // CLI sources that parse flags. index.ts strips flags via
 // args.indexOf/includes; the shared parsers use case/=== comparisons.
 const PARSER_SOURCES = [
@@ -112,6 +122,7 @@ for (const m of indexSource.matchAll(/args\[0\] === "([a-z][a-z0-9-]*)"/g)) {
 // --- The skill's documented surface ---
 
 const skillDoc = readFileSync(SKILL_MD_PATH, "utf-8");
+const annotateSkillDoc = readFileSync(ANNOTATE_SKILL_MD_PATH, "utf-8");
 
 const documentedSubcommands = new Set<string>();
 for (const fence of skillDoc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
@@ -126,6 +137,16 @@ for (const m of skillDoc.matchAll(/(?<![\w-])--[a-z][a-z0-9-]*/g)) {
 }
 
 describe("plannotator knowledge skill freshness", () => {
+  test("file approval guidance enables the annotate gate", () => {
+    expect(skillDoc).toContain("plannotator annotate <file> --gate --json");
+    expect(annotateSkillDoc).toContain(
+      "plannotator annotate <path-or-url> --gate --json",
+    );
+    expect(annotateSkillDoc).toContain(
+      "`--json` only changes the output format and does not enable approval by itself",
+    );
+  });
+
   test("extractors actually extracted (a parsing regression must not pass vacuously)", () => {
     // If the fence or flag regexes stop matching, the forward assertions
     // below would pass on empty sets. Pin known-present anchors instead of
