@@ -130,9 +130,9 @@ export type ResolveAllowedDocPathResult =
 
 /**
  * Resolve a path through the same gate `/api/doc` uses, for callers needing the
- * canonical contained path without reading the file: the annotate version
- * endpoints derive a history slug from it rather than trusting a client slug,
- * which the history dir lookup would join into a path unsanitized.
+ * canonical contained path without reading the file. The annotate version
+ * endpoints derive a history slug from it, since the history dir lookup joins
+ * the slug into a path unsanitized.
  */
 export function resolveAllowedDocPath(
 	requestedPath: string,
@@ -237,10 +237,7 @@ function searchMarkdownFile(input: string, roots: string[]): RootSearchResult {
 	return summarizeRootSearch(found, ambiguous, unavailable);
 }
 
-/**
- * Which file a `/api/doc` path names: base-relative document, raw HTML, code
- * file, then markdown. The returned path is not authorized here.
- */
+/** The returned path is not authorized here. */
 export async function resolveDocTarget(
 	requestedPath: string,
 	options: DocResolveOptions,

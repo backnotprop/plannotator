@@ -299,7 +299,7 @@ async function readCodeFile(res: Res, path: string, input: string, parsed: Parse
 	}
 }
 
-/** Serve a linked markdown document. Uses the shared doc resolver for parity with the Bun server. */
+/** Uses the shared doc resolver for parity with the Bun server. */
 export async function handleDocRequest(res: Res, url: URL, options: HandleDocOptions = {}): Promise<void> {
 	const requestedPath = url.searchParams.get("path");
 	if (!requestedPath) {
