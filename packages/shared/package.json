@@ -95,7 +95,7 @@
     "@joplin/turndown-plugin-gfm": "^1.0.64",
     "@plannotator/core": "workspace:*",
     "chokidar": "^5.0.0",
-    "parse5": "^7.3.0",
+    "parse5": "^8.0.1",
     "turndown": "^7.2.4"
   }
 }
