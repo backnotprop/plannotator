@@ -159,8 +159,7 @@ import {
   findSessionLogsForCwd,
   getRecentRenderedMessages,
   resolveDroidSessionLogForCwd,
-  resolveSessionLogByAncestorPids,
-  resolveSessionLogByCwdScan,
+  resolveClaudeSessionLog,
   type RenderedMessage,
 } from "./session-log";
 import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
@@ -1459,19 +1458,8 @@ if (args[0] === "sessions") {
   } else {
     // Claude Code path: resolve session log
     //
-    // Strategy (most precise → least precise):
-    // 1. Ancestor-PID session metadata: walk up the process tree checking
-    //    ~/.claude/sessions/<pid>.json at each hop. When invoked from a slash
-    //    command's `!` bang, the direct parent is a bash subshell — Claude's
-    //    session file is a few hops up. Deterministic when it matches.
-    // 2. Cwd-scan of session metadata: read every ~/.claude/sessions/*.json,
-    //    filter by cwd, pick the most recent startedAt. Better than mtime
-    //    guessing because it uses session-level metadata.
-    // 3. CWD slug match (mtime-based): legacy behavior — picks the most
-    //    recently modified jsonl in the project dir. Fragile when multiple
-    //    sessions exist for the same project.
-    // 4. Ancestor directory walk: handles the case where the user `cd`'d
-    //    deeper into a subdirectory after session start.
+    // Prefer precise session metadata. Heuristic cwd/ancestor fallbacks are
+    // only safe when no metadata identifies the invoking session.
 
     if (process.env.PLANNOTATOR_DEBUG) {
       console.error(`[DEBUG] Project root: ${projectRoot}`);
@@ -1500,19 +1488,16 @@ if (args[0] === "sessions") {
       }
     }
 
-    // 1. Walk ancestor PIDs for a matching session metadata file
-    const ancestorLog = resolveSessionLogByAncestorPids();
-    tryLogCandidates("Ancestor PID session metadata", () => ancestorLog ? [ancestorLog] : []);
-
-    // 2. Scan all session metadata files for one whose cwd matches
-    const cwdScanLog = resolveSessionLogByCwdScan({ cwd: projectRoot });
-    tryLogCandidates("Cwd-scan session metadata", () => cwdScanLog ? [cwdScanLog] : []);
-
-    // 3. Fall back to CWD slug match (mtime-based)
-    tryLogCandidates("CWD slug match (mtime)", () => findSessionLogsForCwd(projectRoot));
-
-    // 4. Fall back to ancestor directory walk
-    tryLogCandidates("Directory ancestor walk", () => findSessionLogsByAncestorWalk(projectRoot));
+    const resolution = resolveClaudeSessionLog({ cwd: projectRoot });
+    if (resolution.status === "identified") {
+      tryLogCandidates(
+        `Claude session metadata (${resolution.source})`,
+        () => resolution.logPath ? [resolution.logPath] : [],
+      );
+    } else if (resolution.status === "unavailable") {
+      tryLogCandidates("CWD slug match (mtime)", () => findSessionLogsForCwd(projectRoot));
+      tryLogCandidates("Directory ancestor walk", () => findSessionLogsByAncestorWalk(projectRoot));
+    }
   }
 
   if (!lastMessage) {
