@@ -56,9 +56,9 @@ const TRIGGER_COPY: Record<TokenHoverTrigger, { label: string; description: stri
  * The fixture the example card is rendered from. A realistic
  * CodeNavHoverResponse, nothing more: the card itself decides what to show.
  *
- * Exported so the DOM test can render StaticTokenHoverCard from the SAME
- * fixture and assert the dialog's subtree is byte-identical to it. That is
- * what pins "the example is the real card", rather than a copy of its markup.
+ * Exported so the DOM test can assert the rendered card against the SAME
+ * fixture it was built from, which is what pins "the example is the real
+ * card" rather than a copy of its markup.
  */
 /** The symbol the try-it demonstrates. Named in the prompt line too. */
 const EXAMPLE_SYMBOL = 'withRetry';
@@ -105,8 +105,8 @@ const EXAMPLE_REQUEST: CodeNavRequest = {
 /**
  * The illustration is a TRY-IT, not an exhibit: the token below is genuinely
  * hoverable and opens the REAL card through the REAL hook, so the reviewer
- * feels the actual dwell, the leave grace and the Alt gate before committing
- * to a setting. The only thing that is not real is where the answer comes
+ * feels the actual dwell, the leave grace and the modifier gate before
+ * committing to a setting. The only thing that is not real is where the answer comes
  * from, and that is deliberate: a demo must not search the reviewer's
  * repository for a symbol they never asked about.
  *
@@ -246,9 +246,10 @@ export function TokenHoverAnnouncementDialog({
       const dialog = document.querySelector<HTMLElement>('[data-token-hover-announcement-dialog]');
       const focusable = Array.from(
         // `:not([tabindex="-1"])` has to apply to the BUTTONS too, not just the
-        // [tabindex] arm: the roving radio group parks two options at -1, and
-        // the decorative example card carries the real card's location
-        // buttons. Neither belongs in the Tab cycle.
+        // [tabindex] arm: the roving radio group parks two unselected options
+        // at -1 and neither belongs in the Tab cycle. (The try-it's card is
+        // not a factor either way — it portals to <body>, so this query never
+        // reaches it; its own locations leave the tab order via `inert`.)
         dialog?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), [href], [tabindex]:not([tabindex="-1"])')
           ?? [],
       );

@@ -70,6 +70,10 @@ afterEach(async () => {
   host?.remove();
   host = null;
   resetStorageBackend();
+  // Same reason as tokenHoverAnnouncement.test.ts: the store is a process
+  // global that this file re-resolved against a fake backend, so hand it back
+  // to the real one rather than leaving it holding this file's values.
+  configStore.loadFromBackend();
 });
 
 describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
@@ -122,8 +126,19 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
       expect(card).not.toBeNull();
       expect(card!.textContent).toContain(EXAMPLE_HOVER.symbol);
       expect(card!.textContent).toContain(EXAMPLE_HOVER.definition!.filePath);
-      // No References panel behind the demo, so its locations are not tabbable.
-      for (const b of card!.querySelectorAll('button')) expect(b.tabIndex).toBe(-1);
+      // No References panel behind the demo, so its locations are neither
+      // tabbable nor advertised as clickable, and the card is out of the
+      // reading order (it portals to <body>, outside the aria-modal dialog).
+      for (const b of card!.querySelectorAll('button')) {
+        expect(b.tabIndex).toBe(-1);
+        expect(b.className).toContain('cursor-default');
+      }
+      expect(card!.getAttribute('aria-hidden')).toBe('true');
+      // The card portals to <body> like every other instance, so the dialog it
+      // is demonstrated INSIDE would cover it without an explicit layer. This
+      // is the seam's whole reason for existing: a buried demo card is exactly
+      // the failure a live try-it is supposed to make impossible.
+      expect(card!.className).toContain('z-[110]');
     } finally {
       jest.useRealTimers();
     }

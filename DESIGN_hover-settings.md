@@ -7,7 +7,7 @@ implementation; the implementation follows this document.
 
 #1461 shipped hover cards on for everyone, behind one boolean
 (`tokenHoverCards`, cookie-only, default `true`). Resting the pointer on a
-symbol for 350ms opens a card. That is a good default and a bad only-option:
+symbol for 350ms opened a card. That was a good default and a bad only-option:
 a reviewer who reads with the pointer parked in the text gets cards they did
 not ask for, and their only recourse today is a binary off switch that also
 takes away a feature they might want on demand.
@@ -48,8 +48,10 @@ is also why our modifier choice below is not free.
 
 ## 3. Our constraints (what is already true, and must stay true)
 
-- **The 350ms dwell IS the current gate.** `DWELL_MS` in
-  `packages/review-editor/hooks/useTokenHover.ts:10`. Nothing is requested
+- **The dwell IS the gate.** At the time of writing that was a 350ms
+  `DWELL_MS` constant in
+  `packages/review-editor/hooks/useTokenHover.ts:10` (§6 replaces it with the
+  configurable `delayMs`, defaulting to 300). Nothing is requested
   before it elapses; sweeping a diff costs zero ripgrep processes. Any new
   trigger must gate at least as early as this, never later.
 - **Cmd/Ctrl+click opens the References panel.** Shipped contract
@@ -124,7 +126,16 @@ clickable" affordance and precede every deliberate Cmd+click. Two things
 settled it:
 
 - The underline and the card appearing together under a held Cmd is not a
-  collision, it **is** the composite gesture, the same one VS Code ships.
+  collision, it **is** the composite gesture, the same one VS Code ships. The
+  views paint `pn-token-nav` from the pointer ENTER event, which fires for
+  neither transition this mode turns on (a key going down over a parked
+  pointer, and the release after it), so the hook reports both through an
+  `onModifierGate(armed, tokenElement)` option and the App paints them. Both
+  halves of the gesture therefore arrive and leave together, on every disarm
+  route: chord, release, blur, and a trigger change with the key still held.
+  The callback rather than the hook touching the class directly, because the
+  diff views are compiled into the portable viewer and their prop signatures
+  must not move.
 - `handleCodeNavRequest` now dismisses the hover surface on **every**
   References invocation (§6), so a Cmd+click cleanly supersedes an open card
   or a pending dwell instead of stacking with it.
@@ -141,9 +152,13 @@ migrated nothing.
 
 | Value | Label |
 |---|---|
-| `200` | Fast |
-| `350` (default) | Default |
+| `150` | Fast |
+| `300` (default) | Default |
 | `700` | Relaxed |
+
+(Respaced from an earlier 200/350/700 by the maintainer ruling recorded in
+§6: 300 is VS Code's `editor.hover.delay`, and dropping Fast to 150 keeps it
+perceptibly distinct from a 300 default.)
 
 **Why this earns a control.** "Hover cards annoy me" is not one complaint, it
 is three, with three different remedies:
@@ -153,7 +168,7 @@ is three, with three different remedies:
 - *"I want them, they are just too eager"* → a longer dwell.
 
 The third is not served by either of the first two, and it is the complaint
-that a 350ms constant produces most often, because dwell tolerance is a
+that a fixed constant produces most often, because dwell tolerance is a
 personal reading-speed property. It is also the one VS Code found worth
 shipping (`editor.hover.delay`) after having both an enable flag and a
 modifier-gated peek.
@@ -435,7 +450,13 @@ Two rows, one section, same place in the tab.
 - The 250ms leave grace, the 30-entry LRU, the snapshot flush, the scroll and
   wheel cancel, the render threshold, and the silent-failure rule.
 - Comment-only surfaces, read-only views, and the portable guides.show viewer:
-  they pass no hover handlers and gain no props.
+  they pass no hover handlers and gain no props. This is now what gates the
+  `pn-token-hover` treatment as well: the class carries a `cursor: pointer`
+  that only wins over Pierre's I-beam with `!important`, so it is painted only
+  where a hover handler is actually wired. It is also painted in
+  `AllFilesCodeView` now, not just `DiffViewer` — that view is the default
+  review surface, and leaving it out meant the underline the announcement's
+  try-it demonstrates was absent from the surface most reviewers use.
 - `canUseLiveWorkspaceActions` remains an independent hard gate above the
   setting.
 - The server (`POST /api/code-nav/hover`) in either runtime.

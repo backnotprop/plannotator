@@ -183,7 +183,7 @@ export function useTokenHover(
   // something is actually pending or open.
   const [engaged, setEngaged] = useState(false);
 
-  /** Alt held right now. Only tracked while the mode actually needs it. */
+  /** The gate's modifier held right now. Tracked only while the mode needs it. */
   const modifierHeldRef = useRef(false);
   /**
    * The last token the pointer entered, kept even when the gate rejected it.
@@ -231,8 +231,8 @@ export function useTokenHover(
     // The card is gone, so the pointer is not in it any more — and no pointer
     // event will say so, because the card unmounted underneath the pointer
     // rather than being left. Without this reset the flag stays true for the
-    // rest of the session and every later Alt release is ignored as "they are
-    // reading the card".
+    // rest of the session and every later modifier release is ignored as
+    // "they are reading the card".
     pointerInCardRef.current = false;
     setHover(null);
     setEngaged(false);

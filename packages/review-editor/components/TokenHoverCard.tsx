@@ -10,9 +10,8 @@ const RIGHT_MARGIN = 30;
 const ANCHOR_GAP = 8;
 
 /**
- * The card's own box. Shared by the live card and by the static one the
- * announcement dialog renders, so the two cannot drift apart: only the
- * positioning classes differ.
+ * The card's own box. Split from the positioning layer so a host can restack
+ * the card without restating what it looks like.
  */
 const CARD_SURFACE_CLASS =
   'w-[400px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl';
@@ -39,9 +38,12 @@ export interface TokenHoverCardProps {
    */
   layerClassName?: string;
   /**
-   * Drop the location buttons out of the tab order. For hosts where they lead
-   * nowhere (the try-it has no References panel behind it), so Tab does not
-   * walk three dead controls.
+   * The card is on display rather than in service: its locations lead nowhere,
+   * because the host has no References panel behind it (the announcement
+   * dialog's try-it). The locations leave the tab order, stop looking
+   * clickable, and the card leaves the accessibility tree — it portals to
+   * <body>, outside the aria-modal dialog it belongs to, and its meaning is
+   * carried by that dialog's own labelled region instead.
    */
   inert?: boolean;
 }
@@ -53,13 +55,15 @@ function locationLabel(filePath: string, line: number): string {
 /**
  * The card's contents, with no opinion about where the card sits.
  *
- * Split out so the one-time announcement dialog can render a REAL card from a
- * fixture instead of redrawing one: a forked copy of this markup would drift
- * from the shipped card the first time either changed. `interactive: false` is
- * the only difference the static host needs — it drops the location buttons
- * out of the tab order, because they live inside an aria-hidden decorative
- * block where a focusable element would be an accessibility defect. Every
- * class, every section, and their order are shared verbatim.
+ * Split out from the positioning shell only. There is ONE card component and
+ * the announcement dialog renders it, fixture answer and all — nothing here is
+ * redrawn anywhere, because a forked copy of this markup would drift from the
+ * shipped card the first time either changed.
+ *
+ * `interactive: false` is the only difference a display-only host needs: the
+ * location buttons leave the tab order and stop advertising a click the host
+ * will swallow. Every class, every section, and their order are otherwise
+ * shared verbatim.
  */
 function TokenHoverCardContent({
   data,
@@ -73,7 +77,13 @@ function TokenHoverCardContent({
   const { definition, alternateDefinition, references, referenceCount, capped } = data;
   const shownCount = capped ? `${referenceCount}+` : `${referenceCount}`;
   const remaining = referenceCount - references.length;
-  const inertProps = interactive ? {} : { tabIndex: -1 };
+  const inertProps = interactive ? {} : { tabIndex: -1, 'aria-disabled': true as const };
+  // Out of the tab order, and out of the affordance: the card's own footer
+  // says "Click a location to jump", so a location that still underlines on
+  // hover and shows a hand cursor is advertising something that does nothing.
+  // Appended to each button's own classes, never replacing them, so the
+  // display-only card stays the same card.
+  const locationClass = interactive ? '' : ' cursor-default hover:no-underline opacity-80';
 
   return (
     <>
@@ -109,7 +119,7 @@ function TokenHoverCardContent({
             <button
               type="button"
               {...inertProps}
-              className="font-mono text-[11.5px] text-success hover:underline"
+              className={`font-mono text-[11.5px] text-success hover:underline${locationClass}`}
               onClick={() => onSelectLocation(definition)}
             >
               {locationLabel(definition.filePath, definition.line)}
@@ -122,7 +132,7 @@ function TokenHoverCardContent({
               <button
                 type="button"
                 {...inertProps}
-                className="font-mono text-[11.5px] text-success hover:underline"
+                className={`font-mono text-[11.5px] text-success hover:underline${locationClass}`}
                 onClick={() => onSelectLocation(alternateDefinition)}
               >
                 {locationLabel(alternateDefinition.filePath, alternateDefinition.line)}
@@ -146,7 +156,7 @@ function TokenHoverCardContent({
               <button
                 type="button"
                 {...inertProps}
-                className="truncate text-left text-primary hover:underline"
+                className={`truncate text-left text-primary hover:underline${locationClass}`}
                 onClick={() => onSelectLocation(reference)}
               >
                 {locationLabel(reference.filePath, reference.line)}
@@ -225,6 +235,12 @@ export function TokenHoverCard({
       // dismissed. It is supplementary information about the hovered token.
       role="tooltip"
       aria-label={`${data.symbol} details`}
+      // A display-only card portals to <body>, which puts it OUTSIDE the
+      // aria-modal dialog it is being shown inside — where a screen reader
+      // would reach it as a stray tooltip with no context. Its meaning is
+      // carried by that dialog's own labelled region instead. Safe to hide
+      // because `inert` has already taken every control out of the tab order.
+      aria-hidden={inert || undefined}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       className={`${layerClassName} ${CARD_SURFACE_CLASS}`}

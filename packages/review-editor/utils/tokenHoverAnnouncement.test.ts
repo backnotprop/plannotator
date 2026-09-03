@@ -39,7 +39,15 @@ function installBackend(seed: Record<string, string> = {}): void {
 
 describe('token hover announcement persistence', () => {
   beforeEach(() => { installBackend(); });
-  afterEach(() => { resetStorageBackend(); });
+  afterEach(() => {
+    resetStorageBackend();
+    // configStore is a process-global singleton and every installBackend()
+    // above re-resolved EVERY setting from a two-entry fake map. Bun runs the
+    // whole pure lane in one process, so leaving it resolved against a backend
+    // that no longer exists hands the next test file this file's defaults.
+    // Re-hydrate from the real backend now that it is restored.
+    configStore.loadFromBackend();
+  });
 
   test('is needed until the current announcement is marked seen', () => {
     expect(needsTokenHoverAnnouncement()).toBe(true);

@@ -1489,19 +1489,26 @@ const ReviewApp: React.FC = () => {
   // empty diff). `off` is not part of the availability test: a user who
   // reaches the dialog has, by construction, never chosen a trigger.
   //
-  // Eligibility is LATCHED at the first post-load render (dialogs only mount
-  // once isLoading clears, so the latch is always set before they render):
+  // Eligibility is LATCHED once the initial load clears:
   // canUseLiveWorkspaceActions changes on mid-session diff switches, and a
   // stack→ordinary switch must not pop the announcement over work in
   // progress, nor an ordinary→stack switch yank an open one away mid-read.
-  const tokenHoverAvailableRef = useRef<boolean | null>(null);
-  if (!isLoading && tokenHoverAvailableRef.current === null) {
-    tokenHoverAvailableRef.current = canUseLiveWorkspaceActions;
-  }
+  //
+  // In an effect rather than in the render body: a latch written during render
+  // is a side effect React may discard (a concurrent render that never
+  // commits would still have stamped the ref). The commit ordering is safe
+  // because the gate below independently requires !isLoading, so the render
+  // that first clears the flag shows no dialog and the effect has latched
+  // before the next one.
+  const [tokenHoverAvailable, setTokenHoverAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (isLoading) return;
+    setTokenHoverAvailable((current) => (current === null ? canUseLiveWorkspaceActions : current));
+  }, [isLoading, canUseLiveWorkspaceActions]);
   const tokenHoverIntroVisible = tokenHoverAnnouncementCanShow({
     announcementPending: tokenHoverIntroPending,
     isLoading,
-    featureAvailable: tokenHoverAvailableRef.current === true,
+    featureAvailable: tokenHoverAvailable === true,
     guideIntroVisible,
     lookAndFeelVisible: showLookAndFeel,
     reviewSetupVisible: showReviewSetup,
