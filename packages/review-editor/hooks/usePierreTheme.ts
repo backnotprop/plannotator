@@ -279,7 +279,10 @@ export function usePierreTheme(options?: {
           }
           .pn-token-nav {
             text-decoration-thickness: 2px;
-            cursor: pointer;
+            /* Pierre's [data-*] selectors outrank a bare class inside the
+               shadow root, so the pointer needs the same !important the
+               neighboring overrides use, or the I-beam wins. */
+            cursor: pointer !important;
             opacity: 0.85;
           }
 

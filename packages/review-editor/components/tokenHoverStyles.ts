@@ -24,7 +24,7 @@ export function tokenHoverUnderlineCss(primaryColor: string): string {
             text-decoration-color: ${primaryColor};
             text-decoration-thickness: ${UNDERLINE.textDecorationThickness};
             text-underline-offset: ${UNDERLINE.textUnderlineOffset};
-            cursor: pointer;`;
+            cursor: pointer !important;`;
 }
 
 /**
