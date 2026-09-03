@@ -1114,8 +1114,11 @@ const ReviewApp: React.FC = () => {
         id: REVIEW_CODE_NAV_PANEL_ID,
         component: REVIEW_PANEL_TYPES.CODE_NAV,
         title: `References: ${request.symbol}`,
-        position: { direction: 'below', referencePanel: refPanel },
-        initialHeight: 250,
+        // Open beside the code, not under it: a below-split steals vertical
+        // room from the diff being read, and the references list is a narrow
+        // column that reads naturally at the right edge.
+        position: { direction: 'right', referencePanel: refPanel },
+        initialWidth: 420,
       });
     }
   }, [codeNav.resolve, dockApi, isAllFilesActive, isCallFlowActive, isSemanticDiffActive, gitContext, agentCwd]);
