@@ -163,7 +163,13 @@ import {
   resolveSessionLogByCwdScan,
   type RenderedMessage,
 } from "./session-log";
-import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
+import {
+  findCodexRolloutByThreadId,
+  getCodexStopSkipReason,
+  getLatestCodexPlan,
+  getRecentCodexMessages,
+  logCodexStopSkip,
+} from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
@@ -2199,8 +2205,18 @@ if (args[0] === "sessions") {
       process.exit(0);
     }
 
+    const turnId =
+      typeof event.turn_id === "string"
+        ? event.turn_id.trim() || undefined
+        : undefined;
+    const skipReason = getCodexStopSkipReason(rolloutPath, turnId);
+    if (skipReason) {
+      logCodexStopSkip(skipReason, { debug: process.env.PLANNOTATOR_DEBUG });
+      process.exit(0);
+    }
+
     const latestPlan = getLatestCodexPlan(rolloutPath, {
-      turnId: typeof event.turn_id === "string" ? event.turn_id : undefined,
+      turnId,
       stopHookActive: !!event.stop_hook_active,
     });
 

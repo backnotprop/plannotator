@@ -10,7 +10,13 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findCodexRolloutByThreadId, getLastCodexMessage, getLatestCodexPlan } from "./codex-session";
+import {
+  findCodexRolloutByThreadId,
+  getCodexStopSkipReason,
+  getLastCodexMessage,
+  getLatestCodexPlan,
+  logCodexStopSkip,
+} from "./codex-session";
 
 // --- Fixture Helpers ---
 
@@ -71,10 +77,11 @@ function sessionMeta(): string {
   });
 }
 
-function turnContext(): string {
+function turnContext(turnId?: string): string {
   return rolloutLine("turn_context", {
     cwd: "/tmp/test",
     model: "o3",
+    ...(turnId && { turn_id: turnId }),
   });
 }
 
@@ -388,6 +395,7 @@ describe("getLatestCodexPlan", () => {
       text: "Authoritative plan item",
       source: "plan-item",
     });
+
   });
 
   test("falls back to raw proposed_plan blocks for plan-only assistant replies", () => {
@@ -404,6 +412,41 @@ describe("getLatestCodexPlan", () => {
     expect(result).toEqual({
       text: "- First\n- Second",
       source: "assistant-message",
+    });
+  });
+
+  describe("Codex Stop skip diagnostics", () => {
+    test("classifies a missing Stop turn id without reading stale plan content", () => {
+      expect(getCodexStopSkipReason("not-read.jsonl")).toBe("missing-turn-id");
+      expect(getCodexStopSkipReason("not-read.jsonl", "   ")).toBe("missing-turn-id");
+    });
+
+    test("requires an id-carrying rollout turn marker", () => {
+      const turnId = "turn-without-marker";
+      const path = writeTempRollout(
+        buildRollout(
+          sessionMeta(),
+          turnStarted("other-turn"),
+          completedPlanItem("Plan item without matching start marker", turnId),
+        ),
+      );
+
+      expect(getCodexStopSkipReason(path, turnId)).toBe("missing-turn-marker");
+    });
+
+    test("writes the exact skip breadcrumb only when debug is enabled", () => {
+      const messages: string[] = [];
+      const write = (message: string) => messages.push(message);
+
+      logCodexStopSkip("missing-turn-id", { debug: "", write });
+      expect(messages).toEqual([]);
+
+      logCodexStopSkip("missing-turn-id", { debug: "1", write });
+      logCodexStopSkip("missing-turn-marker", { debug: "1", write });
+      expect(messages).toEqual([
+        "[DEBUG] Codex Stop plan review skipped: missing Stop payload turn_id.",
+        "[DEBUG] Codex Stop plan review skipped: missing id-carrying rollout turn marker.",
+      ]);
     });
   });
 
@@ -451,6 +494,55 @@ describe("getLatestCodexPlan", () => {
 
     const result = getLatestCodexPlan(path, { turnId: currentTurnId });
     expect(result).toBeNull();
+  });
+
+  test("does not scrape a proposed plan from a later task when the requested turn has none", () => {
+    const requestedTurnId = "turn-requested";
+    const laterTurnId = "turn-later";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(requestedTurnId),
+        assistantMessage("I have no plan to submit for this task."),
+        turnCompleted(requestedTurnId),
+        turnStarted(laterTurnId),
+        assistantMessage("<proposed_plan>\nPlan from the later task\n</proposed_plan>"),
+      )
+    );
+
+    expect(getLatestCodexPlan(path, { turnId: requestedTurnId })).toBeNull();
+  });
+
+  test("does not scrape an assistant proposed plan for a Stop event without a turn id", () => {
+    const completedTurnId = "turn-completed";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(completedTurnId),
+        assistantMessage("<proposed_plan>\nPrevious turn plan\n</proposed_plan>"),
+        turnCompleted(completedTurnId),
+      ),
+    );
+
+    expect(getLatestCodexPlan(path, { stopHookActive: true })).toBeNull();
+  });
+
+  test("keeps the active task id when a turn context has no id", () => {
+    const turnId = "turn-with-context";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        turnContext(),
+        eventMsg("task_started"),
+        assistantMessage("<proposed_plan>\nCurrent turn plan\n</proposed_plan>"),
+      ),
+    );
+
+    expect(getLatestCodexPlan(path, { turnId })).toEqual({
+      text: "Current turn plan",
+      source: "assistant-message",
+    });
   });
 
   test("returns null when Stop re-entry has no revised plan after the hook prompt", () => {
