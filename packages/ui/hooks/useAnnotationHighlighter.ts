@@ -10,6 +10,10 @@ import Highlighter from '@plannotator/web-highlighter';
 import type { Annotation, EditorMode, ImageAttachment } from '../types';
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
+import {
+  trimWhitespaceOnlyBoundaryNodes,
+  type SelectedNodeLike,
+} from '../utils/selectionBoundary';
 import { getIdentity } from '../utils/identity';
 import { transformPlainText } from '../utils/inlineTransforms';
 
@@ -856,6 +860,15 @@ export function useAnnotationHighlighter({
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
     });
+
+    // Chromium can extend a triple-clicked line into empty or indentation nodes of the next block.
+    // Trim only boundary whitespace so spacing inside genuine multi-node selections stays highlighted.
+    // The hook's callback type is `(...args: unknown[]) => SelectedNode[]`; a SelectedNode
+    // structurally satisfies SelectedNodeLike, so the trimmed subset goes back through the
+    // hook's own callback type rather than importing SelectedNode from the package's dist/.
+    type SelectedNodesTap = Parameters<typeof highlighter.hooks.Render.SelectedNodes.tap>[0];
+    highlighter.hooks.Render.SelectedNodes.tap(((...args: unknown[]) =>
+      trimWhitespaceOnlyBoundaryNodes(args[1] as SelectedNodeLike[])) as SelectedNodesTap);
 
     highlighterRef.current = highlighter;
 
