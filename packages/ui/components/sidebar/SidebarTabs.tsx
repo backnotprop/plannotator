@@ -24,6 +24,7 @@ interface SidebarTabsProps {
   hasFileAnnotations?: boolean;
   hasMessageAnnotations?: boolean;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 export const SidebarTabs: React.FC<SidebarTabsProps> = ({
@@ -40,11 +41,13 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
   hasFileAnnotations,
   hasMessageAnnotations,
   className,
+  style,
 }) => {
   return (
     <div
       data-sidebar-tabs="true"
       className={`flex flex-col gap-1 pt-3 pl-0.5 flex-shrink-0 ${className ?? ""}`}
+      style={style}
     >
       {showAgentTerminalTab && onToggleAgentTerminal && (
         <button
