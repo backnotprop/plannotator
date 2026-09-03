@@ -1007,8 +1007,11 @@ Running only `build:hook` after review-editor changes will copy stale HTML files
 
 ```bash
 bun run --cwd apps/review build && bun run build:hook && \
-  bun build apps/hook/server/index.ts --compile --outfile ~/.local/bin/plannotator
+  bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
+  --define "__CLI_VERSION__=\"0.0.0-dev\"" --outfile ~/.local/bin/plannotator
 ```
+
+These are the flags `.github/workflows/release.yml` compiles with; without the `__CLI_VERSION__` define `plannotator --version` falls back to `plannotator dev` and the binary cannot be told apart from any other local build. On macOS build with bun >= 1.3.14 (what CI pins): 1.3.12 loses the linker signature and the compiled binary is SIGKILLed on launch with no error (#541).
 
 Running only `build:opencode` will copy stale HTML files.
 
