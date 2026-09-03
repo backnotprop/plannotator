@@ -76,6 +76,20 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
     expect(document.querySelector('[data-token-hover-announcement-dialog]')).toBeNull();
   });
 
+  test('the worked example is decorative, so assistive tech never reads it', async () => {
+    // The example reproduces a hover card in mock markup: a name, a signature,
+    // file paths, reference counts. Read aloud it is a wall of invented
+    // identifiers that says nothing about the choice on offer, and every fact
+    // it illustrates is stated in the prose. If the aria-hidden is ever
+    // dropped, the dialog becomes hostile to a screen reader.
+    await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
+    const example = document.querySelector('[data-token-hover-example]');
+    expect(example).not.toBeNull();
+    expect(example!.getAttribute('aria-hidden')).toBe('true');
+    // Nothing focusable may hide inside a decorative block.
+    expect(example!.querySelectorAll('button, a, input, [tabindex]')).toHaveLength(0);
+  });
+
   test('the radio applies the trigger immediately, with no confirm step', async () => {
     await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
     expect(configStore.get('tokenHoverTrigger')).toBe('hover');

@@ -1,4 +1,4 @@
-# Token hover cards: trigger customizability and first-run announcement
+# Hover cards: trigger customizability and first-run announcement
 
 Design for the follow-up to #1461 (token hover cards, Tier 0). Written before
 implementation; the implementation follows this document.
@@ -74,6 +74,16 @@ is also why our modifier choice below is not free.
   feature is cheap when unwanted, and it survives this change verbatim.
 
 ## 4. The model
+
+**Naming.** The user-facing name is **"Hover cards"** everywhere a reader meets
+it: the announcement title, the Settings heading, and the descriptions. Every
+internal identifier keeps the `tokenHover*` spelling it shipped with —
+`tokenHoverTrigger`, `tokenHoverDelay`, the cookie keys, the hook, the
+component and file names, and the `data-token-hover-*` test ids — so the rename
+carries no migration churn. "Token" was accurate and unhelpful: it describes
+the implementation's unit rather than the thing the reviewer points at, and in
+an app full of annotations "token hover card" invites reading it as a kind of
+comment card.
 
 **Two settings. Both cookie-only. Nothing else.**
 
@@ -301,13 +311,32 @@ Two extra conditions on top of the Edit Mode shape:
 
 ### 8.2 Shape
 
-Compact, not the Edit Mode big-format shell: there is no demo video and the
-whole decision is one three-way choice. Portal to `document.body`, `role="dialog"`,
-`aria-modal`, focus trap and Escape wired the same way, Escape and the Done
-button both meaning "accept what the radio currently says".
+The repo's big-format announcement shell, matching `EditModeAnnouncementDialog`
+and `LookAndFeelAnnouncementDialog`: `max-w-5xl`, a header carrying the badge,
+title and description, a `grid-cols-[1.1fr_1fr]` body that collapses to one
+column under 820px, and a footer with the Settings pointer and one action.
+Portal to `document.body`, `role="dialog"`, `aria-modal`, focus trap and Escape
+wired the same way, Escape and the Done button both meaning "accept what the
+radio currently says".
 
-The three options are a **radio group that applies immediately** on selection
-(`configStore.set('tokenHoverTrigger', value)`). Dismiss is therefore always
+**The left column is a worked example**, in the slot where the Edit Mode dialog
+plays its recording: a three-line strip of diff with one token (`charge`) shown
+under the pointer, and below it a mock hover card reproducing the real card's
+anatomy in the order the component renders it — name plus kind badge,
+approximate signature with its `// matched line` marker, doc line, `Defined at`
+location, and a reference sample ending in the "more in the References panel"
+overflow line.
+
+It is built from **JSX and the existing theme tokens, not a bitmap**: it stays
+crisp at any DPI, follows the active palette in both light and dark, and cannot
+go stale against a card whose anatomy changes the way a screenshot would. It is
+purely illustrative, so the whole block is `aria-hidden` and every fact it
+shows is also stated in the prose beside it.
+
+The right column carries the decision: the three options as a **radio group
+that applies immediately** on selection (`configStore.set('tokenHoverTrigger',
+value)`), following the WAI-ARIA radiogroup pattern (roving tabindex, arrows
+move and wrap), plus the note about click behavior. Dismiss is therefore always
 "accept current choice", with no separate confirm, and Escape can never lose a
 selection the user made.
 
@@ -315,7 +344,7 @@ selection the user made.
 
 Badge: `New`
 
-Title: `Token hover cards`
+Title: `Hover cards`
 
 Description:
 > Rest the pointer on a symbol in a diff and Plannotator shows you where it is
@@ -331,7 +360,12 @@ Options:
 - `Off` / `No cards, no listeners, no searches.`
 
 Note under the group:
-> Cmd+click on a symbol still opens the References panel, whichever option you pick.
+> {Cmd|Ctrl}+click on a symbol still opens the References panel, whichever option
+> you pick. Hover cards need ripgrep and a local checkout, and nothing appears when
+> the search comes back empty.
+
+(The modifier word is platform-resolved through `modKeyWord`: `Cmd` on macOS,
+`Ctrl` elsewhere.)
 
 Footer left:
 > Change this anytime in Settings, in the Editor tab.
@@ -340,11 +374,11 @@ Footer button: `Done`
 
 ### 8.4 Settings UI
 
-`ReviewDisplayTab` in `packages/ui/components/Settings.tsx`. The existing
-"Token hover cards" `ToggleSwitch` is replaced in place by:
+`ReviewDisplayTab` in `packages/ui/components/Settings.tsx` (the tab is labeled
+**Editor** in review mode, which is what the dialog footer points at). The existing "Token hover cards" `ToggleSwitch` is
+replaced in place by:
 
-- Heading `Token hover cards` with the same one-line explanation the toggle
-  carried.
+- Heading `Hover cards` with the same one-line explanation the toggle carried.
 - A `SegmentedControl` for the trigger: `On hover` / `Hold Alt` / `Off`.
 - A `SegmentedControl` for the delay: `Fast` / `Default` / `Relaxed`, disabled
   when the trigger is `Off`.

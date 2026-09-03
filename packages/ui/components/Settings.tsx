@@ -515,14 +515,15 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
 
       <div className="border-t border-border" />
 
-      {/* Token hover cards. One trigger select rather than a toggle plus a
-          mode: `Off` is a value of the same question, so there is no
-          unreachable enabled-but-off state to reason about. The delay stays a
-          separate axis because "too eager" is a complaint neither Hold Alt nor
-          Off answers. */}
+      {/* Hover cards (internally tokenHover*; the label is what changed, not
+          the ids). One trigger select rather than a toggle plus a mode: `Off`
+          is a value of the same question, so there is no unreachable
+          enabled-but-off state to reason about. The delay stays a separate
+          axis because "too eager" is a complaint neither Hold Alt nor Off
+          answers. */}
       <div className="space-y-3">
         <div>
-          <div className="text-sm font-medium">Token hover cards</div>
+          <div className="text-sm font-medium">Hover cards</div>
           <div className="text-xs text-muted-foreground">
             Rest the pointer on a symbol in a diff to see where it is defined and who
             references it. Needs ripgrep and a local checkout; nothing appears when the
