@@ -166,6 +166,7 @@ import { TokenHoverAnnouncementDialog } from './components/TokenHoverAnnouncemen
 import {
   markTokenHoverAnnouncementSeen,
   resolveTokenHoverAnnouncementPending,
+  shouldConsumeTokenHoverAnnouncement,
   tokenHoverAnnouncementCanShow,
 } from './utils/tokenHoverAnnouncement';
 import { ExternalLineAnnotationComposer } from './components/ExternalLineAnnotationComposer';
@@ -1079,6 +1080,11 @@ const ReviewApp: React.FC = () => {
     markTokenHoverAnnouncementSeen();
     setTokenHoverIntroPending(false);
   }, []);
+  // Retiring the announcement for a reviewer who already chose a trigger is a
+  // WRITE, so it belongs here rather than in the state initializer above.
+  useEffect(() => {
+    if (shouldConsumeTokenHoverAnnouncement()) markTokenHoverAnnouncementSeen();
+  }, []);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1112,7 +1118,17 @@ const ReviewApp: React.FC = () => {
     delayMs: tokenHoverDelay,
   });
 
+  const closeTokenHover = tokenHover.close;
+
   const handleCodeNavRequest = useCallback((request: CodeNavRequest) => {
+    // Opening References is a deliberate action; a hover is an idle gesture,
+    // and the two must never be on screen together. This covers EVERY route
+    // in: Cmd+click, Ctrl+click, the Alt+click alias, and the card's own
+    // location links. It also settles the overlap #1461 shipped with, where a
+    // Cmd+click landed on a token whose hover card was open or mid-dwell and
+    // both surfaces appeared. close() cancels the pending dwell too, so a
+    // click during the dwell never resolves into a card behind the panel.
+    closeTokenHover();
     if (!gitContext && !agentCwd) {
       toast('Code navigation requires a local checkout', {
         description: 'Re-run with --local for PR reviews',
@@ -1142,7 +1158,7 @@ const ReviewApp: React.FC = () => {
         initialHeight: 250,
       });
     }
-  }, [codeNav.resolve, dockApi, isAllFilesActive, isCallFlowActive, isSemanticDiffActive, gitContext, agentCwd]);
+  }, [closeTokenHover, codeNav.resolve, dockApi, isAllFilesActive, isCallFlowActive, isSemanticDiffActive, gitContext, agentCwd]);
 
   // Check AI capabilities only after /api/diff confirms AI is enabled.
   useEffect(() => {
@@ -1445,17 +1461,26 @@ const ReviewApp: React.FC = () => {
   // ordinary review still shows it (same rule the guide intro uses for an
   // empty diff). `off` is not part of the availability test: a user who
   // reaches the dialog has, by construction, never chosen a trigger.
+  //
+  // Eligibility is LATCHED at the first post-load render (dialogs only mount
+  // once isLoading clears, so the latch is always set before they render):
+  // canUseLiveWorkspaceActions changes on mid-session diff switches, and a
+  // stack→ordinary switch must not pop the announcement over work in
+  // progress, nor an ordinary→stack switch yank an open one away mid-read.
+  const tokenHoverAvailableRef = useRef<boolean | null>(null);
+  if (!isLoading && tokenHoverAvailableRef.current === null) {
+    tokenHoverAvailableRef.current = canUseLiveWorkspaceActions;
+  }
   const tokenHoverIntroVisible = tokenHoverAnnouncementCanShow({
     announcementPending: tokenHoverIntroPending,
     isLoading,
-    featureAvailable: canUseLiveWorkspaceActions,
+    featureAvailable: tokenHoverAvailableRef.current === true,
     guideIntroVisible,
     lookAndFeelVisible: showLookAndFeel,
     reviewSetupVisible: showReviewSetup,
     editModeVisible: editModeIntroVisible,
   });
   const hoveredTokenSymbol = tokenHover.hover?.request.symbol;
-  const closeTokenHover = tokenHover.close;
   const startTokenHover = tokenHover.onTokenHoverEnter;
   // Stitching lives here, not in the diff views: rebuilding a fragmented
   // identifier is app-only work, and both views are compiled into the portable

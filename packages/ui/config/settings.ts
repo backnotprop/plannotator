@@ -291,8 +291,11 @@ export const SETTINGS = {
   // This one select REPLACED the original `tokenHoverCards` boolean rather
   // than sitting beside it: a toggle plus a mode has an unreachable state
   // (disabled + modifier) and asks one question with two controls. The legacy
-  // cookie is still read, once, so an early adopter who turned cards off stays
-  // off; see resolveStoredTokenHoverTrigger.
+  // cookie is still read — on every load until the user touches this setting,
+  // since a migrating read returns a value and so never triggers the
+  // registry's default-seeding write — so an early adopter who turned cards
+  // off stays off. Resolution is pure and identical every time; see
+  // resolveStoredTokenHoverTrigger.
   tokenHoverTrigger: {
     defaultValue: 'hover' as TokenHoverTrigger,
     fromCookie: () => resolveStoredTokenHoverTrigger(

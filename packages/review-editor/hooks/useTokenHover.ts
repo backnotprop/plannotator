@@ -152,6 +152,12 @@ export function useTokenHover(
     activeKeyRef.current = null;
     openKeyRef.current = null;
     lastEnterRef.current = null;
+    // The card is gone, so the pointer is not in it any more — and no pointer
+    // event will say so, because the card unmounted underneath the pointer
+    // rather than being left. Without this reset the flag stays true for the
+    // rest of the session and every later Alt release is ignored as "they are
+    // reading the card".
+    pointerInCardRef.current = false;
     setHover(null);
     setEngaged(false);
   }, [abortInFlight, clearDwell, clearGrace]);

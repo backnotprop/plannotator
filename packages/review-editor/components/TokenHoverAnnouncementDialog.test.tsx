@@ -45,7 +45,11 @@ async function click(el: HTMLElement): Promise<void> {
 
 beforeEach(() => {
   if (!hasDom) return;
-  stored = new Map();
+  // Seed the trigger explicitly rather than relying on the registry default.
+  // configStore is a process-global singleton and loadFromBackend keeps its
+  // in-memory value when the new backend has nothing to say, so an empty map
+  // would inherit whatever the previous test (or test FILE) last set.
+  stored = new Map([['plannotator-token-hover-trigger', 'hover']]);
   setStorageBackend({
     getItem: key => stored.get(key) ?? null,
     setItem: (key, value) => { stored.set(key, value); },
@@ -94,6 +98,38 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
     await click(done!);
 
     expect(dismissed).toBe(1);
+    expect(configStore.get('tokenHoverTrigger')).toBe('off');
+  });
+
+  test('arrows move selection within the group, which is one Tab stop', async () => {
+    // WAI-ARIA radiogroup. Without roving tabindex a keyboard user Tabs
+    // through three options to reach Done; without the arrow handler they
+    // cannot change the selection with the keyboard at all.
+    await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
+    expect(option('hover').tabIndex).toBe(0);
+    expect(option('modifier').tabIndex).toBe(-1);
+
+    await act(async () => {
+      option('hover').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+    });
+    expect(configStore.get('tokenHoverTrigger')).toBe('modifier');
+    expect(option('modifier').tabIndex).toBe(0);
+    expect(option('hover').tabIndex).toBe(-1);
+
+    // Wraps backwards off the first option.
+    await act(async () => {
+      option('modifier').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
+      );
+    });
+    expect(configStore.get('tokenHoverTrigger')).toBe('hover');
+    await act(async () => {
+      option('hover').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
+      );
+    });
     expect(configStore.get('tokenHoverTrigger')).toBe('off');
   });
 

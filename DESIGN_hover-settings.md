@@ -248,11 +248,21 @@ When that key is absent it reads the legacy boolean:
 - absent or unrecognized → `undefined`, so the registry default (`'hover'`)
   applies.
 
-The legacy value is read, never written. `configStore.ensureLoaded()` seeds the
-resolved value into the *new* cookie on first settings access, so the migration
-happens once and the legacy key simply stops being consulted after that. It is
-not deleted: a stale cookie is inert, and deleting it would make a downgrade to
-the #1461 build silently re-enable cards for someone who had turned them off.
+**The mechanism is re-resolution, not one-time seeding.** `configStore`'s
+default-seeding write only fires when `fromCookie()` returns `undefined`, and a
+migrating read returns `'off'`, so nothing is written on load: the legacy key is
+re-read and re-resolved on every page load until the user actually touches the
+setting, at which point `toCookie` writes `plannotator-token-hover-trigger` and
+that branch wins from then on. Resolution is pure and identical every time, so
+the repeated read costs one cookie lookup and can never drift.
+
+Seeding it eagerly (a write inside `fromCookie`) was considered and rejected:
+it would put a storage write inside a getter that the registry calls during
+`ensureLoaded`, for no behavioral gain over re-resolving.
+
+The legacy value is read, never written, and never deleted: a stale cookie is
+inert, and deleting it would make a downgrade to the #1461 build silently
+re-enable cards for someone who had turned them off.
 
 Consequence worth stating plainly: **an early adopter who toggled cards off
 stays off, and is never shown the announcement** (§8 gates on the resolved

@@ -19,22 +19,31 @@ export function markTokenHoverAnnouncementSeen(): void {
 }
 
 /**
- * Latch the pending flag at mount.
+ * Latch the pending flag at mount. PURE, like its `needsEditModeAnnouncement()
+ * && !configStore.get('editSuggestions')` sibling: a React state initializer
+ * can run more than once (StrictMode, a re-render before the store commits),
+ * so the cookie write that goes with this decision lives in an effect
+ * (`shouldConsumeTokenHoverAnnouncement` below), never here.
  *
  * A non-default trigger means the user has already answered the only question
  * this dialog asks. After the boolean-to-trigger migration that is exactly the
  * early adopter who turned cards off with the old switch, and telling someone
  * about a feature they already declined is the worst version of this dialog.
- * The cookie IS consumed in that case: the preference exists, so the dialog
- * has no reason to come back.
  */
 export function resolveTokenHoverAnnouncementPending(): boolean {
-  if (!needsTokenHoverAnnouncement()) return false;
-  if (configStore.get('tokenHoverTrigger') !== 'hover') {
-    markTokenHoverAnnouncementSeen();
-    return false;
-  }
-  return true;
+  return needsTokenHoverAnnouncement() && configStore.get('tokenHoverTrigger') === 'hover';
+}
+
+/**
+ * True when the announcement should be retired without ever being shown: the
+ * reviewer already expressed the preference it exists to collect, so it has no
+ * reason to come back. The App runs this once in an effect and marks it seen.
+ *
+ * Distinct from a session that merely CANNOT run hover cards (a GitButler
+ * stack view), which skips the dialog while deliberately keeping the cookie.
+ */
+export function shouldConsumeTokenHoverAnnouncement(): boolean {
+  return needsTokenHoverAnnouncement() && configStore.get('tokenHoverTrigger') !== 'hover';
 }
 
 export interface TokenHoverAnnouncementGateState {

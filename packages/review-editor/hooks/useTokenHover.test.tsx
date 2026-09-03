@@ -512,6 +512,55 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     expect(pending).toHaveLength(0);
   });
 
+  test('a card closed while the pointer was inside it does not deafen the next release', async () => {
+    // The reviewer's exact sequence. onCardEnter sets "pointer is in the card"
+    // and only onCardLeave used to clear it — but a scroll-close unmounts the
+    // card UNDER the pointer, so no leave ever arrives. The flag stayed true
+    // for the rest of the session and every later Alt release was ignored as
+    // "they are reading the card", leaving cards stuck open.
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    await act(async () => latest!.onCardEnter());
+
+    // Closed by a pane scroll, with the pointer still inside it.
+    await act(async () => { document.dispatchEvent(new Event('scroll')); });
+    expect(latest!.hover).toBeNull();
+
+    // A fresh card on another token, then a release.
+    const second = { ...REQUEST, symbol: 'refund' };
+    await act(async () => latest!.onTokenHoverEnter(second, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(1, hoverResponse({ symbol: 'refund' }));
+    expect(latest!.hover).not.toBeNull();
+
+    await altUp();
+    await act(async () => { jest.advanceTimersByTime(250); });
+
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('window blur clears the held state', async () => {
+    // Alt+Tab: the browser reports no keyup, so without the blur reset the key
+    // reads as held forever and the mode silently becomes plain hover.
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+
+    await act(async () => { window.dispatchEvent(new Event('blur')); });
+    expect(latest!.hover).toBeNull();
+
+    // Held is clear, so hovering again arms nothing until Alt goes down again.
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(pending).toHaveLength(1);
+  });
+
   test('hover mode ignores the key entirely', async () => {
     await mount('snapshot-1', { mode: 'hover' });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
@@ -524,6 +573,62 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
 
     // No key listeners exist in this mode, so a stray keyup cannot close it.
     expect(latest!.hover).not.toBeNull();
+  });
+});
+
+/**
+ * Opening the References panel must never leave a hover card on screen. The
+ * App funnels EVERY route in (Cmd+click, Ctrl+click, the Alt+click alias, the
+ * card's own location links) through handleCodeNavRequest, which calls close()
+ * first. These two tests own the mechanism that handoff depends on; the
+ * "References handoff wiring" suite below pins that the App still calls it.
+ *
+ * Both cases are real: Alt+click on a token the pointer has been resting on is
+ * the overlap #1461 shipped with, and in modifier mode it is the NORMAL way to
+ * click, since the alias and the trigger share the key.
+ */
+describe.skipIf(!hasDom)('useTokenHover References handoff', () => {
+  test('an open card is gone the moment References is invoked', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+
+    // What the Alt+click handler does before resolving the symbol.
+    await act(async () => latest!.close());
+
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('a click during the dwell cancels the card instead of letting it land later', async () => {
+    // Without this the request completes behind the panel and opens a card
+    // over it, seconds after a click that meant "navigate, not explain".
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(200); });
+
+    await act(async () => latest!.close());
+
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(pending).toHaveLength(0);
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('a click after the request launched abandons the in-flight answer', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(1);
+
+    await act(async () => latest!.close());
+    expect(pending[0].signal?.aborted).toBe(true);
+
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(latest!.hover).toBeNull();
   });
 });
 

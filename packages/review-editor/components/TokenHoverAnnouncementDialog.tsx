@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
+import { modKeyWord } from '@plannotator/ui/utils/platform';
 import {
   TOKEN_HOVER_TRIGGERS,
   type TokenHoverTrigger,
@@ -46,6 +47,7 @@ export function TokenHoverAnnouncementDialog({
   onDismiss,
 }: TokenHoverAnnouncementDialogProps) {
   const trigger = useConfigValue('tokenHoverTrigger');
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onDismissRef = useRef(onDismiss);
@@ -96,6 +98,23 @@ export function TokenHoverAnnouncementDialog({
     };
   }, [isOpen]);
 
+  /**
+   * Arrow keys move selection within the group, per the WAI-ARIA radiogroup
+   * pattern: both axes are accepted because the group is a vertical list of
+   * horizontally-laid-out rows, and both wrap. Selection follows focus, which
+   * is what makes the group a single Tab stop that still reaches every option.
+   */
+  const handleOptionKeyDown = (event: React.KeyboardEvent, index: number) => {
+    const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
+    const backward = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
+    if (!forward && !backward) return;
+    event.preventDefault();
+    const count = TOKEN_HOVER_TRIGGERS.length;
+    const next = (index + (forward ? 1 : -1) + count) % count;
+    configStore.set('tokenHoverTrigger', TOKEN_HOVER_TRIGGERS[next]);
+    optionRefs.current[next]?.focus();
+  };
+
   if (!isOpen) return null;
 
   return createPortal(
@@ -137,14 +156,21 @@ export function TokenHoverAnnouncementDialog({
             >
               Show cards
             </div>
-            {TOKEN_HOVER_TRIGGERS.map((value) => {
+            {TOKEN_HOVER_TRIGGERS.map((value, index) => {
               const selected = trigger === value;
               return (
                 <button
                   key={value}
+                  ref={(node) => { optionRefs.current[index] = node; }}
                   type="button"
                   role="radio"
                   aria-checked={selected}
+                  // Roving tabindex (WAI-ARIA radiogroup): Tab enters and
+                  // leaves the group as one stop, arrows move within it. The
+                  // dialog's own focus trap collects [tabindex]:not([tabindex="-1"]),
+                  // so the unselected options fall out of the Tab cycle for free.
+                  tabIndex={selected ? 0 : -1}
+                  onKeyDown={(event) => handleOptionKeyDown(event, index)}
                   data-token-hover-trigger-option={value}
                   onClick={() => configStore.set('tokenHoverTrigger', value)}
                   className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
@@ -173,7 +199,8 @@ export function TokenHoverAnnouncementDialog({
           </div>
 
           <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            Cmd+click on a symbol still opens the References panel, whichever option you pick.
+            {modKeyWord}+click on a symbol still opens the References panel, whichever option
+            you pick.
           </p>
         </div>
 

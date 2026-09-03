@@ -5,6 +5,7 @@ import {
   markTokenHoverAnnouncementSeen,
   needsTokenHoverAnnouncement,
   resolveTokenHoverAnnouncementPending,
+  shouldConsumeTokenHoverAnnouncement,
   tokenHoverAnnouncementCanShow,
   type TokenHoverAnnouncementGateState,
 } from './tokenHoverAnnouncement';
@@ -15,7 +16,16 @@ const LEGACY_KEY = 'plannotator-token-hover-cards';
 let stored: Map<string, string>;
 
 function installBackend(seed: Record<string, string> = {}): void {
-  stored = new Map(Object.entries(seed));
+  // configStore is a process-global singleton whose loadFromBackend keeps its
+  // in-memory value when the new backend is silent, so an unseeded map would
+  // inherit another test file's last write. Seed the trigger to make that
+  // deterministic — but ONLY when the case says nothing about either trigger
+  // key, so the migration case still exercises a genuinely absent new key.
+  // Resolving 'hover' from a cookie and from the registry default are the same
+  // thing to every caller here; the absent-cookie resolution itself is covered
+  // in tokenHoverSetting.test.ts.
+  const speaksForTrigger = TRIGGER_KEY in seed || LEGACY_KEY in seed;
+  stored = new Map(Object.entries(speaksForTrigger ? seed : { [TRIGGER_KEY]: 'hover', ...seed }));
   setStorageBackend({
     getItem: key => stored.get(key) ?? null,
     setItem: (key, value) => { stored.set(key, value); },
@@ -50,11 +60,20 @@ describe('token hover announcement persistence', () => {
     expect(needsTokenHoverAnnouncement()).toBe(true);
   });
 
-  test('never shows to someone who already chose a trigger, and stops asking', () => {
+  test('never shows to someone who already chose a trigger', () => {
     installBackend({ [TRIGGER_KEY]: 'modifier' });
 
     expect(resolveTokenHoverAnnouncementPending()).toBe(false);
-    expect(needsTokenHoverAnnouncement()).toBe(false);
+    // Retiring the announcement is a cookie WRITE, so the pure latch must not
+    // do it. A React state initializer can run more than once, and a getter
+    // that writes storage is the kind of side effect that goes unnoticed
+    // until StrictMode double-invokes it.
+    expect(needsTokenHoverAnnouncement()).toBe(true);
+
+    // The App's effect is what consumes it.
+    expect(shouldConsumeTokenHoverAnnouncement()).toBe(true);
+    markTokenHoverAnnouncementSeen();
+    expect(shouldConsumeTokenHoverAnnouncement()).toBe(false);
   });
 
   test('never shows to the early adopter who turned cards off with the old boolean', () => {
@@ -64,6 +83,11 @@ describe('token hover announcement persistence', () => {
     installBackend({ [LEGACY_KEY]: 'false' });
 
     expect(resolveTokenHoverAnnouncementPending()).toBe(false);
+    expect(shouldConsumeTokenHoverAnnouncement()).toBe(true);
+  });
+
+  test('a reviewer who has not chosen is never retired behind their back', () => {
+    expect(shouldConsumeTokenHoverAnnouncement()).toBe(false);
   });
 });
 

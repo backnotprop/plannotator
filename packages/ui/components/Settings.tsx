@@ -65,7 +65,7 @@ import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { ThemeTab } from './ThemeTab';
-import { isMac, modKey, altKey } from '../utils/platform';
+import { isMac, modKey, modKeyWord, altKey } from '../utils/platform';
 import { getAIProviderSettings, resolveAIProviderSelection } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import { HooksTab } from './settings/HooksTab';
@@ -193,19 +193,19 @@ function SegmentedControl<T extends string>({ options, value, onChange, disabled
   disabled?: boolean;
 }) {
   return (
-    <div className={`flex items-center gap-1 bg-muted/50 rounded-lg p-0.5 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={['flex items-center gap-1 bg-muted/50 rounded-lg p-0.5', disabled && 'opacity-50'].filter(Boolean).join(' ')}>
       {options.map((opt) => (
         <button
           key={opt.value}
-          disabled={disabled}
+          {...(disabled ? { disabled: true } : {})}
           onClick={() => onChange(opt.value)}
-          className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
-            disabled ? 'cursor-not-allowed' : ''
-          } ${
+          className={[
+            'flex-1 px-3 py-1.5 text-xs rounded-md transition-colors',
+            disabled && 'cursor-not-allowed',
             value === opt.value
               ? 'bg-background text-foreground shadow-sm font-medium'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
+              : 'text-muted-foreground hover:text-foreground',
+          ].filter(Boolean).join(' ')}
         >
           {opt.label}
         </button>
@@ -526,7 +526,7 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
           <div className="text-xs text-muted-foreground">
             Rest the pointer on a symbol in a diff to see where it is defined and who
             references it. Needs ripgrep and a local checkout; nothing appears when the
-            search comes back empty. Cmd+click still opens the References panel either way.
+            search comes back empty. {modKeyWord}+click still opens the References panel either way.
           </div>
         </div>
         <SegmentedControl
