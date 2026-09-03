@@ -10,23 +10,23 @@
     "./components/*": "./components/*.tsx"
   },
   "dependencies": {
-    "@base-ui/react": "^1.6.0",
-    "@fontsource-variable/geist-mono": "5.2.7",
-    "@fontsource-variable/inter": "^5.2.8",
-    "@pierre/diffs": "1.3.2",
+    "@base-ui/react": "^1.7.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@pierre/diffs": "1.3.6",
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "lucide-react": "^1.14.0",
+    "lucide-react": "^1.34.0",
     "marked": "^17.0.6",
     "motion": "^12.38.0",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "tailwindcss": "^4.1.18",
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0"
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5"
   }
 }

@@ -20,22 +20,22 @@
     "check:manifest": "bun run build/sync-manifest.ts --check"
   },
   "dependencies": {
-    "@pierre/diffs": "1.3.2",
+    "@pierre/diffs": "1.3.6",
     "@plannotator/core": "workspace:*",
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/review-editor": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.18",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "@cloudflare/workers-types": "^4.20241218.0",
-    "wrangler": "^4.30.0"
+    "wrangler": "^4.126.0"
   }
 }

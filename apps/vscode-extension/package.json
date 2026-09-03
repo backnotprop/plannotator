@@ -103,9 +103,9 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.134.0",
     "@vscode/vsce": "^3.7.1",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.0.0"
   }
 }
