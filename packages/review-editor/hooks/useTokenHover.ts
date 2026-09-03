@@ -20,11 +20,39 @@ const MAX_CACHE_ENTRIES = 30;
  */
 export type TokenHoverMode = 'hover' | 'modifier';
 
+/**
+ * How an answer is obtained for a request. The default posts to
+ * `/api/code-nav/hover`.
+ *
+ * The seam exists so the one-time announcement's try-it can drive the REAL
+ * dwell, supersession, leave-grace and modifier mechanics from a hardcoded
+ * fixture instead of reimplementing them: a second copy of this timing logic
+ * would drift, and a demo that hits the server would search the reviewer's
+ * repository for a symbol they never asked about.
+ */
+export type TokenHoverResolver = (
+  request: CodeNavRequest,
+  signal: AbortSignal,
+) => Promise<CodeNavHoverResponse | null>;
+
+const fetchResolver: TokenHoverResolver = async (request, signal) => {
+  const res = await fetch('/api/code-nav/hover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as CodeNavHoverResponse;
+};
+
 export interface UseTokenHoverOptions {
   /** Default `hover`, which is byte-for-byte the shipped behavior. */
   mode?: TokenHoverMode;
   /** Dwell before any request exists. Sweeping a diff costs zero rg processes. */
   delayMs?: number;
+  /** Default: POST /api/code-nav/hover. */
+  resolve?: TokenHoverResolver;
 }
 
 /**
@@ -101,7 +129,15 @@ export function useTokenHover(
   snapshotId?: string,
   options: UseTokenHoverOptions = {},
 ): UseTokenHoverResult {
-  const { mode = 'hover', delayMs = DEFAULT_TOKEN_HOVER_DELAY_MS } = options;
+  const {
+    mode = 'hover',
+    delayMs = DEFAULT_TOKEN_HOVER_DELAY_MS,
+    resolve = fetchResolver,
+  } = options;
+  // Read through a ref so an inline resolver literal cannot re-arm every
+  // callback in this hook on each render of its host.
+  const resolveRef = useRef(resolve);
+  resolveRef.current = resolve;
   const [hover, setHover] = useState<TokenHoverState | null>(null);
   // Drives the scroll listener: a document-level listener exists only while
   // something is actually pending or open.
@@ -262,14 +298,8 @@ export function useTokenHover(
         inFlightKeyRef.current = key;
         void (async () => {
           try {
-            const res = await fetch('/api/code-nav/hover', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(request),
-              signal: controller.signal,
-            });
-            if (!res.ok) return;
-            const data = (await res.json()) as CodeNavHoverResponse;
+            const data = await resolveRef.current(request, controller.signal);
+            if (data == null) return;
             if (controller.signal.aborted || activeKeyRef.current !== key) return;
             writeCache(key, data);
             open(key, request, data, activeElementRef.current ?? tokenElement);

@@ -319,19 +319,37 @@ Portal to `document.body`, `role="dialog"`, `aria-modal`, focus trap and Escape
 wired the same way, Escape and the Done button both meaning "accept what the
 radio currently says".
 
-**The left column is a worked example**, in the slot where the Edit Mode dialog
-plays its recording: a three-line strip of diff with one token (`charge`) shown
-under the pointer, and below it a mock hover card reproducing the real card's
-anatomy in the order the component renders it — name plus kind badge,
-approximate signature with its `// matched line` marker, doc line, `Defined at`
-location, and a reference sample ending in the "more in the References panel"
-overflow line.
+**The left column is a TRY-IT**, in the slot where the Edit Mode dialog plays
+its recording: a three-line strip of diff whose `withRetry` token is genuinely
+hoverable, with a prompt line inviting it. Resting the pointer there opens the
+**real** `TokenHoverCard` through the **real** `useTokenHover`, so the reviewer
+feels the actual dwell, the leave grace and the Alt gate before committing to a
+setting.
 
-It is built from **JSX and the existing theme tokens, not a bitmap**: it stays
-crisp at any DPI, follows the active palette in both light and dark, and cannot
-go stale against a card whose anatomy changes the way a screenshot would. It is
-purely illustrative, so the whole block is `aria-hidden` and every fact it
-shows is also stated in the prose beside it.
+Nothing is redrawn. A forked copy of the card's markup, or a second copy of the
+dwell logic, would drift from the shipped surface the first time either changed
+— which is precisely what an example is supposed to prevent. Three thin seams
+carry it instead:
+
+| Seam | Why |
+|---|---|
+| `useTokenHover({ resolve })` | The only fixture. The default posts to `/api/code-nav/hover`; the try-it returns a hardcoded `CodeNavHoverResponse`, because a demo must not search the reviewer's repository for a symbol they never asked about. |
+| `TokenHoverCard({ layerClassName })` | The card portals to `<body>` like every instance, so its host has to be able to put it above the modal it is demonstrated inside (`z-[110]` over the dialog's `z-[100]`). |
+| `TokenHoverCard({ inert })` | The try-it has no References panel behind it, so its location buttons lead nowhere and leave the tab order. |
+
+The hovered token wears the same underline treatment the diff pane paints, from
+one definition (`tokenHoverStyles.ts`): the shadow-DOM form is serialized into
+Pierre's stylesheet as `.pn-token-hover`, the dialog applies the same
+declarations as a style object.
+
+**The try-it reads the LIVE setting**, not a prop: flipping the radio to "While
+holding Alt" makes the demo behave that way immediately, and "Off" makes it do
+nothing and closes any open card. That is the honest preview of each choice.
+
+Because it is interactive it is **labeled rather than hidden**: the region
+carries `role="group"` and an `aria-label`, the visible prompt line carries the
+meaning, and only the mock code lines stay `aria-hidden` (read aloud they are a
+wall of invented identifiers).
 
 The right column carries the decision: the three options as a **radio group
 that applies immediately** on selection (`configStore.set('tokenHoverTrigger',

@@ -8,13 +8,13 @@
  * Dismissal must therefore be "accept what is selected", with no separate
  * confirm step that could drop the selection.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { configStore } from '@plannotator/ui/config';
 import { resetStorageBackend, setStorageBackend } from '@plannotator/ui/utils/storage';
-import { TokenHoverAnnouncementDialog } from './TokenHoverAnnouncementDialog';
+import { EXAMPLE_HOVER, TokenHoverAnnouncementDialog } from './TokenHoverAnnouncementDialog';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -76,18 +76,85 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
     expect(document.querySelector('[data-token-hover-announcement-dialog]')).toBeNull();
   });
 
-  test('the worked example is decorative, so assistive tech never reads it', async () => {
-    // The example reproduces a hover card in mock markup: a name, a signature,
-    // file paths, reference counts. Read aloud it is a wall of invented
-    // identifiers that says nothing about the choice on offer, and every fact
-    // it illustrates is stated in the prose. If the aria-hidden is ever
-    // dropped, the dialog becomes hostile to a screen reader.
+  test('the try-it is labeled, and its mock code stays out of the reading order', async () => {
+    // It is interactive now, so hiding the whole block would make it
+    // unreachable and unexplained. The region carries the label; the mock code
+    // inside is decorative (read aloud it is a wall of invented identifiers)
+    // and the visible prompt line carries the meaning instead.
     await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
-    const example = document.querySelector('[data-token-hover-example]');
-    expect(example).not.toBeNull();
-    expect(example!.getAttribute('aria-hidden')).toBe('true');
-    // Nothing focusable may hide inside a decorative block.
-    expect(example!.querySelectorAll('button, a, input, [tabindex]')).toHaveLength(0);
+    const region = document.querySelector('[data-token-hover-example]')!;
+    expect(region.getAttribute('aria-hidden')).toBeNull();
+    expect(region.getAttribute('role')).toBe('group');
+    expect(region.getAttribute('aria-label')).toBeTruthy();
+    expect(
+      document.querySelector('[data-token-hover-example-code]')!.getAttribute('aria-hidden'),
+    ).toBe('true');
+    // The prompt names the token the reviewer is being asked to hover.
+    const prompt = document.querySelector('[data-token-hover-tryit-prompt]')!;
+    expect(prompt.textContent).toContain('withRetry');
+  });
+
+  test('hovering the try-it token opens the real card from the fixture', async () => {
+    // This is the whole point of the seam: real dwell, real card component,
+    // fixture answer. If someone reimplements the demo with its own timing or
+    // its own markup, the card either stops matching the product or stops
+    // behaving like it.
+    jest.useFakeTimers();
+    try {
+      await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
+      const token = document.querySelector('[data-token-hover-example-token]')!;
+
+      await act(async () => {
+        token.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+      });
+      // Nothing before the dwell elapses.
+      expect(document.querySelector('[data-token-hover-card]')).toBeNull();
+
+      await act(async () => { jest.advanceTimersByTime(350); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+      // `data-token-hover-card` is the real component's own marker.
+      const card = document.querySelector('[data-token-hover-card]');
+      expect(card).not.toBeNull();
+      expect(card!.textContent).toContain(EXAMPLE_HOVER.symbol);
+      expect(card!.textContent).toContain(EXAMPLE_HOVER.definition!.filePath);
+      // No References panel behind the demo, so its locations are not tabbable.
+      for (const b of card!.querySelectorAll('button')) expect(b.tabIndex).toBe(-1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('the try-it obeys the trigger the radio currently says', async () => {
+    // Choosing "While holding Alt" has to be feelable BEFORE committing to it,
+    // which is the reason the try-it reads the live setting instead of a prop.
+    jest.useFakeTimers();
+    try {
+      await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
+      await click(option('modifier'));
+
+      const token = document.querySelector('[data-token-hover-example-token]')!;
+      await act(async () => {
+        token.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+      });
+      await act(async () => { jest.advanceTimersByTime(2000); });
+      await act(async () => { await Promise.resolve(); });
+      expect(document.querySelector('[data-token-hover-card]')).toBeNull();
+
+      // Alt down, and the same rest opens it.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }));
+      });
+      await act(async () => { jest.advanceTimersByTime(350); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(document.querySelector('[data-token-hover-card]')).not.toBeNull();
+
+      // And Off takes an open card away with it.
+      await click(option('off'));
+      expect(document.querySelector('[data-token-hover-card]')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('the radio applies the trigger immediately, with no confirm step', async () => {

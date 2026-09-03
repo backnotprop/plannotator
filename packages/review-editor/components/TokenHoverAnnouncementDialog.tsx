@@ -1,7 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { modKeyWord } from '@plannotator/ui/utils/platform';
+import type { CodeNavHoverResponse, CodeNavRequest } from '@plannotator/shared/code-nav';
+import { TokenHoverCard } from './TokenHoverCard';
+import { useTokenHover } from '../hooks/useTokenHover';
+import { TOKEN_HOVER_UNDERLINE_STYLE } from './tokenHoverStyles';
 import {
   TOKEN_HOVER_TRIGGERS,
   type TokenHoverTrigger,
@@ -16,11 +20,11 @@ import {
  * setup, edit mode, then this). The App gates rendering through
  * tokenHoverAnnouncementCanShow so the chain dialogs never stack.
  *
- * The example is built from JSX and theme tokens rather than a screenshot: it
- * stays crisp at any DPI, follows the active palette in both light and dark,
- * and cannot go stale against a card whose anatomy changes. It is purely
- * illustrative, so it is aria-hidden and every fact it shows is also stated in
- * the prose around it.
+ * The example is a TRY-IT: the token in the strip is genuinely hoverable and
+ * opens the REAL card through the REAL hook, governed by whichever trigger and
+ * delay the radio currently says. Only the answer is a fixture, so the demo
+ * never searches the reviewer's repository. Nothing here is a redraw, so it
+ * cannot drift from the surface it illustrates.
  *
  * The radio group writes the real setting on selection, so Done and Escape
  * both mean "accept what is selected" and a choice can never be lost by
@@ -49,28 +53,108 @@ const TRIGGER_COPY: Record<TokenHoverTrigger, { label: string; description: stri
 };
 
 /**
- * The illustration: a short strip of diff with one token under the pointer,
- * and the card that opens for it. Mirrors the real card's anatomy in the same
- * order the component renders it (name + kind, signature, doc, Defined at,
- * references sample) using the same theme tokens, so it reads as the product
- * rather than as marketing art.
+ * The fixture the example card is rendered from. A realistic
+ * CodeNavHoverResponse, nothing more: the card itself decides what to show.
+ *
+ * Exported so the DOM test can render StaticTokenHoverCard from the SAME
+ * fixture and assert the dialog's subtree is byte-identical to it. That is
+ * what pins "the example is the real card", rather than a copy of its markup.
  */
-function HoverCardExample() {
+export const EXAMPLE_HOVER: CodeNavHoverResponse = {
+  backend: 'search',
+  source: 'search',
+  symbol: 'charge',
+  definition: {
+    filePath: 'src/billing/charge.ts',
+    line: 18,
+    column: 22,
+    confidence: 'likely',
+    symbolKind: 'function',
+    signature: 'export async function charge(amount) {',
+    signatureApproximate: true,
+    doc: 'Charges the card on file and returns the settled receipt.',
+    preview: null,
+    otherCandidateCount: 0,
+  },
+  alternateDefinition: null,
+  references: [
+    { filePath: 'src/checkout/order.ts', line: 42, column: 24 },
+    { filePath: 'src/billing/retry.ts', line: 114, column: 11 },
+  ],
+  referenceCount: 7,
+  capped: false,
+  stats: { elapsedMs: 18 },
+};
+
+/** The symbol the try-it demonstrates. Named in the prompt line too. */
+const EXAMPLE_SYMBOL = 'withRetry';
+
+/**
+ * The try-it's request, shaped exactly like one the diff pane would build.
+ * Only the resolver is a fixture; everything downstream is the real pipeline.
+ */
+const EXAMPLE_REQUEST: CodeNavRequest = {
+  symbol: EXAMPLE_SYMBOL,
+  filePath: 'src/checkout/order.ts',
+  line: 42,
+  charStart: 24,
+  side: 'new',
+  language: 'typescript',
+};
+
+/**
+ * The illustration is a TRY-IT, not an exhibit: the token below is genuinely
+ * hoverable and opens the REAL card through the REAL hook, so the reviewer
+ * feels the actual dwell, the leave grace and the Alt gate before committing
+ * to a setting. The only thing that is not real is where the answer comes
+ * from, and that is deliberate: a demo must not search the reviewer's
+ * repository for a symbol they never asked about.
+ *
+ * The trigger and delay come from the LIVE setting, so flipping the radio to
+ * "While holding Alt" makes the try-it behave that way immediately, and "Off"
+ * makes it do nothing, which is the honest preview of that choice.
+ */
+function HoverCardTryIt({
+  mode,
+  delayMs,
+  enabled,
+}: {
+  mode: 'hover' | 'modifier';
+  delayMs: number;
+  enabled: boolean;
+}) {
+  const tokenRef = useRef<HTMLSpanElement>(null);
+
+  // No network, no LRU sharing with the app: this hook instance is its own.
+  const resolve = useCallback(async () => EXAMPLE_HOVER, []);
+  const tokenHover = useTokenHover('token-hover-announcement', { mode, delayMs, resolve });
+
+  const { onTokenHoverEnter, onTokenHoverLeave, close } = tokenHover;
+
+  // Turning the try-it off (the Off option) must take any open card with it;
+  // no leave event arrives when the handlers simply stop being wired.
+  useEffect(() => {
+    if (!enabled) close();
+  }, [enabled, close]);
+
   return (
     <div
-      aria-hidden="true"
+      // Interactive, so it is labeled rather than hidden. The mock code inside
+      // is decorative and stays hidden; the prompt line carries the meaning.
+      role="group"
+      aria-label="Try it: a live hover card demo"
       data-token-hover-example
-      className="flex h-full flex-col gap-3 overflow-hidden rounded-xl border border-border bg-muted/20 p-4"
+      className="flex h-full flex-col gap-3 rounded-xl border border-border bg-muted/20 p-4"
     >
-      {/* Mock file header */}
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-[11px] font-medium text-foreground/80">
-          src/checkout/order.ts
-        </span>
-      </div>
+      <p className="text-xs text-muted-foreground" data-token-hover-tryit-prompt>
+        Try it: rest your pointer on <span className="font-mono text-foreground">{EXAMPLE_SYMBOL}</span> below.
+      </p>
 
-      {/* Diff strip. One token carries the hovered treatment. */}
-      <div className="overflow-hidden rounded-lg border border-border bg-background/70 py-2 font-mono text-[11.5px] leading-6">
+      <div
+        aria-hidden="true"
+        data-token-hover-example-code
+        className="overflow-hidden rounded-lg border border-border bg-background/70 py-2 font-mono text-[12px] leading-6"
+      >
         <div className="flex gap-3 px-3 text-muted-foreground/80">
           <span className="w-5 shrink-0 select-none text-right text-muted-foreground/40">41</span>
           <span className="truncate">
@@ -81,15 +165,22 @@ function HoverCardExample() {
           <span className="w-5 shrink-0 select-none text-right text-success/60">42</span>
           <span className="truncate text-foreground">
             <span className="text-primary/70">const</span> receipt = <span className="text-primary/70">await</span>{' '}
-            {/* The hovered token: a soft plate plus the dotted underline the
-                real diff paints, with the pointer resting on it. */}
-            <span className="relative rounded-[3px] bg-primary/20 px-0.5 underline decoration-primary/60 decoration-dotted underline-offset-[3px]">
-              charge
-              <span className="absolute -bottom-1.5 left-1/2 text-[13px] leading-none text-foreground/70">
-                {'▲'}
-              </span>
+            <span
+              ref={tokenRef}
+              data-token-hover-example-token
+              style={TOKEN_HOVER_UNDERLINE_STYLE}
+              onPointerEnter={() => {
+                if (!enabled || !tokenRef.current) return;
+                onTokenHoverEnter(EXAMPLE_REQUEST, tokenRef.current);
+              }}
+              onPointerLeave={() => {
+                if (!enabled) return;
+                onTokenHoverLeave();
+              }}
+            >
+              {EXAMPLE_SYMBOL}
             </span>
-            (order.total);
+            (() =&gt; charge(order.total));
           </span>
         </div>
         <div className="flex gap-3 px-3 text-muted-foreground/80">
@@ -100,45 +191,20 @@ function HoverCardExample() {
         </div>
       </div>
 
-      {/* The card itself, anchored below the token like the real one. */}
-      <div className="ml-6 w-full max-w-[380px] rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl">
-        <div className="flex items-center gap-2 px-3.5 pt-3">
-          <span className="font-mono text-sm font-bold text-primary">charge</span>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-            function
-          </span>
-        </div>
-
-        <div className="mx-3.5 mt-2 overflow-hidden whitespace-pre rounded-md border border-border bg-muted/40 px-2.5 py-2 font-mono text-[11px] text-foreground">
-          {'export async function charge(amount) {'}
-          <span className="text-muted-foreground">{' // matched line'}</span>
-        </div>
-
-        <p className="mx-3.5 mt-2 text-xs leading-relaxed text-muted-foreground">
-          Charges the card on file and returns the settled receipt.
-        </p>
-
-        <div className="mt-2.5 px-3.5 text-xs text-muted-foreground">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span>{'→'}</span>
-            <span>Defined at</span>
-            <span className="font-mono text-[11px] text-success">src/billing/charge.ts:18</span>
-          </div>
-        </div>
-
-        <div className="mt-2.5 border-t border-border px-3.5 py-2.5">
-          <div className="mb-1.5 text-xs text-muted-foreground">7 references</div>
-          {['src/checkout/order.ts:42', 'src/billing/retry.ts:114'].map((location) => (
-            <div key={location} className="flex gap-1.5 py-0.5 font-mono text-[11px]">
-              <span className="text-muted-foreground/60">{'❯'}</span>
-              <span className="truncate text-primary">{location}</span>
-            </div>
-          ))}
-          <div className="py-0.5 text-[11px] text-muted-foreground">
-            {'… 5 more in the References panel'}
-          </div>
-        </div>
-      </div>
+      {enabled && tokenHover.hover && (
+        <TokenHoverCard
+          hover={tokenHover.hover}
+          onPointerEnter={tokenHover.onCardEnter}
+          onPointerLeave={tokenHover.onCardLeave}
+          // The try-it has no References panel behind it, so the locations
+          // lead nowhere and stay out of the tab order.
+          onSelectLocation={() => {}}
+          inert
+          // Above the modal this is demonstrated inside; the app's own default
+          // layer sits under it.
+          layerClassName="fixed z-[110]"
+        />
+      )}
     </div>
   );
 }
@@ -148,6 +214,7 @@ export function TokenHoverAnnouncementDialog({
   onDismiss,
 }: TokenHoverAnnouncementDialogProps) {
   const trigger = useConfigValue('tokenHoverTrigger');
+  const delayMs = useConfigValue('tokenHoverDelay');
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const primaryActionRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -175,7 +242,11 @@ export function TokenHoverAnnouncementDialog({
 
       const dialog = document.querySelector<HTMLElement>('[data-token-hover-announcement-dialog]');
       const focusable = Array.from(
-        dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')
+        // `:not([tabindex="-1"])` has to apply to the BUTTONS too, not just the
+        // [tabindex] arm: the roving radio group parks two options at -1, and
+        // the decorative example card carries the real card's location
+        // buttons. Neither belongs in the Tab cycle.
+        dialog?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), [href], [tabindex]:not([tabindex="-1"])')
           ?? [],
       );
       if (focusable.length === 0) return;
@@ -246,8 +317,12 @@ export function TokenHoverAnnouncementDialog({
         </header>
 
         <div className="grid min-h-0 flex-1 grid-cols-[1.1fr_1fr] gap-6 overflow-y-auto px-7 py-6 max-[820px]:grid-cols-1">
-          <section aria-label="Hover card example" className="min-h-[300px]">
-            <HoverCardExample />
+          <section className="min-h-[300px]">
+            <HoverCardTryIt
+              mode={trigger === 'modifier' ? 'modifier' : 'hover'}
+              delayMs={delayMs}
+              enabled={trigger !== 'off'}
+            />
           </section>
 
           <section className="flex min-w-0 flex-col gap-3">
@@ -273,8 +348,8 @@ export function TokenHoverAnnouncementDialog({
                     aria-checked={selected}
                     // Roving tabindex (WAI-ARIA radiogroup): Tab enters and
                     // leaves the group as one stop, arrows move within it. The
-                    // dialog's own focus trap collects [tabindex]:not([tabindex="-1"]),
-                    // so the unselected options fall out of the Tab cycle for free.
+                    // focus trap's selector excludes [tabindex="-1"] on buttons
+                    // too, so the unselected options stay out of the Tab cycle.
                     tabIndex={selected ? 0 : -1}
                     onKeyDown={(event) => handleOptionKeyDown(event, index)}
                     data-token-hover-trigger-option={value}
