@@ -1,4 +1,4 @@
-/**
+[Resource from plugin:github:github at repo://backnotprop/plannotator/sha/9f9ee275294a978d8c46cafc8eace96eb04dd6d3/contents/apps/hook/server/index.ts] /**
  * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, and Copilot CLI
  *
  * Supports thirteen modes:
@@ -2355,6 +2355,7 @@ if (args[0] === "sessions") {
         JSON.stringify({
           hookSpecificOutput: {
             hookEventName: "PermissionRequest",
+            systemMessage: result.feedback || undefined,
             decision: {
               behavior: "allow",
               // Echo the original tool_input as updatedInput. Claude Code
