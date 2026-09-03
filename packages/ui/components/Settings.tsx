@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal';
 import type { Origin } from '@plannotator/core/agents';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
+import type { TokenHoverDelay } from '@plannotator/core/token-hover';
 import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType, setReviewAutoViewed } from '../config';
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
 import { loadDiffFont } from '../utils/diffFonts';
@@ -133,6 +134,19 @@ export const DIFF_STYLE_OPTIONS = [
   { value: 'split' as const, label: 'Split' },
   { value: 'unified' as const, label: 'Unified' },
 ];
+/** "Hold Alt" reads the same on every platform, which is why Alt is the key. */
+export const TOKEN_HOVER_TRIGGER_OPTIONS = [
+  { value: 'hover' as const, label: 'On hover' },
+  { value: 'modifier' as const, label: 'Hold Alt' },
+  { value: 'off' as const, label: 'Off' },
+];
+/** SegmentedControl keys on strings, so the ms values ride as their digits. */
+export type TokenHoverDelayOption = '200' | '350' | '700';
+export const TOKEN_HOVER_DELAY_OPTIONS = [
+  { value: '200' as const, label: 'Fast' },
+  { value: '350' as const, label: 'Default' },
+  { value: '700' as const, label: 'Relaxed' },
+];
 export const OVERFLOW_OPTIONS = [
   { value: 'scroll' as const, label: 'Scroll' },
   { value: 'wrap' as const, label: 'Wrap' },
@@ -171,18 +185,23 @@ const AGENT_TERMINAL_SIDE_OPTIONS: { value: AnnotateAgentTerminalSide; label: st
   { value: 'hidden', label: 'Hidden' },
 ];
 
-function SegmentedControl<T extends string>({ options, value, onChange }: {
+function SegmentedControl<T extends string>({ options, value, onChange, disabled = false }: {
   options: { value: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
+  /** Visible but inert, for a control whose axis does not apply right now. */
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
+    <div className={`flex items-center gap-1 bg-muted/50 rounded-lg p-0.5 ${disabled ? 'opacity-50' : ''}`}>
       {options.map((opt) => (
         <button
           key={opt.value}
+          disabled={disabled}
           onClick={() => onChange(opt.value)}
           className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+            disabled ? 'cursor-not-allowed' : ''
+          } ${
             value === opt.value
               ? 'bg-background text-foreground shadow-sm font-medium'
               : 'text-muted-foreground hover:text-foreground'
@@ -471,7 +490,8 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
   const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
-  const tokenHoverCards = useConfigValue('tokenHoverCards');
+  const tokenHoverTrigger = useConfigValue('tokenHoverTrigger');
+  const tokenHoverDelay = useConfigValue('tokenHoverDelay');
 
   // Load font for the preview swatch
   useEffect(() => {
@@ -495,14 +515,36 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
 
       <div className="border-t border-border" />
 
-      {/* Token hover cards */}
+      {/* Token hover cards. One trigger select rather than a toggle plus a
+          mode: `Off` is a value of the same question, so there is no
+          unreachable enabled-but-off state to reason about. The delay stays a
+          separate axis because "too eager" is a complaint neither Hold Alt nor
+          Off answers. */}
       <div className="space-y-3">
-        <ToggleSwitch
-          checked={tokenHoverCards}
-          onChange={(v) => configStore.set('tokenHoverCards', v)}
-          label="Token hover cards"
-          description="Rest the pointer on a symbol in a diff to see where it is defined and who references it. Needs ripgrep and a local checkout; nothing appears when the search comes back empty."
+        <div>
+          <div className="text-sm font-medium">Token hover cards</div>
+          <div className="text-xs text-muted-foreground">
+            Rest the pointer on a symbol in a diff to see where it is defined and who
+            references it. Needs ripgrep and a local checkout; nothing appears when the
+            search comes back empty. Cmd+click still opens the References panel either way.
+          </div>
+        </div>
+        <SegmentedControl
+          options={TOKEN_HOVER_TRIGGER_OPTIONS}
+          value={tokenHoverTrigger}
+          onChange={(v) => configStore.set('tokenHoverTrigger', v)}
         />
+        <div className="space-y-2">
+          <div className="text-xs text-muted-foreground">
+            How long the pointer rests before a card is requested
+          </div>
+          <SegmentedControl
+            options={TOKEN_HOVER_DELAY_OPTIONS}
+            value={String(tokenHoverDelay) as TokenHoverDelayOption}
+            onChange={(v) => configStore.set('tokenHoverDelay', Number(v) as TokenHoverDelay)}
+            disabled={tokenHoverTrigger === 'off'}
+          />
+        </div>
       </div>
 
       <div className="border-t border-border" />

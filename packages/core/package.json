@@ -26,6 +26,7 @@
     "./open-in-apps": "./open-in-apps.ts",
     "./project": "./project.ts",
     "./source-save": "./source-save.ts",
+    "./token-hover": "./token-hover.ts",
     "./config-types": "./config-types.ts",
     "./storage-types": "./storage-types.ts",
     "./workspace-status-types": "./workspace-status-types.ts",

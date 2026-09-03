@@ -219,6 +219,11 @@ pointer is already inside the card when the key is released, the release is
 ignored, because otherwise the card vanishes out from under someone reading it.
 `onCardEnter`/`onCardLeave` already bracket that state; one ref records it.
 
+**Typing owns the key.** Alt is a text-editing chord (Alt+Backspace, Alt+arrow
+for word moves). A keydown whose target is an input, textarea, select or
+contenteditable never arms, because the pointer is often parked over the diff
+while a comment is being written and cards would pop mid-sentence.
+
 **Window blur.** Alt+Tab leaves the key state stale-held forever. On `blur` the
 held flag clears and the card closes.
 

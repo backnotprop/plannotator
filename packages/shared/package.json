@@ -61,6 +61,7 @@
     "./annotate-target": "./annotate-target.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
+    "./token-hover": "./token-hover.ts",
     "./goal-setup": "./goal-setup.ts",
     "./semantic-diff": "./semantic-diff.ts",
     "./semantic-diff-types": "./semantic-diff-types.ts",

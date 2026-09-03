@@ -3,14 +3,29 @@ import type {
   CodeNavHoverResponse,
   CodeNavRequest,
 } from '@plannotator/shared/code-nav';
+import { DEFAULT_TOKEN_HOVER_DELAY_MS } from '@plannotator/shared/token-hover';
 
 export type { CodeNavHoverResponse };
 
-/** Dwell before any request exists. Sweeping a diff costs zero rg processes. */
-const DWELL_MS = 350;
 /** Grace on leave, so the card's own links are reachable. */
 const LEAVE_GRACE_MS = 250;
 const MAX_CACHE_ENTRIES = 30;
+
+/**
+ * How this hook opens cards.
+ *
+ * `off` never reaches here: the App withholds the handler props entirely, so
+ * the diff views wire no listeners at all. What is left is the shipped hover
+ * behavior and the Alt-held gate.
+ */
+export type TokenHoverMode = 'hover' | 'modifier';
+
+export interface UseTokenHoverOptions {
+  /** Default `hover`, which is byte-for-byte the shipped behavior. */
+  mode?: TokenHoverMode;
+  /** Dwell before any request exists. Sweeping a diff costs zero rg processes. */
+  delayMs?: number;
+}
 
 /**
  * Marks the card's own subtree. The card carries this attribute and the scroll
@@ -39,6 +54,23 @@ export interface UseTokenHoverResult {
   close: () => void;
 }
 
+/**
+ * Alt is a text-editing chord on macOS (Alt+Backspace, Alt+arrow for word
+ * moves), so arming on it while the reviewer is writing a comment would pop
+ * cards over the diff mid-sentence whenever the pointer happens to be parked
+ * there. Typing owns the key; only the pointer's own gesture arms.
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    target.isContentEditable
+  );
+}
+
 function cacheKey(request: CodeNavRequest): string {
   return `${request.symbol}|${request.filePath}|${request.side}`;
 }
@@ -62,12 +94,30 @@ function meetsRenderThreshold(data: CodeNavHoverResponse): boolean {
  *
  * @param snapshotId the active diff snapshot; a change flushes the cache so a
  *   refreshed diff can never serve positions from the diff before it.
+ * @param options the user's trigger mode and dwell. Omitted means the shipped
+ *   hover-at-350ms behavior.
  */
-export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
+export function useTokenHover(
+  snapshotId?: string,
+  options: UseTokenHoverOptions = {},
+): UseTokenHoverResult {
+  const { mode = 'hover', delayMs = DEFAULT_TOKEN_HOVER_DELAY_MS } = options;
   const [hover, setHover] = useState<TokenHoverState | null>(null);
   // Drives the scroll listener: a document-level listener exists only while
   // something is actually pending or open.
   const [engaged, setEngaged] = useState(false);
+
+  /** Alt held right now. Only tracked while the mode actually needs it. */
+  const modifierHeldRef = useRef(false);
+  /**
+   * The last token the pointer entered, kept even when the gate rejected it.
+   * A key going down fires no pointer event, so without this the commonest
+   * gesture in modifier mode — park on a symbol, THEN hold Alt — would do
+   * nothing at all.
+   */
+  const lastEnterRef = useRef<{ request: CodeNavRequest; element: HTMLElement } | null>(null);
+  /** Pointer is inside the card, so a key release must not close it. */
+  const pointerInCardRef = useRef(false);
 
   const dwellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,6 +151,7 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
     abortInFlight();
     activeKeyRef.current = null;
     openKeyRef.current = null;
+    lastEnterRef.current = null;
     setHover(null);
     setEngaged(false);
   }, [abortInFlight, clearDwell, clearGrace]);
@@ -152,7 +203,7 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
     [close],
   );
 
-  const onTokenHoverEnter = useCallback(
+  const beginHover = useCallback(
     (request: CodeNavRequest, tokenElement: HTMLElement) => {
       clearGrace();
       const key = cacheKey(request);
@@ -225,9 +276,22 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
             }
           }
         })();
-      }, DWELL_MS);
+      }, delayMs);
     },
-    [abortInFlight, clearDwell, clearGrace, open, readCache, writeCache],
+    [abortInFlight, clearDwell, clearGrace, delayMs, open, readCache, writeCache],
+  );
+
+  const onTokenHoverEnter = useCallback(
+    (request: CodeNavRequest, tokenElement: HTMLElement) => {
+      // Recorded before the gate, so a later key press has a token to act on.
+      lastEnterRef.current = { request, element: tokenElement };
+      // The gate sits HERE, ahead of the dwell timer, the cache read and every
+      // piece of state: in modifier mode with the key up, a hover costs one
+      // boolean read and nothing else.
+      if (mode === 'modifier' && !modifierHeldRef.current) return;
+      beginHover(request, tokenElement);
+    },
+    [beginHover, mode],
   );
 
   const startGrace = useCallback(() => {
@@ -241,12 +305,63 @@ export function useTokenHover(snapshotId?: string): UseTokenHoverResult {
   const onTokenHoverLeave = useCallback(() => {
     // The dwell dies with the pointer; the in-flight fetch does not, so a
     // re-entry inside the grace window still lands its own answer.
+    lastEnterRef.current = null;
     clearDwell();
     startGrace();
   }, [clearDwell, startGrace]);
 
-  const onCardEnter = useCallback(() => clearGrace(), [clearGrace]);
-  const onCardLeave = useCallback(() => startGrace(), [startGrace]);
+  const onCardEnter = useCallback(() => {
+    pointerInCardRef.current = true;
+    clearGrace();
+  }, [clearGrace]);
+  const onCardLeave = useCallback(() => {
+    pointerInCardRef.current = false;
+    startGrace();
+  }, [startGrace]);
+
+  // Modifier mode only. Three listeners, and only while the mode needs them:
+  // in hover mode this effect never runs, so the pipeline is exactly what
+  // #1461 shipped.
+  useEffect(() => {
+    if (mode !== 'modifier') {
+      modifierHeldRef.current = false;
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || modifierHeldRef.current) return;
+      if (isTypingTarget(event.target)) return;
+      modifierHeldRef.current = true;
+      // Pressing the key does not re-enter the token under the pointer, so
+      // this is what makes "park on a symbol, then hold Alt" work.
+      const pending = lastEnterRef.current;
+      if (pending) beginHover(pending.request, pending.element);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.altKey || !modifierHeldRef.current) return;
+      modifierHeldRef.current = false;
+      // Releasing behaves like leaving: the same grace, so the card's own
+      // reference links stay reachable. Unless the pointer is already inside
+      // the card, in which case a release would yank it out from under
+      // someone reading it.
+      if (pointerInCardRef.current) return;
+      clearDwell();
+      startGrace();
+    };
+    // Alt+Tab leaves the key state stale-held forever otherwise.
+    const onBlur = () => {
+      modifierHeldRef.current = false;
+      close();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      modifierHeldRef.current = false;
+    };
+  }, [beginHover, clearDwell, close, mode, startGrace]);
 
   // The anchor rect is stale the moment the PANE moves, so scrolling closes the
   // card and abandons the pending fetch. Capture phase, because the scroll

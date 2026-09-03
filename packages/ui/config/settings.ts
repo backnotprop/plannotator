@@ -15,6 +15,13 @@ import {
 } from '@plannotator/core/agent-terminal';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
+import {
+  DEFAULT_TOKEN_HOVER_DELAY_MS,
+  isTokenHoverDelay,
+  resolveStoredTokenHoverTrigger,
+  type TokenHoverDelay,
+  type TokenHoverTrigger,
+} from '@plannotator/core/token-hover';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 import {
@@ -279,15 +286,35 @@ export const SETTINGS = {
   // Hovering a token in a code-review diff opens a card with what the search
   // backend knows about that symbol. Cookie-only like the other review-chrome
   // preferences: it is presentational, per-browser, and changes no review
-  // semantics — off simply means no listeners, no requests and no card.
-  tokenHoverCards: {
-    defaultValue: true as boolean,
+  // semantics — `off` simply means no listeners, no requests and no card.
+  //
+  // This one select REPLACED the original `tokenHoverCards` boolean rather
+  // than sitting beside it: a toggle plus a mode has an unreachable state
+  // (disabled + modifier) and asks one question with two controls. The legacy
+  // cookie is still read, once, so an early adopter who turned cards off stays
+  // off; see resolveStoredTokenHoverTrigger.
+  tokenHoverTrigger: {
+    defaultValue: 'hover' as TokenHoverTrigger,
+    fromCookie: () => resolveStoredTokenHoverTrigger(
+      storage.getItem('plannotator-token-hover-trigger'),
+      storage.getItem('plannotator-token-hover-cards'),
+    ),
+    toCookie: (value: TokenHoverTrigger) =>
+      storage.setItem('plannotator-token-hover-trigger', value),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  // How long the pointer rests on a symbol before a card is requested. Three
+  // fixed steps, not a slider: "too eager" is a real complaint that neither
+  // `modifier` nor `off` answers, but nobody can tell 340ms from 360ms.
+  tokenHoverDelay: {
+    defaultValue: DEFAULT_TOKEN_HOVER_DELAY_MS as TokenHoverDelay,
     fromCookie: () => {
-      const value = storage.getItem('plannotator-token-hover-cards');
-      return value === 'true' ? true : value === 'false' ? false : undefined;
+      const parsed = Number(storage.getItem('plannotator-token-hover-delay'));
+      return isTokenHoverDelay(parsed) ? parsed : undefined;
     },
-    toCookie: (value: boolean) =>
-      storage.setItem('plannotator-token-hover-cards', String(value)),
+    toCookie: (value: TokenHoverDelay) =>
+      storage.setItem('plannotator-token-hover-delay', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 

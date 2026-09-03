@@ -15,7 +15,11 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { CodeNavHoverResponse, CodeNavRequest } from '@plannotator/shared/code-nav';
-import { useTokenHover, type UseTokenHoverResult } from './useTokenHover';
+import {
+  useTokenHover,
+  type UseTokenHoverOptions,
+  type UseTokenHoverResult,
+} from './useTokenHover';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -66,17 +70,33 @@ let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 let latest: UseTokenHoverResult | null = null;
 
-function Harness({ snapshotId = 'snapshot-1' }: { snapshotId?: string }) {
-  latest = useTokenHover(snapshotId);
+function Harness({
+  snapshotId = 'snapshot-1',
+  options,
+}: { snapshotId?: string; options?: UseTokenHoverOptions }) {
+  latest = useTokenHover(snapshotId, options);
   return null;
 }
 
-async function mount(snapshotId?: string): Promise<void> {
+async function mount(snapshotId?: string, options?: UseTokenHoverOptions): Promise<void> {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<Harness snapshotId={snapshotId} />);
+    root!.render(<Harness snapshotId={snapshotId} options={options} />);
+  });
+}
+
+/** Alt going down/up on the window, the way the browser reports it. */
+async function altDown(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }));
+  });
+}
+
+async function altUp(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', altKey: false }));
   });
 }
 
@@ -389,5 +409,133 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     });
     expect(pending[0].signal?.aborted).toBe(true);
     expect(latest!.hover).toBeNull();
+  });
+});
+
+/**
+ * The trigger mode's whole promise is "with the key up this costs nothing".
+ * The failure to catch is a gate that lands AFTER the dwell timer arms, which
+ * would silently restore one ripgrep per token on an idle sweep and make the
+ * mode a cosmetic filter over the same traffic.
+ */
+describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
+  test('with the key up, no dwell is ever armed', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(pending).toHaveLength(0);
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('holding the key first, then hovering, opens the card', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(1);
+    await settle(0, hoverResponse());
+    expect(latest!.hover?.request.symbol).toBe('charge');
+  });
+
+  test('pressing the key while already parked on a token opens the card', async () => {
+    // The commonest gesture in this mode. A key press fires no pointer event,
+    // so a gate that only reads the enter event would make it do nothing.
+    await mount('snapshot-1', { mode: 'modifier' });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    expect(pending).toHaveLength(0);
+
+    await altDown();
+    await act(async () => { jest.advanceTimersByTime(350); });
+
+    expect(pending).toHaveLength(1);
+  });
+
+  test('a token left before the key goes down is not resurrected by it', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => latest!.onTokenHoverLeave());
+
+    await altDown();
+    await act(async () => { jest.advanceTimersByTime(350); });
+
+    expect(pending).toHaveLength(0);
+  });
+
+  test('releasing the key closes the card the way leaving does', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+
+    await altUp();
+    // The same leave grace, so the card's own reference links stay reachable.
+    expect(latest!.hover).not.toBeNull();
+    await act(async () => { jest.advanceTimersByTime(250); });
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('releasing the key while reading the card does not yank it away', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await altDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    await act(async () => latest!.onCardEnter());
+
+    await altUp();
+    await act(async () => { jest.advanceTimersByTime(1000); });
+
+    expect(latest!.hover).not.toBeNull();
+  });
+
+  test('typing Alt chords in a comment box does not pop a card over the diff', async () => {
+    // Alt+Backspace and Alt+arrow are word-editing chords. The pointer is
+    // often parked over the diff while writing a comment, so arming on those
+    // would open cards mid-sentence.
+    await mount('snapshot-1', { mode: 'modifier' });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+
+    const textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Backspace', altKey: true, bubbles: true }),
+      );
+    });
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    textarea.remove();
+
+    expect(pending).toHaveLength(0);
+  });
+
+  test('hover mode ignores the key entirely', async () => {
+    await mount('snapshot-1', { mode: 'hover' });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+
+    await altUp();
+    await act(async () => { jest.advanceTimersByTime(1000); });
+
+    // No key listeners exist in this mode, so a stray keyup cannot close it.
+    expect(latest!.hover).not.toBeNull();
+  });
+});
+
+describe.skipIf(!hasDom)('useTokenHover delay', () => {
+  test('the configured delay is the dwell, not the shipped constant', async () => {
+    await mount('snapshot-1', { delayMs: 700 });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(0);
+
+    await act(async () => { jest.advanceTimersByTime(350); });
+    expect(pending).toHaveLength(1);
   });
 });

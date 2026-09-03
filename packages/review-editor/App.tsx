@@ -162,6 +162,12 @@ import {
   markEditModeAnnouncementSeen,
   needsEditModeAnnouncement,
 } from './utils/editModeAnnouncement';
+import { TokenHoverAnnouncementDialog } from './components/TokenHoverAnnouncementDialog';
+import {
+  markTokenHoverAnnouncementSeen,
+  resolveTokenHoverAnnouncementPending,
+  tokenHoverAnnouncementCanShow,
+} from './utils/tokenHoverAnnouncement';
 import { ExternalLineAnnotationComposer } from './components/ExternalLineAnnotationComposer';
 import { DestinationSpotlight } from './components/DestinationSpotlight';
 import { needsDestinationSpotlight, markDestinationSpotlightSeen } from './utils/destinationSpotlight';
@@ -439,7 +445,8 @@ const ReviewApp: React.FC = () => {
   const diffTabSize = useConfigValue('diffTabSize');
   const reviewShowViewedControls = useConfigValue('reviewShowViewedControls');
   const reviewShowStageControls = useConfigValue('reviewShowStageControls');
-  const tokenHoverCardsEnabled = useConfigValue('tokenHoverCards');
+  const tokenHoverTrigger = useConfigValue('tokenHoverTrigger');
+  const tokenHoverDelay = useConfigValue('tokenHoverDelay');
   // EXPERIMENTAL: edit code in place to author suggestions (default OFF).
   const editSuggestionsEnabled = useConfigValue('editSuggestions');
   const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
@@ -1060,6 +1067,18 @@ const ReviewApp: React.FC = () => {
     enableEditSuggestionsFromAnnouncement();
     setEditModeIntroPending(false);
   }, []);
+  // One-time token hover card announcement. LAST in the dialog chain (guide
+  // intro → look-and-feel → review setup → edit mode → token hover) — the
+  // chain dialogs never stack. Latched at mount so choosing a trigger inside
+  // the dialog does not unmount it mid-click; a user who already has a
+  // non-default trigger never sees it (resolveTokenHoverAnnouncementPending).
+  const [tokenHoverIntroPending, setTokenHoverIntroPending] = useState(
+    resolveTokenHoverAnnouncementPending,
+  );
+  const dismissTokenHoverIntro = useCallback(() => {
+    markTokenHoverAnnouncementSeen();
+    setTokenHoverIntroPending(false);
+  }, []);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1086,7 +1105,12 @@ const ReviewApp: React.FC = () => {
   } = aiChat;
 
   const codeNav = useCodeNav();
-  const tokenHover = useTokenHover(snapshotId);
+  // `off` never reaches the hook: it is enforced below by withholding the
+  // handler props entirely, so the diff views wire no listeners at all.
+  const tokenHover = useTokenHover(snapshotId, {
+    mode: tokenHoverTrigger === 'modifier' ? 'modifier' : 'hover',
+    delayMs: tokenHoverDelay,
+  });
 
   const handleCodeNavRequest = useCallback((request: CodeNavRequest) => {
     if (!gitContext && !agentCwd) {
@@ -1415,7 +1439,21 @@ const ReviewApp: React.FC = () => {
   // Token hover cards ride the same gate as Cmd+click code navigation, plus
   // their own setting. Off means no handler props reach the diff views, so
   // there are no listeners, no requests and no card in the tree.
-  const tokenHoverEnabled = canUseLiveWorkspaceActions && tokenHoverCardsEnabled;
+  const tokenHoverEnabled = canUseLiveWorkspaceActions && tokenHoverTrigger !== 'off';
+  // Announcing a feature this session cannot run is noise, so a stack/branch
+  // view skips it — and skips it WITHOUT consuming the cookie, so the next
+  // ordinary review still shows it (same rule the guide intro uses for an
+  // empty diff). `off` is not part of the availability test: a user who
+  // reaches the dialog has, by construction, never chosen a trigger.
+  const tokenHoverIntroVisible = tokenHoverAnnouncementCanShow({
+    announcementPending: tokenHoverIntroPending,
+    isLoading,
+    featureAvailable: canUseLiveWorkspaceActions,
+    guideIntroVisible,
+    lookAndFeelVisible: showLookAndFeel,
+    reviewSetupVisible: showReviewSetup,
+    editModeVisible: editModeIntroVisible,
+  });
   const hoveredTokenSymbol = tokenHover.hover?.request.symbol;
   const closeTokenHover = tokenHover.close;
   const startTokenHover = tokenHover.onTokenHoverEnter;
@@ -1432,9 +1470,15 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     if (canUseLiveWorkspaceActions) return;
     codeNav.clear();
-    closeTokenHover();
     dockApi?.getPanel(REVIEW_CODE_NAV_PANEL_ID)?.api.close();
-  }, [canUseLiveWorkspaceActions, codeNav.clear, closeTokenHover, dockApi]);
+  }, [canUseLiveWorkspaceActions, codeNav.clear, dockApi]);
+  // Turning cards off (or losing the workspace gate) with one already open
+  // would otherwise leave it standing over the diff with nothing left to
+  // close it: the handler props are gone, so no leave event can arrive.
+  useEffect(() => {
+    if (tokenHoverEnabled) return;
+    closeTokenHover();
+  }, [tokenHoverEnabled, closeTokenHover]);
   const handleTokenHoverSelectLocation = useCallback(
     (location: { filePath: string; line: number; column: number }) => {
       closeTokenHover();
@@ -2379,7 +2423,7 @@ const ReviewApp: React.FC = () => {
     // (not lost) behind the guide takeover or a first-run dialog — the file
     // still marks and the next auto-view retries the toast.
     if (!needsAutoViewedNotice()) return;
-    if (guideOpen || guideIntroVisible || showLookAndFeel || showReviewSetup || editModeIntroVisible) return;
+    if (guideOpen || guideIntroVisible || showLookAndFeel || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible) return;
     markAutoViewedNoticeSeen();
     toast('Files are marked viewed as you scroll', {
       description: "Scroll past a file or move on to the next and it's checked off. Turn this off in Settings → Git, or from the gear above the file list.",
@@ -2399,7 +2443,7 @@ const ReviewApp: React.FC = () => {
         },
       },
     });
-  }, [guideOpen, guideIntroVisible, showLookAndFeel, showReviewSetup, editModeIntroVisible]);
+  }, [guideOpen, guideIntroVisible, showLookAndFeel, showReviewSetup, editModeIntroVisible, tokenHoverIntroVisible]);
   const { handleReadingFileChange: handleAutoViewReadingFile, handleFileScrolledPast } = useAutoViewed({
     enabled: autoViewedEnabled,
     // Rule 4 — only the review target. The guide takeover CSS-hides the dock
@@ -4053,7 +4097,7 @@ const ReviewApp: React.FC = () => {
     if (event.defaultPrevented || isNativeHistoryOwner(event)) return false;
     if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning || isLoadingDiff) return false;
     if (guideOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showWorktreeDialog || showNoAnnotationsDialog || showExitWarning) return false;
-    if (showLookAndFeel || showGuideIntro || showReviewSetup || editModeIntroVisible || tourDialogJobId) return false;
+    if (showLookAndFeel || showGuideIntro || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || tourDialogJobId) return false;
     return !hasActiveHistoryOverlay(document);
   }, [
     guideOpen,
@@ -4063,6 +4107,7 @@ const ReviewApp: React.FC = () => {
     isPlatformActioning,
     isSendingFeedback,
     editModeIntroVisible,
+    tokenHoverIntroVisible,
     openSettingsMenu,
     platformCommentDialog,
     showDestinationMenu,
@@ -5416,12 +5461,20 @@ const ReviewApp: React.FC = () => {
           />
         )}
 
+        {/* One-time token hover card announcement. LAST in the dialog chain
+            (guide intro → look-and-feel → review setup → edit mode → token
+            hover) — tokenHoverAnnouncementCanShow gates on every earlier
+            dialog, so the chain dialogs never stack. */}
+        {tokenHoverIntroVisible && (
+          <TokenHoverAnnouncementDialog isOpen onDismiss={dismissTokenHoverIntro} />
+        )}
+
         {/* One-time PR feedback-destination spotlight. Strictly AFTER the
             first-run dialog chain (guide intro → look-and-feel → review
-            setup → edit mode): it only mounts once none of the four is
+            setup → edit mode → token hover): it only mounts once none of the five is
             showing, so it never stacks with them. PR mode only — the switcher
             it points at doesn't render otherwise. */}
-        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && (
+        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && !tokenHoverIntroVisible && (
           <DestinationSpotlight
             targetRef={destToggleRef}
             platformLabel={platformLabel}
