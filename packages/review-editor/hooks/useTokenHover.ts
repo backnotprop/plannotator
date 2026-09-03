@@ -55,6 +55,25 @@ export interface UseTokenHoverOptions {
   delayMs?: number;
   /** Default: POST /api/code-nav/hover. */
   resolve?: TokenHoverResolver;
+  /**
+   * The gate armed or disarmed, with the token the pointer is parked on (null
+   * when it is not on one).
+   *
+   * The card is only half of the held-modifier gesture: the other half is the
+   * `pn-token-nav` affordance the diff views paint on the token. The views
+   * paint it from the pointer ENTER event, which is enough for "hold the key,
+   * then move onto a symbol" but fires for neither half of the gesture this
+   * mode exists for — a key going down over a parked pointer, and the release
+   * after it, produce no pointer event at all. Without this the canonical
+   * gesture opened a card on a token wearing no affordance, and a release
+   * closed the card while leaving the affordance painted until the pointer
+   * eventually left.
+   *
+   * A callback rather than the hook touching the class itself: the diff views
+   * are compiled into the portable guides.show viewer and their prop
+   * signatures must not move, and the class is a review-app concern.
+   */
+  onModifierGate?: (armed: boolean, tokenElement: HTMLElement | null) => void;
 }
 
 /**
@@ -149,11 +168,16 @@ export function useTokenHover(
     mode = 'hover',
     delayMs = DEFAULT_TOKEN_HOVER_DELAY_MS,
     resolve = fetchResolver,
+    onModifierGate,
   } = options;
   // Read through a ref so an inline resolver literal cannot re-arm every
   // callback in this hook on each render of its host.
   const resolveRef = useRef(resolve);
   resolveRef.current = resolve;
+  // Same reason, and additionally so the key-listener effect below does not
+  // re-register on every render of its host.
+  const modifierGateRef = useRef(onModifierGate);
+  modifierGateRef.current = onModifierGate;
   const [hover, setHover] = useState<TokenHoverState | null>(null);
   // Drives the scroll listener: a document-level listener exists only while
   // something is actually pending or open.
@@ -379,6 +403,12 @@ export function useTokenHover(
       modifierHeldRef.current = false;
       return;
     }
+    // Always reports the token the pointer is on RIGHT NOW, so a disarm
+    // unpaints the token the pointer drifted onto while the key was held, not
+    // only the one the arm painted.
+    const notifyGate = (armed: boolean) => {
+      modifierGateRef.current?.(armed, lastEnterRef.current?.element ?? null);
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isModKeyHeld(event)) return;
       // Only the modifier ITSELF arms. Any other key while it is held is a
@@ -396,6 +426,7 @@ export function useTokenHover(
         if (!modifierHeldRef.current) return;
         modifierHeldRef.current = false;
         clearDwell();
+        notifyGate(false);
         if (!pointerInCardRef.current) startGrace();
         return;
       }
@@ -406,8 +437,10 @@ export function useTokenHover(
       if (modifierHeldRef.current) return;
       modifierHeldRef.current = true;
       // Pressing the key does not re-enter the token under the pointer, so
-      // this is what makes "park on a symbol, then hold Cmd" work.
+      // this is what makes "park on a symbol, then hold Cmd" work — for the
+      // affordance as well as the card.
       const pending = lastEnterRef.current;
+      notifyGate(true);
       if (pending) beginHover(pending.request, pending.element);
     };
     // No typing guard here, deliberately: a release always disarms. If the
@@ -417,6 +450,10 @@ export function useTokenHover(
     const onKeyUp = (event: KeyboardEvent) => {
       if (isModKeyHeld(event) || !modifierHeldRef.current) return;
       modifierHeldRef.current = false;
+      // Ahead of the reading-the-card early return below: the key IS up, so
+      // the "this is a navigable target" affordance is over either way. Only
+      // the card's dismissal is deferred, never the affordance's.
+      notifyGate(false);
       // Releasing behaves like leaving: the same grace, so the card's own
       // reference links stay reachable. Unless the pointer is already inside
       // the card, in which case a release would yank it out from under
@@ -429,6 +466,7 @@ export function useTokenHover(
     // otherwise, and on macOS it is now the COMMON way to leave: the app
     // switcher is the same key this gate arms on.
     const onBlur = () => {
+      if (modifierHeldRef.current) notifyGate(false);
       modifierHeldRef.current = false;
       close();
     };
@@ -439,6 +477,10 @@ export function useTokenHover(
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
+      // Leaving modifier mode (the reviewer picked another trigger, or the app
+      // unmounted) with the key still down would strand the affordance on the
+      // token, with no listener left to take it off.
+      if (modifierHeldRef.current) notifyGate(false);
       modifierHeldRef.current = false;
     };
   }, [beginHover, clearDwell, close, mode, startGrace]);

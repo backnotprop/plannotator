@@ -682,6 +682,53 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     expect(pending).toHaveLength(1);
   });
 
+  test('the gate paints the navigable-target affordance on the parked token', async () => {
+    // The composite gesture: under one held key the card and the "this is a
+    // navigable target" underline arrive together and leave together. The diff
+    // views paint that class from the pointer ENTER event, which fires for
+    // neither transition here, so before this the mode's own primary gesture
+    // opened a card on a token wearing no affordance, and the release closed
+    // the card while leaving the affordance painted until the pointer left.
+    //
+    // The painter is the three lines App wires to this callback; what is under
+    // test is that the hook reports both transitions with the right element.
+    const paint = (armed: boolean, el: HTMLElement | null) => {
+      if (el) el.classList.toggle('pn-token-nav', armed);
+    };
+    await mount('snapshot-1', { mode: 'modifier', onModifierGate: paint });
+
+    const parked = token();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, parked));
+    expect(parked.classList.contains('pn-token-nav')).toBe(false);
+
+    await modDown();
+    expect(parked.classList.contains('pn-token-nav')).toBe(true);
+
+    await modUp();
+    expect(parked.classList.contains('pn-token-nav')).toBe(false);
+  });
+
+  test('a chord and a blur take the affordance with them too', async () => {
+    // Every disarm route, not just the release: a card that is dismissed by
+    // Cmd+C or by Cmd+Tab must not leave the token underlined behind it.
+    const paint = (armed: boolean, el: HTMLElement | null) => {
+      if (el) el.classList.toggle('pn-token-nav', armed);
+    };
+    await mount('snapshot-1', { mode: 'modifier', onModifierGate: paint });
+
+    const parked = token();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, parked));
+
+    await modDown();
+    await modChord('c');
+    expect(parked.classList.contains('pn-token-nav')).toBe(false);
+
+    await modDown();
+    expect(parked.classList.contains('pn-token-nav')).toBe(true);
+    await act(async () => { window.dispatchEvent(new Event('blur')); });
+    expect(parked.classList.contains('pn-token-nav')).toBe(false);
+  });
+
   test('hover mode ignores the key entirely', async () => {
     await mount('snapshot-1', { mode: 'hover' });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));

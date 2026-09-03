@@ -731,7 +731,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [filePath, onCodeNavRequest]);
 
   const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps, event: PointerEvent) => {
-    props.tokenElement.classList.add('pn-token-hover');
+    // Only where a card can actually open. The class carries a pointer cursor
+    // (now !important, so it genuinely wins over Pierre's I-beam), and painting
+    // it unconditionally promised clickability on every token even with hover
+    // cards switched off.
+    if (onTokenHoverEnter) props.tokenElement.classList.add('pn-token-hover');
     if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
       props.tokenElement.classList.add('pn-token-nav');
     }

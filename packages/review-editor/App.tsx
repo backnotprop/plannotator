@@ -1111,11 +1111,38 @@ const ReviewApp: React.FC = () => {
   } = aiChat;
 
   const codeNav = useCodeNav();
+  // The other half of the held-modifier gesture. The diff views paint
+  // `pn-token-nav` from the pointer ENTER event, which covers "hold the key,
+  // then move onto a symbol" but neither half of the gesture modifier mode
+  // exists for: a key going down over a parked pointer, and the release after
+  // it, fire no pointer event at all. The hook reports those two transitions
+  // and this paints them, so the affordance and the card arrive and leave
+  // together — which is the composite gesture the mode is modelled on.
+  //
+  // It lives here rather than in the views because both are compiled into the
+  // portable guides.show viewer and their prop signatures must not move.
+  const navAffordanceRef = useRef<HTMLElement | null>(null);
+  const handleModifierGate = useCallback((armed: boolean, tokenElement: HTMLElement | null) => {
+    const previous = navAffordanceRef.current;
+    // The pointer can drift to a neighbour while the key is held: that token
+    // was painted by its own enter event, and this one was left painted by an
+    // arm. Both come off.
+    if (previous && previous !== tokenElement) previous.classList.remove('pn-token-nav');
+    navAffordanceRef.current = null;
+    if (!tokenElement) return;
+    if (!armed) {
+      tokenElement.classList.remove('pn-token-nav');
+      return;
+    }
+    tokenElement.classList.add('pn-token-nav');
+    navAffordanceRef.current = tokenElement;
+  }, []);
   // `off` never reaches the hook: it is enforced below by withholding the
   // handler props entirely, so the diff views wire no listeners at all.
   const tokenHover = useTokenHover(snapshotId, {
     mode: tokenHoverTrigger === 'modifier' ? 'modifier' : 'hover',
     delayMs: tokenHoverDelay,
+    onModifierGate: handleModifierGate,
   });
 
   const closeTokenHover = tokenHover.close;
