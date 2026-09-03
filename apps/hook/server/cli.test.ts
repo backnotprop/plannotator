@@ -33,7 +33,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator review [--git | --gitbutler] [--tailscale] [PR_URL]");
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
-    expect(output).toContain("plannotator annotate-last [--stdin]");
+    expect(output).toContain("plannotator annotate-last [--stdin] [--exclude-active-turn]");
     expect(output).toContain("plannotator copilot-last [--gate] [--json] [--hook]");
     expect(output).toContain("plannotator setup-goal <interview|facts>");
     expect(output).toContain("plannotator uninstall [--purge] [--yes]");
@@ -114,6 +114,10 @@ describe("CLI subcommand help", () => {
     expect(formatSubcommandHelp("annotate")).toContain("--result-file <path>");
     expect(formatSubcommandHelp("annotate-last")).not.toContain(
       "--require-approval",
+    );
+    expect(formatSubcommandHelp("annotate-last")).toContain("--exclude-active-turn");
+    expect(formatSubcommandHelp("annotate-last")).toContain(
+      "plannotator last [--stdin] [--exclude-active-turn]",
     );
     expect(formatSubcommandHelp("sessions")).toContain("--open [N]");
     expect(formatSubcommandHelp("uninstall")).toContain(

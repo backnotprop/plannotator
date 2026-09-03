@@ -158,6 +158,7 @@ import {
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
   getRecentRenderedMessages,
+  getRecentRenderedMessagesDetailed,
   resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
@@ -321,6 +322,12 @@ const hookIdx = args.indexOf("--hook");
 const hookFlag = hookIdx !== -1;
 if (hookFlag) args.splice(hookIdx, 1);
 if (hookFlag) gateFlag = true;
+// annotate-last: --exclude-active-turn drops messages from the turn that
+// launched the command (Claude Code path). Accepted everywhere so launchers
+// need not know the vendor; Codex already applies the cutoff unconditionally.
+const excludeActiveTurnIdx = args.indexOf("--exclude-active-turn");
+const excludeActiveTurnFlag = excludeActiveTurnIdx !== -1;
+if (excludeActiveTurnFlag) args.splice(excludeActiveTurnIdx, 1);
 const renderHtmlIdx = args.indexOf("--render-html");
 const renderHtmlFlag = renderHtmlIdx !== -1;
 if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
@@ -1379,6 +1386,10 @@ if (args[0] === "sessions") {
   const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
   let recentMessages: RenderedMessage[] = [];
+  // Set when --exclude-active-turn found the right log but nothing before
+  // the current turn. Distinct from "no log yielded a message": the
+  // candidate walk must stop there rather than drift to an older session.
+  let emptiedByActiveTurn = false;
 
   // Copilot CLI sets no env fingerprint, so detection matches ancestor pids
   // against session-state inuse locks (spawns ps). Only attempted when no
@@ -1480,7 +1491,7 @@ if (args[0] === "sessions") {
 
     /** Try each log path, return the first that yields a message. */
     function tryLogCandidates(label: string, getPaths: () => string[]): void {
-      if (lastMessage) return;
+      if (lastMessage || emptiedByActiveTurn) return;
       const paths = getPaths();
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] ${label}: ${paths.length ? paths.join(", ") : "(none)"}`);
@@ -1489,12 +1500,17 @@ if (args[0] === "sessions") {
         // Claude Code transcripts are trees: `/rewind` re-parents the next
         // message rather than truncating, so a file-order read returns
         // orphaned messages. Follow the id chain instead.
-        const recent = getRecentRenderedMessages(logPath, RECENT_MESSAGES_LIMIT, {
+        const result = getRecentRenderedMessagesDetailed(logPath, RECENT_MESSAGES_LIMIT, {
           activeBranchOnly: true,
+          excludeActiveTurn: excludeActiveTurnFlag,
         });
-        if (recent.length > 0) {
-          recentMessages = recent;
-          lastMessage = recent[0];
+        if (result.messages.length > 0) {
+          recentMessages = result.messages;
+          lastMessage = result.messages[0];
+          return;
+        }
+        if (result.emptiedByActiveTurn) {
+          emptiedByActiveTurn = true;
           return;
         }
       }
@@ -1518,7 +1534,9 @@ if (args[0] === "sessions") {
   if (!lastMessage) {
     console.error(stdinFlag
       ? "No message content received on stdin."
-      : "No rendered assistant message found in session logs.");
+      : emptiedByActiveTurn
+        ? "No assistant message precedes the current turn (--exclude-active-turn)."
+        : "No rendered assistant message found in session logs.");
     process.exit(1);
   }
 
