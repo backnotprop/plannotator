@@ -15,6 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { configStore } from '@plannotator/ui/config';
 import { resetStorageBackend, setStorageBackend } from '@plannotator/ui/utils/storage';
 import { isMac, modEventKey } from '@plannotator/ui/utils/platform';
+import { DEFAULT_TOKEN_HOVER_DELAY_MS } from '@plannotator/shared/token-hover';
 import { EXAMPLE_HOVER, TokenHoverAnnouncementDialog } from './TokenHoverAnnouncementDialog';
 
 const hasDom = typeof document !== 'undefined';
@@ -111,7 +112,9 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
       // Nothing before the dwell elapses.
       expect(document.querySelector('[data-token-hover-card]')).toBeNull();
 
-      await act(async () => { jest.advanceTimersByTime(350); });
+      // The try-it reads the live `tokenHoverDelay`, which the seeded backend
+      // says nothing about, so the dwell here is the registry default.
+      await act(async () => { jest.advanceTimersByTime(DEFAULT_TOKEN_HOVER_DELAY_MS); });
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
       // `data-token-hover-card` is the real component's own marker.
@@ -150,7 +153,7 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
           ctrlKey: !isMac,
         }));
       });
-      await act(async () => { jest.advanceTimersByTime(350); });
+      await act(async () => { jest.advanceTimersByTime(DEFAULT_TOKEN_HOVER_DELAY_MS); });
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(document.querySelector('[data-token-hover-card]')).not.toBeNull();
 

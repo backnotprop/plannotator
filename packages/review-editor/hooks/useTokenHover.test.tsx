@@ -677,10 +677,15 @@ describe.skipIf(!hasDom)('useTokenHover delay', () => {
     await mount('snapshot-1', { delayMs: 700 });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
 
-    await act(async () => { jest.advanceTimersByTime(300); });
+    // The two advances SUM to the configured dwell, so both halves have to
+    // hold: 350 is past DEFAULT_TOKEN_HOVER_DELAY_MS (300), so a hook that
+    // ignored `delayMs` would already have fired here; and 350+350 reaches
+    // exactly 700, so one that never fires is caught below. Changing either
+    // number in isolation silently guts the test — they are a pair.
+    await act(async () => { jest.advanceTimersByTime(350); });
     expect(pending).toHaveLength(0);
 
-    await act(async () => { jest.advanceTimersByTime(300); });
+    await act(async () => { jest.advanceTimersByTime(350); });
     expect(pending).toHaveLength(1);
   });
 });
