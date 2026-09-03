@@ -85,6 +85,20 @@ export interface UseTokenHoverResult {
 }
 
 /**
+ * Where a key event actually came from.
+ *
+ * composedPath()[0] pierces shadow DOM: window-level e.target retargets to the
+ * shadow HOST (e.g. Pierre's <diffs-container>), which would hide a typeable
+ * element living inside a shadow root from the guard below — and the review
+ * pane's edit-session contenteditable is exactly that. The three other
+ * window-level typing guards in this package (AllFilesCodeView, FileTree,
+ * SectionsPanel) all read the origin this way; this one is not an exception.
+ */
+function eventOrigin(event: KeyboardEvent): EventTarget | null {
+  return event.composedPath?.()[0] ?? event.target;
+}
+
+/**
  * The primary modifier is also the editing modifier (Cmd+C, Cmd+V, Cmd+A), so
  * arming on it while the reviewer is writing a comment would pop cards over
  * the diff mid-sentence whenever the pointer happens to be parked there.
@@ -367,11 +381,17 @@ export function useTokenHover(
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isModKeyHeld(event)) return;
-      if (isTypingTarget(event.target)) return;
       // Only the modifier ITSELF arms. Any other key while it is held is a
       // command (Cmd+C, Cmd+V, Cmd+S), not a request to be told about the
       // symbol the pointer happens to be resting on, so a chord disarms and
       // takes any open card with it rather than popping one mid-copy.
+      //
+      // Ahead of the typing guard on purpose: DISARMING is never something
+      // focus should be able to suppress. Focus can land in a comment box
+      // between the arm and the chord (a card is open, the reviewer clicks
+      // into the composer and hits Cmd+V), and a guard that returned first
+      // would leave that card standing over the diff with the gate still
+      // armed behind it.
       if (event.key !== modEventKey) {
         if (!modifierHeldRef.current) return;
         modifierHeldRef.current = false;
@@ -379,6 +399,10 @@ export function useTokenHover(
         if (!pointerInCardRef.current) startGrace();
         return;
       }
+      // Typing owns the key, so only the ARM path is suppressed. Read through
+      // composedPath: the review pane's editor is a contenteditable inside a
+      // shadow root, and a bare event.target reads as its host element.
+      if (isTypingTarget(eventOrigin(event))) return;
       if (modifierHeldRef.current) return;
       modifierHeldRef.current = true;
       // Pressing the key does not re-enter the token under the pointer, so
@@ -386,6 +410,10 @@ export function useTokenHover(
       const pending = lastEnterRef.current;
       if (pending) beginHover(pending.request, pending.element);
     };
+    // No typing guard here, deliberately: a release always disarms. If the
+    // gate never armed the branch below is already a no-op, and if it DID arm
+    // (focus was elsewhere) the release has to be honored wherever focus has
+    // since travelled, or the card outlives the key that opened it.
     const onKeyUp = (event: KeyboardEvent) => {
       if (isModKeyHeld(event) || !modifierHeldRef.current) return;
       modifierHeldRef.current = false;

@@ -115,6 +115,44 @@ async function modChord(key: string, target: EventTarget = window): Promise<void
   });
 }
 
+/** The modifier ALONE, pressed from inside some element rather than at the window. */
+async function modDownFrom(target: EventTarget): Promise<void> {
+  await act(async () => {
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: modEventKey, ...held, bubbles: true, composed: true }),
+    );
+  });
+}
+
+/**
+ * The modifier alone, as the WINDOW sees it when it was pressed inside a
+ * contenteditable in a shadow root (Pierre's edit session).
+ *
+ * The retargeting is modelled explicitly rather than produced by dispatching
+ * from inside a real shadow root, because happy-dom does not retarget:
+ * `event.target` there stays the inner node, so a dispatched event would let a
+ * `event.target` guard pass and the test would assert nothing. What the
+ * browser actually delivers is `target === host` with `composedPath()[0] ===
+ * the editable`, and that is exactly what this builds.
+ */
+async function modDownFromShadowEditor(): Promise<void> {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const editable = document.createElement('div');
+  editable.setAttribute('contenteditable', 'true');
+  host.attachShadow({ mode: 'open' }).appendChild(editable);
+
+  const event = new KeyboardEvent('keydown', { key: modEventKey, ...held });
+  // Retargeted, the way a window-level listener receives it.
+  Object.defineProperty(event, 'target', { value: host });
+  Object.defineProperty(event, 'composedPath', {
+    value: () => [editable, host, document.body, document.documentElement, document, window],
+  });
+
+  await act(async () => { window.dispatchEvent(event); });
+  host.remove();
+}
+
 function token(): HTMLElement {
   const el = document.createElement('span');
   document.body.appendChild(el);
@@ -507,19 +545,62 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     expect(latest!.hover).not.toBeNull();
   });
 
-  test('modifier chords in a comment box do not pop a card over the diff', async () => {
-    // Cmd+C, Cmd+V, Cmd+A. The pointer is often parked over the diff while
-    // writing a comment, so arming on those would open cards mid-sentence.
+  test('the modifier pressed while typing in a comment box arms nothing', async () => {
+    // Typing owns the key. The pointer is routinely parked over the diff while
+    // a comment is being written, so a bare Cmd there — the first half of
+    // Cmd+A, Cmd+V, or a Cmd the reviewer simply leaned on — must not open a
+    // card mid-sentence. This is the ONLY path isTypingTarget covers: a chord
+    // is caught by the disarm branch whether or not the guard exists, so a
+    // chord-shaped test would pass with the guard deleted.
     await mount('snapshot-1', { mode: 'modifier' });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
 
     const textarea = document.createElement('textarea');
     document.body.appendChild(textarea);
-    await modChord('c', textarea);
+    await modDownFrom(textarea);
     await act(async () => { jest.advanceTimersByTime(1000); });
     textarea.remove();
 
     expect(pending).toHaveLength(0);
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('the modifier pressed inside a shadow-root editor arms nothing either', async () => {
+    // A window-level listener sees event.target RETARGETED to the shadow host,
+    // so a guard reading event.target sees a plain <div> and lets the gate arm
+    // while the reviewer is typing in Pierre's edit-session editor. Reading
+    // composedPath()[0] is what the three sibling guards in this package do,
+    // and it is what this test pins.
+    await mount('snapshot-1', { mode: 'modifier' });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+
+    await modDownFromShadowEditor();
+    await act(async () => { jest.advanceTimersByTime(1000); });
+
+    expect(pending).toHaveLength(0);
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('a chord while typing still disarms an open card', async () => {
+    // The asymmetry that matters: typing may suppress ARMING, never
+    // DISARMING. Focus can reach a composer between the two (a card is open,
+    // the reviewer clicks into the comment box and pastes), and a typing
+    // guard placed ahead of the chord branch would leave that card standing
+    // over the diff with the gate still armed behind it.
+    await mount('snapshot-1', { mode: 'modifier' });
+    await modDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(300); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+
+    const textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+    await modChord('v', textarea);
+    await act(async () => { jest.advanceTimersByTime(250); });
+    textarea.remove();
+
+    expect(latest!.hover).toBeNull();
   });
 
   test('a copy chord with the pointer parked on a token opens nothing', async () => {
