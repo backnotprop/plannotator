@@ -37,4 +37,5 @@ export const TOKEN_HOVER_UNDERLINE_STYLE: CSSProperties = {
   textDecorationColor: 'var(--primary)',
   textDecorationThickness: UNDERLINE.textDecorationThickness,
   textUnderlineOffset: UNDERLINE.textUnderlineOffset,
+  cursor: 'pointer',
 };
