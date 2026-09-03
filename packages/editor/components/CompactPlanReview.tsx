@@ -3,7 +3,7 @@ import type { CompactPlanAction } from '@plannotator/ui/components/PlanHeaderMen
 
 type CompactPlanDecisionActionId = Extract<
   CompactPlanAction['id'],
-  'exit' | 'feedback' | 'approve' | 'copy' | 'done'
+  'exit' | 'feedback' | 'approve' | 'copy' | 'done' | 'note' | 'discard-finish'
 >;
 
 /** An incumbent session decision that may be presented by compact Review. */
@@ -164,14 +164,14 @@ const SparklesIcon = () => (
 );
 
 const ActionIcon = ({ kind }: { kind: CompactPlanReviewAction['id'] }) => {
-  if (kind === 'approve' || kind === 'done') {
+  if (kind === 'approve' || kind === 'done' || kind === 'discard-finish') {
     return (
       <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
       </svg>
     );
   }
-  if (kind === 'feedback') return <CommentIcon />;
+  if (kind === 'feedback' || kind === 'note') return <CommentIcon />;
   return (
     <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

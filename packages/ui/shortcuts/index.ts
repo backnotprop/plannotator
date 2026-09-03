@@ -1,6 +1,7 @@
 export * from './core';
 export * from './runtime';
 export { historyShortcuts, useHistoryShortcuts } from './history.shortcuts';
+export { decisionControlShortcuts } from './decisionControl.shortcuts';
 
 // plan-review scopes
 export { annotationModeShortcuts, useAnnotationModeShortcuts } from './plan-review/annotationMode.shortcuts';

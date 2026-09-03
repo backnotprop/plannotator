@@ -89,6 +89,28 @@ describe("feedback archive: record shape", () => {
     expect(sidecar).toContain("since-base");
   });
 
+  test("a review-level general comment records its scope; a line comment stays scope-free", () => {
+    // Regression (maintainer ruling on open question 2): without `scope` in
+    // the normalizer's copied-field allowlist, a review-level general comment
+    // archives byte-identically to a line comment with sentinel 0/0 lines and
+    // "which comments were review-level?" is unanswerable from the index.
+    const dataDir = useTempDataDir();
+    appendFeedbackRecord({
+      project: PROJECT,
+      surface: "review",
+      decision: "feedback",
+      feedback: "one general, one line",
+      annotations: [
+        { id: "g1", type: "comment", scope: "general", filePath: "", lineStart: 0, lineEnd: 0, text: "overall: split this PR" },
+        { id: "l1", type: "comment", filePath: "src/parse.ts", lineStart: 3, lineEnd: 3, text: "null case" },
+      ],
+    });
+    const record = readIndex(dataDir)[0];
+    expect(record.annotations?.find((a) => a.id === "g1")?.scope).toBe("general");
+    // Absent scope stays absent (the pre-scope default), not defaulted-in.
+    expect(record.annotations?.find((a) => a.id === "l1")?.scope).toBeUndefined();
+  });
+
   test("provenance is preserved so `source == null` filters the reviewer's own comments", () => {
     // Regression: external/WebMCP/agent findings are archived (the submitted
     // text already embeds them) but must stay distinguishable, or "analyze my

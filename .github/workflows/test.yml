@@ -164,6 +164,9 @@ jobs:
           packages/editor/planDiffAutoExit.test.tsx
           packages/editor/App.archiveReadOnly.test.tsx
           packages/editor/App.htmlChrome.test.tsx
+          packages/editor/App.decisionControl.test.tsx
+          packages/review-editor/App.decisionControl.test.tsx
+          packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
           packages/ui/components/HtmlSurfaceControls.test.tsx
           packages/ui/components/AnnotationPanel.unanchored.test.tsx
           packages/ui/hooks/useHtmlRefresh.test.tsx
@@ -180,6 +183,10 @@ jobs:
           packages/editor/components/AppHeader.webmcpIndicator.test.tsx
           packages/ui/components/MathBlock.firstPaint.test.tsx
           packages/ui/components/DiagramBlock.lazyRetry.test.tsx
+          packages/ui/components/DecisionControl.test.tsx
+          packages/ui/components/ActionMenu.test.tsx
+          packages/ui/components/PlanHeaderMenu.mobile.test.tsx
+          packages/review-editor/components/ReviewHeaderMenu.mobile.test.tsx
 
   opencode-v2:
     name: OpenCode 2 installed package

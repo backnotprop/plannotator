@@ -56,6 +56,7 @@ interface PromptSectionConfig {
 export interface PromptConfig {
   review?: PromptSectionConfig & {
     approved?: string;
+    approvedWithNotes?: string;
     denied?: string;
   };
   plan?: PromptSectionConfig & {

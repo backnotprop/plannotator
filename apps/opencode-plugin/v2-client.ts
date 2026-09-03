@@ -247,8 +247,12 @@ export function formatSessionUrlNotice(url: string): string {
  *  - Setting no `metadata.source` keeps it on the plain "Notice" row rather
  *    than the subagent/shell completion row.
  *
- * `delivery` is left at the host default, matching upstream's own synthetic
- * notices; only feedback (`FEEDBACK_DELIVERY`) needs an explicit queue.
+ * `delivery` is an explicit "queue", mirroring `FEEDBACK_DELIVERY` (#1459).
+ * The host default resolves to "steer", and a pending steer row is promoted
+ * FIRST by any wake, including spurious idle wakes observed on OpenCode 2
+ * betas where `resume: false` defers the immediate wake but a later wake
+ * turns the notice into its own model turn. Queue delivery keeps the notice
+ * out of every steer-scoped promotion and is a no-op on well-behaved hosts.
  *
  * This does not contradict the reason feedback avoids synthetic injection.
  * Upstream #44788 is about a synthetic message not reliably reaching the MODEL
@@ -267,7 +271,14 @@ export function createSessionUrlNotifier(
   if (typeof synthetic !== "function" || !sessionID) return undefined;
   return async ({ url }) => {
     const notice = formatSessionUrlNotice(url);
-    return await synthetic({ sessionID, text: notice, description: notice, resume: false });
+    return await synthetic({
+      sessionID,
+      text: notice,
+      description: notice,
+      resume: false,
+      // #1459: never ride the "steer" default; see the delivery note above.
+      delivery: FEEDBACK_DELIVERY,
+    });
   };
 }
 

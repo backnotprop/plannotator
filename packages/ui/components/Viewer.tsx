@@ -908,7 +908,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
     if (viewerCommentPopover.isGlobal) {
       const newAnnotation: Annotation = {
-        id: `global-${Date.now()}`,
+        // randomUUID, not Date.now(): two comments minted in the same
+        // millisecond (paste + submit, or a concurrent external write)
+        // would collide on a timestamp id.
+        id: `global-${crypto.randomUUID()}`,
         blockId: '',
         startOffset: 0,
         endOffset: 0,

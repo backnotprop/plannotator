@@ -25,7 +25,7 @@ export interface CompactReviewDestination {
 }
 
 export interface CompactReviewAction {
-  id: 'exit' | 'feedback' | 'approve' | 'copy';
+  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'note' | 'discard-finish';
   label: string;
   subtitle?: string;
   onSelect: () => void;
@@ -389,14 +389,14 @@ const AgentDestinationIcon = () => (
 );
 
 const CompactReviewActionIcon: React.FC<{ kind: CompactReviewAction['id'] }> = ({ kind }) => {
-  if (kind === 'approve') {
+  if (kind === 'approve' || kind === 'discard-finish') {
     return (
       <svg className="w-3.5 h-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
       </svg>
     );
   }
-  if (kind === 'feedback') {
+  if (kind === 'feedback' || kind === 'note') {
     return (
       <svg className="w-3.5 h-3.5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4v-4z" />

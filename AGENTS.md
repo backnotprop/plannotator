@@ -221,8 +221,83 @@ Review server starts, opens browser with diff viewer
 User annotates code, provides feedback
         ↓
 Send Feedback → feedback sent to agent session
-Approve → "LGTM" sent to agent session
+Approve → approved prompt sent to agent session (with the note/annotations when approving with notes)
 ```
+
+### Review header decision control (agent mode)
+
+The agent-destination review header uses the same adaptive split control the annotate surfaces
+adopted: a ghost-X Close plus `DecisionControl` (`packages/ui/components/DecisionControl.tsx`)
+rendered from the pure `buildDecisionSpec` mapping — `Approve` with no annotations,
+`Send Feedback · n` otherwise, with `Request changes…` / `Send with a note…` and the explicit
+`Approve, discard n annotations…` confirm behind the caret. One `submitPrimaryDecision()`
+callback serves the header primary, the global `Mod+Enter` handler, and the compact primary row.
+Transport routing is pure in `packages/review-editor/reviewDecision.ts` and single-endpoint:
+every decision POSTs `/api/feedback` with `approved` as the only fork; a change-request note
+becomes a `scope:'general'` `CodeAnnotation` (sentinel `filePath ''`/0/0, riding the export's
+`## General` section) with a one-render deferred submit — zero server change. Approve-carrying
+menu items (`Approve with notes`, `Approve with a note…`) are capability-gated on the
+server-sent `approvalNotesSupported` advert, which rides every diff payload (`/api/diff`,
+`/api/diff/switch`, `/api/pr-diff-scope`, `/api/pr-switch`, both runtimes) and reads as false
+when absent, so an old server renders no approve-carrying items. For the OpenCode CLI bridge
+the advert additionally requires the plugin's own `supportsApprovalNotes: true` declaration on
+the `opencode-review` stdin JSON (the binary and plugin version independently; an old plugin
+omits it and the advert fails closed, so a new binary can never hand an old bridge a note it
+would discard). A capable session's approvals post `buildReviewApprovalBody`: bare approve
+sends `feedback: ''` (the old `'LGTM - no changes requested.'` placeholder is gone — a bare
+approval now archives as `lgtm` with no sidecar), "Approve with a note…" sends the note as the
+feedback, and "Approve with notes" sends the live annotations plus their export (a note, if
+both are ever present, is folded in ahead of the export — never dropped). The four agent-facing
+decision consumers (Claude Code CLI, OpenCode native + CLI bridge, Pi) emit approvals through
+the shared `composeReviewApprovedMessage` (`packages/shared/prompts.ts`, vendored to Pi):
+a bare approval is the plain approved prompt; an approval carrying feedback uses the
+approved-with-notes framing (`prompts.review.approvedWithNotes`, default
+`DEFAULT_REVIEW_APPROVED_WITH_NOTES_PROMPT` — "non-blocking guidance, do not revise or
+reopen"), because the bare prompt plus a change-request-shaped export would read as a
+contradiction. The legacy placeholder is filtered there so a stale built client cannot get
+filler framed as guidance. The standalone dev server (`apps/review/server`) is the exception:
+it emits the raw decision JSON with the feedback unfiltered and does not route through the
+composer. Compact/touch rows are generated from the same spec, so a visible positive decision
+exists in every state; composer rows open `DecisionNoteDialog`. Platform (PR) mode renders the
+same ghost-X + `DecisionControl` shape from `buildDecisionSpec`'s platform arm, with **no
+composer items ever**: every menu action opens the existing `ReviewSubmissionDialog` (per-target
+state, retry, "leave PR open" toggle — whose general-comment textarea is the only note field on
+that side), and the self-approval mute is preserved — muted primary/items with the "You can't
+approve your own {PR/MR}" reason, `Request changes…` / `Post comments, then…` always live.
+
+Interaction-model changes worth knowing (F8 and siblings): the agent-mode `Approve` primary
+follows the `FeedbackButton` responsive pattern and is **icon-only below the `lg` breakpoint**,
+where the old `ApproveButton` showed a compact `OK` label — the `title` carries the accessible
+name, and compact/touch rows keep full labels. Approving despite annotations is now two clicks
+(caret → `Approve, discard n annotations…` → `Discard & approve`) instead of the old dimmed
+one-click Approve with its warning dialog, and `Mod+Enter` never stacks with the removed
+approve-warning dialog — an open confirm dialog owns `Mod+Enter` outright (the
+`data-plannotator-confirm-dialog` sentinel guard in the app's keydown effect; without it one
+keystroke over the discard confirm would post two contradictory decisions). Accepted edge: the
+compact `DecisionNoteDialog` keeps its draft locally and discards it if the item behind it leaves
+the live spec (the dialog closes), while the desktop popover composer keeps drafts keyed by item
+id — an intentional asymmetry, not a bug.
+
+The review sidebar carries the durable human producer for review-level comments:
+**"+ General comment"** renders in the Annotations tab's General section header (even with zero
+general comments) AND in the all-empty state, opening the shared `DecisionNoteField` in a small
+anchored popover whose width clamps to the resizable panel (200-600px persisted) so it never
+clips inside the sidebar's `overflow-x: hidden` scroll area. Composer state (open + draft) lives
+in `ReviewSidebar`, shared by both placements: the draft survives a dismissal, a placement flip
+(an external annotation arriving mid-sentence moves the button from the empty state to the
+section header), and a tab switch; collapsing the sidebar discards it. The producer is
+deliberately present in platform (PR) mode too — a session-level comment there rides the posted
+review body through the pre-existing `scope:'general'` handling in `buildFileScopedBody` /
+`ReviewSubmissionDialog`. Unlike the header composer's submit note (one-submit lifetime), a sidebar
+general comment goes through `addCodeAnnotationsWithHistory` — undoable, draft-persisted,
+deletable — and both producers share one shape factory, `createGeneralReviewComment` in
+`reviewDecision.ts`: `scope:'general'`, sentinel `filePath ''`/0/0, `review-note-` UUID id, and
+deliberately **no PR context**, so the comment passes every PR scope predicate and survives an
+in-place PR switch. Creating one raises `totalAnnotationCount`, which is what flips the header
+control to `Send Feedback · n` — the control is state-driven, not wired to the button. The
+feedback archive records each annotation's `scope` (additive `scope?: string` in
+`packages/shared/feedback-archive.ts`'s normalizer, vendored to Pi), so a review-level general
+comment stays distinguishable from a line comment in `index.jsonl`.
 
 ### Since-main default review view
 
@@ -298,8 +373,32 @@ Annotate server starts (reuses plan editor HTML with mode:"annotate")
         ↓
 User annotates content, provides feedback
         ↓
-Send Annotations → feedback sent to agent session
+Send Feedback → annotations sent to agent session
+Done / Approve (gate) → positive decision recorded (see the decision control below)
 ```
+
+### Annotate header decision control
+
+Every annotate surface's header decision is one adaptive split control, `DecisionControl`
+(`packages/ui/components/DecisionControl.tsx`), rendered from the pure `buildDecisionSpec`
+state→spec mapping (`packages/ui/utils/decisionSpec.ts`) beside a ghost-X Close: `Done` (or
+`Approve` in gate mode) with nothing to send, `Send Feedback · n` otherwise, with the alternate
+decisions and the in-place note composer behind the caret. One `submitPrimaryDecision()` callback
+serves the header primary, the global `Mod+Enter` handler, and the compact primary row, so
+keyboard and header can never disagree. Transport routing is pure in
+`packages/editor/annotateDecision.ts`: `Done` and every note post `/api/feedback` (a note becomes
+a `GLOBAL_COMMENT` at submit time with a one-render deferred submit — zero server change), so
+`formatAnnotateOutcome` shapes and strict-gate exit codes are byte-identical to the old
+keyboard-only zero submit; only gate-mode approvals reach `/api/approve`. The non-gated empty
+menu carries a single composer, "Send a note…" (maintainer ruling: the old "Done with a note…" /
+"Request changes…" pair differed only by framing on the same transport and was collapsed into
+one item); the approval-framing sentence (`buildCompleteAnnotateFeedback`'s `approvalFraming`)
+now serves only the non-gated discard path, and the only confirm left is the
+explicit `Done/Approve, discard n annotations…` menu item (plus the pre-existing
+close-with-content warning). Compact/touch rows are generated from the same spec, so a visible
+positive decision exists in every state; composer rows open `DecisionNoteDialog`. The header flip
+predicate is `hasFeedbackToSend`, so feedback already delivered through the agent terminal shows
+the positive primary rather than a stale Send Feedback.
 
 ### Tolerant argument resolution
 
@@ -399,7 +498,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 
 | Endpoint              | Method | Purpose                                    |
 | --------------------- | ------ | ------------------------------------------ |
-| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, snapshotId, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd?, semanticDiff?, callFlow?, sections?, commitInfo?, generatedFiles?, baseBehindRemote? }`. `snapshotId` identifies this diff snapshot; the client echoes it on `/api/diff/fresh` probes (also returned by the switch/PR endpoints). `sections` is the since-base sidecar (Committed/Changes/Untracked partition); `commitInfo` is the commit-metadata sidecar (subject, markdown body, author + avatar) present only while a `commit:<sha>` diff is active; `generatedFiles` lists the repo-relative paths that count as generated, which the client collapses by default GitHub-style (presentation-only: the patch is never filtered). Two-layer detection (`packages/shared/generated-files.ts`, vendored to Pi): built-in name defaults (`DEFAULT_GENERATED_PATTERNS` — lockfiles like `bun.lock`/`package-lock.json`/`Cargo.lock`, plus `*.min.js`/`*.min.css`/`*.map`, matched against the path's last segment) apply in every mode with no git needed, and explicit `.gitattributes` `linguist-generated` refines them in BOTH directions via one batched `git check-attr --stdin` at the review cwd (set/true marks any file, unset/false un-marks even a built-in name, unspecified keeps the default). Attribute refinement runs for plain local Git sessions only — PR worktrees, workspace, jj, GitButler, P4, and piped patches get the name-based defaults alone; `baseBehindRemote` flags that the diff base is behind its remote tip. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
+| `/api/diff`           | GET    | Returns `{ rawPatch, gitRef, snapshotId, origin, mode?, diffType, base, hideWhitespace, gitContext, agentCwd?, approvalNotesSupported, semanticDiff?, callFlow?, sections?, commitInfo?, generatedFiles?, baseBehindRemote? }`. `snapshotId` identifies this diff snapshot; the client echoes it on `/api/diff/fresh` probes (also returned by the switch/PR endpoints). `approvalNotesSupported` is the approve-with-notes capability advert (echoed on `/api/diff/switch`, `/api/pr-diff-scope`, and `/api/pr-switch` too, so it survives a diff switch); absent reads as false. `sections` is the since-base sidecar (Committed/Changes/Untracked partition); `commitInfo` is the commit-metadata sidecar (subject, markdown body, author + avatar) present only while a `commit:<sha>` diff is active; `generatedFiles` lists the repo-relative paths that count as generated, which the client collapses by default GitHub-style (presentation-only: the patch is never filtered). Two-layer detection (`packages/shared/generated-files.ts`, vendored to Pi): built-in name defaults (`DEFAULT_GENERATED_PATTERNS` — lockfiles like `bun.lock`/`package-lock.json`/`Cargo.lock`, plus `*.min.js`/`*.min.css`/`*.map`, matched against the path's last segment) apply in every mode with no git needed, and explicit `.gitattributes` `linguist-generated` refines them in BOTH directions via one batched `git check-attr --stdin` at the review cwd (set/true marks any file, unset/false un-marks even a built-in name, unspecified keeps the default). Attribute refinement runs for plain local Git sessions only — PR worktrees, workspace, jj, GitButler, P4, and piped patches get the name-based defaults alone; `baseBehindRemote` flags that the diff base is behind its remote tip. Workspace mode returns `mode: "workspace"` with folder-prefixed paths and no `gitContext`. |
 | `/api/diff/switch`    | POST   | Switch diff type, base branch, or whitespace mode (body: `{ diffType, base?, hideWhitespace?, explicitBase? }` — `diffType` includes the `commit:<sha>` family). `explicitBase: true` marks a base the user picked from the picker — the server then honors it verbatim and permanently disables the bare-local-name → `origin/*` canonicalization for the session (echoed bases stay canonicalizable). Response includes `semanticDiff?`, `callFlow?`, `sections?`, `commitInfo?`, `generatedFiles?`, `baseBehindRemote?`, or `{ superseded: true }` when a newer concurrent switch has taken over (client ignores it). |
 | `/api/commits`        | GET    | One page of the branch's linear `--first-parent` history for the Commits panel (`?limit=&before=`) → `{ commits, hasMore, base }`. Rows carry `isHead` / `isPastBase` (where the branch meets the active base) and best-effort author `avatarUrl`. Plain local git sessions only (PR/workspace/GitButler/jj/p4 → 400); computed against the active diff's cwd, so worktree sessions list the worktree's history. |
 | `/api/diff/fresh`     | GET    | Cheap staleness probe: recomputes the VCS fingerprint captured with the current diff snapshot and returns `{ fresh, fingerprint?, baseBehindRemote?, agentCwd? }`. Accepts `?snapshot=<id>` — the client echoes the `snapshotId` it received with its diff, and a mismatch with the server's current snapshot reports stale PER CLIENT (covers the startup base upgrade and cross-tab switches even when the VCS fingerprint matches). `baseBehindRemote` is carried on every response (omitting it would flicker the "behind GitHub" banner); `agentCwd` re-advertises the PR checkout in PR mode. Unfingerprintable modes (e.g. P4) always report fresh to a matching snapshot. Polled by the UI's "Diff out of date · Refresh" notice. |
@@ -777,7 +876,7 @@ Docs: `apps/marketing/src/content/docs/reference/webmcp-tools.md` (the user-faci
 The shortcut system has three layers:
 
 1. **Engine** (`packages/ui/shortcuts/{core,runtime}.ts`) — parser for declarative bindings (`Mod+Enter`, `Alt Alt` double-tap, `Alt hold`), dispatcher, platform-aware formatter (mac glyphs vs. `Ctrl`), validator, and the `useShortcutScope` / `useDoubleTapShortcuts` React hooks. Truly shared — both apps use it as-is.
-2. **Scopes** — `defineShortcutScope({ id, title, shortcuts: { actionId: { bindings, description, section, ... } } })`. One scope per UI surface (annotation toolbar, comment popover, file tree, etc.). App-specific scopes live in `packages/ui/shortcuts/{plan-review,code-review}/` — **the subfolder names which app's UI the scope serves** — while genuinely cross-app scopes such as `history.shortcuts.ts` live at the shortcuts root. Components/Apps wire handlers to a scope via `useShortcutScope({ scope, handlers: { actionId: () => ... } })`.
+2. **Scopes** — `defineShortcutScope({ id, title, shortcuts: { actionId: { bindings, description, section, ... } } })`. One scope per UI surface (annotation toolbar, comment popover, file tree, etc.). App-specific scopes live in `packages/ui/shortcuts/{plan-review,code-review}/` — **the subfolder names which app's UI the scope serves** — while genuinely cross-app scopes such as `history.shortcuts.ts` and `decisionControl.shortcuts.ts` (the header decision control's note-composer chords, mounted identically by both apps) live at the shortcuts root. Components/Apps wire handlers to a scope via `useShortcutScope({ scope, handlers: { actionId: () => ... } })`.
 3. **Surfaces** (`packages/editor/shortcuts.ts`, `packages/review-editor/shortcuts.ts`) — each app composes its scopes into a `ShortcutSurface` (`planReviewSurface`, `annotateSurface`, `codeReviewSurface`). Surfaces feed both the in-app help modal and the marketing site's auto-generated docs page.
 
 **Convention for adding new shortcuts:** define the action in the relevant app-specific subfolder (`plan-review/` or `code-review/`), or at the shortcuts root when both apps share the same action and semantics. Declare the binding(s) and description, then wire a handler at the call site with `useShortcutScope`. The marketing docs page picks it up automatically at next build. Unit tests in `packages/ui/shortcuts.test.ts` enforce normalized binding tokens (`Mod`, `Shift`, `Alt`, `A-Z`, `1-0`, named keys, `F1`–`F12`) and unique scope ids.

@@ -7,7 +7,7 @@
 # What it does:
 #   1. Builds the review app (ensures latest code)
 #   2. Runs the review server with opencode origin
-#   3. Opens browser for you to test the UI (should show "OpenCode" badge + "Send Feedback" button)
+#   3. Opens browser for you to test the UI (should show "OpenCode" badge + the header decision control)
 #   4. Prints the result (feedback)
 
 set -e
@@ -28,7 +28,8 @@ echo "Starting review server with OpenCode origin..."
 echo "Browser should open automatically."
 echo "You should see:"
 echo "  - 'OpenCode' badge in header"
-echo "  - 'Send Feedback' button (instead of 'Copy Feedback')"
+echo "  - The header decision control (not 'Copy Feedback'): 'Approve' at zero"
+echo "    annotations, 'Send Feedback · n' once you annotate"
 echo ""
 
 # Run the test server

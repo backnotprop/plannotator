@@ -181,6 +181,17 @@ export interface ReviewServerOptions {
   initialFingerprint?: string;
   /** Whether URL sharing is enabled (default: true) */
   sharingEnabled?: boolean;
+  /**
+   * Whether this session's decision consumer delivers approve-time feedback
+   * (decision-control spec §6.4). Echoed as `approvalNotesSupported` on every
+   * diff payload (`/api/diff`, `/api/diff/switch`, `/api/pr-diff-scope`,
+   * `/api/pr-switch`) so the advert survives a diff switch; the client gates
+   * its approve-carrying menu items on it. Default false — a caller that does
+   * not pass it (an older consumer whose approved branch still discards
+   * `result.feedback`) advertises "not capable" and the client renders no
+   * approve-carrying items, exactly the pre-PR5 behavior.
+   */
+  approvalNotesSupported?: boolean;
   /** Custom base URL for share links (default: https://share.plannotator.ai) */
   shareBaseUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
@@ -247,6 +258,9 @@ export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
   const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
+  // Session-constant capability advert; rides every diff payload (see the
+  // option's doc). Absent option = false, so old callers advertise honestly.
+  const approvalNotesSupported = options.approvalNotesSupported === true;
   const submitPlatformReview = options.prReviewSubmitter ?? submitPRReview;
   const aiEnabled = resolveAIEnabled();
 
@@ -2044,6 +2058,7 @@ export async function startReviewServer(
               ...(workspace && { diffOptions: workspace.diffOptions }),
               gitContext: hasLocalAccess ? servedGitContext : undefined,
               sharingEnabled,
+              approvalNotesSupported,
               shareBaseUrl,
               repoInfo,
               isWSL: wslFlag,
@@ -2400,6 +2415,7 @@ export async function startReviewServer(
                   aiReviewContext: buildCurrentAiReviewContext(snapshot.rawPatch),
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
+                  approvalNotesSupported,
                   diffType: currentDiffType,
                   diffOptions: workspace.diffOptions,
                   hideWhitespace: currentHideWhitespace,
@@ -2528,6 +2544,7 @@ export async function startReviewServer(
                 aiReviewContext: buildCurrentAiReviewContext(result.patch, currentBase),
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
+                approvalNotesSupported,
                 diffType: currentDiffType,
                 // Echo the base the server actually used. resolveBaseBranch
                 // trusts the caller verbatim; this echo lets the client
@@ -2577,6 +2594,7 @@ export async function startReviewServer(
                   aiReviewContext: buildCurrentAiReviewContext(),
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
+                  approvalNotesSupported,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
                   ...(currentError && { error: currentError }),
@@ -2633,6 +2651,7 @@ export async function startReviewServer(
                   aiReviewContext: buildCurrentAiReviewContext(),
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
+                  approvalNotesSupported,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
                   ...((currentError ?? upgradeError) && { error: currentError ?? upgradeError }),
@@ -2680,6 +2699,7 @@ export async function startReviewServer(
                 aiReviewContext: buildCurrentAiReviewContext(),
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
+                approvalNotesSupported,
                 prDiffScope: currentPRDiffScope,
                 semanticDiff: await getSemanticDiffAdvert(),
                 callFlow: await getCallFlowAdvert(),
@@ -2808,6 +2828,7 @@ export async function startReviewServer(
                 aiReviewContext: buildCurrentAiReviewContext(),
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
+                approvalNotesSupported,
                 prMetadata: pr.metadata,
                 // The new PR's checkout (null while warming) so Open-in re-roots
                 // immediately on switch instead of waiting for the 5s probe.

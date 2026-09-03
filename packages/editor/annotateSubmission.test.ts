@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { AnnotationType, type Annotation, type CodeAnnotation, type EditorAnnotation } from "@plannotator/ui/types";
 import { parseMarkdownToBlocks, type LinkedDocAnnotationEntry } from "@plannotator/ui/utils/parser";
 import {
+  ANNOTATE_NO_FEEDBACK_SENTENCE,
   buildAnnotateApprovalBody,
   buildCompleteAnnotateFeedback,
-  getAnnotateApprovalPolicy,
 } from "./annotateSubmission";
 
 describe("annotate approval submission", () => {
@@ -51,43 +51,6 @@ describe("annotate approval submission", () => {
       ...input,
       selectedMessageId: "message-2",
     })).toEqual({ draftGeneration: 4 });
-  });
-
-  test("labels capable feedback approvals and requires a non-blocking confirmation", () => {
-    expect(getAnnotateApprovalPolicy({
-      gate: true,
-      approvalNotesSupported: true,
-      hasFeedback: true,
-    })).toEqual({
-      label: "Approve with Notes",
-      title: "Approve with Notes — send notes as non-blocking guidance",
-      confirmation: {
-        title: "Approve with Notes?",
-        message: "This approves the artifact, sends your notes as non-blocking guidance, and closes the gate. Unlike Send Feedback, it does not request changes.",
-        confirmText: "Approve with Notes",
-      },
-    });
-  });
-
-  test("keeps ordinary approval presentation when notes are absent or unsupported", () => {
-    expect(getAnnotateApprovalPolicy({
-      gate: true,
-      approvalNotesSupported: true,
-      hasFeedback: false,
-    })).toEqual({
-      label: "Approve",
-      title: "Approve — no changes requested",
-      confirmation: null,
-    });
-    expect(getAnnotateApprovalPolicy({
-      gate: true,
-      approvalNotesSupported: false,
-      hasFeedback: true,
-    })).toEqual({
-      label: "Approve",
-      title: "Approve — no changes requested",
-      confirmation: null,
-    });
   });
 
   test("composes every annotate feedback source into approval notes", () => {
@@ -266,5 +229,52 @@ describe("annotate approval submission", () => {
     });
 
     expect(feedback).toContain("(line 5) ");
+  });
+
+  // Guards the framing machinery the discard path still rides: a framed
+  // payload prefixes the zero-state sentence, an unframed one never does, and
+  // at zero content the frame is idempotent (the discard body stays
+  // byte-identical to the legacy zero payload).
+  test("approval framing prefixes the zero-state sentence before the note", () => {
+    const note: Annotation = {
+      id: "global-note-1",
+      blockId: "",
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.GLOBAL_COMMENT,
+      text: "watch the migration",
+      originalText: "",
+      createdA: 1,
+    };
+    const base = {
+      blocks: [],
+      annotations: [note],
+      globalAttachments: [],
+      linkedDocuments: new Map<string, LinkedDocAnnotationEntry>(),
+      editorAnnotations: [] as EditorAnnotation[],
+      codeAnnotations: [] as CodeAnnotation[],
+      title: "File Feedback",
+      subject: "file",
+      sourceConverted: false,
+      directEditsSection: "",
+      savedFileChangesSection: "",
+    };
+
+    const changeRequest = buildCompleteAnnotateFeedback(base);
+    const approval = buildCompleteAnnotateFeedback({ ...base, approvalFraming: true });
+
+    expect(changeRequest).toContain("watch the migration");
+    expect(changeRequest.startsWith(ANNOTATE_NO_FEEDBACK_SENTENCE)).toBe(false);
+    expect(approval.startsWith(ANNOTATE_NO_FEEDBACK_SENTENCE)).toBe(true);
+    expect(approval).toContain("watch the migration");
+
+    // Idempotent at zero: the discard path (no annotations + framing) emits
+    // the sentence exactly once — byte-identical to the legacy zero payload.
+    const discard = buildCompleteAnnotateFeedback({
+      ...base,
+      annotations: [],
+      approvalFraming: true,
+    });
+    expect(discard).toBe(ANNOTATE_NO_FEEDBACK_SENTENCE);
   });
 });

@@ -618,6 +618,10 @@ async function createCodeReviewBrowserSession(
 		worktreePool,
 		htmlContent: reviewHtmlContent,
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
+		// Pi's review consumer (index.ts) sends approve-time feedback after the
+		// approved prompt, so the advert is unconditional — same shape as the
+		// annotate session's advert below (spec §6.4).
+		approvalNotesSupported: true,
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 		onCleanup: worktreeCleanup,

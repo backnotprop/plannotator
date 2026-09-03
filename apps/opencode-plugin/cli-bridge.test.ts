@@ -13,7 +13,7 @@ import {
   getRecentAssistantMessages,
   injectSessionPrompt,
 } from "./cli-bridge";
-import { getReviewApprovedPrompt, getReviewDeniedSuffix } from "@plannotator/shared/prompts";
+import { composeReviewApprovedMessage, getReviewApprovedPrompt, getReviewDeniedSuffix } from "@plannotator/shared/prompts";
 import { OpenCodePromptDeliveryError } from "./prompt-delivery-error";
 
 describe("OpenCode CLI bridge helpers", () => {
@@ -237,6 +237,20 @@ describe("OpenCode CLI bridge helpers", () => {
     });
     expect(approved.agent).toBe("build");
     expect(approved.message).toBe(getReviewApprovedPrompt("opencode"));
+
+    // PR5 delivery (spec §6.4, consumer #3): an approval carrying feedback
+    // must route through the shared approved-with-notes composer — this
+    // bridge previously discarded it even though the CLI's JSON record always
+    // included it. The framing itself is pinned in prompts.test.ts; here we
+    // guard the wiring: the note is delivered, inside the composed message.
+    const note = "Approved — rename the flag in a follow-up.";
+    const approvedWithNotes = buildReviewPromptFromBridgeOutcome({
+      decision: "approved",
+      approved: true,
+      feedback: note,
+    });
+    expect(approvedWithNotes.message).toBe(composeReviewApprovedMessage("opencode", note));
+    expect(approvedWithNotes.message).toContain(note);
 
     const localFeedback = buildReviewPromptFromBridgeOutcome({
       decision: "annotated",

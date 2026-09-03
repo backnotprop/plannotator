@@ -18,8 +18,8 @@ import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
+  composeReviewApprovedMessage,
   getAnnotateApprovedWithNotesPrompt,
-  getReviewApprovedPrompt,
   getReviewDeniedSuffix,
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
@@ -148,6 +148,9 @@ export async function handleReviewCommand(
     }
   }
 
+  // @ts-ignore - Event properties contain sessionID
+  const sessionId = event.properties?.sessionID;
+
   const server = await startReviewServer({
     rawPatch,
     gitRef,
@@ -162,6 +165,9 @@ export async function handleReviewCommand(
     agentCwd,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
+    // Approve-time notes are delivered below only when there is a session to
+    // prompt into — same per-session gating as the annotate command's advert.
+    approvalNotesSupported: Boolean(sessionId),
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
     onReady: (url, isRemote, port) => {
@@ -178,10 +184,11 @@ export async function handleReviewCommand(
     return;
   }
 
-  if (result.feedback) {
-    // @ts-ignore - Event properties contain sessionID
-    const sessionId = event.properties?.sessionID;
-
+  // An approval must be delivered even with an empty feedback string: the
+  // old feedback-only gate rode on the removed LGTM placeholder making
+  // `feedback` truthy on every approval — with the placeholder gone (PR5,
+  // spec §6.4), gating on feedback alone would silently drop bare approvals.
+  if (result.feedback || result.approved) {
     if (sessionId) {
       const targetAgent = await resolveValidatedTargetAgent({
         client,
@@ -192,8 +199,9 @@ export async function handleReviewCommand(
       // Append the verification-only suffix when the reviewer sent annotations to
       // act on (PR mode included). Platform PR actions post a status message
       // with no annotations — those go through verbatim, no suffix.
+      // Approvals carry the reviewer's approve-time notes after the prompt.
       const message = result.approved
-        ? getReviewApprovedPrompt("opencode")
+        ? composeReviewApprovedMessage("opencode", result.feedback)
         : result.annotations.length > 0
           ? `${result.feedback}${getReviewDeniedSuffix("opencode")}`
           : result.feedback;

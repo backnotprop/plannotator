@@ -156,6 +156,12 @@ export interface FeedbackAnnotationRecord {
   lineStart?: number;
   lineEnd?: number;
   side?: string;
+  /** Code-annotation scope ("general" | "file" | "line"). Absent means a
+   *  line comment (the pre-scope default) — recorded so a review-level
+   *  general comment stays distinguishable from a line comment in the index
+   *  (maintainer ruling on open question 2; additive per the field contract
+   *  above). */
+  scope?: string;
   blockId?: string;
   diffContext?: string;
   severity?: string;
@@ -280,6 +286,8 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (lineEnd !== undefined) record.lineEnd = lineEnd;
   const side = asString(a.side);
   if (side) record.side = side;
+  const scope = asString(a.scope);
+  if (scope) record.scope = scope;
   const blockId = asString(a.blockId);
   if (blockId) record.blockId = blockId;
   const diffContext = asString(a.diffContext);

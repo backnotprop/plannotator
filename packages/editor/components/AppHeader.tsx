@@ -4,6 +4,8 @@ import type { Agent } from '@plannotator/ui/hooks/useAgents';
 import type { UpdateInfo } from '@plannotator/ui/hooks/useUpdateCheck';
 import { FeedbackButton, ApproveButton, ExitButton } from '@plannotator/ui/components/ToolbarButtons';
 import { ApproveDropdown } from '@plannotator/ui/components/ApproveDropdown';
+import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
+import type { DecisionActionId, DecisionSpec } from '@plannotator/ui/utils/decisionSpec';
 import { Settings } from '@plannotator/ui/components/Settings';
 import { PlanHeaderMenu } from '@plannotator/ui/components/PlanHeaderMenu';
 import type { CallbackConfig } from '@plannotator/ui/utils/callback';
@@ -54,7 +56,6 @@ interface AppHeaderProps {
   goalSetupCanSubmit: boolean;
   goalSetupIsSubmitting: boolean;
   goalSetupSubmitLabel: string;
-  gate: boolean;
   isSharedSession: boolean;
   origin: Origin | null;
 
@@ -65,7 +66,6 @@ interface AppHeaderProps {
   aiAvailable: boolean;
   isAIChatOpen: boolean;
   aiHasMessages: boolean;
-  hasAnyAnnotations: boolean;
   annotationCount: number;
   linkedDocIsActive: boolean;
   callbackShareUrlReady: boolean;
@@ -73,8 +73,17 @@ interface AppHeaderProps {
   agentName: string;
   availableAgents: Agent[];
   showAnnotationsWarning: boolean;
-  annotateApproveLabel: string;
-  annotateApproveTitle: string;
+  /** The unified annotate decision control (spec + handlers + close title).
+   *  App owns the spec derivation and every handler; the header only mounts
+   *  the control beside the ghost Close. Absent outside annotate mode. */
+  annotateDecision?: {
+    spec: DecisionSpec;
+    handlers: Record<DecisionActionId, DecisionHandler>;
+    closeTitle: string;
+    /** Framed surfaces (raw-HTML srcdoc / live-app proxy): iframe focus
+     *  dismisses the popover since clicks never reach the parent document. */
+    dismissOnIframeFocus?: boolean;
+  };
 
   // Callback config (null when no bot callback)
   callbackConfig: CallbackConfig | null;
@@ -98,8 +107,6 @@ interface AppHeaderProps {
   onAnnotateExit: () => void;
   onGoalSetupExit: () => void;
   onGoalSetupSubmit: () => void;
-  onAnnotateFeedback: () => void;
-  onAnnotateApprove: () => void;
   onFeedback: () => void;
   onApprove: () => void;
   onAnnotationPanelToggle: () => void;
@@ -155,7 +162,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   goalSetupCanSubmit,
   goalSetupIsSubmitting,
   goalSetupSubmitLabel,
-  gate,
   isSharedSession,
   origin,
   isSubmitting,
@@ -164,7 +170,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   aiAvailable,
   isAIChatOpen,
   aiHasMessages,
-  hasAnyAnnotations,
   annotationCount,
   linkedDocIsActive,
   callbackShareUrlReady,
@@ -172,8 +177,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   agentName,
   availableAgents,
   showAnnotationsWarning,
-  annotateApproveLabel,
-  annotateApproveTitle,
+  annotateDecision,
   callbackConfig,
   taterMode,
   mobileSettingsOpen,
@@ -186,8 +190,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   onAnnotateExit,
   onGoalSetupExit,
   onGoalSetupSubmit,
-  onAnnotateFeedback,
-  onAnnotateApprove,
   onFeedback,
   onApprove,
   onAnnotationPanelToggle,
@@ -314,17 +316,19 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             {annotateMode ? (
               <>
                 <ExitButton
+                  appearance="ghost"
                   onClick={onAnnotateExit}
                   disabled={isSubmitting || isExiting}
                   isLoading={isExiting}
+                  title={annotateDecision?.closeTitle}
                 />
-                {hasAnyAnnotations && (
-                  <FeedbackButton
-                    onClick={onAnnotateFeedback}
-                    disabled={isSubmitting || isExiting}
+                {annotateDecision && (
+                  <DecisionControl
+                    spec={annotateDecision.spec}
+                    handlers={annotateDecision.handlers}
+                    busy={isSubmitting || isExiting}
                     isLoading={isSubmitting}
-                    label="Send Feedback"
-                    title="Send Feedback"
+                    dismissOnIframeFocus={annotateDecision.dismissOnIframeFocus}
                   />
                 )}
               </>
@@ -338,8 +342,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
               />
             )}
 
-            {(!annotateMode || gate) && (
-              origin === 'opencode' && !annotateMode && availableAgents.length > 0 ? (
+            {!annotateMode && (
+              origin === 'opencode' && availableAgents.length > 0 ? (
                 <ApproveDropdown
                   onApprove={onApprove}
                   agents={availableAgents}
@@ -350,14 +354,11 @@ export const AppHeader = React.memo<AppHeaderProps>(({
                 <div className="relative group/approve">
                   <ApproveButton
                     onClick={onApprove}
-                    disabled={isSubmitting || (annotateMode && isExiting)}
+                    disabled={isSubmitting}
                     isLoading={isSubmitting}
-                    dimmed={!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning}
-                    label={annotateMode ? annotateApproveLabel : undefined}
-                    mobileLabel={annotateMode ? annotateApproveLabel : undefined}
-                    title={annotateMode ? annotateApproveTitle : undefined}
+                    dimmed={(origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning}
                   />
-                  {!annotateMode && (origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning && (
+                  {(origin === 'claude-code' || origin === 'gemini-cli') && showAnnotationsWarning && (
                     <div className="absolute top-full right-0 mt-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl text-xs text-foreground w-56 text-center opacity-0 invisible group-hover/approve:opacity-100 group-hover/approve:visible transition-all pointer-events-none z-50">
                       <div className="absolute bottom-full right-4 border-4 border-transparent border-b-border" />
                       <div className="absolute bottom-full right-4 mt-px border-4 border-transparent border-b-popover" />

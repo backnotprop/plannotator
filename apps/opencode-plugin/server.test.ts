@@ -401,6 +401,8 @@ describe("V2 plan review URL delivery", () => {
       sessionID: "session-1",
       description: formatSessionUrlNotice(SESSION_URL),
       resume: false,
+      // #1459: queue delivery keeps the notice out of steer-scoped promotion.
+      delivery: "queue",
     });
   });
 
