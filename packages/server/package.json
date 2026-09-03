@@ -35,7 +35,7 @@
     "*.mjs"
   ],
   "dependencies": {
-    "@pierre/diffs": "1.3.2",
+    "@pierre/diffs": "1.3.6",
     "@plannotator/ai": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/webtui": "0.1.0",
