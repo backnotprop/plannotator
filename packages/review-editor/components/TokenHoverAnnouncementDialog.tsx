@@ -60,34 +60,34 @@ const TRIGGER_COPY: Record<TokenHoverTrigger, { label: string; description: stri
  * fixture and assert the dialog's subtree is byte-identical to it. That is
  * what pins "the example is the real card", rather than a copy of its markup.
  */
+/** The symbol the try-it demonstrates. Named in the prompt line too. */
+const EXAMPLE_SYMBOL = 'withRetry';
+
 export const EXAMPLE_HOVER: CodeNavHoverResponse = {
   backend: 'search',
   source: 'search',
-  symbol: 'charge',
+  symbol: EXAMPLE_SYMBOL,
   definition: {
-    filePath: 'src/billing/charge.ts',
-    line: 18,
+    filePath: 'src/lib/retry.ts',
+    line: 24,
     column: 22,
     confidence: 'likely',
     symbolKind: 'function',
-    signature: 'export async function charge(amount) {',
+    signature: 'export async function withRetry(fn, attempts = 3) {',
     signatureApproximate: true,
-    doc: 'Charges the card on file and returns the settled receipt.',
+    doc: 'Runs fn, retrying with exponential backoff until attempts runs out.',
     preview: null,
     otherCandidateCount: 0,
   },
   alternateDefinition: null,
   references: [
     { filePath: 'src/checkout/order.ts', line: 42, column: 24 },
-    { filePath: 'src/billing/retry.ts', line: 114, column: 11 },
+    { filePath: 'src/billing/settle.ts', line: 88, column: 11 },
   ],
   referenceCount: 7,
   capped: false,
   stats: { elapsedMs: 18 },
 };
-
-/** The symbol the try-it demonstrates. Named in the prompt line too. */
-const EXAMPLE_SYMBOL = 'withRetry';
 
 /**
  * The try-it's request, shaped exactly like one the diff pane would build.
@@ -164,7 +164,10 @@ function HoverCardTryIt({
         <div className="flex gap-3 bg-success/10 px-3">
           <span className="w-5 shrink-0 select-none text-right text-success/60">42</span>
           <span className="truncate text-foreground">
-            <span className="text-primary/70">const</span> receipt = <span className="text-primary/70">await</span>{' '}
+            {/* The token leads the line on purpose: the card anchors at its
+                left edge and is 400px wide, so a token sitting mid-line would
+                open the card across the radio column beside it. */}
+            <span className="text-primary/70">await</span>{' '}
             <span
               ref={tokenRef}
               data-token-hover-example-token
