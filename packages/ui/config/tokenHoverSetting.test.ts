@@ -79,14 +79,14 @@ describe('tokenHoverTrigger', () => {
 describe('tokenHoverDelay', () => {
   test('defaults to the dwell the feature shipped with', () => {
     installBackend();
-    expect(SETTINGS.tokenHoverDelay.defaultValue).toBe(350);
+    expect(SETTINGS.tokenHoverDelay.defaultValue).toBe(300);
     expect(SETTINGS.tokenHoverDelay.fromCookie()).toBeUndefined();
   });
 
   test('round-trips the three steps as numbers and rejects anything else', () => {
     const values = installBackend();
 
-    for (const delay of [200, 350, 700] as const) {
+    for (const delay of [150, 300, 700] as const) {
       SETTINGS.tokenHoverDelay.toCookie(delay);
       expect(values.get(DELAY_KEY)).toBe(String(delay));
       expect(SETTINGS.tokenHoverDelay.fromCookie()).toBe(delay);

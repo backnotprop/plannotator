@@ -145,10 +145,10 @@ export const TOKEN_HOVER_TRIGGER_OPTIONS = [
   { value: 'off' as const, label: 'Off' },
 ];
 /** SegmentedControl keys on strings, so the ms values ride as their digits. */
-export type TokenHoverDelayOption = '200' | '350' | '700';
+export type TokenHoverDelayOption = '150' | '300' | '700';
 export const TOKEN_HOVER_DELAY_OPTIONS = [
-  { value: '200' as const, label: 'Fast' },
-  { value: '350' as const, label: 'Default' },
+  { value: '150' as const, label: 'Fast' },
+  { value: '300' as const, label: 'Default' },
   { value: '700' as const, label: 'Relaxed' },
 ];
 export const OVERFLOW_OPTIONS = [

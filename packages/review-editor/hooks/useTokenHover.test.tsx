@@ -169,7 +169,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
 
-    await act(async () => { jest.advanceTimersByTime(349); });
+    await act(async () => { jest.advanceTimersByTime(299); });
     expect(pending).toHaveLength(0);
 
     await act(async () => { jest.advanceTimersByTime(2); });
@@ -190,7 +190,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('a new symbol supersedes and aborts the in-flight request', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(1);
 
     await act(async () => {
@@ -198,7 +198,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     });
     expect(pending[0].signal?.aborted).toBe(true);
 
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(2);
     expect(pending[1].request.symbol).toBe('withRetry');
   });
@@ -206,7 +206,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('the card survives the leave grace and entering it cancels the close', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
@@ -228,13 +228,13 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('a re-hover inside the cache spawns no second request', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
 
     await act(async () => latest!.onTokenHoverLeave());
     await act(async () => { jest.advanceTimersByTime(250); });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
 
     expect(pending).toHaveLength(1);
     expect(latest!.hover).not.toBeNull();
@@ -243,7 +243,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('an unavailable backend renders nothing', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse({
       backend: 'unavailable',
       definition: null,
@@ -257,7 +257,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('an answer with no definition and one reference renders nothing', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse({
       definition: null,
       references: [{ filePath: 'src/other.js', line: 4, column: 2, snippet: 'charge(1)' }],
@@ -275,14 +275,14 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     await mount();
     const tokenX = token();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, tokenX));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover!.data.symbol).toBe('charge');
 
     const neighbour = { ...REQUEST, symbol: 'withRetry' };
     await act(async () => latest!.onTokenHoverLeave());
     await act(async () => latest!.onTokenHoverEnter(neighbour, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(2);
 
     // Back onto the still-open card's token, then the neighbour answers.
@@ -302,13 +302,13 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     await mount();
     const tokenX = token();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, tokenX));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(1);
 
     await act(async () => latest!.onTokenHoverLeave());
     await act(async () => { jest.advanceTimersByTime(100); });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, tokenX));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
 
     expect(pending).toHaveLength(1);
     expect(pending[0].signal?.aborted).toBe(false);
@@ -321,7 +321,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('a below-threshold answer for another token closes the stale card', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
@@ -329,7 +329,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     await act(async () => {
       latest!.onTokenHoverEnter({ ...REQUEST, symbol: 'gateway' }, token());
     });
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(1, hoverResponse({
       symbol: 'gateway',
       definition: null,
@@ -348,7 +348,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     await mount();
     const recycled = token();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, recycled));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     recycled.remove();
     await settle(0, hoverResponse());
 
@@ -358,7 +358,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('scrolling inside the card leaves it open; scrolling the pane closes it', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
 
     // The signature block is a horizontal scroller: reading a long signature
@@ -386,7 +386,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     // cached answer must never be served across a refresh.
     await mount('snapshot-1');
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(pending).toHaveLength(1);
 
@@ -396,14 +396,14 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
     expect(latest!.hover).toBeNull();
 
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(2);
   });
 
   test('unmounting abandons the pending request', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(1);
 
     const current = root!;
@@ -416,7 +416,7 @@ describe.skipIf(!hasDom)('useTokenHover', () => {
   test('scrolling closes the card and abandons the pending request', async () => {
     await mount();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(1);
 
     await act(async () => {
@@ -448,7 +448,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
 
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(1);
     await settle(0, hoverResponse());
     expect(latest!.hover?.request.symbol).toBe('charge');
@@ -462,7 +462,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     expect(pending).toHaveLength(0);
 
     await modDown();
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
 
     expect(pending).toHaveLength(1);
   });
@@ -473,7 +473,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await act(async () => latest!.onTokenHoverLeave());
 
     await modDown();
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
 
     expect(pending).toHaveLength(0);
   });
@@ -482,7 +482,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await mount('snapshot-1', { mode: 'modifier' });
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
@@ -497,7 +497,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await mount('snapshot-1', { mode: 'modifier' });
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     await act(async () => latest!.onCardEnter());
 
@@ -542,7 +542,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await mount('snapshot-1', { mode: 'modifier' });
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
@@ -561,7 +561,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await mount('snapshot-1', { mode: 'modifier' });
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     await act(async () => latest!.onCardEnter());
 
@@ -572,7 +572,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     // A fresh card on another token, then a release.
     const second = { ...REQUEST, symbol: 'refund' };
     await act(async () => latest!.onTokenHoverEnter(second, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(1, hoverResponse({ symbol: 'refund' }));
     expect(latest!.hover).not.toBeNull();
 
@@ -588,7 +588,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await mount('snapshot-1', { mode: 'modifier' });
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
@@ -604,7 +604,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
   test('hover mode ignores the key entirely', async () => {
     await mount('snapshot-1', { mode: 'hover' });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
@@ -632,7 +632,7 @@ describe.skipIf(!hasDom)('useTokenHover References handoff', () => {
     await mount('snapshot-1', { mode: 'modifier' });
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
@@ -661,7 +661,7 @@ describe.skipIf(!hasDom)('useTokenHover References handoff', () => {
     await mount('snapshot-1', { mode: 'modifier' });
     await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(1);
 
     await act(async () => latest!.close());
@@ -677,10 +677,10 @@ describe.skipIf(!hasDom)('useTokenHover delay', () => {
     await mount('snapshot-1', { delayMs: 700 });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
 
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(0);
 
-    await act(async () => { jest.advanceTimersByTime(350); });
+    await act(async () => { jest.advanceTimersByTime(300); });
     expect(pending).toHaveLength(1);
   });
 });

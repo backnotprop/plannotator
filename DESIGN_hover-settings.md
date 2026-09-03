@@ -265,7 +265,7 @@ flag clears and the card closes.
 the mode is `modifier`. In `hover` mode the pipeline is byte-for-byte what
 #1461 shipped, plus a delay constant read from settings.
 
-**Delay.** `DWELL_MS` becomes the hook's `delayMs` option, defaulting to 350 so
+**Delay.** `DWELL_MS` becomes the hook's `delayMs` option, defaulting to 300 (matching VS Code, maintainer ruling; tiers respaced 150/300/700 to keep Fast perceptibly distinct) so
 every existing call site and test is unchanged. The leave grace, the cache
 size, the scroll cancel and the render threshold are untouched.
 
@@ -455,7 +455,7 @@ Per the repo's testing rules, each of these names a failure it catches.
    cannot be dismissed.
 3b. **A chord opens nothing and closes an open card**: Cmd+C with the pointer
    parked on a token must not pop a card mid-copy.
-4. **Delay feeds the dwell** (same suite): a 700 delay spawns nothing at 350.
+4. **Delay feeds the dwell** (same suite): a 700 delay spawns nothing at 300.
    Catches the constant being left hardcoded.
 5. **Legacy cookie migration** (new `tokenHoverSetting.test.ts`, pure lane):
    `plannotator-token-hover-cards=false` resolves to `off`; `true` and absent

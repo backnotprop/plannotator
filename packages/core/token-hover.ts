@@ -49,20 +49,20 @@ export function isTokenHoverTrigger(value: unknown): value is TokenHoverTrigger 
  * than a slider: the perceptible granularity here is around 150ms, so offering
  * finer precision would imply a difference nobody can feel.
  */
-export type TokenHoverDelay = 200 | 350 | 700;
+export type TokenHoverDelay = 150 | 300 | 700;
 
 /** The dwell #1461 shipped, and still the default. */
-export const DEFAULT_TOKEN_HOVER_DELAY_MS = 350 satisfies TokenHoverDelay;
+export const DEFAULT_TOKEN_HOVER_DELAY_MS = 300 satisfies TokenHoverDelay;
 
 /** Every delay, fastest first, in the order the Settings control presents them. */
 export const TOKEN_HOVER_DELAYS = [
-  200,
-  350,
+  150,
+  300,
   700,
 ] as const satisfies readonly TokenHoverDelay[];
 
 export function isTokenHoverDelay(value: unknown): value is TokenHoverDelay {
-  return value === 200 || value === 350 || value === 700;
+  return value === 150 || value === 300 || value === 700;
 }
 
 /**

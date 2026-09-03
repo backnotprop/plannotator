@@ -125,7 +125,7 @@ function meetsRenderThreshold(data: CodeNavHoverResponse): boolean {
  * @param snapshotId the active diff snapshot; a change flushes the cache so a
  *   refreshed diff can never serve positions from the diff before it.
  * @param options the user's trigger mode and dwell. Omitted means the shipped
- *   hover-at-350ms behavior.
+ *   hover-at-default-delay behavior.
  */
 export function useTokenHover(
   snapshotId?: string,
