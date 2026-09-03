@@ -206,7 +206,7 @@ export function TokenHoverAnnouncementDialog({
 
         <footer className="flex items-center justify-between gap-4 border-t border-border px-6 py-4">
           <p className="text-xs text-muted-foreground">
-            Change this anytime in Settings, under Review Display.
+            Change this anytime in Settings, in the Editor tab.
           </p>
           <button
             ref={primaryActionRef}

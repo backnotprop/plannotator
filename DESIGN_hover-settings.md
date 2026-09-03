@@ -334,7 +334,7 @@ Note under the group:
 > Cmd+click on a symbol still opens the References panel, whichever option you pick.
 
 Footer left:
-> Change this anytime in Settings, under Review Display.
+> Change this anytime in Settings, in the Editor tab.
 
 Footer button: `Done`
 
