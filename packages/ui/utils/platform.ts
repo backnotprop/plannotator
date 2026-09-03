@@ -14,4 +14,14 @@ export const submitHint = isMac ? '⌘↵' : 'Ctrl+Enter';
  * use `modKey` in key hints and shortcut chips.
  */
 export const modKeyWord = isMac ? 'Cmd' : 'Ctrl';
+/**
+ * The primary modifier's own `KeyboardEvent.key` name, for features that arm
+ * on the modifier being HELD rather than on a chord. Pair with `isModKeyHeld`:
+ * this identifies the key itself, that reads the held flag off any event.
+ */
+export const modEventKey = isMac ? 'Meta' : 'Control';
+/** Whether the primary modifier is down for this event, on this platform. */
+export function isModKeyHeld(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
+  return isMac ? event.metaKey : event.ctrlKey;
+}
 export const isWindows = typeof navigator !== 'undefined' && /^Win/.test(navigator.platform);

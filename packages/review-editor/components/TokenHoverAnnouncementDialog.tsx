@@ -43,8 +43,8 @@ const TRIGGER_COPY: Record<TokenHoverTrigger, { label: string; description: stri
     description: 'Rest the pointer on a symbol and the card appears. This is the default.',
   },
   modifier: {
-    label: 'While holding Alt (Option)',
-    description: 'Cards stay out of the way until you hold Alt. Nothing is searched while the key is up.',
+    label: `While holding ${modKeyWord}`,
+    description: `Cards stay out of the way until you hold ${modKeyWord}. Nothing is searched while the key is up.`,
   },
   off: {
     label: 'Off',
@@ -111,7 +111,7 @@ const EXAMPLE_REQUEST: CodeNavRequest = {
  * repository for a symbol they never asked about.
  *
  * The trigger and delay come from the LIVE setting, so flipping the radio to
- * "While holding Alt" makes the try-it behave that way immediately, and "Off"
+ * the hold-modifier option makes the try-it behave that way immediately, and "Off"
  * makes it do nothing, which is the honest preview of that choice.
  */
 function HoverCardTryIt({

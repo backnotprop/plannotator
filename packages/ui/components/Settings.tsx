@@ -134,10 +134,14 @@ export const DIFF_STYLE_OPTIONS = [
   { value: 'split' as const, label: 'Split' },
   { value: 'unified' as const, label: 'Unified' },
 ];
-/** "Hold Alt" reads the same on every platform, which is why Alt is the key. */
+/**
+ * The modifier gate is the platform's primary modifier: Cmd on macOS, Ctrl on
+ * Windows and Linux. Labeled through modKeyWord so the control names the key
+ * the reader actually has.
+ */
 export const TOKEN_HOVER_TRIGGER_OPTIONS = [
   { value: 'hover' as const, label: 'On hover' },
-  { value: 'modifier' as const, label: 'Hold Alt' },
+  { value: 'modifier' as const, label: `Hold ${modKeyWord}` },
   { value: 'off' as const, label: 'Off' },
 ];
 /** SegmentedControl keys on strings, so the ms values ride as their digits. */
@@ -519,8 +523,8 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
           the ids). One trigger select rather than a toggle plus a mode: `Off`
           is a value of the same question, so there is no unreachable
           enabled-but-off state to reason about. The delay stays a separate
-          axis because "too eager" is a complaint neither Hold Alt nor Off
-          answers. */}
+          axis because "too eager" is a complaint neither the hold-modifier option
+          nor Off answers. */}
       <div className="space-y-3">
         <div>
           <div className="text-sm font-medium">Hover cards</div>

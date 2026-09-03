@@ -15,6 +15,7 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { CodeNavHoverResponse, CodeNavRequest } from '@plannotator/shared/code-nav';
+import { isMac, modEventKey } from '@plannotator/ui/utils/platform';
 import {
   useTokenHover,
   type UseTokenHoverOptions,
@@ -87,16 +88,30 @@ async function mount(snapshotId?: string, options?: UseTokenHoverOptions): Promi
   });
 }
 
-/** Alt going down/up on the window, the way the browser reports it. */
-async function altDown(): Promise<void> {
+/**
+ * The gate's modifier going down/up on the window, the way the browser reports
+ * it. Platform-derived so the suite exercises the same key the product does on
+ * whatever machine it runs: Cmd on macOS, Ctrl on the Linux CI runner.
+ */
+const held = { metaKey: isMac, ctrlKey: !isMac };
+const released = { metaKey: false, ctrlKey: false };
+
+async function modDown(): Promise<void> {
   await act(async () => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: modEventKey, ...held }));
   });
 }
 
-async function altUp(): Promise<void> {
+async function modUp(): Promise<void> {
   await act(async () => {
-    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt', altKey: false }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: modEventKey, ...released }));
+  });
+}
+
+/** A chord (copy) while the modifier is held: a command, not a hover intent. */
+async function modChord(key: string, target: EventTarget = window): Promise<void> {
+  await act(async () => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, ...held, bubbles: true }));
   });
 }
 
@@ -430,7 +445,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
 
   test('holding the key first, then hovering, opens the card', async () => {
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
 
     await act(async () => { jest.advanceTimersByTime(350); });
@@ -446,7 +461,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     expect(pending).toHaveLength(0);
 
-    await altDown();
+    await modDown();
     await act(async () => { jest.advanceTimersByTime(350); });
 
     expect(pending).toHaveLength(1);
@@ -457,7 +472,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => latest!.onTokenHoverLeave());
 
-    await altDown();
+    await modDown();
     await act(async () => { jest.advanceTimersByTime(350); });
 
     expect(pending).toHaveLength(0);
@@ -465,13 +480,13 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
 
   test('releasing the key closes the card the way leaving does', async () => {
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => { jest.advanceTimersByTime(350); });
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
-    await altUp();
+    await modUp();
     // The same leave grace, so the card's own reference links stay reachable.
     expect(latest!.hover).not.toBeNull();
     await act(async () => { jest.advanceTimersByTime(250); });
@@ -480,36 +495,61 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
 
   test('releasing the key while reading the card does not yank it away', async () => {
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => { jest.advanceTimersByTime(350); });
     await settle(0, hoverResponse());
     await act(async () => latest!.onCardEnter());
 
-    await altUp();
+    await modUp();
     await act(async () => { jest.advanceTimersByTime(1000); });
 
     expect(latest!.hover).not.toBeNull();
   });
 
-  test('typing Alt chords in a comment box does not pop a card over the diff', async () => {
-    // Alt+Backspace and Alt+arrow are word-editing chords. The pointer is
-    // often parked over the diff while writing a comment, so arming on those
-    // would open cards mid-sentence.
+  test('modifier chords in a comment box do not pop a card over the diff', async () => {
+    // Cmd+C, Cmd+V, Cmd+A. The pointer is often parked over the diff while
+    // writing a comment, so arming on those would open cards mid-sentence.
     await mount('snapshot-1', { mode: 'modifier' });
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
 
     const textarea = document.createElement('textarea');
     document.body.appendChild(textarea);
-    await act(async () => {
-      textarea.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Backspace', altKey: true, bubbles: true }),
-      );
-    });
+    await modChord('c', textarea);
     await act(async () => { jest.advanceTimersByTime(1000); });
     textarea.remove();
 
     expect(pending).toHaveLength(0);
+  });
+
+  test('a copy chord with the pointer parked on a token opens nothing', async () => {
+    // The modifier that gates this feature is also the editing modifier, and
+    // the pointer is wherever it was left. Only the key ALONE is a request to
+    // be told about a symbol; Cmd+C is a command, and must not pop a card
+    // over the diff mid-copy.
+    await mount('snapshot-1', { mode: 'modifier' });
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+
+    await modDown();
+    await modChord('c');
+    await act(async () => { jest.advanceTimersByTime(5000); });
+
+    expect(pending).toHaveLength(0);
+    expect(latest!.hover).toBeNull();
+  });
+
+  test('a chord while a card is open takes the card with it', async () => {
+    await mount('snapshot-1', { mode: 'modifier' });
+    await modDown();
+    await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
+    await act(async () => { jest.advanceTimersByTime(350); });
+    await settle(0, hoverResponse());
+    expect(latest!.hover).not.toBeNull();
+
+    await modChord('c');
+    await act(async () => { jest.advanceTimersByTime(250); });
+
+    expect(latest!.hover).toBeNull();
   });
 
   test('a card closed while the pointer was inside it does not deafen the next release', async () => {
@@ -519,7 +559,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     // for the rest of the session and every later Alt release was ignored as
     // "they are reading the card", leaving cards stuck open.
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => { jest.advanceTimersByTime(350); });
     await settle(0, hoverResponse());
@@ -536,7 +576,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await settle(1, hoverResponse({ symbol: 'refund' }));
     expect(latest!.hover).not.toBeNull();
 
-    await altUp();
+    await modUp();
     await act(async () => { jest.advanceTimersByTime(250); });
 
     expect(latest!.hover).toBeNull();
@@ -546,7 +586,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     // Alt+Tab: the browser reports no keyup, so without the blur reset the key
     // reads as held forever and the mode silently becomes plain hover.
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => { jest.advanceTimersByTime(350); });
     await settle(0, hoverResponse());
@@ -568,7 +608,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
     await settle(0, hoverResponse());
     expect(latest!.hover).not.toBeNull();
 
-    await altUp();
+    await modUp();
     await act(async () => { jest.advanceTimersByTime(1000); });
 
     // No key listeners exist in this mode, so a stray keyup cannot close it.
@@ -590,7 +630,7 @@ describe.skipIf(!hasDom)('useTokenHover trigger mode', () => {
 describe.skipIf(!hasDom)('useTokenHover References handoff', () => {
   test('an open card is gone the moment References is invoked', async () => {
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => { jest.advanceTimersByTime(350); });
     await settle(0, hoverResponse());
@@ -606,7 +646,7 @@ describe.skipIf(!hasDom)('useTokenHover References handoff', () => {
     // Without this the request completes behind the panel and opens a card
     // over it, seconds after a click that meant "navigate, not explain".
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => { jest.advanceTimersByTime(200); });
 
@@ -619,7 +659,7 @@ describe.skipIf(!hasDom)('useTokenHover References handoff', () => {
 
   test('a click after the request launched abandons the in-flight answer', async () => {
     await mount('snapshot-1', { mode: 'modifier' });
-    await altDown();
+    await modDown();
     await act(async () => latest!.onTokenHoverEnter(REQUEST, token()));
     await act(async () => { jest.advanceTimersByTime(350); });
     expect(pending).toHaveLength(1);

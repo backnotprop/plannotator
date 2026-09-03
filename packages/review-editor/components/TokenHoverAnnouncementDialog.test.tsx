@@ -14,6 +14,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { configStore } from '@plannotator/ui/config';
 import { resetStorageBackend, setStorageBackend } from '@plannotator/ui/utils/storage';
+import { isMac, modEventKey } from '@plannotator/ui/utils/platform';
 import { EXAMPLE_HOVER, TokenHoverAnnouncementDialog } from './TokenHoverAnnouncementDialog';
 
 const hasDom = typeof document !== 'undefined';
@@ -126,8 +127,8 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
   });
 
   test('the try-it obeys the trigger the radio currently says', async () => {
-    // Choosing "While holding Alt" has to be feelable BEFORE committing to it,
-    // which is the reason the try-it reads the live setting instead of a prop.
+    // Choosing the hold-modifier option has to be feelable BEFORE committing
+    // to it, which is why the try-it reads the live setting, not a prop.
     jest.useFakeTimers();
     try {
       await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
@@ -141,9 +142,13 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
       await act(async () => { await Promise.resolve(); });
       expect(document.querySelector('[data-token-hover-card]')).toBeNull();
 
-      // Alt down, and the same rest opens it.
+      // Modifier down, and the same rest opens it.
       await act(async () => {
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true }));
+        window.dispatchEvent(new KeyboardEvent('keydown', {
+          key: modEventKey,
+          metaKey: isMac,
+          ctrlKey: !isMac,
+        }));
       });
       await act(async () => { jest.advanceTimersByTime(350); });
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });

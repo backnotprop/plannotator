@@ -14,15 +14,22 @@
  * How a hover card opens.
  *
  * - `hover`: rest the pointer on a symbol. The shipped default.
- * - `modifier`: only while Alt (Option) is held. With the key up nothing is
- *   armed and nothing reaches the wire.
+ * - `modifier`: only while the platform's primary modifier is held, Cmd on
+ *   macOS and Ctrl on Windows and Linux. With the key up nothing is armed and
+ *   nothing reaches the wire.
  * - `off`: the handlers are never wired, so there are no listeners, no
  *   requests and no card in the tree.
  *
- * Alt rather than Cmd/Ctrl because those already mean something on a token:
- * Cmd/Ctrl+hover paints the navigable-target affordance and Cmd/Ctrl+click
- * opens the References panel. Alt is also spelled the same on every platform,
- * so the label, the docs and the key check are all one thing.
+ * Cmd rather than Alt for two reasons. Alt is widely bound to push-to-talk
+ * dictation, so an Alt-held gate would open cards while the user is speaking.
+ * And Cmd+hover is already VS Code's "tell me about this symbol" gesture, so
+ * this rides muscle memory instead of competing with it: the navigable-target
+ * underline and the card appearing together under one held key is the
+ * composite gesture, not a collision. Cmd+click still supersedes the card,
+ * because every References invocation dismisses the hover surface first.
+ *
+ * The stored value stays `modifier`, deliberately: the setting names the shape
+ * of the gate, not which key fills it, so nothing had to migrate.
  */
 export type TokenHoverTrigger = "hover" | "modifier" | "off";
 

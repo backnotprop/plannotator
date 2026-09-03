@@ -92,7 +92,7 @@ comment card.
 | Value | Label | Meaning |
 |---|---|---|
 | `hover` (default) | On hover | Rest the pointer on a symbol; the card opens after the dwell. Today's behavior. |
-| `modifier` | While holding Alt (Option) | Cards only while Alt is held. With the key up, nothing is armed, nothing is requested, nothing opens. |
+| `modifier` | While holding Cmd (Ctrl on Windows and Linux) | Cards only while the primary modifier is held. With the key up, nothing is armed, nothing is requested, nothing opens. |
 | `off` | Off | No handlers, no listeners, no requests, no card. |
 
 This is one control, not a boolean plus an enum. A separate on/off toggle
@@ -101,30 +101,41 @@ mode: 'modifier'`) that has to be reasoned about at every read site, and it
 puts two controls where the user is answering one question. `off` is a value
 of the question, not a switch above it.
 
-**Why Alt and not Cmd (the interesting call).**
+**Why Cmd (Ctrl) and not Alt.** Ratified by the maintainer; this replaces an
+earlier Alt proposal.
 
-Cmd+hover is the closer analogue of VS Code, and Cmd is already how you get to
-the References panel, so Cmd+hover / Cmd+click would read as one coherent
-"navigation modifier". Rejected anyway, for two reasons:
+1. **Alt is spoken for, in a way that fires constantly.** Push-to-talk
+   dictation is very commonly bound to a held Alt. An Alt-gated card would open
+   every time the user starts speaking, with the pointer wherever they left it,
+   which is the exact failure this setting exists to prevent.
+2. **Cmd+hover is already the gesture.** It is what VS Code does for "tell me
+   about this symbol": the navigable-target underline plus a definition peek,
+   under one held key. Gating on Cmd rides that muscle memory instead of
+   inventing a competing one.
+3. **Alt-hold is taken inside Plannotator too.** The plan editor already binds
+   a held Alt to the temporary input-method switch
+   (`useInputMethodSwitch`, `inputMethod.shortcuts.ts`). One held key meaning
+   two different things across two surfaces is a worse story than reusing the
+   modifier that already means "tell me about this".
 
-1. **Cmd+hover already means something in our UI.** It paints `pn-token-nav`,
-   the "this is clickable" affordance that exists precisely to make a
-   deliberate Cmd+click legible. Layering a card on the same gesture means
-   every intentional Cmd+click is preceded by a card the reviewer did not want,
-   and the affordance and the card compete for the same 350ms.
-2. **Alt spells the same on every platform.** "Alt (Option)" is one label and
-   one key check (`event.altKey`). A Cmd option would be Cmd on macOS and Ctrl
-   elsewhere, so the label, the docs, the announcement, and the Settings row
-   all become platform-conditional to describe the same thing, and Ctrl+hover
-   carries the same `pn-token-nav` collision as Cmd.
+**The old anti-Cmd argument is moot.** It was that Cmd+hover already paints
+`pn-token-nav`, so a card on the same gesture would collide with the "this is
+clickable" affordance and precede every deliberate Cmd+click. Two things
+settled it:
 
-Alt also already means "same destination, quieter path" here (Alt+click is the
-References alias). Alt = "tell me about this", Cmd = "take me there" is a clean
-split, and neither steals the other's gesture.
+- The underline and the card appearing together under a held Cmd is not a
+  collision, it **is** the composite gesture, the same one VS Code ships.
+- `handleCodeNavRequest` now dismisses the hover surface on **every**
+  References invocation (§6), so a Cmd+click cleanly supersedes an open card
+  or a pending dwell instead of stacking with it.
 
-**Why the modifier is not itself a setting.** Offering "Alt or Cmd" is a third
-control whose only purpose is to let a user build the collision described
-above. VS Code makes exactly one modifier choice for exactly this reason.
+**Why the modifier is not itself a setting.** Offering "Cmd or Alt" is a third
+control that buys one keystroke of taste and doubles what every doc sentence
+has to describe. VS Code makes exactly one modifier choice for the same reason.
+
+**The stored value stays `modifier`.** The setting names the shape of the gate,
+not which key fills it, so the ruling changed labels and one key check and
+migrated nothing.
 
 ### 4.2 `tokenHoverDelay` — how long the dwell is
 
@@ -153,7 +164,8 @@ tuning a value whose perceptible granularity is roughly 150ms; nobody can tell
 say what the axis is for and stop.
 
 **Why the delay applies in both trigger modes.** It would be defensible to
-argue that holding Alt is already an expression of intent, so `modifier` mode
+argue that holding the modifier is already an expression of intent, so
+`modifier` mode
 should dwell less (or not at all). Rejected: a zero dwell in modifier mode
 fires one ripgrep per token swept while the key is down, and a *separate*
 implicit dwell for modifier mode is a hidden coupling that cannot be explained
@@ -171,7 +183,7 @@ unrelated rows.
 | **Click to open the card** | See §5. It has no free gesture. |
 | **A click-mode that overrides the References panel default** | Directly asked about in the brief. It replaces a shipped, documented contract (Cmd+click = References) with a per-browser preference, which means the answer to "what does Cmd+click do in Plannotator" stops being knowable. It also doubles the trigger matrix (3 hover modes x 2 click modes) for a destination the card already reaches: every location line on the card routes into the References panel. There is no user need it serves that the card does not already serve one click later. This is our `gotoLocation.*`. |
 | **A separate on/off boolean beside the mode** | Creates an unreachable state, adds a control, answers no new question. `off` is a mode. |
-| **A modifier chooser (Alt vs Cmd)** | Its only power is to build the Cmd collision described in §4.1. |
+| **A modifier chooser (Cmd vs Alt)** | One keystroke of taste, at the price of doubling every sentence that describes the gate. Alt is also the dictation key (§4.1). |
 | **`sticky` / leave-grace toggle** | The 250ms leave grace exists so the card's own reference links are reachable. A user who turns it off cannot click the card. It is a correctness constant, not a taste. |
 | **Placement (above/below)** | The card already flips when the viewport would clip it. Nothing left to choose. |
 | **Per-language or per-file-size gating** | Speculative. The render threshold (definition, or two or more references) already suppresses the thin answers this would target. |
@@ -187,7 +199,7 @@ pane. Each row is a gesture; the column is what already owns it.
 | Pointer down + drag | Text selection, and line-range selection in the diff gutter chain | No. A card-opening click has to be distinguished from the start of a drag, which means deferring to `mouseup` and comparing coordinates, and any threshold you pick is wrong for someone. |
 | Plain click (no drag) | `toolbarHostRef.handleTokenClick`: the annotation/selection toolbar host | No. Taking it means either annotating stops working from a token click, or the card and the toolbar both appear and fight for the same anchor rect. |
 | Cmd/Ctrl+click | References panel (shipped contract) | No, by rule. |
-| Alt+click | References panel (quiet alias, #1461) | Only by breaking the alias, and then Alt+hover and Alt+click would do different things with the same modifier, which is exactly the incoherence Alt was chosen to avoid. |
+| Alt+click | References panel (quiet alias, #1461) | Only by breaking the alias. Unrelated to the gate and deliberately left alone. |
 | Shift+click | Range selection extension in the surrounding text | No. |
 | Double click | Word selection (native) | No. |
 | Middle click | Paste on X11, new tab semantics elsewhere | Not usable. |
@@ -212,30 +224,42 @@ compiled into the portable guides.show viewer.
 at all. The hook never sees `off` in practice; the mode it sees is `hover` or
 `modifier`. That keeps the zero-footprint property of #1461 exactly as shipped.
 
+**Which key.** `isModKeyHeld` / `modEventKey` in `packages/ui/utils/platform.ts`:
+`metaKey` and `Meta` on macOS, `ctrlKey` and `Control` elsewhere. One helper
+pair, shared with the labels (`modKeyWord`), so the key the code checks and the
+key the copy names can never disagree.
+
 **Gate before the dwell.** In `modifier` mode `onTokenHoverEnter` checks the
-tracked Alt state and returns before arming any timer, setting any state, or
+tracked held state and returns before arming any timer, setting any state, or
 touching the cache. Holding nothing costs one boolean read.
 
-**Alt pressed while already hovering.** The pointer does not re-enter a token
-when a key goes down, so a gate that only reads the enter event would make the
-common gesture ("what is this? *holds Alt*") do nothing. The hook remembers the
-last token entered (request + element, one ref, written on every enter
-including gated ones) and runs the normal enter path when Alt goes down. Leave
-clears it.
+**Modifier pressed while already hovering.** The pointer does not re-enter a
+token when a key goes down, so a gate that only reads the enter event would
+make the common gesture ("what is this? *holds Cmd*") do nothing. The hook
+remembers the last token entered (request + element, one ref, written on every
+enter including gated ones) and runs the normal enter path when the key goes
+down. Leave clears it.
 
-**Alt released.** Release behaves the way pointer-leave behaves: it starts the
-same 250ms grace, so the card can still be reached. One exception: if the
+**Only the key ALONE arms.** The gate's modifier is also the editing modifier,
+so any other key going down while it is held (Cmd+C, Cmd+V, Cmd+S) disarms and
+takes an open card with it. Without this, a copy performed with the pointer
+parked over the diff pops a card mid-copy. This is cheap because the branch
+already exists: the keydown handler compares `event.key` to `modEventKey`.
+
+**Modifier released.** Release behaves the way pointer-leave behaves: it starts
+the same 250ms grace, so the card can still be reached. One exception: if the
 pointer is already inside the card when the key is released, the release is
 ignored, because otherwise the card vanishes out from under someone reading it.
 `onCardEnter`/`onCardLeave` already bracket that state; one ref records it.
 
-**Typing owns the key.** Alt is a text-editing chord (Alt+Backspace, Alt+arrow
-for word moves). A keydown whose target is an input, textarea, select or
-contenteditable never arms, because the pointer is often parked over the diff
-while a comment is being written and cards would pop mid-sentence.
+**Typing owns the key.** A keydown whose target is an input, textarea, select
+or contenteditable never arms, because the pointer is often parked over the
+diff while a comment is being written and cards would pop mid-sentence. This is
+belt and braces with the chord rule above.
 
-**Window blur.** Alt+Tab leaves the key state stale-held forever. On `blur` the
-held flag clears and the card closes.
+**Window blur.** On macOS the app switcher is the same key this gate arms on,
+so Cmd+Tab is now the COMMON way to leave with the key held. On `blur` the held
+flag clears and the card closes.
 
 **Listener cost.** The two key listeners and the blur listener exist only while
 the mode is `modifier`. In `hover` mode the pipeline is byte-for-byte what
@@ -323,8 +347,8 @@ radio currently says".
 its recording: a three-line strip of diff whose `withRetry` token is genuinely
 hoverable, with a prompt line inviting it. Resting the pointer there opens the
 **real** `TokenHoverCard` through the **real** `useTokenHover`, so the reviewer
-feels the actual dwell, the leave grace and the Alt gate before committing to a
-setting.
+feels the actual dwell, the leave grace and the modifier gate before
+committing to a setting.
 
 Nothing is redrawn. A forked copy of the card's markup, or a second copy of the
 dwell logic, would drift from the shipped surface the first time either changed
@@ -342,9 +366,10 @@ one definition (`tokenHoverStyles.ts`): the shadow-DOM form is serialized into
 Pierre's stylesheet as `.pn-token-hover`, the dialog applies the same
 declarations as a style object.
 
-**The try-it reads the LIVE setting**, not a prop: flipping the radio to "While
-holding Alt" makes the demo behave that way immediately, and "Off" makes it do
-nothing and closes any open card. That is the honest preview of each choice.
+**The try-it reads the LIVE setting**, not a prop: flipping the radio to the
+hold-modifier option makes the demo behave that way immediately (hold Cmd over
+the demo token and the demo card opens), and "Off" makes it do nothing and
+closes any open card. That is the honest preview of each choice.
 
 Because it is interactive it is **labeled rather than hidden**: the region
 carries `role="group"` and an `aria-label`, the visible prompt line carries the
@@ -374,7 +399,7 @@ Choice group label: `Show cards`
 Options:
 
 - `On hover` / `Rest the pointer on a symbol and the card appears. This is the default.`
-- `While holding Alt (Option)` / `Cards stay out of the way until you hold Alt. Nothing is searched while the key is up.`
+- `While holding {Cmd|Ctrl}` / `Cards stay out of the way until you hold {Cmd|Ctrl}. Nothing is searched while the key is up.`
 - `Off` / `No cards, no listeners, no searches.`
 
 Note under the group:
@@ -397,7 +422,7 @@ Footer button: `Done`
 replaced in place by:
 
 - Heading `Hover cards` with the same one-line explanation the toggle carried.
-- A `SegmentedControl` for the trigger: `On hover` / `Hold Alt` / `Off`.
+- A `SegmentedControl` for the trigger: `On hover` / `Hold {Cmd|Ctrl}` / `Off`.
 - A `SegmentedControl` for the delay: `Fast` / `Default` / `Relaxed`, disabled
   when the trigger is `Off`.
 
@@ -405,7 +430,8 @@ Two rows, one section, same place in the tab.
 
 ## 9. What is deliberately not changing
 
-- Cmd/Ctrl+click and Alt+click both still open the References panel.
+- Cmd/Ctrl+click and Alt+click both still open the References panel. The
+  Alt+click alias from #1461 is unrelated to the gate and is left alone.
 - The 250ms leave grace, the 30-entry LRU, the snapshot flush, the scroll and
   wheel cancel, the render threshold, and the silent-failure rule.
 - Comment-only surfaces, read-only views, and the portable guides.show viewer:
@@ -422,11 +448,13 @@ Per the repo's testing rules, each of these names a failure it catches.
    mode, an enter with Alt up spawns no request no matter how long time
    advances. Catches a regression where the gate moves after the dwell, which
    would restore per-token ripgrep on an idle sweep.
-2. **Alt pressed while hovering opens the card** (same suite): the gesture the
-   mode exists for. Catches a gate that only reads the enter event.
-3. **Alt released starts the close** (same suite), and does not when the
+2. **Modifier pressed while hovering opens the card** (same suite): the
+   gesture the mode exists for. Catches a gate that only reads the enter event.
+3. **Modifier released starts the close** (same suite), and does not when the
    pointer is in the card. Catches a card that cannot be read or one that
    cannot be dismissed.
+3b. **A chord opens nothing and closes an open card**: Cmd+C with the pointer
+   parked on a token must not pop a card mid-copy.
 4. **Delay feeds the dwell** (same suite): a 700 delay spawns nothing at 350.
    Catches the constant being left hardcoded.
 5. **Legacy cookie migration** (new `tokenHoverSetting.test.ts`, pure lane):

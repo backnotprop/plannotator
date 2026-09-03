@@ -4,6 +4,7 @@ import type {
   CodeNavRequest,
 } from '@plannotator/shared/code-nav';
 import { DEFAULT_TOKEN_HOVER_DELAY_MS } from '@plannotator/shared/token-hover';
+import { isModKeyHeld, modEventKey } from '@plannotator/ui/utils/platform';
 
 export type { CodeNavHoverResponse };
 
@@ -16,7 +17,8 @@ const MAX_CACHE_ENTRIES = 30;
  *
  * `off` never reaches here: the App withholds the handler props entirely, so
  * the diff views wire no listeners at all. What is left is the shipped hover
- * behavior and the Alt-held gate.
+ * behavior and the modifier-held gate, which is Cmd on macOS and Ctrl
+ * elsewhere.
  */
 export type TokenHoverMode = 'hover' | 'modifier';
 
@@ -83,10 +85,10 @@ export interface UseTokenHoverResult {
 }
 
 /**
- * Alt is a text-editing chord on macOS (Alt+Backspace, Alt+arrow for word
- * moves), so arming on it while the reviewer is writing a comment would pop
- * cards over the diff mid-sentence whenever the pointer happens to be parked
- * there. Typing owns the key; only the pointer's own gesture arms.
+ * The primary modifier is also the editing modifier (Cmd+C, Cmd+V, Cmd+A), so
+ * arming on it while the reviewer is writing a comment would pop cards over
+ * the diff mid-sentence whenever the pointer happens to be parked there.
+ * Typing owns the key; only the pointer's own gesture arms.
  */
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -148,7 +150,7 @@ export function useTokenHover(
   /**
    * The last token the pointer entered, kept even when the gate rejected it.
    * A key going down fires no pointer event, so without this the commonest
-   * gesture in modifier mode — park on a symbol, THEN hold Alt — would do
+   * gesture in modifier mode — park on a symbol, THEN hold the modifier — would do
    * nothing at all.
    */
   const lastEnterRef = useRef<{ request: CodeNavRequest; element: HTMLElement } | null>(null);
@@ -364,16 +366,28 @@ export function useTokenHover(
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.altKey || modifierHeldRef.current) return;
+      if (!isModKeyHeld(event)) return;
       if (isTypingTarget(event.target)) return;
+      // Only the modifier ITSELF arms. Any other key while it is held is a
+      // command (Cmd+C, Cmd+V, Cmd+S), not a request to be told about the
+      // symbol the pointer happens to be resting on, so a chord disarms and
+      // takes any open card with it rather than popping one mid-copy.
+      if (event.key !== modEventKey) {
+        if (!modifierHeldRef.current) return;
+        modifierHeldRef.current = false;
+        clearDwell();
+        if (!pointerInCardRef.current) startGrace();
+        return;
+      }
+      if (modifierHeldRef.current) return;
       modifierHeldRef.current = true;
       // Pressing the key does not re-enter the token under the pointer, so
-      // this is what makes "park on a symbol, then hold Alt" work.
+      // this is what makes "park on a symbol, then hold Cmd" work.
       const pending = lastEnterRef.current;
       if (pending) beginHover(pending.request, pending.element);
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.altKey || !modifierHeldRef.current) return;
+      if (isModKeyHeld(event) || !modifierHeldRef.current) return;
       modifierHeldRef.current = false;
       // Releasing behaves like leaving: the same grace, so the card's own
       // reference links stay reachable. Unless the pointer is already inside
@@ -383,7 +397,9 @@ export function useTokenHover(
       clearDwell();
       startGrace();
     };
-    // Alt+Tab leaves the key state stale-held forever otherwise.
+    // Cmd+Tab (Alt+Tab elsewhere) leaves the key state stale-held forever
+    // otherwise, and on macOS it is now the COMMON way to leave: the app
+    // switcher is the same key this gate arms on.
     const onBlur = () => {
       modifierHeldRef.current = false;
       close();
