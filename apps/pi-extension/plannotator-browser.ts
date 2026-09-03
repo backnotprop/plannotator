@@ -180,7 +180,7 @@ export async function startServerWithSelfPreemption<T>(
 
 async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
 	const browserResult = await openBrowser(serverUrl);
-	if (isRemoteSession()) {
+	if (ctx.mode === "rpc" || isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");

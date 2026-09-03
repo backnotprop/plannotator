@@ -40,6 +40,48 @@ describe("shouldUseLocalPrCheckout", () => {
 	});
 });
 
+describe("browser URL notification", () => {
+	test("notifies RPC sessions even when the browser launcher reports success", async () => {
+		const previousRemote = process.env.PLANNOTATOR_REMOTE;
+		const previousPlannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
+		const previousBrowser = process.env.BROWSER;
+		const notifications: string[] = [];
+
+		process.env.PLANNOTATOR_REMOTE = "0";
+		delete process.env.PLANNOTATOR_BROWSER;
+		process.env.BROWSER = process.execPath;
+
+		try {
+			const ctx = {
+				mode: "rpc",
+				hasUI: true,
+				ui: {
+					notify(message: string) {
+						notifications.push(message);
+					},
+				},
+			} as any;
+			const session = startBrowserDecisionSession(
+				{ url: "http://localhost:4321", stop() {} },
+				ctx,
+				() => new Promise<never>(() => {}),
+			);
+
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			session.stop();
+
+			expect(notifications).toEqual(["[Plannotator] http://localhost:4321"]);
+		} finally {
+			if (previousRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+			else process.env.PLANNOTATOR_REMOTE = previousRemote;
+			if (previousPlannotatorBrowser === undefined) delete process.env.PLANNOTATOR_BROWSER;
+			else process.env.PLANNOTATOR_BROWSER = previousPlannotatorBrowser;
+			if (previousBrowser === undefined) delete process.env.BROWSER;
+			else process.env.BROWSER = previousBrowser;
+		}
+	});
+});
+
 describe("browser session cleanup", () => {
 	const ctx = {
 		hasUI: true,
