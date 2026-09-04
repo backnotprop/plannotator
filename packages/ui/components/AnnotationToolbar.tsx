@@ -93,7 +93,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onMouseLeave,
 }) => {
   const visibleBounds = useVisibleViewportBounds(16);
-  const [position, setPosition] = useState<ToolbarPosition | null>(null);
+  const [position, setPosition] = useState<ToolbarPosition>(() => ({
+    top: visibleBounds.top,
+    left: visibleBounds.left,
+  }));
   const [hasMeasured, setHasMeasured] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showQuickLabels, setShowQuickLabels] = useState(false);
@@ -210,8 +213,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     ref: toolbarRef,
     onDismiss: onClose,
   });
-
-  if (!position) return null;
 
   const handleTypeSelect = (type: AnnotationType) => {
     if (type === AnnotationType.DELETION) {
