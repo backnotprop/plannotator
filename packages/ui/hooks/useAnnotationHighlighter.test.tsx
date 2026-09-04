@@ -312,6 +312,51 @@ describe('useAnnotationHighlighter math annotations', () => {
     host.remove();
   });
 
+  test.skipIf(!hasDom)('mobile bridge clears the native selection after preserving the selected text', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === '(pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+
+    try {
+      await act(async () => {
+        root.render(<Harness mode="selection" onAdd={() => {}} />);
+      });
+
+      const text = host.querySelector<HTMLElement>('[data-testid="text-before"]')?.firstChild;
+      if (!text) throw new Error('Missing selection fixture text');
+      const range = document.createRange();
+      range.setStart(text, 0);
+      range.setEnd(text, 'Formula'.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+
+      document.dispatchEvent(new Event('selectionchange'));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 450));
+      });
+
+      expect(host.querySelector('mark.annotation-highlight')?.textContent).toBe('Formula');
+      expect(window.getSelection()?.rangeCount).toBe(0);
+    } finally {
+      window.matchMedia = originalMatchMedia;
+      act(() => root.unmount());
+      host.remove();
+      window.getSelection()?.removeAllRanges();
+    }
+  });
+
   test.skipIf(!hasDom)('mixed text and formula mouseup is not swallowed by the math-only handler', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);

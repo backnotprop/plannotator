@@ -1011,7 +1011,14 @@ export function useAnnotationHighlighter({
             const sel = window.getSelection();
             if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
             if (!containerRef.current?.contains(sel.anchorNode)) return;
-            highlighter.fromRange(sel.getRangeAt(0));
+            try {
+              highlighter.fromRange(sel.getRangeAt(0));
+            } finally {
+              // fromRange replaces the selected text nodes with annotation marks.
+              // Keeping the native range alive after that mutation leaves iOS
+              // selection handles attached to stale document boundaries.
+              sel.removeAllRanges();
+            }
           }, 400);
         }
       : null;
