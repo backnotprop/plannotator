@@ -1,13 +1,46 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
+import {
+  type VisibleViewportBounds,
+  useVisibleViewportBounds,
+} from "../hooks/useViewportEnvironment";
 import { type QuickLabel, getQuickLabels, THUMBS_UP_LABEL } from "../utils/quickLabels";
 import { copyTextToClipboard } from "../utils/clipboard";
 import { acquireTypeToCommentCapture } from "../shortcuts/plan-review/annotationMode.shortcuts";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 
 type PositionMode = 'center-above' | 'top-right';
+
+interface ToolbarSize {
+  width: number;
+  height: number;
+}
+
+interface ToolbarPosition {
+  top: number;
+  left: number;
+}
+
+export function computeAnnotationToolbarPosition(
+  anchorRect: Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left' | 'width'>,
+  positionMode: PositionMode,
+  toolbarSize: ToolbarSize,
+  bounds: VisibleViewportBounds,
+): ToolbarPosition {
+  const desiredTop = anchorRect.top - (positionMode === 'center-above' ? 48 : 40);
+  const desiredLeft = positionMode === 'center-above'
+    ? anchorRect.left + anchorRect.width / 2 - toolbarSize.width / 2
+    : anchorRect.right - toolbarSize.width;
+  const maxLeft = Math.max(bounds.left, bounds.right - toolbarSize.width);
+  const maxTop = Math.max(bounds.top, bounds.bottom - toolbarSize.height);
+
+  return {
+    top: Math.max(bounds.top, Math.min(desiredTop, maxTop)),
+    left: Math.max(bounds.left, Math.min(desiredLeft, maxLeft)),
+  };
+}
 
 const isEditableElement = (node: EventTarget | Element | null): boolean => {
   if (!(node instanceof Element)) return false;
@@ -59,7 +92,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onMouseEnter,
   onMouseLeave,
 }) => {
-  const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const visibleBounds = useVisibleViewportBounds(16);
+  const [position, setPosition] = useState<ToolbarPosition | null>(null);
+  const [hasMeasured, setHasMeasured] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showQuickLabels, setShowQuickLabels] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -85,33 +120,43 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     const updatePosition = () => {
       const rect = element.getBoundingClientRect();
 
-      if (closeOnScrollOut && (rect.bottom < 0 || rect.top > window.innerHeight)) {
+      if (closeOnScrollOut && (rect.bottom < visibleBounds.top || rect.top > visibleBounds.bottom)) {
         onClose();
         return;
       }
 
-      if (positionMode === 'center-above') {
-        setPosition({
-          top: rect.top - 48,
-          left: rect.left + rect.width / 2,
-        });
-      } else {
-        setPosition({
-          top: rect.top - 40,
-          right: window.innerWidth - rect.right,
-        });
-      }
+      const toolbarRect = toolbarRef.current?.getBoundingClientRect();
+      setPosition(computeAnnotationToolbarPosition(
+        rect,
+        positionMode,
+        {
+          width: toolbarRect?.width ?? 0,
+          height: toolbarRect?.height ?? 0,
+        },
+        visibleBounds,
+      ));
     };
 
     updatePosition();
     window.addEventListener("scroll", updatePosition, true);
-    window.addEventListener("resize", updatePosition);
 
     return () => {
       window.removeEventListener("scroll", updatePosition, true);
-      window.removeEventListener("resize", updatePosition);
     };
-  }, [element, positionMode, closeOnScrollOut, onClose]);
+  }, [element, positionMode, closeOnScrollOut, onClose, visibleBounds]);
+
+  useLayoutEffect(() => {
+    const toolbarRect = toolbarRef.current?.getBoundingClientRect();
+    if (!toolbarRect) return;
+
+    setPosition(computeAnnotationToolbarPosition(
+      element.getBoundingClientRect(),
+      positionMode,
+      { width: toolbarRect.width, height: toolbarRect.height },
+      visibleBounds,
+    ));
+    setHasMeasured(true);
+  }, [element, positionMode, visibleBounds, commentOnly, hideCopyButton, onQuickLabel]);
 
   // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
@@ -176,14 +221,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     }
   };
 
-  const isCentered = position.left !== undefined;
-  const translateX = isCentered ? ' translateX(-50%)' : '';
-
   const style: React.CSSProperties = {
     top: position.top,
-    ...(isCentered
-      ? { left: position.left, transform: 'translateX(-50%)' }
-      : { right: position.right }),
+    left: position.left,
+    visibility: hasMeasured ? undefined : 'hidden',
     animation: isExiting
       ? 'annotation-toolbar-out 0.15s ease-in forwards'
       : 'annotation-toolbar-in 0.15s ease-out',
@@ -200,12 +241,12 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     >
       <style>{`
         @keyframes annotation-toolbar-in {
-          from { opacity: 0; transform: translateY(12px)${translateX}; }
-          to { opacity: 1; transform: translateY(0)${translateX}; }
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
         }
         @keyframes annotation-toolbar-out {
-          from { opacity: 1; transform: translateY(0)${translateX}; }
-          to { opacity: 0; transform: translateY(8px)${translateX}; }
+          from { opacity: 1; transform: translateY(0); }
+          to { opacity: 0; transform: translateY(8px); }
         }
       `}</style>
       <div data-pn-annotation-toolbar-row="true" className="flex items-center p-1 gap-0.5">
