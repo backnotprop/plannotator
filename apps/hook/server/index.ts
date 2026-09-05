@@ -125,13 +125,11 @@ import {
 import { rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
-  composeReviewApprovedMessage,
-  getReviewDeniedSuffix,
   getPlanDeniedPrompt,
   getPlanToolName,
   buildPlanFileRule,
 } from "@plannotator/shared/prompts";
-import { supportsReviewApprovalNotes } from "./review-output";
+import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output";
 import { registerSession, unregisterSession, listSessions } from "@plannotator/server/sessions";
 import { openBrowser } from "@plannotator/server/browser";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
@@ -1089,23 +1087,8 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output feedback (captured by slash command)
-  if (result.exit) {
-    console.log("Review session closed without feedback.");
-  } else if (result.approved) {
-    // PR5 delivery (spec §6.4): a bare approval prints the approved prompt,
-    // byte-identical to before; an approval carrying reviewer notes prints
-    // the approved-with-notes framing (non-blocking guidance) instead.
-    console.log(composeReviewApprovedMessage(detectedOrigin, result.feedback));
-  } else {
-    console.log(result.feedback);
-    // Append the verification-only suffix whenever the reviewer sent annotations to
-    // act on — in PR mode too. Platform PR actions (approve/comment posted to
-    // the host) come back with an empty annotation set and a status message;
-    // those must NOT get the "verify findings and don't change code" instruction.
-    if (result.annotations.length > 0) {
-      console.log(getReviewDeniedSuffix(detectedOrigin));
-    }
-  }
+  const output = buildReviewOutput(result, detectedOrigin);
+  console.log(jsonFlag ? JSON.stringify(output) : output.message);
   process.exit(0);
 
 } else if (args[0] === "annotate") {

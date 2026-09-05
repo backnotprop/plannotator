@@ -31,6 +31,11 @@ interface RunResult {
   error?: string;
 }
 
+interface ReviewDecision {
+  decision: "approved" | "dismissed" | "annotated";
+  message: string;
+}
+
 interface AnnotateDecision {
   decision: "approved" | "dismissed" | "annotated";
   feedback?: string;
@@ -63,7 +68,7 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
       description: "Open Plannotator code review for the current workspace changes.",
     },
     async (ctx) => {
-      const result = await runPlannotator(amp, ctx, ["review"]);
+      const result = await runPlannotator(amp, ctx, ["review", "--json"]);
       await handleReviewResult(ctx, result);
     },
   );
@@ -85,7 +90,7 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
       const reviewArgs = parseReviewTargetInput(target);
       if (!reviewArgs) return;
 
-      const result = await runPlannotator(amp, ctx, ["review", ...reviewArgs]);
+      const result = await runPlannotator(amp, ctx, ["review", ...reviewArgs, "--json"]);
       await handleReviewResult(ctx, result);
     },
   );
@@ -174,22 +179,38 @@ export function extractTextFromThreadMessage(message: ThreadMessage): string {
     .trim();
 }
 
-export function parseAnnotateDecision(raw: string): AnnotateDecision | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return { decision: "dismissed" };
-
+function parseReviewDecision(raw: string): ReviewDecision | null {
   try {
-    const parsed = JSON.parse(trimmed) as Partial<AnnotateDecision>;
+    const parsed = JSON.parse(raw) as Partial<ReviewDecision> | null;
     if (
       parsed &&
+      typeof parsed === "object" &&
       (parsed.decision === "approved" ||
         parsed.decision === "dismissed" ||
-        parsed.decision === "annotated")
+        parsed.decision === "annotated") &&
+      typeof parsed.message === "string"
     ) {
-      return {
-        decision: parsed.decision,
-        feedback: typeof parsed.feedback === "string" ? parsed.feedback : undefined,
-      };
+      return { decision: parsed.decision, message: parsed.message };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function parseAnnotateDecision(raw: string): AnnotateDecision | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<AnnotateDecision> | null;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (parsed.decision === "approved" ||
+        parsed.decision === "dismissed" ||
+        parsed.decision === "annotated") &&
+      (parsed.feedback === undefined || typeof parsed.feedback === "string")
+    ) {
+      return { decision: parsed.decision, feedback: parsed.feedback };
     }
   } catch {
     return null;
@@ -207,7 +228,7 @@ export function formatAnnotationFeedback(
   if (decision.decision !== "annotated" && decision.decision !== "approved") return null;
 
   const feedback = decision.feedback?.trim();
-  if (!feedback || isNoActionFeedback(feedback)) return null;
+  if (!feedback) return null;
 
   const config = loadPlannotatorConfig();
 
@@ -238,17 +259,6 @@ export function formatAnnotationFeedback(
   return resolveTemplate(template, { feedback });
 }
 
-export function isNoActionFeedback(output: string): boolean {
-  const normalized = output.trim().toLowerCase();
-  return (
-    normalized === "" ||
-    normalized === "review session closed without feedback." ||
-    normalized === "annotation session closed." ||
-    normalized === "approved." ||
-    normalized === "the user approved." ||
-    normalized.includes("has no feedback")
-  );
-}
 
 export function splitCommandArgs(input: string): string[] {
   const args: string[] = [];
@@ -344,13 +354,17 @@ async function getLatestAssistantText(ctx: CommandContext): Promise<string | nul
 async function handleReviewResult(ctx: CommandContext, result: RunResult): Promise<void> {
   if (await notifyFailure(ctx, result, "review")) return;
 
-  const output = result.stdout.trim();
-  if (isNoActionFeedback(output)) {
-    await ctx.ui.notify(output || "Review session closed without feedback.");
+  const decision = parseReviewDecision(result.stdout);
+  if (!decision) {
+    await notifyInvalidStructuredOutput(ctx, result, "review");
+    return;
+  }
+  if (decision.decision === "dismissed") {
+    await ctx.ui.notify(decision.message);
     return;
   }
 
-  await appendFeedback(ctx, output);
+  await appendFeedback(ctx, decision.message);
 }
 
 async function handleAnnotateResult(
@@ -361,7 +375,11 @@ async function handleAnnotateResult(
   if (await notifyFailure(ctx, result, "annotate")) return;
 
   const decision = parseAnnotateDecision(result.stdout);
-  if (decision?.decision === "approved") {
+  if (!decision) {
+    await notifyInvalidStructuredOutput(ctx, result, "annotate");
+    return;
+  }
+  if (decision.decision === "approved") {
     // Approve-with-Notes (#1092): surface the reviewer's notes instead of
     // silently dropping them. A note-less approval keeps the old behavior.
     const feedback = formatAnnotationFeedback(decision, options);
@@ -372,16 +390,14 @@ async function handleAnnotateResult(
     }
     return;
   }
-  if (decision?.decision === "dismissed") {
+  if (decision.decision === "dismissed") {
     await ctx.ui.notify("Annotation session closed.");
     return;
   }
 
-  const feedback = decision
-    ? formatAnnotationFeedback(decision, options)
-    : result.stdout.trim();
+  const feedback = formatAnnotationFeedback(decision, options);
 
-  if (!feedback || isNoActionFeedback(feedback)) {
+  if (!feedback) {
     await ctx.ui.notify("Annotation session closed without feedback.");
     return;
   }
@@ -418,6 +434,17 @@ async function notifyFailure(
 
   await ctx.ui.notify(`Plannotator ${mode} failed.${details ? `\n\n${details}` : ""}${installHint}`);
   return true;
+}
+
+async function notifyInvalidStructuredOutput(
+  ctx: CommandContext,
+  result: RunResult,
+  mode: "review" | "annotate",
+): Promise<void> {
+  const stderr = result.stderr ? `\n\nCLI stderr:\n${result.stderr}` : "";
+  await ctx.ui.notify(
+    `Plannotator ${mode} returned invalid structured output. Update the Plannotator CLI and reload the Amp plugin: ${INSTALL_URL}\n\nNo decision was delivered to the thread. Captured output is included below so you can recover any feedback manually.\n\nCLI stdout:\n${result.stdout || "(empty stdout)"}${stderr}`,
+  );
 }
 
 async function runPlannotator(

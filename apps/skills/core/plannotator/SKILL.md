@@ -30,10 +30,10 @@ This skill is the knowledge layer. The `plannotator-review`, `plannotator-annota
 
 Every review or annotate command starts a local web server, opens the browser, and blocks until the human decides. That can take minutes. Launch it with a long (or no) command timeout, or in the background, then read stdout when the process exits. Do not kill the process to "finish" a review; a session that ends without a decision reads as no feedback.
 
-The stdout contract is the whole interface:
+Stdout is the interface, but its contract is command-specific. For `annotate` and its last-message variants:
 
 - Plaintext (default): empty output on close, `The user approved.` on approve, otherwise the feedback text. Address returned feedback in the same conversation.
-- `--json`: one JSON record, `{"decision":"approved"|"dismissed"|"annotated","feedback":"..."}`. An approval may still carry notes in `feedback`; treat those as guidance, not a change request.
+- `--json`: one JSON record with `decision` (`approved`, `dismissed`, or `annotated`) and optional raw `feedback`. An approval may still carry notes in `feedback`; treat those as guidance, not a change request.
 - `--hook`: hook-native output for real PostToolUse/Stop hook contexts only. Approve/close emits nothing (hook passes); annotations emit `{"decision":"block","reason":"..."}`. `--hook` implies the gate UI. Never use it for a normal interactive invocation.
 
 `plannotator <command> --help` prints usage without launching anything. Bare `plannotator` is the hook entry point and expects hook JSON on stdin.
@@ -41,10 +41,14 @@ The stdout contract is the whole interface:
 ## plannotator review
 
 ```bash
-plannotator review [--git | --gitbutler] [--local | --no-local] [--tailscale] [PR_URL]
+plannotator review [--git | --gitbutler] [--local | --no-local] [--tailscale] [--json] [PR_URL]
 ```
 
-Reviews local VCS changes, or a pull request when a URL is given. Feedback and annotations come back on stdout when the reviewer submits; an approval comes back as an LGTM-style message.
+Reviews local VCS changes, or a pull request when a URL is given. Default stdout stays plaintext: the existing close message, approval prompt, or feedback.
+
+With `--json`, direct review emits one record: `{ decision: 'approved' | 'annotated' | 'dismissed', message: string }`. `message` is the CLI-rendered text exactly as default plaintext would print it, without the final console newline. It includes customized prompts and non-blocking approval-with-notes framing; a denial suffix is included only when `annotations.length > 0`, including in PR mode, not for zero-annotation platform status.
+
+Classify the outcome only by `decision`, never by `message` text. Notes on an `approved` review are guidance, not a blocking change request. This rendered `message` contract is separate from the raw feedback JSON used by `annotate` and the unchanged `opencode-review` integration. `--hook` is annotate-only.
 
 - VCS is auto-detected (JJ, GitButler, Git, and P4 where supported). `--git` forces plain Git; `--gitbutler` forces GitButler (requires the `but` CLI 0.21.0+). Running from a non-VCS parent folder that contains nested repos produces a combined workspace diff.
 - The default diff is "everything a PR would show now": merge-base of the trunk vs the working tree plus untracked files. The reviewer can switch diff types in the UI; you do not control that from the CLI.
