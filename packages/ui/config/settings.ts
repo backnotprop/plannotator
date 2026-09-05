@@ -95,6 +95,8 @@ function isDiffLineBgIntensity(v: unknown): v is DiffLineBgIntensity {
 
 export interface SettingDef<T> {
   defaultValue: T | (() => T);
+  /** Persist missing defaults automatically unless false; explicit writes are unaffected. */
+  persistDefault?: boolean;
   fromCookie: () => T | undefined;
   toCookie: (value: T) => void;
   /** If set, this setting syncs to server via POST /api/config */
@@ -223,6 +225,8 @@ export const SETTINGS = {
   // previously-persisted 'commits' cookie is treated as unset.
   reviewPanelView: {
     defaultValue: 'sections' as 'sections' | 'tree',
+    // An absent cookie means no user choice yet, so first-run setup can choose its default.
+    persistDefault: false,
     fromCookie: () => {
       const v = storage.getItem('plannotator-review-panel-view');
       return v === 'tree' || v === 'sections' ? v : undefined;

@@ -31,6 +31,8 @@ export function initializeReviewSetup(store: typeof configStore = configStore): 
   // let Settings persist a panel view, so a reviewer can hold an explicit
   // choice while "seen" stays unset. Seeding Tree there would overwrite it.
   // A persisted view IS the decision: consume the one-time setup and leave it.
+  // The registry keeps this default in memory only, so a settings read cannot
+  // manufacture that evidence before this initializer runs.
   if (getPersistedReviewPanelView() !== undefined) {
     markReviewSetupSeen();
     return false;
