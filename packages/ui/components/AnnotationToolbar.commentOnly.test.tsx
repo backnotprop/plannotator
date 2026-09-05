@@ -26,7 +26,7 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-async function mount(props: { commentOnly?: boolean; withQuickLabels?: boolean }) {
+async function mount(props: { commentOnly?: boolean; withQuickLabels?: boolean; positionMode?: 'center-above' | 'top-right' }) {
   anchor = document.createElement('p');
   anchor.textContent = 'annotated paragraph';
   document.body.appendChild(anchor);
@@ -37,7 +37,7 @@ async function mount(props: { commentOnly?: boolean; withQuickLabels?: boolean }
     root?.render(
       <AnnotationToolbar
         element={anchor!}
-        positionMode="center-above"
+        positionMode={props.positionMode ?? 'center-above'}
         onAnnotate={() => {}}
         onClose={() => {}}
         onRequestComment={() => {}}
@@ -52,6 +52,24 @@ async function mount(props: { commentOnly?: boolean; withQuickLabels?: boolean }
 }
 
 describe.if(hasDom)('AnnotationToolbar commentOnly seam', () => {
+  test('centered placement exposes its anchor without changing the existing transform or animation', async () => {
+    await mount({});
+    const toolbar = document.querySelector<HTMLElement>('.annotation-toolbar')!;
+    expect(toolbar.dataset.pnAnnotationToolbarCentered).toBe('true');
+    expect(toolbar.style.getPropertyValue('--pn-annotation-toolbar-anchor-x')).toBe(toolbar.style.left);
+    expect(toolbar.style.transform).toBe('translateX(-50%)');
+    expect(toolbar.style.animation).toBe('annotation-toolbar-in 0.15s ease-out');
+  });
+
+  test('right-aligned placement does not opt into horizontal correction', async () => {
+    await mount({ positionMode: 'top-right' });
+    const toolbar = document.querySelector<HTMLElement>('.annotation-toolbar')!;
+    expect(toolbar.hasAttribute('data-pn-annotation-toolbar-centered')).toBe(false);
+    expect(toolbar.style.getPropertyValue('--pn-annotation-toolbar-anchor-x')).toBe('');
+    expect(toolbar.style.left).toBe('');
+    expect(toolbar.style.right).not.toBe('');
+  });
+
   test('commentOnly without a label handler hides Delete and every label affordance', async () => {
     const titles = await mount({ commentOnly: true });
     expect(titles).toContain('Comment');

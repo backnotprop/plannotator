@@ -912,6 +912,17 @@ html:has([data-pn-compact-touch-layout='true'])
   gap: 0.5rem;
 }
 
+/* Percentages in translate use the toolbar's own width. Correct only its
+ * horizontal overflow; leave the existing transform animation untouched. */
+html:has([data-pn-compact-touch-layout='true'])
+  [data-pn-annotation-toolbar-centered='true'] {
+  translate: clamp(
+    calc(var(--pn-viewport-offset-left, 0px) + var(--pn-safe-left, 0px) - var(--pn-annotation-toolbar-anchor-x) + 50%),
+    0px,
+    calc(var(--pn-viewport-offset-left, 0px) + var(--pn-viewport-width, 100vw) - var(--pn-safe-right, 0px) - var(--pn-annotation-toolbar-anchor-x) - 50%)
+  ) 0;
+}
+
 html:has([data-pn-compact-touch-layout='true'])
   [data-pn-touch-target]:not(:disabled):not([aria-disabled='true']):active {
   filter: brightness(0.92);

@@ -179,8 +179,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const isCentered = position.left !== undefined;
   const translateX = isCentered ? ' translateX(-50%)' : '';
 
-  const style: React.CSSProperties = {
+  const style: React.CSSProperties & { '--pn-annotation-toolbar-anchor-x'?: string } = {
     top: position.top,
+    '--pn-annotation-toolbar-anchor-x': isCentered ? `${position.left}px` : undefined,
     ...(isCentered
       ? { left: position.left, transform: 'translateX(-50%)' }
       : { right: position.right }),
@@ -192,6 +193,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   return createPortal(
     <div
       ref={toolbarRef}
+      data-pn-annotation-toolbar-centered={isCentered ? 'true' : undefined}
       className="annotation-toolbar fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl"
       style={style}
       onMouseDown={(e) => e.stopPropagation()}
