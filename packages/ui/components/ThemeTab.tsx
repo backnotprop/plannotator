@@ -6,11 +6,6 @@ import { configStore } from '../config/configStore';
 import { useConfigValue } from '../config/useConfig';
 import { faviconDataUrl, type FaviconStyle } from '@plannotator/core/favicon';
 
-interface ThemeTabProps {
-  onPreview?: () => void;
-  compact?: boolean;
-}
-
 const HALVES: { id: ThemeHalf; label: string }[] = [
   { id: 'light', label: 'Light' },
   { id: 'dark', label: 'Dark' },
@@ -27,12 +22,6 @@ const SyntaxLinesIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
-/**
- * The favicon style choices. Rendered in both layouts, so it lives in one place.
- * The compact layout drops the visible "Favicon" heading the full layout has, so
- * the group carries its own accessible name and two unlabelled image buttons are
- * never all a screen reader gets.
- */
 const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected }) => (
   <div className="flex gap-1" role="group" aria-label="Favicon style">
     {FAVICON_STYLES.map(({ id, label }) => (
@@ -56,7 +45,7 @@ const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected })
   </div>
 );
 
-export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
+export const ThemeTab: React.FC = () => {
   const {
     mode,
     setMode,
@@ -79,7 +68,7 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
   const nameOf = (id: string) => availableThemes.find(theme => theme.id === id)?.name ?? id;
 
   const summary = (
-    <div className={`flex items-center gap-1.5 text-[11px] text-muted-foreground ${compact ? '' : 'flex-wrap'}`}>
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
       {HALVES.map(({ id, label }, index) => (
         <React.Fragment key={id}>
           {index > 0 && <span className="text-muted-foreground/40">·</span>}
@@ -99,10 +88,10 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
   );
 
   return (
-    <div className={compact ? '' : 'space-y-5'}>
+    <div className="space-y-5">
       {/* Mode */}
-      <div className={compact ? 'flex items-center gap-3 mb-2' : 'space-y-2'}>
-        {!compact && <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Mode</label>}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Mode</label>
         <div className="flex gap-1">
           {THEME_MODES.map(({ id, label, Icon }) => (
             <button
@@ -122,49 +111,29 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
             </button>
           ))}
         </div>
-        {!compact && manageFavicon && (
+        {manageFavicon && (
           <div className="space-y-1.5 pt-1">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Favicon</label>
             <FaviconStyleControl selected={faviconStyle} />
           </div>
         )}
-        {!compact && (
-          <p className="text-[11px] text-muted-foreground/70">
-            System follows your OS and switches between the two themes below.
-          </p>
-        )}
-        {compact && (
-          <>
-            {manageFavicon && <FaviconStyleControl selected={faviconStyle} />}
-            <div className="ml-auto">{summary}</div>
-          </>
-        )}
+        <p className="text-[11px] text-muted-foreground/70">
+          System follows your OS and switches between the two themes below.
+        </p>
       </div>
 
       {/* Theme pair */}
-      <div className={compact ? 'space-y-2' : 'space-y-3'}>
-        {!compact && (
-          <>
-            <div className="flex items-center justify-between border-t border-border pt-5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Theme</label>
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] text-muted-foreground/70 flex items-center gap-1">
-                  <SyntaxLinesIcon className="w-2.5 h-2.5" />
-                  = matched syntax colors
-                </span>
-                {onPreview && (
-                  <button
-                    onClick={onPreview}
-                    className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 hover:border-primary/40 transition-colors"
-                  >
-                    Preview Mode
-                  </button>
-                )}
-              </div>
-            </div>
-            {summary}
-          </>
-        )}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between border-t border-border pt-5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Theme</label>
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] text-muted-foreground/70 flex items-center gap-1">
+              <SyntaxLinesIcon className="w-2.5 h-2.5" />
+              = matched syntax colors
+            </span>
+          </div>
+        </div>
+        {summary}
 
         {/* Which half the grid assigns to */}
         <div className="flex items-center gap-2">
@@ -187,7 +156,7 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
           </div>
         </div>
 
-        <div className={`grid gap-2 overflow-y-auto pr-1 ${compact ? 'grid-cols-4' : 'grid-cols-3'}`}>
+        <div className="grid grid-cols-3 gap-2 overflow-y-auto pr-1">
           {themes.map(theme => {
             const isSelected = pair[half] === theme.id;
             const colors = theme.colors[half];
