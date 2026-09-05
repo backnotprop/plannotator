@@ -89,7 +89,7 @@ class ConfigStore {
    * first use — deliberately not in the constructor. The singleton is created
    * at module import, which for a host app is before configurePlannotatorUI()
    * can install its StorageBackend; resolving eagerly there would write every
-   * missing default (including a generated identity) as cookies onto the host's
+   * eligible missing default (including a generated identity) onto the host's
    * origin. Deferring to first use means a host that configures at startup gets
    * its own backend for the initial resolution too — no cookies are ever
    * written on a configured host. Plannotator is unchanged: same resolution,
@@ -105,8 +105,8 @@ class ConfigStore {
         : def.defaultValue;
       const resolved = fromCookie ?? defaultVal;
       this.values.set(name, resolved);
-      // Persist generated defaults to cookie so the value is stable across calls
-      if (fromCookie === undefined) {
+      // Persist defaults for stability unless absence must remain distinguishable.
+      if (fromCookie === undefined && !('persistDefault' in def && def.persistDefault === false)) {
         def.toCookie(resolved as never);
       }
     }
@@ -127,9 +127,9 @@ class ConfigStore {
       const fromBackend = def.fromCookie();
       if (fromBackend !== undefined) {
         this.values.set(name, fromBackend);
-      } else {
-        // Seed the host backend with the resolved default. This matters when
-        // the store was already resolved BEFORE the host installed its
+      } else if (!('persistDefault' in def && def.persistDefault === false)) {
+        // Seed the host backend with the resolved default unless it opts out.
+        // This matters when the store was resolved BEFORE the host installed its
         // StorageBackend (e.g. something read a setting pre-configure): those
         // default-seeding writes went to the earlier backend, not this one.
         // Without this, a fresh host store is never populated, so generated
