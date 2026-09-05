@@ -60,7 +60,8 @@ async function runScenario(setup: {
     `,
     ],
     {
-      env: { ...process.env, HOME: TEST_HOME },
+      // Exercise the fake HOME rather than inheriting the parent test sandbox.
+      env: { ...process.env, HOME: TEST_HOME, USERPROFILE: TEST_HOME, PLANNOTATOR_DATA_DIR: "" },
       cwd: join(import.meta.dir, "../.."),
       stdout: "pipe",
       stderr: "pipe",
