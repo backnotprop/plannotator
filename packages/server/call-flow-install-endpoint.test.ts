@@ -6,15 +6,9 @@ import { join } from 'node:path';
 import type { CallFlowInstallStage, CallFlowNodePreflight, CallFlowRuntimeInstallResult } from '@plannotator/shared/call-flow';
 
 // PLANNOTATOR_DATA_DIR is only ever changed INSIDE tests (boot() below) and
-// restored to its original value after each one. It must never be overridden
-// at module-eval time: bun evaluates every test file's module before running
-// tests in one shared process, and Pi's generated/storage.ts caches its data
-// dir at import time. A module-eval override here makes storage's cached dir
-// and later files' live getPlannotatorDataDir() calls disagree, which is
-// exactly the Pi annotate-history / durable-submit CI failure this comment
-// guards against. Config writes made by these tests target whatever dir the
-// process's config module froze at first import; the snapshot/restore in
-// afterAll below keeps those writes from leaking into a real config.json.
+// restored after each one. Module-eval overrides would leak into other test
+// files because Bun runs the suite in one shared process. The config
+// snapshot/restore in afterAll also protects against shared config state.
 const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
 const originalPort = process.env.PLANNOTATOR_PORT;
 const originalPath = process.env.PATH;
