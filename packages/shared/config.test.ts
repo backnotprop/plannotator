@@ -18,6 +18,8 @@ import {
   resolveGuideHistory,
   resolveUseJina,
   resolveTodoProviderEnabled,
+  resolveWidgetStyle,
+  resolveWidgetMoveCompletedToEnd,
   resolveUrlHost,
   isValidUrlHost,
   parseReviewAnalysisConfig,
@@ -112,6 +114,54 @@ describe("resolveTodoProviderEnabled", () => {
       process.env[TODO_ENV] = v;
       expect(resolveTodoProviderEnabled({ todoProvider: "off" })).toBe(true);
     }
+  });
+});
+
+describe("resolveWidgetStyle", () => {
+  test("unset falls back to default", () => {
+    expect(resolveWidgetStyle({})).toEqual({ kind: "default" });
+  });
+
+  test("accepts the two string modes", () => {
+    expect(resolveWidgetStyle({ widgetStyle: "default" })).toEqual({ kind: "default" });
+    expect(resolveWidgetStyle({ widgetStyle: "compact" })).toEqual({ kind: "compact" });
+  });
+
+  test("positive integers become a limit style", () => {
+    expect(resolveWidgetStyle({ widgetStyle: 1 })).toEqual({ kind: "limit", n: 1 });
+    expect(resolveWidgetStyle({ widgetStyle: 5 })).toEqual({ kind: "limit", n: 5 });
+  });
+
+  test("invalid numbers fall back to default (never blanks the widget)", () => {
+    // 0, negative, and non-integer numbers are all rejected.
+    expect(resolveWidgetStyle({ widgetStyle: 0 })).toEqual({ kind: "default" });
+    expect(resolveWidgetStyle({ widgetStyle: -3 })).toEqual({ kind: "default" });
+    expect(resolveWidgetStyle({ widgetStyle: 2.5 })).toEqual({ kind: "default" });
+    expect(resolveWidgetStyle({ widgetStyle: Number.NaN })).toEqual({ kind: "default" });
+    expect(resolveWidgetStyle({ widgetStyle: Number.POSITIVE_INFINITY })).toEqual({
+      kind: "default",
+    });
+  });
+
+  test("unknown / wrong-typed values fall back to default", () => {
+    // Cast: shape is intentionally invalid; the resolver must not trust the type.
+    expect(resolveWidgetStyle({ widgetStyle: "tiny" as unknown as "default" })).toEqual({
+      kind: "default",
+    });
+    expect(resolveWidgetStyle({ widgetStyle: null as unknown as "default" })).toEqual({
+      kind: "default",
+    });
+  });
+});
+
+describe("resolveWidgetMoveCompletedToEnd", () => {
+  test("defaults to false", () => {
+    expect(resolveWidgetMoveCompletedToEnd({})).toBe(false);
+  });
+
+  test("honors true / false", () => {
+    expect(resolveWidgetMoveCompletedToEnd({ widgetMoveCompletedToEnd: true })).toBe(true);
+    expect(resolveWidgetMoveCompletedToEnd({ widgetMoveCompletedToEnd: false })).toBe(false);
   });
 });
 

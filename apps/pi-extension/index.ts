@@ -31,7 +31,7 @@ import {
 	markCompletedSteps,
 	parseChecklist,
 } from "./generated/checklist.ts";
-import { loadConfig, resolveUseJina } from "./generated/config.ts";
+import { loadConfig, resolveUseJina, resolveWidgetMoveCompletedToEnd, resolveWidgetStyle } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
 import {
@@ -391,20 +391,74 @@ export default function plannotator(pi: ExtensionAPI): void {
 	}
 
 	function updateWidget(ctx: ExtensionContext): void {
-		if (phase === "executing" && checklistItems.length > 0) {
-			const lines = checklistItems.map((item) => {
-				if (item.completed) {
-					return (
-						ctx.ui.theme.fg("success", "☑ ") +
-						ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
-					);
-				}
-				return `${ctx.ui.theme.fg("muted", "☐ ")}${item.text}`;
-			});
-			ctx.ui.setWidget("plannotator-progress", lines);
-		} else {
+		if (phase !== "executing" || checklistItems.length === 0) {
 			ctx.ui.setWidget("plannotator-progress", undefined);
+			return;
 		}
+
+		const cfg = loadConfig();
+		const style = resolveWidgetStyle(cfg);
+		const moveDoneToEnd = resolveWidgetMoveCompletedToEnd(cfg);
+
+		const renderItem = (item: ChecklistItem): string => {
+			if (item.completed) {
+				return (
+					ctx.ui.theme.fg("success", "☑ ") +
+					ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
+				);
+			}
+			return `${ctx.ui.theme.fg("muted", "☐ ")}${item.text}`;
+		};
+
+		if (style.kind === "compact") {
+			const completed = checklistItems.filter((t) => t.completed).length;
+			const total = checklistItems.length;
+			const nextItem = checklistItems.find((t) => !t.completed);
+			const tail = nextItem
+				? `next: ${nextItem.text}`
+				: ctx.ui.theme.fg("success", "all done");
+			ctx.ui.setWidget("plannotator-progress", [
+				`${ctx.ui.theme.fg("accent", `📋 ${completed}/${total}`)} · ${tail}`,
+			]);
+			return;
+		}
+
+		// Order the items once, then either render all (default) or slice N (limit).
+		const remaining = checklistItems.filter((t) => !t.completed);
+		const completedItems = checklistItems.filter((t) => t.completed);
+		const ordered = moveDoneToEnd
+			? [...remaining, ...completedItems]
+			: checklistItems;
+
+		if (style.kind === "default") {
+			ctx.ui.setWidget("plannotator-progress", ordered.map(renderItem));
+			return;
+		}
+
+		// style.kind === "limit": prefer remaining, backfill from most-recent
+		// completed so the widget stays populated as work finishes.
+		const n = style.n;
+		const visibleRemaining = remaining.slice(0, n);
+		const slotsLeft = n - visibleRemaining.length;
+		const visibleCompleted =
+			slotsLeft > 0 ? completedItems.slice(-slotsLeft) : [];
+		const visible = moveDoneToEnd
+			? [...visibleRemaining, ...visibleCompleted]
+			: (() => {
+					const keep = new Set([...visibleRemaining, ...visibleCompleted]);
+					return checklistItems.filter((t) => keep.has(t));
+				})();
+
+		const droppedTodo = remaining.length - visibleRemaining.length;
+		const droppedDone = completedItems.length - visibleCompleted.length;
+		const lines = visible.map(renderItem);
+		if (droppedTodo > 0 || droppedDone > 0) {
+			const parts: string[] = [];
+			if (droppedDone > 0) parts.push(`+${droppedDone} done`);
+			if (droppedTodo > 0) parts.push(`+${droppedTodo} more todo`);
+			lines.push(ctx.ui.theme.fg("muted", `… ${parts.join(", ")}`));
+		}
+		ctx.ui.setWidget("plannotator-progress", lines);
 	}
 
 	/**

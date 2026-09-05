@@ -273,6 +273,43 @@ export interface PlannotatorConfig {
    */
   todoProvider?: "auto" | "off";
   /**
+   * Style for the Pi extension's `plannotator-progress` widget shown above
+   * the editor during plan execution. The widget renders the approved plan
+   * checklist and can crowd the terminal for long plans (#TBD).
+   *
+   *   - `"default"` (unset): one line per checklist item, checked items
+     strikethrough+muted. Current behavior.
+   *   - `"compact"`: a single status line of the form
+     `📋 completed/total · next: <first remaining step text>` (or
+     `· all done` when nothing remains). Smallest possible footprint.
+   *   - a positive integer `N`: at most N item lines are rendered, preferring
+     remaining steps; if fewer than N remain, backfill with the most recent
+     completed items. Dropped items are summarized on a muted overflow line
+     (`… +K more todo`, `… +K done`, or `… +K done, +M todo`). `N <= 0` and
+     any non-integer number silently fall back to `"default"` — an invalid
+     value must never blank the widget.
+   *
+   * Only the widget rendering is affected. The status label
+   * (`📋 completed/total`), the `${todoList}` phase-entry template, the
+   * injected per-turn todo-status message, and the pi-todos mirror all keep
+   * reading the raw checklist in its original order.
+   *
+   * Config-file only — no env-var override (widget appearance is a personal
+   * preference, not a per-session switch).
+   */
+  widgetStyle?: "default" | "compact" | number;
+  /**
+   * When true, the Pi extension's progress widget sorts completed items
+   * after remaining ones. Default: false (checklist order). Affects the
+   * widget rendering only — the underlying checklist order is unchanged,
+   * so `${todoList}`, `[DONE:n]` markers, and the pi-todos mirror all keep
+   * seeing the original order.
+   *
+   * Has no visible effect when `widgetStyle: "compact"` — that mode
+   * renders a single summary line with nothing to reorder.
+   */
+  widgetMoveCompletedToEnd?: boolean;
+  /**
    * Selected favicon style for Plannotator application surfaces:
    * 'totman' (production brand mascot) or 'classic' (historical dark-navy P tile).
    */
@@ -869,4 +906,39 @@ export function resolveTodoProviderEnabled(config: PlannotatorConfig): boolean {
   }
   if (config.todoProvider !== undefined) return config.todoProvider !== "off";
   return true;
+}
+
+/**
+ * Resolved Pi extension progress widget style.
+ *   - `{ kind: "default" }`   — one line per item (current behavior).
+ *   - `{ kind: "compact" }`   — single status-summary line.
+ *   - `{ kind: "limit"; n }`  — at most `n` item lines + overflow line.
+ */
+export type WidgetStyle =
+  | { kind: "default" }
+  | { kind: "compact" }
+  | { kind: "limit"; n: number };
+
+/**
+ * Resolve the Pi extension's progress widget style from config.widgetStyle.
+ *
+ * Config-only — no env-var override. Invalid values (negative or zero
+ * numbers, non-integers, unknown strings, wrong types) fall back to
+ * `{ kind: "default" }` so a bad config never blanks the widget.
+ */
+export function resolveWidgetStyle(config: PlannotatorConfig): WidgetStyle {
+  const raw = config.widgetStyle;
+  if (raw === "compact") return { kind: "compact" };
+  if (raw === "default") return { kind: "default" };
+  if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) {
+    return { kind: "limit", n: raw };
+  }
+  return { kind: "default" };
+}
+
+/**
+ * Resolve config.widgetMoveCompletedToEnd. Config-only, default false.
+ */
+export function resolveWidgetMoveCompletedToEnd(config: PlannotatorConfig): boolean {
+  return coerceConfigBoolean(config.widgetMoveCompletedToEnd, false);
 }
