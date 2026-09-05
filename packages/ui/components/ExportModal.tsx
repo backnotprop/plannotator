@@ -136,7 +136,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     await handleCopy(wrapCopiedAnnotations(annotationsOutput), 'annotations');
   };
 
-  // Whether the hash URL is large enough to warrant a short URL option
+  // Warn when the hash URL may be too long for messaging apps
   const urlIsLarge = shareUrl.length > 2048;
   // Hash-based sharing unavailable (e.g. HTML render mode) — show only short link
   const hashUnavailable = !shareUrl && !!onGenerateShortUrl;
@@ -327,9 +327,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   </svg>
                   Generating short link...
                 </div>
-              ) : (urlIsLarge || hashUnavailable) && onGenerateShortUrl ? (
+              ) : onGenerateShortUrl ? (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                  {!hashUnavailable && (
+                  {urlIsLarge && (
                     <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">
                       This URL may be too long for some messaging apps.
                     </p>
