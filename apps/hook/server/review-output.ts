@@ -1,19 +1,54 @@
 import type { Origin } from "@plannotator/shared/agents";
+import type { PlannotatorConfig } from "@plannotator/shared/config";
+import {
+  composeReviewApprovedMessage,
+  getReviewDeniedSuffix,
+} from "@plannotator/shared/prompts";
+
+interface ReviewOutcome {
+  approved: boolean;
+  feedback: string;
+  annotations: readonly unknown[];
+  exit?: boolean;
+}
+
+export interface ReviewOutput {
+  decision: "approved" | "annotated" | "dismissed";
+  /** The plaintext CLI output, excluding its final console newline. */
+  message: string;
+}
+
+export function buildReviewOutput(
+  result: ReviewOutcome,
+  origin: Origin | undefined,
+  config?: PlannotatorConfig,
+): ReviewOutput {
+  if (result.exit) {
+    return {
+      decision: "dismissed",
+      message: "Review session closed without feedback.",
+    };
+  }
+  if (result.approved) {
+    return {
+      decision: "approved",
+      message: composeReviewApprovedMessage(origin, result.feedback, config),
+    };
+  }
+  return {
+    decision: "annotated",
+    // Preserve the newline between the original feedback and suffix console.log
+    // calls. PR feedback gets the suffix too; zero-annotation platform status does not.
+    message: result.annotations.length > 0
+      ? `${result.feedback}\n${getReviewDeniedSuffix(origin, config)}`
+      : result.feedback,
+  };
+}
 
 /**
- * Whether the `plannotator review` CLI's decision consumer delivers
- * approve-time feedback for this origin (decision-control spec §6.4).
- *
- * Review has no `--gate/--json/--hook` triad, so unlike
- * `supportsAnnotateApprovalNotes` this is keyed on the origin's CONSUMER, not
- * on flags. Every origin routed through this CLI shares the one stdout relay
- * (`composeReviewApprovedMessage` at the approved branch): Claude Code reads
- * the output directly, and the amp/droid plugins shell out to
- * `plannotator review` and relay stdout verbatim, so they inherit the same
- * delivery. That is why this currently returns true uniformly — the function
- * exists as the seam where an origin whose relay drops approve-time output
- * would be keyed off, so the advert can never outrun delivery for it
- * (`reviewDecision.test.ts` pins the client half of that contract).
+ * Whether this CLI's review consumer delivers approval notes for the origin.
+ * Direct review renders notes in both plaintext and JSON messages. The OpenCode
+ * bridge also checks the plugin's declared support before advertising this.
  */
 export function supportsReviewApprovalNotes(_origin: Origin | undefined): boolean {
   return true;
