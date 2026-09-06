@@ -148,6 +148,7 @@ jobs:
           packages/ui/components/Viewer.consumer.test.tsx
           packages/ui/components/Viewer.documentHeader.test.tsx
           packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
+          packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
           packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
           packages/ui/utils/undoHistory.dom.test.ts
           packages/ui/utils/codeBlockMark.test.ts

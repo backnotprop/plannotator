@@ -104,7 +104,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const canIncrease = currentSizeIndex < STROKE_SIZES.length - 1;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl">
+    <div
+      data-pn-image-annotator-toolbar
+      className="flex w-fit max-w-full items-center gap-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl"
+    >
+      <div
+        data-pn-image-toolbar-scroll
+        className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain"
+      >
+        <div className="flex w-max items-center gap-2">
       {/* Tools */}
       <div className="flex items-center gap-1">
         {TOOLS.map(({ id, icon: Icon, label }) => (
@@ -228,15 +236,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       >
         <ClearIcon />
       </button>
+        </div>
+      </div>
 
-      <div className="w-px h-5 bg-border" />
+      <div className="w-px h-5 shrink-0 bg-border" />
 
       {/* Save */}
       <button
         type="button"
         onClick={onSave}
         title="Save (Esc)"
-        className="p-1.5 rounded transition-colors bg-success text-success-foreground hover:opacity-90"
+        className="shrink-0 p-1.5 rounded transition-colors bg-success text-success-foreground hover:opacity-90"
       >
         <CheckIcon />
       </button>
