@@ -100,7 +100,7 @@
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.1",
     "@tailwindcss/vite": "^4.1.18",
-    "@types/bun": "^1.2.0",
+    "@types/bun": "^1.4.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "react": "^19.2.3",

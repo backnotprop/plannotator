@@ -15,7 +15,7 @@
       "automerge": false
     },
     {
-      "description": "Pin Bun to 1.3.11: 1.3.12+ broke macOS binary codesign for bun build --compile (hotfixed in v0.17.9). Unpin only after verifying signed builds work on the target version.",
+      "description": "Pin Bun to 1.4.2: unpin only after verifying signed builds work on the target version.",
       "matchManagers": ["github-actions"],
       "matchDepNames": ["oven-sh/setup-bun"],
       "matchDepTypes": ["action"],
