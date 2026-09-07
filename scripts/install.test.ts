@@ -85,7 +85,7 @@ describe("install.sh", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     // Sparse set extended to also fetch the command stubs from the checkout.
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -197,12 +197,42 @@ describe("install.sh", () => {
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
     // sparse-checkout fetches apps/kiro-cli (skills + agent example).
-    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli");
+    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli apps/vibe");
     // The installer also writes the example custom agent to ~/.kiro/agents.
     expect(script).toContain('cp apps/kiro-cli/agents/plannotator.json "$HOME/.kiro/agents/plannotator.json"');
     // Parity: no bespoke flag, like every other agent.
     expect(script).not.toContain("--kiro");
     expect(script).not.toContain("INSTALL_KIRO");
+  });
+
+  test("auto-installs Vibe skills + managed hook when ~/.vibe is detected (no flag)", () => {
+    // Vibe (Mistral's TUI coding agent) is auto-detected like Kiro/Codex:
+    // PATH executable or an existing ~/.vibe, never gated behind a bespoke flag.
+    expect(script).toContain("vibe_available=0");
+    expect(script).toContain('[ -d "$VIBE_HOME" ]');
+    expect(script).toContain('VIBE_HOME="${VIBE_HOME:-$HOME/.vibe}"');
+    expect(script).toContain("VIBE_SKILLS_DIR");
+    expect(script).toContain('$VIBE_HOME/skills');
+    expect(script).toContain('if [ "$vibe_available" -eq 1 ]');
+    // Vibe-specific skills (origin baked in) come from apps/vibe/skills.
+    for (const skill of ["plannotator-review", "plannotator-annotate", "plannotator-last"]) {
+      expect(script).toContain(`copy_skill_if_present apps/vibe/skills/${skill} "$VIBE_SKILLS_DIR"`);
+    }
+    // The knowledge skill is agent-agnostic and single-sourced in apps/skills/core.
+    expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator "$VIBE_SKILLS_DIR"');
+    // sparse-checkout fetches apps/vibe (skills + hook templates).
+    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli apps/vibe");
+    // Managed marker block so the hook coexists with the user's own hooks.toml.
+    expect(script).toContain('VIBE_MANAGED_START="# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>"');
+    expect(script).toContain('VIBE_MANAGED_END="# <<< plannotator-managed-vibe-hooks <<<"');
+    expect(script).toContain('PLANNOTATOR_ORIGIN=mistral-vibe plannotator"');
+    expect(script).toContain('match = "exit_plan_mode"');
+    // config.toml must carry enable_experimental_hooks = true for any hook to fire.
+    expect(script).toContain("enable_experimental_hooks = true");
+    expect(script).toContain('VIBE_CONFIG="$VIBE_HOME/config.toml"');
+    // Parity: no bespoke flag, like every other agent.
+    expect(script).not.toContain("--vibe-only");
+    expect(script).not.toContain("INSTALL_VIBE");
   });
 
   test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
@@ -225,7 +255,7 @@ describe("install.sh", () => {
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
-      'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do',
+      'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR" "$VIBE_SKILLS_DIR"; do',
     );
     expect(script).toContain('rm -rf "$scope/plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
@@ -375,13 +405,14 @@ describe("install.sh", () => {
     // Flags exist for Codex plus the two integrations where the mechanism
     // generalizes identically (detect -> write): Gemini and Kiro. OpenCode
     // gets a plain do-not-write switch (no detection leg).
-    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-opencode)"]) {
+    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-vibe)", "--skip-opencode)"]) {
       expect(script).toContain(flag);
     }
     // Env vars follow the existing PLANNOTATOR_SKIP_*_INSTALL naming.
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer (M2): the skipInstall OBJECT is extracted first (awk,
     // character-indexed so single-line JSON works too) and per-agent keys
@@ -399,7 +430,7 @@ describe("install.sh", () => {
     expect(script).toContain("continue # explicit false is a veto, never a skip");
     // skills rides the same loop: not an agent, but the same three layers
     // and the same skipInstall key region.
-    expect(script).toContain("for _agent in codex gemini kiro opencode skills; do");
+    expect(script).toContain("for _agent in codex gemini kiro vibe opencode skills; do");
     // The old whole-file grep form is gone.
     expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
@@ -463,7 +494,7 @@ describe("install.sh", () => {
     expect(envIdx).toBeGreaterThan(configIdx);
     expect(flagIdx).toBeGreaterThan(envIdx);
     // Advertised in the usage text alongside the per-agent opt-outs.
-    expect(script).toContain("[--skip-kiro] [--skip-opencode] [--skip-skills]");
+    expect(script).toContain("[--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]");
     expect(script).toContain("PLANNOTATOR_SKIP_SKILLS_INSTALL; config key:");
   });
 
@@ -591,7 +622,7 @@ describe("install.ps1", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("claudeSkillsDir");
     expect(script).toContain("agentsSkillsDir");
@@ -641,7 +672,7 @@ describe("install.ps1", () => {
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
-      'foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\\.kiro\\skills"))',
+      'foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\\.kiro\\skills", (Join-Path $vibeHome "skills")))',
     );
     expect(script).toContain('Join-Path $scope "plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
@@ -708,16 +739,19 @@ describe("install.ps1", () => {
     expect(script).toContain("[switch]$SkipCodex");
     expect(script).toContain("[switch]$SkipGemini");
     expect(script).toContain("[switch]$SkipKiro");
+    expect(script).toContain("[switch]$SkipVibe");
     expect(script).toContain("[switch]$SkipOpencode");
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer parses the real nested JSON (strict boolean check, like
     // verifyAttestation).
     expect(script).toContain("$cfg.skipInstall.codex -is [bool]");
     expect(script).toContain("$cfg.skipInstall.gemini -is [bool]");
     expect(script).toContain("$cfg.skipInstall.kiro -is [bool]");
+    expect(script).toContain("$cfg.skipInstall.vibe -is [bool]");
     expect(script).toContain("$cfg.skipInstall.opencode -is [bool]");
     // Precedence by textual layering (later assignment wins): config, then
     // env var, then switch.
@@ -865,7 +899,7 @@ describe("install.cmd", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -908,7 +942,7 @@ describe("install.cmd", () => {
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
-      'for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!") do',
+      'for %%D in ("!CLAUDE_SKILLS_DIR!" "!AGENTS_SKILLS_DIR!" "!KIRO_SKILLS_DIR!" "!VIBE_SKILLS_DIR!") do',
     );
     expect(script).toContain('rmdir /s /q "%%~D\\plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
@@ -1005,22 +1039,25 @@ describe("install.cmd", () => {
     expect(script).toContain('if /i "%~1"=="--skip-codex"');
     expect(script).toContain('if /i "%~1"=="--skip-gemini"');
     expect(script).toContain('if /i "%~1"=="--skip-kiro"');
+    expect(script).toContain('if /i "%~1"=="--skip-vibe"');
     expect(script).toContain('if /i "%~1"=="--skip-opencode"');
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer (M2): the REAL JSON is parsed by PowerShell (strict
     // boolean check, matching install.ps1) instead of a line-oblivious
     // findstr - so a "codex": true under some OTHER key can never opt
     // anyone out and an explicit false inside skipInstall is honored.
     expect(script).toContain("$c.skipInstall.$k");
-    expect(script).toContain("@('codex','gemini','kiro','opencode','skills')");
+    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','skills')");
     expect(script).toContain("$v -is [bool] -and $v");
     expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
     expect(script).toContain("skipInstall.gemini");
     expect(script).toContain("skipInstall.kiro");
+    expect(script).toContain("skipInstall.vibe");
     expect(script).toContain("skipInstall.opencode");
     // The old whole-file findstr form is gone.
     expect(script).not.toContain('findstr /r /c:"\\"codex\\"');

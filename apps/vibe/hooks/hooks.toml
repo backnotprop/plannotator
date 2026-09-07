@@ -1,0 +1,25 @@
+# Plannotator-managed Vibe hook block (managed; do not edit).
+# Installed by scripts/install.sh into $VIBE_HOME/hooks.toml. The installer
+# strips and rewrites everything between the markers on each run, so hand
+# edits inside the block are lost — keep custom hooks outside the markers.
+# Vibe spawns hook commands via /bin/sh on macOS/Linux, so a bare binary on
+# PATH works. Windows is not supported here (Vibe runs hooks via cmd.exe and
+# a .sh launcher is not executable); the Windows installers print manual
+# setup instructions instead.
+#
+# The pre_tool hook on exit_plan_mode is the plan-review gate. The plan is
+# NOT carried in the exit_plan_mode payload (its args model is empty), so
+# plannotator resolves the plan by reading the newest *.md file in
+# $VIBE_HOME/plans by mtime. Approve → {"decision":"allow"}; Deny →
+# {"decision":"deny","reason":"..."} (the reason becomes the LLM-visible
+# tool error). A startup failure fails open: empty stdout + exit 0, so
+# exit_plan_mode proceeds and the user is never locked out of plan mode.
+# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>
+[[hooks]]
+name = "plannotator-exit-plan-mode"
+type = "pre_tool"
+match = "exit_plan_mode"
+command = "PLANNOTATOR_ORIGIN=mistral-vibe plannotator"
+timeout = 345600
+description = "Plannotator plan review (managed)"
+# <<< plannotator-managed-vibe-hooks <<<

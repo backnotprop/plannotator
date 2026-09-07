@@ -18,6 +18,7 @@ param(
     [switch]$SkipCodex,
     [switch]$SkipGemini,
     [switch]$SkipKiro,
+    [switch]$SkipVibe,
     [switch]$SkipOpencode,
     # Same shape as the per-agent switches, but scoped to the skills/slash
     # command sparse checkout rather than one agent's home: -SkipSkills turns
@@ -365,6 +366,7 @@ if ($WithCallFlow) { $installCallFlowResolved = $true }
 $skipCodexResolved = $false;  $skipCodexSource = ""
 $skipGeminiResolved = $false; $skipGeminiSource = ""
 $skipKiroResolved = $false;   $skipKiroSource = ""
+$skipVibeResolved = $false;   $skipVibeSource = ""
 $skipOpencodeResolved = $false; $skipOpencodeSource = ""
 # skipInstall.skills is not an agent - it opts out of the skills/slash-command
 # checkout for every scope at once - but it shares the same three layers.
@@ -378,6 +380,9 @@ if ($cfg -and $cfg.skipInstall) {
     }
     if ($cfg.skipInstall.kiro -is [bool] -and $cfg.skipInstall.kiro) {
         $skipKiroResolved = $true; $skipKiroSource = "config skipInstall.kiro"
+    }
+    if ($cfg.skipInstall.vibe -is [bool] -and $cfg.skipInstall.vibe) {
+        $skipVibeResolved = $true; $skipVibeSource = "config skipInstall.vibe"
     }
     if ($cfg.skipInstall.opencode -is [bool] -and $cfg.skipInstall.opencode) {
         $skipOpencodeResolved = $true; $skipOpencodeSource = "config skipInstall.opencode"
@@ -401,6 +406,11 @@ if ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(1|true|yes)$') {
 } elseif ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(0|false|no)$') {
     $skipKiroResolved = $false; $skipKiroSource = ""
 }
+if ($env:PLANNOTATOR_SKIP_VIBE_INSTALL -match '^(1|true|yes)$') {
+    $skipVibeResolved = $true; $skipVibeSource = "PLANNOTATOR_SKIP_VIBE_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_VIBE_INSTALL -match '^(0|false|no)$') {
+    $skipVibeResolved = $false; $skipVibeSource = ""
+}
 if ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(1|true|yes)$') {
     $skipOpencodeResolved = $true; $skipOpencodeSource = "PLANNOTATOR_SKIP_OPENCODE_INSTALL"
 } elseif ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(0|false|no)$') {
@@ -414,6 +424,7 @@ if ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(1|true|yes)$') {
 if ($SkipCodex)  { $skipCodexResolved = $true;  $skipCodexSource = "-SkipCodex" }
 if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini" }
 if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
+if ($SkipVibe)   { $skipVibeResolved = $true;   $skipVibeSource = "-SkipVibe" }
 if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
 if ($SkipSkills) { $skipSkillsResolved = $true; $skipSkillsSource = "-SkipSkills" }
 
@@ -732,6 +743,14 @@ if (Test-Path $codexDir) {
 $codexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue) -or $codexHomeHasUserConfig
 # Kiro is auto-detected like Codex/Gemini: PATH executable or an existing ~/.kiro.
 $kiroAvailable = [bool](Get-Command kiro-cli -ErrorAction SilentlyContinue) -or (Test-Path "$env:USERPROFILE\.kiro")
+# Vibe (Mistral's TUI coding agent) stores everything under $VIBE_HOME when set,
+# falling back to ~/.vibe. Auto-detected like Codex/Gemini/Kiro: PATH executable
+# or an existing ~/.vibe. The plan-review hook runs on macOS/Linux only (Vibe
+# spawns hooks via /bin/sh; Windows uses cmd.exe and a .sh launcher is not
+# executable), so the Windows installer prints manual hook instructions instead
+# of wiring hooks.toml; skills still install to $VIBE_HOME\skills.
+$vibeHome = if ($env:VIBE_HOME) { $env:VIBE_HOME } else { Join-Path $env:USERPROFILE ".vibe" }
+$vibeAvailable = [bool](Get-Command vibe -ErrorAction SilentlyContinue) -or (Test-Path $vibeHome)
 
 if ($codexAvailable -and $skipCodexResolved) {
     # HONEST three-state reporting (#1178): detected-but-skipped is its own
@@ -769,6 +788,45 @@ if ($codexAvailable -and $skipCodexResolved) {
     Write-Host "  2. Add a Stop hook in $codexDir\hooks.json that runs:"
     Write-Host ""
     Write-Host "     $codexExePath"
+}
+
+# Vibe plan-review hooks run on macOS/Linux only (Vibe spawns hooks via /bin/sh;
+# Windows uses cmd.exe and a .sh launcher is not executable). The Windows
+# installer never writes $VIBE_HOME\hooks.toml automatically - it prints manual
+# hook setup instructions, mirroring the Codex-on-Windows pattern. A Vibe
+# opt-out (#1178) suppresses the manual instructions and this run neither
+# creates, updates, nor removes anything under the Vibe home. Skills still
+# install to $VIBE_HOME\skills from the sparse checkout below.
+if ($vibeAvailable -and $skipVibeResolved) {
+    Write-Host ""
+    Write-Host "Vibe: detected, skipped ($skipVibeSource)."
+    Write-Host "The Windows installer only prints manual Vibe setup instructions; they"
+    Write-Host "were suppressed."
+    $vibeHooksProbe = Join-Path $vibeHome "hooks.toml"
+    if (Test-Path $vibeHooksProbe) {
+        $vibeHooksContent = Get-Content -Path $vibeHooksProbe -Raw -ErrorAction SilentlyContinue
+        if ($vibeHooksContent -match "plannotator") {
+            Write-Host "Your existing Vibe plan-review hook at $vibeHome\hooks.toml is unaffected."
+        }
+    }
+} elseif ($vibeAvailable) {
+    $vibeExePath = "$installDir\plannotator.exe"
+    Write-Host ""
+    Write-Host "Vibe detected."
+    Write-Host "Vibe plan-review hooks run on macOS/Linux only (Vibe spawns hooks via"
+    Write-Host "/bin/sh; on Windows a .sh launcher is not executable). To set up plan"
+    Write-Host "review manually on a macOS/Linux box with Vibe, add to ~/.vibe/hooks.toml:"
+    Write-Host ""
+    Write-Host "  [[hooks]]"
+    Write-Host "  name = ""plannotator-exit-plan-mode"""
+    Write-Host "  type = ""pre_tool"""
+    Write-Host "  match = ""exit_plan_mode"""
+    Write-Host "  command = ""PLANNOTATOR_ORIGIN=mistral-vibe plannotator"""
+    Write-Host "  timeout = 345600"
+    Write-Host ""
+    Write-Host "And ensure ~/.vibe/config.toml has: enable_experimental_hooks = true"
+    Write-Host ""
+    Write-Host "Vibe skills are still installed to $vibeHome\skills from this run."
 }
 
 # Clear OpenCode plugin cache. An OpenCode opt-out (#1178) leaves OpenCode's
@@ -1158,7 +1216,7 @@ try {
             # plain-clone fallback (#1238): that git has no sparse-checkout
             # subcommand, and the full checkout needs no narrowing.
             if ($sparseClone) {
-                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null }
+                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands 2>$null }
             }
 
             # Claude Code and Codex consume different skill bodies. Claude Code
@@ -1215,6 +1273,23 @@ try {
                     Copy-Item -Force "apps\kiro-cli\agents\plannotator.json" "$kiroAgentsDir\plannotator.json"
                 }
                 Write-Host "Installed Kiro skills to $kiroSkillsDir\ and agent to $kiroAgentsDir\plannotator.json"
+            }
+
+            # Vibe: hand-maintained skills (origin baked in) + the single-sourced
+            # knowledge skill. A Vibe opt-out (#1178) leaves $VIBE_HOME untouched.
+            # Skills work cross-platform; only the hook is macOS/Linux-only.
+            if ($vibeAvailable -and -not $skipVibeResolved -and (Test-Path "apps\vibe\skills")) {
+                $vibeSkillsDir = Join-Path $vibeHome "skills"
+                New-Item -ItemType Directory -Force -Path $vibeSkillsDir | Out-Null
+                # Vibe-specific skills (origin baked in) come from apps/vibe/skills.
+                Copy-SkillIfPresent "apps\vibe\skills\plannotator-review" $vibeSkillsDir
+                Copy-SkillIfPresent "apps\vibe\skills\plannotator-annotate" $vibeSkillsDir
+                Copy-SkillIfPresent "apps\vibe\skills\plannotator-last" $vibeSkillsDir
+                # The plannotator knowledge skill (CLI reference) is agent-agnostic
+                # and single-sourced in apps/skills/core; Vibe gets the same copy
+                # every other scope does.
+                Copy-SkillIfPresent "apps\skills\core\plannotator" $vibeSkillsDir
+                Write-Host "Installed Vibe skills to $vibeSkillsDir\"
             }
 
             # OpenCode command stubs -> ~/.config/opencode/commands (always,
@@ -1284,11 +1359,13 @@ foreach ($cmd in @("plannotator-review", "plannotator-annotate", "plannotator-la
 
 # plannotator-archive no longer ships as a skill. Remove any stale installed
 # copy from every skill scope so upgraders don't keep a dead skill around.
-foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro\skills")) {
+foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, "$env:USERPROFILE\.kiro\skills", (Join-Path $vibeHome "skills"))) {
     # A skills opt-out leaves every skill scope untouched, sweep included.
     if ($skipSkillsResolved) { continue }
     # A Kiro opt-out leaves ~/.kiro entirely untouched - including this sweep.
     if ($skipKiroResolved -and ($scope -eq "$env:USERPROFILE\.kiro\skills")) { continue }
+    # A Vibe opt-out leaves $VIBE_HOME entirely untouched - including this sweep.
+    if ($skipVibeResolved -and ($scope -eq (Join-Path $vibeHome "skills"))) { continue }
     $staleArchivePath = Join-Path $scope "plannotator-archive"
     if (Test-Path $staleArchivePath) {
         Write-Host "Removing stale plannotator-archive skill $staleArchivePath"
@@ -1492,6 +1569,30 @@ if ($kiroAvailable -and $skipKiroResolved) {
     Write-Host "Launch it: kiro-cli chat --agent plannotator"
 } else {
     Write-Host "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
+}
+Write-Host ""
+Write-Host "=========================================="
+Write-Host "  VIBE USERS"
+Write-Host "=========================================="
+Write-Host ""
+if ($vibeAvailable -and $skipVibeResolved) {
+    Write-Host "Vibe was detected, but the integration was skipped ($skipVibeSource)."
+    Write-Host "No files under $vibeHome were written or removed. Re-run without the"
+    Write-Host "opt-out to add Vibe skills."
+} elseif ($vibeAvailable -and $skipSkillsResolved) {
+    Write-Host "Vibe was detected, but skills were skipped ($skipSkillsSource), so no"
+    Write-Host "Vibe skills were installed. The plan-review hook is macOS/Linux-only and"
+    Write-Host "is not wired from the Windows installer. Re-run without the opt-out to"
+    Write-Host "add Vibe skills."
+} elseif ($vibeAvailable) {
+    Write-Host "Vibe skills are installed to $vibeHome\skills\"
+    Write-Host "The plan-review hook is macOS/Linux-only (Vibe spawns hooks via /bin/sh;"
+    Write-Host "on Windows a .sh launcher is not executable). See the manual setup"
+    Write-Host "instructions printed above to wire plan review on a macOS/Linux box."
+    Write-Host "Note: improve-context (plan-mode enrichment) is not wired for Vibe."
+} else {
+    Write-Host "Vibe was not detected. After installing Mistral Vibe, rerun this installer"
+    Write-Host "to add Vibe skills."
 }
 Write-Host ""
 Write-Host "=========================================="

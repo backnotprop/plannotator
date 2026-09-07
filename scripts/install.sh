@@ -49,7 +49,7 @@ RECONFIGURE=0
 # Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
 # no persistent state elsewhere — no sem sidecar, no CallDiff or agent-terminal runtime, no
 # skills, hooks, slash commands, or per-agent config (Claude, Codex, OpenCode,
-# Gemini, Kiro). Set by --minimal (1) / --no-minimal (0); -1 = neither flag
+# Gemini, Kiro, Vibe). Set by --minimal (1) / --no-minimal (0); -1 = neither flag
 # given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved after arg
 # parsing so a flag overrides the env var in either direction.
 MINIMAL_FLAG=-1
@@ -61,6 +61,7 @@ MINIMAL_FLAG=-1
 SKIP_CODEX_FLAG=0
 SKIP_GEMINI_FLAG=0
 SKIP_KIRO_FLAG=0
+SKIP_VIBE_FLAG=0
 SKIP_OPENCODE_FLAG=0
 # Same shape, but scoped to the skills/slash-command sparse checkout rather
 # than one agent's home: --skip-skills turns the whole fetch into a no-op for
@@ -75,7 +76,7 @@ usage() {
 Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
                   [--minimal | --no-minimal] [--skip-codex] [--skip-gemini]
-                  [--skip-kiro] [--skip-opencode] [--skip-skills]
+                  [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]
                   [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
@@ -104,7 +105,7 @@ Options:
                          --binary-only). Skips the sem semantic-diff sidecar,
                          the CallDiff runtime, the agent-terminal runtime, and every per-agent
                          integration (skills, hooks, slash commands, and config
-                         for Claude, Codex, OpenCode, Gemini, and Kiro). No
+                         for Claude, Codex, OpenCode, Gemini, Kiro, and Vibe). No
                          persistent state is written outside $HOME/.local/bin
                          (a temp download file is still used and removed). Also
                          enabled by exporting PLANNOTATOR_MINIMAL=1.
@@ -124,6 +125,11 @@ Options:
                          (~/.kiro skills and agent). Env var:
                          PLANNOTATOR_SKIP_KIRO_INSTALL; config key:
                          skipInstall.kiro.
+  --skip-vibe           Same opt-out for the Mistral Vibe integration
+                         (hooks.toml + config.toml under VIBE_HOME, and the
+                         Vibe-home skills). Env var:
+                         PLANNOTATOR_SKIP_VIBE_INSTALL; config key:
+                         skipInstall.vibe.
   --skip-opencode        Do not write the OpenCode integration (command stubs
                          under ~/.config/opencode/commands and the OpenCode
                          plugin cache clear). OpenCode has no detection leg,
@@ -132,7 +138,7 @@ Options:
                          skipInstall.opencode.
   --skip-skills          Do not fetch or write the /plannotator-* skills and
                          slash commands (the sparse checkout that feeds Claude
-                         Code, ~/.agents, OpenCode, Gemini, and Kiro), the
+                         Code, ~/.agents, OpenCode, Gemini, Kiro, and Vibe), the
                          extras, or the skill-scope cleanup sweeps. Nothing
                          already installed is removed. The binary, hooks, and
                          per-agent config still install. Use it where
@@ -303,6 +309,10 @@ while [ $# -gt 0 ]; do
             ;;
         --skip-kiro)
             SKIP_KIRO_FLAG=1
+            shift
+            ;;
+        --skip-vibe)
+            SKIP_VIBE_FLAG=1
             shift
             ;;
         --skip-opencode)
@@ -512,6 +522,8 @@ skip_gemini=0
 skip_gemini_source=""
 skip_kiro=0
 skip_kiro_source=""
+skip_vibe=0
+skip_vibe_source=""
 skip_opencode=0
 skip_opencode_source=""
 # skipInstall.skills is not an agent — it opts out of the skills/slash-command
@@ -546,7 +558,7 @@ if [ -f "$_config_dir/config.json" ]; then
         }' "$_config_dir/config.json" 2>/dev/null) || _skip_install_block=""
 fi
 if [ -n "$_skip_install_block" ]; then
-    for _agent in codex gemini kiro opencode skills; do
+    for _agent in codex gemini kiro vibe opencode skills; do
         if printf '%s' "$_skip_install_block" | grep -q "\"$_agent\"[[:space:]]*:[[:space:]]*false"; then
             continue # explicit false is a veto, never a skip
         fi
@@ -563,6 +575,10 @@ if [ -n "$_skip_install_block" ]; then
                 kiro)
                     skip_kiro=1
                     skip_kiro_source="config skipInstall.kiro"
+                    ;;
+                vibe)
+                    skip_vibe=1
+                    skip_vibe_source="config skipInstall.vibe"
                     ;;
                 opencode)
                     skip_opencode=1
@@ -608,6 +624,16 @@ case "${PLANNOTATOR_SKIP_KIRO_INSTALL:-}" in
         skip_kiro_source=""
         ;;
 esac
+case "${PLANNOTATOR_SKIP_VIBE_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_vibe=1
+        skip_vibe_source="PLANNOTATOR_SKIP_VIBE_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_vibe=0
+        skip_vibe_source=""
+        ;;
+esac
 case "${PLANNOTATOR_SKIP_OPENCODE_INSTALL:-}" in
     1|true|yes|TRUE|YES|True|Yes)
         skip_opencode=1
@@ -639,6 +665,10 @@ fi
 if [ "$SKIP_KIRO_FLAG" -eq 1 ]; then
     skip_kiro=1
     skip_kiro_source="--skip-kiro"
+fi
+if [ "$SKIP_VIBE_FLAG" -eq 1 ]; then
+    skip_vibe=1
+    skip_vibe_source="--skip-vibe"
 fi
 if [ "$SKIP_OPENCODE_FLAG" -eq 1 ]; then
     skip_opencode=1
@@ -1072,6 +1102,18 @@ fi
 kiro_available=0
 if command -v kiro-cli >/dev/null 2>&1 || [ -d "$HOME/.kiro" ]; then
     kiro_available=1
+fi
+
+# Vibe (Mistral's TUI coding agent) stores everything under $VIBE_HOME when
+# set, falling back to ~/.vibe (vibe/utils/paths.py:get_vibe_home). Detect via
+# the `vibe` binary on PATH or an existing ~/.vibe. The hook runs on
+# macOS/Linux only (Vibe spawns hooks via /bin/sh; Windows uses cmd.exe and a
+# .sh launcher is not executable), so the Windows installers print manual
+# instructions instead of wiring hooks.
+VIBE_HOME="${VIBE_HOME:-$HOME/.vibe}"
+vibe_available=0
+if command -v vibe >/dev/null 2>&1 || [ -d "$VIBE_HOME" ]; then
+    vibe_available=1
 fi
 
 if [ "$codex_available" -eq 1 ] && [ "$skip_codex" -eq 1 ]; then
@@ -1612,6 +1654,7 @@ if [ "$skip_skills" -eq 0 ] && ! command -v git &>/dev/null; then
 fi
 
 KIRO_SKILLS_DIR="$HOME/.kiro/skills"
+VIBE_SKILLS_DIR="$VIBE_HOME/skills"
 OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands"
 GEMINI_COMMANDS_DIR="$HOME/.gemini/commands"
 skills_tmp=$(mktemp -d)
@@ -1717,7 +1760,7 @@ checkout_failed=0
     fi
     cd repo || exit 1
     if [ "$sparse_clone" -eq 1 ]; then
-        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>"$git_err"; then
+        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands 2>"$git_err"; then
             surface_git_error
             exit 1
         fi
@@ -1795,6 +1838,23 @@ checkout_failed=0
         fi
         echo "Installed Kiro skills to ${KIRO_SKILLS_DIR}/ and agent to ~/.kiro/agents/plannotator.json"
     fi
+
+    # Vibe — hand-maintained skills (origin baked in) plus the single-sourced
+    # knowledge skill. A Vibe opt-out (#1178) leaves $VIBE_HOME entirely
+    # untouched. VIBE_HOME is resolved above alongside the Vibe detection.
+    if [ "$vibe_available" -eq 1 ] && [ "$skip_vibe" -eq 0 ] && [ -d "apps/vibe/skills" ] && [ -n "$(ls -A apps/vibe/skills 2>/dev/null)" ]; then
+        mkdir -p "$VIBE_SKILLS_DIR"
+        # Vibe-specific skills (origin baked in) come from apps/vibe/skills.
+        copy_skill_if_present apps/vibe/skills/plannotator-review "$VIBE_SKILLS_DIR"
+        copy_skill_if_present apps/vibe/skills/plannotator-annotate "$VIBE_SKILLS_DIR"
+        copy_skill_if_present apps/vibe/skills/plannotator-last "$VIBE_SKILLS_DIR"
+        # The plannotator knowledge skill (CLI reference) is agent-agnostic and
+        # single-sourced in apps/skills/core; Vibe gets the same copy every
+        # other scope does. Without it, Vibe users get launchers but no CLI
+        # reference.
+        copy_skill_if_present apps/skills/core/plannotator "$VIBE_SKILLS_DIR"
+        echo "Installed Vibe skills to ${VIBE_SKILLS_DIR}/"
+    fi
 ) || checkout_failed=1
 
 rm -rf "$skills_tmp"
@@ -1824,13 +1884,17 @@ done
 
 # plannotator-archive no longer ships as a skill. Remove any stale installed
 # copy from every skill scope so upgraders don't keep a dead skill around.
-for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do
+for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR" "$VIBE_SKILLS_DIR"; do
     # A skills opt-out leaves every skill scope untouched, sweep included.
     if [ "$skip_skills" -eq 1 ]; then
         continue
     fi
     # A Kiro opt-out leaves ~/.kiro entirely untouched — including this sweep.
     if [ "$scope" = "$KIRO_SKILLS_DIR" ] && [ "$skip_kiro" -eq 1 ]; then
+        continue
+    fi
+    # A Vibe opt-out leaves $VIBE_HOME entirely untouched — including this sweep.
+    if [ "$scope" = "$VIBE_SKILLS_DIR" ] && [ "$skip_vibe" -eq 1 ]; then
         continue
     fi
     if [ -d "$scope/plannotator-archive" ]; then
@@ -1978,6 +2042,89 @@ GEMINI_SETTINGS_EOF
     # the skills/commands install block above (apps/gemini/commands).
 fi
 
+# --- Mistral Vibe support (only if Vibe is installed or configured) ---
+# Vibe (Mistral's TUI coding agent) hooks are [[hooks]] TOML blocks in
+# $VIBE_HOME/hooks.toml. Plan review gates exit_plan_mode via a pre_tool hook;
+# the plan is not in the payload (exit_plan_mode takes no args), so plannotator
+# resolves the newest plan from $VIBE_HOME/plans by mtime. A managed marker
+# block coexists with any user/Orca hooks. Vibe needs
+# enable_experimental_hooks = true in config.toml for any hook to fire.
+VIBE_HOOKS="$VIBE_HOME/hooks.toml"
+VIBE_CONFIG="$VIBE_HOME/config.toml"
+VIBE_MANAGED_START="# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>"
+VIBE_MANAGED_END="# <<< plannotator-managed-vibe-hooks <<<"
+
+if [ "$vibe_available" -eq 1 ] && [ "$skip_vibe" -eq 1 ]; then
+    # HONEST three-state reporting (#1178): detected-but-skipped is its own
+    # state. Skip is do-not-write: nothing under $VIBE_HOME is created,
+    # updated, or removed on this run.
+    echo ""
+    echo "Vibe: detected, skipped (${skip_vibe_source})."
+    if [ -f "$VIBE_HOOKS" ] && grep -q "plannotator" "$VIBE_HOOKS" 2>/dev/null; then
+        echo "An existing Vibe integration at ${VIBE_HOOKS} was left untouched."
+    fi
+    echo "Note: the shared agent skills in ~/.agents/skills serve multiple agents"
+    echo "and are still installed."
+elif [ "$vibe_available" -eq 1 ]; then
+    mkdir -p "$VIBE_HOME"
+    vibe_hook_configured=0
+
+    # Strip any existing managed block (markers inclusive), then append a
+    # fresh one. awk prints every line except the managed region; a lone
+    # start-marker with no end-marker is bounded to EOF so it cannot swallow
+    # trailing user TOML beyond the contiguous managed tables. Atomic write
+    # via a temp file in the same dir + rename; keep a .bak for recovery.
+    write_vibe_hooks_block() {
+        _new_body=""
+        if [ -f "$VIBE_HOOKS" ]; then
+            _new_body=$(awk -v s="$VIBE_MANAGED_START" -v e="$VIBE_MANAGED_END" '
+                BEGIN { in_block = 0 }
+                $0 == s { in_block = 1; next }
+                in_block && $0 == e { in_block = 0; next }
+                in_block { next }
+                { print }
+            ' "$VIBE_HOOKS")
+            # Trim trailing blank lines so the appended block sits cleanly.
+            _new_body=$(printf '%s\n' "$_new_body" | sed -e '/^$/N;/^\n$/D')
+        fi
+        [ -f "$VIBE_HOOKS" ] && cp "$VIBE_HOOKS" "$VIBE_HOOKS.bak"
+        {
+            printf '%s\n' "$_new_body"
+            cat << 'VIBE_HOOKS_BLOCK_EOF'
+# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>
+[[hooks]]
+name = "plannotator-exit-plan-mode"
+type = "pre_tool"
+match = "exit_plan_mode"
+command = "PLANNOTATOR_ORIGIN=mistral-vibe plannotator"
+timeout = 345600
+description = "Plannotator plan review (managed)"
+# <<< plannotator-managed-vibe-hooks <<<
+VIBE_HOOKS_BLOCK_EOF
+        } > "$VIBE_HOOKS.tmp" && mv "$VIBE_HOOKS.tmp" "$VIBE_HOOKS"
+    }
+
+    write_vibe_hooks_block
+    echo "Installed Vibe plan-review hook at ${VIBE_HOOKS}"
+    vibe_hook_configured=1
+
+    # Ensure enable_experimental_hooks = true in config.toml. Vibe requires
+    # this top-level key for any hook to fire. Create the file if absent; if
+    # the key already exists (true or false) leave it untouched so we never
+    # downgrade a user's explicit false, matching the Codex config-merge
+    # discipline.
+    if [ ! -f "$VIBE_CONFIG" ]; then
+        printf 'enable_experimental_hooks = true\n' > "$VIBE_CONFIG"
+        echo "Created Vibe config at ${VIBE_CONFIG}"
+    elif grep -Eq '^[[:space:]]*enable_experimental_hooks[[:space:]]*=' "$VIBE_CONFIG"; then
+        echo "Vibe config at ${VIBE_CONFIG} already sets enable_experimental_hooks; leaving it unchanged."
+    else
+        cp "$VIBE_CONFIG" "$VIBE_CONFIG.bak"
+        printf '\n# Added by plannotator installer\nenable_experimental_hooks = true\n' >> "$VIBE_CONFIG"
+        echo "Enabled Vibe experimental hooks in ${VIBE_CONFIG}"
+    fi
+fi
+
 echo ""
 echo "=========================================="
 echo "  OPENCODE USERS"
@@ -2078,6 +2225,31 @@ elif [ "$kiro_available" -eq 1 ]; then
     echo "Launch it: kiro-cli chat --agent plannotator"
 else
     echo "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
+fi
+echo ""
+echo "=========================================="
+echo "  VIBE USERS"
+echo "=========================================="
+echo ""
+if [ "$vibe_available" -eq 1 ] && [ "$skip_vibe" -eq 1 ]; then
+    echo "Vibe was detected, but the integration was skipped (${skip_vibe_source})."
+    echo "No files under ${VIBE_HOME} were written or removed. Re-run without the"
+    echo "opt-out to add the plan-review hook and Vibe skills."
+elif [ "$vibe_available" -eq 1 ] && [ "$skip_skills" -eq 1 ]; then
+    echo "Vibe was detected, and the plan-review hook is installed at ${VIBE_HOME}/hooks.toml."
+    echo "Skills were skipped (${skip_skills_source}), so no Vibe skills were installed."
+    echo "Re-run without the opt-out to add them."
+elif [ "$vibe_available" -eq 1 ]; then
+    echo "Plan review is configured through the Vibe pre_tool hook on exit_plan_mode"
+    echo "in ${VIBE_HOME}/hooks.toml. enable_experimental_hooks = true is set in"
+    echo "${VIBE_HOME}/config.toml."
+    echo ""
+    echo "Vibe skills are installed to ${VIBE_SKILLS_DIR}/"
+    echo "Note: improve-context (plan-mode enrichment) is not wired for Vibe —"
+    echo "only the plan-review gate runs."
+else
+    echo "Vibe was not detected. After installing Mistral Vibe, rerun this installer"
+    echo "to configure plan review."
 fi
 echo ""
 echo "=========================================="

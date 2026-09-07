@@ -1,0 +1,31 @@
+---
+name: plannotator-last
+disable-model-invocation: true
+description: Open Plannotator on the latest rendered assistant message and use the returned annotations to revise that message or continue.
+---
+
+# Plannotator Last (Mistral Vibe)
+
+Use this skill when the user wants to annotate the latest assistant response in Plannotator.
+
+Do not send a commentary/status message before running the command. The command
+targets the latest rendered assistant response, so a preamble can mistakenly become the
+thing being annotated.
+
+Run:
+
+```bash
+PLANNOTATOR_ORIGIN=mistral-vibe plannotator last
+```
+
+Behavior:
+
+1. Run the command.
+2. Wait for the annotation session to finish.
+3. If feedback is returned, incorporate it into the follow-up response.
+4. If the session closes without feedback, mention that briefly and continue.
+5. An approval may still carry notes — a `"decision": "approved"` result with a
+   `"feedback"` field. Read those notes and carry them into subsequent work, but
+   do not redo the message over them: they are guidance, not a change request.
+
+Run the command yourself rather than telling the user to invoke shell syntax manually.
