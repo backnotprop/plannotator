@@ -651,6 +651,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 			try {
 				const { parseReviewArgs } = await import("./generated/review-args.ts");
 				const reviewArgs = parseReviewArgs(args ?? "");
+				// Argument-shape failures refuse to start a session (same contract
+				// as the CLI's exit 1), surfaced through Pi's notifier.
+				if (reviewArgs.errors.length > 0) {
+					ctx.ui.notify(`Plannotator: ${reviewArgs.errors.join("; ")}`, "error");
+					return;
+				}
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType,

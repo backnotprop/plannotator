@@ -736,6 +736,15 @@ if (args[0] === "sessions") {
   // ============================================
 
   const reviewArgs = parseReviewArgs(args.slice(1));
+  // Argument-shape failures (unknown/typo'd flags) refuse to start a session:
+  // silently dropping them is how `--bse main` used to open a review as if
+  // nothing happened. Review has no strict-gate mode, so this is exit 1 like
+  // every other review startup failure.
+  if (reviewArgs.errors.length > 0) {
+    for (const parseError of reviewArgs.errors) console.error(parseError);
+    console.error("Run 'plannotator review --help' for usage.");
+    process.exit(1);
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
@@ -1714,6 +1723,13 @@ if (args[0] === "sessions") {
     inputJson,
   );
   const reviewArgs = parseReviewArgs(typeof input.arguments === "string" ? input.arguments : "");
+  // Same refusal as the direct `review` branch. Errors go to stderr so the
+  // bridge's machine-readable stdout contract stays untouched.
+  if (reviewArgs.errors.length > 0) {
+    for (const parseError of reviewArgs.errors) console.error(parseError);
+    console.error("Run 'plannotator review --help' for usage.");
+    process.exit(1);
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
 

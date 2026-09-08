@@ -67,6 +67,14 @@ export async function handleReviewCommand(
 
   // @ts-ignore - Event properties contain arguments
   const reviewArgs = parseReviewArgs(event.properties?.arguments || "");
+  // Argument-shape failures refuse to start a session (same contract as the
+  // CLI's exit 1) — surfaced through the plugin's existing log path.
+  if (reviewArgs.errors.length > 0) {
+    for (const parseError of reviewArgs.errors) {
+      client.app.log({ level: "error", message: `[Plannotator] ${parseError}` });
+    }
+    return;
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
 

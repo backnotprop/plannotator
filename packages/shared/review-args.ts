@@ -5,6 +5,13 @@ export interface ParsedReviewArgs {
   prUrl?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
+  /**
+   * Argument-shape problems the host must surface before starting a session.
+   * Always present; empty means the invocation parsed cleanly. Hosts differ in
+   * how they surface these (CLI exits 1, Pi/OpenCode notify), which is why the
+   * parser reports rather than throws.
+   */
+  errors: string[];
 }
 
 export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
@@ -14,9 +21,13 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
 
   let vcsType: VcsSelection | undefined;
   let useLocal = true;
+  const errors: string[] = [];
   const positional: string[] = [];
 
-  for (const token of tokens) {
+  // Index-based so value-taking flags can consume their value token before the
+  // positional collector sees it.
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
     switch (token) {
       case "--git":
         vcsType = "git";
@@ -31,7 +42,17 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
         useLocal = false;
         break;
       default:
-        positional.push(token);
+        if (token.startsWith("-")) {
+          // Unknown dash-prefixed tokens error loudly, matching the annotate
+          // contract ("a typo'd flag errors the way it always did"). Silently
+          // dropping them meant a mistyped flag vanished on every host — and a
+          // dashed token in positional[0] could even shadow a PR URL.
+          errors.push(`Unknown review option: ${token}`);
+        } else {
+          // Plain words stay tolerated: slash-command hosts forward raw user
+          // prose verbatim, and only positional[0] is ever inspected (as a URL).
+          positional.push(token);
+        }
         break;
     }
   }
@@ -41,6 +62,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     prUrl: target && isReviewUrl(target) ? target : undefined,
     vcsType,
     useLocal,
+    errors,
   };
 }
 
