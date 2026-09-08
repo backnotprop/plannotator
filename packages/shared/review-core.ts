@@ -651,10 +651,6 @@ export async function getGitContext(
       )
     ).exitCode === 0;
     if (baseResolves) {
-      // Dynamic label so it matches the live gitRef header ("All changes
-      // since origin/main" / "... since master") rather than a hardcoded
-      // base name that contradicts it on non-main repos. The product/
-      // first-run copy uses the short form "All changes".
       diffOptions.push({ id: "since-base", label: `All changes since ${displayRef(defaultBranch)}` });
     }
   }

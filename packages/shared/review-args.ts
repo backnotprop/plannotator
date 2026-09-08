@@ -1,10 +1,37 @@
 import type { VcsSelection } from "./vcs-core";
+import type { DiffType } from "./review-core";
 import { stripWrappingQuotes } from "./resolve-file";
+
+/**
+ * The flat git diff ids `review --diff-type` accepts — exactly GIT_DIFF_TYPES
+ * in vcs-core, pinned by test (a git diff type added to one list and not the
+ * other would make a valid mode unreachable from the CLI). Kept as a literal
+ * list here (type-only imports elsewhere) so review-args stays light for
+ * plugin hosts. Session-navigation states (`commit:<sha>`, `worktree:*`,
+ * `gitbutler:*`, jj/p4 modes) are deliberately not open states.
+ */
+export const REVIEW_OPEN_DIFF_TYPES = [
+  "since-base",
+  "local-vs-remote",
+  "uncommitted",
+  "staged",
+  "unstaged",
+  "last-commit",
+  "branch",
+  "merge-base",
+  "all",
+] as const;
+
+export type ReviewOpenDiffType = (typeof REVIEW_OPEN_DIFF_TYPES)[number];
 
 export interface ParsedReviewArgs {
   prUrl?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
+  /** Compare target the session opens against (`--base <ref>`). */
+  base?: string;
+  /** Diff mode the session opens in (`--diff-type <id>`). */
+  diffType?: DiffType;
   /**
    * Argument-shape problems the host must surface before starting a session.
    * Always present; empty means the invocation parsed cleanly. Hosts differ in
@@ -21,11 +48,14 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
 
   let vcsType: VcsSelection | undefined;
   let useLocal = true;
+  let base: string | undefined;
+  let diffType: DiffType | undefined;
   const errors: string[] = [];
   const positional: string[] = [];
 
-  // Index-based so value-taking flags can consume their value token before the
-  // positional collector sees it.
+  // Index-based so value-taking flags consume their value token before the
+  // positional collector sees it — otherwise `--base main <PR_URL>` would put
+  // "main" in positional[0] and lose the URL.
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     switch (token) {
@@ -41,6 +71,47 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       case "--no-local":
         useLocal = false;
         break;
+      case "--base": {
+        const value = tokens[i + 1];
+        if (value === undefined || value.startsWith("-")) {
+          errors.push("Missing value for --base");
+          break;
+        }
+        i++;
+        if (base !== undefined) {
+          errors.push("--base may only be specified once");
+          break;
+        }
+        // Belt-and-braces before the ref ever reaches git (`--end-of-options`
+        // on the rev-parse probe is the primary guard): no whitespace, no
+        // range syntax.
+        if (/\s/.test(value) || value.includes("..")) {
+          errors.push(`Invalid base ref: ${value}`);
+          break;
+        }
+        base = value;
+        break;
+      }
+      case "--diff-type": {
+        const value = tokens[i + 1];
+        if (value === undefined || value.startsWith("-")) {
+          errors.push("Missing value for --diff-type");
+          break;
+        }
+        i++;
+        if (diffType !== undefined) {
+          errors.push("--diff-type may only be specified once");
+          break;
+        }
+        if (!(REVIEW_OPEN_DIFF_TYPES as readonly string[]).includes(value)) {
+          errors.push(
+            `Unknown diff type: ${value}. Expected one of: ${REVIEW_OPEN_DIFF_TYPES.join(", ")}`,
+          );
+          break;
+        }
+        diffType = value as DiffType;
+        break;
+      }
       default:
         if (token.startsWith("-")) {
           // Unknown dash-prefixed tokens error loudly, matching the annotate
@@ -62,6 +133,8 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     prUrl: target && isReviewUrl(target) ? target : undefined,
     vcsType,
     useLocal,
+    base,
+    diffType,
     errors,
   };
 }

@@ -8,6 +8,58 @@ import { configStore, getPersistedReviewPanelView, setReviewPanelView } from '@p
  */
 const SEEN_KEY = 'plannotator-review-setup-seen';
 
+export interface ReviewSetupSession {
+  /** The caller pinned this session's opening diff (`--base` / `--diff-type`). */
+  openStatePinned?: boolean;
+  hasGitContext: boolean;
+  isWorkspace: boolean;
+  isPR: boolean;
+  vcsType?: string;
+  sinceBaseAvailable: boolean;
+}
+
+/**
+ * Pure predicate for whether this session may offer the first-run setup dialog
+ * at all. App composes `shouldOfferReviewSetup(…) && initializeReviewSetup()`
+ * — the order is load-bearing, because initializeReviewSetup() consumes the
+ * one-time seen cookie as a side effect of being CALLED. A caller-pinned
+ * session must return false here so the cookie survives for the reviewer's
+ * next ordinary review (same not-consumed precedent as the token-hover
+ * announcement), and so the dialog's dismiss handler can never
+ * handleDiffSwitch the flags away.
+ */
+export function shouldOfferReviewSetup(session: ReviewSetupSession): boolean {
+  return (
+    !session.openStatePinned &&
+    session.hasGitContext &&
+    !session.isWorkspace &&
+    !session.isPR &&
+    session.vcsType === 'git' &&
+    session.sinceBaseAvailable
+  );
+}
+
+/**
+ * Pure guard for the panel-pair self-heal effect (persisted
+ * reviewPanelView=sections with a non-since-base defaultDiffType). A pinned
+ * session must not repair: the repair's other half is a config.json write plus
+ * a live handleDiffSwitch — a settings write and a diff override triggered by
+ * a session defined by writing nothing. The conflicted pair stays put for the
+ * reviewer's next ordinary session, which is where a repair belongs.
+ */
+export function shouldRepairPanelPair(session: {
+  openStatePinned: boolean;
+  sectionsCapable: boolean;
+  isFirstRunSetup: boolean;
+  persistedPanelView?: string;
+  defaultDiffType?: string;
+}): boolean {
+  if (session.openStatePinned) return false;
+  if (!session.sectionsCapable || session.isFirstRunSetup) return false;
+  if (session.persistedPanelView !== 'sections') return false;
+  return session.defaultDiffType !== 'since-base';
+}
+
 export function needsReviewSetup(): boolean {
   return storage.getItem(SEEN_KEY) !== 'true';
 }

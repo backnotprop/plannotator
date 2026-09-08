@@ -11,8 +11,10 @@ Use this skill when the user wants to review current code changes in Plannotator
 Run:
 
 ```bash
-plannotator review [optional-pr-url]
+plannotator review [--base <ref>] [--diff-type <type>] [optional-pr-url]
 ```
+
+Reviewing one layer of a stacked branch? Pass `--base <the branch immediately below yours>` so the review shows only what this layer adds, instead of everything since `main`. Both flags are session-only (the reviewer can change either in the UI; nothing is persisted) and git-only.
 
 Behavior:
 

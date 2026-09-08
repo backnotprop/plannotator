@@ -430,6 +430,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 onSelect={onSelectDiff}
                 isLoading={isLoadingDiff}
                 hasBasePicker={!!onSelectBase && !!availableBranches}
+                activeBase={selectedBase}
               />
             </div>
           )}

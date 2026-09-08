@@ -168,7 +168,10 @@ export interface PreparedLocalReviewDiff {
   fingerprint?: string;
 }
 
-const GIT_DIFF_TYPES = new Set(["since-base", "local-vs-remote", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
+// Exported so review-args can pin REVIEW_OPEN_DIFF_TYPES (the flat ids
+// `review --diff-type` accepts) against it — a git diff type added to one set
+// and not the other would make a valid mode unreachable from the CLI.
+export const GIT_DIFF_TYPES = new Set(["since-base", "local-vs-remote", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
 const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
 
 function selectNearestProvider(

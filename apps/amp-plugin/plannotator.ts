@@ -83,7 +83,7 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
     async (ctx) => {
       const target = await ctx.ui.input({
         title: "Review changes or PR",
-        helpText: "Leave blank for local git changes, or enter a GitHub PR/GitLab MR URL or review arguments such as --git.",
+        helpText: "Leave blank for local git changes, or enter a GitHub PR/GitLab MR URL or review arguments such as --git or --base <ref> (open against a specific base, session-only).",
         submitButtonText: "Review",
       });
 

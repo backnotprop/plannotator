@@ -177,6 +177,23 @@ export interface ReviewServerOptions {
    * prompts stay consistent with the patch that's already on screen.
    */
   initialBase?: string;
+  /**
+   * The caller pinned `initialBase` deliberately (a `--base` flag / an
+   * explicit programmatic choice), not merely as the base its initial patch
+   * happened to use. Seeds `baseExplicitlyChosen`: canonicalization off,
+   * startup upgrade suppressed. Additive and opt-in — Pi's plain
+   * forward-the-local-name-and-let-it-upgrade behavior is unchanged without
+   * it.
+   */
+  initialBaseExplicit?: boolean;
+  /**
+   * The caller pinned this session's opening diff type and/or base (CLI
+   * flags). Echoed on `/api/diff` so the client must not auto-switch the diff
+   * on mount, and must not consume the one-time review-setup cookie: the
+   * caller already answered that question for this session, and the answer is
+   * deliberately not persisted.
+   */
+  openStatePinned?: boolean;
   /** Freshness token captured atomically with the initial provider patch. */
   initialFingerprint?: string;
   /** Whether URL sharing is enabled (default: true) */
@@ -401,8 +418,9 @@ export async function startReviewServer(
   // switch body). Disables the bare-local-name → origin/* canonicalization:
   // the picker offers local and remote refs as distinct choices, so an
   // explicit local pick must be honored even when the two point at
-  // different commits.
-  let baseExplicitlyChosen = false;
+  // different commits. A caller-pinned base (`--base` via
+  // initialBaseExplicit) seeds it for the same reason.
+  let baseExplicitlyChosen = options.initialBaseExplicit === true;
 
   // --- PR local checkout resolution -----------------------------------------
   // The pool's initial entry may still be warming up: the checkout is built in
@@ -679,7 +697,10 @@ export async function startReviewServer(
       async (remote) => {
         if (remote && !baseEverSwitched && currentBase !== remote) {
           const localName = remote.replace(/^origin\//, "");
-          if (!options.initialBase || currentBase === localName) {
+          // An explicitly-pinned base (`--base main`) means the LOCAL ref on
+          // purpose — never upgrade it, even when it is the default's bare
+          // local name. Unpinned forwarded local names keep upgrading.
+          if (!options.initialBaseExplicit && (!options.initialBase || currentBase === localName)) {
             // Rebuild the diff for the upgraded base BEFORE swapping it in, and
             // commit base+patch+ref+fingerprint together — otherwise the initial
             // patch (built against the old base by the caller) would be served
@@ -2059,6 +2080,9 @@ export async function startReviewServer(
               gitContext: hasLocalAccess ? servedGitContext : undefined,
               sharingEnabled,
               approvalNotesSupported,
+              // Mount is the only place the pin matters, so it rides /api/diff
+              // alone (not the switch endpoints).
+              ...(options.openStatePinned && { openStatePinned: true }),
               shareBaseUrl,
               repoInfo,
               isWSL: wslFlag,

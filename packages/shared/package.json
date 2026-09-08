@@ -16,6 +16,7 @@
     "./review-workspace": "./review-workspace.ts",
     "./review-workspace-node": "./review-workspace-node.ts",
     "./review-args": "./review-args.ts",
+    "./review-open-state": "./review-open-state.ts",
     "./vcs-core": "./vcs-core.ts",
     "./checklist": "./checklist.ts",
     "./types": "./types.ts",

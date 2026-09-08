@@ -41,7 +41,7 @@ Stdout is the interface, but its contract is command-specific. For `annotate` an
 ## plannotator review
 
 ```bash
-plannotator review [--git | --gitbutler] [--local | --no-local] [--tailscale] [--json] [PR_URL]
+plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--tailscale] [--json] [PR_URL]
 ```
 
 Reviews local VCS changes, or a pull request when a URL is given. Default stdout stays plaintext: the existing close message, approval prompt, or feedback.
@@ -51,7 +51,9 @@ With `--json`, direct review emits one record: `{ decision: 'approved' | 'annota
 Classify the outcome only by `decision`, never by `message` text. Notes on an `approved` review are guidance, not a blocking change request. This rendered `message` contract is separate from the raw feedback JSON used by `annotate` and the unchanged `opencode-review` integration. `--hook` is annotate-only.
 
 - VCS is auto-detected (JJ, GitButler, Git, and P4 where supported). `--git` forces plain Git; `--gitbutler` forces GitButler (requires the `but` CLI 0.21.0+). Running from a non-VCS parent folder that contains nested repos produces a combined workspace diff.
-- The default diff is "everything a PR would show now": merge-base of the trunk vs the working tree plus untracked files. The reviewer can switch diff types in the UI; you do not control that from the CLI.
+- The default diff is "everything a PR would show now": merge-base of the trunk vs the working tree plus untracked files. `--base <ref>` opens the session against a different compare target (branch, `origin/<branch>`, tag, or commit) and `--diff-type <type>` opens it in a different mode (`since-base`, `merge-base`, `branch`, `uncommitted`, `staged`, `unstaged`, `last-commit`, `local-vs-remote`, `all`). Both are **session-only**: the reviewer can change either in the UI, and neither writes the user's saved defaults.
+- **Reviewing one layer of a stacked branch? Pass `--base <the branch below yours>`** — `plannotator review --base feature/part-1` shows only what this layer adds, instead of everything since `main`.
+- Both flags are git-only: they error on jj, GitButler, Perforce, multi-repo workspace reviews, and PR URLs (a PR's base comes from the pull request). A `--base` ref that does not resolve is a startup error naming near-match branches, never a silently wrong diff.
 - PR review (`plannotator review https://github.com/owner/repo/pull/123`, GitLab MR URLs too) needs an authenticated `gh` or `glab` CLI. `--local` (the default) builds a local checkout of the PR head in the background for full file access; `--no-local` skips it and reviews the platform diff only.
 - `--tailscale` publishes the loopback session over the user's tailnet via `tailscale serve` (HTTPS, never public) and prints the URL with a QR code. A publish failure exits nonzero instead of leaving the server hanging.
 

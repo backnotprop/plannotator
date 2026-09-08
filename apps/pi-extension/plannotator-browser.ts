@@ -75,6 +75,14 @@ type CodeReviewOptions = {
 	prUrl?: string;
 	vcsType?: VcsSelection;
 	useLocal?: boolean;
+	/**
+	 * `defaultBranch` / `diffType` came from user CLI flags (`--base` /
+	 * `--diff-type` on /plannotator-review): validate strictly (provider
+	 * matrix, PR/workspace refusal, rev-parse base probe), seed the server's
+	 * explicit-base bit, and pin the open state on /api/diff. Programmatic
+	 * callers omit it and keep the legacy forward-and-let-it-upgrade behavior.
+	 */
+	openStateFromFlags?: boolean;
 };
 
 type CodeReviewDecision = {
@@ -374,6 +382,9 @@ async function createCodeReviewBrowserSession(
 
 	const urlArg = options.prUrl;
 	const isPRMode = urlArg?.startsWith("http://") || urlArg?.startsWith("https://");
+	const openStateFromFlags =
+		options.openStateFromFlags === true &&
+		(options.defaultBranch !== undefined || options.diffType !== undefined);
 
 	let rawPatch: string;
 	let gitRef: string;
@@ -384,6 +395,7 @@ async function createCodeReviewBrowserSession(
 	let diffType: DiffType | WorkspaceDiffType | undefined;
 	let agentCwd: string | undefined;
 	let initialBase: string | undefined;
+	let initialBaseExplicit = false;
 	let initialFingerprint: string | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
 	let worktreePool: WorktreePool | undefined;
@@ -392,6 +404,18 @@ async function createCodeReviewBrowserSession(
 
 	if (isPRMode && urlArg) {
 		// --- PR Review Mode ---
+		// The base comes from the pull request — the open-state flags always
+		// error here, before any auth check or platform fetch.
+		if (openStateFromFlags) {
+			const { resolveReviewOpenState } = await import("./generated/review-open-state.ts");
+			const openState = resolveReviewOpenState({
+				parsed: { base: options.defaultBranch, diffType: options.diffType },
+				isPRMode: true,
+				isWorkspace: false,
+				resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+			});
+			if (openState.error) throw new Error(openState.error);
+		}
 		const prRef = parsePRUrl(urlArg);
 		if (!prRef) {
 			throw new Error(
@@ -565,12 +589,59 @@ async function createCodeReviewBrowserSession(
 		const config = loadConfig();
 		const managedVcs = await detectManagedVcs(cwd, options.vcsType);
 		const forcedVcs = !!options.vcsType && options.vcsType !== "auto";
+		// Flag-sourced open state: validate strictly before any diff work, and
+		// resolve the effective requested base/diff type (promotion included).
+		// Programmatic callers keep the verbatim pass-through below.
+		let requestedBase = options.defaultBranch;
+		let requestedDiffType = options.diffType;
+		if (openStateFromFlags) {
+			const { resolveReviewOpenState } = await import("./generated/review-open-state.ts");
+			if (managedVcs || forcedVcs) {
+				const providerId = (managedVcs?.id ?? options.vcsType) as
+					| "git"
+					| "gitbutler"
+					| "jj"
+					| "p4"
+					| undefined;
+				let baseResolves: boolean | undefined;
+				if (requestedBase !== undefined && providerId === "git") {
+					// --end-of-options blocks flag injection through hostile refs;
+					// the probe is what keeps a typo'd base from producing a
+					// confidently-mislabelled merge-base→HEAD diff.
+					const probe = await reviewRuntime.runGit(
+						["rev-parse", "--verify", "--quiet", "--end-of-options", `${requestedBase}^{commit}`],
+						{ cwd },
+					);
+					baseResolves = probe.exitCode === 0;
+				}
+				const openState = resolveReviewOpenState({
+					parsed: { base: requestedBase, diffType: requestedDiffType },
+					isPRMode: false,
+					isWorkspace: false,
+					providerId,
+					resolvedDefaultDiffType: resolveDefaultDiffType(config),
+					baseResolves,
+				});
+				if (openState.error) throw new Error(openState.error);
+				for (const notice of openState.notices) ctx.ui.notify(notice, "info");
+				requestedBase = openState.requestedBase;
+				requestedDiffType = openState.requestedDiffType;
+			} else {
+				const openState = resolveReviewOpenState({
+					parsed: { base: requestedBase, diffType: requestedDiffType },
+					isPRMode: false,
+					isWorkspace: true,
+					resolvedDefaultDiffType: resolveDefaultDiffType(config),
+				});
+				if (openState.error) throw new Error(openState.error);
+			}
+		}
 		if (managedVcs || forcedVcs) {
 			const result = await prepareLocalReviewDiff({
 				cwd,
 				vcsType: options.vcsType,
-				requestedDiffType: options.diffType,
-				requestedBase: options.defaultBranch,
+				requestedDiffType,
+				requestedBase,
 				configuredDiffType: resolveDefaultDiffType(config),
 				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
 			});
@@ -584,6 +655,9 @@ async function createCodeReviewBrowserSession(
 			// be forwarded to the server below. Only matters when the caller
 			// overrode the detected default; otherwise it matches gitCtx already.
 			initialBase = result.base;
+			// A flag-sourced base is a user-picked base: canonicalization off,
+			// startup upgrade suppressed (server-side explicit bit).
+			initialBaseExplicit = openStateFromFlags && requestedBase !== undefined;
 		} else {
 			workspace = await buildLocalWorkspaceReview(cwd, {
 				requestedDiffType: options.diffType,
@@ -610,6 +684,8 @@ async function createCodeReviewBrowserSession(
 		diffType,
 		gitContext: gitCtx,
 		initialBase,
+		initialBaseExplicit,
+		openStatePinned: openStateFromFlags,
 		initialFingerprint,
 		prMetadata,
 		prPatchIncomplete,

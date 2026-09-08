@@ -87,6 +87,34 @@ If the base branch has moved on GitHub since your last fetch, a "Baseline is beh
 
 You can also pick a specific commit as the diff base from the base branch picker. This lets you compare against any of the last 20 commits on your branch rather than just the branch tip.
 
+## Opening on a specific base
+
+The review can also open against a caller-chosen compare target and diff mode, straight from the command line:
+
+```bash
+# stack: main → feature/part-1 → feature/part-2 (HEAD)
+plannotator review --base feature/part-1
+# opens "All changes since feature/part-1" — only what this layer adds
+
+# committed work on this layer only, no working-tree noise
+plannotator review --base feature/part-1 --diff-type merge-base
+
+# pin to a remote ref or a commit rather than a moving branch tip
+plannotator review --base origin/feature/part-1
+plannotator review --base HEAD~3
+```
+
+`--base` accepts anything git resolves: a local branch, a remote-tracking ref, a tag, or a commit SHA. `--diff-type` accepts the nine git diff modes (`since-base`, `local-vs-remote`, `uncommitted`, `staged`, `unstaged`, `last-commit`, `branch`, `merge-base`, `all`).
+
+Both flags are **session-only**: they seed how the session opens, the base picker and diff type dropdown stay fully usable, and nothing is written to your saved defaults — your next plain `plannotator review` opens exactly as before. A flagged session also skips the one-time first-run setup dialog without consuming it, so it still greets your next ordinary review.
+
+Notes:
+
+- A `--base` ref that does not resolve is a startup error (with near-match branch suggestions), never a silently wrong diff.
+- If your saved default diff mode is not base-relative (for example `uncommitted`), `--base` opens the session on `since-base` for that session and says so on stderr; your saved default is untouched.
+- A base with no remote tracking branch works fine — it simply never shows the "Baseline is behind" banner, which only applies to the remote default branch.
+- The flags are git-only: they error on jj, GitButler, Perforce, multi-repo workspace reviews, and with PR URLs (a PR's base comes from the pull request).
+
 ### Jujutsu (jj) diff modes
 
 In a jj workspace, the diff type picker shows jj-native options instead of git modes:

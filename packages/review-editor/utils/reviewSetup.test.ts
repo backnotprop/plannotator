@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { resetStorageBackend, setStorageBackend } from '@plannotator/ui/utils/storage';
 import { ConfigStoreForTest } from '../../ui/config/configStore';
-import { initializeReviewSetup, needsReviewSetup } from './reviewSetup';
+import {
+  initializeReviewSetup,
+  needsReviewSetup,
+  shouldOfferReviewSetup,
+  shouldRepairPanelPair,
+} from './reviewSetup';
+import type { ReviewSetupSession } from './reviewSetup';
 
 function installMemoryBackend(initial: Readonly<Record<string, string>> = {}): Map<string, string> {
   const values = new Map(Object.entries(initial));
@@ -103,5 +111,91 @@ describe('initializeReviewSetup', () => {
     expect(store.get('reviewPanelView')).toBe('sections');
     expect(store.get('reviewPanelViewLastUsed')).toBe('tree');
     expect(store.get('defaultDiffType')).toBe('since-base');
+  });
+});
+
+function plainGitSession(overrides: Partial<ReviewSetupSession> = {}): ReviewSetupSession {
+  return {
+    hasGitContext: true,
+    isWorkspace: false,
+    isPR: false,
+    vcsType: 'git',
+    sinceBaseAvailable: true,
+    ...overrides,
+  };
+}
+
+describe('shouldOfferReviewSetup', () => {
+  test('a caller-pinned session never offers the dialog', () => {
+    // Failure caught: a pinned session opening a dialog whose dismiss handler
+    // runs handleDiffSwitch(defaultDiffType) — silently discarding --base /
+    // --diff-type.
+    expect(shouldOfferReviewSetup(plainGitSession({ openStatePinned: true }))).toBe(false);
+  });
+
+  test('an ordinary plain-git session still offers it', () => {
+    // Failure caught: over-broad guards silently disabling first-run setup
+    // for everyone.
+    expect(shouldOfferReviewSetup(plainGitSession())).toBe(true);
+    expect(shouldOfferReviewSetup(plainGitSession({ openStatePinned: false }))).toBe(true);
+  });
+
+  test('the pre-existing disqualifiers still apply', () => {
+    expect(shouldOfferReviewSetup(plainGitSession({ hasGitContext: false }))).toBe(false);
+    expect(shouldOfferReviewSetup(plainGitSession({ isWorkspace: true }))).toBe(false);
+    expect(shouldOfferReviewSetup(plainGitSession({ isPR: true }))).toBe(false);
+    expect(shouldOfferReviewSetup(plainGitSession({ vcsType: 'jj' }))).toBe(false);
+    expect(shouldOfferReviewSetup(plainGitSession({ sinceBaseAvailable: false }))).toBe(false);
+  });
+
+  test('a pinned mount leaves the one-time seen cookie unset', () => {
+    // Failure caught: burning the reviewer's one-time setup on a session that
+    // never showed it — the reason the predicate must precede (and
+    // short-circuit past) initializeReviewSetup() in App's && chain.
+    installMemoryBackend();
+    const store = makeStore();
+    const offered =
+      shouldOfferReviewSetup(plainGitSession({ openStatePinned: true })) &&
+      initializeReviewSetup(store);
+    expect(offered).toBe(false);
+    expect(needsReviewSetup()).toBe(true);
+  });
+
+  test('App composes the predicate BEFORE initializeReviewSetup in the && chain', () => {
+    // Source-level pin: initializeReviewSetup() consumes the seen cookie as a
+    // side effect of being CALLED, so ordering (not just the boolean result)
+    // is the implementation. A refactor that calls initializeReviewSetup()
+    // first would pass every pure test above while still burning the cookie.
+    const appSource = readFileSync(join(import.meta.dir, '..', 'App.tsx'), 'utf-8');
+    expect(appSource).toMatch(/shouldOfferReviewSetup\(\{[\s\S]{0,400}?\}\)\s*&&\s*initializeReviewSetup\(\)/);
+  });
+});
+
+describe('shouldRepairPanelPair', () => {
+  const conflictedPair = {
+    openStatePinned: false,
+    sectionsCapable: true,
+    isFirstRunSetup: false,
+    persistedPanelView: 'sections',
+    defaultDiffType: 'uncommitted',
+  };
+
+  test('a caller-pinned session never repairs (no settings write, no diff override)', () => {
+    // Failure caught: a config.json write and a handleDiffSwitch('since-base')
+    // triggered by a session defined by writing nothing.
+    expect(shouldRepairPanelPair({ ...conflictedPair, openStatePinned: true })).toBe(false);
+  });
+
+  test('an unpinned conflicted pair still self-heals', () => {
+    // Failure caught: over-broad guards silently disabling the repair for
+    // everyone.
+    expect(shouldRepairPanelPair(conflictedPair)).toBe(true);
+  });
+
+  test('a consistent pair, first-run, or sections-incapable session does not repair', () => {
+    expect(shouldRepairPanelPair({ ...conflictedPair, defaultDiffType: 'since-base' })).toBe(false);
+    expect(shouldRepairPanelPair({ ...conflictedPair, isFirstRunSetup: true })).toBe(false);
+    expect(shouldRepairPanelPair({ ...conflictedPair, sectionsCapable: false })).toBe(false);
+    expect(shouldRepairPanelPair({ ...conflictedPair, persistedPanelView: 'tree' })).toBe(false);
   });
 });

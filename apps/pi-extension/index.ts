@@ -635,7 +635,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-review", {
-		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider",
+		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider, --base <ref> / --diff-type <type> to pin the session's opening diff",
 		handler: async (args, ctx) => {
 			if (!hasReviewBrowserHtml()) {
 				ctx.ui.notify(
@@ -661,6 +661,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 					prUrl: reviewArgs.prUrl,
 					vcsType: reviewArgs.vcsType,
 					useLocal: reviewArgs.useLocal,
+					// --base / --diff-type: session-only open state from user flags.
+					// openStateFromFlags turns on strict validation (provider
+					// matrix, base probe) and the explicit/pinned server bits;
+					// programmatic callers omit it and keep the legacy
+					// forward-and-let-it-upgrade behavior.
+					defaultBranch: reviewArgs.base,
+					diffType: reviewArgs.diffType,
+					openStateFromFlags: reviewArgs.base !== undefined || reviewArgs.diffType !== undefined,
 				});
 				ctx.ui.notify(sessionOpenedMessage("Code review opened", session.url), "info");
 				void session

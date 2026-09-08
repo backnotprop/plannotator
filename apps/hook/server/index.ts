@@ -96,7 +96,9 @@ import {
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
-import { parseReviewArgs } from "@plannotator/shared/review-args";
+import { parseReviewArgs, type ParsedReviewArgs } from "@plannotator/shared/review-args";
+import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
+import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
 import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
@@ -352,6 +354,67 @@ const emitAnnotateOutcome = createAnnotateOutcomeEmitter({
   hook: hookFlag,
   json: jsonFlag,
 });
+
+/**
+ * Resolve the `--base` / `--diff-type` open-state seed for a review
+ * invocation: probe the requested base ref with git (in `cwd`), validate
+ * against the provider/PR/workspace matrix, print notices on stderr, and exit
+ * 1 on a fatal error (reviews have no strict-gate mode, so every failure here
+ * is exit 1 like the other review startup failures). Returns the seed to
+ * thread into `prepareLocalReviewDiff`. A flagless invocation is a no-op.
+ */
+async function resolveCliReviewOpenState(
+  reviewArgs: ParsedReviewArgs,
+  options: {
+    isPRMode: boolean;
+    isWorkspace: boolean;
+    providerId?: "git" | "gitbutler" | "jj" | "p4";
+    resolvedDefaultDiffType: DiffType;
+    cwd?: string;
+  },
+): Promise<ReviewOpenState> {
+  if (reviewArgs.base === undefined && reviewArgs.diffType === undefined) {
+    return { notices: [] };
+  }
+  let baseResolves: boolean | undefined;
+  let availableBranches: AvailableBranches | undefined;
+  if (
+    reviewArgs.base !== undefined &&
+    !options.isPRMode &&
+    !options.isWorkspace &&
+    options.providerId === "git"
+  ) {
+    // The probe is the whole point of CLI-side resolution: without it a
+    // typo'd base produces a confidently-mislabelled merge-base→HEAD diff
+    // (review-core's since-base degrade). --end-of-options blocks flag
+    // injection through hostile ref names.
+    const probe = await gitRuntime.runGit(
+      ["rev-parse", "--verify", "--quiet", "--end-of-options", `${reviewArgs.base}^{commit}`],
+      { cwd: options.cwd },
+    );
+    baseResolves = probe.exitCode === 0;
+    if (!baseResolves) {
+      // Near-match suggestions: cheap (one for-each-ref) and the single most
+      // useful thing an agent caller can act on.
+      availableBranches = await listBranches(gitRuntime, options.cwd);
+    }
+  }
+  const openState = resolveReviewOpenState({
+    parsed: reviewArgs,
+    isPRMode: options.isPRMode,
+    isWorkspace: options.isWorkspace,
+    providerId: options.providerId,
+    resolvedDefaultDiffType: options.resolvedDefaultDiffType,
+    baseResolves,
+    availableBranches,
+  });
+  if (openState.error) {
+    console.error(openState.error);
+    process.exit(1);
+  }
+  for (const notice of openState.notices) console.error(notice);
+  return openState;
+}
 
 async function loadGoalSetupBundle(
   stage: GoalSetupStage,
@@ -748,6 +811,11 @@ if (args[0] === "sessions") {
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
+  // Caller-pinned open state: `--base` / `--diff-type` seed this session only
+  // (nothing is persisted). Pinned sessions advertise openStatePinned so the
+  // client's mount effects don't auto-switch the diff away from the flags.
+  const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
+  let initialBaseFromFlags: string | undefined;
 
   let rawPatch: string;
   let gitRef: string;
@@ -764,6 +832,13 @@ if (args[0] === "sessions") {
 
   if (isPRMode) {
     // --- PR Review Mode ---
+    // The base comes from the pull request — the open-state flags always
+    // error here (validated before any auth check or platform fetch).
+    await resolveCliReviewOpenState(reviewArgs, {
+      isPRMode: true,
+      isWorkspace: false,
+      resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+    });
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
       console.error(`Invalid PR/MR URL: ${urlArg}`);
@@ -1011,8 +1086,22 @@ if (args[0] === "sessions") {
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
     if (managedVcs || forcedVcs) {
+      const providerId = (managedVcs?.id ?? reviewArgs.vcsType) as
+        | "git"
+        | "gitbutler"
+        | "jj"
+        | "p4"
+        | undefined;
+      const openState = await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: false,
+        providerId,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+      });
       const diffResult = await prepareLocalReviewDiff({
         vcsType: reviewArgs.vcsType,
+        requestedDiffType: openState.requestedDiffType,
+        requestedBase: openState.requestedBase,
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
@@ -1022,7 +1111,18 @@ if (args[0] === "sessions") {
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
       initialFingerprint = diffResult.fingerprint;
+      // Forward the base the patch was actually computed against — without it
+      // the server would serve this patch under the detected default: a
+      // mixed-base review (wrong file-content fetches, wrong agent prompts).
+      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
     } else {
+      // Multi-repo workspace review has no base parameter — the open-state
+      // flags always error here.
+      await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: true,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+      });
       workspace = await buildLocalWorkspaceReview(process.cwd(), {
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
@@ -1050,6 +1150,9 @@ if (args[0] === "sessions") {
     project: reviewProject,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
     gitContext,
+    initialBase: initialBaseFromFlags,
+    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    openStatePinned,
     initialFingerprint,
     prMetadata,
     prPatchIncomplete,
@@ -1732,6 +1835,11 @@ if (args[0] === "sessions") {
   }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
+  // Caller-pinned open state (--base/--diff-type through the plugin's
+  // verbatim rawArgs forward) — session-only seed, mirrors the direct
+  // `review` branch.
+  const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
+  let initialBaseFromFlags: string | undefined;
 
   let rawPatch: string;
   let gitRef: string;
@@ -1745,6 +1853,11 @@ if (args[0] === "sessions") {
   let agentCwd: string | undefined;
 
   if (isPRMode) {
+    await resolveCliReviewOpenState(reviewArgs, {
+      isPRMode: true,
+      isWorkspace: false,
+      resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+    });
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
       console.error(`Invalid PR/MR URL: ${urlArg}`);
@@ -1780,9 +1893,24 @@ if (args[0] === "sessions") {
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
     if (managedVcs || forcedVcs) {
+      const providerId = (managedVcs?.id ?? reviewArgs.vcsType) as
+        | "git"
+        | "gitbutler"
+        | "jj"
+        | "p4"
+        | undefined;
+      const openState = await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: false,
+        providerId,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        cwd,
+      });
       const diffResult = await prepareLocalReviewDiff({
         cwd,
         vcsType: reviewArgs.vcsType,
+        requestedDiffType: openState.requestedDiffType,
+        requestedBase: openState.requestedBase,
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
@@ -1792,7 +1920,14 @@ if (args[0] === "sessions") {
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
       initialFingerprint = diffResult.fingerprint;
+      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
     } else {
+      await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: true,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        cwd,
+      });
       workspace = await buildLocalWorkspaceReview(cwd, {
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
@@ -1821,6 +1956,9 @@ if (args[0] === "sessions") {
     project: reviewProject,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
+    initialBase: initialBaseFromFlags,
+    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    openStatePinned,
     initialFingerprint,
     prMetadata,
     prPatchIncomplete,
