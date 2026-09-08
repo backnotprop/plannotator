@@ -184,10 +184,16 @@ async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): P
 	// announcing the URL only for remote sessions or failed browser launches left
 	// a closed tab unrecoverable on the common local path. Pi's notification is
 	// the analog of stderr here — the TUI owns the terminal.
-	ctx.ui.notify(`Plannotator session ready: ${serverUrl}`, "info");
-	if (!isRemoteSession() && !browserResult.opened) {
-		ctx.ui.notify("Could not open a browser automatically — open the URL above.", "info");
-	}
+	//
+	// One notify call, not two: Pi's status line overwrites back-to-back
+	// notifies, so a separate follow-up call for the browser-failure case
+	// used to erase the URL the moment it appeared — on a headless box the
+	// user saw "open the URL above" with no URL above it. The failure
+	// context, when there is one, rides the same line as the URL instead.
+	const suffix = !isRemoteSession() && !browserResult.opened
+		? " — could not open a browser automatically, open this URL"
+		: "";
+	ctx.ui.notify(`Plannotator session ready: ${serverUrl}${suffix}`, "info");
 }
 
 async function buildLocalWorkspaceReview(

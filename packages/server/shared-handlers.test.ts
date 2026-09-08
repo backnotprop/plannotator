@@ -216,6 +216,33 @@ describe("handleServerReady", () => {
     expect(output).toContain("Could not open a browser automatically");
   });
 
+  // Regression: OpenCode's embedded runtime runs this in-process, sharing
+  // stderr with its opentui renderer, so the unconditional line above would
+  // print raw text into the TUI instead of through the host's own channel.
+  // `announce: false` must silence every stderr write here while leaving the
+  // ready-file write and the browser launch untouched, so the host's own
+  // notifier stays the only visible surface for the URL.
+  test("announce: false silences stderr but still writes the ready file and opens the browser", async () => {
+    let opened = "";
+    const readyFile = join(mkdtempSync(join(tmpdir(), "plannotator-announce-")), "ready.jsonl");
+
+    const output = await captureStderr(async () => {
+      await handleServerReady("http://localhost:5000", true, 5000, {
+        announce: false,
+        readyFile,
+        openBrowser: async (u: string) => {
+          opened = u;
+          return true;
+        },
+      });
+    });
+
+    expect(output).toBe("");
+    expect(opened).toBe("http://localhost:5000");
+    const [line] = readFileSync(readyFile, "utf8").trim().split(/\r?\n/);
+    expect(JSON.parse(line)).toEqual({ url: "http://localhost:5000", isRemote: true, port: 5000 });
+  });
+
   test("publishes ready metadata to the PLANNOTATOR_READY_FILE side channel", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-ready-env-"));
     const readyFile = join(dir, "ready.jsonl");

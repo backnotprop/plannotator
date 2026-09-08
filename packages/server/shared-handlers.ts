@@ -226,6 +226,17 @@ interface ServerReadyOptions {
   readyFile?: string;
   skipBrowserOpen?: boolean;
   openBrowser?: typeof openBrowserImpl;
+  /**
+   * Set false to suppress the stderr line(s) this function writes, while
+   * still writing the ready file and opening the browser. For hosts whose
+   * process shares stderr with an in-process TUI renderer (OpenCode's
+   * embedded runtime, which runs `handleServerReady` in the same process as
+   * opentui's passthrough-mode renderer) rather than piping a real CLI
+   * subprocess's stderr, the unconditional line would print raw text into
+   * the TUI instead of through the host's own notification surface. Default
+   * true: every other host (the CLI hosts, Pi's own analog) wants the line.
+   */
+  announce?: boolean;
 }
 
 export interface ServerReadyMetadata {
@@ -265,19 +276,21 @@ export async function handleServerReady(
     }
   }
 
+  const announce = options.announce ?? true;
+
   // One line, every session, URL last — the format agents grep to recover a
   // session, so it cannot be conditional. Printing it only for remote sessions,
   // the Codex desktop host, or a failed browser launch was the bug: a local
   // session whose browser opened fine printed nothing, so a closed tab left
   // neither the user nor the agent a way back. The URL appears exactly once
   // here; the branches below only add context.
-  process.stderr.write(`\n  ${SESSION_READY_LINE_PREFIX}${url}\n`);
+  if (announce) process.stderr.write(`\n  ${SESSION_READY_LINE_PREFIX}${url}\n`);
 
   // A remote/SSH session can't pop a browser on the user's machine, so say what
   // to do with the URL — independently of whether URL sharing is enabled. The
   // share link (gated on sharing) is an extra; this reachable URL is the
   // lifeline.
-  if (isRemote) {
+  if (isRemote && announce) {
     // With an advertised-URL host override the link is directly reachable
     // (e.g. over a tailnet), so the port-forwarding advice would be wrong.
     if (isUrlHostOverridden()) {
@@ -289,7 +302,7 @@ export async function handleServerReady(
       process.stderr.write(`  Open it on your local machine (forward port ${port} if needed).\n`);
     }
   }
-  process.stderr.write("\n");
+  if (announce) process.stderr.write("\n");
 
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
   if (skipBrowserOpen) return;
@@ -300,7 +313,7 @@ export async function handleServerReady(
   // failed (headless box, devcontainer with no display, broken open/xdg-open)
   // so nobody waits on a tab that will never appear. Remote never attempts a
   // local launch, so it isn't a failure worth reporting there.
-  if (!opened && !isRemote) {
+  if (!opened && !isRemote && announce) {
     process.stderr.write("  Could not open a browser automatically — open the URL above.\n\n");
   }
 }
