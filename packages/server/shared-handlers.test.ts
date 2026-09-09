@@ -43,6 +43,38 @@ function expectSingleSessionReadyLine(output: string, url: string): void {
   expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);
 }
 
+/**
+ * Run `fn` with BOTH streams captured, so a test can assert what landed where.
+ *
+ * The session-ready line is a stderr contract: `--json` and `--hook` reserve
+ * stdout for the decision record an agent parses, so a single stray byte on
+ * stdout from a ready announcement corrupts it. Nothing in `handleServerReady`
+ * may ever write there, in any mode.
+ */
+async function captureStreams(
+  fn: () => Promise<void>,
+): Promise<{ stdout: string; stderr: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const originalOut = process.stdout.write.bind(process.stdout);
+  const originalErr = process.stderr.write.bind(process.stderr);
+  (process.stdout as { write: unknown }).write = (chunk: unknown) => {
+    out.push(String(chunk));
+    return true;
+  };
+  (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+    err.push(String(chunk));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    (process.stdout as { write: unknown }).write = originalOut;
+    (process.stderr as { write: unknown }).write = originalErr;
+  }
+  return { stdout: out.join(""), stderr: err.join("") };
+}
+
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
     method: "POST",
@@ -241,6 +273,63 @@ describe("handleServerReady", () => {
     expect(opened).toBe("http://localhost:5000");
     const [line] = readFileSync(readyFile, "utf8").trim().split(/\r?\n/);
     expect(JSON.parse(line)).toEqual({ url: "http://localhost:5000", isRemote: true, port: 5000 });
+  });
+
+  // The QR is a convenience for the device hop, so it has to sit UNDER the
+  // line whose URL it encodes: ready line, then the reachability context,
+  // then the QR. (The QR itself is TTY-only, which is why this asserts the
+  // order of the surrounding lines rather than the block's presence.)
+  test("puts the ready line above the device-hop context that carries the QR", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-qr-order-"));
+    const savedHost = process.env.PLANNOTATOR_URL_HOST;
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_URL_HOST = "vps-1.tail1234.ts.net";
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+
+    try {
+      const url = "http://vps-1.tail1234.ts.net:19432";
+      const output = await captureStderr(async () => {
+        await handleServerReady(url, true, 19432, { skipBrowserOpen: true });
+      });
+
+      expectSingleSessionReadyLine(output, url);
+      // An overridden host is directly reachable, so the port-forwarding
+      // advice would be wrong and the QR replaces it.
+      expect(output).toContain("Open it on your device");
+      expect(output).not.toContain("forward port");
+      expect(output.indexOf("Plannotator session ready: ")).toBeLessThan(
+        output.indexOf("Open it on your device"),
+      );
+    } finally {
+      if (savedHost === undefined) delete process.env.PLANNOTATOR_URL_HOST;
+      else process.env.PLANNOTATOR_URL_HOST = savedHost;
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The stdout contract, pinned at the handler rather than only end-to-end:
+  // `--json` / `--hook` put a machine-readable decision record on stdout, so
+  // the ready announcement must stay entirely on stderr no matter which
+  // branch it takes. Every mode, because each one adds its own writes.
+  test.each([
+    ["local session, browser opens", false, true, {}],
+    ["local session, browser fails", false, false, {}],
+    ["remote session", true, true, { skipBrowserOpen: true }],
+    ["suppressed announce", false, true, { announce: false }],
+  ])("writes nothing to stdout (%s)", async (_label, isRemote, browserOpens, options) => {
+    const { stdout, stderr } = await captureStreams(async () => {
+      await handleServerReady("http://localhost:7000", isRemote as boolean, 7000, {
+        openBrowser: async () => browserOpens as boolean,
+        ...(options as object),
+      });
+    });
+
+    expect(stdout).toBe("");
+    // Guard against the assertion passing because nothing ran at all.
+    if ((options as { announce?: boolean }).announce === false) expect(stderr).toBe("");
+    else expect(stderr).toContain("http://localhost:7000");
   });
 
   test("publishes ready metadata to the PLANNOTATOR_READY_FILE side channel", async () => {

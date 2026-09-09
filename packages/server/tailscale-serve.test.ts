@@ -12,6 +12,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { TailscaleRunResult } from "@plannotator/shared/tailscale";
 import {
+  announceTailscaleSession,
   disableTailscaleServe,
   enableTailscaleServe,
   resetTailscaleServeForTests,
@@ -208,5 +209,59 @@ describe("disableTailscaleServe", () => {
     const { runner, calls } = makeRunner({});
     disableTailscaleServe(59999, runner);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("announceTailscaleSession", () => {
+  // Regression: the tailnet path used to print its own "Plannotator session
+  // ready — served over your tailnet:" block AND then call
+  // handleServerReady with announce on, which printed a second ready line
+  // carrying the same URL. Two lines claiming to be the ready line leaves an
+  // agent grepping SESSION_READY_LINE_PREFIX with a duplicate, and the second
+  // one landed BELOW the QR block, splitting the QR from the URL it encodes.
+  const withoutReadyFile = async (fn: () => Promise<void>): Promise<void> => {
+    const original = process.env.PLANNOTATOR_READY_FILE;
+    delete process.env.PLANNOTATOR_READY_FILE;
+    try {
+      await fn();
+    } finally {
+      if (original === undefined) delete process.env.PLANNOTATOR_READY_FILE;
+      else process.env.PLANNOTATOR_READY_FILE = original;
+    }
+  };
+
+  test("prints the ready line exactly once, above the tailnet context", async () => {
+    const url = "https://vps-1.tail1234.ts.net:4321";
+    const capture = captureStderr();
+    try {
+      await withoutReadyFile(() => announceTailscaleSession(url, 4321));
+    } finally {
+      capture.restore();
+    }
+    const output = capture.output();
+
+    // The literal, not the interpolated constant: interpolating would assert
+    // the constant against itself and stay green while consumers matching the
+    // old text stopped finding the URL. See shared-handlers.test.ts.
+    expect(output.split("Plannotator session ready: ").length - 1).toBe(1);
+    expect(output.split(url).length - 1).toBe(1);
+    expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);
+    expect(output.indexOf("Plannotator session ready: ")).toBeLessThan(
+      output.indexOf("Served over your tailnet"),
+    );
+  });
+
+  test("never opens a local browser for a URL meant for another device", async () => {
+    const capture = captureStderr();
+    try {
+      await withoutReadyFile(() =>
+        announceTailscaleSession("https://vps-1.tail1234.ts.net:4321", 4321),
+      );
+    } finally {
+      capture.restore();
+    }
+    // handleServerReady runs with skipBrowserOpen, so the browser-failure
+    // line it would otherwise print on a headless box never appears.
+    expect(capture.output()).not.toContain("Could not open a browser");
   });
 });
