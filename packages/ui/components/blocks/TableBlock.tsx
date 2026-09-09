@@ -98,7 +98,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
   return (
     <div
       ref={containerRef}
-      className="my-4 overflow-x-auto"
+      className="my-4 clear-right overflow-x-auto"
       data-block-id={block.id}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={onLeave}
