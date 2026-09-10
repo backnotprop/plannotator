@@ -2893,6 +2893,8 @@ const ReviewApp: React.FC = () => {
             defaultBranch: data.gitContext!.defaultBranch,
             diffOptions: data.gitContext!.diffOptions,
             compareTarget: data.gitContext!.compareTarget,
+            diffAvailability: data.gitContext!.diffAvailability,
+            diffFallback: data.gitContext!.diffFallback,
             jjEvologs: data.gitContext!.jjEvologs,
             // HEAD differs per worktree, so refresh the commit-baseline picker.
             recentCommits: data.gitContext!.recentCommits,
@@ -4967,6 +4969,31 @@ const ReviewApp: React.FC = () => {
               </button>
             </div>
           ) : null
+        )}
+
+        {gitContext?.diffFallback && (
+          <div className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
+            <div>{gitContext.diffFallback.message}</div>
+            {!!gitContext.diffFallback.candidates?.length && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {gitContext.diffFallback.candidates.map((candidate) => (
+                  <button
+                    key={candidate.revision}
+                    type="button"
+                    className="rounded border border-warning/30 bg-background/50 px-2 py-1 text-left hover:bg-background"
+                    title={candidate.subject || candidate.revision}
+                    onClick={() => {
+                      setSelectedBase(candidate.revision);
+                      void fetchDiffSwitch(gitContext.diffFallback!.requestedDiffType, candidate.revision, { explicitBase: true });
+                    }}
+                  >
+                    {candidate.labels[0] ?? candidate.revision.slice(0, 8)}
+                    {candidate.subject && <span className="ml-1 text-muted-foreground">· {candidate.subject}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Main content */}

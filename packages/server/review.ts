@@ -11,7 +11,7 @@
 
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
+import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
 import { SingleFlight } from "@plannotator/shared/single-flight";
@@ -2467,6 +2467,11 @@ export async function startReviewServer(
               // (diff-type switches, refreshes) must not re-canonicalize it.
               const nextBaseExplicitlyChosen = baseExplicitlyChosen ||
                 (body.explicitBase === true && !!requestedBase);
+              const requestedDiffType = newDiffType as DiffType;
+              const availability = clientGitContext
+                ? resolveAvailableDiffType(clientGitContext, requestedDiffType, nextBaseExplicitlyChosen)
+                : { diffType: requestedDiffType };
+              newDiffType = availability.diffType;
               const base = resolveReviewBase(
                 requestedBase,
                 nextBaseExplicitlyChosen,
@@ -2556,8 +2561,21 @@ export async function startReviewServer(
               baseBehindRemote = nextBaseBehindRemote;
               currentError = result.error;
               draftKey = contentHash(currentPatch);
+              const nextClientContext = updatedContext ?? clientGitContext;
+              if (nextClientContext) {
+                clientGitContext = {
+                  ...nextClientContext,
+                  diffFallback: availability.fallback
+                    ? {
+                        requestedDiffType,
+                        effectiveDiffType: newDiffType,
+                        message: availability.fallback.message,
+                        candidates: availability.fallback.candidates,
+                      }
+                    : undefined,
+                };
+              }
               if (updatedContext && sessionVcsType === "gitbutler") {
-                clientGitContext = updatedContext;
                 currentContextRevision = updatedContextRevision ?? "";
               }
               captureDiffFingerprint(result.fingerprint);
@@ -2580,7 +2598,7 @@ export async function startReviewServer(
                 ...(commitInfo && { commitInfo }),
                 ...(generatedFiles && { generatedFiles }),
                 ...(baseBehindRemote && { baseBehindRemote: true }),
-                ...(updatedContext && { gitContext: updatedContext }),
+                ...(clientGitContext && { gitContext: clientGitContext }),
                 ...(currentError && { error: currentError }),
                 semanticDiff: switchSemanticDiff,
                 callFlow: switchCallFlow,

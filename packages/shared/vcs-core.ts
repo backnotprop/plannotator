@@ -517,17 +517,31 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       const { provider, gitContext } = await getContextWithProvider(options.cwd, options.vcsType);
       const ownsRequestedDiffType = options.requestedDiffType !== undefined
         && provider.ownsDiffType(options.requestedDiffType);
-      const diffType = resolveRequestedDiffType(
+      const requestedDiffType = resolveRequestedDiffType(
         provider,
         gitContext,
         options.requestedDiffType,
         options.configuredDiffType,
       );
+      const resolution = resolveAvailableDiffType(gitContext, requestedDiffType, options.requestedBase !== undefined);
+      const fallback = resolution.fallback;
+      const diffType = resolution.diffType;
       const base = resolveInitialBase(gitContext, diffType, options.requestedBase, ownsRequestedDiffType);
       const result = await provider.runDiff(diffType, base, gitContext.cwd ?? options.cwd, {
         hideWhitespace: options.hideWhitespace,
       });
-      const effectiveContext = result.gitContext ?? gitContext;
+      const resultContext = result.gitContext ?? gitContext;
+      const effectiveContext = fallback
+        ? {
+            ...resultContext,
+            diffFallback: {
+              requestedDiffType,
+              effectiveDiffType: diffType,
+              message: fallback.message,
+              candidates: fallback.candidates,
+            },
+          }
+        : resultContext;
 
       return {
         gitContext: effectiveContext,
@@ -618,6 +632,18 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       }
       return provider.materializeSnapshot(options);
     },
+  };
+}
+
+export function resolveAvailableDiffType(
+  gitContext: GitContext,
+  requestedDiffType: DiffType,
+  hasExplicitBase = false,
+): { diffType: DiffType; fallback?: NonNullable<GitContext["diffAvailability"]>[string] } {
+  const fallback = hasExplicitBase ? undefined : gitContext.diffAvailability?.[requestedDiffType];
+  return {
+    diffType: (fallback?.fallbackDiffType ?? requestedDiffType) as DiffType,
+    ...(fallback && { fallback }),
   };
 }
 

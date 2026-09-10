@@ -26,6 +26,7 @@ import {
 	createGitProvider,
 	createJjProvider,
 	createVcsApi,
+	resolveAvailableDiffType,
 	resolveInitialDiffType,
 } from "../generated/vcs-core.ts";
 
@@ -210,7 +211,7 @@ export const {
 	materializeVcsSnapshot,
 } = api;
 
-export { resolveInitialDiffType };
+export { resolveAvailableDiffType, resolveInitialDiffType };
 export type { VcsSelection };
 
 export function getGitContext(cwd?: string): Promise<GitContext> {

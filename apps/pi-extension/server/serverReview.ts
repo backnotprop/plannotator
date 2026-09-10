@@ -191,6 +191,7 @@ import {
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
 	resolveVcsCwd,
+	resolveAvailableDiffType,
 	reviewRuntime,
 	materializeVcsSnapshot,
 	runVcsDiff,
@@ -2362,7 +2363,7 @@ export async function startReviewServer(options: {
 			}
 			try {
 				const body = await parseBody(req);
-				const newType = body.diffType as DiffType | WorkspaceDiffType;
+				let newType = body.diffType as DiffType | WorkspaceDiffType;
 				if (typeof newType !== "string" || !newType) {
 					json(res, { error: "Missing diffType" }, 400);
 					return;
@@ -2417,6 +2418,11 @@ export async function startReviewServer(options: {
 				// (diff-type switches, refreshes) must not re-canonicalize it.
 				const nextBaseExplicitlyChosen = baseExplicitlyChosen ||
 					(body.explicitBase === true && typeof body.base === "string" && !!body.base);
+				const requestedDiffType = newType as DiffType;
+				const availability = clientGitContext
+					? resolveAvailableDiffType(clientGitContext, requestedDiffType, nextBaseExplicitlyChosen)
+					: { diffType: requestedDiffType };
+				newType = availability.diffType;
 				const base = resolveReviewBase(
 					typeof body.base === "string" ? body.base : undefined,
 					nextBaseExplicitlyChosen,
@@ -2496,8 +2502,21 @@ export async function startReviewServer(options: {
 				baseBehindRemote = nextBaseBehindRemote;
 				currentError = result.error;
 				draftKey = contentHash(currentPatch);
+				const nextClientContext = updatedContext ?? clientGitContext;
+				if (nextClientContext) {
+					clientGitContext = {
+						...nextClientContext,
+						diffFallback: availability.fallback
+							? {
+								requestedDiffType,
+								effectiveDiffType: newType,
+								message: availability.fallback.message,
+								candidates: availability.fallback.candidates,
+							}
+							: undefined,
+					};
+				}
 				if (updatedContext && sessionVcsType === "gitbutler") {
-					clientGitContext = updatedContext;
 					currentContextRevision = updatedContextRevision ?? "";
 				}
 				captureDiffFingerprint(result.fingerprint);
@@ -2520,7 +2539,7 @@ export async function startReviewServer(options: {
 					...(commitInfo ? { commitInfo } : {}),
 					...(generatedFiles ? { generatedFiles } : {}),
 					...(baseBehindRemote ? { baseBehindRemote: true } : {}),
-					...(updatedContext ? { gitContext: updatedContext } : {}),
+					...(clientGitContext ? { gitContext: clientGitContext } : {}),
 					...(currentError ? { error: currentError } : {}),
 					semanticDiff: switchSemanticDiff,
 					callFlow: switchCallFlow,

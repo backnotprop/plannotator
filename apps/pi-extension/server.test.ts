@@ -1786,11 +1786,30 @@ describe("pi review server", () => {
       expect(last.diffType).toBe("jj-last");
       expect(last.rawPatch).toContain("last.txt");
 
+      const automaticLineResponse = await fetch(`${server.url}/api/diff/switch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diffType: "jj-line" }),
+      });
+      expect(automaticLineResponse.status).toBe(200);
+      const automaticLine = await automaticLineResponse.json() as {
+        diffType: string;
+        gitContext?: { diffFallback?: { requestedDiffType: string; effectiveDiffType: string } };
+      };
+      expect(automaticLine.diffType).toBe("jj-current");
+      expect(automaticLine.gitContext?.diffFallback).toEqual({
+        requestedDiffType: "jj-line",
+        effectiveDiffType: "jj-current",
+        message: "The line of work starts at the repository root. Showing Current change instead.",
+      });
+
       for (const nextType of ["jj-line", "jj-all"] as const) {
         const response = await fetch(`${server.url}/api/diff/switch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ diffType: nextType }),
+          body: JSON.stringify(nextType === "jj-line"
+            ? { diffType: nextType, base: expectedJjBase, explicitBase: true }
+            : { diffType: nextType }),
         });
         expect(response.status).toBe(200);
         const payload = await response.json() as { diffType: string; rawPatch: string };

@@ -82,6 +82,39 @@ export interface RepositoryContext {
   displayFallback?: string;
 }
 
+export interface ReviewBaseCandidate {
+  revision: string;
+  labels: string[];
+  subject: string;
+}
+
+export interface ReviewDiffFallback {
+  requestedDiffType: string;
+  effectiveDiffType: string;
+  message: string;
+  candidates?: ReviewBaseCandidate[];
+}
+
+export interface DiffAvailability {
+  fallbackDiffType: string;
+  message: string;
+  candidates?: ReviewBaseCandidate[];
+}
+
+export interface JjRevisionInfo {
+  /** Full immutable commit ID used for every review computation. */
+  commitId: string;
+  /** Names that pointed at this revision when it was resolved. */
+  bookmarks: string[];
+  /** First line of the revision description, for disambiguation in pickers. */
+  subject: string;
+}
+
+export type JjLineBaseResolution =
+  | { kind: "resolved"; revision: JjRevisionInfo }
+  | { kind: "ambiguous"; candidates: JjRevisionInfo[] }
+  | { kind: "unavailable"; reason: string };
+
 export interface JjEvoLogEntry {
   /** Short commit ID (12 hex chars) */
   commitId: string;
@@ -112,10 +145,16 @@ export interface GitContext {
   availableBranches: AvailableBranches;
   compareTarget?: CompareTargetConfig;
   repository?: RepositoryContext;
+  /** Provider-authored fallback for modes that cannot resolve in this repository. */
+  diffAvailability?: Record<string, DiffAvailability>;
+  /** Requested and effective modes when startup used one of those fallbacks. */
+  diffFallback?: ReviewDiffFallback;
   cwd?: string;
   vcsType?: "git" | "gitbutler" | "jj" | "p4";
   /** Hash of the exact GitButler branch/commit topology used for this context. */
   gitButlerRevision?: string;
+  /** Automatic line-of-work base resolution (jj only). */
+  jjLineBase?: JjLineBaseResolution;
   /** Evolution log entries for the current jj change (jj only). */
   jjEvologs?: JjEvoLogEntry[];
   /** HEAD ancestry, newest first. Powers the commit-based baseline picker (#709). */
