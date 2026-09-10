@@ -8,6 +8,8 @@ section: "Integrations"
 
 External programs (linters, AI tools, security scanners, custom scripts) can push annotations into a live Plannotator session over HTTP. Annotations appear in the browser in real-time, tagged with their source, alongside any user-created annotations.
 
+To hand the current session to an external agent, open **Options → Agent Instructions** in Plan Review, Code Review, or Annotate and paste the copied instructions into the agent. The payload includes the exact session URL and the annotation shape for the current mode.
+
 ## How it works
 
 ```
