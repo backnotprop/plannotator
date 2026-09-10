@@ -529,6 +529,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     hasUnsavedContent ||
     (allowEmptySubmit && initialText.trim().length > 0);
   const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
+  const showsSkillMenu = skillAc.menu !== null;
 
   // Shared by both footers. Disabled once anything is typed or attached so a
   // click can never discard a draft; with content present, Save is the path.
@@ -570,7 +571,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           aria-modal="true"
           aria-label={isGlobal ? 'Global comment' : 'Comment'}
           tabIndex={-1}
-          className="relative w-full max-w-xl max-h-full min-h-0 bg-popover border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
+          className={`relative w-full max-w-xl max-h-full min-h-0 bg-popover border border-border rounded-xl shadow-2xl flex flex-col ${
+            showsSkillMenu ? 'overflow-visible' : 'overflow-hidden'
+          }`}
           style={{
             animation: 'comment-dialog-in 0.15s ease-out',
           }}
@@ -617,7 +620,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {chipsRow}
 
           {/* Textarea */}
-          <div className="relative px-4 py-3 min-h-0 flex-1 overflow-y-auto">
+          <div className={`relative px-4 py-3 min-h-0 flex-1 ${
+            showsSkillMenu ? 'overflow-visible' : 'overflow-y-auto'
+          }`}>
             {skillAc.menu && (
               <SkillReferenceMenu
                 id={skillListboxId}
@@ -713,14 +718,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             left: dragPosition.left,
             width: position.width,
             maxHeight: visibleBounds.height,
-            overflowY: 'auto',
+            overflowY: showsSkillMenu ? 'visible' : 'auto',
           }
         : {
             top: position.top,
             left: position.left,
             width: position.width,
             maxHeight: position.maxHeight,
-            overflowY: 'auto',
+            overflowY: showsSkillMenu ? 'visible' : 'auto',
             ...(position.flipAbove ? { transform: 'translateY(-100%)' } : {}),
             animation: position.flipAbove
               ? 'comment-popover-in-above 0.15s ease-out'
