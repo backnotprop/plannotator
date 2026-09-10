@@ -70,4 +70,22 @@ describe('configStore lazy resolution', () => {
     expect(second).toBe(first);
     expect(reads.length).toBe(readsAfterLoad);
   });
+
+  test('default seeding leaves review setup undecided on load and backend hydration', () => {
+    setStorageBackend(hostBackend);
+    const store = new ConfigStoreForTest();
+    const identity = store.get('displayName');
+
+    expect(store.get('reviewPanelView')).toBe('sections');
+    expect(stored.has('plannotator-review-panel-view')).toBe(false);
+
+    // A host may install an empty backend after settings were already read.
+    stored.clear();
+    store.loadFromBackend();
+
+    // Generated defaults still persist, but a panel default is not a choice.
+    expect(stored.get('plannotator-identity')).toBe(identity);
+    expect(stored.has('plannotator-review-panel-view')).toBe(false);
+    expect(new ConfigStoreForTest().get('displayName')).toBe(identity);
+  });
 });
