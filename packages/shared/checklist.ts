@@ -19,11 +19,12 @@ export interface ChecklistItem {
  *   - [x] Completed step
  *   * [ ] Alternative bullet
  */
+const checklistPattern = /^[-*]\s*\[([ xX])\]\s+(.+)$/gm;
+
 export function parseChecklist(content: string): ChecklistItem[] {
   const items: ChecklistItem[] = [];
-  const pattern = /^[-*]\s*\[([ xX])\]\s+(.+)$/gm;
 
-  for (const match of content.matchAll(pattern)) {
+  for (const match of content.matchAll(checklistPattern)) {
     const completed = match[1] !== " ";
     const text = match[2].trim();
     if (text.length > 0) {
@@ -31,6 +32,21 @@ export function parseChecklist(content: string): ChecklistItem[] {
     }
   }
   return items;
+}
+
+/**
+ * Render completed checklist items into Markdown without changing other text.
+ *
+ * The line pattern and ordinal mapping match parseChecklist. Completion is
+ * upgrade-only so a plan cannot lose a checked item during a state refresh.
+ */
+export function renderCompletedChecklist(content: string, items: ChecklistItem[]): string {
+  let step = 0;
+  return content.replace(checklistPattern, (line, marker: string) => {
+    const item = items[step++];
+    if (marker === " " && item?.completed) return line.replace("[ ]", "[x]");
+    return line;
+  });
 }
 
 export function extractDoneSteps(message: string): number[] {

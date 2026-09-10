@@ -16,7 +16,7 @@
  * - /plannotator-annotate command for markdown annotation
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
@@ -30,6 +30,7 @@ import {
 	type ChecklistItem,
 	markCompletedSteps,
 	parseChecklist,
+	renderCompletedChecklist,
 } from "./generated/checklist.ts";
 import { loadConfig, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
@@ -444,6 +445,16 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}`,
 				"warning",
 			);
+		}
+	}
+
+	function persistCompletedChecklist(fullPath: string): void {
+		try {
+			const content = readFileSync(fullPath, "utf-8");
+			const updated = renderCompletedChecklist(content, checklistItems);
+			if (updated !== content) writeFileSync(fullPath, updated, "utf-8");
+		} catch {
+			// Progress persistence must not stop plan execution.
 		}
 	}
 
@@ -1553,6 +1564,7 @@ Mark completed steps with [DONE:n] in your response.`
 		const text = getAssistantMessageText(event.message);
 		if (!text) return;
 		if (markCompletedSteps(text, checklistItems) > 0) {
+			if (lastSubmittedPath) persistCompletedChecklist(resolve(ctx.cwd, lastSubmittedPath));
 			updateStatus(ctx);
 			updateWidget(ctx);
 			await syncTodoProvider(ctx);
@@ -1690,6 +1702,7 @@ Mark completed steps with [DONE:n] in your response.`
 							if (text) markCompletedSteps(text, checklistItems);
 						}
 					}
+					persistCompletedChecklist(fullPath);
 				} else {
 					// Plan file gone — fall back to idle. This demotes a RECORDED
 					// executing phase, so the session provably used plan mode and

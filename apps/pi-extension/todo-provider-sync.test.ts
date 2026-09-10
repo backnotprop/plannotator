@@ -183,11 +183,12 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		}
 	});
 
-	test("a DONE marker closes the matching todo", async () => {
+	test("a DONE marker closes the matching todo and persists the plan", async () => {
 		const cwd = makeTempDir("plannotator-todo-sync-");
 		const todosDir = join(cwd, ".pi", "todos");
 		mkdirSync(todosDir, { recursive: true });
-		writeFileSync(join(cwd, "PLAN.md"), PLAN_CONTENT);
+		const planPath = join(cwd, "PLAN.md");
+		writeFileSync(planPath, PLAN_CONTENT);
 
 		const harness = createHarness(cwd);
 		await harness.startSession();
@@ -197,6 +198,7 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		const byTitle = new Map(readTodos(todosDir).map((todo) => [todo.title, todo]));
 		expect(byTitle.get("1. First step")?.status).toBe("done");
 		expect(byTitle.get("2. Second step")?.status).toBe("open");
+		expect(readFileSync(planPath, "utf8")).toBe("# Plan\n\n- [x] First step\n- [ ] Second step\n");
 	});
 
 	test("keeps the progress widget even while mirroring", async () => {
