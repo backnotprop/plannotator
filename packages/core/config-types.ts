@@ -1,4 +1,9 @@
-export type DefaultDiffType = 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+export interface ProviderReviewDefaults {
+  defaultDiffType?: string;
+}
+
+export type ReviewDefaults = Record<string, ProviderReviewDefaults>;
+
 export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 /**
@@ -24,6 +29,6 @@ export interface DiffOptions {
   tabSize?: number;
   hideWhitespace?: boolean;
   expandUnchanged?: boolean;
-  defaultDiffType?: DefaultDiffType;
+  defaultDiffType?: string;
   lineBgIntensity?: DiffLineBgIntensity;
 }

@@ -28,11 +28,12 @@ describe("vendored review-args parity", () => {
     // Guards the vendor.sh entry for review-open-state: without it Pi's
     // review command would crash on import instead of validating.
     const { resolveReviewOpenState } = await import("./generated/review-open-state.ts");
+    const { jjReviewPolicy } = await import("./generated/jj-review-policy.ts");
     const state = resolveReviewOpenState({
       parsed: { base: "main" },
       isPRMode: false,
       isWorkspace: false,
-      providerId: "jj",
+      provider: { resolve: jjReviewPolicy.resolveOpenState },
       resolvedDefaultDiffType: "since-base",
     });
     expect(state.error).toContain("--base is not supported in jj sessions");

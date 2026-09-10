@@ -12,21 +12,27 @@
 import type { ParsedReviewArgs } from "./review-args";
 import type { AvailableBranches, DiffType } from "./review-core";
 
-/** The diff types for which a base ref is meaningful (compareTarget.diffTypes). */
-export const BASE_RELATIVE_DIFF_TYPES = ["since-base", "branch", "merge-base"] as const;
-
-const BASE_RELATIVE = new Set<string>(BASE_RELATIVE_DIFF_TYPES);
+export interface ReviewOpenStatePolicy {
+  resolve(input: ProviderReviewOpenStateInput): ReviewOpenState;
+}
 
 export interface ReviewOpenStateInput {
   parsed: Pick<ParsedReviewArgs, "base" | "diffType">;
   isPRMode: boolean;
   isWorkspace: boolean;
-  providerId?: "git" | "gitbutler" | "jj" | "p4";
-  /** resolveDefaultDiffType(config) — the diff the session would open on without flags. */
+  provider?: ReviewOpenStatePolicy;
   resolvedDefaultDiffType: DiffType;
-  /** Result of the CLI-side `git rev-parse --verify` probe; undefined = not probed. */
+  /** Result of a provider-specific base probe; undefined = not probed. */
   baseResolves?: boolean;
-  /** Optional branch lists for near-match suggestions in the not-found error. */
+  /** Optional names for provider-specific near-match suggestions. */
+  availableBranches?: AvailableBranches;
+}
+
+export interface ProviderReviewOpenStateInput {
+  base?: string;
+  diffType?: string;
+  resolvedDefaultDiffType: DiffType;
+  baseResolves?: boolean;
   availableBranches?: AvailableBranches;
 }
 
@@ -66,74 +72,17 @@ export function resolveReviewOpenState(input: ReviewOpenStateInput): ReviewOpenS
     );
   }
 
-  // Provider matrix: on jj/gitbutler `resolveInitialBase` hard-returns the
-  // detected default and `ownsDiffType` rejects git diff ids, so accepting the
-  // flags would silently review against the wrong base. Error honestly instead.
-  if (input.providerId === "gitbutler") {
-    return fail(
-      base !== undefined
-        ? "--base is not supported in a GitButler workspace; GitButler derives the merge base from the workspace itself."
-        : "--diff-type is not supported in a GitButler workspace; GitButler modes are selected in the UI.",
-    );
-  }
-  if (input.providerId === "jj") {
-    return fail(
-      base !== undefined
-        ? "--base is not supported in jj sessions yet (only the jj-line mode has a base)."
-        : "--diff-type is not supported in jj sessions; jj modes are selected in the UI.",
-    );
-  }
-  if (input.providerId === "p4") {
-    return fail(
-      base !== undefined
-        ? "--base is not supported in Perforce sessions."
-        : "--diff-type is not supported in Perforce sessions.",
-    );
+  if (!input.provider) {
+    return fail("Review options are not available because no VCS provider was selected.");
   }
 
-  if (base !== undefined) {
-    // Explicit contradiction: the caller stated both, and the stated diff type
-    // ignores the base. Fail rather than quietly doing half of what was asked.
-    if (diffType !== undefined && !BASE_RELATIVE.has(diffType)) {
-      return fail(
-        `--base has no effect with --diff-type ${diffType}.\n` +
-          `Base-relative diff types: ${BASE_RELATIVE_DIFF_TYPES.join(", ")}.`,
-      );
-    }
-    // The probe is the whole point: without it a typo'd base degrades the
-    // since-base diff to `merge-base -> HEAD` under a confidently wrong label.
-    if (input.baseResolves === false) {
-      return fail(buildBaseNotFoundError(base, input.availableBranches));
-    }
-  }
-
-  const notices: string[] = [];
-  let requestedDiffType = diffType;
-  if (base !== undefined && diffType === undefined) {
-    if (BASE_RELATIVE.has(input.resolvedDefaultDiffType)) {
-      // Request the resolved default EXPLICITLY: `resolveRequestedDiffType`
-      // honors an owned request even when `gitContext.diffOptions` omitted
-      // since-base (undiscoverable trunk), so a probed `--base trunk` makes
-      // since-base work on a repo where the UI cannot currently offer it.
-      requestedDiffType = input.resolvedDefaultDiffType;
-    } else {
-      // The conflicting value comes from the human's config, which an agent
-      // running `review --base X` cannot see — promote with a notice rather
-      // than failing (unreliable flag) or doing nothing (the bug this feature
-      // exists to fix).
-      requestedDiffType = "since-base";
-      notices.push(
-        `[plannotator] --base ${base} needs a base-relative diff; opening on "since-base" ` +
-          `for this session (your default stays ${input.resolvedDefaultDiffType}).`,
-      );
-    }
-  }
-
-  return {
-    ...(base !== undefined && { requestedBase: base }),
-    ...(requestedDiffType !== undefined && { requestedDiffType }),
-    notices,
-  };
+  return input.provider.resolve({
+    base,
+    diffType,
+    resolvedDefaultDiffType: input.resolvedDefaultDiffType,
+    baseResolves: input.baseResolves,
+    availableBranches: input.availableBranches,
+  });
 }
 
 function fail(error: string): ReviewOpenState {

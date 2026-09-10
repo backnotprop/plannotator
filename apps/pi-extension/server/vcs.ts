@@ -20,6 +20,10 @@ import {
 import {
 	type ReviewGitButlerRuntime,
 } from "../generated/gitbutler-core.ts";
+import type { PlannotatorConfig } from "../generated/config.ts";
+import { gitReviewPolicy } from "../generated/git-review-policy.ts";
+import { gitButlerReviewPolicy } from "../generated/gitbutler-review-policy.ts";
+import { jjReviewPolicy } from "../generated/jj-review-policy.ts";
 import {
 	type VcsSelection,
 	createGitButlerProvider,
@@ -188,12 +192,14 @@ export const gitButlerRuntime: ReviewGitButlerRuntime = {
 };
 
 const api = createVcsApi([
-	createJjProvider(jjRuntime, reviewRuntime),
-	createGitButlerProvider(gitButlerRuntime),
-	createGitProvider(reviewRuntime),
-]);
+	createJjProvider(jjRuntime, reviewRuntime, jjReviewPolicy),
+	createGitButlerProvider(gitButlerRuntime, gitButlerReviewPolicy),
+	createGitProvider(reviewRuntime, gitReviewPolicy),
+], "git");
 
 export const {
+	getReviewPolicy: getVcsReviewPolicy,
+	resolveReviewDefault: resolveVcsReviewDefault,
 	detectVcs,
 	detectManagedVcs,
 	vcsOwnsDiffType,
@@ -210,6 +216,17 @@ export const {
 	vcsSupportsSnapshot,
 	materializeVcsSnapshot,
 } = api;
+
+export function resolveConfiguredVcsReviewDefault(
+	config: PlannotatorConfig | undefined,
+	vcsType?: VcsSelection,
+): DiffType {
+	return resolveVcsReviewDefault(
+		vcsType,
+		config?.reviewDefaults,
+		config?.diffOptions?.defaultDiffType,
+	);
+}
 
 export { resolveAvailableDiffType, resolveInitialDiffType };
 export type { VcsSelection };

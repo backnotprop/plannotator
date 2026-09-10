@@ -5,6 +5,9 @@ import type {
   GitContext,
   ReviewGitRuntime,
 } from "./review-core";
+import { gitReviewPolicy } from "./git-review-policy";
+import { gitButlerReviewPolicy } from "./gitbutler-review-policy";
+import { jjReviewPolicy } from "./jj-review-policy";
 import {
   type VcsProvider,
   createGitProvider,
@@ -37,6 +40,12 @@ function provider(
   const isDetected = () => typeof detected === "function" ? detected() : detected;
   return {
     id,
+    label: id === "git" ? "Git" : id,
+    reviewPolicy: id === "jj"
+      ? jjReviewPolicy
+      : id === "gitbutler"
+        ? gitButlerReviewPolicy
+        : gitReviewPolicy,
     async detect() {
       return isDetected();
     },
@@ -202,7 +211,7 @@ describe("createVcsApi", () => {
   });
 
   test("limits Git staging to working-tree diff modes", async () => {
-    const git = createVcsApi([createGitProvider(gitRuntime)]);
+    const git = createVcsApi([createGitProvider(gitRuntime, gitReviewPolicy)]);
 
     await expect(git.canStageFiles("uncommitted", "/repo")).resolves.toBe(true);
     await expect(git.canStageFiles("unstaged", "/repo")).resolves.toBe(true);
@@ -216,7 +225,7 @@ describe("createVcsApi", () => {
   });
 
   test("the git provider owns commit:<sha> diff types", () => {
-    const git = createGitProvider(gitRuntime);
+    const git = createGitProvider(gitRuntime, gitReviewPolicy);
     expect(git.ownsDiffType("commit:abc1234")).toBe(true);
     expect(git.ownsDiffType("worktree:/repo:commit:abc1234")).toBe(true);
   });
@@ -462,9 +471,6 @@ describe("resolveInitialDiffType", () => {
     expect(resolveInitialDiffType(context({}), "merge-base")).toBe("merge-base");
   });
 
-  test("uses p4-default for P4 contexts", () => {
-    expect(resolveInitialDiffType(context({ vcsType: "p4" }), "merge-base")).toBe("p4-default");
-  });
 
   test("ignores saved Git defaults for jj contexts", () => {
     const jjContext = context({

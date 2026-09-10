@@ -22,10 +22,10 @@ import {
 } from "fs";
 import { execSync } from "child_process";
 
-import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig } from '@plannotator/core/config-types';
+import type { DiffLineBgIntensity, DiffOptions, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
-export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
+export type { DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
 export interface CCLabelConfig {
@@ -103,6 +103,8 @@ export function mergePromptConfig(
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  /** Provider-scoped review defaults. Unknown provider keys are preserved. */
+  reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
     /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
@@ -508,6 +510,9 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
     const mergedReviewAnalysis = (current.reviewAnalysis || partial.reviewAnalysis)
       ? { ...current.reviewAnalysis, ...partial.reviewAnalysis }
       : undefined;
+    const mergedReviewDefaults = (current.reviewDefaults || partial.reviewDefaults)
+      ? { ...current.reviewDefaults, ...partial.reviewDefaults }
+      : undefined;
     const mergedPrompts = mergePromptConfig(current.prompts, partial.prompts);
     const merged = {
       ...current,
@@ -515,6 +520,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
       diffOptions: mergedDiffOptions,
       theme: mergedTheme,
       reviewAnalysis: mergedReviewAnalysis,
+      reviewDefaults: mergedReviewDefaults,
       prompts: mergedPrompts,
     };
     writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
@@ -545,6 +551,7 @@ export function detectGitUser(): string | null {
 export function getServerConfig(gitUser: string | null): {
   displayName?: string;
   diffOptions?: DiffOptions;
+  reviewDefaults?: ReviewDefaults;
   theme?: ThemeConfig;
   favicon?: FaviconStyle;
   reviewAnalysis: NonNullable<PlannotatorConfig["reviewAnalysis"]>;
@@ -558,6 +565,7 @@ export function getServerConfig(gitUser: string | null): {
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
+    ...(cfg.reviewDefaults !== undefined && { reviewDefaults: cfg.reviewDefaults }),
     ...(cfg.theme !== undefined && { theme: cfg.theme }),
     ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
     // These values gate server-side work, so always make the resolved defaults
@@ -595,17 +603,6 @@ export function isAgentTerminalSide(
   value: unknown,
 ): value is NonNullable<PlannotatorConfig["agentTerminalSide"]> {
   return isAnnotateAgentTerminalSide(value);
-}
-
-/**
- * Read the user's preferred default diff type from config, falling back to
- * 'since-base' (the composite "what would GitHub show" view). Users with an
- * explicit defaultDiffType keep their choice.
- */
-export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType {
-  const v = cfg?.diffOptions?.defaultDiffType as string | undefined;
-  if (v === 'branch') return 'merge-base';
-  return v === 'since-base' || v === 'local-vs-remote' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'since-base';
 }
 
 /**
