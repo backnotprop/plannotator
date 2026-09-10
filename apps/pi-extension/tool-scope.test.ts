@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	applyPhaseTools,
 	isPlanWritePathAllowed,
+	PLAN_MARK_DONE_TOOL,
+	PLAN_SUBMIT_TOOL,
 	releasePhaseTools,
+	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
 
 describe("pi plan tool scoping", () => {
@@ -36,6 +39,12 @@ describe("pi plan tool scoping", () => {
 			),
 		).toEqual(["inspect", "external_new"]);
 	});
+});
+
+test("removes plan-only tools on phase exit", () => {
+	expect(stripPlanningOnlyTools(["read", PLAN_SUBMIT_TOOL, PLAN_MARK_DONE_TOOL])).toEqual([
+		"read",
+	]);
 });
 
 describe("plan write path gate", () => {

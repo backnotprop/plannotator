@@ -68,6 +68,7 @@ import {
 import {
 	applyPhaseTools,
 	isPlanWritePathAllowed,
+	PLAN_MARK_DONE_TOOL,
 	PLAN_SUBMIT_TOOL,
 	releasePhaseTools,
 	type Phase,
@@ -458,6 +459,20 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 	}
 
+	async function markStepDone(step: number, ctx: ExtensionContext): Promise<boolean> {
+		if (phase !== "executing") return false;
+		const item = checklistItems.find((candidate) => candidate.step === step);
+		if (!item) return false;
+
+		item.completed = true;
+		if (lastSubmittedPath) persistCompletedChecklist(resolve(ctx.cwd, lastSubmittedPath));
+		updateStatus(ctx);
+		updateWidget(ctx);
+		await syncTodoProvider(ctx);
+		persistState();
+		return true;
+	}
+
 	function captureSavedState(ctx: ExtensionContext): void {
 		savedState = {
 			model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
@@ -526,7 +541,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const phaseTools =
 				phase === "planning" && !configuredTools.includes(PLAN_SUBMIT_TOOL)
 					? [...configuredTools, PLAN_SUBMIT_TOOL]
-					: configuredTools;
+					: phase === "executing" && !configuredTools.includes(PLAN_MARK_DONE_TOOL)
+						? [...configuredTools, PLAN_MARK_DONE_TOOL]
+						: configuredTools;
 			const selection = applyPhaseTools(
 				activeTools,
 				phaseAddedTools,
@@ -1143,6 +1160,47 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 
+	// ── Plan execution tools ────────────────────────────────────────────
+
+	pi.registerTool({
+		name: PLAN_MARK_DONE_TOOL,
+		label: "Mark Plan Step Done",
+		description:
+			"Mark one approved-plan checklist step complete. Call this immediately after finishing each step and before starting the next one.",
+		parameters: Type.Object({
+			step: Type.Number({
+				description: "One-based number of the completed plan checklist step.",
+				multipleOf: 1,
+			}),
+		}) as any,
+
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (phase !== "executing") {
+				return {
+					content: [{ type: "text", text: "Error: No approved plan is executing." }],
+					details: { completed: false },
+				};
+			}
+
+			const step = (params as { step?: unknown })?.step;
+			if (
+				typeof step !== "number" ||
+				!Number.isInteger(step) ||
+				!(await markStepDone(step, ctx))
+			) {
+				return {
+					content: [{ type: "text", text: `Error: Plan checklist step ${String(step)} does not exist.` }],
+					details: { completed: false },
+				};
+			}
+
+			return {
+				content: [{ type: "text", text: `Plan checklist step ${step} marked complete.` }],
+				details: { completed: true, step },
+			};
+		},
+	});
+
 	// ── plannotator_submit_plan Tool ────────────────────────────────────
 
 	pi.registerTool({
@@ -1464,7 +1522,7 @@ Todo status for ${planRef}: ${todoStats.completedCount}/${todoStats.totalCount} 
 Remaining steps:
 ${todoStats.todoList}
 
-Mark completed steps with [DONE:n] in your response.`
+Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
 				: null;
 
 		if (framingDelivered) {

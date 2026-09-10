@@ -3,11 +3,14 @@ import { extname, isAbsolute, relative, resolve } from "node:path";
 export type Phase = "idle" | "planning" | "executing";
 
 export const PLAN_SUBMIT_TOOL = "plannotator_submit_plan";
+export const PLAN_MARK_DONE_TOOL = "plannotator_mark_done";
 
 const ALLOWED_PLAN_EXTENSIONS = new Set<string>([".md", ".mdx"]);
 
 export function stripPlanningOnlyTools(tools: readonly string[]): string[] {
-	return tools.filter((tool) => tool !== PLAN_SUBMIT_TOOL);
+	return tools.filter(
+		(tool) => tool !== PLAN_SUBMIT_TOOL && tool !== PLAN_MARK_DONE_TOOL,
+	);
 }
 
 export function applyPhaseTools(
