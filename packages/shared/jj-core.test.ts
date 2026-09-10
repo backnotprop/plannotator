@@ -419,6 +419,8 @@ describe("jj compare targets", () => {
         subject: "Develop the feature",
       },
     });
+    // Deliberate pin: the revset IS the behavior under test — `exactly(...)`
+    // vs the old `latest(...)` is the whole fix, so drift here must fail.
     expect(calls).toEqual([[
       "log",
       "--no-graph",

@@ -2502,7 +2502,20 @@ export async function startReviewServer(options: {
 				baseBehindRemote = nextBaseBehindRemote;
 				currentError = result.error;
 				draftKey = contentHash(currentPatch);
-				const nextClientContext = updatedContext ?? clientGitContext;
+				// Session-context adoption is provider-scoped: gitbutler (as
+				// before this change) because its stack topology is the
+				// context, and jj so the jj-line availability/fallback stays
+				// fresh across reloads. Plain git keeps the launch-frozen
+				// session context — currentBranch labels the launch cwd in
+				// WorktreePicker and the feedback branch label, and adopting a
+				// switched worktree's recomputed context here would repoint
+				// those on the next reload.
+				const adoptContext =
+					updatedContext !== undefined &&
+					(sessionVcsType === "gitbutler" || sessionVcsType === "jj");
+				const nextClientContext = adoptContext
+					? updatedContext
+					: clientGitContext;
 				if (nextClientContext) {
 					clientGitContext = {
 						...nextClientContext,
@@ -2539,7 +2552,19 @@ export async function startReviewServer(options: {
 					...(commitInfo ? { commitInfo } : {}),
 					...(generatedFiles ? { generatedFiles } : {}),
 					...(baseBehindRemote ? { baseBehindRemote: true } : {}),
-					...(clientGitContext ? { gitContext: clientGitContext } : {}),
+					// The response still carries a transiently recomputed context
+					// (worktree switches on plain git) even when the session did
+					// not adopt it — matching the pre-jj-line behavior.
+					...(updatedContext || clientGitContext
+						? {
+							gitContext: updatedContext
+								? {
+									...updatedContext,
+									diffFallback: clientGitContext?.diffFallback,
+								}
+								: clientGitContext,
+						}
+						: {}),
 					...(currentError ? { error: currentError } : {}),
 					semanticDiff: switchSemanticDiff,
 					callFlow: switchCallFlow,

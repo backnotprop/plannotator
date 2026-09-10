@@ -1797,6 +1797,8 @@ describe("pi review server", () => {
         gitContext?: { diffFallback?: { requestedDiffType: string; effectiveDiffType: string } };
       };
       expect(automaticLine.diffType).toBe("jj-current");
+      // Deliberate copy pin: the sentence is the only discriminator between
+      // the root-fork and ambiguous-fork fallback branches on the wire.
       expect(automaticLine.gitContext?.diffFallback).toEqual({
         requestedDiffType: "jj-line",
         effectiveDiffType: "jj-current",

@@ -392,7 +392,9 @@ export function getJjDiffArgs(
     case "jj-line":
       return {
         args: ["diff", "--git", ...whitespaceArgs, "--from", jjLineBaseRevset(compareTarget), "--to", "@"],
-        label: `Line of work vs ${compareTarget}`,
+        // A frozen full commit id would render as 40+ hex chars in the
+        // header label; show the short form like jj itself does.
+        label: `Line of work vs ${/^[0-9a-f]{40,64}$/.test(compareTarget) ? compareTarget.slice(0, 12) : compareTarget}`,
       };
     case "jj-evolog":
       // compareTarget is the short commit ID of an older evolog entry.
