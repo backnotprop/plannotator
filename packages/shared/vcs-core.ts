@@ -1,3 +1,4 @@
+import type { VcsReviewSettingsDescriptor } from "@plannotator/core/config-types";
 import {
   type DiffResult,
   type DiffType,
@@ -61,6 +62,7 @@ export {
 
 export interface VcsProvider {
   readonly id: string;
+  readonly reviewSettings?: VcsReviewSettingsDescriptor;
   detect(cwd?: string): Promise<boolean>;
   getRoot?(cwd?: string): Promise<string | null>;
   ownsDiffType(diffType: string): boolean;
@@ -110,6 +112,7 @@ export interface VcsSnapshot {
 export type VcsSelection = "auto" | "git" | "gitbutler" | "jj" | "p4";
 
 export interface VcsApi {
+  getReviewSettings(): VcsReviewSettingsDescriptor[];
   detectVcs(cwd?: string): Promise<VcsProvider>;
   detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null>;
   vcsOwnsDiffType(vcsType: Exclude<VcsSelection, "auto">, diffType: string): boolean;
@@ -172,7 +175,37 @@ export interface PreparedLocalReviewDiff {
 // `review --diff-type` accepts) against it — a git diff type added to one set
 // and not the other would make a valid mode unreachable from the CLI.
 export const GIT_DIFF_TYPES = new Set(["since-base", "local-vs-remote", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
-const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
+export const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
+
+const GIT_REVIEW_SETTINGS: VcsReviewSettingsDescriptor = {
+  id: "git",
+  label: "Git",
+  defaultDiffType: "since-base",
+  diffOptions: [
+    { id: "since-base", label: "All Changes (Recommended)", description: "Everything since your branch split from main — committed, uncommitted, and untracked" },
+    { id: "local-vs-remote", label: "Local vs Remote Branch", description: "Your local branch and working tree compared with its last-fetched remote-tracking branch" },
+    { id: "uncommitted", label: "Uncommitted", description: "Everything you've changed since your last commit" },
+    { id: "unstaged", label: "Unstaged", description: "Only changes you haven't staged yet" },
+    { id: "staged", label: "Staged", description: "Only changes you've staged for commit" },
+    { id: "merge-base", label: "Committed changes (PR view)", description: "Everything you've committed on this branch" },
+    { id: "all", label: "All Files (HEAD)", description: "Every tracked file at HEAD, shown as additions" },
+  ],
+  capabilities: { statusSections: true, staging: true, compareTarget: true },
+};
+
+const JJ_REVIEW_SETTINGS: VcsReviewSettingsDescriptor = {
+  id: "jj",
+  label: "Jujutsu",
+  defaultDiffType: "jj-current",
+  diffOptions: [
+    { id: "jj-current", label: "Current change", description: "Only the changes in the working-copy change" },
+    { id: "jj-line", label: "Line of work", description: "The complete mutable line of work leading to the working copy" },
+    { id: "jj-last", label: "Last change", description: "The change immediately before the working copy" },
+    { id: "jj-evolog", label: "Evolution diff", description: "How the current change differs from its previous state" },
+    { id: "jj-all", label: "All files", description: "Every file at the working-copy revision, shown as additions" },
+  ],
+  capabilities: { statusSections: false, staging: false, compareTarget: true },
+};
 
 function selectNearestProvider(
   candidates: Array<{ provider: VcsProvider; root: string | null; order: number }>,
@@ -208,6 +241,7 @@ function vcsRootDepth(root: string): number {
 export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
   return {
     id: "git",
+    reviewSettings: GIT_REVIEW_SETTINGS,
 
     async detect(cwd?: string): Promise<boolean> {
       try {
@@ -285,6 +319,7 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
 export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGitRuntime): VcsProvider {
   return {
     id: "jj",
+    reviewSettings: JJ_REVIEW_SETTINGS,
 
     async detect(cwd?: string): Promise<boolean> {
       return (await detectJjWorkspace(runtime, cwd)) !== null;
@@ -466,7 +501,16 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     vcsType?: VcsSelection,
   ): Promise<{ provider: VcsProvider; gitContext: GitContext }> {
     const provider = await getProviderForSelection(vcsType, cwd);
-    return { provider, gitContext: await provider.getContext(cwd) };
+    const gitContext = await provider.getContext(cwd);
+    return {
+      provider,
+      gitContext: {
+        ...gitContext,
+        reviewSettings: providerList.flatMap((candidate) =>
+          candidate.reviewSettings ? [candidate.reviewSettings] : []
+        ),
+      },
+    };
   }
 
   function resolveRequestedDiffType(
@@ -497,6 +541,10 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
   }
 
   return {
+    getReviewSettings(): VcsReviewSettingsDescriptor[] {
+      return providerList.flatMap((provider) => provider.reviewSettings ? [provider.reviewSettings] : []);
+    },
+
     detectVcs,
     detectManagedVcs,
 
@@ -627,9 +675,6 @@ export function resolveInitialDiffType(
 ): DiffType {
   if (gitContext.vcsType === "p4") {
     return "p4-default";
-  }
-  if (gitContext.vcsType === "jj") {
-    return "jj-current";
   }
   if (gitContext.diffOptions.some((option) => option.id === configuredDiffType)) {
     return configuredDiffType;

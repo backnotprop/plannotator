@@ -13,7 +13,7 @@ import type { ParsedReviewArgs } from "./review-args";
 import type { AvailableBranches, DiffType } from "./review-core";
 
 /** The diff types for which a base ref is meaningful (compareTarget.diffTypes). */
-export const BASE_RELATIVE_DIFF_TYPES = ["since-base", "branch", "merge-base"] as const;
+export const BASE_RELATIVE_DIFF_TYPES = ["since-base", "branch", "merge-base", "jj-line"] as const;
 
 const BASE_RELATIVE = new Set<string>(BASE_RELATIVE_DIFF_TYPES);
 
@@ -77,11 +77,21 @@ export function resolveReviewOpenState(input: ReviewOpenStateInput): ReviewOpenS
     );
   }
   if (input.providerId === "jj") {
-    return fail(
-      base !== undefined
-        ? "--base is not supported in jj sessions yet (only the jj-line mode has a base)."
-        : "--diff-type is not supported in jj sessions; jj modes are selected in the UI.",
-    );
+    if (diffType !== undefined && !diffType.startsWith("jj-")) {
+      return fail(`--diff-type ${diffType} is not available in Jujutsu sessions.`);
+    }
+    if (base !== undefined && diffType !== undefined && diffType !== "jj-line") {
+      return fail(`--base has no effect with --diff-type ${diffType}.\nBase-relative Jujutsu diff type: jj-line.`);
+    }
+    return {
+      ...(base !== undefined && { requestedBase: base }),
+      ...(diffType !== undefined
+        ? { requestedDiffType: diffType }
+        : base !== undefined
+          ? { requestedDiffType: "jj-line" as const }
+          : {}),
+      notices: [],
+    };
   }
   if (input.providerId === "p4") {
     return fail(

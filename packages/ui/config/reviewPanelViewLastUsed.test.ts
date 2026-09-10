@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 import { SETTINGS } from './settings';
 import { ConfigStoreForTest } from './configStore';
-import { setReviewDefaultDiffType, setReviewPanelView } from './reviewView';
+import {
+  getProviderReviewDefaultDiffType,
+  setProviderReviewDefaultDiffType,
+  setReviewDefaultDiffType,
+  setReviewPanelView,
+} from './reviewView';
 
 function installMemoryBackend(): Map<string, string> {
   const values = new Map<string, string>();
@@ -73,6 +78,26 @@ describe('reviewPanelViewLastUsed setting', () => {
     expect(store.get('defaultDiffType')).toBe('since-base');
     // ...but the user's last-used view survived.
     expect(store.get('reviewPanelViewLastUsed')).toBe('tree');
+  });
+
+  test('keeps provider defaults independent and falls back to provider metadata', () => {
+    installMemoryBackend();
+    const store = makeStore();
+    const jj = {
+      id: 'jj',
+      label: 'Jujutsu',
+      defaultDiffType: 'jj-current',
+      diffOptions: [
+        { id: 'jj-current', label: 'Current', description: 'Current change' },
+        { id: 'jj-line', label: 'Line', description: 'Line of work' },
+      ],
+      capabilities: { statusSections: false, staging: false, compareTarget: true },
+    };
+
+    expect(getProviderReviewDefaultDiffType(jj, store)).toBe('jj-current');
+    setProviderReviewDefaultDiffType('jj', 'jj-line', store);
+    expect(getProviderReviewDefaultDiffType(jj, store)).toBe('jj-line');
+    expect(store.get('defaultDiffType')).toBe('since-base');
   });
 
   test('local-vs-remote persists as a Tree-compatible default', () => {

@@ -103,6 +103,8 @@ export function mergePromptConfig(
 export interface PlannotatorConfig {
   displayName?: string;
   diffOptions?: DiffOptions;
+  /** Provider-scoped review defaults. Unknown provider keys are preserved. */
+  reviewDefaults?: Record<string, { defaultDiffType?: string }>;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
     /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
@@ -508,6 +510,9 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
     const mergedReviewAnalysis = (current.reviewAnalysis || partial.reviewAnalysis)
       ? { ...current.reviewAnalysis, ...partial.reviewAnalysis }
       : undefined;
+    const mergedReviewDefaults = (current.reviewDefaults || partial.reviewDefaults)
+      ? { ...current.reviewDefaults, ...partial.reviewDefaults }
+      : undefined;
     const mergedPrompts = mergePromptConfig(current.prompts, partial.prompts);
     const merged = {
       ...current,
@@ -515,6 +520,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
       diffOptions: mergedDiffOptions,
       theme: mergedTheme,
       reviewAnalysis: mergedReviewAnalysis,
+      reviewDefaults: mergedReviewDefaults,
       prompts: mergedPrompts,
     };
     writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
@@ -545,6 +551,7 @@ export function detectGitUser(): string | null {
 export function getServerConfig(gitUser: string | null): {
   displayName?: string;
   diffOptions?: DiffOptions;
+  reviewDefaults?: PlannotatorConfig["reviewDefaults"];
   theme?: ThemeConfig;
   favicon?: FaviconStyle;
   reviewAnalysis: NonNullable<PlannotatorConfig["reviewAnalysis"]>;
@@ -558,6 +565,7 @@ export function getServerConfig(gitUser: string | null): {
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
+    ...(cfg.reviewDefaults !== undefined && { reviewDefaults: cfg.reviewDefaults }),
     ...(cfg.theme !== undefined && { theme: cfg.theme }),
     ...(isFaviconStyle(cfg.favicon) && { favicon: cfg.favicon }),
     // These values gate server-side work, so always make the resolved defaults
@@ -602,10 +610,26 @@ export function isAgentTerminalSide(
  * 'since-base' (the composite "what would GitHub show" view). Users with an
  * explicit defaultDiffType keep their choice.
  */
-export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType {
-  const v = cfg?.diffOptions?.defaultDiffType as string | undefined;
-  if (v === 'branch') return 'merge-base';
-  return v === 'since-base' || v === 'local-vs-remote' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'since-base';
+export function resolveDefaultDiffType(
+  cfg?: PlannotatorConfig,
+  providerId = "git",
+): DefaultDiffType {
+  const providerValue = cfg?.reviewDefaults?.[providerId]?.defaultDiffType;
+  const legacyGitValue = providerId === "git"
+    ? cfg?.diffOptions?.defaultDiffType as string | undefined
+    : undefined;
+  const value = providerValue ?? legacyGitValue;
+  if (value === "branch") return "merge-base";
+  if (providerId === "jj") {
+    return value === "jj-current" || value === "jj-last" || value === "jj-line"
+      || value === "jj-evolog" || value === "jj-all"
+      ? value
+      : "jj-current";
+  }
+  return value === "since-base" || value === "local-vs-remote" || value === "uncommitted"
+    || value === "unstaged" || value === "staged" || value === "merge-base" || value === "all"
+    ? value
+    : "since-base";
 }
 
 /**

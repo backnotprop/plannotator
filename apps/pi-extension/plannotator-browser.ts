@@ -619,7 +619,7 @@ async function createCodeReviewBrowserSession(
 					isPRMode: false,
 					isWorkspace: false,
 					providerId,
-					resolvedDefaultDiffType: resolveDefaultDiffType(config),
+					resolvedDefaultDiffType: resolveDefaultDiffType(config, providerId),
 					baseResolves,
 				});
 				if (openState.error) throw new Error(openState.error);
@@ -642,7 +642,7 @@ async function createCodeReviewBrowserSession(
 				vcsType: options.vcsType,
 				requestedDiffType,
 				requestedBase,
-				configuredDiffType: resolveDefaultDiffType(config),
+				configuredDiffType: resolveDefaultDiffType(config, managedVcs?.id ?? options.vcsType),
 				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
 			});
 			gitCtx = result.gitContext;

@@ -5,6 +5,7 @@
  * self-contained while review diff logic remains sourced from one module.
  */
 
+import type { VcsReviewSettingsDescriptor } from "@plannotator/core/config-types";
 import {
   formatDiffMetadataPathToken,
   formatPatchPathToken,
@@ -116,6 +117,8 @@ export interface GitContext {
   vcsType?: "git" | "gitbutler" | "jj" | "p4";
   /** Hash of the exact GitButler branch/commit topology used for this context. */
   gitButlerRevision?: string;
+  /** Review settings contributed by the providers registered in this runtime. */
+  reviewSettings?: VcsReviewSettingsDescriptor[];
   /** Evolution log entries for the current jj change (jj only). */
   jjEvologs?: JjEvoLogEntry[];
   /** HEAD ancestry, newest first. Powers the commit-based baseline picker (#709). */

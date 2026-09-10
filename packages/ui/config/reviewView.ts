@@ -1,6 +1,7 @@
 import { configStore } from './configStore';
 import { SETTINGS } from './settings';
 import { storage } from '../utils/storage';
+import type { VcsReviewSettingsDescriptor } from '@plannotator/core/config-types';
 
 /**
  * The ONLY writers for the coupled setting pair (reviewPanelView,
@@ -68,12 +69,39 @@ export function setReviewDefaultDiffType(
   store: PanelViewConfigStore = configStore,
 ): void {
   store.set('defaultDiffType', value);
+  setProviderReviewDefaultDiffType('git', value, store);
   if (value !== 'since-base' && store.get('reviewPanelView') !== 'tree') {
     store.set('reviewPanelView', 'tree');
     // The snap is an explicit-choice consequence (the user picked a classic
     // diff default), so it syncs the memo like any explicit view write.
     store.set('reviewPanelViewLastUsed', 'tree');
   }
+}
+
+export function getProviderReviewDefaultDiffType(
+  descriptor: VcsReviewSettingsDescriptor,
+  store: PanelViewConfigStore = configStore,
+): string {
+  const configured = store.get('reviewDefaults')[descriptor.id]?.defaultDiffType;
+  if (configured && descriptor.diffOptions.some((option) => option.id === configured)) {
+    return configured;
+  }
+  if (descriptor.id === 'git') {
+    const legacy = store.get('defaultDiffType');
+    if (descriptor.diffOptions.some((option) => option.id === legacy)) return legacy;
+  }
+  return descriptor.defaultDiffType;
+}
+
+export function setProviderReviewDefaultDiffType(
+  providerId: string,
+  value: string,
+  store: PanelViewConfigStore = configStore,
+): void {
+  store.set('reviewDefaults', {
+    ...store.get('reviewDefaults'),
+    [providerId]: { defaultDiffType: value },
+  });
 }
 
 

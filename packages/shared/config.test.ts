@@ -39,6 +39,20 @@ describe("resolveDefaultDiffType", () => {
       diffOptions: { defaultDiffType: "local-vs-remote" },
     })).toBe("local-vs-remote");
   });
+
+  test("resolves provider defaults without leaking Git preferences into JJ", () => {
+    const config = {
+      diffOptions: { defaultDiffType: "unstaged" as const },
+      reviewDefaults: {
+        git: { defaultDiffType: "merge-base" },
+        jj: { defaultDiffType: "jj-line" },
+      },
+    };
+
+    expect(resolveDefaultDiffType(config, "git")).toBe("merge-base");
+    expect(resolveDefaultDiffType(config, "jj")).toBe("jj-line");
+    expect(resolveDefaultDiffType({ diffOptions: config.diffOptions }, "jj")).toBe("jj-current");
+  });
 });
 
 describe("parseReviewAnalysisConfig", () => {
@@ -360,7 +374,7 @@ describe("config.json boolean coercion", () => {
   }
 });
 
-describe("favicon config persistence", () => {
+describe("config persistence", () => {
   const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
   let tempDir: string;
 
@@ -393,6 +407,16 @@ describe("favicon config persistence", () => {
     saveConfig({ favicon: unknownFavicon });
     expect(loadConfig().favicon).toBe(unknownFavicon);
     expect(getServerConfig(null).favicon).toBeUndefined();
+  });
+
+  test("merges provider review defaults without dropping another provider", () => {
+    saveConfig({ reviewDefaults: { git: { defaultDiffType: "merge-base" } } });
+    saveConfig({ reviewDefaults: { jj: { defaultDiffType: "jj-line" } } });
+
+    expect(getServerConfig(null).reviewDefaults).toEqual({
+      git: { defaultDiffType: "merge-base" },
+      jj: { defaultDiffType: "jj-line" },
+    });
   });
 });
 

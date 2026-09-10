@@ -1,4 +1,40 @@
-export type DefaultDiffType = 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+export type DefaultDiffType =
+  | 'since-base'
+  | 'local-vs-remote'
+  | 'uncommitted'
+  | 'unstaged'
+  | 'staged'
+  | 'merge-base'
+  | 'all'
+  | 'jj-current'
+  | 'jj-last'
+  | 'jj-line'
+  | 'jj-evolog'
+  | 'jj-all';
+
+export interface ProviderReviewDefaults {
+  defaultDiffType?: string;
+}
+
+export type ReviewDefaults = Record<string, ProviderReviewDefaults>;
+
+export interface ReviewSettingsDiffOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface VcsReviewSettingsDescriptor {
+  id: string;
+  label: string;
+  defaultDiffType: string;
+  diffOptions: ReviewSettingsDiffOption[];
+  capabilities: {
+    statusSections: boolean;
+    staging: boolean;
+    compareTarget: boolean;
+  };
+}
 export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 /**

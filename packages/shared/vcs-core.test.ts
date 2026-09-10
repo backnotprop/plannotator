@@ -83,6 +83,33 @@ describe("createVcsApi", () => {
     await expect(api.getVcsContext("/repo")).resolves.toMatchObject({ vcsType: "jj" });
   });
 
+  test("exposes settings descriptors from registered providers without requiring every provider to implement one", async () => {
+    const git = {
+      ...provider("git", true, ["uncommitted"]),
+      reviewSettings: {
+        id: "git",
+        label: "Git",
+        defaultDiffType: "uncommitted",
+        diffOptions: [{ id: "uncommitted", label: "Uncommitted", description: "Working tree changes" }],
+        capabilities: { statusSections: true, staging: true, compareTarget: true },
+      },
+    } satisfies VcsProvider;
+    const plugin = {
+      ...provider("plugin-vcs", false, ["plugin-diff"]),
+      reviewSettings: {
+        id: "plugin-vcs",
+        label: "Plugin VCS",
+        defaultDiffType: "plugin-diff",
+        diffOptions: [{ id: "plugin-diff", label: "Plugin diff", description: "Plugin changes" }],
+        capabilities: { statusSections: false, staging: false, compareTarget: false },
+      },
+    } satisfies VcsProvider;
+    const p4 = provider("p4", false, ["p4-default"]);
+
+    const context = await createVcsApi([plugin, git, p4]).getVcsContext("/repo");
+    expect(context.reviewSettings?.map((descriptor) => descriptor.id)).toEqual(["plugin-vcs", "git"]);
+  });
+
   test("selects GitButler ahead of Git without changing JJ precedence", async () => {
     const jj = provider("jj", false, ["jj-current"], {}, "/repo");
     const gitButler = provider("gitbutler", true, ["gitbutler:workspace"], {}, "/repo");
@@ -431,7 +458,7 @@ describe("resolveInitialDiffType", () => {
     expect(resolveInitialDiffType(context({ vcsType: "p4" }), "merge-base")).toBe("p4-default");
   });
 
-  test("ignores saved Git defaults for jj contexts", () => {
+  test("uses JJ defaults and ignores saved Git defaults for jj contexts", () => {
     const jjContext = context({
       defaultBranch: "trunk()",
       diffOptions: [
@@ -442,6 +469,7 @@ describe("resolveInitialDiffType", () => {
       vcsType: "jj",
     });
 
+    expect(resolveInitialDiffType(jjContext, "jj-line")).toBe("jj-line");
     expect(resolveInitialDiffType(jjContext, "all")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "merge-base")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "unstaged")).toBe("jj-current");

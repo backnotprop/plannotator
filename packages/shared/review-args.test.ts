@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { REVIEW_OPEN_DIFF_TYPES, parseReviewArgs } from "./review-args";
-import { GIT_DIFF_TYPES } from "./vcs-core";
+import { GIT_DIFF_TYPES, JJ_DIFF_TYPES } from "./vcs-core";
 
 describe("parseReviewArgs", () => {
   test("defaults to auto VCS and local PR checkout", () => {
@@ -111,6 +111,15 @@ describe("parseReviewArgs", () => {
     expect(parsed.errors).toEqual([]);
   });
 
+  test("accepts stable JJ diff modes as explicit session overrides", () => {
+    expect(parseReviewArgs(["--diff-type", "jj-line", "--base", "develop@origin"])).toMatchObject({
+      vcsType: undefined,
+      diffType: "jj-line",
+      base: "develop@origin",
+      errors: [],
+    });
+  });
+
   test("--base's value cannot shadow a following PR URL", () => {
     // Failure caught: the value token landing in positional[0] and shadowing
     // the URL — a real regression path since only positional[0] is a URL
@@ -156,10 +165,10 @@ describe("parseReviewArgs", () => {
     ]);
   });
 
-  test("REVIEW_OPEN_DIFF_TYPES is exactly GIT_DIFF_TYPES", () => {
-    // Failure caught: a git diff type added to one set and not the other,
-    // making a valid mode unreachable from (or falsely advertised by) the CLI.
-    expect(new Set(REVIEW_OPEN_DIFF_TYPES)).toEqual(GIT_DIFF_TYPES);
+  test("REVIEW_OPEN_DIFF_TYPES is exactly the stable Git and JJ modes", () => {
+    // Failure caught: a stable provider diff type added to one set and not the
+    // other, making a valid mode unreachable from the CLI.
+    expect(new Set(REVIEW_OPEN_DIFF_TYPES)).toEqual(new Set([...GIT_DIFF_TYPES, ...JJ_DIFF_TYPES]));
   });
 
   test("an unknown dashed token cannot shadow a PR URL", () => {

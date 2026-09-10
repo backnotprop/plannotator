@@ -4,6 +4,8 @@ export { useConfigValue } from './useConfig';
 export {
   setReviewPanelView,
   setReviewDefaultDiffType,
+  getProviderReviewDefaultDiffType,
+  setProviderReviewDefaultDiffType,
   getPersistedReviewPanelView,
   setReviewAutoViewed,
   needsAutoViewedNotice,

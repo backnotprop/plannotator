@@ -163,7 +163,7 @@ export async function handleReviewCommand(
         isPRMode: false,
         isWorkspace: false,
         providerId,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        resolvedDefaultDiffType: resolveDefaultDiffType(config, providerId),
         baseResolves,
       });
       if (openState.error) {
@@ -179,7 +179,7 @@ export async function handleReviewCommand(
           vcsType: reviewArgs.vcsType,
           requestedDiffType: openState.requestedDiffType,
           requestedBase: openState.requestedBase,
-          configuredDiffType: resolveDefaultDiffType(config),
+          configuredDiffType: resolveDefaultDiffType(config, providerId),
           hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
         });
         gitContext = diffResult.gitContext;

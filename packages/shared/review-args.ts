@@ -8,7 +8,8 @@ import { stripWrappingQuotes } from "./resolve-file";
  * other would make a valid mode unreachable from the CLI). Kept as a literal
  * list here (type-only imports elsewhere) so review-args stays light for
  * plugin hosts. Session-navigation states (`commit:<sha>`, `worktree:*`,
- * `gitbutler:*`, jj/p4 modes) are deliberately not open states.
+ * `gitbutler:*` and p4 modes) are deliberately not open states. JJ's stable
+ * built-in modes are valid open defaults and explicit per-invocation seeds.
  */
 export const REVIEW_OPEN_DIFF_TYPES = [
   "since-base",
@@ -20,6 +21,11 @@ export const REVIEW_OPEN_DIFF_TYPES = [
   "branch",
   "merge-base",
   "all",
+  "jj-current",
+  "jj-last",
+  "jj-line",
+  "jj-evolog",
+  "jj-all",
 ] as const;
 
 export type ReviewOpenDiffType = (typeof REVIEW_OPEN_DIFF_TYPES)[number];

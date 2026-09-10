@@ -26,7 +26,7 @@ describe("resolveInitialDiffType", () => {
     expect(resolveInitialDiffType(context({ vcsType: "p4" }), "merge-base")).toBe("p4-default");
   });
 
-  test("ignores saved Git defaults for jj contexts", () => {
+  test("uses JJ defaults and ignores saved Git defaults for jj contexts", () => {
     const jjContext = context({
       defaultBranch: "trunk()",
       diffOptions: [
@@ -37,6 +37,7 @@ describe("resolveInitialDiffType", () => {
       vcsType: "jj",
     });
 
+    expect(resolveInitialDiffType(jjContext, "jj-line")).toBe("jj-line");
     expect(resolveInitialDiffType(jjContext, "all")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "merge-base")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "unstaged")).toBe("jj-current");

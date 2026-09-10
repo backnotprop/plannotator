@@ -193,6 +193,7 @@ const api = createVcsApi([
 ]);
 
 export const {
+	getReviewSettings: getVcsReviewSettings,
 	detectVcs,
 	detectManagedVcs,
 	vcsOwnsDiffType,

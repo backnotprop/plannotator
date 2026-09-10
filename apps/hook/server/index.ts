@@ -1096,13 +1096,13 @@ if (args[0] === "sessions") {
         isPRMode: false,
         isWorkspace: false,
         providerId,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        resolvedDefaultDiffType: resolveDefaultDiffType(config, providerId),
       });
       const diffResult = await prepareLocalReviewDiff({
         vcsType: reviewArgs.vcsType,
         requestedDiffType: openState.requestedDiffType,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveDefaultDiffType(config, providerId),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
@@ -1903,7 +1903,7 @@ if (args[0] === "sessions") {
         isPRMode: false,
         isWorkspace: false,
         providerId,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        resolvedDefaultDiffType: resolveDefaultDiffType(config, providerId),
         cwd,
       });
       const diffResult = await prepareLocalReviewDiff({
@@ -1911,7 +1911,7 @@ if (args[0] === "sessions") {
         vcsType: reviewArgs.vcsType,
         requestedDiffType: openState.requestedDiffType,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveDefaultDiffType(config, providerId),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
