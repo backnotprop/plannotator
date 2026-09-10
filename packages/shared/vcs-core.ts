@@ -30,13 +30,13 @@ import {
   resolveJjSnapshotEndpoint,
   runJjDiff,
 } from "./jj-core";
+import { resolveProviderReviewDefault, type VcsReviewPolicy } from "./vcs-review-policy";
 import {
   type ReviewGitButlerRuntime,
   detectGitButlerWorkspace,
   getGitButlerContext,
   getGitButlerDiffFingerprint,
   getGitButlerFileContentsForDiff,
-  parseGitButlerDiffType,
   runGitButlerDiff,
 } from "./gitbutler-core";
 
@@ -61,9 +61,11 @@ export {
 
 export interface VcsProvider {
   readonly id: string;
+  readonly label: string;
+  readonly reviewPolicy: VcsReviewPolicy;
   detect(cwd?: string): Promise<boolean>;
   getRoot?(cwd?: string): Promise<string | null>;
-  ownsDiffType(diffType: string): boolean;
+  ownsDiffType(diffType: string): diffType is DiffType;
   canStageFiles?(diffType: string): boolean;
   getContext(cwd?: string): Promise<GitContext>;
   runDiff(diffType: DiffType, defaultBranch: string, cwd?: string, options?: GitDiffOptions): Promise<DiffResult>;
@@ -110,6 +112,12 @@ export interface VcsSnapshot {
 export type VcsSelection = "auto" | "git" | "gitbutler" | "jj" | "p4";
 
 export interface VcsApi {
+  getReviewPolicy(vcsType?: VcsSelection): VcsReviewPolicy;
+  resolveReviewDefault(
+    vcsType: VcsSelection | undefined,
+    configuredValues: Record<string, { defaultDiffType?: string }> | undefined,
+    legacyValue: unknown,
+  ): DiffType;
   detectVcs(cwd?: string): Promise<VcsProvider>;
   detectManagedVcs(cwd?: string, vcsType?: VcsSelection): Promise<VcsProvider | null>;
   vcsOwnsDiffType(vcsType: Exclude<VcsSelection, "auto">, diffType: string): boolean;
@@ -168,12 +176,6 @@ export interface PreparedLocalReviewDiff {
   fingerprint?: string;
 }
 
-// Exported so review-args can pin REVIEW_OPEN_DIFF_TYPES (the flat ids
-// `review --diff-type` accepts) against it — a git diff type added to one set
-// and not the other would make a valid mode unreachable from the CLI.
-export const GIT_DIFF_TYPES = new Set(["since-base", "local-vs-remote", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
-const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
-
 function selectNearestProvider(
   candidates: Array<{ provider: VcsProvider; root: string | null; order: number }>,
   cwd?: string,
@@ -205,9 +207,14 @@ function vcsRootDepth(root: string): number {
   return resolve(root).split(/[\\/]+/).filter(Boolean).length;
 }
 
-export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
+export function createGitProvider(
+  runtime: ReviewGitRuntime,
+  reviewPolicy: VcsReviewPolicy,
+): VcsProvider {
   return {
     id: "git",
+    label: "Git",
+    reviewPolicy,
 
     async detect(cwd?: string): Promise<boolean> {
       try {
@@ -223,13 +230,7 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       return result.exitCode === 0 ? result.stdout.trim() || null : null;
     },
 
-    ownsDiffType(diffType: string): boolean {
-      return (
-        GIT_DIFF_TYPES.has(diffType) ||
-        diffType.startsWith("worktree:") ||
-        diffType.startsWith("commit:")
-      );
-    },
+    ownsDiffType: reviewPolicy.ownsDiffType,
 
     canStageFiles(diffType: string): boolean {
       const effectiveDiffType = parseWorktreeDiffType(diffType)?.subType ?? diffType;
@@ -282,9 +283,15 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
   };
 }
 
-export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGitRuntime): VcsProvider {
+export function createJjProvider(
+  runtime: ReviewJjRuntime,
+  gitRuntime: ReviewGitRuntime,
+  reviewPolicy: VcsReviewPolicy,
+): VcsProvider {
   return {
     id: "jj",
+    label: "JJ",
+    reviewPolicy,
 
     async detect(cwd?: string): Promise<boolean> {
       return (await detectJjWorkspace(runtime, cwd)) !== null;
@@ -294,9 +301,7 @@ export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGit
       return detectJjWorkspace(runtime, cwd);
     },
 
-    ownsDiffType(diffType: string): boolean {
-      return JJ_DIFF_TYPES.has(diffType);
-    },
+    ownsDiffType: reviewPolicy.ownsDiffType,
 
     getContext(cwd?: string): Promise<GitContext> {
       return getJjContext(runtime, cwd);
@@ -323,9 +328,14 @@ export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGit
 }
 
 /** Create the provider for an actively checked-out GitButler workspace. */
-export function createGitButlerProvider(runtime: ReviewGitButlerRuntime): VcsProvider {
+export function createGitButlerProvider(
+  runtime: ReviewGitButlerRuntime,
+  reviewPolicy: VcsReviewPolicy,
+): VcsProvider {
   return {
     id: "gitbutler",
+    label: "GitButler",
+    reviewPolicy,
 
     async detect(cwd?: string): Promise<boolean> {
       return (await detectGitButlerWorkspace(runtime, cwd)) !== null;
@@ -335,9 +345,7 @@ export function createGitButlerProvider(runtime: ReviewGitButlerRuntime): VcsPro
       return detectGitButlerWorkspace(runtime, cwd);
     },
 
-    ownsDiffType(diffType: string): boolean {
-      return parseGitButlerDiffType(diffType) !== null;
-    },
+    ownsDiffType: reviewPolicy.ownsDiffType,
 
     getContext(cwd?: string): Promise<GitContext> {
       return getGitButlerContext(runtime, cwd);
@@ -357,9 +365,12 @@ export function createGitButlerProvider(runtime: ReviewGitButlerRuntime): VcsPro
   };
 }
 
-export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
+export function createVcsApi(
+  providers: readonly VcsProvider[],
+  defaultProviderId = providers[0]?.id,
+): VcsApi {
   const providerList = [...providers];
-  const defaultProvider = providerList.find((provider) => provider.id === "git") ?? providerList[0];
+  const defaultProvider = providerList.find((provider) => provider.id === defaultProviderId) ?? providerList[0];
 
   if (!defaultProvider) {
     throw new Error("createVcsApi requires at least one provider");
@@ -425,19 +436,6 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     return providerList.find((provider) => provider.id === id) ?? null;
   }
 
-  function formatVcsName(id: Exclude<VcsSelection, "auto">): string {
-    switch (id) {
-      case "git":
-        return "Git";
-      case "gitbutler":
-        return "GitButler";
-      case "jj":
-        return "JJ";
-      case "p4":
-        return "P4";
-    }
-  }
-
   async function getProviderForSelection(
     vcsType: VcsSelection | undefined,
     cwd?: string,
@@ -447,12 +445,11 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     }
 
     const provider = getProviderById(vcsType);
-    const vcsName = formatVcsName(vcsType);
     if (!provider) {
-      throw new Error(`${vcsName} support is not available in this runtime.`);
+      throw new Error(`${vcsType} support is not available in this runtime.`);
     }
     if (!(await provider.detect(cwd))) {
-      throw new Error(`${vcsName} workspace not found.`);
+      throw new Error(`${provider.label} workspace not found.`);
     }
     return provider;
   }
@@ -481,22 +478,24 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     return resolveInitialDiffType(gitContext, configuredDiffType);
   }
 
-  function resolveInitialBase(
-    gitContext: GitContext,
-    diffType: DiffType,
-    requestedBase: string | undefined,
-    ownsRequestedDiffType: boolean,
-  ): string {
-    if (gitContext.vcsType === "jj" || gitContext.vcsType === "gitbutler") {
-      if (diffType === "jj-line" && ownsRequestedDiffType && requestedBase) {
-        return requestedBase;
-      }
-      return gitContext.defaultBranch;
-    }
-    return requestedBase ?? gitContext.defaultBranch;
-  }
 
   return {
+    getReviewPolicy(vcsType): VcsReviewPolicy {
+      if (!vcsType || vcsType === "auto") return defaultProvider.reviewPolicy;
+      return getProviderById(vcsType)?.reviewPolicy ?? defaultProvider.reviewPolicy;
+    },
+
+    resolveReviewDefault(vcsType, configuredValues, legacyValue): DiffType {
+      const provider = vcsType && vcsType !== "auto"
+        ? getProviderById(vcsType) ?? defaultProvider
+        : defaultProvider;
+      return resolveProviderReviewDefault(
+        provider.reviewPolicy,
+        configuredValues?.[provider.id]?.defaultDiffType,
+        legacyValue,
+      );
+    },
+
     detectVcs,
     detectManagedVcs,
 
@@ -526,7 +525,12 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       const resolution = resolveAvailableDiffType(gitContext, requestedDiffType, options.requestedBase !== undefined);
       const fallback = resolution.fallback;
       const diffType = resolution.diffType;
-      const base = resolveInitialBase(gitContext, diffType, options.requestedBase, ownsRequestedDiffType);
+      const base = provider.reviewPolicy.resolveInitialBase(
+        gitContext.defaultBranch,
+        diffType,
+        options.requestedBase,
+        ownsRequestedDiffType,
+      );
       const result = await provider.runDiff(diffType, base, gitContext.cwd ?? options.cwd, {
         hideWhitespace: options.hideWhitespace,
       });
@@ -628,7 +632,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     ): Promise<VcsSnapshot> {
       const provider = getProviderById(vcsType);
       if (!provider?.materializeSnapshot || (!options.prCommitPair && !(provider.supportsSnapshot?.(options.diffType) ?? false))) {
-        throw new Error(`Snapshot materialization does not support the ${options.diffType} ${formatVcsName(vcsType)} review mode.`);
+        throw new Error(`Snapshot materialization does not support the ${options.diffType} ${provider?.label ?? vcsType} review mode.`);
       }
       return provider.materializeSnapshot(options);
     },
@@ -651,12 +655,6 @@ export function resolveInitialDiffType(
   gitContext: GitContext,
   configuredDiffType: DiffType,
 ): DiffType {
-  if (gitContext.vcsType === "p4") {
-    return "p4-default";
-  }
-  if (gitContext.vcsType === "jj") {
-    return "jj-current";
-  }
   if (gitContext.diffOptions.some((option) => option.id === configuredDiffType)) {
     return configuredDiffType;
   }

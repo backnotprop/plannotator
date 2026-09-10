@@ -68,6 +68,7 @@ export function setReviewDefaultDiffType(
   store: PanelViewConfigStore = configStore,
 ): void {
   store.set('defaultDiffType', value);
+  setProviderReviewDefaultDiffType('git', value, store);
   if (value !== 'since-base' && store.get('reviewPanelView') !== 'tree') {
     store.set('reviewPanelView', 'tree');
     // The snap is an explicit-choice consequence (the user picked a classic
@@ -76,6 +77,16 @@ export function setReviewDefaultDiffType(
   }
 }
 
+export function setProviderReviewDefaultDiffType(
+  providerId: string,
+  value: string,
+  store: PanelViewConfigStore = configStore,
+): void {
+  store.set('reviewDefaults', {
+    ...store.get('reviewDefaults'),
+    [providerId]: { defaultDiffType: value },
+  });
+}
 
 /**
  * One-time gate for the auto-mark-viewed notice — the toast that fires the

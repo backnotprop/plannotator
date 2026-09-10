@@ -13,11 +13,11 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, prepareLocalReviewDiff, detectManagedVcs, gitRuntime } from "@plannotator/server/vcs";
+import { type DiffType, prepareLocalReviewDiff, detectManagedVcs, resolveConfiguredVcsReviewDefault, gitRuntime } from "@plannotator/server/vcs";
 import { resolveReviewOpenState } from "@plannotator/shared/review-open-state";
 import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
-import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
+import { loadConfig, resolveUseJina } from "@plannotator/shared/config";
 import {
   composeReviewApprovedMessage,
   getAnnotateApprovedWithNotesPrompt,
@@ -102,7 +102,7 @@ export async function handleReviewCommand(
         parsed: reviewArgs,
         isPRMode: true,
         isWorkspace: false,
-        resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+        resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(loadConfig()),
       });
       if (openState.error) {
         client.app.log({ level: "error", message: `[Plannotator] ${openState.error}` });
@@ -162,8 +162,10 @@ export async function handleReviewCommand(
         parsed: reviewArgs,
         isPRMode: false,
         isWorkspace: false,
-        providerId,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        provider: managedVcs
+          ? { resolve: managedVcs.reviewPolicy.resolveOpenState }
+          : undefined,
+        resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(config, providerId),
         baseResolves,
       });
       if (openState.error) {
@@ -177,9 +179,9 @@ export async function handleReviewCommand(
         const diffResult = await prepareLocalReviewDiff({
           cwd,
           vcsType: reviewArgs.vcsType,
-          requestedDiffType: openState.requestedDiffType,
+          requestedDiffType: openState.requestedDiffType as DiffType | undefined,
           requestedBase: openState.requestedBase,
-          configuredDiffType: resolveDefaultDiffType(config),
+          configuredDiffType: resolveConfiguredVcsReviewDefault(config, providerId),
           hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
         });
         gitContext = diffResult.gitContext;
@@ -202,7 +204,7 @@ export async function handleReviewCommand(
           parsed: reviewArgs,
           isPRMode: false,
           isWorkspace: true,
-          resolvedDefaultDiffType: resolveDefaultDiffType(config),
+          resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(config),
         });
         if (openState.error) {
           client.app.log({ level: "error", message: `[Plannotator] ${openState.error}` });
@@ -210,7 +212,7 @@ export async function handleReviewCommand(
         }
       }
       workspace = await buildLocalWorkspaceReview(cwd, {
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveConfiguredVcsReviewDefault(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       if (workspace.repos.length === 0) {
