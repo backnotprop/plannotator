@@ -452,6 +452,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 	function persistCompletedChecklist(fullPath: string): void {
 		try {
 			const content = readFileSync(fullPath, "utf-8");
+			// One-turn ordinal-desync window: checklistItems were parsed at turn
+			// start, so an agent that edits the plan's checkboxes mid-turn can land
+			// a step number on a neighboring box until the next turn re-parses from
+			// disk. Bounded by upgrade-only writes plus that per-turn re-parse.
 			const updated = renderCompletedChecklist(content, checklistItems);
 			if (updated !== content) writeFileSync(fullPath, updated, "utf-8");
 		} catch {
@@ -1391,9 +1395,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 				persistState();
 				justApprovedPlan = true;
 
+				// Keep this aligned with the executing-phase framing delivered on the
+				// same turn: the tool is the primary mechanism, markers the fallback.
 				const doneMsg =
 					checklistItems.length > 0
-						? `After completing each step, include [DONE:n] in your response where n is the step number.`
+						? `Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
 						: "";
 
 				if (result.feedback) {
