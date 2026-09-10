@@ -1,3 +1,4 @@
+import { jjReviewPolicy } from "./jj-review-policy";
 /**
  * Real-Jujutsu coverage for Call flow snapshot materialization.
  *
@@ -65,7 +66,7 @@ const jjRuntime: ReviewJjRuntime = {
   },
 };
 
-const vcs = createVcsApi([createJjProvider(jjRuntime, gitRuntime)]);
+const vcs = createVcsApi([createJjProvider(jjRuntime, gitRuntime, jjReviewPolicy)]);
 
 let workspace = "";
 

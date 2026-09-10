@@ -26,20 +26,11 @@ import {
   getServerConfig,
   resolveGuideShareUrl,
   resolveSharingEnabled,
-  resolveDefaultDiffType,
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
-
-describe("resolveDefaultDiffType", () => {
-  test("accepts local-vs-remote as a persisted review default", () => {
-    expect(resolveDefaultDiffType({
-      diffOptions: { defaultDiffType: "local-vs-remote" },
-    })).toBe("local-vs-remote");
-  });
-});
 
 describe("parseReviewAnalysisConfig", () => {
   test("accepts independent boolean analysis flags", () => {
@@ -360,7 +351,7 @@ describe("config.json boolean coercion", () => {
   }
 });
 
-describe("favicon config persistence", () => {
+describe("config persistence", () => {
   const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
   let tempDir: string;
 
@@ -393,6 +384,16 @@ describe("favicon config persistence", () => {
     saveConfig({ favicon: unknownFavicon });
     expect(loadConfig().favicon).toBe(unknownFavicon);
     expect(getServerConfig(null).favicon).toBeUndefined();
+  });
+
+  test("merges provider review defaults without dropping another provider", () => {
+    saveConfig({ reviewDefaults: { git: { defaultDiffType: "merge-base" } } });
+    saveConfig({ reviewDefaults: { jj: { defaultDiffType: "jj-line" } } });
+
+    expect(getServerConfig(null).reviewDefaults).toEqual({
+      git: { defaultDiffType: "merge-base" },
+      jj: { defaultDiffType: "jj-line" },
+    });
   });
 });
 

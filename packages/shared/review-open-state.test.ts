@@ -1,19 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import {
-  BASE_RELATIVE_DIFF_TYPES,
   buildBaseNotFoundError,
   resolveReviewOpenState,
   suggestBaseRefs,
 } from "./review-open-state";
 import type { ReviewOpenStateInput } from "./review-open-state";
 import type { DiffType } from "./review-core";
+import { gitReviewPolicy } from "./git-review-policy";
+import { gitButlerReviewPolicy } from "./gitbutler-review-policy";
+import { jjReviewPolicy } from "./jj-review-policy";
+import { p4ReviewPolicy } from "./p4-review-policy";
 
 function input(overrides: Partial<ReviewOpenStateInput> = {}): ReviewOpenStateInput {
   return {
     parsed: {},
     isPRMode: false,
     isWorkspace: false,
-    providerId: "git",
+    provider: { resolve: gitReviewPolicy.resolveOpenState },
     resolvedDefaultDiffType: "since-base",
     ...overrides,
   };
@@ -38,50 +41,69 @@ describe("resolveReviewOpenState", () => {
     expect(state.notices).toEqual([]);
   });
 
-  test.each(["gitbutler", "jj", "p4"] as const)(
+  test.each(["gitbutler", "p4"] as const)(
     "%s + --base errors instead of accept-and-ignore",
     (providerId) => {
-      // resolveInitialBase hard-returns the detected default on jj/gitbutler
-      // (and p4 has no base at all): accepting the flag would quietly review
+      // These providers derive their own base (or have none): accepting the
+      // flag would quietly review
       // against the wrong base — the silent lie this matrix exists to prevent.
       const state = resolveReviewOpenState(
-        input({ providerId, parsed: { base: "feature/part-1" }, baseResolves: true }),
+        input({ provider: { resolve: ({ gitbutler: gitButlerReviewPolicy, jj: jjReviewPolicy, p4: p4ReviewPolicy } as const)[providerId].resolveOpenState }, parsed: { base: "feature/part-1" }, baseResolves: true }),
       );
       expect(state.error).toContain("--base is not supported");
       expect(state.requestedBase).toBeUndefined();
     },
   );
 
-  test.each(["gitbutler", "jj", "p4"] as const)(
+  test.each(["gitbutler", "p4"] as const)(
     "%s + --diff-type since-base errors instead of accept-and-ignore",
     (providerId) => {
       // ownsDiffType rejects git diff ids on these providers, so the request
       // would be silently dropped by resolveRequestedDiffType.
       const state = resolveReviewOpenState(
-        input({ providerId, parsed: { diffType: "since-base" } }),
+        input({ provider: { resolve: ({ gitbutler: gitButlerReviewPolicy, jj: jjReviewPolicy, p4: p4ReviewPolicy } as const)[providerId].resolveOpenState }, parsed: { diffType: "since-base" } }),
       );
       expect(state.error).toContain("--diff-type is not supported");
     },
   );
 
+  test("JJ flags seed native modes and only allow a base for line-of-work", () => {
+    expect(resolveReviewOpenState(input({
+      provider: { resolve: jjReviewPolicy.resolveOpenState },
+      parsed: { diffType: "jj-last" },
+      resolvedDefaultDiffType: "jj-current",
+    }))).toEqual({ requestedDiffType: "jj-last", notices: [] });
+
+    expect(resolveReviewOpenState(input({
+      provider: { resolve: jjReviewPolicy.resolveOpenState },
+      parsed: { base: "develop@origin" },
+      resolvedDefaultDiffType: "jj-current",
+    }))).toEqual({ requestedBase: "develop@origin", requestedDiffType: "jj-line", notices: [] });
+
+    expect(resolveReviewOpenState(input({
+      provider: { resolve: jjReviewPolicy.resolveOpenState },
+      parsed: { base: "develop@origin", diffType: "jj-current" },
+    })).error).toContain("--base has no effect");
+  });
+
   test("workspace + either flag errors (a base parameter with nowhere to go)", () => {
     const base = resolveReviewOpenState(
-      input({ isWorkspace: true, providerId: undefined, parsed: { base: "main" } }),
+      input({ isWorkspace: true, parsed: { base: "main" } }),
     );
     expect(base.error).toContain("multi-repo workspace review");
     const diffType = resolveReviewOpenState(
-      input({ isWorkspace: true, providerId: undefined, parsed: { diffType: "uncommitted" } }),
+      input({ isWorkspace: true, parsed: { diffType: "uncommitted" } }),
     );
     expect(diffType.error).toContain("multi-repo workspace review");
   });
 
   test("PR mode + either flag errors (the base comes from the pull request)", () => {
     const base = resolveReviewOpenState(
-      input({ isPRMode: true, providerId: undefined, parsed: { base: "main" } }),
+      input({ isPRMode: true, parsed: { base: "main" } }),
     );
     expect(base.error).toContain("pull request");
     const diffType = resolveReviewOpenState(
-      input({ isPRMode: true, providerId: undefined, parsed: { diffType: "merge-base" } }),
+      input({ isPRMode: true, parsed: { diffType: "merge-base" } }),
     );
     expect(diffType.error).toContain("pull request");
   });
@@ -112,7 +134,7 @@ describe("resolveReviewOpenState", () => {
       }),
     );
     expect(state.error).toContain("--base has no effect with --diff-type uncommitted");
-    expect(state.error).toContain(BASE_RELATIVE_DIFF_TYPES.join(", "));
+    expect(state.error).toContain("since-base, branch, merge-base");
   });
 
   test("--base with a base-relative resolved default is left alone, no notice", () => {

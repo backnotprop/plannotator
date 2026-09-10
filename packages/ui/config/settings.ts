@@ -13,7 +13,7 @@ import {
   isAnnotateAgentTerminalSide,
   type AnnotateAgentTerminalSide,
 } from '@plannotator/core/agent-terminal';
-import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
+import type { DiffLineBgIntensity, ReviewDefaults } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
 import {
   DEFAULT_TOKEN_HOVER_DELAY_MS,
@@ -91,6 +91,19 @@ export function readThemePairCookies(keys?: ThemePairLegacyKeys): ThemePair | un
 const DIFF_LINE_BG_INTENSITY_VALUES = ['subtle', 'normal', 'strong'] as const;
 function isDiffLineBgIntensity(v: unknown): v is DiffLineBgIntensity {
   return typeof v === 'string' && (DIFF_LINE_BG_INTENSITY_VALUES as readonly string[]).includes(v);
+}
+
+function parseReviewDefaults(value: unknown): ReviewDefaults | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const defaults: ReviewDefaults = {};
+  for (const [providerId, providerValue] of Object.entries(value)) {
+    if (!providerId || !providerValue || typeof providerValue !== 'object' || Array.isArray(providerValue)) continue;
+    const defaultDiffType = (providerValue as Record<string, unknown>).defaultDiffType;
+    if (typeof defaultDiffType === 'string' && defaultDiffType) {
+      defaults[providerId] = { defaultDiffType };
+    }
+  }
+  return defaults;
 }
 
 export interface SettingDef<T> {
@@ -330,6 +343,25 @@ export const SETTINGS = {
     toCookie: (value: boolean) =>
       storage.setItem('plannotator-review-show-stage-controls', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  reviewDefaults: {
+    defaultValue: {} as ReviewDefaults,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-review-defaults');
+      if (!value) return undefined;
+      try {
+        return parseReviewDefaults(JSON.parse(value));
+      } catch {
+        return undefined;
+      }
+    },
+    toCookie: (value: ReviewDefaults) =>
+      storage.setItem('plannotator-review-defaults', JSON.stringify(value)),
+    serverKey: 'reviewDefaults',
+    fromServer: (serverConfig: Record<string, unknown>) =>
+      parseReviewDefaults(serverConfig.reviewDefaults),
+    toServer: (value: ReviewDefaults) => ({ reviewDefaults: value }),
   },
 
   defaultDiffType: {

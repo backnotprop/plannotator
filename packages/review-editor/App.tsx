@@ -7,6 +7,7 @@
 import '@plannotator/ui/utils/math-eager';
 import '@plannotator/ui/utils/identity-tater';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import type { VcsReviewSettingsDescriptor } from '@plannotator/core/config-types';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { TooltipProvider } from '@plannotator/ui/components/Tooltip';
@@ -560,6 +561,7 @@ const ReviewApp: React.FC = () => {
   const [reviewMode, setReviewMode] = useState<string | null>(null);
   const [diffType, setDiffType] = useState<string>('uncommitted');
   const [gitContext, setGitContext] = useState<GitContext | null>(null);
+  const [reviewSettings, setReviewSettings] = useState<VcsReviewSettingsDescriptor[]>([]);
   const [workspaceDiffOptions, setWorkspaceDiffOptions] = useState<DiffOption[] | null>(null);
   // Two bases:
   //   selectedBase  — what the picker is currently showing (UI intent).
@@ -1986,6 +1988,7 @@ const ReviewApp: React.FC = () => {
         diffType?: string;
         base?: string;
         gitContext?: GitContext;
+        reviewSettings?: VcsReviewSettingsDescriptor[];
         diffOptions?: DiffOption[];
         agentCwd?: string | null;
         sharingEnabled?: boolean;
@@ -2036,6 +2039,7 @@ const ReviewApp: React.FC = () => {
         setFiles(apiFiles);
         setReviewMode(data.mode ?? null);
         setWorkspaceDiffOptions(data.mode === 'workspace' ? (data.diffOptions ?? []) : null);
+        setReviewSettings(data.reviewSettings ?? data.gitContext?.reviewSettings ?? []);
         if (data.origin) setOrigin(data.origin);
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) {
@@ -5417,6 +5421,8 @@ const ReviewApp: React.FC = () => {
             mode="review"
             aiProviders={aiProviders}
             gitUser={gitUser}
+            reviewSettings={reviewSettings}
+            activeVcsId={gitContext?.vcsType}
             externalOpen={openSettingsMenu}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref

@@ -5,6 +5,10 @@ import type {
   GitContext,
   ReviewGitRuntime,
 } from "./review-core";
+import { gitReviewPolicy } from "./git-review-policy";
+import { gitButlerReviewPolicy } from "./gitbutler-review-policy";
+import { jjReviewPolicy } from "./jj-review-policy";
+import { p4ReviewPolicy } from "./p4-review-policy";
 import {
   type VcsProvider,
   createGitProvider,
@@ -37,6 +41,14 @@ function provider(
   const isDetected = () => typeof detected === "function" ? detected() : detected;
   return {
     id,
+    label: id === "git" ? "Git" : id,
+    reviewPolicy: id === "jj"
+      ? jjReviewPolicy
+      : id === "gitbutler"
+        ? gitButlerReviewPolicy
+        : id === "p4"
+          ? p4ReviewPolicy
+          : gitReviewPolicy,
     async detect() {
       return isDetected();
     },
@@ -81,6 +93,39 @@ describe("createVcsApi", () => {
 
     await expect(api.detectVcs("/repo")).resolves.toBe(jj);
     await expect(api.getVcsContext("/repo")).resolves.toMatchObject({ vcsType: "jj" });
+  });
+
+  test("exposes settings descriptors from registered providers without requiring every provider to implement one", async () => {
+    const git = {
+      ...provider("git", true, ["uncommitted"]),
+      reviewPolicy: {
+        ...gitReviewPolicy,
+        settings: {
+          id: "git",
+          label: "Git",
+          defaultDiffType: "uncommitted",
+          diffOptions: [{ id: "uncommitted", label: "Uncommitted", description: "Working tree changes" }],
+          capabilities: { statusSections: true, staging: true, compareTarget: true },
+        },
+      },
+    } satisfies VcsProvider;
+    const plugin = {
+      ...provider("plugin-vcs", false, ["plugin-diff"]),
+      reviewPolicy: {
+        ...gitReviewPolicy,
+        settings: {
+          id: "plugin-vcs",
+          label: "Plugin VCS",
+          defaultDiffType: "plugin-diff",
+          diffOptions: [{ id: "plugin-diff", label: "Plugin diff", description: "Plugin changes" }],
+          capabilities: { statusSections: false, staging: false, compareTarget: false },
+        },
+      },
+    } satisfies VcsProvider;
+    const p4 = provider("p4", false, ["p4-default"]);
+
+    const context = await createVcsApi([plugin, git, p4]).getVcsContext("/repo");
+    expect(context.reviewSettings?.map((descriptor) => descriptor.id)).toEqual(["plugin-vcs", "git"]);
   });
 
   test("selects GitButler ahead of Git without changing JJ precedence", async () => {
@@ -202,7 +247,7 @@ describe("createVcsApi", () => {
   });
 
   test("limits Git staging to working-tree diff modes", async () => {
-    const git = createVcsApi([createGitProvider(gitRuntime)]);
+    const git = createVcsApi([createGitProvider(gitRuntime, gitReviewPolicy)]);
 
     await expect(git.canStageFiles("uncommitted", "/repo")).resolves.toBe(true);
     await expect(git.canStageFiles("unstaged", "/repo")).resolves.toBe(true);
@@ -216,7 +261,7 @@ describe("createVcsApi", () => {
   });
 
   test("the git provider owns commit:<sha> diff types", () => {
-    const git = createGitProvider(gitRuntime);
+    const git = createGitProvider(gitRuntime, gitReviewPolicy);
     expect(git.ownsDiffType("commit:abc1234")).toBe(true);
     expect(git.ownsDiffType("worktree:/repo:commit:abc1234")).toBe(true);
   });
@@ -462,11 +507,8 @@ describe("resolveInitialDiffType", () => {
     expect(resolveInitialDiffType(context({}), "merge-base")).toBe("merge-base");
   });
 
-  test("uses p4-default for P4 contexts", () => {
-    expect(resolveInitialDiffType(context({ vcsType: "p4" }), "merge-base")).toBe("p4-default");
-  });
 
-  test("ignores saved Git defaults for jj contexts", () => {
+  test("uses JJ defaults and ignores saved Git defaults for jj contexts", () => {
     const jjContext = context({
       defaultBranch: "trunk()",
       diffOptions: [
@@ -477,6 +519,7 @@ describe("resolveInitialDiffType", () => {
       vcsType: "jj",
     });
 
+    expect(resolveInitialDiffType(jjContext, "jj-line")).toBe("jj-line");
     expect(resolveInitialDiffType(jjContext, "all")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "merge-base")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "unstaged")).toBe("jj-current");

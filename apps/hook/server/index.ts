@@ -94,8 +94,8 @@ import {
   startGoalSetupServer,
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
-import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
+import { type DiffType, type VcsProvider, detectManagedVcs, prepareLocalReviewDiff, resolveConfiguredVcsReviewDefault, gitRuntime } from "@plannotator/server/vcs";
+import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
 import { parseReviewArgs, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -368,7 +368,7 @@ async function resolveCliReviewOpenState(
   options: {
     isPRMode: boolean;
     isWorkspace: boolean;
-    providerId?: "git" | "gitbutler" | "jj" | "p4";
+    provider?: VcsProvider;
     resolvedDefaultDiffType: DiffType;
     cwd?: string;
   },
@@ -382,7 +382,7 @@ async function resolveCliReviewOpenState(
     reviewArgs.base !== undefined &&
     !options.isPRMode &&
     !options.isWorkspace &&
-    options.providerId === "git"
+    options.provider?.id === "git"
   ) {
     // The probe is the whole point of CLI-side resolution: without it a
     // typo'd base produces a confidently-mislabelled merge-base→HEAD diff
@@ -403,7 +403,9 @@ async function resolveCliReviewOpenState(
     parsed: reviewArgs,
     isPRMode: options.isPRMode,
     isWorkspace: options.isWorkspace,
-    providerId: options.providerId,
+    provider: options.provider
+      ? { resolve: options.provider.reviewPolicy.resolveOpenState }
+      : undefined,
     resolvedDefaultDiffType: options.resolvedDefaultDiffType,
     baseResolves,
     availableBranches,
@@ -837,7 +839,7 @@ if (args[0] === "sessions") {
     await resolveCliReviewOpenState(reviewArgs, {
       isPRMode: true,
       isWorkspace: false,
-      resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+      resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(loadConfig()),
     });
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
@@ -1096,13 +1098,14 @@ if (args[0] === "sessions") {
         isPRMode: false,
         isWorkspace: false,
         providerId,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        provider: managedVcs ?? undefined,
+        resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(config, providerId),
       });
       const diffResult = await prepareLocalReviewDiff({
         vcsType: reviewArgs.vcsType,
-        requestedDiffType: openState.requestedDiffType,
+        requestedDiffType: openState.requestedDiffType as DiffType | undefined,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveConfiguredVcsReviewDefault(config, providerId),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
@@ -1121,10 +1124,10 @@ if (args[0] === "sessions") {
       await resolveCliReviewOpenState(reviewArgs, {
         isPRMode: false,
         isWorkspace: true,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(config),
       });
       workspace = await buildLocalWorkspaceReview(process.cwd(), {
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveConfiguredVcsReviewDefault(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       if (workspace.repos.length === 0) {
@@ -1856,7 +1859,7 @@ if (args[0] === "sessions") {
     await resolveCliReviewOpenState(reviewArgs, {
       isPRMode: true,
       isWorkspace: false,
-      resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+      resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(loadConfig()),
     });
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
@@ -1902,16 +1905,16 @@ if (args[0] === "sessions") {
       const openState = await resolveCliReviewOpenState(reviewArgs, {
         isPRMode: false,
         isWorkspace: false,
-        providerId,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        provider: managedVcs ?? undefined,
+        resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(config, providerId),
         cwd,
       });
       const diffResult = await prepareLocalReviewDiff({
         cwd,
         vcsType: reviewArgs.vcsType,
-        requestedDiffType: openState.requestedDiffType,
+        requestedDiffType: openState.requestedDiffType as DiffType | undefined,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveConfiguredVcsReviewDefault(config, providerId),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
@@ -1925,11 +1928,11 @@ if (args[0] === "sessions") {
       await resolveCliReviewOpenState(reviewArgs, {
         isPRMode: false,
         isWorkspace: true,
-        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        resolvedDefaultDiffType: resolveConfiguredVcsReviewDefault(config),
         cwd,
       });
       workspace = await buildLocalWorkspaceReview(cwd, {
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveConfiguredVcsReviewDefault(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       if (workspace.repos.length === 0) {

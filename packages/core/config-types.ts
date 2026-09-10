@@ -1,4 +1,29 @@
-export type DefaultDiffType = 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all';
+export interface ProviderReviewDefaults {
+  defaultDiffType?: string;
+}
+
+export type ReviewDefaults = Record<string, ProviderReviewDefaults>;
+
+export interface ReviewSettingsDiffOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface VcsReviewSettingsDescriptor {
+  id: string;
+  label: string;
+  defaultDiffType: string;
+  diffOptions: ReviewSettingsDiffOption[];
+  capabilities: {
+    statusSections: boolean;
+    staging: boolean;
+    compareTarget: boolean;
+  };
+  /** Legacy setting registry key, interpreted generically by the UI. */
+  legacyDefaultSetting?: string;
+}
+
 export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 /**
@@ -24,6 +49,6 @@ export interface DiffOptions {
   tabSize?: number;
   hideWhitespace?: boolean;
   expandUnchanged?: boolean;
-  defaultDiffType?: DefaultDiffType;
+  defaultDiffType?: string;
   lineBgIntensity?: DiffLineBgIntensity;
 }

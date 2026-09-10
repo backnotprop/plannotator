@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { GitContext } from "@plannotator/shared/review-core";
-import { resolveInitialDiffType } from "./vcs";
+import { resolveConfiguredVcsReviewDefault, resolveInitialDiffType } from "./vcs";
 
 function context(overrides: Partial<GitContext>): GitContext {
   return {
@@ -22,11 +22,13 @@ describe("resolveInitialDiffType", () => {
     expect(resolveInitialDiffType(context({}), "merge-base")).toBe("merge-base");
   });
 
-  test("uses p4-default for P4 contexts", () => {
-    expect(resolveInitialDiffType(context({ vcsType: "p4" }), "merge-base")).toBe("p4-default");
+  test("uses the P4 provider default instead of a legacy Git setting", () => {
+    expect(resolveConfiguredVcsReviewDefault({
+      diffOptions: { defaultDiffType: "merge-base" },
+    }, "p4")).toBe("p4-default");
   });
 
-  test("ignores saved Git defaults for jj contexts", () => {
+  test("uses JJ defaults and ignores saved Git defaults for jj contexts", () => {
     const jjContext = context({
       defaultBranch: "trunk()",
       diffOptions: [
@@ -37,6 +39,7 @@ describe("resolveInitialDiffType", () => {
       vcsType: "jj",
     });
 
+    expect(resolveInitialDiffType(jjContext, "jj-line")).toBe("jj-line");
     expect(resolveInitialDiffType(jjContext, "all")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "merge-base")).toBe("jj-current");
     expect(resolveInitialDiffType(jjContext, "unstaged")).toBe("jj-current");

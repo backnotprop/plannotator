@@ -11,7 +11,7 @@
 
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
+import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, getVcsReviewSettings, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
 import { SingleFlight } from "@plannotator/shared/single-flight";
@@ -2078,6 +2078,7 @@ export async function startReviewServer(
               hideWhitespace: servedHideWhitespace,
               ...(workspace && { diffOptions: workspace.diffOptions }),
               gitContext: hasLocalAccess ? servedGitContext : undefined,
+              reviewSettings: getVcsReviewSettings(),
               sharingEnabled,
               approvalNotesSupported,
               // Mount is the only place the pin matters, so it rides /api/diff
@@ -3276,10 +3277,11 @@ export async function startReviewServer(
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
             try {
-              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; reviewAnalysis?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
+              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; reviewAnalysis?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
               const toSave: Record<string, unknown> = {};
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
+              if (body.reviewDefaults !== undefined) toSave.reviewDefaults = body.reviewDefaults;
               if (body.theme !== undefined) toSave.theme = body.theme;
               if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
               if (body.reviewAnalysis !== undefined) {
