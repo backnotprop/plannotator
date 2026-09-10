@@ -198,6 +198,7 @@ const api = createVcsApi([
 ], "git");
 
 export const {
+	getReviewSettings: getVcsReviewSettings,
 	getReviewPolicy: getVcsReviewPolicy,
 	resolveReviewDefault: resolveVcsReviewDefault,
 	detectVcs,

@@ -41,11 +41,11 @@ describe("resolveReviewOpenState", () => {
     expect(state.notices).toEqual([]);
   });
 
-  test.each(["gitbutler", "jj", "p4"] as const)(
+  test.each(["gitbutler", "p4"] as const)(
     "%s + --base errors instead of accept-and-ignore",
     (providerId) => {
-      // resolveInitialBase hard-returns the detected default on jj/gitbutler
-      // (and p4 has no base at all): accepting the flag would quietly review
+      // These providers derive their own base (or have none): accepting the
+      // flag would quietly review
       // against the wrong base — the silent lie this matrix exists to prevent.
       const state = resolveReviewOpenState(
         input({ provider: { resolve: ({ gitbutler: gitButlerReviewPolicy, jj: jjReviewPolicy, p4: p4ReviewPolicy } as const)[providerId].resolveOpenState }, parsed: { base: "feature/part-1" }, baseResolves: true }),
@@ -55,7 +55,7 @@ describe("resolveReviewOpenState", () => {
     },
   );
 
-  test.each(["gitbutler", "jj", "p4"] as const)(
+  test.each(["gitbutler", "p4"] as const)(
     "%s + --diff-type since-base errors instead of accept-and-ignore",
     (providerId) => {
       // ownsDiffType rejects git diff ids on these providers, so the request
@@ -66,6 +66,25 @@ describe("resolveReviewOpenState", () => {
       expect(state.error).toContain("--diff-type is not supported");
     },
   );
+
+  test("JJ flags seed native modes and only allow a base for line-of-work", () => {
+    expect(resolveReviewOpenState(input({
+      provider: { resolve: jjReviewPolicy.resolveOpenState },
+      parsed: { diffType: "jj-last" },
+      resolvedDefaultDiffType: "jj-current",
+    }))).toEqual({ requestedDiffType: "jj-last", notices: [] });
+
+    expect(resolveReviewOpenState(input({
+      provider: { resolve: jjReviewPolicy.resolveOpenState },
+      parsed: { base: "develop@origin" },
+      resolvedDefaultDiffType: "jj-current",
+    }))).toEqual({ requestedBase: "develop@origin", requestedDiffType: "jj-line", notices: [] });
+
+    expect(resolveReviewOpenState(input({
+      provider: { resolve: jjReviewPolicy.resolveOpenState },
+      parsed: { base: "develop@origin", diffType: "jj-current" },
+    })).error).toContain("--base has no effect");
+  });
 
   test("workspace + either flag errors (a base parameter with nowhere to go)", () => {
     const base = resolveReviewOpenState(

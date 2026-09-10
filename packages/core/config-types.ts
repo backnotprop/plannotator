@@ -4,6 +4,26 @@ export interface ProviderReviewDefaults {
 
 export type ReviewDefaults = Record<string, ProviderReviewDefaults>;
 
+export interface ReviewSettingsDiffOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface VcsReviewSettingsDescriptor {
+  id: string;
+  label: string;
+  defaultDiffType: string;
+  diffOptions: ReviewSettingsDiffOption[];
+  capabilities: {
+    statusSections: boolean;
+    staging: boolean;
+    compareTarget: boolean;
+  };
+  /** Legacy setting registry key, interpreted generically by the UI. */
+  legacyDefaultSetting?: string;
+}
+
 export type DiffLineBgIntensity = 'subtle' | 'normal' | 'strong';
 
 /**

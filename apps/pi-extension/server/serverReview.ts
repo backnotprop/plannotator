@@ -188,6 +188,7 @@ import {
 	canStageFiles,
 	detectRemoteDefaultCompareTarget,
 	getVcsContext,
+	getVcsReviewSettings,
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
 	resolveVcsCwd,
@@ -2093,6 +2094,7 @@ export async function startReviewServer(options: {
 				hideWhitespace: servedHideWhitespace,
 				...(workspace && { diffOptions: workspace.diffOptions }),
 				gitContext: hasLocalAccess ? servedGitContext : undefined,
+				reviewSettings: getVcsReviewSettings(),
 				sharingEnabled,
 				approvalNotesSupported,
 				// Mount is the only place the pin matters, so it rides /api/diff

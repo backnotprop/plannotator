@@ -1,6 +1,7 @@
 import { configStore } from './configStore';
 import { SETTINGS } from './settings';
 import { storage } from '../utils/storage';
+import type { VcsReviewSettingsDescriptor } from '@plannotator/core/config-types';
 
 /**
  * The ONLY writers for the coupled setting pair (reviewPanelView,
@@ -75,6 +76,21 @@ export function setReviewDefaultDiffType(
     // diff default), so it syncs the memo like any explicit view write.
     store.set('reviewPanelViewLastUsed', 'tree');
   }
+}
+
+export function getProviderReviewDefaultDiffType(
+  descriptor: VcsReviewSettingsDescriptor,
+  store: PanelViewConfigStore = configStore,
+): string {
+  const configured = store.get('reviewDefaults')[descriptor.id]?.defaultDiffType;
+  if (configured && descriptor.diffOptions.some((option) => option.id === configured)) {
+    return configured;
+  }
+  if (descriptor.legacyDefaultSetting) {
+    const legacy = store.get(descriptor.legacyDefaultSetting as 'defaultDiffType');
+    if (descriptor.diffOptions.some((option) => option.id === legacy)) return legacy;
+  }
+  return descriptor.defaultDiffType;
 }
 
 export function setProviderReviewDefaultDiffType(

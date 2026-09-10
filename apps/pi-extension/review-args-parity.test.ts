@@ -36,7 +36,11 @@ describe("vendored review-args parity", () => {
       provider: { resolve: jjReviewPolicy.resolveOpenState },
       resolvedDefaultDiffType: "since-base",
     });
-    expect(state.error).toContain("--base is not supported in jj sessions");
+    expect(state).toEqual({
+      requestedBase: "main",
+      requestedDiffType: "jj-line",
+      notices: [],
+    });
   });
 
   test("the review command handler forwards the parsed open state", async () => {

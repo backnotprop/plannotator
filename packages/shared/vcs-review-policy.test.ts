@@ -32,7 +32,7 @@ describe("provider-owned open-state validation", () => {
     expect(result.error).toContain("Unknown diff type: provider-mode");
   });
 
-  test("JJ owns its unsupported-open-state message", () => {
+  test("JJ owns its stable open modes and base-relative line mode", () => {
     const result = resolveReviewOpenState({
       parsed: { base: "main" },
       isPRMode: false,
@@ -41,6 +41,10 @@ describe("provider-owned open-state validation", () => {
       resolvedDefaultDiffType: "jj-current",
     });
 
-    expect(result.error).toContain("not supported in jj sessions yet");
+    expect(result).toEqual({
+      requestedBase: "main",
+      requestedDiffType: "jj-line",
+      notices: [],
+    });
   });
 });

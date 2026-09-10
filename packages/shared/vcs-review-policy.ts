@@ -1,3 +1,4 @@
+import type { VcsReviewSettingsDescriptor } from "@plannotator/core/config-types";
 import type { DiffType } from "./review-core";
 import type {
   ProviderReviewOpenStateInput,
@@ -10,6 +11,7 @@ export interface LegacyReviewDefaultAdapter {
 
 export interface VcsReviewPolicy {
   readonly defaultDiffType: DiffType;
+  readonly settings?: VcsReviewSettingsDescriptor;
   ownsDiffType(diffType: string): diffType is DiffType;
   readonly legacyDefault?: LegacyReviewDefaultAdapter;
   resolveDefault(value: unknown): DiffType | undefined;

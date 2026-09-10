@@ -11,7 +11,7 @@
 
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
+import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, getVcsReviewSettings, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
 import { SingleFlight } from "@plannotator/shared/single-flight";
@@ -2078,6 +2078,7 @@ export async function startReviewServer(
               hideWhitespace: servedHideWhitespace,
               ...(workspace && { diffOptions: workspace.diffOptions }),
               gitContext: hasLocalAccess ? servedGitContext : undefined,
+              reviewSettings: getVcsReviewSettings(),
               sharingEnabled,
               approvalNotesSupported,
               // Mount is the only place the pin matters, so it rides /api/diff

@@ -23,6 +23,22 @@ const BASE_RELATIVE = new Set<string>(BASE_RELATIVE_DIFF_TYPES);
 
 export const gitReviewPolicy: VcsReviewPolicy = {
   defaultDiffType: "since-base",
+  settings: {
+    id: "git",
+    label: "Git",
+    defaultDiffType: "since-base",
+    diffOptions: [
+      { id: "since-base", label: "All Changes (Recommended)", description: "Everything since your branch split from main — committed, uncommitted, and untracked" },
+      { id: "local-vs-remote", label: "Local vs Remote Branch", description: "Your local branch and working tree compared with its last-fetched remote-tracking branch" },
+      { id: "uncommitted", label: "Uncommitted", description: "Everything you've changed since your last commit" },
+      { id: "unstaged", label: "Unstaged", description: "Only changes you haven't staged yet" },
+      { id: "staged", label: "Staged", description: "Only changes you've staged for commit" },
+      { id: "merge-base", label: "Committed changes (PR view)", description: "Everything you've committed on this branch" },
+      { id: "all", label: "All Files (HEAD)", description: "Every tracked file at HEAD, shown as additions" },
+    ],
+    capabilities: { statusSections: true, staging: true, compareTarget: true },
+    legacyDefaultSetting: "defaultDiffType",
+  },
   ownsDiffType(diffType: string): diffType is DiffType {
     return GIT_DIFF_TYPES.has(diffType)
       || diffType.startsWith("worktree:")
