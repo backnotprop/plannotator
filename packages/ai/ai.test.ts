@@ -1591,6 +1591,23 @@ describe("mapPiEvent", () => {
     expect(result).toEqual([]);
   });
 
+  test("completed assistant error maps to an error", () => {
+    const result = mapPiEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "OpenAI API error (429): quota exceeded",
+      },
+    }, SESSION_ID);
+    expect(result).toEqual([{
+      type: "error",
+      error: "OpenAI API error (429): quota exceeded",
+      code: "pi_request_error",
+    }]);
+  });
+
   test("tool_execution_end maps to tool_result", () => {
     const result = mapPiEvent({
       type: "tool_execution_end",

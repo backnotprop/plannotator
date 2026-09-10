@@ -68,7 +68,15 @@ export function mapPiEvent(
 
 		case "message_end": {
 			const message = event.message as Record<string, unknown> | undefined;
-			if (message?.role !== "assistant" || !Array.isArray(message.content)) return [];
+			if (message?.role !== "assistant") return [];
+			if (message.stopReason === "error") {
+				return [{
+					type: "error",
+					error: typeof message.errorMessage === "string" ? message.errorMessage : "Pi request failed",
+					code: "pi_request_error",
+				}];
+			}
+			if (!Array.isArray(message.content)) return [];
 
 			const text = message.content
 				.filter((block): block is Record<string, unknown> =>
