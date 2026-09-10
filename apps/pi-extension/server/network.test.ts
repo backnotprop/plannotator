@@ -285,6 +285,42 @@ describe("pi browser no-op sentinels", () => {
 	});
 });
 
+describe("pi PLANNOTATOR_BROWSER script path", () => {
+	// #1391: on darwin, `open -a <script>` fails with LaunchServices -10811,
+	// so a slash-containing non-.app value must be executed directly.
+	test.if(process.platform !== "win32")(
+		"executes a script path directly with the URL as argument",
+		async () => {
+			clearEnv();
+			const { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } =
+				await import("node:fs");
+			const { join } = await import("node:path");
+			const { tmpdir } = await import("node:os");
+			const dir = mkdtempSync(join(tmpdir(), "pn-browser-"));
+			try {
+				const marker = join(dir, "opened.txt");
+				const script = join(dir, "handler.sh");
+				writeFileSync(script, `#!/bin/sh\nprintf '%s' \"$1\" > \"${marker}\"\n`, {
+					mode: 0o755,
+				});
+				process.env.PLANNOTATOR_BROWSER = script;
+
+				const result = await openBrowser("http://127.0.0.1:19432");
+				expect(result.opened).toBe(true);
+
+				// spawn is detached; poll briefly for the marker
+				const deadline = Date.now() + 2000;
+				while (!existsSync(marker) && Date.now() < deadline) {
+					await new Promise((r) => setTimeout(r, 25));
+				}
+				expect(readFileSync(marker, "utf-8")).toBe("http://127.0.0.1:19432");
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		},
+	);
+});
+
 describe("pi buildAdvertisedUrl", () => {
 	test("defaults to localhost", () => {
 		clearEnv();
