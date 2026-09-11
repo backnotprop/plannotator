@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -143,6 +143,70 @@ assert(
   "Bun must keep the exact-version @plannotator/core dependency linked to the local workspace",
 );
 
+// Every "@plannotator/core/<subpath>" the UI source imports must be an export of
+// the core the consumer will install. Two layers: the local core manifest (what
+// WILL be published when core is bumped) and the registry (what IS published when
+// the pinned core version already exists there). ui 0.38.0 shipped importing
+// @plannotator/core/token-hover while the pinned core 0.25.1 on npm had no such
+// export: the consumer below installs core from the local tarball, so it never saw it.
+function coreSubpathsImportedByUi(): string[] {
+  const out = run("grep", [
+    "-rhoE",
+    "@plannotator/core/[A-Za-z0-9_-]+",
+    "--include=*.ts",
+    "--include=*.tsx",
+    "--exclude=*.test.ts",
+    "--exclude=*.test.tsx",
+    "--exclude-dir=node_modules",
+    "--exclude-dir=scripts",
+    uiDir,
+  ]);
+  return [...new Set(out.split("\n").filter(Boolean))]
+    .map((specifier) => specifier.replace(/^@plannotator\/core/, "."))
+    .sort();
+}
+const importedCoreSubpaths = coreSubpathsImportedByUi();
+assert(importedCoreSubpaths.length > 0, "expected the UI source to import at least one @plannotator/core subpath");
+for (const subpath of importedCoreSubpaths) {
+  assert(
+    subpath in coreSourceManifest.exports,
+    `UI imports ${subpath.replace(/^\./, "@plannotator/core")} but the core source manifest does not export it`,
+  );
+}
+function publishedCoreExports(version: string): Record<string, string> | null {
+  // Capture both streams: npm reports E404 on stderr (and, with --json, as a
+  // JSON error on stdout), and execFileSync's message carries neither.
+  const result = spawnSync("npm", ["view", `@plannotator/core@${version}`, "exports", "--json"], {
+    cwd: repoDir,
+    encoding: "utf8",
+  });
+  const combined = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  if (result.status === 0) {
+    return result.stdout.trim() ? parseStringRecord(JSON.parse(result.stdout), "published core exports") : null;
+  }
+  if (/E404|404 Not Found|No match found/.test(combined)) return null;
+  throw new Error(`could not read @plannotator/core@${version} from the registry (network?): ${combined.trim()}`);
+}
+const published = publishedCoreExports(expectedCoreVersion);
+if (published === null) {
+  console.log(
+    `@plannotator/core@${expectedCoreVersion} is not on the registry yet: publish core FIRST, then the UI (HANDOFF "Publishing & versioning").`,
+  );
+} else {
+  for (const subpath of importedCoreSubpaths) {
+    assert(
+      subpath in published,
+      `UI imports ${subpath.replace(/^\./, "@plannotator/core")} but the PUBLISHED @plannotator/core@${expectedCoreVersion} does not export it; core changed since it was published, so bump core, update the UI pin, and publish core first`,
+    );
+  }
+  for (const [subpath, target] of Object.entries(coreSourceManifest.exports)) {
+    assert(
+      published[subpath] === target,
+      `core source manifest export ${subpath} differs from the published @plannotator/core@${expectedCoreVersion}; bump core before publishing the UI`,
+    );
+  }
+}
+
 const workDir = mkdtempSync(join(tmpdir(), "plannotator-ui-package-smoke-"));
 try {
   const coreTarballPath = join(workDir, "plannotator-core.tgz");
@@ -251,6 +315,8 @@ try {
       'import { StickyHeaderLane, type StickyHeaderLaneProps } from "@plannotator/ui/components/StickyHeaderLane";',
       'import { Viewer, type ViewerAnnotationHeaderConfig } from "@plannotator/ui/components/Viewer";',
       'import * as parser from "@plannotator/ui/utils/parser";',
+      'import { configurePlannotatorUI } from "@plannotator/ui/configure";',
+      'import * as config from "@plannotator/ui/config";',
       "",
       'const laneProps: Pick<StickyHeaderLaneProps, "visibility" | "sticky"> = { visibility: "always", sticky: false };',
       'const annotationHeader: ViewerAnnotationHeaderConfig = { onInputMethodChange: () => {}, onModeChange: () => {}, hideQuickLabel: true };',
@@ -260,6 +326,8 @@ try {
       "void annotationHeader;",
       "void AnnotationPanel;",
       "void parser;",
+      "configurePlannotatorUI({});",
+      "void config;",
       "",
     ].join("\n"),
   );
