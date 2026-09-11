@@ -2555,14 +2555,17 @@ export async function startReviewServer(options: {
 					// The response still carries a transiently recomputed context
 					// (worktree switches on plain git) even when the session did
 					// not adopt it — matching the pre-jj-line behavior.
-					...(updatedContext || clientGitContext
+					// Emitted only when a context was actually recomputed: on a
+					// same-cwd commit:<sha> switch (recompute skipped) the client
+					// keeps what it has. Echoing the launch-frozen session context
+					// here would revert the base picker and commit-baseline list
+					// on every Commits-rail click.
+					...(updatedContext
 						? {
-							gitContext: updatedContext
-								? {
-									...updatedContext,
-									diffFallback: clientGitContext?.diffFallback,
-								}
-								: clientGitContext,
+							gitContext: {
+								...updatedContext,
+								diffFallback: clientGitContext?.diffFallback,
+							},
 						}
 						: {}),
 					...(currentError ? { error: currentError } : {}),
