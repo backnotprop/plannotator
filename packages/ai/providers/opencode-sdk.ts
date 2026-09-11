@@ -304,7 +304,7 @@ class OpenCodeSession extends BaseSession {
 			yield BaseSession.BUSY_ERROR;
 			return;
 		}
-		const { gen } = started;
+		const { gen, signal } = started;
 
 		try {
 			// Build model param if specified
@@ -317,11 +317,29 @@ class OpenCodeSession extends BaseSession {
 				}
 			}
 
-			// Subscribe to SSE events
-			const { stream } = await this.config.client.event.subscribe();
+			// Open the SSE stream and wait for the first frame *before* prompting.
+			// OpenCode 1.18+ can finish a short turn before a late subscriber
+			// connects; Ask AI then hangs until the browser reports Failed to fetch.
+			const { stream } = await this.config.client.event.subscribe(
+				undefined,
+				{ signal },
+			);
+			const iterator = stream[Symbol.asyncIterator]();
 
 			try {
-				// Send prompt asynchronously
+				// First frame only proves the subscriber is live. Do not treat it as
+				// this turn — it can be server.connected or leftover idle from a
+				// previous query on the same session.
+				const first = await iterator.next();
+				if (first.done) {
+					yield {
+						type: "error",
+						error: "OpenCode event stream closed before the prompt was sent.",
+						code: "provider_error",
+					};
+					return;
+				}
+
 				try {
 					await this.config.client.session.promptAsync({
 						path: { id: this.config.sessionId },
@@ -344,29 +362,28 @@ class OpenCodeSession extends BaseSession {
 				}
 				this._firstQuerySent = true;
 
-				// Drain SSE events filtered by session ID
-				for await (const event of stream) {
-					const eventType = event.type as string;
-					const props = event.properties as Record<string, unknown> | undefined;
-					if (!props) continue;
-
-					// Filter: only events for our session
-					const eventSessionId =
-						(props.sessionID as string) ??
-						((props.info as Record<string, unknown>)?.sessionID as string) ??
-						((props.part as Record<string, unknown>)?.sessionID as string);
-					if (eventSessionId && eventSessionId !== this.config.sessionId) continue;
-
-					const mapped = mapOpenCodeEvent(eventType, props, this.id);
-					for (const msg of mapped) {
-						yield msg;
-						if (msg.type === "result" || (msg.type === "error" && isTerminalEvent(eventType))) {
-							return;
-						}
-					}
+				const state = createOpenCodeQueryState();
+				while (!signal.aborted) {
+					const next = await iterator.next();
+					if (next.done) break;
+					const { messages, done } = consumeOpenCodeEvent(
+						next.value,
+						this.config.sessionId,
+						state,
+					);
+					for (const msg of messages) yield msg;
+					if (done) return;
 				}
+
+				yield {
+					type: "error",
+					error: signal.aborted
+						? "OpenCode query aborted."
+						: "OpenCode event stream ended without a result.",
+					code: "provider_error",
+				};
 			} finally {
-				stream.return?.();
+				await iterator.return?.();
 			}
 		} catch (err) {
 			yield {
@@ -409,6 +426,94 @@ function isTerminalEvent(eventType: string): boolean {
 	return eventType === "session.error" || eventType === "session.status";
 }
 
+export function openCodeEventSessionId(
+	props: Record<string, unknown>,
+): string | undefined {
+	return (
+		(props.sessionID as string | undefined) ??
+		((props.info as Record<string, unknown> | undefined)?.sessionID as
+			| string
+			| undefined) ??
+		((props.part as Record<string, unknown> | undefined)?.sessionID as
+			| string
+			| undefined)
+	);
+}
+
+/**
+ * OpenCode 1.18 still emits `message.part.delta` for streaming text, but some
+ * turns only land a final `message.part.updated` snapshot (or a late
+ * subscriber misses the deltas). Capture assistant text parts so Ask AI can
+ * still render an answer. User-prompt snapshots have no `time` stamp.
+ */
+export function assistantTextFromPartUpdate(
+	part: Record<string, unknown> | undefined,
+): string | undefined {
+	if (!part || part.type !== "text") return undefined;
+	if (part.time == null) return undefined;
+	const text = part.text;
+	return typeof text === "string" && text.length > 0 ? text : undefined;
+}
+
+export interface OpenCodeQueryState {
+	sawTextDelta: boolean;
+	lastAssistantText: string;
+}
+
+export function createOpenCodeQueryState(): OpenCodeQueryState {
+	return { sawTextDelta: false, lastAssistantText: "" };
+}
+
+/**
+ * If this turn never streamed `message.part.delta` text, emit the last
+ * assistant snapshot so Ask AI still has something to render (#514 / #907).
+ */
+export function fallbackAssistantText(state: OpenCodeQueryState): AIMessage[] {
+	if (state.sawTextDelta || !state.lastAssistantText) return [];
+	return [{ type: "text_delta", delta: state.lastAssistantText }];
+}
+
+/**
+ * Consume one OpenCode SSE event after promptAsync. Returns mapped Ask AI
+ * messages and whether the query should stop. Pre-prompt leftover idle is
+ * ignored by only calling this after the prompt is sent.
+ */
+export function consumeOpenCodeEvent(
+	event: { type?: string; properties?: Record<string, unknown> },
+	sessionId: string,
+	state: OpenCodeQueryState,
+): { messages: AIMessage[]; done: boolean } {
+	const eventType = event.type as string;
+	const props = event.properties;
+	if (props == null) return { messages: [], done: false };
+
+	const eventSessionId = openCodeEventSessionId(props);
+	if (eventSessionId && eventSessionId !== sessionId) {
+		return { messages: [], done: false };
+	}
+
+	if (eventType === "message.part.updated") {
+		const snapshot = assistantTextFromPartUpdate(
+			props.part as Record<string, unknown> | undefined,
+		);
+		if (snapshot) state.lastAssistantText = snapshot;
+	}
+
+	const mapped = mapOpenCodeEvent(eventType, props, sessionId);
+	const messages: AIMessage[] = [];
+	let done = false;
+	for (const msg of mapped) {
+		if (msg.type === "text_delta") state.sawTextDelta = true;
+		if (msg.type === "result") {
+			messages.push(...fallbackAssistantText(state));
+			done = true;
+		}
+		messages.push(msg);
+		if (msg.type === "error" && isTerminalEvent(eventType)) done = true;
+	}
+	return { messages, done };
+}
+
 /**
  * Map an OpenCode SSE event to AIMessage[].
  *
@@ -428,6 +533,8 @@ export function mapOpenCodeEvent(
 		case "message.part.delta": {
 			const field = props.field as string;
 			const delta = props.delta as string;
+			// Reasoning/thinking deltas share this event; Ask AI only renders
+			// assistant answer text.
 			if (field === "text" && delta) {
 				return [{ type: "text_delta", delta }];
 			}
