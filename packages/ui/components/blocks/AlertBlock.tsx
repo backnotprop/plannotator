@@ -1,6 +1,8 @@
 import React from 'react';
 import type { AlertKind } from '../../types';
 import { renderProseBody } from './proseBody';
+import { InlineMarkdown } from '../InlineMarkdown';
+import { parseAlertTitleLine } from '../../utils/alertTitle';
 
 interface AlertBlockProps {
   blockId: string;
@@ -22,6 +24,25 @@ const TITLE: Record<AlertKind, string> = {
   important: 'Important',
 };
 
+/**
+ * Host seam: resolve a named icon from a title line's `<!-- icon: name -->`
+ * comment to a React node. Default: null for every name, so the alert keeps
+ * the type's own icon exactly as today. A host that ships an icon set (the
+ * package deliberately bundles none) registers a renderer once at startup.
+ * Returning null for an unknown name falls back to the type's icon.
+ */
+export type AlertIconRenderer = (name: string) => React.ReactNode | null;
+
+let alertIconRenderer: AlertIconRenderer | null = null;
+
+export function setAlertIconRenderer(renderer: AlertIconRenderer | null): void {
+  alertIconRenderer = renderer;
+}
+
+export function resetAlertIconRenderer(): void {
+  alertIconRenderer = null;
+}
+
 const Icon: React.FC<{ kind: AlertKind }> = ({ kind }) => {
   const common = { viewBox: '0 0 16 16', width: '16', height: '16', fill: 'currentColor', 'aria-hidden': true as const };
   switch (kind) {
@@ -41,6 +62,19 @@ const Icon: React.FC<{ kind: AlertKind }> = ({ kind }) => {
 export const AlertBlock: React.FC<AlertBlockProps> = ({
   blockId, kind, body, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, githubRepo, onNavigateAnchor,
 }) => {
+  const proseProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, githubRepo };
+
+  // A bold-only first line (optionally led by one emoji, optionally trailed by
+  // an `<!-- icon: name -->` comment) is the alert's title and rides the icon
+  // row in place of the type word; the emoji, or a host-resolved named icon,
+  // takes the icon slot. See utils/alertTitle for the exact grammar. A body
+  // with no such line renders exactly as before.
+  const titleLine = parseAlertTitleLine(body);
+  const hostIcon = titleLine?.icon && alertIconRenderer ? alertIconRenderer(titleLine.icon) : null;
+  const icon = titleLine?.emoji
+    ? <span aria-hidden="true" className="alert-emoji text-base leading-none">{titleLine.emoji}</span>
+    : hostIcon ?? <Icon kind={kind} />;
+
   return (
     <div
       className={`alert alert-${kind} my-4 pl-4 pr-3 py-2 border-l-[3px]`}
@@ -48,11 +82,24 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
       data-block-type="alert"
       data-alert-kind={kind}
     >
-      <div className="alert-title flex items-center gap-2 font-semibold mb-1">
-        <Icon kind={kind} />
-        <span>{TITLE[kind]}</span>
+      <div
+        className="alert-title flex items-center gap-2 font-semibold mb-1"
+        aria-label={titleLine?.title ? `${TITLE[kind]}: ${titleLine.title}` : undefined}
+      >
+        {icon}
+        <span>
+          {titleLine?.title
+            ? <InlineMarkdown text={titleLine.title} {...proseProps} />
+            : TITLE[kind]}
+        </span>
       </div>
-      {renderProseBody({ body, imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, githubRepo })}
+      {titleLine
+        ? (titleLine.rest.trim()
+            // Indent the body by the icon's width plus the row gap so it starts
+            // at the title's left edge (16px icon + 8px gap = pl-6).
+            ? <div className="alert-body pl-6">{renderProseBody({ body: titleLine.rest, ...proseProps })}</div>
+            : null)
+        : renderProseBody({ body, ...proseProps })}
     </div>
   );
 };

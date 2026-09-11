@@ -11,6 +11,7 @@ import { setSkillCatalogTransport, setSkillContentTransport, type SkillCatalogTr
 import { setWebMcpPolicy, type WebMcpPolicy } from './webmcp/policy';
 import { setMathRendererLoader, type MathRenderer, type MathRendererLoader } from './utils/math';
 import { setIdentityGenerator, type IdentityGenerator } from './utils/generateIdentity';
+import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
 import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
 import type { ExternalAnnotationEvent, VaultNode } from './types';
@@ -38,6 +39,7 @@ export type {
   MathRenderer,
   MathRendererLoader,
   IdentityGenerator,
+  AlertIconRenderer,
 };
 
 type ExternalAnnotationBase = { id: string; source?: string };
@@ -85,6 +87,12 @@ export interface PlannotatorUIConfig {
    * dictionary by importing `@plannotator/ui/utils/identity-tater`.
    */
   identityGenerator?: IdentityGenerator;
+  /**
+   * Resolve a GitHub alert title line's `<!-- icon: name -->` to a React node.
+   * Default: null for every name, so alerts keep the type's own icon exactly as
+   * today; the package bundles no icon set. A host with one registers a renderer.
+   */
+  alertIconRenderer?: AlertIconRenderer;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */
   loadSettingsFromBackend?: boolean;
 }
@@ -105,6 +113,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.webmcp) setWebMcpPolicy(config.webmcp);
   if (config.mathRendererLoader) setMathRendererLoader(config.mathRendererLoader);
   if (config.identityGenerator) setIdentityGenerator(config.identityGenerator);
+  if (config.alertIconRenderer) setAlertIconRenderer(config.alertIconRenderer);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();
 }

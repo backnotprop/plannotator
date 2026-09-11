@@ -30,6 +30,7 @@ configurePlannotatorUI({
   webmcp,                      // browser-agent (WebMCP) provider policy: { enabled, namePrefix }
   mathRendererLoader,          // how KaTeX loads when no renderer is registered before first math render
   identityGenerator,           // sync generator behind the default "tater" name (no identityProvider)
+  alertIconRenderer,           // (name) => ReactNode | null for a GitHub alert title line's <!-- icon: name --> (default: null, the type's icon)
 });
 ```
 
