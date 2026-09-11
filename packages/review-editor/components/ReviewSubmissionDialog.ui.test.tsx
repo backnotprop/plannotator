@@ -90,6 +90,15 @@ describe('ReviewSubmissionDialog submission outcomes', () => {
     expect(actionButton()?.hasAttribute('data-pn-touch-target')).toBe(true);
   });
 
+  test.skipIf(!hasDom)('keeps the action footer outside the scrollable form body', async () => {
+    await renderSubmission({ targets: [baseTarget], orphans: [] });
+
+    const scrollableBody = document.querySelector('textarea')?.closest('.overflow-y-auto');
+
+    expect(scrollableBody).not.toBeNull();
+    expect(scrollableBody?.contains(actionButton())).toBe(false);
+  });
+
   test.skipIf(!hasDom)('ignores Escape while a platform submission is in flight', async () => {
     let cancelCount = 0;
     await renderSubmission(

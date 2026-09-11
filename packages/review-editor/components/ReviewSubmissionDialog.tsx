@@ -551,8 +551,10 @@ export function ReviewSubmissionDialog({
           View on {platformLabel} after submitting
         </label>
 
+        </div>
+
         {/* Actions */}
-        <div className="sticky bottom-0 -mx-4 -mb-4 flex justify-end gap-2 border-t border-border/50 bg-card px-4 pb-4 pt-3 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6">
+        <div className="shrink-0 flex justify-end gap-2 border-t border-border/50 bg-card px-4 pb-4 pt-3 sm:px-6 sm:pb-6">
           <button
             data-pn-touch-target
             onClick={onCancel}
@@ -585,7 +587,6 @@ export function ReviewSubmissionDialog({
                     ? 'Approve'
                     : 'Post Comments'}
           </button>
-        </div>
         </div>
       </DialogContent>
     </Dialog>
