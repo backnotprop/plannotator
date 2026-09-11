@@ -29,6 +29,16 @@ const factoryConfigDir =
 const DEFAULT_FACTORY_SESSIONS_DIR = join(factoryConfigDir, "sessions");
 
 /**
+ * Resolve the Vibe home directory. Vibe (Mistral's TUI agent) respects the
+ * VIBE_HOME env var and defaults to ~/.vibe (mirrors vibe/utils/paths.py).
+ */
+function resolveVibeHome(): string {
+  const raw = process.env.VIBE_HOME;
+  if (raw) return raw.startsWith("~") ? join(homedir(), raw.slice(1)) : raw;
+  return join(homedir(), ".vibe");
+}
+
+/**
  * Normalize a cwd for comparison. On Windows, filesystems are case-insensitive
  * and processes can report drive letters in either case, so we lowercase and
  * fold slashes. On Unix, cwds are compared as-is.
@@ -882,4 +892,173 @@ export function getRecentRenderedMessages(
   } catch {
     return [];
   }
+}
+
+// --- Mistral Vibe session discovery ---
+
+/**
+ * Vibe session index entry shape. Vibe writes a session index at
+ * $VIBE_HOME/logs/session/.session_index.json mapping session directory names
+ * to metadata. Only the fields we use are declared; others are tolerated.
+ */
+interface VibeSessionIndexEntry {
+  session_id: string;
+  cwd: string;
+  mtime_ns: number;
+  parent_session_id?: string | null;
+}
+type VibeSessionIndex = Record<string, VibeSessionIndexEntry>;
+
+function readVibeSessionIndex(
+  sessionLogDir: string,
+): VibeSessionIndex | null {
+  const indexPath = join(sessionLogDir, ".session_index.json");
+  try {
+    return JSON.parse(readFileSync(indexPath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the Vibe session log file (messages.jsonl) for a given cwd.
+ *
+ * Vibe stores sessions as directories under $VIBE_HOME/logs/session/, each
+ * containing a messages.jsonl transcript. A .session_index.json maps each
+ * directory name to { session_id, cwd, mtime_ns }. We filter by cwd and pick
+ * the newest by mtime_ns. If no index exists, fall back to scanning the
+ * directory for the newest session_<ts>_<id>/ whose messages.jsonl exists.
+ *
+ * Returns the absolute path to messages.jsonl, or null if none match.
+ */
+export function resolveVibeSessionLogForCwd(
+  cwd: string,
+  opts: { vibeHome?: string } = {},
+): string | null {
+  const vibeHome = opts.vibeHome
+    ? (opts.vibeHome.startsWith("~") ? join(homedir(), opts.vibeHome.slice(1)) : opts.vibeHome)
+    : resolveVibeHome();
+  const sessionLogDir = join(vibeHome, "logs", "session");
+  const normalizedTarget = normalizeCwdForCompare(cwd);
+
+  const index = readVibeSessionIndex(sessionLogDir);
+  if (index) {
+    let bestDir: string | null = null;
+    let bestMtime = -1;
+    for (const [dirName, entry] of Object.entries(index)) {
+      if (!entry?.cwd || !entry?.mtime_ns) continue;
+      if (normalizeCwdForCompare(entry.cwd) !== normalizedTarget) continue;
+      if (entry.mtime_ns > bestMtime) {
+        const messagesPath = join(sessionLogDir, dirName, "messages.jsonl");
+        try {
+          statSync(messagesPath);
+          bestMtime = entry.mtime_ns;
+          bestDir = messagesPath;
+        } catch {
+          continue;
+        }
+      }
+    }
+    // The index is authoritative: a present-but-no-match means no session
+    // for this cwd, so do not fall through to the cwd-blind mtime scan.
+    return bestDir;
+  }
+
+  // Fallback: scan session_<ts>_<id>/ directories by mtime when the index is
+  // absent. Picks the newest whose messages.jsonl exists.
+  let dirs: string[];
+  try {
+    dirs = readdirSync(sessionLogDir).filter((d) => d.startsWith("session_"));
+  } catch {
+    return null;
+  }
+  let newest: string | null = null;
+  let newestMtime = -1;
+  for (const d of dirs) {
+    const messagesPath = join(sessionLogDir, d, "messages.jsonl");
+    try {
+      const mtime = statSync(messagesPath).mtimeMs;
+      if (mtime > newestMtime) {
+        newestMtime = mtime;
+        newest = messagesPath;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return newest;
+}
+
+interface VibeMessageEntry {
+  role?: string;
+  content?: string;
+  message_id?: string;
+  reasoning_content?: string;
+  tool_calls?: unknown[];
+}
+
+/**
+ * Extract up to `limit` recent rendered assistant messages from a Vibe
+ * messages.jsonl transcript, newest-first.
+ *
+ * Vibe's transcript line shape: { role, content, message_id, reasoning_content?,
+ * tool_calls? }. A rendered assistant message has role === "assistant" and a
+ * non-empty string `content`; reasoning-only or tool-call-only turns are skipped.
+ * Chunks sharing a message_id are concatenated.
+ */
+export function getRecentVibeMessages(
+  logPath: string,
+  limit: number,
+): RenderedMessage[] {
+  if (limit <= 0) return [];
+  let lines: string[];
+  try {
+    lines = readFileSync(logPath, "utf-8").split("\n");
+  } catch {
+    return [];
+  }
+
+  const buckets = new Map<
+    string,
+    { texts: string[]; lineNums: number[]; timestamp?: string }
+  >();
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let entry: VibeMessageEntry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.role !== "assistant") continue;
+    const text = typeof entry.content === "string" ? entry.content.trim() : "";
+    if (!text) continue;
+    const msgId = entry.message_id;
+    if (!msgId) continue;
+
+    let bucket = buckets.get(msgId);
+    if (!bucket) {
+      if (buckets.size >= limit) continue;
+      bucket = { texts: [], lineNums: [] };
+      buckets.set(msgId, bucket);
+    }
+    bucket.texts.push(text);
+    bucket.lineNums.push(i + 1);
+  }
+
+  return Array.from(buckets, ([messageId, b]) => {
+    const chrono = b.texts.slice().reverse();
+    return {
+      messageId,
+      text: chrono.join("\n"),
+      lineNumbers: b.lineNums.slice().reverse(),
+    };
+  });
+}
+
+/** Convenience: the single most recent rendered assistant message in a Vibe log. */
+export function getLastVibeRenderedMessage(logPath: string): RenderedMessage | null {
+  return getRecentVibeMessages(logPath, 1)[0] ?? null;
 }

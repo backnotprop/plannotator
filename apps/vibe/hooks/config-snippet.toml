@@ -1,0 +1,6 @@
+# Plannotator-managed Vibe config snippet.
+# Merged into $VIBE_HOME/config.toml by the installer: if the file or the
+# enable_experimental_hooks key is absent, it is appended; an existing true
+# value is left alone. Vibe requires enable_experimental_hooks = true for
+# any hook in hooks.toml to fire.
+enable_experimental_hooks = true

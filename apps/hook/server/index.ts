@@ -158,13 +158,16 @@ import {
   findSessionLogsByAncestorWalk,
   findSessionLogsForCwd,
   getRecentRenderedMessages,
+  getRecentVibeMessages,
   resolveDroidSessionLogForCwd,
   resolveSessionLogByAncestorPids,
   resolveSessionLogByCwdScan,
+  resolveVibeSessionLogForCwd,
   type RenderedMessage,
 } from "./session-log";
 import { findCodexRolloutsByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
+import { resolveLatestVibePlan } from "./vibe-plan";
 import {
   formatInteractiveNoArgClarification,
   formatSubcommandHelp,
@@ -579,8 +582,12 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 //     still be detected as themselves. OMPCODE still wins over the terminal
 //     fallback below.
 //
+//   > Mistral Vibe — detected via PLANNOTATOR_ORIGIN=mistral-vibe baked into the
+//     hook command by the installer (Vibe's hook executor does not inject a
+//     unique fingerprint env var; the override check above catches it).
+//
 // To add a new agent, also add an entry to AGENT_CONFIG in
-// packages/shared/agents.ts (see header comment there).
+// packages/core/agents.ts (see header comment there).
 const originOverride = process.env.PLANNOTATOR_ORIGIN as Origin | undefined;
 const detectedOrigin: Origin =
   (originOverride && originOverride in AGENT_CONFIG) ? originOverride :
@@ -1464,6 +1471,7 @@ if (args[0] === "sessions") {
   const isCodex = !!codexThreadId;
   const isDroid = detectedOrigin === "droid";
   const isCopilot = detectedOrigin === "copilot-cli";
+  const isVibe = detectedOrigin === "mistral-vibe";
 
   // Collect up to N recent assistant messages so the user can pick the right
   // one — defaults to the same selection as the legacy "last message"
@@ -1480,7 +1488,7 @@ if (args[0] === "sessions") {
   // earlier branch claims the invocation.
   let copilotLockSessionDir: string | null = null;
   let copilotSessionDir: string | null = null;
-  if (!stdinFlag && !isCodex && !isDroid) {
+  if (!stdinFlag && !isCodex && !isDroid && !isVibe) {
     copilotLockSessionDir = findCopilotSessionByAncestorPids();
     copilotSessionDir = copilotLockSessionDir ??
       (isCopilot ? findCopilotSessionForCwd(projectRoot) : null);
@@ -1553,6 +1561,22 @@ if (args[0] === "sessions") {
     }
     if (copilotSessionDir) {
       recentMessages = getRecentCopilotMessages(copilotSessionDir, RECENT_MESSAGES_LIMIT)
+        .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
+      lastMessage = recentMessages[0] ?? null;
+    }
+  } else if (isVibe) {
+    // Mistral Vibe path: resolve the session log for the current cwd from
+    // $VIBE_HOME/logs/session/ (indexed by .session_index.json), then read
+    // the most recent rendered assistant messages from messages.jsonl.
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Vibe detected, project root: ${projectRoot}`);
+    }
+    const vibeLog = resolveVibeSessionLogForCwd(projectRoot);
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Vibe selected log: ${vibeLog ?? "(none)"}`);
+    }
+    if (vibeLog) {
+      recentMessages = getRecentVibeMessages(vibeLog, RECENT_MESSAGES_LIMIT)
         .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
       lastMessage = recentMessages[0] ?? null;
     }
@@ -2403,6 +2427,72 @@ if (args[0] === "sessions") {
             toolName: getPlanToolName("codex"),
             planFileRule: "",
             feedback: result.feedback || "Plan changes requested",
+          }),
+        })
+      );
+    }
+
+    process.exit(0);
+  }
+
+  // Mistral Vibe: pre_tool hook matching exit_plan_mode. Vibe's tool takes
+  // no args, so the plan is not in the payload — resolve it from
+  // $VIBE_HOME/plans by mtime. Origin is set via PLANNOTATOR_ORIGIN=mistral-vibe
+  // baked into the hook command by the installer.
+  if (
+    detectedOrigin === "mistral-vibe" &&
+    event.hook_event_name === "pre_tool" &&
+    event.tool_name === "exit_plan_mode"
+  ) {
+    const vibePlanContent = resolveLatestVibePlan();
+    if (!vibePlanContent) {
+      console.error(
+        "No plan file found in $VIBE_HOME/plans. Vibe may not have written the plan yet, or VIBE_HOME is set to a non-default location."
+      );
+      // Fail open: empty stdout + exit 0 lets Vibe pass the tool through.
+      process.exit(0);
+    }
+
+    const vibePlanProject = (await detectProjectName()) ?? "_unknown";
+    const vibeServer = await startPlannotatorServer({
+      plan: vibePlanContent,
+      origin: "mistral-vibe",
+      sharingEnabled,
+      shareBaseUrl,
+      pasteApiUrl,
+      htmlContent: planHtmlContent,
+      onReady: async (url, isRemote, port) => {
+        handleServerReady(url, isRemote, port);
+        if (isRemote && sharingEnabled) {
+          await writeRemoteShareLink(vibePlanContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+        }
+      },
+    });
+
+    registerSession({
+      pid: process.pid,
+      port: vibeServer.port,
+      url: vibeServer.url,
+      mode: "plan",
+      project: vibePlanProject,
+      startedAt: new Date().toISOString(),
+      label: `plan-${vibePlanProject}`,
+    });
+
+    const vibeResult = await vibeServer.waitForDecision();
+    await Bun.sleep(1500);
+    vibeServer.stop();
+
+    if (vibeResult.approved) {
+      console.log(JSON.stringify({ decision: "allow" }));
+    } else {
+      console.log(
+        JSON.stringify({
+          decision: "deny",
+          reason: getPlanDeniedPrompt("mistral-vibe", undefined, {
+            toolName: getPlanToolName("mistral-vibe"),
+            planFileRule: "",
+            feedback: vibeResult.feedback || "Plan changes requested",
           }),
         })
       );
