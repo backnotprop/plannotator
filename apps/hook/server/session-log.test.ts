@@ -7,7 +7,7 @@
  * Each test builds a minimal log and verifies the extraction logic.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   parseSessionLog,
   isHumanPrompt,
@@ -15,6 +15,8 @@ import {
   extractLastRenderedMessage,
   extractRecentRenderedMessages,
   getRecentRenderedMessages,
+  getRecentRenderedMessagesDetailed,
+  findActiveTurnStartIndex,
   resolveActiveBranchIndices,
   findDroidSessionLogsForCwd,
   resolveDroidSessionLogForCwd,
@@ -987,6 +989,146 @@ describe("getRecentRenderedMessages — after a /compact", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("getRecentRenderedMessagesDetailed — excludeActiveTurn", () => {
+  // A launcher that runs the CLI from the agent's own tool call (not a `!`
+  // slash command) leaves the agent free to write to the transcript before
+  // and after the process starts. The active turn — everything from the
+  // newest human prompt onward — must be invisible to selection.
+  let dir: string;
+  let logPath: string;
+  beforeEach(() => {
+    dir = join(tmpdir(), `plannotator-active-turn-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(dir, { recursive: true });
+    logPath = join(dir, "session.jsonl");
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const read = (log: string, excludeActiveTurn = true) => {
+    writeFileSync(logPath, log);
+    return getRecentRenderedMessagesDetailed(logPath, 25, {
+      activeBranchOnly: true,
+      excludeActiveTurn,
+    });
+  };
+  const ids = (r: { messages: { messageId: string }[] }) => r.messages.map((m) => m.messageId);
+
+  test("an acknowledgement written after launch is excluded", () => {
+    const result = read(buildLog(
+      userPrompt("write the plan"),
+      assistantText("msg_plan", "Here is the plan."),
+      userPrompt("/open-for-review last"),
+      assistantToolUse("msg_launch", "Bash"),
+      assistantText("msg_ack", "Opened."),
+    ));
+    expect(ids(result)).toEqual(["msg_plan"]);
+    expect(result.emptiedByActiveTurn).toBe(false);
+  });
+
+  test("a preamble written before the tool call is excluded", () => {
+    const result = read(buildLog(
+      userPrompt("write the plan"),
+      assistantText("msg_plan", "Here is the plan."),
+      userPrompt("/open-for-review last"),
+      assistantText("msg_preamble", "Opening your last message..."),
+      assistantToolUse("msg_launch", "Bash"),
+    ));
+    expect(ids(result)).toEqual(["msg_plan"]);
+  });
+
+  test("without the option the acknowledgement still wins (unchanged default)", () => {
+    const result = read(buildLog(
+      userPrompt("write the plan"),
+      assistantText("msg_plan", "Here is the plan."),
+      userPrompt("/open-for-review last"),
+      assistantText("msg_ack", "Opened."),
+    ), false);
+    expect(ids(result)).toEqual(["msg_ack", "msg_plan"]);
+  });
+
+  test("a multi-chunk message right before the turn is concatenated whole", () => {
+    const result = read(buildLog(
+      userPrompt("write the plan"),
+      assistantText("msg_plan", "Part one."),
+      assistantText("msg_plan", "Part two."),
+      userPrompt("/open-for-review last"),
+      assistantText("msg_ack", "Opened."),
+    ));
+    expect(ids(result)).toEqual(["msg_plan"]);
+    expect(result.messages[0].text).toBe("Part one.\nPart two.");
+  });
+
+  test("the cutoff is computed on the active branch after a rewind", () => {
+    // The orphaned assistant message is newest in file order; the anchor and
+    // the selection must both ignore it.
+    writeFileSync(logPath, buildRewoundLog({
+      kept: [
+        userPrompt("write the plan"),
+        assistantText("msg_plan", "Here is the plan."),
+      ],
+      abandoned: [
+        userPrompt("actually, rewrite it"),
+        assistantText("msg_orphan", "Rewritten plan."),
+      ],
+      resumed: [
+        userPrompt("/open-for-review last"),
+        assistantText("msg_ack", "Opened."),
+      ],
+    }));
+    const result = getRecentRenderedMessagesDetailed(logPath, 25, {
+      activeBranchOnly: true,
+      excludeActiveTurn: true,
+    });
+    expect(ids(result)).toEqual(["msg_plan"]);
+  });
+
+  test("no human prompt on the branch: behaves as without the option", () => {
+    const result = read(buildLog(
+      assistantText("msg_only", "Summary after compaction."),
+    ));
+    expect(ids(result)).toEqual(["msg_only"]);
+    expect(result.emptiedByActiveTurn).toBe(false);
+  });
+
+  test("a fresh /compact still falls open before the cutoff applies", () => {
+    const preCompact = linkChain([
+      userPrompt("early question"),
+      assistantText("msg_pre", "Pre-compaction answer"),
+    ]);
+    const boundary = JSON.stringify({
+      type: "system",
+      subtype: "compact_boundary",
+      uuid: "u-compact",
+      parentUuid: null,
+    });
+    const post = linkChain([
+      userPrompt("/open-for-review last"),
+      assistantText("msg_ack", "Opened."),
+    ], "u-compact");
+    const result = read([...preCompact, boundary, ...post].join("\n"));
+    expect(ids(result)).toEqual(["msg_pre"]);
+  });
+
+  test("nothing before the turn is reported, not treated as a wrong file", () => {
+    const result = read(buildLog(
+      userPrompt("/open-for-review last"),
+      assistantText("msg_ack", "Opened."),
+    ));
+    expect(result.messages).toEqual([]);
+    expect(result.emptiedByActiveTurn).toBe(true);
+  });
+
+  test("findActiveTurnStartIndex skips tool results and respects the branch set", () => {
+    const entries = parseSessionLog(buildLog(
+      userPrompt("first"),
+      assistantToolUse("msg_tool", "Read"),
+      userToolResult("tu_1", "contents"),
+      assistantText("msg_a", "Done."),
+    ));
+    expect(findActiveTurnStartIndex(entries)).toBe(0);
+    expect(findActiveTurnStartIndex(entries, new Set([3]))).toBe(-1);
   });
 });
 
