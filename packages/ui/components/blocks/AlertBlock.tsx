@@ -70,10 +70,11 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
   // takes the icon slot. See utils/alertTitle for the exact grammar. A body
   // with no such line renders exactly as before.
   const titleLine = parseAlertTitleLine(body);
-  const hostIcon = titleLine?.icon && alertIconRenderer ? alertIconRenderer(titleLine.icon) : null;
+  // The emoji wins outright: the host renderer is consulted only for a title
+  // line that carries an icon comment and no emoji (the seam contract).
   const icon = titleLine?.emoji
     ? <span aria-hidden="true" className="alert-emoji text-base leading-none">{titleLine.emoji}</span>
-    : hostIcon ?? <Icon kind={kind} />;
+    : (titleLine?.icon && alertIconRenderer ? alertIconRenderer(titleLine.icon) : null) ?? <Icon kind={kind} />;
 
   return (
     <div
@@ -82,14 +83,19 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
       data-block-type="alert"
       data-alert-kind={kind}
     >
-      <div
-        className="alert-title flex items-center gap-2 font-semibold mb-1"
-        aria-label={titleLine?.title ? `${TITLE[kind]}: ${titleLine.title}` : undefined}
-      >
+      <div className="alert-title flex items-center gap-2 font-semibold mb-1">
         {icon}
         <span>
           {titleLine?.title
-            ? <InlineMarkdown text={titleLine.title} {...proseProps} />
+            ? (
+              <>
+                {/* The type word stays part of the accessible name. A visually
+                    hidden span is read by every engine; an aria-label on this
+                    generic div is prohibited by ARIA and dropped by WebKit. */}
+                <span className="sr-only">{TITLE[kind]}: </span>
+                <InlineMarkdown text={titleLine.title} {...proseProps} />
+              </>
+            )
             : TITLE[kind]}
         </span>
       </div>

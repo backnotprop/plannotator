@@ -33,6 +33,7 @@ async function render(kind: 'note' | 'tip' | 'warning' | 'caution' | 'important'
 }
 
 const titleRow = (el: HTMLElement) => el.querySelector<HTMLElement>('.alert-title')!;
+const srOnly = (el: HTMLElement) => el.querySelector<HTMLElement>('.alert-title .sr-only')?.textContent ?? null;
 const paragraphs = (el: HTMLElement) => Array.from(el.querySelectorAll('p')).map((p) => p.textContent);
 
 describe('AlertBlock title line', () => {
@@ -40,7 +41,7 @@ describe('AlertBlock title line', () => {
     const el = await render('caution', 'ML auto-detection has no protobuf model.');
     expect(titleRow(el).textContent).toBe('Caution');
     expect(titleRow(el).querySelector('svg')).not.toBeNull();
-    expect(titleRow(el).getAttribute('aria-label')).toBeNull();
+    expect(srOnly(el)).toBeNull();
     expect(el.querySelector('.alert-body')).toBeNull();
     expect(paragraphs(el)).toEqual(['ML auto-detection has no protobuf model.']);
   });
@@ -53,9 +54,12 @@ describe('AlertBlock title line', () => {
 
   test.skipIf(!hasDom)('B: a bold-only first line becomes the title in place of the type word', async () => {
     const el = await render('important', '**Read before you deploy**\n\nThe env still names D1.');
-    expect(titleRow(el).textContent).toBe('Read before you deploy');
+    // Visible text is the title alone; the accessible name keeps the type word
+    // through a visually hidden span (an aria-label on the generic div is
+    // prohibited by ARIA and dropped by WebKit, so VoiceOver lost the type word).
+    expect(titleRow(el).textContent).toBe('Important: Read before you deploy');
+    expect(srOnly(el)).toBe('Important: ');
     expect(titleRow(el).querySelector('svg')).not.toBeNull(); // type icon stays
-    expect(titleRow(el).getAttribute('aria-label')).toBe('Important: Read before you deploy');
     expect(paragraphs(el)).toEqual(['The env still names D1.']); // no bold paragraph any more
     expect(el.querySelector('.alert-body')?.className).toContain('pl-6');
   });
@@ -66,8 +70,8 @@ describe('AlertBlock title line', () => {
     expect(row.querySelector('svg')).toBeNull();
     expect(row.querySelector('.alert-emoji')?.textContent).toBe('🧭');
     expect(row.querySelector('.alert-emoji')?.getAttribute('aria-hidden')).toBe('true');
-    expect(row.textContent).toBe('🧭Browser quirks');
-    expect(row.getAttribute('aria-label')).toBe('Tip: Browser quirks');
+    expect(row.textContent).toBe('🧭Tip: Browser quirks');
+    expect(srOnly(el)).toBe('Tip: ');
     expect(paragraphs(el)).toEqual(['There are caret bugs.']);
   });
 
@@ -76,7 +80,7 @@ describe('AlertBlock title line', () => {
     expect(el.textContent).not.toContain('icon:');
     expect(el.textContent).not.toContain('<!--');
     expect(titleRow(el).querySelector('svg')).not.toBeNull();
-    expect(titleRow(el).textContent).toBe('Browser quirks');
+    expect(titleRow(el).textContent).toBe('Tip: Browser quirks');
     expect(paragraphs(el)).toEqual(['The sentence.']);
   });
 
@@ -84,13 +88,13 @@ describe('AlertBlock title line', () => {
     const el = await render('warning', '🚧\n\ntot.page is bound to the old D1.');
     expect(titleRow(el).querySelector('.alert-emoji')?.textContent).toBe('🚧');
     expect(titleRow(el).textContent).toBe('🚧Warning');
-    expect(titleRow(el).getAttribute('aria-label')).toBeNull();
+    expect(srOnly(el)).toBeNull();
     expect(paragraphs(el)).toEqual(['tot.page is bound to the old D1.']);
   });
 
   test.skipIf(!hasDom)('a title line with no body renders no body wrapper', async () => {
     const el = await render('note', '**Just a title**');
-    expect(titleRow(el).textContent).toBe('Just a title');
+    expect(titleRow(el).textContent).toBe('Note: Just a title');
     expect(el.querySelector('.alert-body')).toBeNull();
     expect(paragraphs(el)).toEqual([]);
   });

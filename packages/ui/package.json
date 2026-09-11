@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.38.1",
+  "version": "0.38.2",
   "type": "module",
   "exports": {
     "./components/*": "./components/*.tsx",
@@ -93,8 +93,8 @@
     "unique-username-generator": "^1.5.1"
   },
   "peerDependencies": {
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {

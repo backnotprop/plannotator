@@ -51,7 +51,7 @@ describe('AlertIconRenderer seam', () => {
     const row = await render(TITLED);
     expect(row.querySelector('svg')).not.toBeNull();
     expect(row.querySelector('[data-host-icon]')).toBeNull();
-    expect(row.textContent).toBe('Browser quirks');
+    expect(row.textContent).toBe('Tip: Browser quirks');
   });
 
   test.skipIf(!hasDom)('a registered renderer receives the name and its node takes the icon slot', async () => {
