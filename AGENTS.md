@@ -229,7 +229,7 @@ Approve → approved prompt sent to agent session (with the note/annotations whe
 The agent-destination review header uses the same adaptive split control the annotate surfaces
 adopted: a ghost-X Close plus `DecisionControl` (`packages/ui/components/DecisionControl.tsx`)
 rendered from the pure `buildDecisionSpec` mapping — `Approve` with no annotations,
-`Send Feedback · n` otherwise, with `Request changes…` / `Send with a note…` and the explicit
+`Send Feedback` otherwise, with `Request changes…` / `Send with a note…` and the explicit
 `Approve, discard n annotations…` confirm behind the caret. One `submitPrimaryDecision()`
 callback serves the header primary, the global `Mod+Enter` handler, and the compact primary row.
 Transport routing is pure in `packages/review-editor/reviewDecision.ts` and single-endpoint:
@@ -294,7 +294,7 @@ deletable — and both producers share one shape factory, `createGeneralReviewCo
 `reviewDecision.ts`: `scope:'general'`, sentinel `filePath ''`/0/0, `review-note-` UUID id, and
 deliberately **no PR context**, so the comment passes every PR scope predicate and survives an
 in-place PR switch. Creating one raises `totalAnnotationCount`, which is what flips the header
-control to `Send Feedback · n` — the control is state-driven, not wired to the button. The
+control to `Send Feedback` — the control is state-driven, not wired to the button. The
 feedback archive records each annotation's `scope` (additive `scope?: string` in
 `packages/shared/feedback-archive.ts`'s normalizer, vendored to Pi), so a review-level general
 comment stays distinguishable from a line comment in `index.jsonl`.
@@ -382,7 +382,7 @@ Done / Approve (gate) → positive decision recorded (see the decision control b
 Every annotate surface's header decision is one adaptive split control, `DecisionControl`
 (`packages/ui/components/DecisionControl.tsx`), rendered from the pure `buildDecisionSpec`
 state→spec mapping (`packages/ui/utils/decisionSpec.ts`) beside a ghost-X Close: `Done` (or
-`Approve` in gate mode) with nothing to send, `Send Feedback · n` otherwise, with the alternate
+`Approve` in gate mode) with nothing to send, `Send Feedback` otherwise, with the alternate
 decisions and the in-place note composer behind the caret. One `submitPrimaryDecision()` callback
 serves the header primary, the global `Mod+Enter` handler, and the compact primary row, so
 keyboard and header can never disagree. Transport routing is pure in

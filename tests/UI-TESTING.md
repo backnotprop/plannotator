@@ -187,7 +187,7 @@ UI test scripts simulate plugin behavior locally:
 1. Builds review app (`bun run build:review`)
 2. Starts review server with sample git diff
 3. Opens browser with code review UI
-4. Verifies "OpenCode" badge + the header decision control (`Approve` at zero annotations, `Send Feedback · n` once you annotate — not "Copy Feedback")
+4. Verifies "OpenCode" badge + the header decision control (`Approve` at zero annotations, `Send Feedback` once you annotate — not "Copy Feedback")
 5. Tests feedback submission flow
 
 **`test-codex-plan-review-e2e.sh`**
@@ -381,7 +381,7 @@ Build failed with X errors
 ## Decision Control Manual Checklist
 
 Not CI. Every annotate surface and the review header share one adaptive split control
-(`DecisionControl`): a positive primary (`Done` / `Approve` / `Send Feedback · n`) plus a caret
+(`DecisionControl`): a positive primary (`Done` / `Approve` / `Send Feedback`) plus a caret
 menu with the alternate decisions and the in-place note composer. Run each flow in both states —
 zero annotations and n annotations — on desktop AND on a real phone (touch has no `Mod+Enter`,
 which is the regression class this control exists to fix).
@@ -390,7 +390,7 @@ which is the regression class this control exists to fix).
    clicking it submits the "no feedback" record and the terminal prints it. Caret →
    `Done with a note…` opens the composer in place: `Enter` inserts a newline, `Mod+Enter`
    submits, `Escape` steps back to the menu keeping the draft. Add an annotation: the primary
-   flips to `Send Feedback · 1`, and `Done, discard 1 annotation…` raises the one confirm.
+   flips to `Send Feedback`, and `Done, discard 1 annotation…` raises the one confirm.
 2. **Annotate, gate mode** (`plannotator annotate notes.md --gate --json`). The zero-state
    primary is `Approve` and posts `/api/approve` (stdout records `"approved"`; with
    `--require-approval` only approval exits `0`); `Request changes…` records an annotated
@@ -402,7 +402,7 @@ which is the regression class this control exists to fix).
 4. **HTML / live-app annotate** (`plannotator annotate page.html`, `plannotator annotate
    http://localhost:<port>`). Open the caret menu, then click the framed page: the popover
    dismisses (iframe focus is the dismissal signal — there is no parent pointerdown).
-5. **Review, agent mode** (`plannotator review`). `Approve` at zero, `Send Feedback · n` after
+5. **Review, agent mode** (`plannotator review`). `Approve` at zero, `Send Feedback` after
    annotating; approving despite annotations is two clicks (caret → `Approve, discard n
    annotations…` → `Discard & approve`). With the composer open, `Escape` returns to the menu
    and does NOT collapse the file tree or close the sidebar; a second `Escape` closes the menu;
@@ -417,7 +417,7 @@ which is the regression class this control exists to fix).
    (`DecisionNoteDialog`), not an inline textarea.
 8. **Sidebar general comment** (review). "+ General comment" is reachable at zero annotations
    (empty state) and from the General section header; creating one flips the header control to
-   `Send Feedback · 1`.
+   `Send Feedback`.
 
 ## WebMCP Manual Checklist
 

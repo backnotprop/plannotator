@@ -35,7 +35,6 @@ export interface DecisionPrimary {
   title: string;            // tooltip / aria description
   tone: Exclude<DecisionTone, 'destructive'>;
   icon?: 'check' | 'send';
-  count?: number;           // rendered as the inline pill; omitted when 0
   /**
    * Platform self-approval (PR6, §3.4): rendered dimmed but NOT disabled.
    * The reason surfaces through the shared Tooltip + aria-describedby (the
@@ -87,7 +86,7 @@ export interface DecisionSpecInput {
   app: 'annotate' | 'review';
   /** Annotate: `gate`. Review: always true — review's primary decision IS approval. */
   gate: boolean;
-  /** The count rendered in the pill and interpolated into labels. */
+  /** The annotation count interpolated into the menu's discard and note copy (never the primary label). */
   count: number;
   /**
    * Whether there is anything to send. Deliberately separate from `count`:
@@ -327,7 +326,6 @@ function buildFeedbackSpec(input: DecisionSpecInput, approvalFlow: boolean): Dec
       title: 'Send your feedback to the agent',
       tone: 'primary',
       icon: 'send',
-      count: count > 0 ? count : undefined,
     },
     items,
   };
@@ -395,7 +393,6 @@ function buildPlatformSpec(input: DecisionSpecInput, platform: DecisionPlatformI
       title: `Post review to ${platform.label}`,
       tone: 'primary',
       icon: 'send',
-      count: count > 0 ? count : undefined,
     },
     items: [
       {

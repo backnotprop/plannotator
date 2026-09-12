@@ -599,8 +599,9 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     await settle();
 
     // The control is state-driven: one durable comment flips the primary.
+    // The label carries no count (maintainer ruling); the count lives in the menu copy only.
     expect(primaryButton()!.textContent).toContain("Send Feedback");
-    expect(primaryButton()!.textContent).toContain("1");
+    expect(primaryButton()!.textContent).not.toMatch(/\d/);
 
     await act(async () => primaryButton()!.click());
     await settle();
@@ -805,7 +806,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await settle();
 
     expect(primaryButton()!.textContent).toContain("Post Comments");
-    expect(primaryButton()!.textContent).toContain("1");
 
     const doubleTapAlt = async () => {
       await act(async () => {
@@ -818,11 +818,9 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await doubleTapAlt();
     // Agent spec, same annotation count — the flip swaps the spec, never the state.
     expect(primaryButton()!.textContent).toContain("Send Feedback");
-    expect(primaryButton()!.textContent).toContain("1");
 
     await doubleTapAlt();
     expect(primaryButton()!.textContent).toContain("Post Comments");
-    expect(primaryButton()!.textContent).toContain("1");
     expect(submissions).toHaveLength(0);
   });
 });

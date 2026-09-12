@@ -475,16 +475,6 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
             {spec.primary.label}
           </span>
         )}
-        {typeof spec.primary.count === 'number' && (
-          // The count is the state indicator, not decoration: present at every
-          // breakpoint, unlike the labels.
-          <span
-            data-decision-count="true"
-            className="rounded-full bg-white/25 px-1.5 text-[10px] font-bold leading-4"
-          >
-            {spec.primary.count}
-          </span>
-        )}
       </Button>
   );
 
