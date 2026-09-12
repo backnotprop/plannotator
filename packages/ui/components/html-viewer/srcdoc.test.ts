@@ -1476,6 +1476,115 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  // --- Element context: the agent-facing description a pinpoint carries ---
+  // Failures to catch: silent regression to label-only capture; secrets or
+  // handlers leaking into feedback on disk; unbounded growth on a container
+  // click; the skeleton dropping the grep keys (id/class) an agent needs.
+
+  const CONTEXT_MARKUP = [
+    '<div id="root"><header class="site-header"><h1>Acme Analytics</h1>',
+    '<nav id="site-nav" class="site-nav sticky" aria-label="Primary" data-component="AppNav">',
+    '<ul class="nav-list"><li><a href="https://acme.test/home?token=abc#frag">Home</a></li>',
+    '<li><a href="/about?tab=2">About</a></li></ul>',
+    '<button class="nav-toggle" aria-label="Open menu" onclick="steal()" style="color:red" data-secret="s3cr3t"><svg></svg></button>',
+    "<script>var secret = 'do-not-export';</script>",
+    "</nav></header><main><h2>Usage</h2><p>Body</p></main></div>",
+  ].join("");
+
+  test("a pinpointed <nav> carries an element context: identity, path, role, name, hooks, skeleton, surroundings", async () => {
+    document.body.innerHTML = CONTEXT_MARKUP;
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    const nav = document.querySelector<HTMLElement>("nav#site-nav")!;
+    hoverAt(nav, 30, 30);
+    const { messages } = await clickAndCollectSelection(nav, 30, 30);
+    expect(messages.length).toBe(1);
+    const context = messages[0]!.context as Record<string, unknown>;
+    expect(context).toBeDefined();
+    expect(context.tag).toBe("nav");
+    expect(context.id).toBe("site-nav");
+    expect(context.classes).toEqual(["site-nav", "sticky"]);
+    expect(context.path).toBe("body > div#root > header.site-header > nav#site-nav");
+    expect(context.role).toBe("navigation"); // implicit role, no role attribute
+    expect(context.name).toBe("Primary"); // aria-label wins the accessible name
+    expect(context.attrs).toEqual([["aria-label", "Primary"], ["data-component", "AppNav"]]);
+    expect(context.component).toBe("data-component=AppNav");
+    expect(context.landmark).toBe("header.site-header");
+    expect(context.heading).toBe('h1 "Acme Analytics"');
+    expect(context.children).toBe(2); // ul + button; the <script> is skipped
+    const outline = String(context.outline);
+    // The root tag prints its grep keys and its allowlisted attributes.
+    expect(outline.startsWith('<nav id="site-nav" class="site-nav sticky" aria-label="Primary" data-component="AppNav">')).toBe(true);
+    // Children as bare tags, leaves with their short text.
+    expect(outline).toContain('<ul class="nav-list">');
+    expect(outline).toContain("<li>Home</li>");
+    expect(outline).toContain('<button class="nav-toggle">');
+    expect(outline.endsWith("</nav>")).toBe(true);
+    // Never: script text, inline handlers, style, non-allowlisted data-*.
+    expect(JSON.stringify(context)).not.toContain("do-not-export");
+    expect(JSON.stringify(context)).not.toContain("steal");
+    expect(JSON.stringify(context)).not.toContain("color:red");
+    expect(JSON.stringify(context)).not.toContain("s3cr3t");
+    // Srcdoc sessions carry no page identity (that is live-mode only).
+    expect(context.page).toBeUndefined();
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+
+    // A text-less icon button: the quote stays the placeholder the export
+    // rewrites, and the context names the element the placeholder cannot.
+    const toggle = document.querySelector<HTMLElement>("button.nav-toggle")!;
+    hoverAt(toggle, 60, 30);
+    const button = await clickAndCollectSelection(toggle, 60, 30);
+    expect(button.messages[0]!.text).toBe("[element: Button]");
+    const buttonContext = button.messages[0]!.context as Record<string, unknown>;
+    expect(buttonContext.name).toBe("Open menu");
+    expect(buttonContext.role).toBe("button");
+    expect(buttonContext.landmark).toBe('nav#site-nav "Primary"');
+    expect(buttonContext.attrs).toEqual([["aria-label", "Open menu"]]);
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+
+    // Absolute URLs lose their query and fragment (tokens live there);
+    // relative ones are route state and stay whole.
+    const home = document.querySelector<HTMLElement>('a[href^="https://acme.test"]')!;
+    hoverAt(home, 10, 10);
+    const link = await clickAndCollectSelection(home, 10, 10);
+    const linkContext = link.messages[0]!.context as { attrs: Array<[string, string]>; role: string };
+    expect(linkContext.attrs).toEqual([["href", "https://acme.test/home?…"]]);
+    expect(linkContext.role).toBe("link");
+    expect(JSON.stringify(linkContext)).not.toContain("token=abc");
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    // Fresh coordinates: the hover hit-test is keyed on the pointer position.
+    const about = document.querySelector<HTMLElement>('a[href="/about?tab=2"]')!;
+    hoverAt(about, 90, 12);
+    const rel = await clickAndCollectSelection(about, 90, 12);
+    expect((rel.messages[0]!.context as { attrs: Array<[string, string]> }).attrs).toEqual([["href", "/about?tab=2"]]);
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
+  test("a container with hundreds of children stays under the byte budget and collapses its skeleton", async () => {
+    const items: string[] = [];
+    for (let i = 0; i < 400; i++) items.push(`<li class="row">Row number ${i} with some words in it</li>`);
+    document.body.innerHTML = `<main><ul id="big" class="list">${items.join("")}</ul></main>`;
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    const list = document.querySelector<HTMLElement>("ul#big")!;
+    hoverAt(list, 30, 30);
+    const { messages } = await clickAndCollectSelection(list, 30, 30);
+    const context = messages[0]!.context as Record<string, unknown>;
+    expect(context.children).toBe(400);
+    expect(new TextEncoder().encode(JSON.stringify(context)).length).toBeLessThanOrEqual(2048);
+    const outline = String(context.outline);
+    expect(outline.length).toBeLessThanOrEqual(600);
+    // The adaptive skeleton shows a few children and counts the rest.
+    expect(outline).toContain("more: li×");
+    expect(String(context.text).length).toBeLessThanOrEqual(301); // 300 + ellipsis
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
   test("marker click ownership is identity-gated, not selector-gated (D5)", async () => {
     // A page element spoofing our marker attributes is NOT a viewer overlay:
     // it hovers and annotates like any other element.
@@ -1596,6 +1705,26 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     keys.set("alpha", primaryKey);
     return { primaryKey, keys };
   }
+
+  test("shift-click additional targets carry their own (smaller) element context", async () => {
+    document.body.innerHTML = MULTI_MARKUP;
+    const { keys } = await startMultiDraft();
+    const beta = document.querySelector<HTMLElement>("p.beta")!;
+    const added = await collectMessages(
+      ["plannotator-bridge-multi-target-added"],
+      () => clickAt(beta, 40, 40, true),
+    );
+    expect(added.length).toBe(1);
+    const context = added[0]!.context as Record<string, unknown>;
+    expect(context.tag).toBe("p");
+    expect(context.path).toBe("body > div#hero > p.beta");
+    expect(context.text).toBe("Beta text");
+    expect(new TextEncoder().encode(JSON.stringify(context)).length).toBeLessThanOrEqual(1024);
+    expect(keys.get("alpha")).toBeTruthy();
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
 
   test("shift-click adds targets to the SAME draft and toggles them off again", async () => {
     document.body.innerHTML = MULTI_MARKUP;

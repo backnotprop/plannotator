@@ -82,6 +82,7 @@ export interface Annotation {
   pageUrl?: string; // set only by live app annotate sessions: the page (pathname + search) the annotation was made on; restore filters to the current page and export groups by page
   inReplyTo?: string; // id of the annotation this one replies to; a reply inherits its parent's anchor, renders indented under it in the panel, and exports grouped under it. Additive: annotations without it render and export exactly as before.
   htmlAnchor?: HtmlElementAnchor; // raw-HTML pinpoint: serialized element anchor for reliable restoration
+  elementContext?: HtmlElementContext; // raw-HTML / live-app pinpoint: bounded agent-facing description of the primary element (never used by restore)
   htmlAdditionalTargets?: HtmlAnnotationTarget[]; // raw-HTML shift-click multi-select: extra elements this one comment covers (primary stays htmlAnchor/originalText)
   // web-highlighter metadata for cross-element selections
   startMeta?: AnnotationTextMeta;
@@ -124,6 +125,50 @@ export interface HtmlAnnotationTarget {
   text: string;
   /** Element anchor for restoration; absent when the bridge failed closed. */
   anchor?: HtmlElementAnchor;
+  /** Agent-facing element description (smaller budget than the primary's). */
+  context?: HtmlElementContext;
+}
+
+/**
+ * A bounded, agent-facing description of a pinpointed element, captured by the
+ * bridge at annotation time (only it can see the DOM). Purely descriptive:
+ * restore never reads it (that is `HtmlElementAnchor`'s job). It exists so the
+ * exported feedback can tell an agent working in the app's SOURCE which
+ * element the comment is about — identity (what it is), location (where it
+ * sits), and hooks (what to grep for) — without dumping the page. Every field
+ * is page-controlled and re-validated at the parent trust boundary
+ * (`parseHtmlElementContext`). Additive: annotations without one export
+ * exactly as before, and share links never carry it.
+ */
+export interface HtmlElementContext {
+  tag: string;
+  id?: string;
+  /** Author classes, generated/hashed ones skipped; may end in "+N more". */
+  classes?: string[];
+  /** Ancestor path, e.g. `body > div#root > header.site-header > nav#site-nav`. */
+  path?: string;
+  /** Explicit `role` or the tag's implicit ARIA role. */
+  role?: string;
+  /** Accessible name: aria-label, aria-labelledby, alt, title, <label for>, own short text. */
+  name?: string;
+  /** Allowlisted attributes in a fixed order (href/src scrubbed of query and fragment). */
+  attrs?: Array<[string, string]>;
+  /** Rendered text (innerText), whitespace-collapsed, word-boundary truncated. */
+  text?: string;
+  /** Collapsed HTML skeleton: opening tag with allowlisted attributes, then children as bare tags. */
+  outline?: string;
+  /** Number of element children (after skipping script/style/template and viewer overlays). */
+  children?: number;
+  /** Viewport-relative bounding box plus the viewport it was seen at. */
+  rect?: { x: number; y: number; w: number; h: number; vw: number; vh: number };
+  /** Nearest enclosing landmark/region, e.g. `header.site-header "Primary"`. */
+  landmark?: string;
+  /** Nearest preceding heading, e.g. `h2 "Usage"`. */
+  heading?: string;
+  /** Nearest author component marker, e.g. `data-component=AppNav`. */
+  component?: string;
+  /** Live-app sessions only: the route the element was seen on and the page title. */
+  page?: { url: string; title?: string };
 }
 
 export type AlertKind = 'note' | 'tip' | 'warning' | 'caution' | 'important';

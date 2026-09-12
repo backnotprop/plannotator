@@ -8,6 +8,8 @@ import { OverlayScrollArea } from './OverlayScrollArea';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { resolveReplyParents, resolveThreadRootTimestamps } from '@plannotator/core/annotation-threads';
+import { exportAnnotationEntry } from '../utils/parser';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 // Card type-word colors. Deletion uses `destructive` (reliably red on every
 // theme, matching the in-document .deletion highlight). Comment uses the
@@ -30,6 +32,13 @@ const TYPE_LABEL: Record<AnnotationType, string> = {
 const PencilIcon = () => (
   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+  </svg>
+);
+
+const CopyEntryIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
   </svg>
 );
 
@@ -661,6 +670,24 @@ const AnnotationCard: React.FC<{
         </span>
         {!readOnly && (
           <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+            {/* Raw-HTML / live-app pinpoints: copy this one entry with its
+                element block (selector, path, skeleton, route) — the exact
+                shape the full export delivers for it. Other surfaces keep
+                their row byte-identical. */}
+            {(annotation.elementContext || annotation.htmlAnchor) && !isEditing && (
+              <button
+                type="button"
+                data-annotation-copy-entry="true"
+                onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                  e.stopPropagation();
+                  void copyTextToClipboard(exportAnnotationEntry(annotation, { includeRoute: true }));
+                }}
+                className="relative rounded-md p-1.5 text-muted-foreground transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:text-foreground"
+                title="Copy this annotation with its element context"
+              >
+                <CopyEntryIcon />
+              </button>
+            )}
             {onEdit && annotation.type !== AnnotationType.DELETION && !isEditing && (
               <button
                 type="button"

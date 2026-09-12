@@ -312,3 +312,43 @@ describe("feedback archive: project bucketing", () => {
     expect(deriveFeedbackProject(undefined)).toBe("_unknown");
   });
 });
+
+describe("feedback archive: element identity", () => {
+  test("a raw-HTML pinpoint records its element identity and route; other annotations stay identity-free", () => {
+    // Regression: without these fields a pinpoint archives as the bridge's
+    // placeholder quote ("[element: Navigation]") and the index cannot say
+    // WHICH element the comment was about once the page is gone.
+    const dataDir = useTempDataDir();
+    appendFeedbackRecord({
+      project: PROJECT,
+      origin: "claude-code",
+      surface: "annotate-app",
+      decision: "feedback",
+      target: { filePath: "http://localhost:5173/" },
+      feedback: "this",
+      annotations: [
+        {
+          id: "a1", type: "COMMENT", text: "this", originalText: "[element: Navigation]", pageUrl: "/dashboard?tab=2",
+          htmlAnchor: { selector: "nav#site-nav", tagName: "nav", text: "" },
+          elementContext: { tag: "nav", path: "body > div#root > header.site-header > nav#site-nav", role: "navigation", name: "Primary", outline: "<nav>…</nav>" },
+        },
+        { id: "a2", type: "COMMENT", text: "plain", originalText: "some words" },
+      ],
+    });
+    const record = readIndex(dataDir)[0]!;
+    expect(record.annotations?.[0]).toMatchObject({
+      elementTag: "nav",
+      elementSelector: "nav#site-nav",
+      elementPath: "body > div#root > header.site-header > nav#site-nav",
+      elementRole: "navigation",
+      elementName: "Primary",
+      pageUrl: "/dashboard?tab=2",
+    });
+    // Identity only: the skeleton is feedback-sized, not index-sized.
+    expect(JSON.stringify(record.annotations?.[0])).not.toContain("<nav>");
+    const plain = record.annotations?.[1] as Record<string, unknown>;
+    for (const key of ["elementTag", "elementSelector", "elementPath", "elementRole", "elementName", "pageUrl"]) {
+      expect(key in plain).toBe(false);
+    }
+  });
+});

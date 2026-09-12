@@ -20,6 +20,9 @@ const MULTI: Annotation = {
   createdA: 1,
   author: "reviewer",
   htmlAnchor: { selector: "p.primary", tagName: "p", text: "Primary chip" },
+  // Element context describes a DOM the link's recipient does not have: it
+  // follows the anchor rule and never enters a share payload.
+  elementContext: { tag: "p", path: "body > p.primary", outline: "<p>Primary chip</p>" },
   htmlAdditionalTargets: [
     { label: "Button", text: "Create", anchor: { selector: "span.btn", tagName: "span", text: "Create" } },
   ],
@@ -31,6 +34,8 @@ describe("sharing — multi-target annotations", () => {
     expect(shareable).toEqual([["C", "Primary chip", "Unify these", "reviewer", undefined]]);
     expect(JSON.stringify(shareable)).not.toContain("htmlAdditionalTargets");
     expect(JSON.stringify(shareable)).not.toContain("selector");
+    expect(JSON.stringify(shareable)).not.toContain("elementContext");
+    expect(JSON.stringify(shareable)).not.toContain("outline");
   });
 
   test("round trip keeps the comment but has no target array", () => {
@@ -40,5 +45,6 @@ describe("sharing — multi-target annotations", () => {
     expect(restored[0]!.originalText).toBe("Primary chip");
     expect(restored[0]!.htmlAnchor).toBeUndefined();
     expect(restored[0]!.htmlAdditionalTargets).toBeUndefined();
+    expect(restored[0]!.elementContext).toBeUndefined();
   });
 });
