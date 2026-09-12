@@ -115,8 +115,8 @@ jobs:
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-x64
           sha256sum plannotator-darwin-x64 > plannotator-darwin-x64.sha256
 
-          # Linux x64
-          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
+          # Linux x64 (baseline supports pre-AVX2 CPUs)
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64-baseline --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
           sha256sum plannotator-linux-x64 > plannotator-linux-x64.sha256
 
           # Linux ARM64
@@ -138,7 +138,7 @@ jobs:
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-x64 --outfile plannotator-paste-darwin-x64
           sha256sum plannotator-paste-darwin-x64 > plannotator-paste-darwin-x64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --outfile plannotator-paste-linux-x64
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64-baseline --outfile plannotator-paste-linux-x64
           sha256sum plannotator-paste-linux-x64 > plannotator-paste-linux-x64.sha256
 
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-arm64 --outfile plannotator-paste-linux-arm64
@@ -193,6 +193,60 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+
+      - name: Install QEMU for older-CPU smoke test
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qemu-user
+
+      - name: Smoke-test Linux x64 baseline CPU compatibility
+        if: runner.os == 'Linux'
+        timeout-minutes: 4
+        env:
+          BINARY: artifacts/plannotator-linux-x64
+          PASTE_BINARY: artifacts/plannotator-paste-linux-x64
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          chmod +x "$BINARY" "$PASTE_BINARY"
+
+          # Nehalem has SSE4.2 but no AVX, AVX2 or BMI instructions. Execute
+          # the downloaded release artifacts, not a separately compiled probe.
+          timeout --kill-after=5s 60s qemu-x86_64 -cpu Nehalem "$BINARY" --help
+          expected="plannotator $(jq -r .version package.json)"
+          actual="$(timeout --kill-after=5s 60s qemu-x86_64 -cpu Nehalem "$BINARY" --version)"
+          if [ "$actual" != "$expected" ]; then
+            echo "FAIL: expected '$expected', got '$actual'" >&2
+            exit 1
+          fi
+
+          # Port zero lets the OS choose a free port. The startup message is
+          # emitted only after Bun.serve succeeds; no public health API is needed.
+          paste_dir="$(mktemp -d)"
+          PASTE_PORT=0 PASTE_DATA_DIR="$paste_dir/data" \
+            timeout --kill-after=5s 60s qemu-x86_64 -cpu Nehalem "$PASTE_BINARY" > "$paste_dir/server.log" 2>&1 &
+          paste_pid=$!
+          trap '
+            kill "$paste_pid" 2>/dev/null || true
+            wait "$paste_pid" 2>/dev/null || true
+            cat "$paste_dir/server.log"
+            rm -rf "$paste_dir"
+          ' EXIT
+
+          for _ in $(seq 1 60); do
+            if ! kill -0 "$paste_pid" 2>/dev/null; then
+              break
+            fi
+            if grep -q '^Plannotator paste service running on ' "$paste_dir/server.log"; then
+              echo "OK: Linux x64 CLI and paste service started on Nehalem"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "FAIL: paste service did not start on Nehalem" >&2
+          exit 1
 
       - name: Smoke-test binary
         if: runner.os != 'Windows'
