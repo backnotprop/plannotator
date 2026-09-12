@@ -87,7 +87,7 @@
     "lucide-react": "^1.38.0",
     "marked": "^17.0.6",
     "mermaid": "^11.17.2",
-    "motion": "^12.38.0",
+    "motion": "^13.2.0",
     "perfect-freehand": "^1.2.2",
     "tailwind-merge": "^3.6.0",
     "unique-username-generator": "^1.5.1"
