@@ -170,7 +170,6 @@ jobs:
           packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
           packages/ui/components/HtmlSurfaceControls.test.tsx
           packages/ui/components/AnnotationPanel.unanchored.test.tsx
-          packages/ui/components/AnnotationPanel.elementContext.test.tsx
           packages/ui/hooks/useHtmlRefresh.test.tsx
           packages/ui/hooks/useSharing.contentRevision.test.tsx
           packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx

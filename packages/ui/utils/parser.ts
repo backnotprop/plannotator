@@ -1217,11 +1217,12 @@ const additionalTargetsExportBlock = (ann: any): string => {
 
 /**
  * One annotation rendered as a standalone feedback entry (no number, no
- * document heading): what the annotation panel's per-row Copy puts on the
- * clipboard. The body is the same shape the full export emits for the entry,
- * including the element block, so a copied entry never drifts from what
- * Send Feedback delivers; the live-app route line is included here because
- * the copied entry has no `## Page:` heading above it.
+ * document heading), for hosts that surface a single annotation to an agent.
+ * The body is the same shape the full export emits for the entry, including
+ * the element block, so a standalone entry never drifts from what Send
+ * Feedback delivers; the live-app route line is included here because the
+ * standalone entry has no `## Page:` heading above it. Plannotator's own
+ * panel chrome does not use it.
  */
 export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOptions = { includeRoute: true }): string => {
   let output = '';
