@@ -401,8 +401,12 @@ describe("V2 plan review URL delivery", () => {
       sessionID: "session-1",
       description: formatSessionUrlNotice(SESSION_URL),
       resume: false,
-      // #1459: queue delivery keeps the notice out of steer-scoped promotion.
-      delivery: "queue",
+      // #1515: `resume: false` only declines the immediate wake. The row still
+      // waits in the inbox, and a queued row promotes alone while steers
+      // promote as a batch (`SessionInbox.promote`), so queue delivery is what
+      // turns a notice into its own model turn. Mid-tool-call here, a steer
+      // lands at the running turn's next step boundary instead.
+      delivery: "steer",
     });
   });
 

@@ -421,12 +421,65 @@ describe("V2 feedback delivery", () => {
 
   test("feedback is queued, never steered into a running turn", async () => {
     // The invocation's own delivery was chosen at admission; a review comes
-    // back minutes later, when a steer would land mid-turn.
+    // back minutes later, when a steer would land mid-turn. This client posted
+    // no session-URL notice, so nothing of ours is pending ahead of it.
     const { client, prompt } = makeBridge(async () => {});
 
     await client.session.prompt({
       path: { id: "session-1" },
       body: { parts: [{ type: "text", text: "LGTM" }] },
+    });
+
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
+  });
+
+  // Regression (#1515): a session-URL notice is a pending inbox row that the
+  // feedback's own wake promotes. Queued rows promote one at a time
+  // (`SessionInbox.promote`, packages/core/src/session/inbox.ts), so queued
+  // feedback behind a pending notice runs the notice as its own model turn
+  // first. The two must share one promotion, and steers promote as a batch.
+  test("feedback follows a pending session-URL notice into the same promotion", async () => {
+    const synthetic = mock(async (_input: unknown) => ({}));
+    const prompt = mock(async (_input: unknown) => ({}));
+    const client = createV2BridgeClient({
+      ctx: { session: { synthetic, prompt } } as never,
+      getAgents: async () => [],
+      sessionID: "session-1",
+    });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    await client.session.prompt({
+      path: { id: "session-1" },
+      body: { parts: [{ type: "text", text: "fix the null check" }] },
+    });
+
+    expect(synthetic.mock.calls[0]![0]).toMatchObject({ delivery: "steer" });
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "steer" });
+  });
+
+  // Regression: a notice the host REFUSED is not pending, so nothing has to be
+  // co-promoted and the feedback keeps its late-arrival queue delivery. Marking
+  // the notice pending before the host accepted it would steer every review on
+  // a host whose `session.synthetic` never works.
+  test("a rejected notice leaves the feedback queued", async () => {
+    const prompt = mock(async (_input: unknown) => ({}));
+    const client = createV2BridgeClient({
+      ctx: {
+        session: {
+          synthetic: async () => {
+            throw new Error("session gone");
+          },
+          prompt,
+        },
+      } as never,
+      getAgents: async () => [],
+      sessionID: "session-1",
+    });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" }).catch(() => {});
+    await client.session.prompt({
+      path: { id: "session-1" },
+      body: { parts: [{ type: "text", text: "fix the null check" }] },
     });
 
     expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
@@ -545,10 +598,6 @@ describe("V2 session URL delivery", () => {
   // Regression: without `resume: false` upstream calls `execution.wake`
   // (packages/core/src/session/session.ts), so merely showing a URL would start
   // a model turn the reviewer never asked for and burn tokens on every command.
-  // #1459 extension: resume: false only defers the immediate wake; the host
-  // default delivery is "steer", which any later wake (including spurious
-  // idle wakes on OpenCode 2 betas) promotes into its own model turn. The
-  // notice must therefore also pin queue delivery.
   test("the notice never wakes a model turn", async () => {
     const { synthetic, ctx } = makeSyntheticCtx();
     const client = createV2BridgeClient({ ctx, getAgents: async () => [], sessionID: "session-1" });
@@ -556,7 +605,24 @@ describe("V2 session URL delivery", () => {
     pushUrlLine(client);
     await Promise.resolve();
 
-    expect(synthetic.mock.calls[0]![0]).toMatchObject({ resume: false, delivery: "queue" });
+    expect(synthetic.mock.calls[0]![0]).toMatchObject({ resume: false });
+  });
+
+  // Regression (#1515): `resume: false` only declines the immediate wake — the
+  // row still waits in the inbox and is promoted by the next wake, which is the
+  // feedback's. `SessionInbox.promote` (packages/core/src/session/inbox.ts)
+  // promotes pending steers as a batch but queued rows one at a time, so a
+  // QUEUED notice ahead of queued feedback becomes its own model turn and the
+  // reviewer's annotations land behind it. #1459 set this to "queue"; that is
+  // what produced #1515.
+  test("the notice rides the delivery that batches, not the one that isolates", async () => {
+    const { synthetic, ctx } = makeSyntheticCtx();
+    const client = createV2BridgeClient({ ctx, getAgents: async () => [], sessionID: "session-1" });
+
+    pushUrlLine(client);
+    await Promise.resolve();
+
+    expect(synthetic.mock.calls[0]![0]).toMatchObject({ delivery: "steer" });
   });
 
   // Regression: `session.synthetic` is absent on older V2 hosts, and a session

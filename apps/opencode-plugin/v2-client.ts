@@ -17,7 +17,11 @@ export interface V2SessionDomain {
   switchAgent?: (input: { sessionID: string; agent: string }) => Promise<unknown>;
   context?: (input: { sessionID: string }) => Promise<unknown>;
   /**
-   * Put a message in the session WITHOUT starting a model turn.
+   * Put a message in the session without starting a model turn NOW.
+   *
+   * `resume: false` declines the immediate wake; it does not exempt the message
+   * from the next promotion, which is what `delivery` governs. Widened to
+   * `unknown` like `prompt`'s, because the delivery literals are the host's.
    *
    * Optional because it only exists on hosts whose plugin API carries it
    * (`SessionDomain` in `packages/plugin/src/promise/session.ts`); every call
@@ -28,6 +32,7 @@ export interface V2SessionDomain {
     text: string;
     description?: string;
     resume?: boolean;
+    delivery?: unknown;
   }) => Promise<unknown>;
 }
 
@@ -195,7 +200,8 @@ function readSessionId(request: unknown): string | undefined {
 }
 
 /**
- * How Plannotator feedback is admitted to the session.
+ * How Plannotator feedback is admitted to the session when nothing of ours is
+ * already pending ahead of it.
  *
  * A command invocation carries its own delivery, but that value was chosen when
  * the user pressed enter, and a review comes back minutes later: replaying a
@@ -205,6 +211,36 @@ function readSessionId(request: unknown): string | undefined {
  * explicitly rather than omitted.
  */
 const FEEDBACK_DELIVERY = "queue";
+
+/**
+ * How BOTH the session-URL notice and the feedback that follows it are admitted,
+ * so OpenCode promotes them into ONE model turn (#1515).
+ *
+ * OpenCode 2 admits every plugin message — `session.prompt` and
+ * `session.synthetic` alike — as a pending inbox row, and `resume: false` only
+ * declines to wake the session NOW; it never exempts the row from a later
+ * promotion. Promotion is not symmetric between the two delivery kinds
+ * (`SessionInbox.promote`, `packages/core/src/session/inbox.ts` @ v2.0.2):
+ *
+ *  - pending steers are promoted as a BATCH ("publish(db, bus, sessionID,
+ *    control === -1 ? steers : steers.slice(0, control))"), so several steer
+ *    rows enter the same turn;
+ *  - a queued row is promoted ONE AT A TIME (the `limit(1)` select), and only
+ *    after the steers.
+ *
+ * A promoted synthetic becomes a user-role message (`to-llm-message.ts`) and
+ * the runner then runs a full model step for it, with no "was this real user
+ * input?" guard. So a queued notice sitting ahead of queued feedback is
+ * promoted alone and becomes its own model turn, with the reviewer's feedback
+ * stuck behind it — exactly what #1515 reports. Riding "steer" for both is what
+ * makes the notice and the feedback one batch, which is the same reason
+ * upstream's own transcript notices (shell results, `Session.shell`) leave the
+ * host default of "steer" in place instead of queueing.
+ *
+ * Only used when this client actually posted a notice; a review that posted
+ * none keeps `FEEDBACK_DELIVERY` and its late-arrival guarantee.
+ */
+const CO_PROMOTED_DELIVERY = "steer";
 
 /**
  * The one line a user is shown when a Plannotator session opens on OpenCode 2.
@@ -247,12 +283,12 @@ export function formatSessionUrlNotice(url: string): string {
  *  - Setting no `metadata.source` keeps it on the plain "Notice" row rather
  *    than the subagent/shell completion row.
  *
- * `delivery` is an explicit "queue", mirroring `FEEDBACK_DELIVERY` (#1459).
- * The host default resolves to "steer", and a pending steer row is promoted
- * FIRST by any wake, including spurious idle wakes observed on OpenCode 2
- * betas where `resume: false` defers the immediate wake but a later wake
- * turns the notice into its own model turn. Queue delivery keeps the notice
- * out of every steer-scoped promotion and is a no-op on well-behaved hosts.
+ * `delivery` is an explicit `CO_PROMOTED_DELIVERY` ("steer"), which is also the
+ * host default. #1459 tried "queue" here; #1515 is what that produced, because
+ * a queued row is promoted alone while steers are promoted as a batch. See
+ * `CO_PROMOTED_DELIVERY` above for the promotion rules and the citations. The
+ * feedback that follows rides the same delivery, so the notice enters the model
+ * turn the reviewer actually asked for instead of starting one of its own.
  *
  * This does not contradict the reason feedback avoids synthetic injection.
  * Upstream #44788 is about a synthetic message not reliably reaching the MODEL
@@ -266,19 +302,28 @@ export function formatSessionUrlNotice(url: string): string {
 export function createSessionUrlNotifier(
   ctx: V2ContextLike,
   sessionID: string | undefined,
+  /**
+   * Called once the host has ACCEPTED a notice, so the feedback that follows can
+   * be admitted with the delivery that co-promotes with it. Never called for a
+   * rejected notice: nothing is then pending and the plain queue delivery is
+   * still the right one.
+   */
+  onAdmitted?: () => void,
 ): ((input: { url: string; message: string }) => Promise<unknown>) | undefined {
   const synthetic = ctx.session?.synthetic;
   if (typeof synthetic !== "function" || !sessionID) return undefined;
   return async ({ url }) => {
     const notice = formatSessionUrlNotice(url);
-    return await synthetic({
+    const admitted = await synthetic({
       sessionID,
       text: notice,
       description: notice,
       resume: false,
-      // #1459: never ride the "steer" default; see the delivery note above.
-      delivery: FEEDBACK_DELIVERY,
+      // #1515: the notice and the feedback must share one promotion.
+      delivery: CO_PROMOTED_DELIVERY,
     });
+    onAdmitted?.();
+    return admitted;
   };
 }
 
@@ -305,7 +350,16 @@ export function createV2BridgeClient(input: {
 }): V2BridgeClient {
   const warn = input.warn ?? ((message: string) => console.error(message));
   const loggedUrls = new Set<string>();
-  const notifyUrl = createSessionUrlNotifier(input.ctx, input.sessionID);
+  // Whether a session-URL notice of ours is still waiting in this session's
+  // inbox. It is the only thing that can sit AHEAD of the reviewer's feedback,
+  // and the plugin session domain exposes no way to withdraw a pending row
+  // (`SessionDomain` is a fixed Pick in `packages/plugin/src/promise/session.ts`
+  // with no inbox member, even though the server itself routes
+  // `session.inbox.cancel`), so the feedback joins its promotion instead.
+  let noticePending = false;
+  const notifyUrl = createSessionUrlNotifier(input.ctx, input.sessionID, () => {
+    noticePending = true;
+  });
   return {
     ...(notifyUrl && { notifyUrl }),
     app: {
@@ -342,11 +396,15 @@ export function createV2BridgeClient(input: {
         if (typeof prompt !== "function") {
           throw new Error("OpenCode 2 host exposes no session.prompt; cannot deliver Plannotator feedback.");
         }
-        return await prompt({
+        const delivered = await prompt({
           sessionID,
           text: joinTextParts(Array.isArray(body.parts) ? body.parts : []),
-          delivery: FEEDBACK_DELIVERY,
+          delivery: noticePending ? CO_PROMOTED_DELIVERY : FEEDBACK_DELIVERY,
         });
+        // Admitted: the notice is no longer the row ahead of us, so any later
+        // delivery on this client is a plain late arrival again.
+        noticePending = false;
+        return delivered;
       },
     },
   };
