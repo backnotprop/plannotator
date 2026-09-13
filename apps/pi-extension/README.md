@@ -284,6 +284,53 @@ The Plannotator archive browser is available through the shared event API as `ar
 
 During execution, the agent marks completed steps with `[DONE:n]` markers. Progress is shown in the status line and as a checklist widget in the terminal.
 
+#### Configuring the progress widget
+
+Two optional keys in `~/.plannotator/config.json` (the Plannotator-wide config, same file as `todoProvider` — not the per-phase `plannotator.json` above) shrink or reorder the widget for long plans. Both are config-only — there is no env-var override.
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `widgetStyle` | `"default"` \| `"compact"` \| positive integer | `"default"` | Selects the widget rendering. See modes below |
+| `widgetMoveCompletedToEnd` | boolean | `false` | Sorts completed items after remaining ones in the widget only. Underlying checklist order (used by `${todoList}`, `[DONE:n]`, and the pi-todos mirror) is unchanged |
+
+**`"default"`** — current behavior. One line per checklist item, completed items rendered strikethrough and muted:
+
+```json
+{ "widgetStyle": "default" }
+```
+
+**`"compact"`** — collapses the widget to a single status line (`📋 completed/total · next: <first remaining step>`, or `· all done` when nothing remains). Smallest possible footprint. `widgetMoveCompletedToEnd` has no visible effect in this mode:
+
+```json
+{ "widgetStyle": "compact" }
+```
+
+**Positive integer `N`** — caps the widget at N item lines, preferring remaining steps. When fewer than N remain, backfills with the most recent completed items so the widget stays populated. Dropped items are summarized on a muted overflow line (`… +K more todo`, `… +K done`, or `… +K done, +M todo`):
+
+```json
+{ "widgetStyle": 5 }
+```
+
+Invalid `widgetStyle` values (zero, negatives, non-integer numbers, unknown strings) silently fall back to `"default"` — a bad config never blanks the widget.
+
+**Reordering example.** Push completed items to the bottom of the widget:
+
+```json
+{
+  "widgetStyle": "default",
+  "widgetMoveCompletedToEnd": true
+}
+```
+
+Or combine with a limit to show the next 3 remaining steps first, then any backfilled completed ones:
+
+```json
+{
+  "widgetStyle": 3,
+  "widgetMoveCompletedToEnd": true
+}
+```
+
 ## Commands
 
 | Command | Description |
