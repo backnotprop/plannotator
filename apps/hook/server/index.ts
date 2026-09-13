@@ -521,9 +521,10 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 //     still be detected as themselves. OMPCODE still wins over the terminal
 //     fallback below.
 //
-//   > Mistral Vibe — detected via PLANNOTATOR_ORIGIN=mistral-vibe baked into the
-//     hook command by the installer (Vibe's hook executor does not inject a
-//     unique fingerprint env var; the override check above catches it).
+//   > Mistral Vibe — detected from the pre_tool hook payload (hook_event_name
+//     "pre_tool" + tool_name "exit_plan_mode" is unambiguous vs Claude/Gemini),
+//     so the installer's hook command needs no env prefix. PLANNOTATOR_ORIGIN=
+//     mistral-vibe remains the manual override above.
 //
 // To add a new agent, also add an entry to AGENT_CONFIG in
 // packages/core/agents.ts (see header comment there).
@@ -2282,15 +2283,18 @@ if (args[0] === "sessions") {
   }
 
   // Mistral Vibe: pre_tool hook matching exit_plan_mode. Vibe's tool takes
-  // no args, so the plan is not in the payload — resolve it from
-  // $VIBE_HOME/plans by mtime. Origin is set via PLANNOTATOR_ORIGIN=mistral-vibe
-  // baked into the hook command by the installer.
-  if (
-    detectedOrigin === "mistral-vibe" &&
-    event.hook_event_name === "pre_tool" &&
-    event.tool_name === "exit_plan_mode"
-  ) {
-    const vibePlanContent = resolveLatestVibePlan();
+  // no args, so the plan is not in the payload — the pre_tool payload carries
+  // transcript_path, and the resolver pins the plan this session wrote by
+  // scanning that transcript (newest-by-mtime within a freshness window as
+  // the fallback, else fail open). Detection is payload-based (pre_tool +
+  // exit_plan_mode is unambiguous vs Claude/Gemini); PLANNOTATOR_ORIGIN=
+  // mistral-vibe remains the manual override above.
+  const isVibeExitPlanMode =
+    event.hook_event_name === "pre_tool" && event.tool_name === "exit_plan_mode";
+  if (isVibeExitPlanMode) {
+    const vibeTranscript =
+      typeof event.transcript_path === "string" ? event.transcript_path : undefined;
+    const vibePlanContent = resolveLatestVibePlan({ transcriptPath: vibeTranscript });
     if (!vibePlanContent) {
       console.error(
         "No plan file found in $VIBE_HOME/plans. Vibe may not have written the plan yet, or VIBE_HOME is set to a non-default location."

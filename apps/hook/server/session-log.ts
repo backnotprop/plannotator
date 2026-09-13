@@ -964,8 +964,10 @@ export function resolveVibeSessionLogForCwd(
     return bestDir;
   }
 
-  // Fallback: scan session_<ts>_<id>/ directories by mtime when the index is
-  // absent. Picks the newest whose messages.jsonl exists.
+  // Fallback: scan session_<ts>_<id>/ directories when the index is absent.
+  // Each session dir carries a meta.json with its working_directory under
+  // environment (see Vibe's session_logger), so filter on cwd the same way
+  // the index path does — never pick the newest session across all projects.
   let dirs: string[];
   try {
     dirs = readdirSync(sessionLogDir).filter((d) => d.startsWith("session_"));
@@ -977,6 +979,13 @@ export function resolveVibeSessionLogForCwd(
   for (const d of dirs) {
     const messagesPath = join(sessionLogDir, d, "messages.jsonl");
     try {
+      const metaPath = join(sessionLogDir, d, "meta.json");
+      const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+      const metaCwd =
+        typeof meta?.environment?.working_directory === "string"
+          ? meta.environment.working_directory
+          : undefined;
+      if (!metaCwd || normalizeCwdForCompare(metaCwd) !== normalizedTarget) continue;
       const mtime = statSync(messagesPath).mtimeMs;
       if (mtime > newestMtime) {
         newestMtime = mtime;

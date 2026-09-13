@@ -1011,10 +1011,12 @@ if "!VIBE_AVAILABLE!"=="1" if "!SKIP_VIBE!"=="0" (
     echo   name = "plannotator-exit-plan-mode"
     echo   type = "pre_tool"
     echo   match = "exit_plan_mode"
-    echo   command = "PLANNOTATOR_ORIGIN=mistral-vibe plannotator"
+    echo   command = "/full/path/to/plannotator"
     echo   timeout = 345600
     echo.
-    echo And ensure ~/.vibe/config.toml has: enable_experimental_hooks = true
+    echo The command must be argv-only ^(no env-prefix^): plannotator detects
+    echo the Vibe origin from the hook payload. Hooks are stable in Vibe
+    echo 2.25+, so no config.toml flag is needed.
     echo.
     echo Vibe skills are still installed to !VIBE_HOME!\skills from this run.
 )

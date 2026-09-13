@@ -36,11 +36,18 @@ function writeSession(
   dirName: string,
   messages: string,
   mtimeSec?: number,
+  cwd?: string,
 ): string {
   const sessionDir = join(home, "logs", "session", dirName);
   mkdirSync(sessionDir, { recursive: true });
   const messagesPath = join(sessionDir, "messages.jsonl");
   writeFileSync(messagesPath, messages);
+  if (cwd) {
+    writeFileSync(
+      join(sessionDir, "meta.json"),
+      JSON.stringify({ session_id: dirName, environment: { working_directory: cwd } }),
+    );
+  }
   if (mtimeSec !== undefined) utimesSync(messagesPath, mtimeSec, mtimeSec);
   return messagesPath;
 }
@@ -85,15 +92,24 @@ describe("resolveVibeSessionLogForCwd", () => {
     expect(resolveVibeSessionLogForCwd("/Users/test/project", { vibeHome: home })).toBeNull();
   });
 
-  test("falls back to directory scan when the index is absent", () => {
+  test("falls back to meta.json cwd filter when the index is absent", () => {
     const home = makeVibeHome();
     const cwd = "/Users/test/project";
-    writeSession(home, "session_old", vibeLine("assistant", "old", "m1"), 1);
-    writeSession(home, "session_new", vibeLine("assistant", "new", "m2"), 100);
-    // No .session_index.json — should pick the newest by file mtime.
+    // An other-project session with a NEWER mtime must never win over the
+    // matching one: the fallback filters on meta.json cwd, not bare mtime.
+    writeSession(home, "session_other", vibeLine("assistant", "other", "m0"), 200, "/elsewhere");
+    writeSession(home, "session_old", vibeLine("assistant", "old", "m1"), 1, cwd);
+    writeSession(home, "session_new", vibeLine("assistant", "new", "m2"), 100, cwd);
+    // No .session_index.json — picks the newest matching session by mtime.
     const log = resolveVibeSessionLogForCwd(cwd, { vibeHome: home });
     expect(log).toBeTruthy();
     expect(log!.endsWith("session_new/messages.jsonl")).toBe(true);
+  });
+
+  test("returns null in the fallback when no session's meta.json matches the cwd", () => {
+    const home = makeVibeHome();
+    writeSession(home, "session_other", vibeLine("assistant", "other", "m0"), 100, "/elsewhere");
+    expect(resolveVibeSessionLogForCwd("/Users/test/project", { vibeHome: home })).toBeNull();
   });
 
   test("returns null when no sessions exist", () => {

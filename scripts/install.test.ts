@@ -225,11 +225,16 @@ describe("install.sh", () => {
     // Managed marker block so the hook coexists with the user's own hooks.toml.
     expect(script).toContain('VIBE_MANAGED_START="# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>"');
     expect(script).toContain('VIBE_MANAGED_END="# <<< plannotator-managed-vibe-hooks <<<"');
-    expect(script).toContain('PLANNOTATOR_ORIGIN=mistral-vibe plannotator"');
+    // The hook command is argv-only with the absolute binary path (no env
+    // prefix) so it survives both shell and shell-free hook executors, and
+    // origin detection happens in the binary from the hook payload.
+    expect(script).toContain('command = "${PLANNOTATOR_BIN}"');
+    expect(script).toContain("PLANNOTATOR_BIN=\"${INSTALL_DIR}/plannotator\"");
     expect(script).toContain('match = "exit_plan_mode"');
-    // config.toml must carry enable_experimental_hooks = true for any hook to fire.
-    expect(script).toContain("enable_experimental_hooks = true");
-    expect(script).toContain('VIBE_CONFIG="$VIBE_HOME/config.toml"');
+    // Hooks are stable in Vibe 2.25+; no config.toml flag is written, and the
+    // installer must not touch $VIBE_HOME/config.toml at all.
+    expect(script).not.toContain("enable_experimental_hooks");
+    expect(script).not.toContain('VIBE_CONFIG="$VIBE_HOME/config.toml"');
     // Parity: no bespoke flag, like every other agent.
     expect(script).not.toContain("--vibe-only");
     expect(script).not.toContain("INSTALL_VIBE");

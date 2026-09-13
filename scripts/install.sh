@@ -1105,14 +1105,17 @@ if command -v kiro-cli >/dev/null 2>&1 || [ -d "$HOME/.kiro" ]; then
 fi
 
 # Vibe (Mistral's TUI coding agent) stores everything under $VIBE_HOME when
-# set, falling back to ~/.vibe (vibe/utils/paths.py:get_vibe_home). Detect via
-# the `vibe` binary on PATH or an existing ~/.vibe. The hook runs on
-# macOS/Linux only (Vibe spawns hooks via /bin/sh; Windows uses cmd.exe and a
-# .sh launcher is not executable), so the Windows installers print manual
-# instructions instead of wiring hooks.
+# set, falling back to ~/.vibe (vibe/utils/paths.py:get_vibe_home). Detection
+# requires an existing home dir, not merely a `vibe` binary on PATH: a machine
+# with an unrelated `vibe` binary must not gain a ~/.vibe the user never had.
+# The write legs below only run when detection passed. The hook command is
+# argv-only, so it runs under both shell-based and shell-free hook executors;
+# the Windows installers print manual instructions instead of wiring hooks
+# (older Vibe builds spawned hooks via /bin/sh, which a .sh launcher can't
+# reach on Windows).
 VIBE_HOME="${VIBE_HOME:-$HOME/.vibe}"
 vibe_available=0
-if command -v vibe >/dev/null 2>&1 || [ -d "$VIBE_HOME" ]; then
+if [ -d "$VIBE_HOME" ]; then
     vibe_available=1
 fi
 
@@ -2044,13 +2047,14 @@ fi
 
 # --- Mistral Vibe support (only if Vibe is installed or configured) ---
 # Vibe (Mistral's TUI coding agent) hooks are [[hooks]] TOML blocks in
-# $VIBE_HOME/hooks.toml. Plan review gates exit_plan_mode via a pre_tool hook;
-# the plan is not in the payload (exit_plan_mode takes no args), so plannotator
-# resolves the newest plan from $VIBE_HOME/plans by mtime. A managed marker
-# block coexists with any user/Orca hooks. Vibe needs
-# enable_experimental_hooks = true in config.toml for any hook to fire.
+# $VIBE_HOME/hooks.toml (stable since Vibe 2.25; no config flag needed).
+# Plan review gates exit_plan_mode via a pre_tool hook. The hook command is
+# argv-only (absolute binary path, no env prefix) so it survives both shell
+# and shell-free hook execution. plannotator detects the Vibe origin from
+# the hook payload itself; PLANNOTATOR_ORIGIN=mistral-vibe remains the
+# documented manual override. A managed marker block coexists with any
+# user/Orca hooks.
 VIBE_HOOKS="$VIBE_HOME/hooks.toml"
-VIBE_CONFIG="$VIBE_HOME/config.toml"
 VIBE_MANAGED_START="# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>"
 VIBE_MANAGED_END="# <<< plannotator-managed-vibe-hooks <<<"
 
@@ -2067,13 +2071,16 @@ if [ "$vibe_available" -eq 1 ] && [ "$skip_vibe" -eq 1 ]; then
     echo "and are still installed."
 elif [ "$vibe_available" -eq 1 ]; then
     mkdir -p "$VIBE_HOME"
-    vibe_hook_configured=0
+    PLANNOTATOR_BIN="${INSTALL_DIR}/plannotator"
 
     # Strip any existing managed block (markers inclusive), then append a
-    # fresh one. awk prints every line except the managed region; a lone
-    # start-marker with no end-marker is bounded to EOF so it cannot swallow
-    # trailing user TOML beyond the contiguous managed tables. Atomic write
-    # via a temp file in the same dir + rename; keep a .bak for recovery.
+    # fresh one. awk prints every line except the managed region. A start
+    # marker with no end marker swallows everything to EOF (the block is
+    # always written with both markers, so this is corrupt-input handling,
+    # not a normal path): a truncated managed block has no trailing user
+    # TOML worth preserving, and dropping it fails closed into a clean
+    # rewrite. Atomic write via a temp file in the same dir + rename; keep
+    # a .bak for recovery.
     write_vibe_hooks_block() {
         _new_body=""
         if [ -f "$VIBE_HOOKS" ]; then
@@ -2090,13 +2097,13 @@ elif [ "$vibe_available" -eq 1 ]; then
         [ -f "$VIBE_HOOKS" ] && cp "$VIBE_HOOKS" "$VIBE_HOOKS.bak"
         {
             printf '%s\n' "$_new_body"
-            cat << 'VIBE_HOOKS_BLOCK_EOF'
+            cat << VIBE_HOOKS_BLOCK_EOF
 # >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>
 [[hooks]]
 name = "plannotator-exit-plan-mode"
 type = "pre_tool"
 match = "exit_plan_mode"
-command = "PLANNOTATOR_ORIGIN=mistral-vibe plannotator"
+command = "${PLANNOTATOR_BIN}"
 timeout = 345600
 description = "Plannotator plan review (managed)"
 # <<< plannotator-managed-vibe-hooks <<<
@@ -2106,23 +2113,6 @@ VIBE_HOOKS_BLOCK_EOF
 
     write_vibe_hooks_block
     echo "Installed Vibe plan-review hook at ${VIBE_HOOKS}"
-    vibe_hook_configured=1
-
-    # Ensure enable_experimental_hooks = true in config.toml. Vibe requires
-    # this top-level key for any hook to fire. Create the file if absent; if
-    # the key already exists (true or false) leave it untouched so we never
-    # downgrade a user's explicit false, matching the Codex config-merge
-    # discipline.
-    if [ ! -f "$VIBE_CONFIG" ]; then
-        printf 'enable_experimental_hooks = true\n' > "$VIBE_CONFIG"
-        echo "Created Vibe config at ${VIBE_CONFIG}"
-    elif grep -Eq '^[[:space:]]*enable_experimental_hooks[[:space:]]*=' "$VIBE_CONFIG"; then
-        echo "Vibe config at ${VIBE_CONFIG} already sets enable_experimental_hooks; leaving it unchanged."
-    else
-        cp "$VIBE_CONFIG" "$VIBE_CONFIG.bak"
-        printf '\n# Added by plannotator installer\nenable_experimental_hooks = true\n' >> "$VIBE_CONFIG"
-        echo "Enabled Vibe experimental hooks in ${VIBE_CONFIG}"
-    fi
 fi
 
 echo ""
@@ -2241,8 +2231,7 @@ elif [ "$vibe_available" -eq 1 ] && [ "$skip_skills" -eq 1 ]; then
     echo "Re-run without the opt-out to add them."
 elif [ "$vibe_available" -eq 1 ]; then
     echo "Plan review is configured through the Vibe pre_tool hook on exit_plan_mode"
-    echo "in ${VIBE_HOME}/hooks.toml. enable_experimental_hooks = true is set in"
-    echo "${VIBE_HOME}/config.toml."
+    echo "in ${VIBE_HOME}/hooks.toml (requires Vibe 2.25 or newer)."
     echo ""
     echo "Vibe skills are installed to ${VIBE_SKILLS_DIR}/"
     echo "Note: improve-context (plan-mode enrichment) is not wired for Vibe —"
