@@ -8,6 +8,8 @@ import '@plannotator/ui/utils/math-eager';
 import '@plannotator/ui/utils/identity-tater';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
+import { canProviderForkOriginSession } from '@plannotator/ui/utils/aiProvider';
+import type { ParentSession } from '@plannotator/core/ai-context';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
@@ -550,6 +552,12 @@ const ReviewApp: React.FC = () => {
     });
   }, []);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  // The agent session that invoked this review, when the server knows it —
+  // the fork source for the Ask AI opt-in below.
+  const [originSession, setOriginSession] = useState<ParentSession | null>(null);
+  // Ask AI fork opt-in: off by default — a fresh session is often what you
+  // want; forking is for "why did you..." questions that need the history.
+  const [forkOriginSession, setForkOriginSession] = useState(false);
   // Unknown until /api/diff responds. Keeping this tri-state prevents provider
   // discovery from starting before the server reports that AI is enabled.
   const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
@@ -1089,6 +1097,12 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     if (shouldConsumeTokenHoverAnnouncement()) markTokenHoverAnnouncementSeen();
   }, []);
+  // Fork gating: the toggle is only meaningful when the effective provider
+  // (explicit selection, else the server's first — mirroring AIConfigBar)
+  // can fork AND natively owns the origin session's harness.
+  const effectiveAIProvider = aiProviders.find(p => p.id === aiConfig.providerId) ?? aiProviders[0] ?? null;
+  const canForkOriginSession = canProviderForkOriginSession(effectiveAIProvider, originSession);
+
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1101,6 +1115,7 @@ const ReviewApp: React.FC = () => {
     providerId: aiConfig.providerId,
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
+    parent: forkOriginSession && canForkOriginSession ? originSession : null,
   });
   const {
     messages: aiMessages,
@@ -1112,6 +1127,7 @@ const ReviewApp: React.FC = () => {
     abort: abortAI,
     resetSession: resetAISession,
     sessionId: aiSessionId,
+    sessionForked: aiSessionForked,
   } = aiChat;
 
   const codeNav = useCodeNav();
@@ -1225,6 +1241,13 @@ const ReviewApp: React.FC = () => {
     applyConfigChange(config);
     resetAISession();
   }, [activateAIProvider, applyConfigChange, resetAISession]);
+
+  // Fork opt-in changes what kind of session the next question creates —
+  // same reset discipline as a provider switch.
+  const handleForkOriginToggle = useCallback((enabled: boolean) => {
+    setForkOriginSession(enabled);
+    resetAISession();
+  }, [resetAISession]);
 
   // Opening the Ask AI sidebar tab with a provider selected is the other
   // explicit gesture that should surface the provider's real model list.
@@ -1982,6 +2005,7 @@ const ReviewApp: React.FC = () => {
         aiEnabled?: boolean;
         aiReviewContext?: string;
         origin?: Origin;
+        originSession?: ParentSession | null;
         mode?: string;
         diffType?: string;
         base?: string;
@@ -2037,6 +2061,7 @@ const ReviewApp: React.FC = () => {
         setReviewMode(data.mode ?? null);
         setWorkspaceDiffOptions(data.mode === 'workspace' ? (data.diffOptions ?? []) : null);
         if (data.origin) setOrigin(data.origin);
+        setOriginSession(data.originSession ?? null);
         if (data.diffType) setDiffType(data.diffType);
         if (data.gitContext) {
           setGitContext(data.gitContext);
@@ -5356,6 +5381,13 @@ const ReviewApp: React.FC = () => {
                 aiConfig={aiConfig}
                 onAIConfigChange={handleAIConfigChange}
                 hasAISession={!!aiSessionId}
+                originFork={{
+                  available: canForkOriginSession,
+                  enabled: forkOriginSession,
+                  onToggle: handleForkOriginToggle,
+                  fellBack: forkOriginSession && canForkOriginSession && aiSessionForked === false,
+                  agentName: getAgentName(originSession?.agent as Origin),
+                }}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}

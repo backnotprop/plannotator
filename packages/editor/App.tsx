@@ -50,7 +50,7 @@ import { getOctarineSettings, isOctarineConfigured } from '@plannotator/ui/utils
 import { getDefaultNotesApp } from '@plannotator/ui/utils/defaultNotesApp';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
-import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { type AIProviderOption, canProviderForkOriginSession } from '@plannotator/ui/utils/aiProvider';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
@@ -109,7 +109,7 @@ import {
   type GoalSetupSurfaceHandle,
 } from '@plannotator/ui/components/goal-setup/GoalSetupSurface';
 import type { GoalSetupBundle } from '@plannotator/shared/goal-setup';
-import type { AIContext } from '@plannotator/ai';
+import type { AIContext, ParentSession } from '@plannotator/ai';
 import type { CommentAskAIContext } from '@plannotator/ui/components/CommentPopover';
 import {
   hasSourceSaveConflictSnapshot,
@@ -506,6 +506,12 @@ const App: React.FC = () => {
     if (isApiMode) primeSkillCatalog();
   }, [isApiMode]);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  // The agent session this document was produced by, when the server knows
+  // it — the fork source for the Ask AI opt-in below.
+  const [originSession, setOriginSession] = useState<ParentSession | null>(null);
+  // Ask AI fork opt-in: off by default — a fresh session is often what you
+  // want; forking is for "why did you..." questions that need the history.
+  const [forkOriginSession, setForkOriginSession] = useState(false);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const updateInfo = useUpdateCheck();
@@ -3194,7 +3200,7 @@ const App: React.FC = () => {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { plan: string; origin?: Origin; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
+      .then((data: { plan: string; origin?: Origin; originSession?: ParentSession | null; mode?: 'annotate' | 'annotate-last' | 'annotate-folder' | 'annotate-app' | 'archive' | 'goal-setup'; goalSetup?: GoalSetupBundle; filePath?: string; appUrl?: string; targetUrl?: string; liveToken?: string; sourceInfo?: string; sourceConverted?: boolean; sourceSave?: SourceSaveCapability; gate?: boolean; approvalNotesSupported?: boolean; clientLease?: AnnotateClientLeaseConfig; renderAs?: 'html' | 'markdown'; rawHtml?: string; shareHtml?: string; diffHtml?: string; convertHtml?: boolean; sharingEnabled?: boolean; shareBaseUrl?: string; pasteApiUrl?: string; repoInfo?: { display: string; branch?: string; host?: string }; previousPlan?: string | null; versionInfo?: { version: number; totalVersions: number; project: string }; archivePlans?: ArchivedPlan[]; projectRoot?: string; isWSL?: boolean; markdownExtensions?: string[]; serverConfig?: { displayName?: string; gitUser?: string }; recentMessages?: PickerMessage[]; agentTerminal?: AgentTerminalCapability; feedbackTemplates?: AnnotateFeedbackTemplates }) => {
         // Initialize config store with server-provided values (config file > cookie > default)
         configStore.init(data.serverConfig);
         // Extra extensions the user registered as markdown (#1307) — the
@@ -3306,6 +3312,9 @@ const App: React.FC = () => {
         if (data.versionInfo) {
           setVersionInfo(data.versionInfo);
         }
+        // The invoking agent session (Ask AI fork origin) — null when the
+        // document didn't come from a live agent session.
+        setOriginSession(data.originSession ?? null);
         if (data.origin) {
           setOrigin(data.origin);
           // For Claude Code, check if user needs to configure permission mode.
@@ -4407,6 +4416,13 @@ const App: React.FC = () => {
     linkedDocHook.isActive ||
     !!sourceFilePath;
 
+  // Fork gating: the toggle is only meaningful when the effective provider
+  // (explicit selection, else the server's first — mirroring AIProviderBar)
+  // can fork AND natively owns the origin session's harness.
+  const effectiveAIProvider = aiProviders.find(p => p.id === aiConfig.providerId) ?? aiProviders[0] ?? null;
+  const canForkOriginSession = canProviderForkOriginSession(effectiveAIProvider, originSession);
+  const forkParent = forkOriginSession && canForkOriginSession ? originSession : null;
+
   const aiContext = useMemo<AIContext | null>(() => {
     if (!aiSessionEnabled || archive.archiveMode || goalSetupMode) return null;
     if (aiDocumentMode && !hasAIDocumentContext) return null;
@@ -4422,6 +4438,7 @@ const App: React.FC = () => {
           renderAs: aiRenderAs,
           annotations: aiAnnotationsContext,
         },
+        ...(forkParent ? { parent: forkParent } : {}),
       };
     }
 
@@ -4435,6 +4452,7 @@ const App: React.FC = () => {
         project: versionInfo?.project,
         annotations: aiAnnotationsContext,
       },
+      ...(forkParent ? { parent: forkParent } : {}),
     };
   }, [
     aiAnnotationsContext,
@@ -4447,6 +4465,7 @@ const App: React.FC = () => {
     hasAIDocumentContext,
     archive.archiveMode,
     displayedMarkdown,
+    forkParent,
     goalSetupMode,
     markdown,
     previousPlan,
@@ -4473,6 +4492,7 @@ const App: React.FC = () => {
     resetSession: resetAISession,
     resetThread: resetAIThread,
     sessionId: aiSessionId,
+    sessionForked: aiSessionForked,
   } = aiChat;
   const canUseAI = aiAvailable && aiContext !== null;
   const canUseAskAI = canUseAI || isAgentTerminalReady;
@@ -4540,6 +4560,13 @@ const App: React.FC = () => {
     applyConfigChange(config);
     resetAISession();
   }, [activateAIProvider, applyConfigChange, resetAISession]);
+
+  // Fork opt-in changes what kind of session the next question creates —
+  // same reset discipline as a provider switch.
+  const handleForkOriginToggle = useCallback((enabled: boolean) => {
+    setForkOriginSession(enabled);
+    resetAISession();
+  }, [resetAISession]);
 
   // Opening the Ask AI surface with a provider selected is the other explicit
   // gesture that should surface the provider's real model list.
@@ -5773,6 +5800,15 @@ const App: React.FC = () => {
       aiProviders={visibleAIProviders}
       aiConfig={visibleAIConfig}
       onAIConfigChange={isAgentTerminalReady ? undefined : handleAIConfigChange}
+      originFork={{
+        // The agent-terminal surface is the origin agent's own TUI — forking
+        // it into a provider chat isn't meaningful there.
+        available: !isAgentTerminalReady && canForkOriginSession,
+        enabled: forkOriginSession,
+        onToggle: handleForkOriginToggle,
+        fellBack: forkOriginSession && canForkOriginSession && aiSessionForked === false,
+        agentName: getAgentName(originSession?.agent as Origin),
+      }}
     />
   );
 

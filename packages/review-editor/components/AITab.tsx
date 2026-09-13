@@ -29,6 +29,14 @@ interface AITabProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
+  /** Opt-in origin-session forking — forwarded to AIConfigBar. */
+  originFork?: {
+    available: boolean;
+    enabled: boolean;
+    onToggle: (enabled: boolean) => void;
+    fellBack: boolean;
+    agentName: string;
+  };
 }
 
 interface FileGroup {
@@ -57,6 +65,7 @@ export const AITab: React.FC<AITabProps> = ({
   aiConfig,
   onAIConfigChange,
   hasAISession = false,
+  originFork,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // File chat groups default to expanded; this tracks the ones the user has
@@ -178,6 +187,7 @@ export const AITab: React.FC<AITabProps> = ({
           selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
           onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
           hasSession={hasAISession}
+          originFork={originFork}
         />
         {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} />}
       </div>
@@ -276,6 +286,7 @@ export const AITab: React.FC<AITabProps> = ({
         selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
         onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
         hasSession={hasAISession}
+        originFork={originFork}
       />
 
       {/* General question input */}
