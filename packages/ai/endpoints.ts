@@ -219,15 +219,29 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         // Providers that can't fork (e.g. Codex) fall back to a fresh
         // session with the full system prompt — no fake history.
         const shouldFork = context.parent && provider.capabilities.fork;
-        const session = shouldFork
-          ? await provider.forkSession(options)
-          : await provider.createSession(options);
+        let session;
+        let forked = false;
+        if (shouldFork) {
+          try {
+            session = await provider.forkSession(options);
+            forked = true;
+          } catch {
+            // The parent session may be unresumable (transcript pruned,
+            // different machine, CLI state cleared). A fresh session with
+            // the full system prompt is strictly better than a 500 — the
+            // `forked` flag tells the client which one it got.
+            session = await provider.createSession(options);
+          }
+        } else {
+          session = await provider.createSession(options);
+        }
 
         const entry = sessionManager.track(session, context.mode);
 
         return Response.json({
           sessionId: session.id,
           parentSessionId: session.parentSessionId,
+          forked,
           mode: context.mode,
           createdAt: entry.createdAt,
         });
