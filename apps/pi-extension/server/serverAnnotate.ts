@@ -12,6 +12,7 @@ import {
 } from "../generated/live-proxy-core.ts";
 import { startLiveAppProxyNode } from "../generated/live-proxy-node.ts";
 import type { LiveAppProxy } from "../generated/live-proxy-core.ts";
+import type { ParentSession } from "../generated/ai/ai-context.ts";
 
 import { contentHash, deleteDraft } from "../generated/draft.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
@@ -215,6 +216,9 @@ export async function startAnnotateServer(options: {
 	filePath: string;
 	htmlContent: string;
 	origin?: string;
+	/** The agent session the annotated content came from, when known —
+	 *  echoed to the browser so Ask AI can offer to fork it (opt-in). */
+	originSession?: ParentSession | null;
 	mode?: string;
 	folderPath?: string;
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[];
@@ -721,6 +725,7 @@ export async function startAnnotateServer(options: {
 			json(res, {
 				plan: "",
 				origin: options.origin ?? "pi",
+				originSession: options.originSession ?? null,
 				mode: options.mode,
 				filePath: options.filePath,
 				sourceInfo: options.sourceInfo ?? options.liveApp.targetUrl,
@@ -777,6 +782,7 @@ export async function startAnnotateServer(options: {
 			json(res, {
 				plan: primarySource.plan,
 				origin: options.origin ?? "pi",
+				originSession: options.originSession ?? null,
 				mode: options.mode || "annotate",
 				filePath: options.filePath,
 				sourceInfo: options.sourceInfo,

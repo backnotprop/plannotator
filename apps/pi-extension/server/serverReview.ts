@@ -5,6 +5,7 @@ import os from "node:os";
 import { basename, resolve as resolvePath } from "node:path";
 
 import { SingleFlight } from "../generated/single-flight.ts";
+import type { ParentSession } from "../generated/ai/ai-context.ts";
 import { contentHash, deleteDraft } from "../generated/draft.ts";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl } from "../generated/config.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
@@ -286,6 +287,9 @@ export async function startReviewServer(options: {
 	gitRef: string;
 	htmlContent: string;
 	origin?: string;
+	/** The agent session that invoked the review, when known — echoed to the
+	 *  browser so Ask AI can offer to fork it (opt-in). */
+	originSession?: ParentSession | null;
 	diffType?: DiffType | WorkspaceDiffType;
 	gitContext?: GitContext;
 	/**
@@ -2085,6 +2089,7 @@ export async function startReviewServer(options: {
 				gitRef: servedGitRef,
 				snapshotId: servedSnapshotId,
 				origin: options.origin ?? "pi",
+				originSession: options.originSession ?? null,
 				mode: isWorkspaceMode ? "workspace" : undefined,
 				diffType: hasLocalAccess || isWorkspaceMode ? servedDiffType : undefined,
 				// Echo the active base so page refresh/reconnect rehydrates the

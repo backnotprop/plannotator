@@ -16,6 +16,7 @@ import {
 	saveToHistory,
 } from "../generated/storage.ts";
 import { createEditorAnnotationHandler } from "./annotations.ts";
+import type { ParentSession } from "../generated/ai/ai-context.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
 	handleDraftRequest,
@@ -83,6 +84,9 @@ export async function startPlanReviewServer(options: {
 	htmlContent: string;
 	origin?: string;
 	permissionMode?: string;
+	/** The agent session this plan was produced by, when known — echoed to
+	 *  the browser so Ask AI can offer to fork it (opt-in). */
+	originSession?: ParentSession | null;
 	sharingEnabled?: boolean;
 	shareBaseUrl?: string;
 	pasteApiUrl?: string;
@@ -265,6 +269,7 @@ export async function startPlanReviewServer(options: {
 					plan: options.plan,
 					origin: options.origin ?? "pi",
 					permissionMode: options.permissionMode,
+					originSession: options.originSession ?? null,
 					previousPlan,
 					versionInfo,
 					sharingEnabled,
