@@ -234,6 +234,9 @@ export async function handleReviewCommand(
     gitRef,
     error: diffError,
     origin: "opencode",
+    originSession: sessionId
+      ? { sessionId, cwd: directory ?? process.cwd(), agent: "opencode" }
+      : null,
     project: (await detectProjectName()) ?? undefined,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
@@ -461,6 +464,9 @@ export async function handleAnnotateCommand(
     markdown,
     filePath: absolutePath,
     origin: "opencode",
+    originSession: sessionId
+      ? { sessionId, cwd: directory ?? process.cwd(), agent: "opencode" }
+      : null,
     mode: annotateMode,
     project: annotateProject,
     folderPath,
@@ -530,7 +536,7 @@ export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
 ): Promise<{ approved: boolean; feedback: string } | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
@@ -584,6 +590,7 @@ export async function handleAnnotateLastCommand(
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
+    originSession: { sessionId, cwd: directory ?? process.cwd(), agent: "opencode" },
     mode: "annotate-last",
     project: lastProject,
     recentMessages: pickerMessages,

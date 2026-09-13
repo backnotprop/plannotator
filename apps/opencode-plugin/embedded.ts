@@ -12,6 +12,10 @@ import { deliverOpenCodePrompt } from "./prompt-delivery-error";
 export interface EmbeddedPlanReviewInput {
   client: any;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin). */
+  sessionId?: string;
+  /** Working directory that session was running in. */
+  cwd?: string;
   sharingEnabled: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
@@ -74,6 +78,9 @@ export async function runEmbeddedPlanReview(
   const server = await startPlannotatorServer({
     plan: input.planContent,
     origin: "opencode",
+    originSession: input.sessionId
+      ? { sessionId: input.sessionId, cwd: input.cwd ?? process.cwd(), agent: "opencode" }
+      : null,
     sharingEnabled: input.sharingEnabled,
     shareBaseUrl: input.shareBaseUrl,
     pasteApiUrl: input.pasteApiUrl,

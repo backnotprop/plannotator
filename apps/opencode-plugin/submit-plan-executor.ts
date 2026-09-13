@@ -42,6 +42,9 @@ export interface SubmitPlanHost {
   reviewPlan(input: {
     planContent: string;
     abortSignal?: AbortSignal;
+    /** The OpenCode session that submitted the plan — lets the review's
+     *  Ask AI offer to fork it for full conversation history. */
+    sessionId: string;
   }): Promise<SubmitPlanReviewResult>;
   resolveTargetAgent(input: {
     requestedAgent?: string;
@@ -102,6 +105,7 @@ Use /plannotator-last or /plannotator-annotate for manual review, or set workflo
     reviewResult = await host.reviewPlan({
       planContent,
       abortSignal: invocation.abortSignal,
+      sessionId: invocation.sessionId,
     });
   } catch (error) {
     invocation.abortSignal?.throwIfAborted();

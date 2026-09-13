@@ -488,6 +488,8 @@ export function canLaunchGatedAnnotate(
 export async function runCliPlanReview(input: {
   client: OpenCodeClient;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin). */
+  sessionId?: string;
   cwd?: string;
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
@@ -500,6 +502,8 @@ export async function runCliPlanReview(input: {
     input: JSON.stringify({
       plan: input.planContent,
       timeoutSeconds: input.timeoutSeconds,
+      sessionId: input.sessionId,
+      directory: input.cwd,
       ...buildBridgePayload(input.bridge),
     }),
     readyLabel: "plan review",
@@ -659,6 +663,8 @@ export async function handleCliCommand(input: {
         cwd,
         input: JSON.stringify({
           arguments: input.rawArgs,
+          sessionId: input.sessionId,
+          directory: cwd,
           // Fail-closed approval-notes handshake (same version-skew reasoning
           // as formatUserFacingCliStderrLine above: the binary and this plugin
           // version independently). The advert lives in the binary's review
@@ -756,6 +762,8 @@ export async function handleCliCommand(input: {
         input: JSON.stringify({
           gate: parsed.gate,
           recentMessages,
+          sessionId: input.sessionId,
+          directory: cwd,
           ...buildBridgePayload(input.bridge),
         }),
         readyLabel: "annotation UI",

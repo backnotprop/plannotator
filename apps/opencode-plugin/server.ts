@@ -223,10 +223,11 @@ const serverPlugin = {
             directory,
             workflowOptions,
           }, {
-            reviewPlan: async ({ planContent }) => await runPlanReview({
+            reviewPlan: async ({ planContent, sessionId }) => await runPlanReview({
               client,
               runtime: workflowOptions.runtime,
               planContent,
+              sessionId,
               sharingEnabled: bridge.sharingEnabled ?? true,
               shareBaseUrl: bridge.shareBaseUrl,
               pasteApiUrl: bridge.pasteApiUrl,
@@ -345,6 +346,8 @@ async function runPlanReview(input: {
   client: V2Client;
   runtime: RuntimeMode;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin). */
+  sessionId?: string;
   sharingEnabled: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
@@ -363,6 +366,8 @@ async function runPlanReview(input: {
       return await embedded.runEmbeddedPlanReview({
         client: input.client,
         planContent: input.planContent,
+        sessionId: input.sessionId,
+        cwd: input.directory,
         sharingEnabled: input.sharingEnabled,
         shareBaseUrl: input.shareBaseUrl,
         pasteApiUrl: input.pasteApiUrl,
@@ -380,6 +385,7 @@ async function runPlanReview(input: {
   return await runCliPlanReview({
     client: input.client,
     planContent: input.planContent,
+    sessionId: input.sessionId,
     cwd: input.directory,
     timeoutSeconds: input.timeoutSeconds,
     abortSignal: input.abortSignal,

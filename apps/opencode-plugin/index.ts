@@ -191,6 +191,8 @@ async function runPlanReview(input: {
   client: any;
   runtime: RuntimeMode;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin). */
+  sessionId?: string;
   sharingEnabled: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
@@ -211,6 +213,8 @@ async function runPlanReview(input: {
       return await embedded.runEmbeddedPlanReview({
         client: input.client,
         planContent: input.planContent,
+        sessionId: input.sessionId,
+        cwd: input.cwd,
         sharingEnabled: input.sharingEnabled,
         shareBaseUrl: input.shareBaseUrl,
         pasteApiUrl: input.pasteApiUrl,
@@ -234,6 +238,7 @@ async function runPlanReview(input: {
   return await runCliPlanReview({
     client: input.client,
     planContent: input.planContent,
+    sessionId: input.sessionId,
     cwd: input.cwd,
     timeoutSeconds: input.timeoutSeconds,
     abortSignal: input.abortSignal,
@@ -559,10 +564,11 @@ Do NOT proceed with implementation until your plan is approved.`;
             directory: ctx.directory,
             workflowOptions,
           }, {
-            reviewPlan: async ({ planContent }) => await runPlanReview({
+            reviewPlan: async ({ planContent, sessionId }) => await runPlanReview({
               client: ctx.client,
               runtime: workflowOptions.runtime,
               planContent,
+              sessionId,
               sharingEnabled: await getSharingEnabled(),
               shareBaseUrl: getShareBaseUrl(),
               pasteApiUrl: getPasteApiUrl(),
