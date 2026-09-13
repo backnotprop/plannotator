@@ -112,8 +112,7 @@ import {
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
-import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
-import { writeUrlQr } from "@plannotator/server/qr";
+import { announceTailscaleSession, enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { LIVE_APP_REMOTE_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
@@ -297,9 +296,7 @@ async function handleTailscaleReady(port: number): Promise<void> {
       }),
     );
   }
-  process.stderr.write(`\n  Plannotator session ready — served over your tailnet:\n  ${url}\n\n`);
-  writeUrlQr(url);
-  await handleServerReady(url, false, port, { skipBrowserOpen: true });
+  await announceTailscaleSession(url, port);
 }
 
 // Global flag: --no-jina (disables Jina Reader for URL annotation)

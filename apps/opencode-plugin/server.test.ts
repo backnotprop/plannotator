@@ -410,10 +410,11 @@ describe("V2 plan review URL delivery", () => {
     });
   });
 
-  // Regression: the fallback must stay SILENT, not fall back to app.log. That
-  // is console.error, the same stderr handleServerReady has already printed the
-  // URL to, so logging here would duplicate the line in remote mode and add a
-  // stray one locally. This hook was empty for exactly that reason.
+  // Regression: the fallback must stay SILENT, not fall back to app.log.
+  // That is console.error, which OpenCode 2 discards unless the host was
+  // started with OPENCODE_PRINT_LOGS=1 — a real gap the transcript notice is
+  // built to close, not a duplicate of anything handleServerReady still
+  // prints here (runEmbeddedPlanReview passes it { announce: false }).
   test("without session.synthetic the plan path stays silent", () => {
     const log = mock((_entry: unknown) => {});
     const client = createV2BridgeClient({

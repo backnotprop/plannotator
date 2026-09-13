@@ -188,11 +188,20 @@ export async function startServerWithSelfPreemption<T>(
 
 async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
 	const browserResult = await openBrowser(serverUrl);
-	if (isRemoteSession()) {
-		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
-	} else if (!browserResult.opened) {
-		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
-	}
+	// Unconditional, mirroring the Bun runtime's stderr line (upstream #1134):
+	// announcing the URL only for remote sessions or failed browser launches left
+	// a closed tab unrecoverable on the common local path. Pi's notification is
+	// the analog of stderr here — the TUI owns the terminal.
+	//
+	// One notify call, not two: Pi's status line overwrites back-to-back
+	// notifies, so a separate follow-up call for the browser-failure case
+	// used to erase the URL the moment it appeared — on a headless box the
+	// user saw "open the URL above" with no URL above it. The failure
+	// context, when there is one, rides the same line as the URL instead.
+	const suffix = !isRemoteSession() && !browserResult.opened
+		? " — could not open a browser automatically, open this URL"
+		: "";
+	ctx.ui.notify(`Plannotator session ready: ${serverUrl}${suffix}`, "info");
 }
 
 async function buildLocalWorkspaceReview(

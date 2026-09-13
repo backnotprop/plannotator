@@ -58,6 +58,54 @@ function runAnnotate(args: string[], envOverrides: Record<string, string> = {}):
   };
 }
 
+/**
+ * Start a real annotate session, wait for the ready line on stderr, then kill
+ * it. Returns everything each stream received.
+ *
+ * The gate never settles on its own here (no client ever connects, and a
+ * session that never received a first client does not auto-dismiss), so the
+ * ready line is the only signal that the server came all the way up, and the
+ * kill is how the session ends.
+ */
+async function runAnnotateUntilReady(args: string[]): Promise<{
+  stdout: string;
+  stderr: string;
+}> {
+  const proc = Bun.spawn([process.execPath, cliEntry, "annotate", ...args], {
+    cwd: fixtureDir,
+    env: {
+      ...process.env,
+      PLANNOTATOR_CWD: fixtureDir,
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
+      PLANNOTATOR_AI: "disabled",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const sinks = { stdout: "", stderr: "" };
+  const drain = async (stream: ReadableStream<Uint8Array>, key: "stdout" | "stderr") => {
+    const decoder = new TextDecoder();
+    try {
+      for await (const chunk of stream) sinks[key] += decoder.decode(chunk, { stream: true });
+    } catch {
+      // The kill below tears the pipes down mid-read; whatever arrived is enough.
+    }
+  };
+  const drained = Promise.all([drain(proc.stdout, "stdout"), drain(proc.stderr, "stderr")]);
+
+  const deadline = Date.now() + 30_000;
+  while (!sinks.stderr.includes("Plannotator session ready: ") && Date.now() < deadline) {
+    await Bun.sleep(50);
+  }
+
+  proc.kill();
+  await proc.exited;
+  await drained;
+  return { stdout: sinks.stdout, stderr: sinks.stderr };
+}
+
 beforeAll(() => {
   if (!existsSync(distDir)) {
     mkdirSync(distDir, { recursive: true });
@@ -250,4 +298,27 @@ describe("plannotator annotate: live app remote hard-off (CLI layer)", () => {
       app.stop(true);
     }
   });
+});
+
+/**
+ * The stdout contract for the always-printed session URL (#1134).
+ *
+ * `--json` and `--hook` reserve stdout for the decision record an agent
+ * parses, so the ready announcement has to stay entirely on stderr. Asserted
+ * through a real session rather than only at `handleServerReady`, because the
+ * bytes an agent reads are the process's, not one function's: any startup
+ * write on either the plain or the hook-native path would corrupt the record.
+ */
+describe("annotate CLI keeps stdout clean while a session is live", () => {
+  test.each([
+    ["json mode", ["notes.md", "--gate", "--json"]],
+    ["hook mode", ["notes.md", "--hook"]],
+  ])("%s: the ready line goes to stderr, stdout stays empty", async (_label, args) => {
+    const result = await runAnnotateUntilReady(args as string[]);
+
+    // Literal, not the exported constant: interpolating the constant would
+    // assert it against itself and stay green if the text ever drifted.
+    expect(result.stderr).toContain("Plannotator session ready: http://localhost:");
+    expect(result.stdout).toBe("");
+  }, 40_000);
 });

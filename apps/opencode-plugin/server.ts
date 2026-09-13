@@ -316,13 +316,15 @@ function getPlanHtml(): string {
  * The embedded runtime's ready hook: put the session URL where a reviewer can
  * see it, and nowhere else.
  *
- * This still must NOT go to `client.app.log`. That is `console.error`, the same
- * stderr stream `handleServerReady` has already printed the URL to, so logging
- * here would duplicate the line in remote mode and add a stray one locally
- * (which is why this hook used to be empty). The transcript notice is a
- * different surface entirely, and on OpenCode 2 it is the only one a remote
- * reviewer can actually see: the host discards a server plugin's stderr unless
- * it was started with `OPENCODE_PRINT_LOGS=1`.
+ * This still must NOT go to `client.app.log`. `runEmbeddedPlanReview` (this
+ * hook's caller) passes `handleServerReady` `{ announce: false }`, because it
+ * runs in-process and shares stderr with OpenCode's opentui renderer — the
+ * raw stderr line would print into the TUI rather than through it. That
+ * leaves this hook as the URL's only channel, and `client.app.log` is not a
+ * substitute: it is `console.error`, and on OpenCode 2 the host discards a
+ * server plugin's stderr unless it was started with `OPENCODE_PRINT_LOGS=1`.
+ * The transcript notice is the one surface a remote reviewer can actually
+ * see.
  *
  * Best-effort in both directions: an older host exposes no `session.synthetic`,
  * so `notifyUrl` is absent and this stays silent, exactly as before.

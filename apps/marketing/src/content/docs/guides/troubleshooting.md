@@ -51,6 +51,14 @@ plannotator sessions --open 2     # reopens session #2
 
 Stale sessions from crashed processes are cleaned up automatically. You can also force cleanup with `plannotator sessions --clean`.
 
+Every session also prints its URL on one line to stderr when it starts:
+
+```
+  Plannotator session ready: http://localhost:54321
+```
+
+That prefix is a stable format, so an agent or a script can grep the line out of the output it already captures. For a session whose output you no longer have, `plannotator sessions` above is the place to look: it lists every server that is still alive, not merely every one that was started.
+
 ## Where does Plannotator store data?
 
 Plannotator-managed files live under `~/.plannotator/` by default:
