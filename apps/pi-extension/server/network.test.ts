@@ -485,3 +485,60 @@ describe("pi WSL configured browser launch", () => {
 		expect(isPosixBrowserTarget("/mnt/c/Program Files/Chrome/chrome.exe")).toBe(false);
 	});
 });
+
+// --- darwin PLANNOTATOR_BROWSER routing (#1391) ---
+
+/** Pretend to run on macOS: the darwin branch is chosen by process.platform alone. */
+function mockDarwin() {
+	Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+}
+
+describe("pi darwin configured browser launch", () => {
+	afterEach(() => {
+		restoreHostPlatform();
+	});
+
+	// The platform is faked so this also runs on Linux CI; the unfaked test
+	// above only reaches the darwin branch on a real Mac.
+	test("a script path is spawned directly with the URL", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-darwin-"));
+		const log = join(dir, "direct.txt");
+		const script = writeExecutable(dir, "handler.sh", `printf '%s' "$1" > '${log}'`);
+		try {
+			clearEnv();
+			mockDarwin();
+			process.env.PLANNOTATOR_BROWSER = script;
+
+			expect(await openBrowser(URL)).toEqual({ opened: true });
+			await waitForFile(log);
+			expect(readFileSync(log, "utf8")).toBe(URL);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	// The other half of the decision table: widening the script branch must not
+	// swallow app names or .app bundles, which only `open -a` can launch.
+	test("an app name or .app bundle still launches through open -a", async () => {
+		for (const value of ["Google Chrome", "/Applications/Firefox.app"]) {
+			const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-darwin-"));
+			const log = join(dir, "open.txt");
+			writeExecutable(dir, "open", `printf '%s' "$*" > '${log}'`);
+			const originalPath = process.env.PATH;
+			try {
+				process.env.PATH = `${dir}${delimiter}${originalPath ?? ""}`;
+				clearEnv();
+				mockDarwin();
+				process.env.PLANNOTATOR_BROWSER = value;
+
+				expect(await openBrowser(URL)).toEqual({ opened: true });
+				await waitForFile(log);
+				expect(readFileSync(log, "utf8")).toBe(`-a ${value} ${URL}`);
+			} finally {
+				if (originalPath === undefined) delete process.env.PATH;
+				else process.env.PATH = originalPath;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}
+	});
+});
