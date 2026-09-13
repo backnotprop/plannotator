@@ -591,6 +591,26 @@ const detectedOrigin: Origin =
   process.env.OMPCODE ? "oh-my-pi" :
   "claude-code";
 
+/**
+ * Best-effort identity of the invoking Claude Code session for surfaces
+ * launched from inside one (a slash command's `!` bang runs this CLI as a
+ * descendant of the agent's shell, so the ancestor-PID walk finds it).
+ * Lets Ask AI offer to fork that session instead of starting fresh.
+ * Returns null for other harnesses or when nothing resolves — forking is
+ * opt-in and falls back to a fresh session, so a miss is harmless.
+ */
+function resolveInvokingClaudeSession(): { sessionId: string; cwd: string; agent: string } | null {
+  if (detectedOrigin !== "claude-code") return null;
+  try {
+    const logPath = resolveSessionLogByAncestorPids();
+    if (!logPath) return null;
+    const sessionId = path.basename(logPath, ".jsonl");
+    return sessionId ? { sessionId, cwd: process.cwd(), agent: "claude-code" } : null;
+  } catch {
+    return null;
+  }
+}
+
 type OpenCodeBridgeAgent = {
   name: string;
   description?: string;
@@ -1147,6 +1167,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
+    originSession: resolveInvokingClaudeSession(),
     project: reviewProject,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
     gitContext,
@@ -1376,6 +1397,7 @@ if (args[0] === "sessions") {
     markdown,
     filePath: absolutePath,
     origin: detectedOrigin,
+    originSession: resolveInvokingClaudeSession(),
     mode: liveAppResolved ? "annotate-app" : annotateMode,
     liveApp: liveAppResolved
       ? {
@@ -1474,6 +1496,9 @@ if (args[0] === "sessions") {
   const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
   let recentMessages: RenderedMessage[] = [];
+  // Claude path only: the transcript the message was read from, so its
+  // basename (<sessionId>.jsonl) can seed Ask AI session forking.
+  let claudeSessionLogPath: string | null = null;
 
   // Copilot CLI sets no env fingerprint, so detection matches ancestor pids
   // against session-state inuse locks (spawns ps). Only attempted when no
@@ -1595,6 +1620,7 @@ if (args[0] === "sessions") {
         if (recent.length > 0) {
           recentMessages = recent;
           lastMessage = recent[0];
+          claudeSessionLogPath = logPath;
           return;
         }
       }
@@ -1629,6 +1655,15 @@ if (args[0] === "sessions") {
   const annotatedMessage = lastMessage;
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
+  // The session the annotated message came from — lets Ask AI offer to fork
+  // it. Only claimed when the harness is certain: Codex via its env thread
+  // id, Claude Code via the resolved transcript (basename is the session id).
+  const annotateLastOriginSession = codexThreadId
+    ? { sessionId: codexThreadId, cwd: projectRoot, agent: "codex" }
+    : detectedOrigin === "claude-code" && claudeSessionLogPath
+      ? { sessionId: path.basename(claudeSessionLogPath, ".jsonl"), cwd: projectRoot, agent: "claude-code" }
+      : null;
+
   // Only ship the picker list when there's a choice to make. The client uses
   // its presence (length > 1) as the signal to render the picker UI.
   const pickerMessages = recentMessages.length > 1
@@ -1639,6 +1674,7 @@ if (args[0] === "sessions") {
     markdown: annotatedMessage.text,
     filePath: "last-message",
     origin: copilotDetected ? "copilot-cli" : detectedOrigin,
+    originSession: annotateLastOriginSession,
     mode: "annotate-last",
     sharingEnabled,
     shareBaseUrl,
@@ -1746,7 +1782,7 @@ if (args[0] === "sessions") {
   // that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ plan?: unknown; timeoutSeconds?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ plan?: unknown; timeoutSeconds?: unknown; sessionId?: unknown; directory?: unknown }>(
     "opencode-plan",
     inputJson,
   );
@@ -1770,6 +1806,13 @@ if (args[0] === "sessions") {
   const server = await startPlannotatorServer({
     plan: planContent,
     origin: "opencode",
+    originSession: typeof input.sessionId === "string" && input.sessionId
+      ? {
+          sessionId: input.sessionId,
+          cwd: typeof input.directory === "string" && input.directory ? input.directory : process.cwd(),
+          agent: "opencode",
+        }
+      : null,
     sharingEnabled: bridgeSharingEnabled,
     shareBaseUrl: bridgeShareBaseUrl,
     pasteApiUrl: bridgePasteApiUrl,
@@ -1826,7 +1869,7 @@ if (args[0] === "sessions") {
   // in a host that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown; sessionId?: unknown; directory?: unknown }>(
     "opencode-review",
     inputJson,
   );
@@ -1958,6 +2001,13 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
+    originSession: typeof input.sessionId === "string" && input.sessionId
+      ? {
+          sessionId: input.sessionId,
+          cwd: typeof input.directory === "string" && input.directory ? input.directory : process.cwd(),
+          agent: "opencode",
+        }
+      : null,
     project: reviewProject,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
@@ -2025,6 +2075,8 @@ if (args[0] === "sessions") {
   const input = parseOpenCodeBridgeInput<{
     gate?: unknown;
     recentMessages?: unknown;
+    sessionId?: unknown;
+    directory?: unknown;
   }>("opencode-annotate-last", inputJson);
 
   const recentMessages = Array.isArray(input.recentMessages)
@@ -2062,6 +2114,13 @@ if (args[0] === "sessions") {
     markdown: lastMessage.text,
     filePath: "last-message",
     origin: "opencode",
+    originSession: typeof input.sessionId === "string" && input.sessionId
+      ? {
+          sessionId: input.sessionId,
+          cwd: typeof input.directory === "string" && input.directory ? input.directory : process.cwd(),
+          agent: "opencode",
+        }
+      : null,
     mode: "annotate-last",
     recentMessages: pickerMessages,
     sharingEnabled: bridgeSharingEnabled,
@@ -2363,9 +2422,16 @@ if (args[0] === "sessions") {
     }
 
     const planProject = (await detectProjectName()) ?? "_unknown";
+    const codexThreadId = process.env.CODEX_THREAD_ID;
     const server = await startPlannotatorServer({
       plan: latestPlan.text,
       origin: "codex",
+      // No Ask AI provider can fork a Codex thread today (the codex provider
+      // declares fork: false), but record the origin honestly — the client
+      // gates its fork toggle on provider capability, so this costs nothing.
+      originSession: codexThreadId
+        ? { sessionId: codexThreadId, cwd: process.cwd(), agent: "codex" }
+        : null,
       sharingEnabled,
       shareBaseUrl,
       pasteApiUrl,
@@ -2440,11 +2506,23 @@ if (args[0] === "sessions") {
 
   const planProject = (await detectProjectName()) ?? "_unknown";
 
+  // The session that produced this plan — echoed to the browser so Ask AI
+  // can offer to fork it (full conversation history) instead of starting
+  // fresh with just the plan text.
+  const planOriginSession = typeof event.session_id === "string" && event.session_id
+    ? {
+        sessionId: event.session_id,
+        cwd: typeof event.cwd === "string" && event.cwd ? event.cwd : process.cwd(),
+        agent: isGemini ? "gemini-cli" : detectedOrigin,
+      }
+    : null;
+
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
     origin: isGemini ? "gemini-cli" : detectedOrigin,
     permissionMode,
+    originSession: planOriginSession,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
