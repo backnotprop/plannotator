@@ -10,6 +10,13 @@ export interface ParentSession {
   sessionId: string;
   /** Working directory the parent session was running in. */
   cwd: string;
+  /**
+   * Harness that owns the parent session (an Origin, e.g. "claude-code",
+   * "opencode"). Lets clients/providers tell whether a given AI provider can
+   * actually fork this session — a Claude Code session ID is meaningless to
+   * the OpenCode provider and vice versa.
+   */
+  agent?: string;
 }
 
 /**

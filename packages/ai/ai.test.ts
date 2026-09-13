@@ -795,6 +795,85 @@ describe("AI endpoints", () => {
     expect(createRes.status).toBe(200);
   });
 
+  test("session creation forks when the context carries a parent session", async () => {
+    const { reg, endpoints } = setup();
+    reg.register(mockProvider("mock"));
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: {
+            mode: "plan-review",
+            plan: { plan: "# Test" },
+            parent: { sessionId: "origin-123", cwd: "/tmp/project", agent: "claude-code" },
+          },
+        }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      sessionId: string;
+      parentSessionId: string | null;
+      forked: boolean;
+    };
+    expect(data.sessionId).toMatch(/^forked-/);
+    expect(data.parentSessionId).toBe("origin-123");
+    expect(data.forked).toBe(true);
+  });
+
+  test("session creation does not fork without a parent, even when the provider can", async () => {
+    const { reg, endpoints } = setup();
+    reg.register(mockProvider("mock"));
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+        }),
+      })
+    );
+    const data = (await res.json()) as { sessionId: string; forked: boolean };
+    expect(data.sessionId).toMatch(/^session-/);
+    expect(data.forked).toBe(false);
+  });
+
+  test("session creation falls back to a fresh session when forking fails", async () => {
+    const { reg, endpoints } = setup();
+    reg.register({
+      ...mockProvider("mock"),
+      async forkSession() {
+        throw new Error("parent session no longer resumable");
+      },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: {
+            mode: "plan-review",
+            plan: { plan: "# Test" },
+            parent: { sessionId: "gone-123", cwd: "/tmp/project", agent: "claude-code" },
+          },
+        }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      sessionId: string;
+      parentSessionId: string | null;
+      forked: boolean;
+    };
+    expect(data.sessionId).toMatch(/^session-/);
+    expect(data.parentSessionId).toBeNull();
+    expect(data.forked).toBe(false);
+  });
+
   test("session creation activates only the resolved provider before createSession", async () => {
     const reg = new ProviderRegistry();
     const sm = new SessionManager();

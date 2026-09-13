@@ -19,6 +19,21 @@ interface DocumentAIChatPanelProps {
   aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
+  /**
+   * Opt-in origin-session forking. When `available`, a toggle is shown
+   * letting the user fork the agent session that produced this document
+   * (full conversation history) instead of starting fresh.
+   */
+  originFork?: {
+    available: boolean;
+    enabled: boolean;
+    onToggle: (enabled: boolean) => void;
+    /** The live session wanted a fork but got a fresh one (e.g. the origin
+     *  session is no longer resumable). */
+    fellBack: boolean;
+    /** Display name of the origin harness, e.g. "Claude Code". */
+    agentName: string;
+  };
 }
 
 function truncate(text: string, max = 180): string {
@@ -64,6 +79,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   aiProviders = [],
   aiConfig,
   onAIConfigChange,
+  originFork,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
@@ -125,6 +141,28 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
               onRespond={onRespondToPermission ?? (() => {})}
             />
           ))}
+        </div>
+      )}
+
+      {originFork?.available && (
+        <div className="border-t border-border/50 px-2 py-1.5 space-y-1">
+          <label
+            className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none"
+            title={`Start the chat as a fork of the ${originFork.agentName} session that produced this document, so answers can draw on its full conversation history. Starts a fresh chat when toggled.`}
+          >
+            <input
+              type="checkbox"
+              checked={originFork.enabled}
+              onChange={(event) => originFork.onToggle(event.target.checked)}
+              className="accent-primary"
+            />
+            Fork the {originFork.agentName} session
+          </label>
+          {originFork.fellBack && (
+            <p className="text-[10px] text-warning">
+              Couldn't fork the original session — answering from document context only.
+            </p>
+          )}
         </div>
       )}
 

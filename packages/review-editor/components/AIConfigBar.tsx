@@ -12,6 +12,20 @@ interface AIConfigBarProps {
   onModelChange: (model: string) => void;
   onReasoningEffortChange: (effort: string | null) => void;
   hasSession: boolean;
+  /**
+   * Opt-in origin-session forking (Ask AI). When `available`, a toggle row
+   * above the bar lets the user fork the agent session that invoked the
+   * review (full conversation history) instead of starting fresh.
+   */
+  originFork?: {
+    available: boolean;
+    enabled: boolean;
+    onToggle: (enabled: boolean) => void;
+    /** The live session wanted a fork but got a fresh one. */
+    fellBack: boolean;
+    /** Display name of the origin harness, e.g. "Claude Code". */
+    agentName: string;
+  };
 }
 
 export const AIConfigBar: React.FC<AIConfigBarProps> = ({
@@ -23,6 +37,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   onModelChange,
   onReasoningEffortChange,
   hasSession,
+  originFork,
 }) => {
   const [showSessionNote, setShowSessionNote] = useState(false);
   const [openMenu, setOpenMenu] = useState<'provider' | 'model' | 'effort' | null>(null);
@@ -100,7 +115,29 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   );
 
   return (
-    <div ref={barRef} className="relative border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+    <div ref={barRef} className="relative border-t border-border/50 text-[11px] text-muted-foreground">
+      {originFork?.available && (
+        <div className="px-2 py-1.5 border-b border-border/50 space-y-1">
+          <label
+            className="flex items-center gap-1.5 cursor-pointer select-none"
+            title={`Start the chat as a fork of the ${originFork.agentName} session that invoked this review, so answers can draw on its full conversation history. Starts a fresh chat when toggled.`}
+          >
+            <input
+              type="checkbox"
+              checked={originFork.enabled}
+              onChange={(event) => originFork.onToggle(event.target.checked)}
+              className="accent-primary"
+            />
+            Fork the {originFork.agentName} session
+          </label>
+          {originFork.fellBack && (
+            <p className="text-[10px] text-warning">
+              Couldn't fork the original session — answering from the diff context only.
+            </p>
+          )}
+        </div>
+      )}
+      <div className="px-2 py-1.5 flex items-center gap-1.5">
       {/* Provider selector */}
       {providers.length > 1 ? (
         <div className="relative">
@@ -256,6 +293,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
       {showSessionNote && (
         <span className="text-[10px] text-amber-500 animate-pulse">New chat session</span>
       )}
+      </div>
     </div>
   );
 };

@@ -14,6 +14,7 @@
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
+import type { ParentSession } from "@plannotator/ai";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -81,6 +82,12 @@ export interface AnnotateServerOptions {
   htmlContent: string;
   /** Origin identifier for UI customization */
   origin?: Origin;
+  /**
+   * The agent session the annotated content came from, when known (e.g.
+   * annotate-last resolving the invoking session's transcript). Echoed to the
+   * browser so Ask AI can offer to fork it (opt-in) instead of starting fresh.
+   */
+  originSession?: ParentSession | null;
   /** UI mode: "annotate" for files, "annotate-last" for last agent message,
    *  "annotate-folder" for folders, "annotate-app" for live local apps */
   mode?: "annotate" | "annotate-last" | "annotate-folder" | "annotate-app";
@@ -232,6 +239,7 @@ export async function startAnnotateServer(
     filePath,
     htmlContent,
     origin,
+    originSession,
     mode = "annotate",
     folderPath,
     recentMessages,
@@ -707,6 +715,7 @@ export async function startAnnotateServer(
             return Response.json({
               plan: "",
               origin,
+              originSession: originSession ?? null,
               mode,
               filePath,
               sourceInfo: sourceInfo ?? liveApp.targetUrl,
@@ -760,6 +769,7 @@ export async function startAnnotateServer(
             return Response.json({
               plan: primarySource.plan,
               origin,
+              originSession: originSession ?? null,
               mode,
               filePath,
               sourceInfo,

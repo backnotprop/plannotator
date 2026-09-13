@@ -47,6 +47,7 @@ describe("executeSubmitPlan", () => {
     expect(reviewPlan).toHaveBeenCalledWith({
       planContent: "# Plan\n\nShip it",
       abortSignal: undefined,
+      sessionId: "session-1",
     });
   });
 

@@ -5,6 +5,7 @@ import {
   type AskAIParams,
   type PendingPermission,
 } from '@plannotator/ui/hooks/useAIChat';
+import type { ParentSession } from '@plannotator/core/ai-context';
 import { buildReviewContextPreamble } from '@plannotator/ui/utils/aiPrompt';
 export type { AIChatEntry, PendingPermission };
 
@@ -27,6 +28,9 @@ interface UseAIChatOptions {
   providerId?: string | null;
   model?: string | null;
   reasoningEffort?: string | null;
+  /** Fork source for Ask AI (opt-in): the agent session that invoked the
+   *  review. Null/undefined starts a fresh session instead. */
+  parent?: ParentSession | null;
 }
 
 export function useAIChat({
@@ -38,11 +42,13 @@ export function useAIChat({
   providerId,
   model,
   reasoningEffort,
+  parent,
 }: UseAIChatOptions) {
   const chat = useSharedAIChat({
     context: {
       mode: 'code-review',
       review: { patch, diffType, base: base ?? undefined },
+      ...(parent ? { parent } : {}),
     },
     providerId,
     model,

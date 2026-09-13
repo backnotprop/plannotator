@@ -27,6 +27,13 @@ export interface AIProviderOption {
   id: string;
   name: string;
   models?: AIProviderModel[];
+  /** Server-reported capabilities (from /api/ai/capabilities). */
+  capabilities?: {
+    fork?: boolean;
+    resume?: boolean;
+    streaming?: boolean;
+    tools?: boolean;
+  };
 }
 
 export interface AIProviderSettings {
@@ -45,6 +52,21 @@ export interface AIProviderSelection {
 
 export function originHasDedicatedAIProvider(origin: Origin | null | undefined): boolean {
   return getAgentAIProviderTypes(origin).length > 0;
+}
+
+/**
+ * Whether `provider` can fork the given origin session: the provider must
+ * report fork support AND be the natural provider for the harness that owns
+ * the session — a Claude Code session id means nothing to the OpenCode
+ * provider, and vice versa.
+ */
+export function canProviderForkOriginSession(
+  provider: AIProviderOption | null | undefined,
+  originSession: { agent?: string } | null | undefined,
+): boolean {
+  if (!provider || !originSession?.agent) return false;
+  if (provider.capabilities?.fork !== true) return false;
+  return getAgentAIProviderTypes(originSession.agent as Origin).includes(provider.name);
 }
 
 /**

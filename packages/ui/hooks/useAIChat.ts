@@ -205,6 +205,10 @@ export function useAIChat({
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Whether the live session was forked from the invoking agent session
+  // (true), started fresh (false), or not created yet (null). Lets the UI
+  // be honest when a requested fork fell back to a fresh session.
+  const [sessionForked, setSessionForked] = useState<boolean | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   // In-flight server abort (from Stop or a superseding question). The next ask()
@@ -248,11 +252,12 @@ export function useAIChat({
         throw new Error(data.error || `HTTP ${res.status}`);
       }
 
-      const data = await res.json() as { sessionId: string };
+      const data = await res.json() as { sessionId: string; forked?: boolean };
       if (signal.aborted || epoch !== sessionEpochRef.current) {
         void safeAbort(data.sessionId); // fire-and-forget cleanup of the orphaned session
         throw createAbortError('AI session creation was superseded');
       }
+      setSessionForked(data.forked ?? false);
       setSessionId(data.sessionId);
       return data.sessionId;
     } finally {
@@ -490,6 +495,7 @@ export function useAIChat({
       pendingAbortRef.current = postServerAbort();
     }
     setSessionId(null);
+    setSessionForked(null);
     setIsCreatingSession(false);
     setIsStreaming(false);
   }, [postServerAbort, setSessionId]);
@@ -503,6 +509,7 @@ export function useAIChat({
       pendingAbortRef.current = postServerAbort();
     }
     setThread(createThread(threadTitle));
+    setSessionForked(null);
     setIsCreatingSession(false);
     setIsStreaming(false);
     setError(null);
@@ -531,5 +538,6 @@ export function useAIChat({
     resetSession,
     resetThread,
     sessionId: thread.sessionId,
+    sessionForked,
   };
 }

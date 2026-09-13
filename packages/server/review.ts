@@ -11,6 +11,7 @@
 
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
+import type { ParentSession } from "@plannotator/ai";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
@@ -163,6 +164,12 @@ export interface ReviewServerOptions {
   htmlContent: string;
   /** Origin identifier for UI customization */
   origin?: Origin;
+  /**
+   * The agent session that invoked the review, when known (e.g. launched via
+   * a slash command inside an agent session). Echoed to the browser so Ask AI
+   * can offer to fork it (opt-in) instead of starting fresh.
+   */
+  originSession?: ParentSession | null;
   /** Current diff type being displayed */
   diffType?: DiffType | WorkspaceDiffType;
   /** Git context with branch info and available diff options */
@@ -275,6 +282,7 @@ export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
   const { htmlContent, origin, gitContext, sharingEnabled = true, shareBaseUrl, onReady } = options;
+  const originSession = options.originSession ?? null;
   // Session-constant capability advert; rides every diff payload (see the
   // option's doc). Absent option = false, so old callers advertise honestly.
   const approvalNotesSupported = options.approvalNotesSupported === true;
@@ -2069,6 +2077,7 @@ export async function startReviewServer(
               gitRef: servedGitRef,
               snapshotId: servedSnapshotId,
               origin,
+              originSession,
               mode: isWorkspaceMode ? "workspace" : undefined,
               diffType: hasLocalAccess || isWorkspaceMode ? servedDiffType : undefined,
               // Echo the active base so a page refresh or reconnect rehydrates

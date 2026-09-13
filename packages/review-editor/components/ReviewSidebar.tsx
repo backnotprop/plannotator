@@ -74,6 +74,14 @@ interface ReviewSidebarProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
+  /** Opt-in origin-session forking (Ask AI) — forwarded to AITab. */
+  originFork?: {
+    available: boolean;
+    enabled: boolean;
+    onToggle: (enabled: boolean) => void;
+    fellBack: boolean;
+    agentName: string;
+  };
   // Agent props
   agentJobs?: AgentJobInfo[];
   agentCapabilities?: AgentCapabilities | null;
@@ -273,6 +281,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   aiConfig,
   onAIConfigChange,
   hasAISession,
+  originFork,
   agentJobs,
   agentCapabilities,
   onAgentLaunch,
@@ -737,6 +746,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               aiConfig={aiConfig}
               onAIConfigChange={onAIConfigChange}
               hasAISession={hasAISession}
+              originFork={originFork}
             />
           )}
 
