@@ -467,12 +467,18 @@ not hand the turn to an earlier dialog.
 5. **Keyboard.** With the panel open, `Tab` cycles only inside it and wraps at both ends;
    `Mod+Enter` does nothing (no plan approved, no review posted). Closing it returns focus to the
    app.
-6. **Content.** Both copy buttons put the exact install command on the clipboard and flip to a
-   check for two seconds. Every link opens in a new tab: the two X demos, the three GitHub repos,
-   the two issue trackers, and the releases page.
-7. **Theme and width.** Toggle light/dark: the panel, the terminal preview and the code rows all
-   follow the active palette. At ~400px wide the cards stack, nothing overflows horizontally, and
-   the footer wraps.
+6. **Video.** The Full demo starts playing on its own, silent and looping, with a real frame
+   showing before playback (never a black box). Hover the footage: a small pause control
+   appears bottom-left and pauses it; the centered play button brings it back. Switch to
+   **Lite**: the footage changes, the "Watch on X" link now points at the Lite post, and Full
+   restores the first demo. With "Reduce motion" on in the OS, the poster waits behind a play
+   button and nothing autoplays. Offline (DevTools, Network, Offline, then reload): the frame
+   keeps its place and offers "Watch on X" instead of a broken player.
+7. **Links.** Every link opens in a new tab: the two GitHub repos and the X post for the demo
+   currently selected.
+8. **Theme and width.** Toggle light/dark: the panel chrome follows the active palette around
+   the dark footage. At ~400px wide the video spans the panel, the headline, switch and actions
+   wrap without horizontal overflow, and "Got it" stays reachable.
 
 ## Need Help?
 

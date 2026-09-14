@@ -322,13 +322,34 @@ registry default into a cookie on first access, so a registry-backed flag could
 never tell "never seen" from "seeded default".
 
 The component is `packages/ui/components/TerminalToolsAnnouncementDialog.tsx`
-(shared shell: portal, `z-[100]`, `max-w-5xl`, hand-rolled Escape + Tab wrap +
-focus restore, `data-terminal-tools-announcement-dialog`). Two deliberate
-departures from its siblings: the backdrop dismisses (the panel collects no
-decision, so there is nothing to lose by closing it impatiently), and its
-keydown listener is registered on the CAPTURE phase and swallows `Mod+Enter`,
-so a keystroke aimed at the announcement cannot approve a plan or post a review
-behind it.
+(shared shell: portal, `z-[100]`, hand-rolled Escape + Tab wrap + focus
+restore, `data-terminal-tools-announcement-dialog`). It is video first: the
+real demo footage fills the top of the panel edge to edge, and the text under
+it is one headline and one sentence, then one action row (star the two repos,
+"Watch on X", "Got it"). There is no mock terminal, no install commands, no
+feature list; the repo pages carry all of that. Two deliberate departures from
+its siblings: the backdrop dismisses (the panel collects no decision, so there
+is nothing to lose by closing it impatiently), and its keydown listener is
+registered on the CAPTURE phase and swallows `Mod+Enter`, so a keystroke aimed
+at the announcement cannot approve a plan or post a review behind it.
+
+**Media is hosted, not bundled.** The two demos (`tui-herdr-full-demo` and
+`tui-herdr-lite-demo`, mp4 + webm + poster jpg each, ~23MB together) live in
+`apps/marketing/public/assets/` and are served from
+`https://plannotator.ai/assets/` once the marketing deploy syncs them, the same
+precedent as `GuideIntroDialog`'s hero image (the Edit Mode recording is small
+enough to inline; these are not). The `<video>` is `muted playsInline loop`
+with `preload="auto"`, mp4 first in source order, and `autoPlay` unless
+`prefers-reduced-motion` matches, in which case the poster waits behind a
+play button. A `Full | Lite` segmented switch (`role="tablist"`) swaps the
+footage and the "Watch on X" link together; the panel is keyed per demo so
+playback and load-failure state reset with it. If neither source can load
+(offline), the frame keeps its place and shows a "Watch on X" link over it.
+The panel's width follows the viewport HEIGHT as well as its width
+(`min(1120px, 100%, (100dvh - 14rem) * 1280/806)`) so the video never
+scrolls out of view on a short window. No CSP is involved: the app HTML ships
+no `Content-Security-Policy`, and the servers only set one on sandboxed
+artifact responses.
 
 **Ordering: LAST in each app's chain, never first.** Code review gates it
 through `terminalToolsAnnouncementCanShow` on guide intro, look-and-feel, review
