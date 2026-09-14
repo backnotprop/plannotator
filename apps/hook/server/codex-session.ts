@@ -17,8 +17,6 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-import { normalizePlanText } from "./plan-normalization";
-
 // --- Types ---
 
 type CodexPlanSource = "plan-item" | "assistant-message";
@@ -61,6 +59,15 @@ export interface GetLatestCodexPlanOptions {
 }
 
 export type CodexStopSkipReason = "missing-turn-id" | "missing-turn-marker";
+
+export interface CodexStopPlanLookup {
+  plan: CodexPlanResult | null;
+  /**
+   * Why no plan was looked for at all, as opposed to a turn that simply
+   * produced none. Diagnostic only: both outcomes are a silent no-op.
+   */
+  skipReason: CodexStopSkipReason | null;
+}
 
 const TURN_START_TYPES = new Set(["task_started", "turn_started"]);
 const TURN_COMPLETE_TYPES = new Set(["task_complete", "turn_completed"]);
@@ -215,40 +222,36 @@ function findLastIndex(
   return -1;
 }
 
-function findMatchingTurnMarkerIndex(
-  entries: RolloutEntry[],
-  turnId: string,
-): number {
-  return findLastIndex(
-    entries,
-    (entry) =>
-      (
-        (entry.type === "event_msg" && TURN_START_TYPES.has(entry.payload?.type || "")) ||
-        entry.type === "turn_context"
-      ) &&
-      getTurnId(entry) === turnId,
+/**
+ * A rollout line that opens — or reopens — a turn: the turn's `task_started`
+ * event and every `turn_context` snapshot Codex writes for it.
+ */
+function isTurnMarker(entry: RolloutEntry): boolean {
+  return (
+    (entry.type === "event_msg" &&
+      TURN_START_TYPES.has(entry.payload?.type || "")) ||
+    entry.type === "turn_context"
   );
 }
 
-function findTurnStartIndex(entries: RolloutEntry[], turnId?: string): number {
-  const matchingTurnStart = turnId
-    ? findMatchingTurnMarkerIndex(entries, turnId)
-    : -1;
-  if (matchingTurnStart !== -1) return matchingTurnStart;
+function getTurnId(entry: RolloutEntry): string | null {
+  const turnId = entry.payload?.turn_id;
+  return typeof turnId === "string" && turnId ? turnId : null;
+}
 
-  const lastTurnStart = findLastIndex(
-    entries,
-    (entry) =>
-      entry.type === "event_msg" &&
-      TURN_START_TYPES.has(entry.payload?.type || "")
+/**
+ * Index of the FIRST marker naming `turnId` — where that turn begins in this
+ * rollout file — or -1 when the turn is not anchored in the file at all.
+ *
+ * Deliberately not the LAST marker: mid-turn compaction re-emits a
+ * `turn_context` line carrying the same turn id as the in-flight turn (Codex
+ * `Session::replace_compacted_history`), so the last marker sits after the
+ * compaction point and a plan the turn produced before it would be invisible.
+ */
+function findTurnStartIndex(entries: RolloutEntry[], turnId: string): number {
+  return entries.findIndex(
+    (entry) => isTurnMarker(entry) && getTurnId(entry) === turnId
   );
-  if (lastTurnStart !== -1) return lastTurnStart;
-
-  const lastTurnContext = findLastIndex(
-    entries,
-    (entry) => entry.type === "turn_context"
-  );
-  return lastTurnContext === -1 ? 0 : lastTurnContext;
 }
 
 function findActiveTurnStartIndex(entries: RolloutEntry[]): number {
@@ -290,11 +293,11 @@ function findLastHookPromptIndex(
 
 function getPlanItemText(
   entry: RolloutEntry,
-  turnId?: string
+  turnId: string
 ): string | null {
   if (entry.type !== "event_msg") return null;
   if (entry.payload?.type !== "item_completed") return null;
-  if (turnId && entry.payload?.turn_id !== turnId) return null;
+  if (entry.payload?.turn_id !== turnId) return null;
 
   const itemType = entry.payload?.item?.type;
   if (itemType !== "Plan" && itemType !== "plan") return null;
@@ -312,22 +315,6 @@ function getAssistantProposedPlanText(entry: RolloutEntry): string | null {
   if (!messageText) return null;
 
   return extractLastProposedPlan(messageText);
-}
-
-function getTurnId(entry: RolloutEntry): string | null {
-  const turnId = entry.payload?.turn_id;
-  return typeof turnId === "string" && turnId ? turnId : null;
-}
-
-export function getCodexStopSkipReason(
-  rolloutPath: string,
-  turnId?: string,
-): CodexStopSkipReason | null {
-  if (!turnId?.trim()) return "missing-turn-id";
-  const entries = parseRolloutEntries(rolloutPath);
-  return findMatchingTurnMarkerIndex(entries, turnId) === -1
-    ? "missing-turn-marker"
-    : null;
 }
 
 export function logCodexStopSkip(
@@ -348,17 +335,15 @@ export function logCodexStopSkip(
 function collectPlanCandidates(
   entries: RolloutEntry[],
   startIndex: number,
-  turnId?: string
+  turnId: string
 ): CodexPlanCandidate[] {
   const candidates: CodexPlanCandidate[] = [];
   let activeTurnId: string | null = null;
 
   for (let i = Math.max(startIndex, 0); i < entries.length; i++) {
     const entry = entries[i];
-    if (
-      (entry.type === "event_msg" && TURN_START_TYPES.has(entry.payload?.type || "")) ||
-      entry.type === "turn_context"
-    ) {
+    if (isTurnMarker(entry)) {
+      // A `turn_context` line may omit the id; those keep the active turn.
       const boundaryTurnId = getTurnId(entry);
       if (boundaryTurnId) activeTurnId = boundaryTurnId;
     }
@@ -368,10 +353,10 @@ function collectPlanCandidates(
       candidates.push({ index: i, text: planItemText, source: "plan-item" });
     }
 
+    // Unlike plan items, a raw assistant <proposed_plan> carries no turn id of
+    // its own, so it counts only while the scan is inside the named turn.
     const assistantPlanText =
-      !turnId || activeTurnId === turnId
-        ? getAssistantProposedPlanText(entry)
-        : null;
+      activeTurnId === turnId ? getAssistantProposedPlanText(entry) : null;
     if (assistantPlanText) {
       candidates.push({
         index: i,
@@ -486,26 +471,64 @@ export function getRecentCodexMessages(
  * When stopHookActive is true, this only returns a changed post-feedback plan:
  * - no plan after the last hook prompt => null
  * - identical plan after the last hook prompt => null
+ *
+ * Requires options.turnId, and requires that turn to be anchored in the file:
+ * see resolveCodexStopPlan, which this thin wrapper drops the reason from.
  */
 export function getLatestCodexPlan(
   rolloutPath: string,
   options: GetLatestCodexPlanOptions = {}
 ): CodexPlanResult | null {
-  const entries = parseRolloutEntries(rolloutPath);
-  if (entries.length === 0) return null;
-  // Stop payloads without a turn id cannot safely distinguish a new plan from
-  // a previous assistant <proposed_plan>; fail closed instead of resurfacing it.
-  if (!options.turnId) return null;
+  return resolveCodexStopPlan(rolloutPath, options).plan;
+}
 
-  const turnStartIndex = findTurnStartIndex(entries, options.turnId);
-  const candidates = collectPlanCandidates(
-    entries,
-    turnStartIndex,
-    options.turnId
-  );
+/**
+ * The Stop hook's single entry point: the plan to review, plus the reason no
+ * plan was looked for. Reads and parses the rollout at most once — the hook
+ * needs both answers and the file is the whole session transcript.
+ */
+export function resolveCodexStopPlan(
+  rolloutPath: string,
+  options: GetLatestCodexPlanOptions = {}
+): CodexStopPlanLookup {
+  // A Stop payload without a turn id cannot tell a plan produced in this turn
+  // from an already-decided <proposed_plan> earlier in the thread, so fail
+  // closed — before the file is read, so stale content is never even loaded.
+  // Codex itself always sends one (`StopCommandInput.turn_id` is a required
+  // String), so this is a guard against a foreign or truncated payload.
+  const turnId = options.turnId?.trim();
+  if (!turnId) return { plan: null, skipReason: "missing-turn-id" };
+
+  const entries = parseRolloutEntries(rolloutPath);
+  // The named turn must be anchored in THIS rollout file. Without an anchor,
+  // every plan in the file belongs to some other turn — the normal shape of an
+  // older segment of a split thread, which routinely ends with an
+  // already-decided plan that must not be reopened.
+  const turnStartIndex = findTurnStartIndex(entries, turnId);
+  if (turnStartIndex === -1) {
+    return { plan: null, skipReason: "missing-turn-marker" };
+  }
+
+  return {
+    plan: findPlanInTurn(entries, turnStartIndex, turnId, !!options.stopHookActive),
+    skipReason: null,
+  };
+}
+
+function normalizePlan(text: string): string {
+  return text.replace(/\r\n/g, "\n").trim();
+}
+
+function findPlanInTurn(
+  entries: RolloutEntry[],
+  turnStartIndex: number,
+  turnId: string,
+  stopHookActive: boolean
+): CodexPlanResult | null {
+  const candidates = collectPlanCandidates(entries, turnStartIndex, turnId);
   if (candidates.length === 0) return null;
 
-  if (!options.stopHookActive) {
+  if (!stopHookActive) {
     const latestPlan = pickLatestPreferredPlan(candidates);
     return latestPlan
       ? { text: latestPlan.text, source: latestPlan.source }
@@ -536,8 +559,8 @@ export function getLatestCodexPlan(
 
   if (
     latestBeforeHookPrompt &&
-    normalizePlanText(latestBeforeHookPrompt.text) ===
-      normalizePlanText(latestAfterHookPrompt.text)
+    normalizePlan(latestBeforeHookPrompt.text) ===
+      normalizePlan(latestAfterHookPrompt.text)
   ) {
     return null;
   }
