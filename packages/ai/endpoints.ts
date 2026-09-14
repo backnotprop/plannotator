@@ -13,9 +13,10 @@
  *   GET  /api/ai/capabilities  — Check if AI features are available
  */
 
-import type { AIContext, AIMessage, CreateSessionOptions } from "./types.ts";
+import type { AIContext, AIMessage, CreateSessionOptions, ParentSession } from "./types.ts";
 import type { ProviderRegistry } from "./provider.ts";
 import type { SessionManager } from "./session-manager.ts";
+import { matchesAgentProvider, type Origin } from "@plannotator/core/agents";
 
 /** Canonical paths handled by the shared AI endpoint runtime. */
 export const AI_ENDPOINT_PATHS = [
@@ -54,6 +55,13 @@ export interface CreateSessionRequest {
   maxBudgetUsd?: number;
   /** Reasoning effort (Codex only). */
   reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  /**
+   * Fork the server-known origin session (the agent session that invoked
+   * this Plannotator surface — see `AIEndpointDeps.originSession`) instead of
+   * starting fresh. The client never sends a `ParentSession` itself; this
+   * boolean is the only origin-fork signal that crosses the wire (#1519).
+   */
+  forkOrigin?: boolean;
 }
 
 export interface QueryRequest {
@@ -85,6 +93,31 @@ export interface AIEndpointDeps {
   beforeCapabilities?: () => Promise<void> | void;
   /** Optional hook to finish provider-specific lazy initialization before creating a session. */
   beforeProviderSession?: (providerId: string) => Promise<void> | void;
+  /**
+   * The agent session that invoked this Plannotator surface, when known
+   * (resolved server-side at launch — see `createAIRuntime`). Never sent by
+   * the client; a `forkOrigin: true` session request forks this instead
+   * (#1519). Absent/null when this surface didn't come from a live agent
+   * session, or the harness can't be resolved.
+   */
+  originSession?: ParentSession | null;
+}
+
+/**
+ * Registry ids of providers that can fork `agent`'s session: they declare
+ * `capabilities.fork` AND are the provider that natively owns that harness
+ * (`matchesAgentProvider`, packages/core/agents.ts — see the "Ask AI
+ * Provider Defaults" table in AGENTS.md). Instance ids can be custom, so
+ * this matches on registry id OR provider type name, the same rule the
+ * client uses to pick a default provider for an origin (`findOriginAIProvider`
+ * in packages/ui/utils/aiProvider.ts) — id-only matching would silently miss
+ * a custom instance id. Computed once per capabilities response.
+ */
+function originForkProviderIds(agent: Origin, registry: ProviderRegistry): string[] {
+  return registry.list().filter((id) => {
+    const provider = registry.get(id);
+    return !!provider?.capabilities.fork && matchesAgentProvider(agent, id, provider.name);
+  });
 }
 
 const MAX_CLIENT_MAX_TURNS = 99;
@@ -131,6 +164,7 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
     getCwd,
     beforeCapabilities,
     beforeProviderSession,
+    originSession,
   } = deps;
 
   return {
@@ -157,10 +191,17 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           models: p.models ?? [],
         };
       });
+      // Origin-fork availability (#1519): advertised only when this launch
+      // knows its invoking agent session AND that harness is one of the two
+      // origins any provider can actually fork today.
+      const originFork = originSession?.agent
+        ? { agent: originSession.agent, providerIds: originForkProviderIds(originSession.agent, registry) }
+        : null;
       return Response.json({
         available: !!defaultEntry,
         providers: providerDetails,
         defaultProvider: defaultEntry?.id ?? null,
+        originFork,
       });
     },
 
@@ -170,14 +211,21 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       const body = (await req.json()) as CreateSessionRequest;
-      const { context, providerId, model, maxTurns, maxBudgetUsd, reasoningEffort } = body;
+      const { providerId, model, maxTurns, maxBudgetUsd, reasoningEffort, forkOrigin } = body;
 
-      if (!context?.mode) {
+      if (!body.context?.mode) {
         return Response.json(
           { error: "Missing context.mode" },
           { status: 400 }
         );
       }
+
+      // The client only ever sends the `forkOrigin` boolean — the actual
+      // ParentSession lives server-side (see AIEndpointDeps.originSession)
+      // and is never round-tripped through the browser (#1519).
+      const context: AIContext = forkOrigin && originSession
+        ? { ...body.context, parent: originSession }
+        : body.context;
 
       // Resolve provider: by ID, or default
       const providerEntry = providerId

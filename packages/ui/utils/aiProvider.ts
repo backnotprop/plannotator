@@ -7,7 +7,7 @@
  */
 
 import { storage } from './storage';
-import { AGENT_CONFIG, getAgentAIProviderTypes, type Origin } from '@plannotator/core/agents';
+import { AGENT_CONFIG, getAgentAIProviderTypes, matchesAgentProvider, type Origin } from '@plannotator/core/agents';
 
 const PROVIDER_KEY = 'plannotator-ai-provider';
 const MODELS_KEY = 'plannotator-ai-models';
@@ -115,18 +115,15 @@ export function savePreferredModel(providerId: string, modelId: string): void {
 
 /**
  * Find the first available provider that naturally matches the current origin.
- * Instance IDs can be custom, so we match both the registry ID and provider type.
+ * Instance IDs can be custom, so we match both the registry ID and provider type
+ * (`matchesAgentProvider`, packages/core/agents.ts — the same rule
+ * `originForkProviderIds` uses server-side, packages/ai/endpoints.ts, #1519).
  */
 export function findOriginAIProvider(
   providers: AIProviderOption[],
   origin: Origin | null | undefined,
 ): AIProviderOption | null {
-  const providerTypes = getAgentAIProviderTypes(origin);
-  for (const providerType of providerTypes) {
-    const provider = providers.find(p => p.id === providerType || p.name === providerType);
-    if (provider) return provider;
-  }
-  return null;
+  return providers.find(p => matchesAgentProvider(origin, p.id, p.name)) ?? null;
 }
 
 export function resolveAIModelForProvider(

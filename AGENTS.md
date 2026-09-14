@@ -444,6 +444,8 @@ Ask AI providers are detected independently from installed/authenticated local C
 
 Automatic resolution is session-only and never writes a preference. Explicit per-origin choices are persisted in cookies, so a user can override the automatic match for one agent without changing the default for another.
 
+> **Origin-session forking (#1519):** only `claude-code` and `opencode` are ever live `originFork` agents — they're the two providers that declare `capabilities.fork: true` (`packages/ai/providers/claude-agent-sdk.ts`, `.../opencode-sdk.ts`; `codex-sdk` and `pi-sdk` both declare `fork: false`). `/api/ai/capabilities`'s `originFork.providerIds` is computed server-side by matching each registered provider's registry **id or type name** against this same table's provider types for `originFork.agent` (`matchesAgentProvider` in `packages/core/agents.ts`, used by `originForkProviderIds` in `packages/ai/endpoints.ts`) — instance ids can be custom, so id-only matching would silently miss one; this is the same rule the client uses to pick a default provider for an origin (`findOriginAIProvider` in `packages/ui/utils/aiProvider.ts`). The client (`useOriginFork` in `packages/ui/hooks/useOriginFork.ts`) shows the "Fork the &lt;agent&gt; session" toggle only when the *effective* provider id (explicit selection if it resolves to a real, current provider, else the server's `defaultProvider` — never array order) is in that list, and posts `forkOrigin: true` on `/api/ai/session` when armed.
+
 > **Codex transport note:** the `codex-sdk` provider id is a stable identifier only — it no longer uses `@openai/codex-sdk` / `codex exec`. It drives a long-lived `codex app-server` process over JSON-RPC (`packages/ai/providers/codex-app-server.ts`), which respects the user's/enterprise-managed approval policy and supports interactive Allow/Deny approvals. The id stays `codex-sdk` to preserve saved cookie preferences, the `agents.ts` mapping, and the UI reasoning-effort gate.
 
 > **OpenCode transport note:** the `opencode-sdk` provider spawns its own `opencode serve` per process on an OS-assigned port (`port: 0`) and never attaches to a server it did not spawn (an attached server can't be cleaned up by us, and opencode's per-directory instances accumulate in it without eviction). The spawned server is closed on dispose and on process exit. Model discovery is deferred behind the provider initializer (`?activate=` from the model picker, or the first opencode session) exactly like Codex — nothing spawns at server boot, so the picker lists opencode with an empty model list until first activation. Regression-pinned by `packages/ai/providers/opencode-sdk.test.ts`.
@@ -590,8 +592,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |
 | `/api/editor-annotation` | POST/DELETE | Add or remove an editor annotation (VS Code only) |
-| `/api/ai/capabilities` | GET | Check if AI features are available |
-| `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/capabilities` | GET | Check if AI features are available. Also reports `originFork: { agent, providerIds } \| null` (#1519): when this launch knows the agent session that invoked it, `agent` names its harness and `providerIds` are the registry ids of providers that can fork it (`capabilities.fork` AND natively own that harness — see "Ask AI Provider Defaults"); `null` when there's no known origin session |
+| `/api/ai/session` | POST | Create or fork an AI session (body may set `forkOrigin: true` to fork the session named by `originFork` — for that path the server supplies the actual `ParentSession` itself, so the client never needs to construct one) |
 | `/api/ai/query` | POST | Send a message and stream the response (SSE) |
 | `/api/ai/abort` | POST | Abort the current query |
 | `/api/ai/permission` | POST | Respond to a permission request |
@@ -624,8 +626,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |
 | `/api/editor-annotation` | POST/DELETE | Add or remove an editor annotation (VS Code only) |
-| `/api/ai/capabilities` | GET | Check if AI features are available |
-| `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/capabilities` | GET | Check if AI features are available. Also reports `originFork: { agent, providerIds } \| null` (#1519): when this launch knows the agent session that invoked it, `agent` names its harness and `providerIds` are the registry ids of providers that can fork it (`capabilities.fork` AND natively own that harness — see "Ask AI Provider Defaults"); `null` when there's no known origin session |
+| `/api/ai/session` | POST | Create or fork an AI session (body may set `forkOrigin: true` to fork the session named by `originFork` — for that path the server supplies the actual `ParentSession` itself, so the client never needs to construct one) |
 | `/api/ai/query` | POST | Send a message and stream the response (SSE) |
 | `/api/ai/abort` | POST | Abort the current query |
 | `/api/ai/permission` | POST | Respond to a permission request |
@@ -686,8 +688,8 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/annotate/client-lease` | GET (SSE) | Client lease for local direct structured gates: each open stream is one connected review surface. 404 when the capability is not advertised. |
 | `/api/agent-terminal/pty/<token>` | WebSocket | Tokenized PTY bridge for the optional annotate-mode agent terminal |
-| `/api/ai/capabilities` | GET | Check if AI features are available |
-| `/api/ai/session` | POST | Create or fork an AI session |
+| `/api/ai/capabilities` | GET | Check if AI features are available. Also reports `originFork: { agent, providerIds } \| null` (#1519): when this launch knows the agent session that invoked it, `agent` names its harness and `providerIds` are the registry ids of providers that can fork it (`capabilities.fork` AND natively own that harness — see "Ask AI Provider Defaults"); `null` when there's no known origin session |
+| `/api/ai/session` | POST | Create or fork an AI session (body may set `forkOrigin: true` to fork the session named by `originFork` — for that path the server supplies the actual `ParentSession` itself, so the client never needs to construct one) |
 | `/api/ai/query` | POST | Send a message and stream the response (SSE) |
 | `/api/ai/abort` | POST | Abort the current query |
 | `/api/ai/permission` | POST | Respond to a permission request |
