@@ -125,6 +125,19 @@ describe('TerminalToolsAnnouncementDialog', () => {
     const play = document.querySelector(`${DIALOG} [data-terminal-tools-playback="play"]`);
     expect(play).not.toBeNull();
     expect(play?.getAttribute('aria-label')).toBe('Play demo');
+    // The tag's sheen is motion too: it must not run for a reader who asked
+    // for none, while the tag itself stays.
+    const tag = document.querySelector(`${DIALOG} [data-terminal-tools-tag]`);
+    expect(tag).not.toBeNull();
+    expect(tag?.getAttribute('data-shimmer')).toBe('off');
+    expect(tag?.classList.contains('terminal-tools-announcement-tag--sheen')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('the footage tag shimmers by default', async () => {
+    await mountDialog();
+    const tag = document.querySelector(`${DIALOG} [data-terminal-tools-tag]`);
+    expect(tag?.getAttribute('data-shimmer')).toBe('on');
+    expect(tag?.classList.contains('terminal-tools-announcement-tag--sheen')).toBe(true);
   });
 
   test.skipIf(!hasDom)('the demo switch swaps the footage and the X link together', async () => {

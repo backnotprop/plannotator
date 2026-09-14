@@ -43,6 +43,20 @@ export interface TerminalToolsDemo {
 /** 1280x806 and 1280x808: one aspect ratio, so switching never reflows the panel. */
 const DEMO_ASPECT = 1280 / 806;
 
+/**
+ * Herdr Annotate's own colors, from its repo badges (assets/install-full.svg
+ * and siblings): badge purple, lavender text, periwinkle accent. They belong to
+ * another product, so they live as local variables on this dialog and never
+ * enter theme.css. The badge purple is the one that still reads as a purple
+ * block over the dark footage; the darker hero ground (#10101f-#2c2536) would
+ * vanish into the frame.
+ */
+const HERDR_BRAND_VARS = {
+  '--announce-brand': '#312b52',
+  '--announce-brand-text': '#c9c6f1',
+  '--announce-brand-accent': '#B9C0FF',
+} as React.CSSProperties;
+
 export const TERMINAL_TOOLS_DEMOS: readonly TerminalToolsDemo[] = [
   {
     id: 'full',
@@ -161,6 +175,18 @@ function DemoPlayer({ demo, reducedMotion }: DemoPlayerProps) {
       className="group relative w-full overflow-hidden bg-muted"
       style={{ aspectRatio: String(DEMO_ASPECT) }}
     >
+      {/* Top-left, on the footage. The posters keep only a sidebar label and a
+          tab marker under this corner, so nothing that matters is covered. */}
+      <span
+        aria-hidden="true"
+        data-terminal-tools-tag
+        data-shimmer={reducedMotion ? 'off' : 'on'}
+        className={`terminal-tools-announcement-tag absolute left-3.5 top-3.5 z-10 select-none rounded-md px-2 py-1 text-[11px] font-semibold uppercase leading-none tracking-[0.14em] sm:left-4 sm:top-4${
+          reducedMotion ? '' : ' terminal-tools-announcement-tag--sheen'
+        }`}
+      >
+        New · Watch:
+      </span>
       <video
         ref={videoRef}
         data-terminal-tools-demo={demo.id}
@@ -364,6 +390,7 @@ export function TerminalToolsAnnouncementDialog({
         // video plus footer fit instead of scrolling the video out of view.
         // The 12rem is the footer's height, with the wrap at narrow widths.
         style={{
+          ...HERDR_BRAND_VARS,
           width: `min(1120px, 100%, calc((100dvh - 2rem - 12rem) * ${DEMO_ASPECT}))`,
         }}
         className="terminal-tools-announcement-dialog flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
