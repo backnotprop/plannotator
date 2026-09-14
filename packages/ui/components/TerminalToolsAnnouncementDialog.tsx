@@ -62,7 +62,7 @@ function CommandRow({
 }) {
   return (
     <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-surface-0 px-2.5 py-2">
-      <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-[11px] leading-relaxed text-foreground">
+      <code className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground">
         {command}
       </code>
       <button
