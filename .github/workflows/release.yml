@@ -127,8 +127,14 @@ jobs:
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-arm64
           sha256sum plannotator-linux-arm64 > plannotator-linux-arm64.sha256
 
-          # Windows x64
-          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-x64.exe
+          # Windows x64 (baseline, same pre-AVX2 rationale as Linux x64 above:
+          # Windows 10 is supported on plenty of pre-Haswell hardware). There is
+          # no cheap way to run an emulated old CPU on a GitHub Windows runner,
+          # so this target is covered by the Bun target contract and the ordinary
+          # Windows smoke leg, not by an old-CPU gate. macOS x64 deliberately
+          # stays on the default target: every Mac that can run a supported
+          # macOS is Haswell or newer.
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64-baseline --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-x64.exe
           sha256sum plannotator-win32-x64.exe > plannotator-win32-x64.exe.sha256
 
           # Windows ARM64 (native, via bun-windows-arm64 — stable since Bun v1.3.10)
@@ -148,7 +154,7 @@ jobs:
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-arm64 --outfile plannotator-paste-linux-arm64
           sha256sum plannotator-paste-linux-arm64 > plannotator-paste-linux-arm64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64 --outfile plannotator-paste-win32-x64.exe
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64-baseline --outfile plannotator-paste-win32-x64.exe
           sha256sum plannotator-paste-win32-x64.exe > plannotator-paste-win32-x64.exe.sha256
 
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
