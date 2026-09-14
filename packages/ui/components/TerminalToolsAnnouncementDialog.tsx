@@ -1,46 +1,124 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Copy, Star } from 'lucide-react';
+import { Pause, Play } from 'lucide-react';
 
 /**
  * One-time announcement for Plannotator's two terminal clients, Plannotator TUI
- * and Herdr Annotate. Same big-format shell as the other first-run
- * announcements (LookAndFeelAnnouncementDialog, EditModeAnnouncementDialog),
- * with one difference: it asks the user to decide nothing, so Escape, the
- * backdrop and the single "Got it" button all do the same thing.
+ * and Herdr Annotate. Video first: the real demo footage fills the top of the
+ * panel edge to edge, and the text below it is one headline and one sentence.
+ * Same shell as the other first-run announcements (portal, z-[100], hand-rolled
+ * Escape + Tab wrap + focus restore), with one difference: it asks the user to
+ * decide nothing, so Escape, the backdrop and the single "Got it" button all do
+ * the same thing.
  *
  * LAST in each app's first-run dialog chain. The Apps gate rendering through
  * terminalToolsAnnouncementCanShow so the chain dialogs never stack; see that
  * function for why last rather than first.
+ *
+ * The footage is hosted on plannotator.ai like GuideIntroDialog's hero image
+ * (the two demos together are ~23MB, far too much to inline the way the Edit
+ * Mode recording is), so the dialog has to look right without it: the poster
+ * stays up while the video buffers, and if the media cannot load at all the
+ * frame keeps its place and offers the X post instead.
  */
 
 const TUI_REPO = 'https://github.com/plannotator/plannotator-tui';
 const HERDR_REPO = 'https://github.com/plannotator/herdr-annotate';
-const PLANNOTATOR_REPO = 'https://github.com/backnotprop/plannotator';
-const FULL_DEMO = 'https://x.com/plannotator/status/2093419561077154287';
-const LITE_DEMO = 'https://x.com/plannotator/status/2092757422322627008';
+
+/** Where the marketing deploy publishes `apps/marketing/public/assets/`. */
+const MEDIA_BASE_URL = 'https://plannotator.ai/assets';
+
+export interface TerminalToolsDemo {
+  readonly id: 'full' | 'lite';
+  /** Segment label. Herdr Annotate's own naming for its two install targets. */
+  readonly label: string;
+  readonly mp4: string;
+  readonly webm: string;
+  readonly poster: string;
+  /** The X post the footage was cut from. */
+  readonly watchUrl: string;
+  readonly description: string;
+}
+
+/** 1280x806 and 1280x808: one aspect ratio, so switching never reflows the panel. */
+const DEMO_ASPECT = 1280 / 806;
+
+export const TERMINAL_TOOLS_DEMOS: readonly TerminalToolsDemo[] = [
+  {
+    id: 'full',
+    label: 'Full',
+    mp4: `${MEDIA_BASE_URL}/tui-herdr-full-demo.mp4`,
+    webm: `${MEDIA_BASE_URL}/tui-herdr-full-demo.webm`,
+    poster: `${MEDIA_BASE_URL}/tui-herdr-full-poster.jpg`,
+    watchUrl: 'https://x.com/plannotator/status/2093419561077154287',
+    description:
+      'Herdr Annotate reviewing a Markdown file with Plannotator TUI: a file tree, a selected block with its comment, and the feedback sent to the agent.',
+  },
+  {
+    id: 'lite',
+    label: 'Lite',
+    mp4: `${MEDIA_BASE_URL}/tui-herdr-lite-demo.mp4`,
+    webm: `${MEDIA_BASE_URL}/tui-herdr-lite-demo.webm`,
+    poster: `${MEDIA_BASE_URL}/tui-herdr-lite-poster.jpg`,
+    watchUrl: 'https://x.com/plannotator/status/2092757422322627008',
+    description:
+      'Herdr Annotate Lite: terminal text selected in an agent session, a comment written in a popover, and the notes sent back to the agent.',
+  },
+];
 
 interface TerminalToolsAnnouncementDialogProps {
   readonly isOpen: boolean;
   /** Marks the announcement seen and closes it. Also wired to Escape and the backdrop. */
   readonly onDismiss: () => void;
+  /**
+   * Test seam. Defaults to the media query; forcing it lets a test assert the
+   * reduced-motion branch without a real `matchMedia`.
+   */
+  readonly reducedMotion?: boolean;
 }
 
-function OutboundLink({
+export function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function GitHubMark({ className }: { readonly className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" className={className} aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+      />
+    </svg>
+  );
+}
+
+function XMark({ className }: { readonly className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231Zm-1.161 17.52h1.833L7.084 4.126H5.117Z"
+      />
+    </svg>
+  );
+}
+
+function OutboundAction({
   href,
   children,
   icon,
 }: {
   readonly href: string;
   readonly children: React.ReactNode;
-  readonly icon?: React.ReactNode;
+  readonly icon: React.ReactNode;
 }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-border bg-surface-1/30 px-2.5 text-xs font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-surface-1/60 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+      className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border bg-surface-0/40 px-3 text-sm font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-surface-1/70 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
     >
       {icon}
       {children}
@@ -48,77 +126,148 @@ function OutboundLink({
   );
 }
 
-function CommandRow({
-  command,
-  label,
-  copied,
-  onCopy,
-}: {
-  readonly command: string;
-  /** Accessible name for the copy button; the command itself is long and noisy. */
-  readonly label: string;
-  readonly copied: boolean;
-  readonly onCopy: (command: string) => void;
-}) {
+interface DemoPlayerProps {
+  readonly demo: TerminalToolsDemo;
+  readonly reducedMotion: boolean;
+}
+
+/**
+ * The footage. Muted, looping, inline; autoplays unless the reader asked for
+ * reduced motion, in which case the poster waits behind a play button. One
+ * toggle serves both: large and centered while paused, tucked into a corner
+ * while playing, so a paused frame is never mistaken for a broken one.
+ */
+function DemoPlayer({ demo, reducedMotion }: DemoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  // Optimistic: autoplay is expected, so the corner control is the initial
+  // shape and the centered Play only appears once the browser has proven it
+  // will not start (canplaythrough with the element still paused).
+  const [playing, setPlaying] = useState(!reducedMotion);
+  const [failed, setFailed] = useState(false);
+
+  const toggle = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      // Autoplay policies can reject play(); the button simply stays put.
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }, []);
+
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-border/60 bg-surface-0 px-2.5 py-2">
-      <code className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground">
-        {command}
-      </code>
-      <button
-        type="button"
-        onClick={() => onCopy(command)}
-        aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
-        className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-surface-1 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+    <div
+      className="group relative w-full overflow-hidden bg-muted"
+      style={{ aspectRatio: String(DEMO_ASPECT) }}
+    >
+      <video
+        ref={videoRef}
+        data-terminal-tools-demo={demo.id}
+        poster={demo.poster}
+        muted
+        playsInline
+        loop
+        autoPlay={!reducedMotion}
+        preload="auto"
+        aria-label={demo.description}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onCanPlayThrough={(event) => setPlaying(!event.currentTarget.paused)}
+        onClick={toggle}
+        className="absolute inset-0 h-full w-full object-cover"
       >
-        {copied ? (
-          <Check className="size-3.5 text-success" aria-hidden="true" />
-        ) : (
-          <Copy className="size-3.5" aria-hidden="true" />
-        )}
-      </button>
+        <source src={demo.mp4} type="video/mp4" />
+        {/* The last source is the one whose error means nothing could load. */}
+        <source src={demo.webm} type="video/webm" onError={() => setFailed(true)} />
+      </video>
+
+      {failed ? (
+        <div className="absolute inset-0 grid place-items-center bg-background/70 backdrop-blur-sm">
+          <a
+            href={demo.watchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground outline-none hover:bg-surface-1 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <XMark className="size-3.5" />
+            Watch on X
+          </a>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={playing ? 'Pause demo' : 'Play demo'}
+          data-terminal-tools-playback={playing ? 'pause' : 'play'}
+          className={
+            playing
+              ? 'absolute bottom-3 left-3 grid size-9 place-items-center rounded-full border border-border/60 bg-background/70 text-foreground opacity-0 outline-none backdrop-blur-sm transition-opacity motion-reduce:transition-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary'
+              : 'absolute left-1/2 top-1/2 grid size-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-border/60 bg-background/80 text-foreground shadow-lg outline-none backdrop-blur-sm transition-transform motion-reduce:transition-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary'
+          }
+        >
+          {playing ? (
+            <Pause className="size-4" aria-hidden="true" />
+          ) : (
+            <Play className="ml-0.5 size-6 fill-current" aria-hidden="true" />
+          )}
+        </button>
+      )}
     </div>
   );
 }
 
-/**
- * Mock of a Plannotator TUI review: a selected block with its comment bubble,
- * the annotation toolbar, and the status line. Built from theme tokens as real
- * elements rather than an ASCII block, so it cannot misalign on a font fallback
- * and it follows the active palette in both light and dark.
- */
-function TuiPreview() {
+interface DemoSwitchProps {
+  readonly active: TerminalToolsDemo['id'];
+  readonly onChange: (id: TerminalToolsDemo['id']) => void;
+}
+
+function DemoSwitch({ active, onChange }: DemoSwitchProps) {
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const index = TERMINAL_TOOLS_DEMOS.findIndex((demo) => demo.id === active);
+    const step = event.key === 'ArrowRight' ? 1 : -1;
+    const next = TERMINAL_TOOLS_DEMOS[
+      (index + step + TERMINAL_TOOLS_DEMOS.length) % TERMINAL_TOOLS_DEMOS.length
+    ];
+    onChange(next.id);
+    tabRefs.current[next.id]?.focus();
+  };
+
   return (
     <div
-      aria-hidden="true"
-      className="overflow-hidden rounded-xl border border-border bg-surface-0 font-mono text-[10.5px] leading-[1.7] text-muted-foreground"
+      role="tablist"
+      aria-label="Demo"
+      className="inline-flex shrink-0 rounded-lg border border-border bg-surface-0/60 p-0.5"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-1.5">
-        <span className="text-foreground">plan.md</span>
-        <span className="text-primary">Send 2 to claude in w1:p1 ▸</span>
-      </div>
-      <div className="flex items-start gap-4 px-3 py-2.5">
-        <div className="min-w-0 flex-1">
-          <p className="truncate">Plugins are shareable, executable workflow packages.</p>
-          <div className="my-1 border-l-2 border-primary bg-primary/[0.07] pl-2">
-            <p className="truncate text-foreground">Herdr owns the host surface: installation,</p>
-            <p className="truncate text-foreground">manifest validation, keybindings, panes.</p>
-          </div>
-          <p className="truncate">The plugin owns its implementation language.</p>
-        </div>
-        <div className="hidden w-44 shrink-0 rounded-md border border-border bg-card px-2 py-1.5 sm:block">
-          <p className="text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground/70">
-            comment 8d3e8
-          </p>
-          <p className="mt-0.5 text-foreground">Say which parts the plugin can override.</p>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/60 px-3 py-1.5">
-        <span className="text-success">a looks good</span>
-        <span className="text-primary">c comment</span>
-        <span className="text-destructive">d delete</span>
-        <span className="ml-auto hidden sm:inline">plan.md · 2 annotations · selected 36 chars</span>
-      </div>
+      {TERMINAL_TOOLS_DEMOS.map((demo) => {
+        const selected = demo.id === active;
+        return (
+          <button
+            key={demo.id}
+            ref={(node) => {
+              tabRefs.current[demo.id] = node;
+            }}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls="terminal-tools-announcement-demo"
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(demo.id)}
+            onKeyDown={handleKeyDown}
+            className={`min-h-8 rounded-md px-3 text-xs font-medium outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-primary ${
+              selected
+                ? 'bg-card text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {demo.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -126,34 +275,20 @@ function TuiPreview() {
 export function TerminalToolsAnnouncementDialog({
   isOpen,
   onDismiss,
+  reducedMotion,
 }: TerminalToolsAnnouncementDialogProps) {
   const dismissRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const onDismissRef = useRef(onDismiss);
-  const [copied, setCopied] = useState<string | null>(null);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeDemoId, setActiveDemoId] = useState<TerminalToolsDemo['id']>('full');
+  const [motionPreference] = useState(() => reducedMotion ?? prefersReducedMotion());
+  const reduced = reducedMotion ?? motionPreference;
+  const activeDemo =
+    TERMINAL_TOOLS_DEMOS.find((demo) => demo.id === activeDemoId) ?? TERMINAL_TOOLS_DEMOS[0];
 
   useEffect(() => {
     onDismissRef.current = onDismiss;
   }, [onDismiss]);
-
-  const handleCopy = useCallback((command: string) => {
-    // Clipboard access can be denied or missing (insecure context, older
-    // browsers). The command stays selectable either way, so a failure is
-    // silent rather than an error the reader cannot act on.
-    void navigator.clipboard?.writeText(command).then(
-      () => {
-        setCopied(command);
-        if (copiedTimer.current) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => setCopied(null), 2000);
-      },
-      () => {},
-    );
-  }, []);
-
-  useEffect(() => () => {
-    if (copiedTimer.current) clearTimeout(copiedTimer.current);
-  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -185,7 +320,7 @@ export function TerminalToolsAnnouncementDialog({
       const focusable = Array.from(
         dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')
           ?? [],
-      );
+      ).filter((element) => element.getAttribute('tabindex') !== '-1');
       if (focusable.length === 0) return;
 
       const first = focusable[0];
@@ -211,7 +346,7 @@ export function TerminalToolsAnnouncementDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 p-4 backdrop-blur-sm"
+      className="terminal-tools-announcement-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-background/90 p-4 backdrop-blur-sm"
       // Dismissing from the backdrop is safe here because the dialog collects
       // no decision: there is nothing to lose by closing it the impatient way.
       onMouseDown={(event) => {
@@ -224,150 +359,64 @@ export function TerminalToolsAnnouncementDialog({
         aria-modal="true"
         aria-labelledby="terminal-tools-announcement-title"
         aria-describedby="terminal-tools-announcement-description"
-        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+        // Width follows the viewport height as well as its width: the footage
+        // keeps its aspect ratio, so on a short window the panel narrows until
+        // video plus footer fit instead of scrolling the video out of view.
+        // The 12rem is the footer's height, with the wrap at narrow widths.
+        style={{
+          width: `min(1120px, 100%, calc((100dvh - 2rem - 12rem) * ${DEMO_ASPECT}))`,
+        }}
+        className="terminal-tools-announcement-dialog flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
       >
-        <header className="border-b border-border px-5 py-5 sm:px-7 sm:py-6">
-          <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-primary">
-            New
-          </span>
-          <h2
-            id="terminal-tools-announcement-title"
-            className="mt-3 text-balance text-xl font-semibold tracking-tight sm:text-2xl"
-          >
-            Plannotator now runs in the terminal
-          </h2>
-          <p
-            id="terminal-tools-announcement-description"
-            className="mt-1.5 max-w-3xl text-pretty text-sm leading-relaxed text-muted-foreground"
-          >
-            Two new tools for people who would rather review in a terminal than in a browser.
-            Both turn your notes into feedback for your coding agent.
-          </p>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
-          <TuiPreview />
-
-          <div className="mt-5 grid grid-cols-2 gap-4 max-[820px]:grid-cols-1">
-            <section
-              aria-labelledby="terminal-tools-tui-heading"
-              className="flex min-w-0 flex-col rounded-xl border border-border bg-muted/25 p-4"
-            >
-              <h3 id="terminal-tools-tui-heading" className="text-sm font-semibold text-foreground">
-                Plannotator TUI
-              </h3>
-              <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                Markdown review in the terminal
-              </p>
-              <p className="mt-2 text-pretty text-xs leading-relaxed text-muted-foreground">
-                Select text, comment, mark it looks good or delete, then hand the review to your
-                agent as numbered feedback. Open a folder to get a file tree with per-file counts,
-                or run <code className="font-mono text-foreground">plannotator-tui last</code> to
-                annotate one of your agent&rsquo;s recent replies. One static binary, no runtime.
-              </p>
-              <div className="mt-3 flex flex-col gap-1.5">
-                <CommandRow
-                  command="brew trust plannotator/tap && brew install plannotator/tap/plannotator-tui"
-                  label="the Homebrew install command"
-                  copied={copied === 'brew trust plannotator/tap && brew install plannotator/tap/plannotator-tui'}
-                  onCopy={handleCopy}
-                />
-                <CommandRow
-                  command="cargo install plannotator-tui"
-                  label="the Cargo install command"
-                  copied={copied === 'cargo install plannotator-tui'}
-                  onCopy={handleCopy}
-                />
-              </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                Prebuilt macOS, Linux and Windows binaries are on the{' '}
-                <a
-                  href={`${TUI_REPO}/releases`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-2 hover:text-foreground"
-                >
-                  releases page
-                </a>
-                .
-              </p>
-              <div className="mt-auto flex flex-wrap gap-1.5 pt-3">
-                <OutboundLink href={FULL_DEMO}>See it in action</OutboundLink>
-                <OutboundLink href={TUI_REPO} icon={<Star className="size-3.5" aria-hidden="true" />}>
-                  Star on GitHub
-                </OutboundLink>
-                <OutboundLink href={`${TUI_REPO}/issues`}>Feedback</OutboundLink>
-              </div>
-            </section>
-
-            <section
-              aria-labelledby="terminal-tools-herdr-heading"
-              className="flex min-w-0 flex-col rounded-xl border border-border bg-muted/25 p-4"
-            >
-              <h3 id="terminal-tools-herdr-heading" className="text-sm font-semibold text-foreground">
-                Herdr Annotate
-              </h3>
-              <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                Annotate inside Herdr
-              </p>
-              <p className="mt-2 text-pretty text-xs leading-relaxed text-muted-foreground">
-                Comment on any terminal text, review Markdown documents and your agent&rsquo;s
-                replies, and send the feedback back to the agent as its next message. Document
-                review runs Plannotator TUI. Needs Herdr 0.8.0 or later, and you bind the keys in
-                Herdr&rsquo;s config after installing.
-              </p>
-              <div className="mt-3 flex flex-col gap-1.5">
-                <CommandRow
-                  command="herdr plugin install plannotator/herdr-annotate"
-                  label="the full install command"
-                  copied={copied === 'herdr plugin install plannotator/herdr-annotate'}
-                  onCopy={handleCopy}
-                />
-                <CommandRow
-                  command="herdr plugin install plannotator/herdr-annotate/lite"
-                  label="the Lite install command"
-                  copied={copied === 'herdr plugin install plannotator/herdr-annotate/lite'}
-                  onCopy={handleCopy}
-                />
-              </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                Full covers macOS and Linux. Lite is terminal notes only: select text, press your
-                annotate key, comment in a popover.
-              </p>
-              <div className="mt-auto flex flex-wrap gap-1.5 pt-3">
-                <OutboundLink href={FULL_DEMO}>Full demo</OutboundLink>
-                <OutboundLink href={LITE_DEMO}>Lite demo</OutboundLink>
-                <OutboundLink href={HERDR_REPO} icon={<Star className="size-3.5" aria-hidden="true" />}>
-                  Star on GitHub
-                </OutboundLink>
-                <OutboundLink href={`${HERDR_REPO}/issues`}>Feedback</OutboundLink>
-              </div>
-            </section>
-          </div>
+        <div
+          id="terminal-tools-announcement-demo"
+          role="tabpanel"
+          aria-label={`${activeDemo.label} demo`}
+          className="shrink-0 border-b border-border"
+        >
+          {/* Keyed so a switch resets playback and load-failure state with the footage. */}
+          <DemoPlayer key={activeDemo.id} demo={activeDemo} reducedMotion={reduced} />
         </div>
 
-        <footer className="flex flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7 sm:py-5">
-          <p className="text-pretty text-xs leading-relaxed text-muted-foreground">
-            We&rsquo;re enhancing these as much as we enhance this UI. Star them if they&rsquo;re
-            useful, and open an issue when they&rsquo;re not.
-          </p>
-          <div className="flex items-center gap-2 sm:shrink-0">
-            <OutboundLink
-              href={PLANNOTATOR_REPO}
-              icon={<Star className="size-3.5" aria-hidden="true" />}
-            >
-              Star Plannotator
-            </OutboundLink>
+        <div className="min-h-0 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
+          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+            <div className="min-w-0">
+              <h2
+                id="terminal-tools-announcement-title"
+                className="text-balance text-xl font-semibold tracking-tight sm:text-2xl"
+              >
+                Plannotator TUI and Herdr Annotate
+              </h2>
+              <p
+                id="terminal-tools-announcement-description"
+                className="mt-1 text-pretty text-sm leading-relaxed text-muted-foreground"
+              >
+                Annotate Markdown and terminal text, then send the notes to your agent.
+              </p>
+            </div>
+            <DemoSwitch active={activeDemo.id} onChange={setActiveDemoId} />
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <OutboundAction href={TUI_REPO} icon={<GitHubMark className="size-4" />}>
+              Star plannotator-tui
+            </OutboundAction>
+            <OutboundAction href={HERDR_REPO} icon={<GitHubMark className="size-4" />}>
+              Star herdr-annotate
+            </OutboundAction>
+            <OutboundAction href={activeDemo.watchUrl} icon={<XMark className="size-3.5" />}>
+              Watch on X
+            </OutboundAction>
             <button
               ref={dismissRef}
               type="button"
               onClick={onDismiss}
-              className="min-h-9 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+              className="ml-auto min-h-9 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             >
               Got it
             </button>
           </div>
-        </footer>
+        </div>
       </div>
     </div>,
     document.body,

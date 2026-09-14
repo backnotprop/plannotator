@@ -1,20 +1,27 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { TerminalToolsAnnouncementDialog } from './TerminalToolsAnnouncementDialog';
+import {
+  TERMINAL_TOOLS_DEMOS,
+  TerminalToolsAnnouncementDialog,
+} from './TerminalToolsAnnouncementDialog';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
 const DIALOG = '[data-terminal-tools-announcement-dialog]';
+const VIDEO = `${DIALOG} video[data-terminal-tools-demo]`;
 
-async function mountDialog(onDismiss: () => void = () => {}) {
+async function mountDialog(
+  onDismiss: () => void = () => {},
+  props: { readonly reducedMotion?: boolean } = {},
+) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(<TerminalToolsAnnouncementDialog isOpen onDismiss={onDismiss} />);
+    root?.render(<TerminalToolsAnnouncementDialog isOpen onDismiss={onDismiss} {...props} />);
   });
 }
 
@@ -48,6 +55,19 @@ function gotItButton(): HTMLButtonElement {
   return match;
 }
 
+function video(): HTMLVideoElement {
+  const match = document.querySelector<HTMLVideoElement>(VIDEO);
+  if (!match) throw new Error('Demo video did not render');
+  return match;
+}
+
+function tab(label: string): HTMLButtonElement {
+  const match = Array.from(document.querySelectorAll<HTMLButtonElement>(`${DIALOG} [role="tab"]`))
+    .find((button) => button.textContent?.trim() === label);
+  if (!match) throw new Error(`Demo tab "${label}" did not render`);
+  return match;
+}
+
 describe('TerminalToolsAnnouncementDialog', () => {
   afterEach(async () => {
     if (root) await act(async () => root?.unmount());
@@ -73,6 +93,62 @@ describe('TerminalToolsAnnouncementDialog', () => {
       .filter((button) => button.textContent?.trim() === 'Got it');
     expect(completions).toHaveLength(1);
     expect(document.activeElement).toBe(completions[0]);
+  });
+
+  test.skipIf(!hasDom)('the footage is inline, silent, looping and autoplaying', async () => {
+    await mountDialog();
+
+    const element = video();
+    // Silent + inline is what lets a browser autoplay it at all (and what
+    // keeps iOS from hijacking the dialog into a fullscreen player). React
+    // mirrors `muted` to the property, not the attribute, so read both ways.
+    expect(element.muted || element.hasAttribute('muted')).toBe(true);
+    expect(element.hasAttribute('playsinline')).toBe(true);
+    expect(element.hasAttribute('loop')).toBe(true);
+    expect(element.hasAttribute('autoplay')).toBe(true);
+    expect(element.getAttribute('poster')).toMatch(/^https:\/\/plannotator\.ai\/assets\//);
+
+    // mp4 is the first source every browser can play; webm is the fallback.
+    const sources = Array.from(element.querySelectorAll('source')).map((source) => source.type);
+    expect(sources).toEqual(['video/mp4', 'video/webm']);
+  });
+
+  test.skipIf(!hasDom)('reduced motion withholds autoplay and offers a play button instead', async () => {
+    await mountDialog(() => {}, { reducedMotion: true });
+
+    const element = video();
+    expect(element.hasAttribute('autoplay')).toBe(false);
+    // Still silent and inline: the reader may press play, and it must then
+    // behave exactly like the autoplaying version.
+    expect(element.muted || element.hasAttribute('muted')).toBe(true);
+    expect(element.hasAttribute('playsinline')).toBe(true);
+    const play = document.querySelector(`${DIALOG} [data-terminal-tools-playback="play"]`);
+    expect(play).not.toBeNull();
+    expect(play?.getAttribute('aria-label')).toBe('Play demo');
+  });
+
+  test.skipIf(!hasDom)('the demo switch swaps the footage and the X link together', async () => {
+    await mountDialog();
+
+    const full = TERMINAL_TOOLS_DEMOS.find((demo) => demo.id === 'full');
+    const lite = TERMINAL_TOOLS_DEMOS.find((demo) => demo.id === 'lite');
+    if (!full || !lite) throw new Error('Both demos must be defined');
+
+    expect(video().getAttribute('data-terminal-tools-demo')).toBe('full');
+    const watchLink = () =>
+      Array.from(document.querySelectorAll<HTMLAnchorElement>(`${DIALOG} a[href]`))
+        .find((link) => link.textContent?.trim() === 'Watch on X');
+    expect(watchLink()?.getAttribute('href')).toBe(full.watchUrl);
+    expect(tab('Full').getAttribute('aria-selected')).toBe('true');
+
+    await act(async () => tab('Lite').click());
+
+    // The X link has to follow the footage: "Watch on X" under the Lite demo
+    // pointing at the Full post would be a lie.
+    expect(video().getAttribute('data-terminal-tools-demo')).toBe('lite');
+    expect(watchLink()?.getAttribute('href')).toBe(lite.watchUrl);
+    expect(tab('Lite').getAttribute('aria-selected')).toBe('true');
+    expect(tab('Full').getAttribute('aria-selected')).toBe('false');
   });
 
   test.skipIf(!hasDom)('sends every outbound link to a new tab with an isolated opener', async () => {
@@ -162,9 +238,11 @@ describe('TerminalToolsAnnouncementDialog', () => {
     document.body.appendChild(outside);
     try {
       await mountDialog();
+      // The unselected demo tab is tabindex -1 (roving tabindex), so the
+      // wrap must skip it the same way the browser's own Tab order does.
       const focusable = Array.from(
         document.querySelectorAll<HTMLElement>(`${DIALOG} button, ${DIALOG} [href]`),
-      );
+      ).filter((element) => element.getAttribute('tabindex') !== '-1');
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
 
