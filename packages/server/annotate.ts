@@ -14,6 +14,7 @@
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
+import type { OriginSessionOption } from "./origin-session";
 import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -72,7 +73,7 @@ export { handleServerReady as handleAnnotateServerReady } from "./shared-handler
 
 // --- Types ---
 
-export interface AnnotateServerOptions {
+export interface AnnotateServerOptions extends OriginSessionOption {
   /** Markdown content of the file to annotate. Empty when rendering raw HTML. */
   markdown: string;
   /** Original file path (for display purposes) */
@@ -232,6 +233,7 @@ export async function startAnnotateServer(
     filePath,
     htmlContent,
     origin,
+    originSession,
     mode = "annotate",
     folderPath,
     recentMessages,
@@ -458,7 +460,7 @@ export async function startAnnotateServer(
     return legacyDurable && (archived || !hasContent);
   };
   const externalAnnotations = createExternalAnnotationHandler("plan");
-  const aiRuntime = resolveAIEnabled() ? await createAIRuntime() : null;
+  const aiRuntime = resolveAIEnabled() ? await createAIRuntime({ originSession }) : null;
   const htmlAssets = createHtmlAssetRegistry();
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),

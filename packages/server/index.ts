@@ -57,6 +57,7 @@ import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
+import type { OriginSessionOption } from "./origin-session";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -65,10 +66,12 @@ export * from "./integrations";
 export * from "./storage";
 export { handleServerReady } from "./shared-handlers";
 export { type VaultNode, buildFileTree } from "@plannotator/shared/reference-common";
+export type { ParentSession } from "@plannotator/ai";
+export { buildOriginSession, type OriginSessionOption } from "./origin-session";
 
 // --- Types ---
 
-export interface ServerOptions {
+export interface ServerOptions extends OriginSessionOption {
   /** The plan markdown content */
   plan: string;
   /** Origin identifier (e.g., "claude-code", "opencode") */
@@ -128,7 +131,7 @@ export interface ServerResult {
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
+  const { plan, origin, htmlContent, permissionMode, originSession, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -152,7 +155,7 @@ export async function startPlannotatorServer(
   const draftKey = mode !== "archive" ? contentHash(plan) : "";
   const editorAnnotations = mode !== "archive" ? createEditorAnnotationHandler() : null;
   const externalAnnotations = mode !== "archive" ? createExternalAnnotationHandler("plan") : null;
-  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime() : null;
+  const aiRuntime = mode !== "archive" && resolveAIEnabled() ? await createAIRuntime({ originSession }) : null;
   const slug = mode !== "archive" ? generateSlug(plan) : "";
 
   // Lazy cache for in-session archive browsing (plan review sidebar tab)
