@@ -24,6 +24,7 @@ import {
 } from "./cli-bridge";
 import { switchV2SessionAgent } from "./agent-switch";
 import { registerNativeCommands } from "./native-commands";
+import { toOriginSession } from "./origin-session";
 import {
   createV2BridgeClient,
   formatSessionUrlNotice,
@@ -224,10 +225,11 @@ const serverPlugin = {
               directory,
               workflowOptions,
             }, {
-              reviewPlan: async ({ planContent }) => await runPlanReview({
+              reviewPlan: async ({ planContent, sessionId }) => await runPlanReview({
                 client,
                 runtime: workflowOptions.runtime,
                 planContent,
+                sessionId,
                 sharingEnabled: bridge.sharingEnabled ?? true,
                 shareBaseUrl: bridge.shareBaseUrl,
                 pasteApiUrl: bridge.pasteApiUrl,
@@ -351,6 +353,8 @@ async function runPlanReview(input: {
   client: V2Client;
   runtime: RuntimeMode;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin). */
+  sessionId?: string;
   sharingEnabled: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
@@ -363,12 +367,17 @@ async function runPlanReview(input: {
     throw new Error('runtime "embedded" requires a Bun-hosted OpenCode plugin runtime. Use runtime "auto" or "cli" with this OpenCode host.');
   }
 
+  // Joined once, here, rather than threading sessionId/directory separately
+  // through the embedded and CLI runners below (#1519).
+  const originSession = toOriginSession({ sessionId: input.sessionId, cwd: input.directory });
+
   if (input.runtime !== "cli" && hasEmbeddedRuntime()) {
     try {
       const embedded = await importEmbeddedRuntime();
       return await embedded.runEmbeddedPlanReview({
         client: input.client,
         planContent: input.planContent,
+        originSession,
         sharingEnabled: input.sharingEnabled,
         shareBaseUrl: input.shareBaseUrl,
         pasteApiUrl: input.pasteApiUrl,
@@ -386,6 +395,7 @@ async function runPlanReview(input: {
   return await runCliPlanReview({
     client: input.client,
     planContent: input.planContent,
+    originSession,
     cwd: input.directory,
     timeoutSeconds: input.timeoutSeconds,
     abortSignal: input.abortSignal,
