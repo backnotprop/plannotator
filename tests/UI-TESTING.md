@@ -11,6 +11,7 @@ steps to ensure your changes work correctly.
 4. [Debugging Common Issues](#debugging-common-issues)
 5. [Decision Control Manual Checklist](#decision-control-manual-checklist)
 6. [WebMCP Manual Checklist](#webmcp-manual-checklist)
+7. [Terminal-Tools Announcement Manual Checklist](#terminal-tools-announcement-manual-checklist)
 
 ---
 
@@ -443,6 +444,35 @@ Then the remaining surfaces:
 - Settings, General, "Agent tools" off: `getTools()` is empty and `document.cookie` now has `plannotator-webmcp-tools=false`. Back on: six tools again and the cookie is gone.
 - `plannotator annotate <file.html>` and `plannotator annotate http://localhost:<port>`: from inside the iframe, `document.modelContext.getTools()` and `registerTool()` reject with `NotAllowedError`; the parent page still lists Plannotator's tools.
 - Approve or send feedback from the page: the write tools disappear from `getTools()` and `read_document` carries `session_decided`.
+
+## Terminal-Tools Announcement Manual Checklist
+
+Not CI. The gate is one cookie, `plannotator-announce-tui-herdr-seen`; clear it in DevTools
+(Application, Cookies) between runs, and keep the other first-run keys seeded so the chain does
+not hand the turn to an earlier dialog.
+
+1. **It shows once.** Clear the cookie, open `plannotator review` (or a plan or annotate
+   session), and dismiss everything else the session asks for. The announcement fills most of the
+   window over a dimmed backdrop. Click **Got it**: it closes, the cookie reads `1`, and a reload
+   never shows it again.
+2. **Every exit marks it seen.** Repeat with `Escape`, then again with a click on the dimmed area
+   outside the panel. Both close it and both write the cookie. A press that starts inside the
+   panel and drags out does not close it.
+3. **It never stacks.** Clear the cookie AND `plannotator-plan-look-choice-resolved`. The
+   Grid/Clean chooser opens alone. Dismiss it and reload: the announcement is now the one on
+   screen. Nothing ever shows two dialogs at once.
+4. **It stays out of read-only and compact.** With the cookie cleared, run `plannotator archive`,
+   open a `#share` link, and open any session in a phone-sized touch viewport. No announcement in
+   any of them, and the cookie is still unset afterwards, so the next desktop session shows it.
+5. **Keyboard.** With the panel open, `Tab` cycles only inside it and wraps at both ends;
+   `Mod+Enter` does nothing (no plan approved, no review posted). Closing it returns focus to the
+   app.
+6. **Content.** Both copy buttons put the exact install command on the clipboard and flip to a
+   check for two seconds. Every link opens in a new tab: the two X demos, the three GitHub repos,
+   the two issue trackers, and the releases page.
+7. **Theme and width.** Toggle light/dark: the panel, the terminal preview and the code rows all
+   follow the active palette. At ~400px wide the cards stack, nothing overflows horizontally, and
+   the footer wraps.
 
 ## Need Help?
 
