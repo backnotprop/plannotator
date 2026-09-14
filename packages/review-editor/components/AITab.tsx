@@ -12,6 +12,7 @@ import { AIConfigBar } from './AIConfigBar';
 import { submitHint } from '@plannotator/ui/utils/platform';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import type { OriginForkToggleProps } from '@plannotator/ui/hooks/useOriginFork';
 
 interface AITabProps {
   messages: AIChatEntry[];
@@ -29,6 +30,8 @@ interface AITabProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
+  /** Opt-in origin-session forking (#1519) — forwarded to AIConfigBar. */
+  originFork?: OriginForkToggleProps;
 }
 
 interface FileGroup {
@@ -57,6 +60,7 @@ export const AITab: React.FC<AITabProps> = ({
   aiConfig,
   onAIConfigChange,
   hasAISession = false,
+  originFork,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // File chat groups default to expanded; this tracks the ones the user has
@@ -178,6 +182,7 @@ export const AITab: React.FC<AITabProps> = ({
           selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
           onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
           hasSession={hasAISession}
+          originFork={originFork}
         />
         {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} />}
       </div>
@@ -276,6 +281,7 @@ export const AITab: React.FC<AITabProps> = ({
         selectedReasoningEffort={aiConfig?.reasoningEffort ?? null}
         onReasoningEffortChange={(effort) => onAIConfigChange?.({ reasoningEffort: effort })}
         hasSession={hasAISession}
+        originFork={originFork}
       />
 
       {/* General question input */}

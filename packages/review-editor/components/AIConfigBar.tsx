@@ -2,6 +2,8 @@ import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
 import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { OriginForkToggle } from '@plannotator/ui/components/ai/OriginForkToggle';
+import type { OriginForkToggleProps } from '@plannotator/ui/hooks/useOriginFork';
 
 interface AIConfigBarProps {
   providers: AIProviderOption[];
@@ -12,6 +14,8 @@ interface AIConfigBarProps {
   onModelChange: (model: string) => void;
   onReasoningEffortChange: (effort: string | null) => void;
   hasSession: boolean;
+  /** Opt-in origin-session forking (#1519) — see `useOriginFork`. */
+  originFork?: OriginForkToggleProps;
 }
 
 export const AIConfigBar: React.FC<AIConfigBarProps> = ({
@@ -23,6 +27,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   onModelChange,
   onReasoningEffortChange,
   hasSession,
+  originFork,
 }) => {
   const [showSessionNote, setShowSessionNote] = useState(false);
   const [openMenu, setOpenMenu] = useState<'provider' | 'model' | 'effort' | null>(null);
@@ -100,141 +105,41 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   );
 
   return (
-    <div ref={barRef} className="relative border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-      {/* Provider selector */}
-      {providers.length > 1 ? (
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setOpenMenu(openMenu === 'provider' ? null : 'provider')}
-            className="flex items-center gap-1.5 px-1 py-0.5 -mx-1 rounded hover:bg-muted/50 transition-colors"
-          >
-            <Icon className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>{meta.label}</span>
-            {chevron}
-          </button>
-
-          {openMenu === 'provider' && (
-            <div className="ai-config-menu">
-              {providers.map(p => {
-                const m = getProviderMeta(p.name);
-                const ProvIcon = m.icon;
-                const isActive = p.id === effectiveProviderId;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => handleProviderSelect(p.id)}
-                    className={`ai-config-menu-item ${isActive ? 'ai-config-menu-item-active' : ''}`}
-                  >
-                    <ProvIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>{m.label}</span>
-                    {isActive && (
-                      <svg className="w-3 h-3 ml-auto text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+    <div ref={barRef} className="relative border-t border-border/50 text-[11px] text-muted-foreground">
+      {originFork?.available && (
+        <div className="px-2 py-1.5 border-b border-border/50">
+          <OriginForkToggle {...originFork} />
         </div>
-      ) : (
-        <span className="flex items-center gap-1.5">
-          <Icon className="w-3.5 h-3.5 flex-shrink-0" />
-          <span>{meta.label}</span>
-        </span>
       )}
-
-      {/* Model selector */}
-      {models.length > 1 ? (
-        <>
-          <span className="text-border/60">·</span>
+      <div className="px-2 py-1.5 flex items-center gap-1.5">
+        {/* Provider selector */}
+        {providers.length > 1 ? (
           <div className="relative">
             <button
               type="button"
-              onClick={() => setOpenMenu(openMenu === 'model' ? null : 'model')}
-              className="flex items-center gap-1 px-1 py-0.5 -mx-1 rounded hover:bg-muted/50 transition-colors"
+              onClick={() => setOpenMenu(openMenu === 'provider' ? null : 'provider')}
+              className="flex items-center gap-1.5 px-1 py-0.5 -mx-1 rounded hover:bg-muted/50 transition-colors"
             >
-              <span>{currentModelLabel}</span>
+              <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+              <span>{meta.label}</span>
               {chevron}
             </button>
 
-            {openMenu === 'model' && (
+            {openMenu === 'provider' && (
               <div className="ai-config-menu">
-                {models.length > 8 && (
-                  <div className="ai-config-menu-search">
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      placeholder="Filter models…"
-                      value={modelSearch}
-                      onChange={e => setModelSearch(e.target.value)}
-                      autoFocus
-                    />
-                  </div>
-                )}
-                <div className={models.length > 8 ? 'ai-config-menu-scroll' : ''}>
-                  {models
-                    .filter(m => !modelSearch || m.label.toLowerCase().includes(modelSearch.toLowerCase()))
-                    .map(m => {
-                      const isActive = m.id === effectiveModel;
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => handleModelSelect(m.id)}
-                          className={`ai-config-menu-item ${isActive ? 'ai-config-menu-item-active' : ''}`}
-                        >
-                          <span>{m.label}</span>
-                          {isActive && (
-                            <svg className="w-3 h-3 ml-auto text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
-                      );
-                    })}
-                </div>
-              </div>
-            )}
-          </div>
-        </>
-      ) : currentModelLabel ? (
-        <>
-          <span className="text-border/60">·</span>
-          <span>{currentModelLabel}</span>
-        </>
-      ) : null}
-
-      {/* Reasoning effort — shown when the selected model reports supported efforts */}
-      {reasoningEfforts.length > 0 && (
-        <>
-          <span className="text-border/60">·</span>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setOpenMenu(openMenu === 'effort' ? null : 'effort')}
-              className="flex items-center gap-1 px-1 py-0.5 -mx-1 rounded hover:bg-muted/50 transition-colors"
-              title="Reasoning effort"
-            >
-              <span>{reasoningEfforts.find(e => e.id === activeEffort)?.label ?? 'Auto'}</span>
-              {chevron}
-            </button>
-
-            {openMenu === 'effort' && (
-              <div className="ai-config-menu">
-                {reasoningEfforts.map(e => {
-                  const isActive = e.id === activeEffort;
+                {providers.map(p => {
+                  const m = getProviderMeta(p.name);
+                  const ProvIcon = m.icon;
+                  const isActive = p.id === effectiveProviderId;
                   return (
                     <button
-                      key={e.id}
+                      key={p.id}
                       type="button"
-                      onClick={() => handleEffortSelect(e.id)}
+                      onClick={() => handleProviderSelect(p.id)}
                       className={`ai-config-menu-item ${isActive ? 'ai-config-menu-item-active' : ''}`}
                     >
-                      <span>{e.label}</span>
+                      <ProvIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>{m.label}</span>
                       {isActive && (
                         <svg className="w-3 h-3 ml-auto text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -246,16 +151,123 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
               </div>
             )}
           </div>
-        </>
-      )}
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>{meta.label}</span>
+          </span>
+        )}
 
-      {/* Spacer */}
-      <div className="flex-1" />
+        {/* Model selector */}
+        {models.length > 1 ? (
+          <>
+            <span className="text-border/60">·</span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenMenu(openMenu === 'model' ? null : 'model')}
+                className="flex items-center gap-1 px-1 py-0.5 -mx-1 rounded hover:bg-muted/50 transition-colors"
+              >
+                <span>{currentModelLabel}</span>
+                {chevron}
+              </button>
 
-      {/* Session reset note */}
-      {showSessionNote && (
-        <span className="text-[10px] text-amber-500 animate-pulse">New chat session</span>
-      )}
+              {openMenu === 'model' && (
+                <div className="ai-config-menu">
+                  {models.length > 8 && (
+                    <div className="ai-config-menu-search">
+                      <input
+                        ref={searchInputRef}
+                        type="text"
+                        placeholder="Filter models…"
+                        value={modelSearch}
+                        onChange={e => setModelSearch(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                  )}
+                  <div className={models.length > 8 ? 'ai-config-menu-scroll' : ''}>
+                    {models
+                      .filter(m => !modelSearch || m.label.toLowerCase().includes(modelSearch.toLowerCase()))
+                      .map(m => {
+                        const isActive = m.id === effectiveModel;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => handleModelSelect(m.id)}
+                            className={`ai-config-menu-item ${isActive ? 'ai-config-menu-item-active' : ''}`}
+                          >
+                            <span>{m.label}</span>
+                            {isActive && (
+                              <svg className="w-3 h-3 ml-auto text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        ) : currentModelLabel ? (
+          <>
+            <span className="text-border/60">·</span>
+            <span>{currentModelLabel}</span>
+          </>
+        ) : null}
+
+        {/* Reasoning effort — shown when the selected model reports supported efforts */}
+        {reasoningEfforts.length > 0 && (
+          <>
+            <span className="text-border/60">·</span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenMenu(openMenu === 'effort' ? null : 'effort')}
+                className="flex items-center gap-1 px-1 py-0.5 -mx-1 rounded hover:bg-muted/50 transition-colors"
+                title="Reasoning effort"
+              >
+                <span>{reasoningEfforts.find(e => e.id === activeEffort)?.label ?? 'Auto'}</span>
+                {chevron}
+              </button>
+
+              {openMenu === 'effort' && (
+                <div className="ai-config-menu">
+                  {reasoningEfforts.map(e => {
+                    const isActive = e.id === activeEffort;
+                    return (
+                      <button
+                        key={e.id}
+                        type="button"
+                        onClick={() => handleEffortSelect(e.id)}
+                        className={`ai-config-menu-item ${isActive ? 'ai-config-menu-item-active' : ''}`}
+                      >
+                        <span>{e.label}</span>
+                        {isActive && (
+                          <svg className="w-3 h-3 ml-auto text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Session reset note */}
+        {showSessionNote && (
+          <span className="text-[10px] text-amber-500 animate-pulse">New chat session</span>
+        )}
+      </div>
     </div>
   );
 };
