@@ -54,6 +54,12 @@ import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
+import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
+import {
+  markTerminalToolsAnnouncementSeen,
+  needsTerminalToolsAnnouncement,
+  terminalToolsAnnouncementCanShow,
+} from '@plannotator/ui/utils/terminalToolsAnnouncement';
 import { buildDefaultPrompt, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
@@ -672,6 +678,13 @@ const App: React.FC = () => {
     },
   });
   const [showLookAndFeelAnnouncement, setShowLookAndFeelAnnouncement] = useState(needsLookAndFeelAnnouncement);
+  // One-time terminal-tools announcement (Plannotator TUI + Herdr Annotate),
+  // shared with the code review editor through one cookie. Latched at mount:
+  // the dismiss writes the cookie, and re-reading it per render would unmount
+  // the dialog under its own click handler.
+  const [terminalToolsIntroPending, setTerminalToolsIntroPending] = useState(
+    needsTerminalToolsAnnouncement,
+  );
   const isMobile = useIsMobile();
   const isBelowAgentTerminalBreakpoint = useIsMobile(AGENT_TERMINAL_LG_BREAKPOINT);
   const isCompactTouchLayout = useCompactTouchLayout();
@@ -1020,6 +1033,11 @@ const App: React.FC = () => {
     setRightSidebarTab('annotations');
     setIsPanelOpen(prev => rightSidebarTab === 'annotations' ? !prev : true);
   }, [agentTerminalPlacement, exitWideMode, isAgentTerminalVisible, isCompactTouchLayout, openCompactPlanSurface, replaceRightAgentTerminalWithPanel, rightSidebarTab, wideModeType]);
+
+  const dismissTerminalToolsAnnouncement = useCallback(() => {
+    markTerminalToolsAnnouncementSeen();
+    setTerminalToolsIntroPending(false);
+  }, []);
 
   const dismissLookAndFeelAnnouncement = useCallback(() => {
     // Persist even when the user accepts the displayed default without first
@@ -5574,6 +5592,18 @@ const App: React.FC = () => {
     !isSharedSession &&
     !goalSetupMode &&
     !showPermissionModeSetup;
+  // LAST in this app's first-run sequence: it asks for no decision, so it waits
+  // behind the look-and-feel chooser and the two setup flows. Archive browsing
+  // and a read-only shared plan (which is also what the share portal serves)
+  // have no one to address, so it is deferred there rather than consumed.
+  const shouldShowTerminalToolsAnnouncement = terminalToolsAnnouncementCanShow({
+    announcementPending: terminalToolsIntroPending,
+    isLoading,
+    readOnlySession: isSharedSession || archive.archiveMode,
+    compact: isCompactTouchLayout,
+    otherFirstRunDialogVisible:
+      shouldShowLookAndFeelAnnouncement || goalSetupMode || showPermissionModeSetup,
+  });
   const compactNavigatorTabs: SidebarTab[] = [
     ...(hasTocEntries ? ['toc' as const] : []),
     ...(!isHtmlSurface && activeDiffVersionInfo !== null && activeDiffVersionInfo.totalVersions > 1
@@ -6743,6 +6773,16 @@ const App: React.FC = () => {
           onToggleGrid={(v) => configStore.set('gridEnabled', v)}
           onDismiss={dismissLookAndFeelAnnouncement}
         />
+
+        {/* One-time Plannotator TUI + Herdr Annotate announcement, shared with
+            the code review editor. Renders only once the look-and-feel chooser
+            and the setup flows are done, so the first-run dialogs never stack. */}
+        {shouldShowTerminalToolsAnnouncement && (
+          <TerminalToolsAnnouncementDialog
+            isOpen
+            onDismiss={dismissTerminalToolsAnnouncement}
+          />
+        )}
 
         {/* Image Annotator for pasted images */}
         <ImageAnnotator

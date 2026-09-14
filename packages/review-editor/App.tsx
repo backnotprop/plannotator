@@ -41,6 +41,12 @@ import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
+import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
+import {
+  markTerminalToolsAnnouncementSeen,
+  needsTerminalToolsAnnouncement,
+  terminalToolsAnnouncementCanShow,
+} from '@plannotator/ui/utils/terminalToolsAnnouncement';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
@@ -1089,6 +1095,18 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     if (shouldConsumeTokenHoverAnnouncement()) markTokenHoverAnnouncementSeen();
   }, []);
+  // One-time terminal-tools announcement (Plannotator TUI + Herdr Annotate).
+  // LAST in the dialog chain, after every dialog that asks the reviewer to
+  // decide something. Latched at mount like its siblings: the dismiss writes
+  // the cookie, and re-reading it per render would unmount the dialog under
+  // its own click handler.
+  const [terminalToolsIntroPending, setTerminalToolsIntroPending] = useState(
+    needsTerminalToolsAnnouncement,
+  );
+  const dismissTerminalToolsIntro = useCallback(() => {
+    markTerminalToolsAnnouncementSeen();
+    setTerminalToolsIntroPending(false);
+  }, []);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1520,6 +1538,23 @@ const ReviewApp: React.FC = () => {
     lookAndFeelVisible: showLookAndFeel,
     reviewSetupVisible: showReviewSetup,
     editModeVisible: editModeIntroVisible,
+  });
+  // LAST in the first-run dialog chain: it asks for no decision, so it waits
+  // behind every dialog that does. terminalToolsAnnouncementCanShow explains
+  // why last rather than first.
+  const terminalToolsIntroVisible = terminalToolsAnnouncementCanShow({
+    announcementPending: terminalToolsIntroPending,
+    isLoading,
+    // The code review editor has no archive or shared-session mode; the
+    // portable guide viewer never mounts this App.
+    readOnlySession: false,
+    compact: isCompactTouchLayout,
+    otherFirstRunDialogVisible:
+      guideIntroVisible
+      || showLookAndFeel
+      || showReviewSetup
+      || editModeIntroVisible
+      || tokenHoverIntroVisible,
   });
   const hoveredTokenSymbol = tokenHover.hover?.request.symbol;
   const startTokenHover = tokenHover.onTokenHoverEnter;
@@ -2502,7 +2537,7 @@ const ReviewApp: React.FC = () => {
     // (not lost) behind the guide takeover or a first-run dialog — the file
     // still marks and the next auto-view retries the toast.
     if (!needsAutoViewedNotice()) return;
-    if (guideOpen || guideIntroVisible || showLookAndFeel || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible) return;
+    if (guideOpen || guideIntroVisible || showLookAndFeel || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible) return;
     markAutoViewedNoticeSeen();
     toast('Files are marked viewed as you scroll', {
       description: "Scroll past a file or move on to the next and it's checked off. Turn this off in Settings → Git, or from the gear above the file list.",
@@ -2522,7 +2557,7 @@ const ReviewApp: React.FC = () => {
         },
       },
     });
-  }, [guideOpen, guideIntroVisible, showLookAndFeel, showReviewSetup, editModeIntroVisible, tokenHoverIntroVisible]);
+  }, [guideOpen, guideIntroVisible, showLookAndFeel, showReviewSetup, editModeIntroVisible, tokenHoverIntroVisible, terminalToolsIntroVisible]);
   const { handleReadingFileChange: handleAutoViewReadingFile, handleFileScrolledPast } = useAutoViewed({
     enabled: autoViewedEnabled,
     // Rule 4 — only the review target. The guide takeover CSS-hides the dock
@@ -4192,7 +4227,7 @@ const ReviewApp: React.FC = () => {
     if (event.defaultPrevented || isNativeHistoryOwner(event)) return false;
     if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning || isLoadingDiff) return false;
     if (guideOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showWorktreeDialog || showNoAnnotationsDialog || showExitWarning) return false;
-    if (showLookAndFeel || showGuideIntro || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || tourDialogJobId) return false;
+    if (showLookAndFeel || showGuideIntro || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || tourDialogJobId) return false;
     return !hasActiveHistoryOverlay(document);
   }, [
     guideOpen,
@@ -4203,6 +4238,7 @@ const ReviewApp: React.FC = () => {
     isSendingFeedback,
     editModeIntroVisible,
     tokenHoverIntroVisible,
+    terminalToolsIntroVisible,
     openSettingsMenu,
     platformCommentDialog,
     showDestinationMenu,
@@ -5581,20 +5617,28 @@ const ReviewApp: React.FC = () => {
           />
         )}
 
-        {/* One-time token hover card announcement. LAST in the dialog chain
+        {/* One-time token hover card announcement. Fifth in the dialog chain
             (guide intro → look-and-feel → review setup → edit mode → token
-            hover) — tokenHoverAnnouncementCanShow gates on every earlier
-            dialog, so the chain dialogs never stack. */}
+            hover → terminal tools) — tokenHoverAnnouncementCanShow gates on
+            every earlier dialog, so the chain dialogs never stack. */}
         {tokenHoverIntroVisible && (
           <TokenHoverAnnouncementDialog isOpen onDismiss={dismissTokenHoverIntro} />
         )}
 
+        {/* One-time Plannotator TUI + Herdr Annotate announcement. LAST in the
+            dialog chain (guide intro → look-and-feel → review setup → edit
+            mode → token hover → terminal tools) — terminalToolsAnnouncementCanShow
+            gates on every earlier dialog, so the chain dialogs never stack. */}
+        {terminalToolsIntroVisible && (
+          <TerminalToolsAnnouncementDialog isOpen onDismiss={dismissTerminalToolsIntro} />
+        )}
+
         {/* One-time PR feedback-destination spotlight. Strictly AFTER the
-            first-run dialog chain (guide intro → look-and-feel → review
-            setup → edit mode → token hover): it only mounts once none of the five is
-            showing, so it never stacks with them. PR mode only — the switcher
-            it points at doesn't render otherwise. */}
-        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && !tokenHoverIntroVisible && (
+            first-run dialog chain (guide intro → look-and-feel → review setup
+            → edit mode → token hover → terminal tools): it only mounts once
+            none of the six is showing, so it never stacks with them. PR mode
+            only — the switcher it points at doesn't render otherwise. */}
+        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && !tokenHoverIntroVisible && !terminalToolsIntroVisible && (
           <DestinationSpotlight
             targetRef={destToggleRef}
             platformLabel={platformLabel}
