@@ -259,20 +259,23 @@
   }
 }
 
-/* The "New · Watch:" tag over the announcement footage. Colors come from the
- * dialog's own --announce-brand* variables (Herdr Annotate's badge palette,
- * deliberately not app tokens). The sheen is a slow diagonal highlight, never
- * a blink; the dialog drops the --sheen class under reduced motion and this
- * media query is the backstop. */
+/* The "New · Watch:" corner block on the announcement footage, flush to the
+ * frame's top-left edge. Colors come from the dialog's own --announce-brand*
+ * variables (Herdr Annotate's badge palette, deliberately not app tokens); the
+ * periwinkle edge runs only along the two sides that meet the footage. The
+ * sheen is a slow diagonal highlight across the whole block every 4s, never a
+ * blink; the dialog drops the --sheen class under reduced motion and the media
+ * query below is the backstop. */
 .terminal-tools-announcement-tag {
   position: absolute;
   overflow: hidden;
   background: var(--announce-brand, #312b52);
   color: var(--announce-brand-text, #c9c6f1);
-  border: 1px solid color-mix(in srgb, var(--announce-brand-accent, #B9C0FF) 38%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--announce-brand-accent, #B9C0FF) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--announce-brand-accent, #B9C0FF) 55%, transparent);
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    0 4px 14px rgba(0, 0, 0, 0.28);
+    2px 2px 0 rgba(0, 0, 0, 0.18),
+    4px 6px 18px rgba(0, 0, 0, 0.32);
 }
 
 .terminal-tools-announcement-tag--sheen::after {
@@ -287,12 +290,12 @@
     transparent 62%
   );
   transform: translateX(-100%);
-  animation: terminal-tools-announcement-sheen 3.6s ease-in-out infinite;
+  animation: terminal-tools-announcement-sheen 4s ease-in-out infinite;
 }
 
 @keyframes terminal-tools-announcement-sheen {
   0% { transform: translateX(-100%); }
-  55%, 100% { transform: translateX(100%); }
+  45%, 100% { transform: translateX(100%); }
 }
 
 @media (prefers-reduced-motion: reduce) {

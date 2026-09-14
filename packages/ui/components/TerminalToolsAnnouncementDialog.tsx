@@ -175,13 +175,16 @@ function DemoPlayer({ demo, reducedMotion }: DemoPlayerProps) {
       className="group relative w-full overflow-hidden bg-muted"
       style={{ aspectRatio: String(DEMO_ASPECT) }}
     >
-      {/* Top-left, on the footage. The posters keep only a sidebar label and a
-          tab marker under this corner, so nothing that matters is covered. */}
+      {/* A corner block on the frame, flush to the panel's top-left edge (the
+          panel's own radius clips its outer corner) the way a "new" corner tag
+          sits on a product card. The posters keep only a sidebar label and a
+          tab marker under this corner, so nothing that matters is covered.
+          Roughly 200x48 over the desktop video, 118x32 at phone width. */}
       <span
         aria-hidden="true"
         data-terminal-tools-tag
         data-shimmer={reducedMotion ? 'off' : 'on'}
-        className={`terminal-tools-announcement-tag absolute left-3.5 top-3.5 z-10 select-none rounded-md px-2 py-1 text-[11px] font-semibold uppercase leading-none tracking-[0.14em] sm:left-4 sm:top-4${
+        className={`terminal-tools-announcement-tag absolute left-0 top-0 z-10 inline-flex h-8 select-none items-center rounded-br-xl pl-3.5 pr-4 text-[11px] font-semibold uppercase leading-none tracking-[0.16em] sm:h-12 sm:pl-6 sm:pr-7 sm:text-[15px] sm:tracking-[0.18em]${
           reducedMotion ? '' : ' terminal-tools-announcement-tag--sheen'
         }`}
       >
