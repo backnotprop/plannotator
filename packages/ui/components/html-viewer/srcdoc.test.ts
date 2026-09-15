@@ -1542,8 +1542,8 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     expect(buttonContext.attrs).toEqual([["aria-label", "Open menu"]]);
     postBridge({ type: "plannotator-bridge-cancel-selection" });
 
-    // Absolute URLs lose their query and fragment (tokens live there);
-    // relative ones are route state and stay whole.
+    // URLs lose their query and fragment (tokens live there) and keep their
+    // path, in every form: absolute and relative alike.
     const home = document.querySelector<HTMLElement>('a[href^="https://acme.test"]')!;
     hoverAt(home, 10, 10);
     const link = await clickAndCollectSelection(home, 10, 10);
@@ -1556,7 +1556,8 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     const about = document.querySelector<HTMLElement>('a[href="/about?tab=2"]')!;
     hoverAt(about, 90, 12);
     const rel = await clickAndCollectSelection(about, 90, 12);
-    expect((rel.messages[0]!.context as { attrs: Array<[string, string]> }).attrs).toEqual([["href", "/about?tab=2"]]);
+    expect((rel.messages[0]!.context as { attrs: Array<[string, string]> }).attrs).toEqual([["href", "/about?…"]]);
+    expect(JSON.stringify(rel.messages[0]!.context)).not.toContain("tab=2");
     postBridge({ type: "plannotator-bridge-cancel-selection" });
 
     postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });

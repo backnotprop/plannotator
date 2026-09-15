@@ -2748,8 +2748,9 @@ export const BRIDGE_SCRIPT = `(function() {
   // Constraints (the "smart" part is that they adapt to the element):
   // - attributes are an ALLOWLIST (a page cannot add a key); no form values,
   //   no on* handlers, no style, no script/style/template contents ever;
-  // - absolute http(s) URLs lose their query and fragment (tokens live
-  //   there), data: URIs keep only their media-type prefix;
+  // - href/src URLs lose their query and fragment (tokens live there),
+  //   relative ones included, and data: URIs keep only their media-type
+  //   prefix;
   // - the outline tries two levels of children, falls back to one, then to a
   //   per-tag count, whichever first fits CTX_MAX_OUTLINE, so a click on a
   //   whole <main> costs the same bytes as a click on a chip;
@@ -2799,7 +2800,10 @@ export const BRIDGE_SCRIPT = `(function() {
   }
 
   // URL attribute values: keep what locates the element in source, drop
-  // what identifies the user. Relative URLs are route state and stay whole.
+  // what identifies the user. The path survives in every form; the query and
+  // the fragment never do — a relative URL carries the same per-visit state an
+  // absolute one does (session ids, and the implicit-flow tokens that live in
+  // the fragment specifically), so it is scrubbed the same way.
   function ctxScrubUrl(value) {
     var v = String(value).trim();
     if (/^javascript:/i.test(v)) return null;
@@ -2813,6 +2817,8 @@ export const BRIDGE_SCRIPT = `(function() {
         return u.origin + u.pathname + (u.search || u.hash ? '?…' : '');
       } catch (ex) { return ctxTruncate(v, CTX_MAX_ATTR_VALUE); }
     }
+    var mark = v.search(/[?#]/);
+    if (mark >= 0) return v.slice(0, mark) + '?…';
     return v;
   }
 
