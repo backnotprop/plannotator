@@ -849,6 +849,77 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
  * and box metrics MUST stay identical or the overlay drifts out of alignment. */
 const COMPOSER_TEXT_CLASSES = 'w-full bg-transparent text-sm px-1 py-0.5';
 
+/** Per-composer memo for the overlay gutter sync below. */
+interface OverlayGutterState {
+  /** The overlay the applied value belongs to (a remount invalidates it). */
+  overlay: HTMLElement | null;
+  /** Last `offsetWidth - clientWidth` seen on the textarea. */
+  raw: number;
+  /** Extra right padding currently written inline on the overlay, in px. */
+  applied: number;
+}
+
+const cssPx = (value: string): number => {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * Keep the mirror's text column exactly as wide as the textarea's (#1525).
+ *
+ * A layout-consuming vertical scrollbar (Windows/Linux classic scrollbars; the
+ * app's `scrollbar-width: thin` makes them ~12px) narrows the textarea's
+ * content box once the composer hits its max height — but the overlay is
+ * `overflow: hidden` and keeps its full width, so from the first line that
+ * wraps differently the painted glyphs drift away from the native caret, which
+ * is the one thing the textarea itself still draws. `scrollbar-gutter: stable`
+ * cannot fix this: it is ignored on an `overflow: hidden` box. Mirroring the
+ * measured scrollbar width onto the overlay's right padding makes both boxes
+ * wrap identically again (and stops the overlay painting under the scrollbar).
+ *
+ * Overlay scrollbars (macOS, iOS, any touch surface) consume no layout, so the
+ * measured width is 0 — and then this writes NOTHING at all, leaving the
+ * class-driven padding untouched exactly as before the fix.
+ */
+function syncOverlayGutter(
+  el: HTMLTextAreaElement,
+  overlay: HTMLElement,
+  state: OverlayGutterState,
+  raw: number,
+): void {
+  // Nothing measurable changed since the last sync — the common case.
+  if (overlay === state.overlay && raw === state.raw) return;
+  state.overlay = overlay;
+  state.raw = raw;
+
+  const clear = () => {
+    if (state.applied === 0) return; // never wrote anything; leave the DOM alone
+    overlay.style.removeProperty('padding-right');
+    state.applied = 0;
+  };
+
+  const style = getComputedStyle(el);
+  // `offsetWidth - clientWidth` is scrollbar + left/right borders. The borders
+  // are shared with the overlay (both boxes are border-box), so only the
+  // scrollbar part is the extra gutter the mirror is missing.
+  const borders = cssPx(style.borderLeftWidth) + cssPx(style.borderRightWidth);
+  const scrollbar = Math.max(0, raw - borders);
+  if (scrollbar === 0) {
+    clear();
+    return;
+  }
+  // Base padding is read from the textarea (never the overlay, whose computed
+  // value may already include a gutter we wrote), so the two can never drift
+  // apart if COMPOSER_TEXT_CLASSES changes.
+  const base = parseFloat(style.paddingRight);
+  if (!Number.isFinite(base)) {
+    clear(); // unmeasurable: fall back to the pre-fix behavior
+    return;
+  }
+  overlay.style.paddingRight = `${base + scrollbar}px`;
+  state.applied = scrollbar;
+}
+
 interface ComposerTextareaProps {
   value: string;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
@@ -897,12 +968,17 @@ const ComposerTextarea: React.FC<ComposerTextareaProps> = ({
 }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
+  const gutterRef = useRef<OverlayGutterState>({ overlay: null, raw: 0, applied: 0 });
 
   const syncScroll = useCallback((el: HTMLTextAreaElement) => {
     const overlay = overlayRef.current;
     if (!overlay) return;
-    overlay.scrollTop = el.scrollTop;
-    overlay.scrollLeft = el.scrollLeft;
+    // Reads before writes so a sync costs at most one forced layout.
+    const { scrollTop, scrollLeft } = el;
+    const raw = el.offsetWidth - el.clientWidth;
+    overlay.scrollTop = scrollTop;
+    overlay.scrollLeft = scrollLeft;
+    syncOverlayGutter(el, overlay, gutterRef.current, raw);
   }, []);
 
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -919,6 +995,19 @@ const ComposerTextarea: React.FC<ComposerTextareaProps> = ({
   useEffect(() => {
     if (innerRef.current) syncScroll(innerRef.current);
   }, [value, syncScroll]);
+
+  // `syncScroll` otherwise only runs on scroll and on value change, so a
+  // window/panel resize that grows or drops the textarea's scrollbar without a
+  // keystroke would leave the gutter stale until the next one.
+  useEffect(() => {
+    const el = innerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (innerRef.current) syncScroll(innerRef.current);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [skillReferences, syncScroll]);
 
   if (!skillReferences) {
     return (
