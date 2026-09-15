@@ -48,7 +48,7 @@ import { type QuickLabel } from '../utils/quickLabels';
 import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBadges';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
-import { useAnnotationHighlighter } from '../hooks/useAnnotationHighlighter';
+import { useAnnotationHighlighter, type AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { useVimSelection } from '../hooks/useVimSelection';
 import {
   getScrollViewportIntersectionRoot,
@@ -167,6 +167,9 @@ export interface ViewerProps {
   vimHudKeyPanelEnabled?: boolean;
   /** Persist a user request to hide the bottom-right key panel. */
   onVimHudKeyPanelChange?: (enabled: boolean) => void;
+  /** Fires once per highlight-restore pass with what it tried and what it could
+   *  not anchor, so a host can mark the leftovers in its annotation panel. */
+  onRestoreReport?: (report: AnnotationRestoreReport) => void;
 }
 
 export interface ViewerHandle {
@@ -364,6 +367,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   imageBaseDir,
   codePathBaseDir,
   disableCodePathValidation,
+  onRestoreReport,
   copyLabel,
   actionsLabelMode = 'full',
   archiveInfo,
@@ -508,6 +512,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     // dropped and the text-search rescue runs instead of a wrong highlight.
     verifyRestoredContent: true,
     onRestoreMismatch: handleRestoreMismatch,
+    onRestoreReport,
   });
 
   // Refs for code block annotation path

@@ -604,6 +604,19 @@ export interface UseAnnotationHighlighterOptions {
   /** Fires when a restore was rejected (content mismatch) and the text-search
    *  fallback could not re-anchor the annotation either. */
   onRestoreMismatch?: (annotation: Annotation, restoredText: string) => void;
+  /** Fires once per `applyAnnotations` pass with what that pass tried and what
+   *  it could not anchor, so a host can mark the leftovers in its panel. */
+  onRestoreReport?: (report: AnnotationRestoreReport) => void;
+}
+
+/** The outcome of one `applyAnnotations` pass. */
+export interface AnnotationRestoreReport {
+  /** Ids the pass considered — including ones already painted, which are
+   *  anchored by definition. A host clears their unanchored marks. */
+  attempted: string[];
+  /** Of those, the ones left with no highlight because the stored positions
+   *  resolved onto the wrong text AND the quote was nowhere in the document. */
+  unanchored: string[];
 }
 
 /** Annotation UI state and mutation commands owned by one rendered document. */
@@ -648,6 +661,7 @@ export function useAnnotationHighlighter({
   enabled = true,
   verifyRestoredContent = false,
   onRestoreMismatch,
+  onRestoreReport,
 }: UseAnnotationHighlighterOptions): UseAnnotationHighlighterReturn {
   const highlighterRef = useRef<Highlighter | null>(null);
   const modeRef = useRef<EditorMode>(mode);
@@ -675,6 +689,8 @@ export function useAnnotationHighlighter({
   useEffect(() => { onSelectAnnotationRef.current = onSelectAnnotation; }, [onSelectAnnotation]);
   const onRestoreMismatchRef = useRef(onRestoreMismatch);
   useEffect(() => { onRestoreMismatchRef.current = onRestoreMismatch; }, [onRestoreMismatch]);
+  const onRestoreReportRef = useRef(onRestoreReport);
+  useEffect(() => { onRestoreReportRef.current = onRestoreReport; }, [onRestoreReport]);
 
   const clearPendingSelection = useCallback(() => {
     pendingSourceRef.current = null;
@@ -1015,8 +1031,12 @@ export function useAnnotationHighlighter({
     const highlighter = highlighterRef.current;
     if (!highlighter || !containerRef.current) return;
 
+    const attempted: string[] = [];
+    const unanchored: string[] = [];
+
     anns.forEach(ann => {
       if (ann.type === AnnotationType.GLOBAL_COMMENT) return;
+      attempted.push(ann.id);
 
       // Skip if already highlighted
       try {
@@ -1068,6 +1088,7 @@ export function useAnnotationHighlighter({
       const range = findTextInDOM(ann.originalText);
       if (!range) {
         if (rejectedRestoreText !== null) {
+          unanchored.push(ann.id);
           onRestoreMismatchRef.current?.(ann, rejectedRestoreText);
         }
         console.warn(`Could not find text for annotation ${ann.id}: "${ann.originalText.slice(0, 50)}..."`);
@@ -1156,6 +1177,8 @@ export function useAnnotationHighlighter({
         console.warn(`Failed to apply highlight for annotation ${ann.id}:`, e);
       }
     });
+
+    if (attempted.length > 0) onRestoreReportRef.current?.({ attempted, unanchored });
   }, [findMathElementsForAnnotation, findTextInDOM, verifyRestoredContent]);
 
   const removeHighlight = useCallback((id: string) => {

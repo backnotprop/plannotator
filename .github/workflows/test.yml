@@ -192,6 +192,7 @@ jobs:
           packages/review-editor/components/ReviewHeaderMenu.mobile.test.tsx
           packages/editor/App.editModeShortcut.test.tsx
           packages/editor/App.editModeCrossBlockHighlights.test.tsx
+          packages/editor/App.markdownUnanchored.test.tsx
           packages/ui/components/blocks/AlertBlock.title.test.tsx
           packages/ui/components/blocks/AlertBlock.seam.test.tsx
           packages/ui/components/blocks/AlertBlock.annotation.test.tsx
