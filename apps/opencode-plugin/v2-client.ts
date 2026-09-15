@@ -50,10 +50,26 @@ export interface V2CommandDomain {
   reload?: () => Promise<unknown>;
 }
 
+/**
+ * The subset of the V2 event domain this plugin touches.
+ *
+ * `ctx.event.subscribe()` is the public server event stream: the host filters
+ * the bus to `EventManifest.ServerDefinitions`
+ * (`packages/core/src/plugin/host.ts` @ anomalyco/opencode `origin/v2`
+ * 27aaa9ce0e), and the session inbox events are part of that manifest
+ * (`SessionEvent.Definitions`, `packages/schema/src/session-event.ts`). Both
+ * plugin generations this adapter targets carry it, but it is probed like every
+ * other domain.
+ */
+export interface V2EventDomain {
+  subscribe?: (options?: { signal?: AbortSignal }) => AsyncIterable<unknown>;
+}
+
 export interface V2ContextLike {
   agent?: { list?: (input?: unknown) => Promise<unknown> };
   session?: V2SessionDomain;
   command?: V2CommandDomain;
+  event?: V2EventDomain;
   location?: { directory?: string };
 }
 
@@ -104,6 +120,12 @@ export interface V2BridgeClient {
     messages: (input: unknown) => Promise<{ data: unknown[] }>;
     prompt: (input: unknown) => Promise<unknown>;
   };
+  /**
+   * Release anything this client is watching on the host. Safe to call more
+   * than once, and safe never to call — it only shortens the lifetime of the
+   * inbox watcher `createNoticePendingTracker` may have opened.
+   */
+  dispose: () => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -237,10 +259,161 @@ const FEEDBACK_DELIVERY = "queue";
  * upstream's own transcript notices (shell results, `Session.shell`) leave the
  * host default of "steer" in place instead of queueing.
  *
- * Only used when this client actually posted a notice; a review that posted
- * none keeps `FEEDBACK_DELIVERY` and its late-arrival guarantee.
+ * Only used while a notice of this client's is STILL an un-promoted row. A
+ * review that posted none, and one whose notice something else has already
+ * promoted, both keep `FEEDBACK_DELIVERY` and its late-arrival guarantee: see
+ * `NoticePendingTracker`.
  */
 const CO_PROMOTED_DELIVERY = "steer";
+
+/**
+ * Event types by which a host reports that a pending inbox row LEFT the inbox.
+ *
+ * Two vocabularies are live at once, and this adapter has to speak both:
+ *
+ *  - `0.0.0-next-*` (the version this package pins, and what CI installs)
+ *    publishes `session.input.promoted` with `data.inputID`
+ *    (`SessionInputPromoted` in `@opencode-ai/client`'s generated types).
+ *  - v2.0.x and `dev` renamed the inbox events: `session.inbox.delivered` and
+ *    `session.inbox.cancelled`, both with `data.inboxID`
+ *    (`packages/schema/src/session-event.ts` @ anomalyco/opencode `origin/v2`
+ *    27aaa9ce0e, lines 196-223).
+ *
+ * `promote` publishes `InboxDelivered` for every row it consumes
+ * (`SessionInbox.publish`, `packages/core/src/session/inbox.ts`), which is
+ * exactly the moment our notice stops being the row ahead of the feedback.
+ * Cancellation is treated the same way: the row is gone either way.
+ */
+const NOTICE_SETTLED_EVENT_TYPES = new Set([
+  "session.inbox.delivered",
+  "session.inbox.cancelled",
+  "session.input.promoted",
+]);
+
+/**
+ * Read a settled-inbox-row event into `{ sessionID, inboxID }`, or undefined
+ * for anything else on the stream. Tolerates both id spellings, because the two
+ * host generations disagree on the field name.
+ */
+function readSettledInboxRef(
+  event: unknown,
+): { sessionID: string; inboxID: string } | undefined {
+  if (!isRecord(event) || typeof event.type !== "string") return undefined;
+  if (!NOTICE_SETTLED_EVENT_TYPES.has(event.type)) return undefined;
+  const data = isRecord(event.data) ? event.data : undefined;
+  if (!data || typeof data.sessionID !== "string") return undefined;
+  const inboxID = typeof data.inboxID === "string"
+    ? data.inboxID
+    : typeof data.inputID === "string" ? data.inputID : undefined;
+  if (!inboxID) return undefined;
+  return { sessionID: data.sessionID, inboxID };
+}
+
+/**
+ * Tracks whether a session-URL notice of OURS is still an un-promoted inbox row.
+ *
+ * This is the whole point of the type: "pending" must mean "our row is still
+ * sitting in the inbox", not "we posted a notice at some point during this
+ * review". The two diverge as soon as anything else wakes the session — a user
+ * typing an unrelated message promotes every pending steer as one batch
+ * (`SessionInbox.promote`, `packages/core/src/session/inbox.ts`), our notice
+ * included. A flag that never noticed that would still claim the notice was
+ * pending minutes later and steer the reviewer's feedback into the middle of
+ * whatever turn is running then — the exact late-arrival case
+ * `FEEDBACK_DELIVERY` exists to prevent.
+ *
+ * Mechanism: subscribe to the host's own event stream and clear the flag when
+ * the host reports our row settled. The subscription starts BEFORE the notice
+ * is posted (`watch()`), because the row can in principle be promoted between
+ * admission and the moment we learn its id; ids seen in that window are
+ * buffered and `admitted()` consults the buffer.
+ *
+ * Degradation, in order:
+ *  - no `ctx.event.subscribe` or no `sessionID`: nothing is watched.
+ *  - the host accepted the notice but reported no row id: nothing to match.
+ *  - the stream throws, ends, or simply never delivers (upstream #44788 reports
+ *    it as unreliable on some V2 nightlies).
+ * In all three the flag behaves exactly as it did before this tracker existed —
+ * pending until our own prompt joins it — so a host that cannot answer the
+ * question is never made worse than the release that shipped the co-promotion.
+ *
+ * Deliberately NOT bounded by a timer instead. A TTL short enough to contain
+ * the mis-steer (seconds to a couple of minutes) is far shorter than a real
+ * review, so it would give up the #1515 co-promotion on every session that
+ * takes longer than the timeout, trading a precise answer for a guess in both
+ * directions.
+ */
+export interface NoticePendingTracker {
+  /** Start watching, before the notice is posted. Idempotent. */
+  watch: () => void;
+  /**
+   * Record a notice the host ACCEPTED. `inboxID` is the pending row's id when
+   * the host reported one (`session.synthetic` answers with the admitted row).
+   */
+  admitted: (inboxID: string | undefined) => void;
+  /** Is a notice of ours still believed to be an un-promoted row? */
+  pending: () => boolean;
+  /** Our own prompt just joined the notice's promotion; nothing is ahead now. */
+  settle: () => void;
+  /** Stop watching. Safe to call repeatedly. */
+  dispose: () => void;
+}
+
+export function createNoticePendingTracker(
+  ctx: V2ContextLike,
+  sessionID: string | undefined,
+): NoticePendingTracker {
+  let pending = false;
+  let noticeID: string | undefined;
+  /** Rows the host reported settled, including any seen before we knew our id. */
+  const settled = new Set<string>();
+  let controller: AbortController | undefined;
+
+  const stop = () => {
+    const own = controller;
+    controller = undefined;
+    own?.abort();
+  };
+
+  return {
+    watch: () => {
+      const subscribe = ctx.event?.subscribe;
+      if (controller || typeof subscribe !== "function" || !sessionID) return;
+      const own = new AbortController();
+      controller = own;
+      void (async () => {
+        try {
+          for await (const event of subscribe({ signal: own.signal })) {
+            const ref = readSettledInboxRef(event);
+            if (!ref || ref.sessionID !== sessionID) continue;
+            settled.add(ref.inboxID);
+            if (noticeID !== undefined && ref.inboxID === noticeID) {
+              pending = false;
+              break;
+            }
+          }
+        } catch {
+          // Best effort: an unavailable stream degrades to the old flag, never
+          // to an unhandled rejection inside the host's plugin runtime.
+        } finally {
+          if (controller === own) controller = undefined;
+        }
+      })();
+    },
+    admitted: (inboxID) => {
+      noticeID = inboxID;
+      // A row the host already reported settled was never pending for us.
+      pending = !(inboxID !== undefined && settled.has(inboxID));
+      if (!pending) stop();
+    },
+    pending: () => pending,
+    settle: () => {
+      pending = false;
+      stop();
+    },
+    dispose: stop,
+  };
+}
 
 /**
  * The one line a user is shown when a Plannotator session opens on OpenCode 2.
@@ -287,8 +460,9 @@ export function formatSessionUrlNotice(url: string): string {
  * host default. #1459 tried "queue" here; #1515 is what that produced, because
  * a queued row is promoted alone while steers are promoted as a batch. See
  * `CO_PROMOTED_DELIVERY` above for the promotion rules and the citations. The
- * feedback that follows rides the same delivery, so the notice enters the model
- * turn the reviewer actually asked for instead of starting one of its own.
+ * feedback that follows rides the same delivery — but only for as long as this
+ * notice is still an un-promoted row, which is what `NoticePendingTracker`
+ * answers.
  *
  * This does not contradict the reason feedback avoids synthetic injection.
  * Upstream #44788 is about a synthetic message not reliably reaching the MODEL
@@ -302,29 +476,51 @@ export function formatSessionUrlNotice(url: string): string {
 export function createSessionUrlNotifier(
   ctx: V2ContextLike,
   sessionID: string | undefined,
-  /**
-   * Called once the host has ACCEPTED a notice, so the feedback that follows can
-   * be admitted with the delivery that co-promotes with it. Never called for a
-   * rejected notice: nothing is then pending and the plain queue delivery is
-   * still the right one.
-   */
-  onAdmitted?: () => void,
+  notice?: {
+    /**
+     * Called before the notice is posted, so a watcher is already listening if
+     * the row is promoted between admission and the moment its id is known.
+     */
+    posting?: () => void;
+    /**
+     * Called once the host has ACCEPTED a notice, so the feedback that follows
+     * can be admitted with the delivery that co-promotes with it, carrying the
+     * admitted row's id when the host reported one. Never called for a rejected
+     * notice: nothing is then pending and the plain queue delivery is still the
+     * right one.
+     */
+    admitted?: (inboxID: string | undefined) => void;
+  },
 ): ((input: { url: string; message: string }) => Promise<unknown>) | undefined {
   const synthetic = ctx.session?.synthetic;
   if (typeof synthetic !== "function" || !sessionID) return undefined;
   return async ({ url }) => {
-    const notice = formatSessionUrlNotice(url);
+    const text = formatSessionUrlNotice(url);
+    notice?.posting?.();
     const admitted = await synthetic({
       sessionID,
-      text: notice,
-      description: notice,
+      text,
+      description: text,
       resume: false,
       // #1515: the notice and the feedback must share one promotion.
       delivery: CO_PROMOTED_DELIVERY,
     });
-    onAdmitted?.();
+    notice?.admitted?.(readAdmittedInboxID(admitted));
     return admitted;
   };
+}
+
+/**
+ * The pending row id out of a `session.synthetic` response, when the host
+ * reports one. Both generations answer with the admitted inbox row
+ * (`SessionPendingSynthetic` on `0.0.0-next-*`, `SessionInboxSynthetic` on
+ * v2.0.x), whose `id` is also the message id the row is promoted under
+ * (`SessionInbox.promotedFromMessage` looks the message up by exactly that id).
+ * Undefined for any other shape, which degrades the tracker to the old flag.
+ */
+function readAdmittedInboxID(response: unknown): string | undefined {
+  if (!isRecord(response) || typeof response.id !== "string" || !response.id) return undefined;
+  return response.id;
 }
 
 /**
@@ -354,14 +550,19 @@ export function createV2BridgeClient(input: {
   // inbox. It is the only thing that can sit AHEAD of the reviewer's feedback,
   // and the plugin session domain exposes no way to withdraw a pending row
   // (`SessionDomain` is a fixed Pick in `packages/plugin/src/promise/session.ts`
-  // with no inbox member, even though the server itself routes
-  // `session.inbox.cancel`), so the feedback joins its promotion instead.
-  let noticePending = false;
-  const notifyUrl = createSessionUrlNotifier(input.ctx, input.sessionID, () => {
-    noticePending = true;
+  // with no inbox member, and the host builds that object literally with no
+  // inbox member either — `packages/core/src/plugin/host.ts` @ `origin/v2`
+  // 27aaa9ce0e — even though the server itself routes `session.inbox.cancel`),
+  // so the feedback joins its promotion instead. The tracker is what keeps that
+  // "still waiting" honest once something else promotes the row.
+  const notice = createNoticePendingTracker(input.ctx, input.sessionID);
+  const notifyUrl = createSessionUrlNotifier(input.ctx, input.sessionID, {
+    posting: notice.watch,
+    admitted: notice.admitted,
   });
   return {
     ...(notifyUrl && { notifyUrl }),
+    dispose: notice.dispose,
     app: {
       agents: async () => ({ data: await input.getAgents() }),
       log: ({ message }) => {
@@ -399,11 +600,11 @@ export function createV2BridgeClient(input: {
         const delivered = await prompt({
           sessionID,
           text: joinTextParts(Array.isArray(body.parts) ? body.parts : []),
-          delivery: noticePending ? CO_PROMOTED_DELIVERY : FEEDBACK_DELIVERY,
+          delivery: notice.pending() ? CO_PROMOTED_DELIVERY : FEEDBACK_DELIVERY,
         });
         // Admitted: the notice is no longer the row ahead of us, so any later
         // delivery on this client is a plain late arrival again.
-        noticePending = false;
+        notice.settle();
         return delivered;
       },
     },

@@ -443,6 +443,19 @@ describe("V2 plan review URL delivery", () => {
     expect(/logReady:\s*createPlanReadyNotifier\(/.test(source)).toBe(true);
   });
 
+  // Regression: the submit_plan path builds its own client, so it owns that
+  // client's notice watch too. A plan review that ends without delivering a
+  // prompt (denied and closed, or approved — the V2 approval handoff is the
+  // agent switch, not a `session.prompt`) would otherwise leave the host event
+  // subscription open for the life of the process. Pinned at source level for
+  // the same reason as the two facts above: reaching the real wiring means
+  // running a plan review.
+  test("the plan path releases the notice watch when the review ends", () => {
+    const source = readFileSync(path.join(import.meta.dir, "server.ts"), "utf-8");
+
+    expect(/\}\s*finally\s*\{[^}]*client\.dispose\(\);/.test(source)).toBe(true);
+  });
+
   // Regression: a rejected notice must not surface as an unhandled rejection
   // and must not take the plan review down with it.
   test("a rejecting notice is caught", async () => {

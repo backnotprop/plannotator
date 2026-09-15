@@ -457,6 +457,180 @@ describe("V2 feedback delivery", () => {
     expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "steer" });
   });
 
+  /**
+   * A controllable stand-in for `ctx.event.subscribe()`: an async iterable of
+   * host events that honours the abort signal the client passes it, so a test
+   * can both feed it and observe that the client stopped listening.
+   */
+  function createTestEventStream() {
+    const buffered: unknown[] = [];
+    let deliver: ((result: IteratorResult<unknown>) => void) | undefined;
+    let aborted = false;
+    const end = () => {
+      aborted = true;
+      deliver?.({ value: undefined, done: true });
+      deliver = undefined;
+    };
+    return {
+      isAborted: () => aborted,
+      subscribe: (options?: { signal?: AbortSignal }) => {
+        options?.signal?.addEventListener("abort", end);
+        return {
+          [Symbol.asyncIterator]: () => ({
+            next: (): Promise<IteratorResult<unknown>> => {
+              if (buffered.length) return Promise.resolve({ value: buffered.shift(), done: false });
+              if (aborted) return Promise.resolve({ value: undefined, done: true });
+              return new Promise((resolve) => { deliver = resolve; });
+            },
+            return: () => {
+              end();
+              return Promise.resolve({ value: undefined, done: true } as IteratorResult<unknown>);
+            },
+          }),
+        };
+      },
+      emit: async (event: unknown) => {
+        if (deliver) {
+          const resolve = deliver;
+          deliver = undefined;
+          resolve({ value: event, done: false });
+        } else {
+          buffered.push(event);
+        }
+        // Let the client's `for await` body run before the test asserts.
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      },
+    };
+  }
+
+  function makeNoticeBridge(input: {
+    stream: ReturnType<typeof createTestEventStream>;
+    noticeRow?: unknown;
+  }) {
+    const synthetic = mock(async (_input: unknown) => input.noticeRow ?? { id: NOTICE_ROW_ID });
+    const prompt = mock(async (_input: unknown) => ({}));
+    const client = createV2BridgeClient({
+      ctx: {
+        session: { synthetic, prompt },
+        event: { subscribe: input.stream.subscribe },
+      } as never,
+      getAgents: async () => [],
+      sessionID: SESSION_ID,
+    });
+    return { client, prompt, synthetic };
+  }
+
+  const SESSION_ID = "session-1";
+  const NOTICE_ROW_ID = "msg-notice";
+  const FEEDBACK = { path: { id: SESSION_ID }, body: { parts: [{ type: "text", text: "fix the null check" }] } };
+
+  // Regression (#1518 follow-up): `noticePending` used to mean "we posted a
+  // notice during this review", so it stayed true after anything else drained
+  // the inbox. A user typing an unrelated message promotes every pending steer
+  // as one batch (`SessionInbox.promote`) and starts a turn; the reviewer's
+  // feedback, arriving minutes later, was then admitted as a steer INTO that
+  // unrelated turn instead of queueing behind it.
+  test("feedback queues again once the host reports the notice promoted", async () => {
+    const stream = createTestEventStream();
+    const { client, prompt } = makeNoticeBridge({ stream });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    await stream.emit({
+      type: "session.inbox.delivered",
+      data: { sessionID: SESSION_ID, inboxID: NOTICE_ROW_ID },
+    });
+    await client.session.prompt(FEEDBACK);
+
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
+  });
+
+  // The CI-pinned host (`@opencode-ai/plugin@0.0.0-next-16775`) predates the
+  // inbox-event rename and reports the same fact as `session.input.promoted`
+  // with `data.inputID`. Reading only the v2.0.x spelling would leave the
+  // mis-steer live on exactly the host this package pins.
+  test("the pre-rename session.input.promoted event settles the notice too", async () => {
+    const stream = createTestEventStream();
+    const { client, prompt } = makeNoticeBridge({ stream });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    await stream.emit({
+      type: "session.input.promoted",
+      data: { sessionID: SESSION_ID, inputID: NOTICE_ROW_ID },
+    });
+    await client.session.prompt(FEEDBACK);
+
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
+  });
+
+  // The other direction: clearing the flag too eagerly would resurrect #1515,
+  // where a queued notice is promoted ALONE as its own model turn with the
+  // reviewer's feedback stuck behind it. Neither another row's promotion nor a
+  // promotion in another session says anything about our row.
+  test("an unrelated promotion leaves the notice pending and the feedback steered", async () => {
+    const stream = createTestEventStream();
+    const { client, prompt } = makeNoticeBridge({ stream });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    await stream.emit({
+      type: "session.inbox.delivered",
+      data: { sessionID: SESSION_ID, inboxID: "someone-elses-row" },
+    });
+    await stream.emit({
+      type: "session.inbox.delivered",
+      data: { sessionID: "other-session", inboxID: NOTICE_ROW_ID },
+    });
+    await client.session.prompt(FEEDBACK);
+
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "steer" });
+  });
+
+  // Degradation: a host that accepts the notice but reports no row id gives the
+  // tracker nothing to match on, so the flag must behave exactly as it did
+  // before it existed — pending until our own prompt joins the promotion —
+  // rather than guessing from someone else's promotion.
+  test("a notice the host reports no row id for keeps the old co-promotion", async () => {
+    const stream = createTestEventStream();
+    const { client, prompt } = makeNoticeBridge({ stream, noticeRow: {} });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    await stream.emit({
+      type: "session.inbox.delivered",
+      data: { sessionID: SESSION_ID, inboxID: NOTICE_ROW_ID },
+    });
+    await client.session.prompt(FEEDBACK);
+
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "steer" });
+  });
+
+  // Documented limitation, not a fix: a review closed without feedback strands
+  // the notice row, because the plugin session domain exposes no way to
+  // withdraw one (no `inbox` member on `SessionDomain`, and the host builds
+  // that object literally without one). What the invocation CAN do is stop
+  // listening, so a review that delivers no prompt does not leave an event
+  // subscription open on the host for the life of the process.
+  test("a review that sends no feedback releases the notice watch", async () => {
+    const stream = createTestEventStream();
+    const synthetic = mock(async (_input: unknown) => ({ id: NOTICE_ROW_ID }));
+
+    await runNativeCommand("plannotator-review", { sessionID: SESSION_ID }, {
+      ctx: {
+        session: { synthetic },
+        event: { subscribe: stream.subscribe },
+        location: { directory: "/tmp" },
+      } as never,
+      getAgents: async () => [],
+      getBridgeContext: async () => ({ agents: [] }),
+      runCommand: async (request) => {
+        const client = request.client as { notifyUrl?: (input: { url: string; message: string }) => Promise<unknown> };
+        await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+        // The reviewer closes the review: no feedback, so no `session.prompt`.
+      },
+    });
+
+    expect(synthetic).toHaveBeenCalledTimes(1);
+    expect(stream.isAborted()).toBe(true);
+  });
+
   // Regression: a notice the host REFUSED is not pending, so nothing has to be
   // co-promoted and the feedback keeps its late-arrival queue delivery. Marking
   // the notice pending before the host accepted it would steer every review on

@@ -216,38 +216,44 @@ const serverPlugin = {
             getAgents,
             sessionID: toolContext.sessionID,
           });
-          const result = await executeSubmitPlan({
-            edits: getPlanEdits(input),
-            invokingAgent: toolContext.agent,
-            sessionId: toolContext.sessionID,
-            directory,
-            workflowOptions,
-          }, {
-            reviewPlan: async ({ planContent }) => await runPlanReview({
-              client,
-              runtime: workflowOptions.runtime,
-              planContent,
-              sharingEnabled: bridge.sharingEnabled ?? true,
-              shareBaseUrl: bridge.shareBaseUrl,
-              pasteApiUrl: bridge.pasteApiUrl,
-              timeoutSeconds: getPlanTimeoutSeconds(),
+          try {
+            const result = await executeSubmitPlan({
+              edits: getPlanEdits(input),
+              invokingAgent: toolContext.agent,
+              sessionId: toolContext.sessionID,
               directory,
-              bridge,
-            }),
-            resolveTargetAgent: async ({ requestedAgent }) => await switchV2SessionAgent({
-              ctx: v2,
-              sessionID: toolContext.sessionID,
-              requestedAgent,
-              getAgents,
-            }),
-            // The switch above is the whole handoff on V2. Its session.prompt
-            // has no `noReply` equivalent, so an injected approval note would
-            // start a model turn the reviewer never asked for; the submit_plan
-            // tool result already carries the approval text.
-            sendApprovalHandoff: async () => {},
-          });
+              workflowOptions,
+            }, {
+              reviewPlan: async ({ planContent }) => await runPlanReview({
+                client,
+                runtime: workflowOptions.runtime,
+                planContent,
+                sharingEnabled: bridge.sharingEnabled ?? true,
+                shareBaseUrl: bridge.shareBaseUrl,
+                pasteApiUrl: bridge.pasteApiUrl,
+                timeoutSeconds: getPlanTimeoutSeconds(),
+                directory,
+                bridge,
+              }),
+              resolveTargetAgent: async ({ requestedAgent }) => await switchV2SessionAgent({
+                ctx: v2,
+                sessionID: toolContext.sessionID,
+                requestedAgent,
+                getAgents,
+              }),
+              // The switch above is the whole handoff on V2. Its session.prompt
+              // has no `noReply` equivalent, so an injected approval note would
+              // start a model turn the reviewer never asked for; the submit_plan
+              // tool result already carries the approval text.
+              sendApprovalHandoff: async () => {},
+            });
 
-          return { content: result };
+            return { content: result };
+          } finally {
+            // Same call as `runNativeCommand`: closes the session-URL notice
+            // watch for a review that delivered no prompt of its own.
+            client.dispose();
+          }
         },
       });
     });
