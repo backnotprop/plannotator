@@ -248,6 +248,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
         <button
           key={value}
           type="button"
+          data-pn-touch-target="true"
           data-annotation-scope={value}
           aria-pressed={scope === value}
           onClick={() => onAnnotationScopeChange!(value)}
@@ -371,6 +372,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                 <section key={group.path} data-annotation-group={group.path}>
                   <button
                     type="button"
+                    data-pn-touch-target="true"
                     onClick={() => toggleGroup(group.path)}
                     aria-expanded={!collapsed}
                     className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-surface-1/50"
@@ -472,6 +474,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
             {otherGroups.length > 0 && onOtherFileAnnotationsClick && (
               <button
                 type="button"
+                data-pn-touch-target="true"
                 data-annotation-show-in-files="true"
                 onClick={onOtherFileAnnotationsClick}
                 className="mt-1 cursor-pointer self-start px-1.5 text-[10px] text-muted-foreground/60 transition-colors hover:text-primary"
@@ -493,6 +496,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               {scopeEnabled && otherGroupCount > 0 && (
                 <button
                   type="button"
+                  data-pn-touch-target="true"
                   data-annotation-view-all="true"
                   onClick={() => onAnnotationScopeChange!('all')}
                   className="mt-3 cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary"
