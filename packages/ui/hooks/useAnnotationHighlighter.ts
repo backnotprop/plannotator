@@ -212,6 +212,84 @@ const isAnnotationExcludedTextNode = (node: Node): boolean =>
  */
 const compactText = (value: string): string => value.replace(/\s+/g, '');
 
+/**
+ * The text a set of painted highlight wrappers shows the reader.
+ *
+ * Not `textContent`: a wrapper can legitimately contain `.annotation-exclude`
+ * chrome (a list marker the selection crossed, an alert's visually hidden type
+ * word), and that chrome is in neither the browser's selection string nor the
+ * quote derived from it. Comparing raw `textContent` against `originalText`
+ * therefore rejected correct restores over anything non-selectable.
+ */
+const paintedTextOf = (doms: readonly HTMLElement[]): string => {
+  let painted = '';
+  for (const dom of doms) {
+    if (!dom) continue;
+    if (dom.closest?.(ANNOTATION_EXCLUDED_SELECTOR)) continue;
+    const walker = document.createTreeWalker(dom, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      if (isAnnotationExcludedTextNode(node)) continue;
+      painted += node.textContent ?? '';
+    }
+  }
+  return painted;
+};
+
+/**
+ * Tags whose boxes a browser separates with a line break in a selection string.
+ *
+ * Read by {@link blockBoundaryOffsets} only; a computed-style check would be
+ * more precise but is unavailable under the test DOM and would cost a layout
+ * read per text node on every restore.
+ */
+const BLOCK_LEVEL_TAGS = new Set([
+  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'BODY', 'DD', 'DETAILS', 'DIALOG',
+  'DIV', 'DL', 'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM',
+  'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HGROUP', 'HR', 'LI', 'MAIN',
+  'NAV', 'OL', 'P', 'PRE', 'SECTION', 'SUMMARY', 'TABLE', 'TBODY', 'TD',
+  'TFOOT', 'TH', 'THEAD', 'TR', 'UL',
+]);
+
+const nearestBlockAncestor = (node: Node): Element | null => {
+  let element = node.parentElement;
+  while (element) {
+    if (BLOCK_LEVEL_TAGS.has(element.tagName)) return element;
+    element = element.parentElement;
+  }
+  return null;
+};
+
+/**
+ * Offsets in the concatenated text stream at which a new block box starts.
+ *
+ * The document's text nodes are joined with nothing between them, but the
+ * browser's selection string puts a blank line between two block elements —
+ * so a quote spanning two blocks carries whitespace the search stream does
+ * not, and the whitespace-collapsing fallback could never match it. Every
+ * cross-block annotation therefore lost its highlight the moment it had to
+ * fall back to text search (which is every one of them after an Edit Mode
+ * commit, where `applyEditedDocument` strips the stored positions of any
+ * annotation whose quote is not contained in one block).
+ *
+ * Reported as offsets rather than inserted into the stream so the existing
+ * offset-to-node mapping keeps working untouched.
+ */
+const blockBoundaryOffsets = (textNodes: readonly Text[]): Set<number> => {
+  const boundaries = new Set<number>();
+  let offset = 0;
+  let previousBlock: Element | null = null;
+  let seenAny = false;
+  for (const node of textNodes) {
+    const block = nearestBlockAncestor(node);
+    if (seenAny && block !== previousBlock && offset > 0) boundaries.add(offset);
+    previousBlock = block;
+    seenAny = true;
+    offset += node.textContent?.length ?? 0;
+  }
+  return boundaries;
+};
+
 /** The node a range's start boundary actually addresses: an element boundary
  *  addresses the child at its offset, which is where web-highlighter descends
  *  (`formatDomNode`). */
@@ -613,12 +691,24 @@ export function useAnnotationHighlighter({
         return null;
       };
 
-      const normalizeWithMap = (text: string): { text: string; map: number[] } => {
+      // `boundaries` names offsets at which a new block box starts. They are
+      // normalized as if a space stood there, because that is what the
+      // browser's selection string carries at the same place — which is the
+      // only way a cross-block quote can match this stream.
+      const normalizeWithMap = (
+        text: string,
+        boundaries?: ReadonlySet<number>,
+      ): { text: string; map: number[] } => {
         let normalized = '';
         const map: number[] = [];
         let inWhitespace = false;
 
         for (let i = 0; i < text.length; i++) {
+          if (boundaries?.has(i) && !inWhitespace && normalized.length > 0) {
+            normalized += ' ';
+            map.push(i);
+            inWhitespace = true;
+          }
           const ch = text[i];
           if (/\s/.test(ch)) {
             if (!inWhitespace) {
@@ -661,7 +751,7 @@ export function useAnnotationHighlighter({
         return rangeFromTextOffsets(searchIndex, searchIndex + needle.length);
       }
 
-      const haystack = normalizeWithMap(fullText);
+      const haystack = normalizeWithMap(fullText, blockBoundaryOffsets(textNodes));
       const normalizedNeedle = normalizeWithMap(needle).text;
       const normalizedIndex = haystack.text.indexOf(normalizedNeedle);
       if (normalizedNeedle && normalizedIndex !== -1) {
@@ -886,7 +976,7 @@ export function useAnnotationHighlighter({
           highlighter.fromStore(ann.startMeta, ann.endMeta, ann.originalText, ann.id);
           const restoredDoms = highlighter.getDoms(ann.id);
           if (restoredDoms && restoredDoms.length > 0) {
-            const restoredText = restoredDoms.map(dom => dom.textContent ?? '').join('');
+            const restoredText = paintedTextOf(restoredDoms as HTMLElement[]);
             if (
               verifyRestoredContent &&
               compactText(restoredText) !== compactText(ann.originalText)
@@ -918,12 +1008,20 @@ export function useAnnotationHighlighter({
 
       try {
         const textNodes: { node: Text; start: number; end: number }[] = [];
+        // Excluded chrome is rejected by the search that produced this range,
+        // so a run of it inside the range is not part of the quote; wrapping it
+        // anyway would paint a list marker the reviewer never selected (and,
+        // on the next reload, make the painted text disagree with the quote).
         const walker = document.createTreeWalker(
           range.commonAncestorContainer.nodeType === Node.TEXT_NODE
             ? range.commonAncestorContainer.parentNode!
             : range.commonAncestorContainer,
           NodeFilter.SHOW_TEXT,
-          null
+          {
+            acceptNode: (node) => isAnnotationExcludedTextNode(node)
+              ? NodeFilter.FILTER_REJECT
+              : NodeFilter.FILTER_ACCEPT,
+          },
         );
 
         let node: Text | null;

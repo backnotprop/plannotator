@@ -123,8 +123,6 @@ function crossBlockDraft(
   id: string,
   start: HTMLElement,
   end: HTMLElement,
-  /** Text the selection also crosses between the two, e.g. a list marker. */
-  between = '',
 ): Annotation {
   const startText = start.textContent ?? '';
   const endText = end.textContent ?? '';
@@ -137,12 +135,19 @@ function crossBlockDraft(
     endOffset: startText.length + endText.length,
     type: AnnotationType.COMMENT,
     text: 'this pair reads oddly',
-    originalText: `${startText}${BLOCK_BREAK}${between}${endText}`,
+    originalText: `${startText}${BLOCK_BREAK}${endText}`,
     createdA: 1,
     startMeta: metaFor(start, 0),
     endMeta: metaFor(end, endText.length),
   };
 }
+
+/** The same draft after an Edit Mode commit: `applyEditedDocument` strips the
+ *  stored positions of every annotation whose quote is not contained in one
+ *  block — which is every cross-block annotation — so the restore has nothing
+ *  but the quote and the text search is the only path left. */
+const withoutStoredPositions = (draft: Annotation): Annotation =>
+  ({ ...draft, blockId: '', startMeta: undefined, endMeta: undefined });
 
 const paintedText = (id: string): string =>
   Array.from(document.querySelectorAll<HTMLElement>(
@@ -175,15 +180,21 @@ describe('Viewer restore of a selection spanning two blocks', () => {
 
   test.skipIf(!hasDom)('two list items', async () => {
     // A list item's text lives in a <span> beside its marker, not an <li>, and
-    // the selection crosses the second item's bullet on the way.
+    // the selection crosses the second item's bullet on the way. The marker is
+    // `select-none`, so no browser ever puts the bullet in the selection
+    // string: the stored quote is the two items with a block break between
+    // them and nothing else. The painted highlight has to agree, which is what
+    // `annotation-exclude` on the marker buys.
     const ref = await mount();
     const first = elementWith('span', 'echo');
     const second = elementWith('span', 'foxtrot');
     const marker = second.previousElementSibling?.textContent ?? '';
-    const draft = crossBlockDraft('annList', first, second, marker);
+    expect(marker).not.toBe('');
+    const draft = crossBlockDraft('annList', first, second);
     await act(async () => { ref.current!.applySharedAnnotations([draft]); });
 
-    expect(paintedText(draft.id)).toBe(`${first.textContent}${marker}${second.textContent}`);
+    expect(paintedText(draft.id)).toBe(`${first.textContent}${second.textContent}`);
+    expect(paintedText(draft.id)).not.toContain(marker);
     expect(first.querySelector('mark')).not.toBeNull();
     expect(second.querySelector('mark')).not.toBeNull();
   });
@@ -197,6 +208,55 @@ describe('Viewer restore of a selection spanning two blocks', () => {
 
     expect(paintedText(draft.id)).toBe(`${paragraph.textContent}${code.textContent}`);
     expect(code.querySelector('mark')).not.toBeNull();
+  });
+
+  // An Edit Mode commit leaves a cross-block annotation with nothing but its
+  // quote (see `withoutStoredPositions`). Before this, the whitespace-collapsing
+  // search compared a needle carrying the browser's block break against a
+  // haystack that joins block text with nothing at all, so no cross-block quote
+  // could ever be found: every cross-block highlight vanished on the first edit
+  // anywhere in the document.
+  test.skipIf(!hasDom)('re-anchors by text alone across a block boundary', async () => {
+    const ref = await mount();
+    const first = elementWith('p', 'alpha');
+    const second = elementWith('p', 'beta');
+    const draft = withoutStoredPositions(crossBlockDraft('annSearchPara', first, second));
+    await act(async () => { ref.current!.applySharedAnnotations([draft]); });
+
+    expect(paintedText(draft.id)).toBe(`${first.textContent}${second.textContent}`);
+  });
+
+  test.skipIf(!hasDom)('re-anchors by text alone across two list items', async () => {
+    const ref = await mount();
+    const first = elementWith('span', 'echo');
+    const second = elementWith('span', 'foxtrot');
+    const draft = withoutStoredPositions(crossBlockDraft('annSearchList', first, second));
+    await act(async () => { ref.current!.applySharedAnnotations([draft]); });
+
+    expect(paintedText(draft.id)).toBe(`${first.textContent}${second.textContent}`);
+  });
+
+  test.skipIf(!hasDom)('re-anchors by text alone from a paragraph into a fence', async () => {
+    const ref = await mount();
+    const paragraph = elementWith('p', 'golf');
+    const code = elementWith('code', 'hotel');
+    const draft = withoutStoredPositions(crossBlockDraft('annSearchCode', paragraph, code));
+    await act(async () => { ref.current!.applySharedAnnotations([draft]); });
+
+    expect(paintedText(draft.id)).toBe(`${paragraph.textContent}${code.textContent}`);
+  });
+
+  test.skipIf(!hasDom)('a text-only restore of drifted content still paints nothing', async () => {
+    // The boundary-aware search must not become a fuzzy one: a quote whose
+    // words changed has no match, positions or not.
+    const ref = await mount();
+    const first = elementWith('p', 'alpha');
+    const second = elementWith('p', 'beta');
+    const draft = withoutStoredPositions(crossBlockDraft('annSearchDrift', first, second));
+    draft.originalText = draft.originalText.replace('beta', 'gamma');
+    await act(async () => { ref.current!.applySharedAnnotations([draft]); });
+
+    expect(paintedText(draft.id)).toBe('');
   });
 
   test.skipIf(!hasDom)('a quote whose content really did change is still rejected', async () => {
