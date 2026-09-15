@@ -28,10 +28,11 @@ const AlertBlock = alertMod?.AlertBlock as typeof import('./AlertBlock')['AlertB
 
 const BODY = '**Browser quirks**\n\nSafari drops the label when ALPHA happens.';
 
-function Harness({ resultRef, added, body }: {
+function Harness({ resultRef, added, body, lead }: {
   resultRef: { current: HookReturn | null };
   added: Annotation[];
   body: string;
+  lead?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   resultRef.current = useAnnotationHighlighter({
@@ -44,6 +45,7 @@ function Harness({ resultRef, added, body }: {
   });
   return (
     <div ref={containerRef}>
+      {lead ? <p data-block-id="p-0">{lead}</p> : null}
       <AlertBlock blockId="alert-1" kind="tip" body={body} />
       <p data-block-id="p-1">Trailing paragraph BRAVO.</p>
     </div>
@@ -55,7 +57,7 @@ let host: HTMLElement | null = null;
 
 async function mount(
   added: Annotation[],
-  options: { body?: string } = {},
+  options: { body?: string; lead?: string } = {},
 ): Promise<{ current: HookReturn | null }> {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -63,7 +65,12 @@ async function mount(
   await act(async () => {
     root = createRoot(host!);
     root.render(
-      <Harness resultRef={resultRef} added={added} body={options.body ?? BODY} />,
+      <Harness
+        resultRef={resultRef}
+        added={added}
+        body={options.body ?? BODY}
+        lead={options.lead}
+      />,
     );
   });
   return resultRef;
@@ -191,6 +198,27 @@ describe('alert title annotations', () => {
 
     expect(paintedText()).toBe('Browser quirks here');
     expect(added[0]!.originalText).not.toContain('Tip');
+  });
+
+  test.skipIf(!hasDom)('body prose that repeats the type word keeps it', async () => {
+    // The quote repair used to remove the FIRST match of the excluded text
+    // anywhere in the quote. With real prose reading "Tip: " ahead of the
+    // alert, it removed the reviewer's own words, failed its own check and
+    // reverted - leaving the invisible word in after all.
+    const added: Annotation[] = [];
+    const hook = await mount(added, { lead: 'Tip: read the lead-in first.' });
+    const lead = textNodeWith('p[data-block-id="p-0"]', 'lead-in');
+    const title = textNodeWith('.alert-title', 'Browser quirks');
+    const range = document.createRange();
+    range.setStart(lead, 0);
+    range.setEnd(title, title.length);
+    await act(async () => { hook.current!.highlightRange(range); });
+    await act(async () => { hook.current!.handleCommentSubmit('tie these together'); });
+
+    expect(paintedText()).toBe('Tip: read the lead-in first.Browser quirks');
+    // The reviewer's own "Tip: " survives; the hidden one does not.
+    expect(added[0]!.originalText).toContain('Tip: read the lead-in first.');
+    expect(compact(added[0]!.originalText)).toBe(compact(paintedText()));
   });
 
   test.skipIf(!hasDom)('a share link of that annotation restores onto the title', async () => {

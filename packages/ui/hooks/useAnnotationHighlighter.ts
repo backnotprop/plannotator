@@ -286,6 +286,52 @@ const snapRangeStartPastExcluded = (range: Range): boolean => {
   return false;
 };
 
+/** One clipped text run of a range, and whether it is excluded chrome. */
+interface RangeTextPiece {
+  text: string;
+  excluded: boolean;
+}
+
+/**
+ * The range's own text runs in document order, clipped to its boundaries.
+ *
+ * Read BEFORE the highlight is painted: painting splits and re-parents text
+ * nodes, which leaves the range's boundaries stale. The runs are plain strings
+ * and survive that.
+ *
+ * Returns null for a shape this cannot read (an element-node boundary, or an
+ * end boundary the walk never reaches), so callers leave the quote alone.
+ */
+const rangeTextPieces = (range: Range): RangeTextPiece[] | null => {
+  const { startContainer, endContainer, startOffset, endOffset } = range;
+  if (startContainer?.nodeType !== Node.TEXT_NODE) return null;
+  if (endContainer?.nodeType !== Node.TEXT_NODE) return null;
+
+  const scopeNode = range.commonAncestorContainer;
+  const scope = scopeNode?.nodeType === Node.ELEMENT_NODE
+    ? (scopeNode as Element)
+    : scopeNode?.parentElement;
+  if (!scope) return null;
+
+  const pieces: RangeTextPiece[] = [];
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  let started = false;
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const text = node as Text;
+    if (!started) {
+      if (text !== startContainer) continue;
+      started = true;
+    }
+    const from = text === startContainer ? startOffset : 0;
+    const to = text === endContainer ? endOffset : text.length;
+    const slice = (text.textContent ?? '').slice(from, to);
+    if (slice) pieces.push({ text: slice, excluded: isAnnotationExcludedTextNode(text) });
+    if (text === endContainer) return pieces;
+  }
+  return null;
+};
+
 /**
  * Drop `.annotation-exclude` chrome from a new annotation's quote.
  *
@@ -300,35 +346,52 @@ const snapRangeStartPastExcluded = (range: Range): boolean => {
  * excluded text. (A selection that BEGINS inside such a node is handled
  * earlier, by {@link snapRangeStartPastExcluded}.)
  *
- * The painted highlight is therefore the authority on CONTENT and the
- * selection string on FORMATTING: remove each excluded run and keep the
- * result only when it matches what was painted, so an unrecognized shape
- * leaves the quote exactly as before.
+ * The removal is positional, driven by the range's own nodes rather than by
+ * searching the quote for the chrome's text: the excluded runs are located in
+ * the quote's whitespace-free coordinate space, where the selection string and
+ * the concatenated runs agree character for character. Searching by text
+ * removed the wrong occurrence whenever the body prose legitimately contained
+ * the same words ("Tip: " as real copy), which then failed the final check and
+ * silently kept the invisible word. The painted highlight remains the last
+ * word on CONTENT: an unrecognized shape leaves the quote exactly as before.
  */
 const quoteWithoutExcludedText = (
-  container: HTMLElement | null,
+  pieces: RangeTextPiece[] | null,
   selectionText: string,
   paintedText: string,
 ): string => {
-  if (!container || !selectionText) return selectionText;
+  if (!selectionText) return selectionText;
   if (compactText(selectionText) === compactText(paintedText)) return selectionText;
+  if (!pieces || !pieces.some(piece => piece.excluded)) return selectionText;
 
-  const excluded = container.querySelectorAll<HTMLElement>(ANNOTATION_EXCLUDED_SELECTOR);
-  if (excluded.length === 0) return selectionText;
-
-  let quote = selectionText;
-  excluded.forEach(element => {
-    const chunk = element.textContent ?? '';
-    // Browsers drop a trailing space at an inline boundary, so a rendered
-    // "Tip: " reads back from the selection as "Tip:".
-    for (const candidate of [chunk, chunk.replace(/\s+$/, '')]) {
-      if (!candidate.trim()) continue;
-      const index = quote.indexOf(candidate);
-      if (index === -1) continue;
-      quote = quote.slice(0, index) + quote.slice(index + candidate.length);
-      break;
+  // Excluded spans in compacted (whitespace-free) coordinates.
+  const spans: { start: number; end: number }[] = [];
+  let compactLength = 0;
+  for (const piece of pieces) {
+    const length = compactText(piece.text).length;
+    if (piece.excluded && length > 0) {
+      spans.push({ start: compactLength, end: compactLength + length });
     }
-  });
+    compactLength += length;
+  }
+  if (spans.length === 0) return selectionText;
+  // The selection string and the range's runs must describe the same
+  // characters for positions to mean anything.
+  if (compactText(selectionText).length !== compactLength) return selectionText;
+
+  let cursor = 0;
+  let quote = '';
+  for (const char of selectionText) {
+    if (/\s/.test(char)) {
+      // Whitespace has no compacted position of its own: drop it only when it
+      // sits inside an excluded run or immediately after one, so removing
+      // "Tip:" takes the space that followed it with it.
+      if (!spans.some(span => cursor > span.start && cursor <= span.end)) quote += char;
+      continue;
+    }
+    if (!spans.some(span => cursor >= span.start && cursor < span.end)) quote += char;
+    cursor += 1;
+  }
 
   return compactText(quote) === compactText(paintedText) ? quote.trim() : selectionText;
 };
@@ -451,6 +514,10 @@ export function useAnnotationHighlighter({
   const justCreatedIdRef = useRef<string | null>(null);
   const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const mouseDownMathRef = useRef<HTMLElement | null>(null);
+  /** The text runs of the range the highlight about to be created came from,
+   *  captured before painting (which invalidates the range itself). The CREATE
+   *  handler repairs the quote from them. */
+  const pendingRangeRunsRef = useRef<RangeTextPiece[] | null>(null);
 
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
@@ -1000,7 +1067,7 @@ export function useAnnotationHighlighter({
           // the comment draft key, and the annotation's own `originalText` all
           // come from `source.text`.
           source.text = quoteWithoutExcludedText(
-            containerRef.current,
+            pendingRangeRunsRef.current,
             source.text,
             doms.map((dom: HTMLElement) => dom.textContent ?? '').join(''),
           );
@@ -1059,13 +1126,20 @@ export function useAnnotationHighlighter({
     const handlePointerEndCapture = () => {
       const container = containerRef.current;
       const selection = window.getSelection();
-      if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
+        pendingRangeRunsRef.current = null;
+        return;
+      }
       const range = selection.getRangeAt(0).cloneRange();
-      if (!container.contains(range.commonAncestorContainer)) return;
+      if (!container.contains(range.commonAncestorContainer)) {
+        pendingRangeRunsRef.current = null;
+        return;
+      }
       if (snapRangeStartPastExcluded(range)) {
         selection.removeAllRanges();
         selection.addRange(range);
       }
+      pendingRangeRunsRef.current = rangeTextPieces(range);
     };
 
     const container = containerRef.current;
@@ -1172,6 +1246,7 @@ export function useAnnotationHighlighter({
             if (!containerRef.current?.contains(sel.anchorNode)) return;
             const range = sel.getRangeAt(0).cloneRange();
             snapRangeStartPastExcluded(range);
+            pendingRangeRunsRef.current = rangeTextPieces(range);
             highlighter.fromRange(range);
           }, 400);
         }
@@ -1206,6 +1281,7 @@ export function useAnnotationHighlighter({
     // range is left untouched).
     const painted = range.cloneRange();
     snapRangeStartPastExcluded(painted);
+    pendingRangeRunsRef.current = rangeTextPieces(painted);
 
     const selection = window.getSelection();
     selection?.removeAllRanges();
