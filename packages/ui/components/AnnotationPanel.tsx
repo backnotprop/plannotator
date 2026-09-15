@@ -8,6 +8,7 @@ import { OverlayScrollArea } from './OverlayScrollArea';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { resolveReplyParents, resolveThreadRootTimestamps } from '@plannotator/core/annotation-threads';
+import { ROOT_DOCUMENT_GROUP_KEY } from '../utils/annotationScope';
 import type { AnnotationScope, AnnotationDocumentGroup } from '../utils/annotationScope';
 
 // Card type-word colors. Deletion uses `destructive` (reliably red on every
@@ -388,7 +389,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                     </svg>
                     <span
                       className={cn('min-w-0 flex-1 truncate font-mono text-[10px]', group.isCurrent ? 'text-foreground' : 'text-muted-foreground')}
-                      title={group.path}
+                      // The pathless root document (plan review) is keyed by a
+                      // sentinel, which is not something to show a reader.
+                      title={group.path === ROOT_DOCUMENT_GROUP_KEY ? group.label : group.path}
                     >
                       {group.label}
                     </span>

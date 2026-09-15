@@ -67,10 +67,11 @@ import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode'
 import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
 import { getHtmlChromeState, mergeHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
 import {
-  groupAnnotationsByDocument,
+  buildAnnotationDocumentGroups,
   getAnnotationScopePreference,
   resolveInitialAnnotationScope,
   setAnnotationScopePreference,
+  ROOT_DOCUMENT_GROUP_KEY,
   type AnnotationScope,
 } from '@plannotator/ui/utils/annotationScope';
 import { useInputMethodSwitch } from '@plannotator/ui/hooks/useInputMethodSwitch';
@@ -4433,6 +4434,17 @@ const App: React.FC = () => {
   // only ever showed the open one. These derive the "All files" view: every
   // document that carries feedback, the open one first.
   const currentDocumentPath = linkedDocHook.filepath ?? sourceFilePath ?? null;
+  // The open document's group key. A plan-review session's document is the plan
+  // itself, which has no path (`sourceFilePath` is annotate-only), so keying the
+  // group by path alone dropped it from the "All files" list entirely — the
+  // plan's own comments were neither shown nor counted. The synthetic key keeps
+  // it in the list; it is still the OPEN document, so its group is `isCurrent`
+  // and the panel routes select/edit/delete to the live host state, not to the
+  // cross-document store.
+  const currentDocumentGroupKey = currentDocumentPath ?? ROOT_DOCUMENT_GROUP_KEY;
+  const currentDocumentGroupLabel = currentDocumentPath
+    ? undefined
+    : (annotateMode ? '(this document)' : '(this plan)');
 
   const annotationDocumentRoots = useMemo(() => {
     const roots = fileBrowser.dirs.filter((d) => !d.isVault).map((d) => d.path);
@@ -4441,19 +4453,22 @@ const App: React.FC = () => {
   }, [fileBrowser.dirs, projectRoot]);
 
   const annotationDocumentGroups = useMemo(() => {
-    const byPath = new Map<string, Annotation[]>();
-    for (const [filepath, entry] of linkedDocHook.getDocAnnotations()) {
-      byPath.set(filepath, entry.annotations);
-    }
-    // The open document's live list (externals included) is the same set its
-    // "This file" timeline renders; the cache copy behind it can be stale.
-    if (currentDocumentPath) byPath.set(currentDocumentPath, allAnnotations);
-    return groupAnnotationsByDocument(
-      Array.from(byPath, ([path, annotations]) => ({ path, annotations })),
-      currentDocumentPath,
-      annotationDocumentRoots,
-    );
-  }, [linkedDocHook.getDocAnnotations, allAnnotations, currentDocumentPath, annotationDocumentRoots]);
+    return buildAnnotationDocumentGroups({
+      cached: Array.from(linkedDocHook.getDocAnnotations(), ([filepath, entry]) => [filepath, entry.annotations] as const),
+      current: {
+        key: currentDocumentGroupKey,
+        label: currentDocumentGroupLabel,
+        annotations: allAnnotations,
+      },
+      roots: annotationDocumentRoots,
+    });
+  }, [
+    linkedDocHook.getDocAnnotations,
+    allAnnotations,
+    currentDocumentGroupKey,
+    currentDocumentGroupLabel,
+    annotationDocumentRoots,
+  ]);
 
   const otherDocumentAnnotationCount = useMemo(
     () => annotationDocumentGroups.reduce((n, g) => (g.isCurrent ? n : n + g.annotations.length), 0),

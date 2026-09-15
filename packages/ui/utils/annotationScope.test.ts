@@ -15,9 +15,11 @@
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation } from '../types';
 import {
+  buildAnnotationDocumentGroups,
   documentLabel,
   groupAnnotationsByDocument,
   resolveInitialAnnotationScope,
+  ROOT_DOCUMENT_GROUP_KEY,
 } from './annotationScope';
 
 function ann(id: string): Annotation {
@@ -83,6 +85,51 @@ describe('groupAnnotationsByDocument', () => {
 
     expect(groups[0].isCurrent).toBe(true);
     expect(groups[0].label).toBe('docs/a.md');
+  });
+});
+
+describe('buildAnnotationDocumentGroups', () => {
+  test('the pathless root document still forms a group, first and current', () => {
+    // Plan review: the open document is the plan, which has no path of its own.
+    // Keyed by path alone it contributed no group, so switching to All files
+    // hid every comment the reviewer had made on the plan in front of them.
+    const groups = buildAnnotationDocumentGroups({
+      cached: [['/repo/linked.md', [ann('l1')]]],
+      current: {
+        key: ROOT_DOCUMENT_GROUP_KEY,
+        label: '(this plan)',
+        annotations: [ann('p1'), ann('p2')],
+      },
+      roots: ['/repo'],
+    });
+
+    expect(groups.map((g) => g.label)).toEqual(['(this plan)', 'linked.md']);
+    expect(groups[0].isCurrent).toBe(true);
+    expect(groups[0].annotations.map((a) => a.id)).toEqual(['p1', 'p2']);
+    // `isCurrent` is what routes edit/delete to the live host state rather than
+    // to the cross-document store, which has no entry for a pathless document.
+    expect(groups.filter((g) => g.isCurrent)).toHaveLength(1);
+  });
+
+  test('an empty root document contributes nothing, exactly like any other empty file', () => {
+    const groups = buildAnnotationDocumentGroups({
+      cached: [['/repo/linked.md', [ann('l1')]]],
+      current: { key: ROOT_DOCUMENT_GROUP_KEY, label: '(this plan)', annotations: [] },
+    });
+
+    expect(groups.map((g) => g.label)).toEqual(['linked.md']);
+  });
+
+  test('the open document overrides its cached copy, which can be stale', () => {
+    const groups = buildAnnotationDocumentGroups({
+      cached: [['/repo/open.md', [ann('stale')]]],
+      current: { key: '/repo/open.md', annotations: [ann('live1'), ann('live2')] },
+      roots: ['/repo'],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].annotations.map((a) => a.id)).toEqual(['live1', 'live2']);
+    expect(groups[0].label).toBe('open.md');
   });
 });
 

@@ -29,10 +29,24 @@ export function setAnnotationScopePreference(scope: AnnotationScope): void {
   setItem(ANNOTATION_SCOPE_KEY, scope);
 }
 
+/**
+ * Group key for the open document when it has no path of its own — plan review,
+ * where the plan is the document and `sourceFilePath` is annotate-only. Without
+ * a key the root document forms no group at all, so the "All files" view hid the
+ * plan's own comments while listing every linked document's. It contains no path
+ * separator, so `normalizeBrowserPath` leaves it alone, and the angle brackets
+ * keep it from colliding with a real file path (illegal in Windows paths, and
+ * absent from the absolute paths these groups carry).
+ */
+export const ROOT_DOCUMENT_GROUP_KEY = '<plannotator-root-document>';
+
 export interface AnnotationDocumentInput {
   /** Absolute path of the document. */
   path: string;
   annotations: readonly Annotation[];
+  /** Display name override. Only the pathless root document needs one: every
+   *  other group derives its label from its path. */
+  label?: string;
 }
 
 export interface AnnotationDocumentGroup {
@@ -83,7 +97,7 @@ export function groupAnnotationsByDocument(
     seen.add(path);
     groups.push({
       path,
-      label: documentLabel(path, roots),
+      label: doc.label ?? documentLabel(path, roots),
       annotations: [...doc.annotations],
       isCurrent: path === normalizedCurrent,
     });
@@ -93,6 +107,36 @@ export function groupAnnotationsByDocument(
     return a.path.localeCompare(b.path);
   });
   return groups;
+}
+
+/**
+ * The panel's groups for a session: every cached document plus the OPEN one,
+ * whose live list (externals included) is the same set its "This file" timeline
+ * renders — the cache copy behind it can be stale.
+ *
+ * The open document is always contributed, under `current.key`. In plan review
+ * that key is {@link ROOT_DOCUMENT_GROUP_KEY}: the plan has no path, and keying
+ * groups by path alone dropped it from the list, so the "All files" view hid
+ * the reviewer's own comments on the document in front of them.
+ */
+export function buildAnnotationDocumentGroups(input: {
+  /** Documents held in the linked-doc cache, keyed by path. */
+  cached: Iterable<readonly [string, readonly Annotation[]]>;
+  current: { key: string; label?: string; annotations: readonly Annotation[] };
+  roots?: readonly string[];
+}): AnnotationDocumentGroup[] {
+  const byPath = new Map<string, readonly Annotation[]>();
+  for (const [path, annotations] of input.cached) byPath.set(path, annotations);
+  byPath.set(input.current.key, input.current.annotations);
+  return groupAnnotationsByDocument(
+    Array.from(byPath, ([path, annotations]) => ({
+      path,
+      annotations,
+      label: path === input.current.key ? input.current.label : undefined,
+    })),
+    input.current.key,
+    input.roots ?? [],
+  );
 }
 
 /**
