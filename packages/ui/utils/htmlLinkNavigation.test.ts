@@ -10,6 +10,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+	documentRendersHtml,
 	MAX_HTML_LINK_HREF_LENGTH,
 	resolveHtmlLinkIntent,
 } from "./htmlLinkNavigation";
@@ -210,5 +211,22 @@ describe("resolveHtmlLinkIntent — which surface the target opens on", () => {
 	test("a --markdown session Turndowns HTML, so its targets are markdown too", () => {
 		expect(resolveHtmlLinkIntent("a.html", { ...CTX, convertHtml: true }))
 			.toMatchObject({ rendersHtml: false });
+	});
+
+	// The annotations panel's cross-file jump asks the same question of an
+	// absolute path it never routed through link resolution, and must get the
+	// same answer — two spellings of the rule would let a jump pop the sidebar
+	// on exactly the surface a link click leaves alone.
+	test("documentRendersHtml answers for a bare path the way link resolution does", () => {
+		expect(documentRendersHtml("/site/a.html")).toBe(true);
+		expect(documentRendersHtml("/site/B.HTM")).toBe(true);
+		expect(documentRendersHtml("/site/notes.md")).toBe(false);
+		expect(documentRendersHtml("/site/log.txt")).toBe(false);
+		expect(documentRendersHtml("/site/a.html", true)).toBe(false);
+		for (const link of ["a.html", "../b.HTM", "notes.md", "log.txt"]) {
+			const intent = resolveHtmlLinkIntent(link, CTX);
+			if (intent.kind !== "document") throw new Error(`expected a document intent for ${link}`);
+			expect(documentRendersHtml(intent.path)).toBe(intent.rendersHtml);
+		}
 	});
 });

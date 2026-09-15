@@ -129,8 +129,20 @@ function resolveRelative(
 		kind: "document",
 		path: resolved,
 		hash,
-		rendersHtml: /\.html?$/i.test(resolved) && !context.convertHtml,
+		rendersHtml: documentRendersHtml(resolved, context.convertHtml),
 	};
+}
+
+/**
+ * Whether opening `path` lands on another raw-HTML surface rather than a
+ * markdown one. `--markdown` sessions convert HTML on the way in, so nothing
+ * renders as HTML there. This is the one rule behind `rendersHtml`, and the
+ * same question the annotations panel's cross-file jump asks before deciding
+ * whether to reveal the sidebar — so it lives here rather than being spelled
+ * twice.
+ */
+export function documentRendersHtml(path: string, convertHtml?: boolean): boolean {
+	return /\.html?$/i.test(path) && !convertHtml;
 }
 
 function stripQuery(value: string): string {

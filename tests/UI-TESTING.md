@@ -589,7 +589,8 @@ scope preference lives in the `plannotator-annotation-scope` cookie; clear it be
    files and confirm the agent receives every document's feedback, including a cross-file edit
    made in step 6 and excluding a cross-file delete.
 8. **HTML folder files.** Repeat steps 2, 5 and 6 with a folder containing `.html` documents.
-   Jumping must select the placed marker on the target page.
+   Jumping must select the placed marker on the target page, and — with the sidebar closed —
+   must leave it closed, the same way following a link between HTML documents does.
 9. **Read-only.** Run `plannotator archive` and open a `#share` link: no cross-file mutation
    affordances appear on any card.
 

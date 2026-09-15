@@ -14,7 +14,7 @@ import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 import { setExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
-import { resolveHtmlLinkIntent } from '@plannotator/ui/utils/htmlLinkNavigation';
+import { documentRendersHtml, resolveHtmlLinkIntent } from '@plannotator/ui/utils/htmlLinkNavigation';
 import { annotateFileFeedback, annotateMessageFeedback, wrapFeedbackForClipboard, type AnnotateFeedbackTemplates } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { primeSkillCatalog, primeSkillContentsForExport } from '@plannotator/ui/utils/skillCatalog';
@@ -4485,9 +4485,15 @@ const App: React.FC = () => {
   /** Open a document the way a sidebar click would, so the file browser's
    *  active file, the doc URL and the linked document stay in step. */
   const navigateToDocument = React.useCallback(async (path: string): Promise<void> => {
+    // Same rule a link click between HTML documents follows (#1532): an
+    // HTML destination owns the viewport, so arriving there must not pop the
+    // left sidebar open. A markdown destination keeps the markdown
+    // convention, where the sidebar's "Viewing / Back to …" header is the
+    // way out.
+    const openOptions = documentRendersHtml(path, convertHtml) ? { revealSidebar: false } : undefined;
     const dir = fileBrowser.dirs.find((d) => !d.isVault && pathIsInsideDir(path, d.path))?.path;
     if (dir) {
-      await handleFileBrowserSelect(path, dir);
+      await handleFileBrowserSelect(path, dir, openOptions);
       return;
     }
     // A linked-doc session's source document is reached by going back, not by
@@ -4496,8 +4502,8 @@ const App: React.FC = () => {
       handleLinkedDocBack();
       return;
     }
-    await linkedDocHook.open(path);
-  }, [fileBrowser.dirs, handleFileBrowserSelect, handleLinkedDocBack, linkedDocHook, sourceFilePath]);
+    await linkedDocHook.open(path, undefined, undefined, openOptions);
+  }, [convertHtml, fileBrowser.dirs, handleFileBrowserSelect, handleLinkedDocBack, linkedDocHook, sourceFilePath]);
 
   const jumpToAnnotation = useAnnotationJump({
     currentPath: currentDocumentPath,
