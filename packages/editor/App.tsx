@@ -5876,12 +5876,16 @@ const App: React.FC = () => {
     !showPermissionModeSetup;
   // LAST in this app's first-run sequence: it asks for no decision, so it waits
   // behind the look-and-feel chooser and the two setup flows. Archive browsing
-  // and a read-only shared plan (which is also what the share portal serves)
-  // have no one to address, so it is deferred there rather than consumed.
+  // and a read-only shared plan have no one to address, so it is deferred there
+  // rather than consumed — and so is any session with no Plannotator server
+  // behind it (`!isApiMode`): the share portal's own root and the demo plan it
+  // renders never fetch /api/plan, and `isSharedSession` alone does not cover
+  // them. `isApiMode` is settled by the time `isLoading` clears, so this can
+  // never defer a real session.
   const shouldShowTerminalToolsAnnouncement = terminalToolsAnnouncementCanShow({
     announcementPending: terminalToolsIntroPending,
     isLoading,
-    readOnlySession: isSharedSession || archive.archiveMode,
+    readOnlySession: isSharedSession || archive.archiveMode || !isApiMode,
     compact: isCompactTouchLayout,
     otherFirstRunDialogVisible:
       shouldShowLookAndFeelAnnouncement || goalSetupMode || showPermissionModeSetup,

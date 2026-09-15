@@ -31,9 +31,11 @@ export interface TerminalToolsAnnouncementGateState {
   readonly isLoading: boolean;
   /**
    * The session has no author to address: archive browsing, a read-only shared
-   * plan, the share portal. Telling a viewer about a CLI they did not open is
-   * noise, and the cookie is deliberately NOT consumed, so the next authoring
-   * session still shows it.
+   * plan, and any session with no Plannotator server behind it (the share
+   * portal's root and its demo plan included — those are not "shared
+   * sessions", so the host must fold that in). Telling a viewer about a CLI
+   * they did not open is noise, and the cookie is deliberately NOT consumed,
+   * so the next authoring session still shows it.
    */
   readonly readOnlySession: boolean;
   /**
