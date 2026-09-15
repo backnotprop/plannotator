@@ -420,6 +420,34 @@ which is the regression class this control exists to fix).
    (empty state) and from the General section header; creating one flips the header control to
    `Send Feedback`.
 
+## HTML Surface Header Manual Checklist
+
+Not CI. Run `plannotator annotate <file>.html` in a browser profile with no
+`plannotator-html-chrome` cookie (a fresh profile, or clear that cookie).
+
+1. **Opens with the tools hidden.** The page fills the viewport: no sidebar
+   tongue tabs on the left, no comment/attachments cluster top-right, and no
+   flash of either during load. The header eye shows its "hidden" (eye-off)
+   icon and reports `aria-pressed="true"`.
+2. **The eye is the way back.** Click it: the tongue tabs and the cluster
+   appear, the icon flips, and the version-diff "Show changes" control (when
+   the file has a previous version) is in that cluster. Reload: the tools are
+   still showing — a fresh cookie beats the hidden default. Hide them again
+   and reload: still hidden.
+3. **Toggle chords.** `Mod+Shift+A` drops the surface to Interact (pen
+   unpressed, clicks reach the page) and pressing it again re-arms — including
+   with focus inside the framed page, which is the case Esc cannot undo.
+   `Mod+Shift+X` flips the tools from either document. Open a comment draft,
+   then press `Mod+Shift+A`: the draft closes with the disarm, like Esc.
+4. **Tooltips.** Hover the eye, the pen and Refresh: each shows its
+   description over its shortcut as keycaps (⌘⇧X / Ctrl+Shift+X for the eye,
+   ⌘⇧A / Ctrl+Shift+A for the pen, no key row for Refresh), positioned below
+   the button, in both light and dark. Tab to each control: the same tooltip
+   opens on keyboard focus. No native `title` box appears on top of it.
+5. **Compact/touch** (DevTools device mode). No header eye or pen; the Options
+   menu reads "Show tools" on a fresh session and flips to "Hide tools" after
+   it is used.
+
 ## WebMCP Manual Checklist
 
 Not CI. Run this in Chrome or Edge with the API on: `chrome://flags/#enable-webmcp-testing`, or launch with `--enable-features=WebMCPTesting`. Use a fresh profile so the first-run dialogs and a recovered draft do not get in the way. The Model Context Tool Inspector extension can call tools too, but the page console is enough: `const tools = await document.modelContext.getTools()` lists them, and `JSON.parse(await document.modelContext.executeTool(tools.find((t) => t.name === 'plannotator.read_document'), {}))` calls one.
