@@ -615,7 +615,11 @@ const App: React.FC = () => {
   // Header "Hide tools": removes ALL floating chrome over the page (sidebar
   // tongue tabs + comment/attachments cluster) from the DOM. The header
   // button itself is the way back, so hidden state can never strand.
-  const [htmlToolsHidden, setHtmlToolsHidden] = useState(false);
+  // Initialized TRUE to match DEFAULT_HTML_CHROME_STATE: an HTML surface opens
+  // with the tools hidden, and seeding false here would flash the floating
+  // chrome for the frames before the restore effect runs. A fresh cookie still
+  // wins in both directions (the restore effect applies it).
+  const [htmlToolsHidden, setHtmlToolsHidden] = useState(true);
   const [imageBaseDir, setImageBaseDir] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2189,7 +2193,7 @@ const App: React.FC = () => {
   // Restore-on-entry: every time the session transitions ONTO an HTML surface
   // (a root raw-HTML session, or a linked .html doc opened from markdown),
   // apply the sidebar/panel/toolsHidden state the user last left an HTML
-  // session with (first-ever run: both closed, tools visible). A restored
+  // session with (first-ever run: both closed, tools hidden). A restored
   // toolsHidden:true always has a way back on every layout: the desktop
   // header eye toggle, and the compact Options menu "Show tools" action
   // (compactDocumentActions). Re-restoring on each entry is also what keeps

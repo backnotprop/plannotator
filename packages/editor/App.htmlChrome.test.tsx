@@ -1,12 +1,15 @@
 /**
  * HTML-surface chrome contract (DOM-gated).
  *
- * The header "Hide tools" eye toggle (left of the pen) removes ALL floating
- * chrome over the page from the DOM: the sidebar tongue tabs and the
- * comment/attachments cluster, with no residual artifact. The toggle itself
- * lives in the header, so a hidden state (including one restored from an old
- * cookie) always has a way back. Sidebar/panel halves of the persisted state
- * round-trip; the pen reports the armed-by-default Interact/Annotate state.
+ * An HTML surface opens with the floating tools HIDDEN — the page gets the
+ * whole viewport — and the header "Hide tools" eye (left of the pen) is what
+ * reveals them. Hiding removes ALL floating chrome over the page from the
+ * DOM: the sidebar tongue tabs and the comment/attachments cluster, with no
+ * residual artifact. The toggle itself lives in the header, so the hidden
+ * state (default, or restored from a cookie) always has a way back, and a
+ * fresh cookie recording shown tools still wins over the default.
+ * Sidebar/panel halves of the persisted state round-trip; the pen reports the
+ * armed-by-default Interact/Annotate state.
  */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
@@ -256,18 +259,19 @@ afterAll(() => {
 });
 
 describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
-  test("tools default visible: eye toggle present, tongue tabs + cluster render", async () => {
+  test("tools default HIDDEN: no tongue tabs or cluster, and the eye renders its hidden state", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
     await mountHtmlAnnotate();
 
+    expect(sidebarTabs()).toBeNull();
+    expect(floatingCluster()).toBeNull();
+    // The eye is the way back, and it reports "hidden" from the first paint.
     expect(toolsToggle()).not.toBeNull();
-    expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("false");
-    expect(sidebarTabs()).not.toBeNull();
-    expect(floatingCluster()).not.toBeNull();
+    expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("true");
   });
 
-  test("Hide tools removes ALL floating chrome from the DOM, with no residual artifact; Show tools brings it back", async () => {
+  test("Show tools brings ALL floating chrome back; Hide removes it again with no residual artifact", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
     await mountHtmlAnnotate();
@@ -276,15 +280,30 @@ describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
     if (!toggle) throw new Error("tools toggle missing");
     await act(async () => toggle.click());
 
+    expect(sidebarTabs()).not.toBeNull();
+    expect(floatingCluster()).not.toBeNull();
+    expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("false");
+
+    await act(async () => toolsToggle()!.click());
     expect(sidebarTabs()).toBeNull();
     expect(floatingCluster()).toBeNull();
     // No leftover pill/expander: the toggle in the header is the only way back.
     expect(toolsToggle()).not.toBeNull();
     expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("true");
+  });
 
-    await act(async () => toolsToggle()!.click());
-    expect(sidebarTabs()).not.toBeNull();
+  test("a fresh cookie recording toolsHidden:false still shows the tools (the default never overrides an explicit choice)", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: false, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
+    await mountHtmlAnnotate();
+    await settle();
+
     expect(floatingCluster()).not.toBeNull();
+    expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("false");
   });
 
   test("a cookie recording toolsHidden:true restores hidden, and the header toggle is the way back", async () => {
@@ -306,18 +325,15 @@ describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
     expect(sidebarTabs()).not.toBeNull();
   });
 
-  test("compact touch layout: a toolsHidden:true cookie is undoable through the Options menu 'Show tools' action", async () => {
+  test("compact touch layout: the hidden-by-default tools are undoable through the Options menu 'Show tools' action", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
-    memory.set(
-      "plannotator-html-chrome",
-      JSON.stringify({ toolsHidden: true, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
-    );
     window.matchMedia = coarseMatchMedia as typeof window.matchMedia;
     await mountCompactHtmlAnnotate();
 
-    // The cookie applies (desktop parity), but compact is not stranded: the
-    // desktop-only eye toggle is absent and the menu action is the way back.
+    // Hidden applies on compact too (desktop parity), but compact is not
+    // stranded: the desktop-only eye toggle is absent and the menu action is
+    // the way back — and it must read "Show tools", not "Hide tools".
     expect(floatingCluster()).toBeNull();
     expect(toolsToggle()).toBeNull();
 
@@ -448,6 +464,13 @@ describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
   test("Refresh keeps the version-diff toggle available (the server recomputes the diff for the root document)", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();
+    // The version-diff toggle lives in the floating cluster over the page,
+    // which an HTML surface hides by default — this test is about refresh, so
+    // start from a session whose reviewer had the tools showing.
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: false, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
     await mountHtmlAnnotate(versionedFetch);
     await settle();
 

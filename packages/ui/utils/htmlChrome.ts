@@ -16,9 +16,13 @@ import { isStalePreference } from './preferenceTtl';
  *
  * `toolsHidden` is the header "Hide tools" toggle: while true, ALL floating
  * chrome over the page (sidebar tongue tabs + the comment/attachments
- * cluster) is removed from the DOM. Restoring it hidden can never strand a
- * user: the header button that flips it back is part of the header, not the
- * hidden chrome.
+ * cluster) is removed from the DOM. It DEFAULTS to true — an HTML document is
+ * authored to fill the viewport, so a first-ever session shows the page and
+ * nothing else, and the header eye (plus Mod+Shift+X) is what reveals the
+ * tools. Defaulting hidden can never strand a user for the same reason
+ * restoring hidden can't: the control that flips it back lives in the header,
+ * never in the hidden chrome. A fresh persisted record still wins in both
+ * directions, so a user who showed the tools keeps them next session.
  */
 
 const STORAGE_KEY = 'plannotator-html-chrome';
@@ -32,11 +36,14 @@ export interface HtmlChromeState {
   toolsHidden: boolean;
 }
 
-/** Default: both side surfaces closed — the page gets the viewport. */
+/**
+ * Default: both side surfaces closed AND the floating tools hidden — the page
+ * gets the whole viewport until the user asks for the tools.
+ */
 export const DEFAULT_HTML_CHROME_STATE: HtmlChromeState = {
   sidebarOpen: false,
   panelOpen: false,
-  toolsHidden: false,
+  toolsHidden: true,
 };
 
 /** Pure resolution logic (exported for tests): raw cookie value → state. */
