@@ -123,7 +123,8 @@ type BridgeMessage =
   | { type: `${typeof PREFIX}mark-click`; id: string }
   | { type: `${typeof PREFIX}unanchored`; ids: string[] }
   | { type: `${typeof PREFIX}resize`; height: number }
-  | { type: `${typeof PREFIX}page-change`; pageUrl: string };
+  | { type: `${typeof PREFIX}page-change`; pageUrl: string }
+  | { type: `${typeof PREFIX}link-click`; href: string };
 
 /** Live proxied-app session credentials: the proxy origin messages must come
  * from, and the per-session token every message must echo. */
@@ -134,6 +135,11 @@ export interface HtmlLiveSession {
 
 /** Cap for live-mode page identity strings (mirrors the bridge's slice). */
 export const MAX_PAGE_URL_LENGTH = 2048;
+
+/** Cap for a link href relayed out of the framed document. */
+const MAX_LINK_HREF_LENGTH = 2048;
+/** Control characters never appear in a real href; they are how structure gets smuggled. */
+const LINK_CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
 /** True when a live-session message event fails the origin or token check.
  * Exported for protocol tests. */
@@ -182,6 +188,12 @@ export interface UseHtmlAnnotationOptions {
    *  the bridge on arm-multi-select so the in-page toggle stops at the
    *  same number. Absent: the package's 16, and the arm message is unchanged. */
   maxAdditionalTargets?: number;
+  /** A link the framed document swallowed rather than navigating to. The raw
+   *  href, already bounded and screened; the host resolves it (see
+   *  `resolveHtmlLinkIntent`). Delivered in readOnly mode too — navigating is
+   *  a read action — and never fired in live sessions, which navigate the
+   *  proxied app for real. */
+  onLinkClick?: (href: string) => void;
   /** scrollIntoView behavior for scroll-to (selecting an annotation).
    *  Absent: smooth, as before; pass 'auto' to honor reduced motion. */
   scrollBehavior?: 'smooth' | 'auto';
@@ -548,6 +560,16 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       return typeof value.height === "number" && Number.isFinite(value.height)
         ? { type: value.type, height: value.height }
         : null;
+    case `${PREFIX}link-click`: {
+      // The raw href of a link the framed document just swallowed. It is
+      // page-controlled text, so it is bounded and screened here — the trust
+      // boundary — before the host resolves it into a path or a URL.
+      if (typeof value.href !== "string") return null;
+      const href = value.href.trim();
+      if (!href || href.length > MAX_LINK_HREF_LENGTH) return null;
+      if (LINK_CONTROL_CHARS.test(href)) return null;
+      return { type: value.type, href };
+    }
     case `${PREFIX}page-change`:
       // Live-mode SPA navigation report. Bounded like every bridge string.
       return typeof value.pageUrl === "string"
@@ -576,6 +598,7 @@ export function useHtmlAnnotation({
   onResize,
   live,
   onPageChange,
+  onLinkClick,
   onBridgePointer,
   onUnanchoredChange,
   maxAdditionalTargets,
@@ -649,6 +672,8 @@ export function useHtmlAnnotation({
   liveRef.current = live ?? null;
   const onPageChangeRef = useRef(onPageChange);
   onPageChangeRef.current = onPageChange;
+  const onLinkClickRef = useRef(onLinkClick);
+  onLinkClickRef.current = onLinkClick;
   // The effective cap and whether the host set one: only an explicit cap
   // rides on arm-multi-select, so an unconfigured viewer posts today's message.
   const maxTargetsRef = useRef(resolveMaxAdditionalTargets(maxAdditionalTargets));
@@ -761,6 +786,8 @@ export function useHtmlAnnotation({
         && type !== `${PREFIX}resize`
         // Page identity is navigation state, not an annotation mutation.
         && type !== `${PREFIX}page-change`
+        // Following a link is a read action; a read-only document still navigates.
+        && type !== `${PREFIX}link-click`
       ) {
         return;
       }
@@ -926,6 +953,10 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}page-change`) {
         onPageChangeRef.current?.(message.pageUrl);
+      }
+
+      if (type === `${PREFIX}link-click`) {
+        onLinkClickRef.current?.(message.href);
       }
     }
 

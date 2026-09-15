@@ -11,7 +11,7 @@
  * These tests are the mutation guard: reintroducing any bare-token injection
  * for non-opted-in documents must go red here.
  */
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
 import {
   DIFF_HIGHLIGHT_CSS,
@@ -3907,6 +3907,123 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     });
     postBridge({ type: "plannotator-bridge-clear-marks" });
     document.body.replaceChildren();
+  });
+
+  // --- Local-site link navigation -----------------------------------------
+  // A srcdoc document's base URL is the PARENT page's, so an unhandled link
+  // resolves onto the Plannotator server and its catch-all answers with the
+  // app itself: the whole editor rendered inside the annotated document.
+  // The bridge must therefore never let this frame navigate.
+  describe("link navigation", () => {
+    let capturedLinkPosts: Array<Record<string, unknown>> = [];
+    let stopCapture: (() => void) | null = null;
+
+    function startCapture() {
+      capturedLinkPosts = [];
+      const capture = (event: MessageEvent) => {
+        const data = bridgeMessageData(event);
+        if (data && data.type === "plannotator-bridge-link-click") capturedLinkPosts.push(data);
+      };
+      window.addEventListener("message", capture);
+      stopCapture = () => window.removeEventListener("message", capture);
+    }
+
+    /** postMessage delivery is queued; one macrotask turn settles it. */
+    const flushPosts = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    function clickLink(selector: string): MouseEvent {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el) throw new Error("missing link " + selector);
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      el.dispatchEvent(event);
+      return event;
+    }
+
+    function setUp(html: string, armed: boolean) {
+      document.body.innerHTML = html;
+      postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+      postBridge({ type: "plannotator-bridge-set-annotate-mode", active: armed });
+      startCapture();
+    }
+
+    afterEach(() => {
+      stopCapture?.();
+      stopCapture = null;
+      postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+      postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+      document.body.replaceChildren();
+    });
+
+    test("Interact: a relative document link is swallowed and reported, never navigated", async () => {
+      setUp('<a id="rel" href="01-entry-point.html">Entry</a>', false);
+      const event = clickLink("#rel");
+      await flushPosts();
+      // The default action is what would load the app into this frame.
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts.map((p) => p.href)).toEqual(["01-entry-point.html"]);
+    });
+
+    test("Interact: the RAW href travels — resolution belongs to the parent", async () => {
+      setUp('<a id="rel" href="./sub/02-detail.html?v=2#top">Detail</a>', false);
+      clickLink("#rel");
+      await flushPosts();
+      expect(capturedLinkPosts[0]?.href).toBe("./sub/02-detail.html?v=2#top");
+    });
+
+    test("Interact: a click on a child of the link still resolves to the link", async () => {
+      setUp('<a id="rel" href="a.html"><span id="inner">deep</span></a>', false);
+      const event = clickLink("#inner");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts[0]?.href).toBe("a.html");
+    });
+
+    test("Interact: an off-origin link is reported too — the parent opens the tab", async () => {
+      setUp('<a id="ext" href="https://example.com">Example</a>', false);
+      const event = clickLink("#ext");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts[0]?.href).toBe("https://example.com");
+    });
+
+    test("an in-page #fragment scrolls locally and is never reported", async () => {
+      setUp('<a id="frag" href="#target">Jump</a><h2 id="target">Target</h2>', false);
+      const target = document.querySelector<HTMLElement>("#target")!;
+      let scrolled = 0;
+      target.scrollIntoView = () => { scrolled += 1; };
+      const event = clickLink("#frag");
+      await flushPosts();
+      // Still prevented: in a srcdoc document the browser treats #target as a
+      // cross-document navigation to the PARENT's URL.
+      expect(event.defaultPrevented).toBe(true);
+      expect(scrolled).toBe(1);
+      expect(capturedLinkPosts).toEqual([]);
+    });
+
+    test("scroll-to-fragment replays a linked document's fragment after load", () => {
+      setUp('<h2 id="deep">Deep</h2>', false);
+      const target = document.querySelector<HTMLElement>("#deep")!;
+      let scrolled = 0;
+      target.scrollIntoView = () => { scrolled += 1; };
+      postBridge({ type: "plannotator-bridge-scroll-to-fragment", fragment: "deep" });
+      expect(scrolled).toBe(1);
+    });
+
+    test("armed pinpoint: the click annotates — no navigation, and no link report", async () => {
+      setUp('<a id="rel" href="01-entry-point.html">Entry</a>', true);
+      const event = clickLink("#rel");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts).toEqual([]);
+    });
+
+    test("javascript: hrefs stay the page's own scripting", async () => {
+      setUp('<a id="js" href="javascript:void 0">Run</a>', false);
+      const event = clickLink("#js");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(false);
+      expect(capturedLinkPosts).toEqual([]);
+    });
   });
 });
 

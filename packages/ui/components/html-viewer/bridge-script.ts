@@ -690,6 +690,13 @@ export const BRIDGE_SCRIPT = `(function() {
       scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth');
     }
 
+    else if (type === PREFIX + 'scroll-to-fragment') {
+      // A linked document opened from an in-page link carried a #fragment.
+      // The srcdoc document has no URL of its own, so the parent cannot set
+      // one: it replays the fragment here once the new document is ready.
+      scrollToLocalFragment(typeof e.data.fragment === 'string' ? e.data.fragment : '');
+    }
+
     else if (type === PREFIX + 'focus-mark') {
       focusAnnotationRecord(typeof e.data.id === 'string' ? e.data.id : null, false);
     }
@@ -3502,6 +3509,74 @@ export const BRIDGE_SCRIPT = `(function() {
       context: pendingPinContext || undefined,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
     return true;
+  }
+
+  // --- Local-site link navigation (srcdoc sessions only) ---
+  // A srcdoc document has no URL of its own: its base URL is the PARENT page's,
+  // which is the Plannotator server. So a plain link to 02-detail.html resolves
+  // to http://localhost:<port>/02-detail.html, the server's catch-all answers
+  // with the app itself, and the whole editor renders inside the annotated
+  // frame. An in-page #section link is a cross-document navigation for the
+  // same reason.
+  //
+  // The frame therefore never navigates itself. In-page fragments scroll here;
+  // everything else is handed to the parent, which owns resolution against the
+  // current document's directory and is the trust boundary for the href.
+  // Registered BEFORE the pinpoint handler and never stopping propagation, so
+  // an armed click still pins the link element exactly as it always did.
+  //
+  // Live app sessions are excluded outright: they navigate a real origin
+  // through the proxy, which is the whole point of that surface.
+  function scrollToLocalFragment(rawId) {
+    var id = typeof rawId === 'string' ? rawId : '';
+    try { id = decodeURIComponent(id); } catch (ex) {}
+    if (!id) {
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (ex) { window.scrollTo(0, 0); }
+      return true;
+    }
+    var target = null;
+    try { target = document.getElementById(id); } catch (ex) {}
+    if (!target) {
+      var named = document.getElementsByName(id);
+      if (named && named.length) target = named[0];
+    }
+    if (!target) return false;
+    try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    catch (ex) { target.scrollIntoView(); }
+    return true;
+  }
+
+  function navigableLinkHref(node) {
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    if (!el || !el.closest) return '';
+    var link = el.closest('a,area');
+    if (!link) return '';
+    var raw = link.getAttribute('href');
+    // SVG anchors may only carry xlink:href.
+    if (typeof raw !== 'string') raw = link.getAttribute('xlink:href');
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  if (!LIVE) {
+    document.addEventListener('click', function(e) {
+      if (e.defaultPrevented || e.button !== 0) return;
+      if (isViewerOverlayNode(e.target)) return; // markers own their clicks
+      var raw = navigableLinkHref(e.target);
+      if (!raw) return;
+      // The page's own scripting, not a navigation: leave it alone.
+      if (/^javascript:/i.test(raw)) return;
+      if (raw.charAt(0) === '#') {
+        e.preventDefault();
+        scrollToLocalFragment(raw.slice(1));
+        return;
+      }
+      e.preventDefault();
+      // Armed pinpoint: the click belongs to annotation, and the capture-phase
+      // pinpoint handler below is about to pin this element. Navigation is
+      // already suppressed above, which is all this surface owes the click.
+      if (annotateModeActive && currentInputMethod === 'pinpoint') return;
+      postToParent({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
+    }, true);
   }
 
   document.addEventListener('click', function(e) {

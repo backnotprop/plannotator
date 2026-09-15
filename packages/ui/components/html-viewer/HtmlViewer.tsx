@@ -190,6 +190,18 @@ export interface HtmlViewerProps {
   currentPageUrl?: string;
   /** Live-mode page navigation reports (ready pageUrl + page-change). */
   onPageChange?: (pageUrl: string) => void;
+  /** A link the framed srcdoc document swallowed rather than navigating to.
+   *  A srcdoc document's base URL is the PARENT page's, so an unhandled
+   *  `<a href="other.html">` would load the host app inside the frame; the
+   *  bridge suppresses every such navigation and relays the RAW href here
+   *  (bounded and screened at the trust boundary) for the host to resolve —
+   *  see `resolveHtmlLinkIntent`. In-page `#fragment` links are scrolled by
+   *  the bridge and never reported. Never fires in live (`src`) sessions,
+   *  which navigate the proxied app for real. */
+  onOpenLink?: (href: string) => void;
+  /** Fragment to scroll to once this document's bridge is ready, for a
+   *  linked document opened from a `#`-carrying link. Bare id, no `#`. */
+  initialFragment?: string;
   annotations: Annotation[];
   onAddAnnotation: (ann: Annotation) => void;
   onSelectAnnotation: (id: string | null) => void;
@@ -311,6 +323,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       liveSession,
       currentPageUrl,
       onPageChange,
+      onOpenLink,
+      initialFragment,
       annotations,
       onAddAnnotation,
       onSelectAnnotation,
@@ -575,6 +589,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onResize: handleResize,
       live: liveSession,
       onPageChange,
+      onLinkClick: onOpenLink,
       onBridgePointer: handleBridgePointer,
       onUnanchoredChange: handleBridgeUnanchored,
       maxAdditionalTargets,
@@ -807,6 +822,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       bridgeReportedRef.current = false;
       postToBridge({ type: `${PREFIX}report-unanchored` });
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // A linked document opened from a `#`-carrying link: the srcdoc document
+    // has no URL, so the fragment is replayed once its bridge is ready.
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !initialFragment) return;
+      postToBridge({ type: `${PREFIX}scroll-to-fragment`, fragment: initialFragment });
+    }, [iframeReadyVersion, initialFragment, postToBridge]);
 
     // Live page navigation with a ready iframe: explicitly clear the previous
     // page's marks, then re-apply the filtered set. Relying on dead anchors to
