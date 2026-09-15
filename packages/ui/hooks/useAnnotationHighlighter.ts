@@ -212,18 +212,93 @@ const isAnnotationExcludedTextNode = (node: Node): boolean =>
  */
 const compactText = (value: string): string => value.replace(/\s+/g, '');
 
+/** The node a range's start boundary actually addresses: an element boundary
+ *  addresses the child at its offset, which is where web-highlighter descends
+ *  (`formatDomNode`). */
+const startBoundaryNode = (range: Range): Node => {
+  const { startContainer, startOffset } = range;
+  if (startContainer.nodeType === Node.ELEMENT_NODE) {
+    return startContainer.childNodes[startOffset] ?? startContainer;
+  }
+  return startContainer;
+};
+
+const excludedAncestor = (node: Node | null): HTMLElement | null => {
+  if (!node) return null;
+  const element = node.nodeType === Node.ELEMENT_NODE
+    ? (node as HTMLElement)
+    : node.parentElement;
+  return element?.closest<HTMLElement>(ANNOTATION_EXCLUDED_SELECTOR) ?? null;
+};
+
+/**
+ * Move a range's start off any `.annotation-exclude` subtree it begins inside,
+ * onto the first annotatable text position the range covers.
+ *
+ * web-highlighter never ENTERS an excluded subtree (`painter/dom.ts` skips it
+ * before the "are we at the start node" check), so a range that starts inside
+ * one never flips its in-selection flag: every intermediate run is dropped and
+ * only the trailing text node is painted. A drag from a GitHub alert's icon —
+ * where the visually hidden "Tip: " lives — through the alert body therefore
+ * highlighted the body alone and left the title unpainted, while the quote
+ * still carried the invisible word. Snapping fixes both at once: the painted
+ * extent covers what the reviewer dragged over, and the quote (which web-
+ * highlighter derives from this same range/selection) no longer contains the
+ * hidden chrome.
+ *
+ * Snapping is by NODE IDENTITY, never by matching text. Returns whether the
+ * range was changed.
+ */
+const snapRangeStartPastExcluded = (range: Range): boolean => {
+  const excluded = excludedAncestor(startBoundaryNode(range));
+  if (!excluded) return false;
+
+  const scopeNode = range.commonAncestorContainer;
+  const scope = scopeNode.nodeType === Node.ELEMENT_NODE
+    ? (scopeNode as Element)
+    : scopeNode.parentElement;
+  // A range that lies entirely inside the excluded subtree has nothing to snap
+  // to; leave it alone (it paints nothing, exactly as before).
+  if (!scope || excluded.contains(scope)) return false;
+
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const text = node as Text;
+    if (!text.length) continue;
+    // Skip everything at or before the excluded subtree, and any other
+    // excluded run that follows it.
+    if (excluded.contains(text)) continue;
+    const position = excluded.compareDocumentPosition(text);
+    if (!(position & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+    if (isAnnotationExcludedTextNode(text)) continue;
+    // Never past the range's own end.
+    if (text === range.endContainer) {
+      if (range.endOffset === 0) return false;
+      range.setStart(text, 0);
+      return true;
+    }
+    const toEnd = text.compareDocumentPosition(range.endContainer);
+    if (!(toEnd & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
+    range.setStart(text, 0);
+    return true;
+  }
+  return false;
+};
+
 /**
  * Drop `.annotation-exclude` chrome from a new annotation's quote.
  *
  * Excluded nodes are never PAINTED (they are in the highlighter's
  * `exceptSelectors`) and never searched (the restore TreeWalker rejects
- * them), but the browser's selection string still contains them — a drag that
- * starts at the left edge of a GitHub alert's title row reports the visually
- * hidden "Tip: " that keeps the alert type in its accessible name (#1511).
- * That string becomes `originalText`: the quote in the panel, the quote handed
- * to the agent, and the only handle a share link has for re-finding the
+ * them), but the browser's selection string still contains them — a selection
+ * that runs THROUGH a GitHub alert's title row picks up the visually hidden
+ * "Tip: " that keeps the alert type in its accessible name (#1511). That
+ * string becomes `originalText`: the quote in the panel, the quote handed to
+ * the agent, and the only handle a share link has for re-finding the
  * highlight — which it then never can, because the search stream skips the
- * excluded text.
+ * excluded text. (A selection that BEGINS inside such a node is handled
+ * earlier, by {@link snapRangeStartPastExcluded}.)
  *
  * The painted highlight is therefore the authority on CONTENT and the
  * selection string on FORMATTING: remove each excluded run and keep the
@@ -977,6 +1052,26 @@ export function useAnnotationHighlighter({
       onSelectAnnotationRef.current?.(id);
     });
 
+    // web-highlighter's own pointer-end handler reads the LIVE selection, so
+    // the range it paints and quotes has to be corrected before that handler
+    // runs: registered on the capture phase of the same element, and before
+    // `run()` so registration order settles the at-target case too.
+    const handlePointerEndCapture = () => {
+      const container = containerRef.current;
+      const selection = window.getSelection();
+      if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      const range = selection.getRangeAt(0).cloneRange();
+      if (!container.contains(range.commonAncestorContainer)) return;
+      if (snapRangeStartPastExcluded(range)) {
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    };
+
+    const container = containerRef.current;
+    container.addEventListener('mouseup', handlePointerEndCapture, true);
+    container.addEventListener('touchend', handlePointerEndCapture, true);
+
     highlighter.run();
 
     const handleMathMouseDown = (event: MouseEvent) => {
@@ -1075,7 +1170,9 @@ export function useAnnotationHighlighter({
             const sel = window.getSelection();
             if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
             if (!containerRef.current?.contains(sel.anchorNode)) return;
-            highlighter.fromRange(sel.getRangeAt(0));
+            const range = sel.getRangeAt(0).cloneRange();
+            snapRangeStartPastExcluded(range);
+            highlighter.fromRange(range);
           }, 400);
         }
       : null;
@@ -1091,6 +1188,8 @@ export function useAnnotationHighlighter({
       }
       containerRef.current?.removeEventListener('mousedown', handleMathMouseDown, true);
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
+      container.removeEventListener('mouseup', handlePointerEndCapture, true);
+      container.removeEventListener('touchend', handlePointerEndCapture, true);
       highlighter.dispose();
     };
   }, [clearPendingSelection, enabled]);
@@ -1101,13 +1200,20 @@ export function useAnnotationHighlighter({
     if (!highlighter || !container || range.collapsed) return;
     if (!container.contains(range.commonAncestorContainer)) return;
 
+    // Pinpoint clicks and vim visual selections anchor on the first
+    // annotatable text node of a block, which for a titled GitHub alert is the
+    // visually hidden type word; snap off it before painting (the caller's own
+    // range is left untouched).
+    const painted = range.cloneRange();
+    snapRangeStartPastExcluded(painted);
+
     const selection = window.getSelection();
     selection?.removeAllRanges();
-    selection?.addRange(range.cloneRange());
+    selection?.addRange(painted.cloneRange());
     pendingModeOverrideRef.current = modeOverride ?? null;
 
     try {
-      highlighter.fromRange(range);
+      highlighter.fromRange(painted);
     } finally {
       pendingModeOverrideRef.current = null;
       selection?.removeAllRanges();
