@@ -190,22 +190,26 @@ const escapeAttrValue = (value: string): string => {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 };
 
-/** Whitespace-insensitive comparison for restore verification: a highlight
- *  spanning element boundaries legitimately differs from `originalText` in
- *  whitespace, so only content differences count as a mismatch. */
-const normalizeForRestoreCompare = (value: string): string =>
-  value.replace(/\s+/g, ' ').trim();
-
 // web-highlighter 0.8.x accepts only class, ID, and tag exclusions.
 const ANNOTATION_EXCLUDED_SELECTOR = '.annotation-exclude';
 
 const isAnnotationExcludedTextNode = (node: Node): boolean =>
   Boolean(node.parentElement?.closest(ANNOTATION_EXCLUDED_SELECTOR));
 
-/** Content-only comparison for the quote repair below: the painted highlight
- *  and the browser's selection string legitimately differ in whitespace
- *  (innerText inserts blank lines between blocks, wrapper `<mark>`s do not),
- *  so only the characters themselves are compared. */
+/**
+ * Content-only comparison: the painted highlight and the browser's selection
+ * string legitimately differ in whitespace (`Selection.toString()` inserts a
+ * blank line between block elements, the wrapper `<mark>`s concatenated with
+ * no separator do not), so only the characters themselves are compared.
+ *
+ * Used by BOTH the quote repair below and the restore verification, which
+ * compares `originalText` against the text the stored positions actually
+ * painted. Whitespace must be REMOVED there rather than collapsed: a quote
+ * spanning two blocks carries the browser's "\n\n" where the painted marks
+ * carry nothing at all, so collapsing to a single space rejects every correct
+ * cross-block restore. Content drift — the case that verification exists for
+ * (#1509) — still differs once whitespace is gone.
+ */
 const compactText = (value: string): string => value.replace(/\s+/g, '');
 
 /**
@@ -743,7 +747,7 @@ export function useAnnotationHighlighter({
             const restoredText = restoredDoms.map(dom => dom.textContent ?? '').join('');
             if (
               verifyRestoredContent &&
-              normalizeForRestoreCompare(restoredText) !== normalizeForRestoreCompare(ann.originalText)
+              compactText(restoredText) !== compactText(ann.originalText)
             ) {
               // Positions resolved, but onto the WRONG text — remove the bad
               // highlight and fall through to the text-search fallback.
