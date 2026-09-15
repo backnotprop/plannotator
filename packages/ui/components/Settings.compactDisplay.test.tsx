@@ -14,7 +14,7 @@ const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-async function openDisplayTab(isCompactTouchLayout: boolean): Promise<void> {
+async function openAppearanceTab(isCompactTouchLayout: boolean): Promise<void> {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -30,10 +30,15 @@ async function openDisplayTab(isCompactTouchLayout: boolean): Promise<void> {
     );
   });
 
-  const displayTab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+  const appearanceTab = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+    .find((button) => button.textContent?.trim() === 'Appearance');
+  if (!appearanceTab) throw new Error('review appearance tab did not render');
+  await act(async () => appearanceTab.click());
+
+  const editorDisplay = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
     .find((button) => button.textContent?.trim() === 'Editor');
-  if (!displayTab) throw new Error('review display tab did not render');
-  await act(async () => displayTab.click());
+  if (!editorDisplay) throw new Error('editor display subsection did not render');
+  await act(async () => editorDisplay.click());
 }
 
 function styleControlButtons(): HTMLButtonElement[] {
@@ -49,9 +54,9 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-describe.if(hasDom)('review Display tab diff style', () => {
+describe.if(hasDom)('review Appearance tab diff style', () => {
   test('desktop keeps the Split/Unified control', async () => {
-    await openDisplayTab(false);
+    await openAppearanceTab(false);
 
     const options = styleControlButtons();
     expect(options.map((button) => button.textContent?.trim()).sort()).toEqual(['Split', 'Unified']);
@@ -59,7 +64,7 @@ describe.if(hasDom)('review Display tab diff style', () => {
   });
 
   test('compact hides the control and explains the session behavior', async () => {
-    await openDisplayTab(true);
+    await openAppearanceTab(true);
 
     expect(styleControlButtons()).toHaveLength(0);
     expect(document.body.textContent).toContain('unified diffs for the session');

@@ -77,8 +77,10 @@ import {
 } from '../utils/fileBrowser';
 import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
 import { AnalysisLayerToggle } from './AnalysisLayerToggle';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+type AppearanceSection = 'theme' | 'editor';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -481,6 +483,24 @@ const GitTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavail
   );
 };
 
+const EditSuggestionsSetting: React.FC = () => {
+  const editSuggestions = useConfigValue('editSuggestions');
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Experimental
+      </div>
+      <ToggleSwitch
+        checked={editSuggestions}
+        onChange={(v) => configStore.set('editSuggestions', v)}
+        label="Edit Code to Suggest"
+        description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
+      />
+    </div>
+  );
+};
+
 const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isCompactTouchLayout = false }) => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
@@ -490,7 +510,6 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
   const diffShowBackground = useConfigValue('diffShowBackground');
   const diffLineBgIntensity = useConfigValue('diffLineBgIntensity');
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
-  const editSuggestions = useConfigValue('editSuggestions');
   const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
@@ -504,21 +523,6 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
 
   return (
     <>
-      {/* Experimental: edit code to author suggestions */}
-      <div className="space-y-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Experimental
-        </div>
-        <ToggleSwitch
-          checked={editSuggestions}
-          onChange={(v) => configStore.set('editSuggestions', v)}
-          label="Edit Code to Suggest"
-          description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
-        />
-      </div>
-
-      <div className="border-t border-border" />
-
       {/* Hover cards (internally tokenHover*; the label is what changed, not
           the ids). One trigger select rather than a toggle plus a mode: `Off`
           is a value of the same question, so there is no unreachable
@@ -933,7 +937,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const webmcpTools = useWebMcpToolsEnabled();
   const [showDialog, setShowDialog] = useState(false);
   const settingsWasOpenRef = useRef(false);
-  const [themePreview, setThemePreview] = useState(false);
+  const [livePreview, setLivePreview] = useState(false);
 
   useEffect(() => {
     const wasOpen = settingsWasOpenRef.current;
@@ -941,23 +945,30 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     if (
       wasOpen
       && !showDialog
-      && !themePreview
+      && !livePreview
       && mode !== 'review'
       && configStore.get('vimModeEnabled')
     ) {
       requestVimDocumentFocus();
     }
-  }, [mode, showDialog, themePreview]);
+  }, [mode, showDialog, livePreview]);
 
   useEffect(() => {
-    if (!themePreview) return;
+    if (!livePreview) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setThemePreview(false); setShowDialog(true); }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setLivePreview(false);
+        setActiveTab('general');
+        setShowDialog(false);
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [themePreview]);
+  }, [livePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [appearanceSection, setAppearanceSection] = useState<AppearanceSection>('theme');
   const gridEnabled = useConfigValue('gridEnabled');
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
@@ -998,7 +1009,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
   const mainTabs = useMemo(() => {
     const t: { id: SettingsTab; label: string }[] = [{ id: 'general', label: 'General' }];
-    t.push({ id: 'theme', label: 'Theme' });
+    t.push({ id: 'theme', label: mode === 'review' ? 'Appearance' : 'Theme' });
     if (mode === 'plan') {
       t.push({ id: 'display', label: 'Display' });
       t.push({ id: 'saving', label: 'Saving' });
@@ -1006,7 +1017,6 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     }
     if (mode === 'review') {
       t.push({ id: 'git', label: 'Git' });
-      t.push({ id: 'display', label: 'Editor' });
       t.push({ id: 'analysis', label: 'Analysis' });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
@@ -1199,9 +1209,31 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   // controls render exactly as before.
   const identityEditable = isIdentityEditable();
 
+  const isLivePreviewTab = (tab: SettingsTab) =>
+    tab === 'theme' || (tab === 'display' && mode === 'plan');
+
+  const selectSettingsTab = (tab: SettingsTab) => {
+    const nextLivePreview = isLivePreviewTab(tab);
+    if (nextLivePreview === livePreview) {
+      setActiveTab(tab);
+      return;
+    }
+
+    setActiveTab(tab);
+    setLivePreview(nextLivePreview);
+  };
+
+  const closeSettings = () => {
+    setLivePreview(false);
+    setActiveTab('general');
+    setAppearanceSection('theme');
+    setShowDialog(false);
+  };
+
   return (
     <>
       <button
+        type="button"
         onClick={() => setShowDialog(true)}
         className="relative p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         title="Settings"
@@ -1212,31 +1244,33 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
         </svg>
       </button>
 
-      {showDialog && !themePreview && createPortal(
+      {showDialog && createPortal(
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
-          onClick={() => setShowDialog(false)}
+          className={livePreview
+            ? 'pointer-events-none fixed inset-0 z-100 flex items-center justify-center p-4'
+            : 'fixed inset-0 z-100 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm'}
+          onClick={livePreview ? undefined : closeSettings}
         >
           <div
-            className="bg-card border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl relative overflow-hidden"
+            className="pointer-events-auto relative flex h-[min(44rem,88dvh)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
             role="dialog"
-            aria-modal="true"
+            aria-modal={livePreview ? 'false' : 'true'}
             aria-labelledby="plannotator-settings-title"
             onClick={e => e.stopPropagation()}
             onKeyDown={(event) => {
               if (event.key !== 'Escape' || event.defaultPrevented) return;
               event.preventDefault();
               event.stopPropagation();
-              setShowDialog(false);
+              closeSettings();
             }}
           >
             {taterMode && <TaterSpritePullup />}
-            <div className="flex items-center justify-between p-4 border-b border-border">
+            <div className="flex shrink-0 items-center justify-between border-b border-border p-4">
               <h3 id="plannotator-settings-title" className="font-semibold text-sm">Settings</h3>
               <button
                 type="button"
                 aria-label="Close settings"
-                onClick={() => setShowDialog(false)}
+                onClick={closeSettings}
                 className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1247,11 +1281,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
             <div className="flex flex-col md:flex-row md:min-h-[420px] flex-1 min-h-0 overflow-hidden">
               {/* Mobile: horizontal tab bar */}
-              <nav className="md:hidden flex overflow-x-auto border-b border-border px-2 py-1.5 gap-1 flex-shrink-0">
+              <nav aria-label="Settings sections" className="md:hidden flex overflow-x-auto border-b border-border px-2 py-1.5 gap-1 flex-shrink-0">
                 {[...mainTabs, ...integrationTabs].map(tab => (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    type="button"
+                    onClick={() => selectSettingsTab(tab.id)}
+                    aria-current={activeTab === tab.id ? 'page' : undefined}
                     className={`px-3 py-1.5 rounded text-xs whitespace-nowrap transition-colors flex items-center gap-1.5 ${
                       activeTab === tab.id
                         ? 'bg-primary/10 text-primary font-medium'
@@ -1264,12 +1300,14 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
               </nav>
 
               {/* Desktop: sidebar */}
-              <nav className="hidden md:block w-40 border-r border-border p-2 flex-shrink-0">
+              <nav aria-label="Settings sections" className="hidden md:block w-40 border-r border-border p-2 flex-shrink-0">
                 <div className="space-y-0.5">
                   {mainTabs.map(tab => (
                     <button
                       key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
+                      type="button"
+                      onClick={() => selectSettingsTab(tab.id)}
+                      aria-current={activeTab === tab.id ? 'page' : undefined}
                       className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors flex items-center justify-between ${
                         activeTab === tab.id
                           ? 'bg-primary/10 text-primary font-medium'
@@ -1290,7 +1328,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       {integrationTabs.map(tab => (
                         <button
                           key={tab.id}
-                          onClick={() => setActiveTab(tab.id)}
+                          type="button"
+                          onClick={() => selectSettingsTab(tab.id)}
+                          aria-current={activeTab === tab.id ? 'page' : undefined}
                           className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
                             activeTab === tab.id
                               ? 'bg-primary/10 text-primary font-medium'
@@ -1305,9 +1345,35 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
               </nav>
 
-              {/* Content — scrollable */}
-              <OverlayScrollArea className="flex-1 min-h-0">
-              <div className="p-4 space-y-4">
+              <Tabs
+                value={appearanceSection}
+                onValueChange={(value) => {
+                  if (value === 'theme' || value === 'editor') setAppearanceSection(value);
+                }}
+                className="flex min-w-0 flex-1 flex-col"
+              >
+                {activeTab === 'theme' && mode === 'review' && (
+                  <div className="shrink-0 border-b border-border p-2">
+                    <TabsList aria-label="Appearance sections" className="w-full gap-1 rounded-lg bg-muted/50 p-0.5">
+                      <TabsTrigger
+                        value="theme"
+                        className="flex-1 justify-center text-sm data-active:bg-background data-active:shadow-sm"
+                      >
+                        Theme
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="editor"
+                        className="flex-1 justify-center text-sm data-active:bg-background data-active:shadow-sm"
+                      >
+                        Editor
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+                )}
+
+                {/* Content — scrollable */}
+                <OverlayScrollArea className="min-h-0 flex-1">
+                <div className="p-4 space-y-4">
 
                 {/* === GENERAL TAB === */}
                 {activeTab === 'general' && (
@@ -1545,6 +1611,13 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                     <div className="border-t border-border" />
 
+                    {mode === 'review' && (
+                      <>
+                        <EditSuggestionsSetting />
+                        <div className="border-t border-border" />
+                      </>
+                    )}
+
                     {/* Auto-close Tab */}
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Auto-close Tab</div>
@@ -1571,16 +1644,19 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 )}
 
                 {/* === THEME TAB === */}
-                {activeTab === 'theme' && <ThemeTab onPreview={() => { setShowDialog(false); setThemePreview(true); }} />}
+                {activeTab === 'theme' && mode !== 'review' && <ThemeTab />}
+                {activeTab === 'theme' && mode === 'review' && (
+                  <>
+                    <TabsContent value="theme"><ThemeTab /></TabsContent>
+                    <TabsContent value="editor" className="space-y-4">
+                      <ReviewDisplayTab isCompactTouchLayout={isCompactTouchLayout} />
+                    </TabsContent>
+                  </>
+                )}
 
                 {/* === GIT TAB === */}
                 {activeTab === 'git' && mode === 'review' && (
                   <GitTab sinceBaseUnavailable={sinceBaseUnavailable} />
-                )}
-
-                {/* === DISPLAY TAB === */}
-                {activeTab === 'display' && mode === 'review' && (
-                  <ReviewDisplayTab isCompactTouchLayout={isCompactTouchLayout} />
                 )}
 
                 {activeTab === 'analysis' && mode === 'review' && (
@@ -2585,37 +2661,15 @@ tags: [plan, ...]
                   </>
                 )}
 
-              </div>
-              </OverlayScrollArea>
+                </div>
+                </OverlayScrollArea>
+              </Tabs>
             </div>
           </div>
         </div>,
         document.body
       )}
 
-      {themePreview && createPortal(
-        <div className="fixed inset-0 z-[100] flex flex-col pointer-events-none">
-          <div className="flex-1" />
-          <div
-            className="pointer-events-auto w-full bg-card border-t-2 border-primary/30 shadow-[0_-4px_20px_rgba(0,0,0,0.4)] flex flex-col max-h-[35vh] overflow-hidden"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border flex-shrink-0">
-              <span className="text-xs font-medium text-muted-foreground">Theme Preview</span>
-              <button
-                onClick={() => { setThemePreview(false); setShowDialog(true); }}
-                className="px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Done
-              </button>
-            </div>
-            <div className="p-3 overflow-y-auto flex-1 min-h-0">
-              <ThemeTab compact />
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </>
   );
 };
