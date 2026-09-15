@@ -193,6 +193,56 @@ jobs:
           packages/editor/App.editModeShortcut.test.tsx
           packages/ui/components/blocks/AlertBlock.title.test.tsx
           packages/ui/components/blocks/AlertBlock.seam.test.tsx
+          packages/ui/components/AnnotationPanel.allFiles.test.tsx
+          packages/ui/hooks/useLinkedDoc.crossFile.test.tsx
+          packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
+          packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
+          packages/editor/hooks/useAnnotationJump.test.tsx
+          packages/ui/components/TableOfContents.linkedDoc.test.tsx
+          packages/ui/components/CommentPopover.overlayGutter.test.tsx
+          packages/ui/components/CommentPopover.multiTarget.test.tsx
+          packages/ui/aiProviderConfigPersistence.test.tsx
+          packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
+          packages/ui/components/ui/mobile-foundation.test.tsx
+          packages/ui/components/Settings.vim.test.tsx
+          packages/ui/components/Settings.compactDisplay.test.tsx
+          packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
+          packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
+          packages/ui/components/PermissionModeSetup.mobile.test.tsx
+          packages/ui/components/html-viewer/useHtmlAnnotation.mintedIds.test.tsx
+          packages/ui/components/LookAndFeelAnnouncementDialog.test.tsx
+          packages/ui/components/CommentPopover.mobile.test.tsx
+          packages/ui/components/CommentPopover.forcedDialog.test.tsx
+          packages/ui/components/ConfirmDialog.mobile.test.tsx
+          packages/ui/components/ThemeProvider.test.tsx
+          packages/ui/components/MarkdownEditor.embedPicker.test.ts
+          packages/ui/hooks/useViewportEnvironment.test.tsx
+          packages/ui/hooks/useIsMobile.test.tsx
+          packages/ui/hooks/useVimDocumentFocus.test.tsx
+          packages/ui/hooks/useScrollViewport.test.ts
+          packages/review-editor/components/ExpandedCommentDialog.mobile.test.tsx
+          packages/review-editor/components/DiffTypePicker.openState.test.tsx
+          packages/review-editor/components/EditModeAnnouncementDialog.test.tsx
+          packages/review-editor/components/DestinationSpotlight.test.tsx
+          packages/review-editor/dock/panels/PRArtifactGallery.test.tsx
+          packages/review-editor/dock/panels/artifactDocument.test.ts
+          packages/review-editor/dock/ReviewDockRightActions.test.tsx
+          packages/editor/skillPrimeRenderLoop.test.tsx
+          packages/editor/App.compactToc.mobile.test.tsx
+          packages/editor/App.permissionModeSetup.test.tsx
+          packages/editor/components/CompactPlanStage.test.tsx
+          packages/editor/components/FolderAnnotationEmptyState.test.tsx
+          packages/editor/components/AppHeader.mobile.test.tsx
+          packages/editor/components/CompactAnnotationControls.test.tsx
+          packages/editor/components/AnnotateAgentTerminalPanel.displayReset.test.tsx
+
+      # The list above is hand-maintained, and every feature that adds a
+      # DOM-gated test file has to remember it — which is exactly what stopped
+      # happening (34 tests guarding shipped controls never ran). This asserts
+      # that every DOM-gated test file in the repo is named in one of the
+      # DOM_TESTS steps of this workflow, so the list cannot drift again.
+      - name: Guard the DOM test allowlist
+        run: bun test scripts/dom-test-allowlist.test.ts
 
   opencode-v2:
     name: OpenCode 2 installed package
