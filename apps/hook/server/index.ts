@@ -167,6 +167,7 @@ import {
   findCodexRolloutsByThreadId,
   getRecentCodexMessages,
   logCodexStopSkip,
+  logCodexStopTurnIdFallback,
   resolveCodexStopPlan,
 } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
@@ -2360,12 +2361,20 @@ if (args[0] === "sessions") {
       process.exit(0);
     }
 
-    const { plan: latestPlan, skipReason } = resolveCodexStopPlan(rolloutPath, {
-      turnId: typeof event.turn_id === "string" ? event.turn_id : undefined,
+    // Absent `turn_id` means an older Codex (the field arrived in rust-v0.117.0)
+    // and hands the lookup its rollout fallback; a PRESENT but unusable value is
+    // a truncated or foreign payload and must still fail closed, so it is passed
+    // through as a blank string rather than collapsed to "absent".
+    const rawTurnId = event.turn_id;
+    const { plan: latestPlan, skipReason, fallbackTurnId } = resolveCodexStopPlan(rolloutPath, {
+      turnId: rawTurnId === undefined ? undefined : typeof rawTurnId === "string" ? rawTurnId : "",
       stopHookActive: !!event.stop_hook_active,
     });
     if (skipReason) {
       logCodexStopSkip(skipReason, { debug: process.env.PLANNOTATOR_DEBUG });
+    }
+    if (fallbackTurnId) {
+      logCodexStopTurnIdFallback(fallbackTurnId);
     }
 
     if (!latestPlan?.text) {

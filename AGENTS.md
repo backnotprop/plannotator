@@ -204,6 +204,38 @@ Approve → stdout: {"hookSpecificOutput":{"decision":{"behavior":"allow"}}}
 Deny    → stdout: {"hookSpecificOutput":{"decision":{"behavior":"deny","message":"..."}}}
 ```
 
+### Codex Stop hook: which turn the plan belongs to
+
+Codex has no `ExitPlanMode`, so plan review rides its experimental `Stop` hook:
+the hook reads the session rollout and returns the plan **the turn that just
+stopped** produced. Anchoring on a turn is what keeps an older, already-decided
+`<proposed_plan>` from being reopened (#1169), and the turn is resolved in
+`resolveCodexStopPlan` (`apps/hook/server/codex-session.ts`) in two tiers:
+
+1. **The payload's own `turn_id`** when the Stop JSON carries the field.
+2. **The rollout's own turn markers** when it does not: the id of the LAST
+   id-carrying `turn_context` / `task_started` marker in the newest rollout
+   segment. A turn still in flight owns the last markers by construction, and
+   when Stop fires at turn end the last marker is that turn's own, so one rule
+   covers both shapes. The scan then still anchors on that turn's **first**
+   marker, so a mid-turn compaction (which re-emits `turn_context` with the same
+   id) cannot hide a plan the turn produced before it.
+
+Tier 2 exists because `StopCommandInput.turn_id` only landed in Codex
+**rust-v0.117.0** (`rust-v0.116.0-alpha.12`), while the hooks engine itself
+shipped in **rust-v0.114.0**: stable `rust-v0.114.0`, `v0.115.0` and `v0.116.0`
+fire the Stop hook with no `turn_id` at all. Their rollouts do record the id on
+every turn marker (`TurnContext::to_turn_context_item` writes
+`turn_id: Some(sub_id)`), which is what the fallback reads. Using it writes one
+unconditional line to **stderr** (`logCodexStopTurnIdFallback`; stdout is the
+hook's JSON decision channel, and Codex only reads a Stop hook's stderr on
+exit code 2, which this hook never uses).
+
+Fail-closed cases are unchanged: a payload that carries `turn_id` as a blank
+string is truncated or foreign, not an old Codex, and is refused **before the
+rollout is read**; a rollout with no id-carrying turn marker at all skips too.
+Both skips stay silent unless `PLANNOTATOR_DEBUG` is set.
+
 ## Code Review Flow
 
 ```

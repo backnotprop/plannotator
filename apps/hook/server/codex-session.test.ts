@@ -16,6 +16,7 @@ import {
   getLastCodexMessage,
   getLatestCodexPlan,
   logCodexStopSkip,
+  logCodexStopTurnIdFallback,
   getRecentCodexMessages,
   resolveCodexStopPlan,
 } from "./codex-session";
@@ -700,14 +701,16 @@ describe("getLatestCodexPlan", () => {
   });
 
   describe("Codex Stop skip diagnostics", () => {
-    test("classifies a missing Stop turn id without reading stale plan content", () => {
-      // The path does not exist: reaching the file at all would throw, which
-      // is the point — a turn-id-less Stop must never load plan content.
-      expect(resolveCodexStopPlan("not-read.jsonl")).toEqual({
+    test("classifies a blank Stop turn id without reading stale plan content", () => {
+      // A PRESENT but blank turn id is a truncated or foreign payload, never an
+      // old Codex, so it still fails closed. The path does not exist: reaching
+      // the file at all would throw, which is the point — that payload must
+      // never load plan content.
+      expect(resolveCodexStopPlan("not-read.jsonl", { turnId: "   " })).toEqual({
         plan: null,
         skipReason: "missing-turn-id",
       });
-      expect(resolveCodexStopPlan("not-read.jsonl", { turnId: "   " })).toEqual({
+      expect(resolveCodexStopPlan("not-read.jsonl", { turnId: "" })).toEqual({
         plan: null,
         skipReason: "missing-turn-id",
       });
@@ -742,6 +745,123 @@ describe("getLatestCodexPlan", () => {
         "[DEBUG] Codex Stop plan review skipped: missing Stop payload turn_id.",
         "[DEBUG] Codex Stop plan review skipped: missing id-carrying rollout turn marker.",
       ]);
+    });
+  });
+
+  // Codex rust-v0.114.0/0.115.0/0.116.0 ship the hooks engine but send a Stop
+  // payload with no `turn_id` field at all (it arrived in rust-v0.117.0). On
+  // those versions the turn is derived from the rollout instead of failing
+  // closed, which would leave plan review silently disabled.
+  describe("Codex Stop turn id fallback", () => {
+    test("resolves the plan of the rollout's current turn", () => {
+      const path = writeTempRollout(
+        buildRollout(
+          sessionMeta(),
+          turnStarted("turn-only"),
+          completedPlanItem("Plan from the turn that just stopped", "turn-only"),
+        ),
+      );
+
+      expect(resolveCodexStopPlan(path)).toEqual({
+        plan: {
+          text: "Plan from the turn that just stopped",
+          source: "plan-item",
+        },
+        skipReason: null,
+        fallbackTurnId: "turn-only",
+      });
+    });
+
+    test("anchors on the turn's FIRST marker, so a mid-turn compaction keeps the plan visible", () => {
+      // Compaction re-emits a `turn_context` carrying the in-flight turn's id.
+      // Naming the turn from the LAST marker is fine; anchoring the scan there
+      // would hide every plan the turn produced before the compaction point.
+      const turnId = "turn-compacted";
+      const path = writeTempRollout(
+        buildRollout(
+          sessionMeta(),
+          turnStarted(turnId),
+          completedPlanItem("Plan written before compaction", turnId),
+          compacted("Summary of the conversation so far"),
+          turnContext(turnId),
+          assistantMessage("Continuing after compaction."),
+        ),
+      );
+
+      const result = resolveCodexStopPlan(path);
+      expect(result.plan).toEqual({
+        text: "Plan written before compaction",
+        source: "plan-item",
+      });
+      expect(result.fallbackTurnId).toBe(turnId);
+    });
+
+    test("never re-reviews a plan from an older, already-completed turn", () => {
+      const path = writeTempRollout(
+        buildRollout(
+          sessionMeta(),
+          turnStarted("turn-old"),
+          completedPlanItem("Already-decided plan", "turn-old"),
+          turnCompleted("turn-old"),
+          turnStarted("turn-new"),
+          assistantMessage("Unrelated follow-up answer."),
+          turnCompleted("turn-new"),
+        ),
+      );
+
+      expect(resolveCodexStopPlan(path)).toEqual({
+        plan: null,
+        skipReason: null,
+        fallbackTurnId: "turn-new",
+      });
+    });
+
+    test("fails closed when the rollout carries no id-carrying turn marker", () => {
+      const path = writeTempRollout(
+        buildRollout(
+          sessionMeta(),
+          turnContext(),
+          assistantMessage("<proposed_plan>\nStale plan\n</proposed_plan>"),
+        ),
+      );
+
+      expect(resolveCodexStopPlan(path)).toEqual({
+        plan: null,
+        skipReason: "missing-turn-marker",
+      });
+    });
+
+    test("a payload-named turn is unaffected by the fallback", () => {
+      const path = writeTempRollout(
+        buildRollout(
+          sessionMeta(),
+          turnStarted("turn-old"),
+          completedPlanItem("Older turn's plan", "turn-old"),
+          turnCompleted("turn-old"),
+          turnStarted("turn-new"),
+          assistantMessage("Unrelated follow-up answer."),
+        ),
+      );
+
+      // The payload names the older turn: its plan is returned, and no fallback
+      // is reported — the rollout's newest turn never enters the decision.
+      expect(resolveCodexStopPlan(path, { turnId: "turn-old" })).toEqual({
+        plan: { text: "Older turn's plan", source: "plan-item" },
+        skipReason: null,
+      });
+    });
+
+    test("announces the fallback on stderr unconditionally", () => {
+      const messages: string[] = [];
+      logCodexStopTurnIdFallback("turn-42", {
+        write: (message) => messages.push(message),
+      });
+
+      expect(messages).toHaveLength(1);
+      // The line must name the missing field and the turn it fell back to —
+      // that is the whole diagnostic value. No debug flag gates it.
+      expect(messages[0]).toContain("turn_id");
+      expect(messages[0]).toContain("turn-42");
     });
   });
 
@@ -808,14 +928,20 @@ describe("getLatestCodexPlan", () => {
     expect(getLatestCodexPlan(path, { turnId: requestedTurnId })).toBeNull();
   });
 
-  test("does not scrape an assistant proposed plan for a Stop event without a turn id", () => {
+  test("does not scrape an older turn's assistant proposed plan for a Stop event without a turn id", () => {
+    // A turn-id-less payload now resolves the turn from the rollout instead of
+    // failing closed (Codex < 0.117 sends no turn_id), but the resolved turn is
+    // the CURRENT one — an earlier, already-decided turn's plan stays invisible.
     const completedTurnId = "turn-completed";
+    const currentTurnId = "turn-current";
     const path = writeTempRollout(
       buildRollout(
         sessionMeta(),
         turnStarted(completedTurnId),
         assistantMessage("<proposed_plan>\nPrevious turn plan\n</proposed_plan>"),
         turnCompleted(completedTurnId),
+        turnStarted(currentTurnId),
+        assistantMessage("Just answering a regular question."),
       ),
     );
 

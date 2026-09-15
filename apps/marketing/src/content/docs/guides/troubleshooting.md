@@ -92,6 +92,32 @@ If a Codex plan turn completes without opening Plannotator:
 3. Check `~/.codex/config.toml` contains `hooks = true` under `[features]`
 4. Check `~/.codex/hooks.json` has a `Stop` hook whose command points to `plannotator`
 5. Run `plannotator sessions` in case the browser failed to open but the session is running
+6. Check your Codex version: `codex --version`
+
+### Minimum Codex version
+
+The `Stop` hook Plannotator uses arrived in Codex **rust-v0.114.0**, so anything
+older has no Codex plan review at all. Two later changes matter:
+
+| Codex version | What changed |
+|---------------|--------------|
+| `rust-v0.114.0` | Hooks engine ships; the feature key is `codex_hooks` and it is off by default |
+| `rust-v0.117.0` (`0.116.0-alpha.12`) | The Stop payload starts carrying `turn_id` |
+| `rust-v0.125.0` | Hooks become enabled by default |
+| `rust-v0.131.0` | The feature key is renamed to `hooks`, with `codex_hooks` kept as a legacy alias |
+
+Step 3 above assumes `rust-v0.131.0` or newer, which is the version this
+installer targets. On `rust-v0.114.0`–`rust-v0.130.x` the key Codex reads is
+`codex_hooks = true`, so a config that says `hooks = true` alone has no effect
+there — write `codex_hooks = true` (both keys together are fine) and restart
+Codex.
+
+You do **not** need a Codex new enough to send `turn_id`. On `rust-v0.114.0`,
+`v0.115.0` and `v0.116.0` the Stop payload omits that field, and Plannotator
+resolves the turn from the session rollout instead, which is why plan review
+opens there as well. When that fallback runs it prints one line to stderr
+naming the turn it used, so a hook run captured with stderr visible shows
+exactly what happened.
 
 Codex hooks are currently disabled on Windows in the official Codex docs, so the Windows installer prints manual guidance instead of changing Codex config automatically.
 

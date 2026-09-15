@@ -67,6 +67,12 @@ export interface CodexStopPlanLookup {
    * produced none. Diagnostic only: both outcomes are a silent no-op.
    */
   skipReason: CodexStopSkipReason | null;
+  /**
+   * The turn id the scan used, set ONLY when it was derived from the rollout
+   * because the Stop payload carried no `turn_id` field. The caller surfaces
+   * it on stderr; a payload-named turn leaves this undefined.
+   */
+  fallbackTurnId?: string;
 }
 
 const TURN_START_TYPES = new Set(["task_started", "turn_started"]);
@@ -254,6 +260,26 @@ function findTurnStartIndex(entries: RolloutEntry[], turnId: string): number {
   );
 }
 
+/**
+ * The turn the rollout says is current: the id of the LAST id-carrying turn
+ * marker in the file, or null when the file has none.
+ *
+ * That single rule covers both shapes the Stop hook can catch. A turn still in
+ * flight owns the last markers by construction — a completed turn's markers can
+ * only be followed by a newer turn's — and when Stop fires at turn end the last
+ * marker is that turn's own. Compaction is safe because this only names the
+ * turn; where it BEGINS is still `findTurnStartIndex`'s first-marker anchor.
+ */
+function findLatestRolloutTurnId(entries: RolloutEntry[]): string | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (!isTurnMarker(entry)) continue;
+    const turnId = getTurnId(entry);
+    if (turnId) return turnId;
+  }
+  return null;
+}
+
 function findActiveTurnStartIndex(entries: RolloutEntry[]): number {
   const latestTurnStart = findLastIndex(
     entries,
@@ -330,6 +356,24 @@ export function logCodexStopSkip(
       ? "missing Stop payload turn_id."
       : "missing id-carrying rollout turn marker.";
   (opts.write ?? console.error)(`[DEBUG] Codex Stop plan review skipped: ${detail}`);
+}
+
+/**
+ * One unconditional stderr line whenever the rollout fallback named the turn,
+ * so a user on a Codex that sends no `turn_id` can see WHY plan review behaves
+ * the way it does without setting PLANNOTATOR_DEBUG.
+ *
+ * stderr, never stdout: stdout is the Stop hook's JSON decision channel. Codex
+ * only reads a Stop hook's stderr when it exits with code 2, and this hook
+ * always exits 0, so the line is a captured breadcrumb, never agent input.
+ */
+export function logCodexStopTurnIdFallback(
+  turnId: string,
+  opts: { write?: (message: string) => void } = {},
+): void {
+  (opts.write ?? console.error)(
+    `[plannotator] Codex Stop payload carried no turn_id (Codex < 0.117); resolved the current turn from the rollout instead (turn ${turnId}).`,
+  );
 }
 
 function collectPlanCandidates(
@@ -472,8 +516,9 @@ export function getRecentCodexMessages(
  * - no plan after the last hook prompt => null
  * - identical plan after the last hook prompt => null
  *
- * Requires options.turnId, and requires that turn to be anchored in the file:
- * see resolveCodexStopPlan, which this thin wrapper drops the reason from.
+ * The turn comes from options.turnId, or from the rollout's own turn markers
+ * when the Stop payload carried no `turn_id` field, and must be anchored in the
+ * file: see resolveCodexStopPlan, which this thin wrapper drops the reason from.
  */
 export function getLatestCodexPlan(
   rolloutPath: string,
@@ -491,15 +536,26 @@ export function resolveCodexStopPlan(
   rolloutPath: string,
   options: GetLatestCodexPlanOptions = {}
 ): CodexStopPlanLookup {
-  // A Stop payload without a turn id cannot tell a plan produced in this turn
-  // from an already-decided <proposed_plan> earlier in the thread, so fail
-  // closed — before the file is read, so stale content is never even loaded.
-  // Codex itself always sends one (`StopCommandInput.turn_id` is a required
-  // String), so this is a guard against a foreign or truncated payload.
-  const turnId = options.turnId?.trim();
-  if (!turnId) return { plan: null, skipReason: "missing-turn-id" };
+  // A payload that NAMES a turn but names it blank is truncated or foreign, not
+  // an old Codex: fail closed before the file is read, so stale plan content is
+  // never even loaded. Keyed on the field being present, because an absent
+  // field is the old-Codex shape handled below.
+  const payloadTurnId = options.turnId?.trim();
+  if (options.turnId !== undefined && !payloadTurnId) {
+    return { plan: null, skipReason: "missing-turn-id" };
+  }
 
   const entries = parseRolloutEntries(rolloutPath);
+
+  // Codex only added `turn_id` to the Stop payload in rust-v0.117.0
+  // (rust-v0.116.0-alpha.12); rust-v0.114.0/0.115.0/0.116.0 ship the hooks
+  // engine and send a Stop payload without the field. Their rollouts still
+  // record the turn id on every turn marker (`TurnContext::to_turn_context_item`
+  // writes `turn_id: Some(sub_id)`), so derive the current turn from the file
+  // rather than failing closed and silently disabling plan review there.
+  const turnId = payloadTurnId ?? findLatestRolloutTurnId(entries);
+  if (!turnId) return { plan: null, skipReason: "missing-turn-marker" };
+
   // The named turn must be anchored in THIS rollout file. Without an anchor,
   // every plan in the file belongs to some other turn — the normal shape of an
   // older segment of a split thread, which routinely ends with an
@@ -512,6 +568,7 @@ export function resolveCodexStopPlan(
   return {
     plan: findPlanInTurn(entries, turnStartIndex, turnId, !!options.stopHookActive),
     skipReason: null,
+    ...(payloadTurnId ? {} : { fallbackTurnId: turnId }),
   };
 }
 
