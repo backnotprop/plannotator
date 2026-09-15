@@ -13,6 +13,7 @@ steps to ensure your changes work correctly.
 6. [WebMCP Manual Checklist](#webmcp-manual-checklist)
 7. [Terminal-Tools Announcement Manual Checklist](#terminal-tools-announcement-manual-checklist)
 8. [HTML Sibling-Link Manual Checklist](#html-sibling-link-manual-checklist)
+9. [Cross-File Annotations Manual Checklist](#cross-file-annotations-manual-checklist)
 
 ---
 
@@ -554,6 +555,43 @@ play. Run `plannotator annotate <site>/index.html`.
 Known limitation to expect in step 2: a document in a subfolder loads assets that sit below it,
 but `../style.css` and `../img.png` do not resolve (`/api/html-assets` mints one token per HTML
 file's own directory and refuses `..`), so `sub/02-detail.html` renders unstyled.
+
+## Cross-File Annotations Manual Checklist
+
+Not CI. Start a folder session over three documents with `plannotator annotate <folder>/`. The
+scope preference lives in the `plannotator-annotation-scope` cookie; clear it between runs.
+
+1. **The toggle only exists where it answers something.** With feedback on the open file and
+   nowhere else, the annotations panel header shows no `This file | All files` toggle. Add a
+   comment in a second file: the toggle appears in both files, and the header shows
+   `+N elsewhere` while This file is selected.
+2. **All files shows everything.** Switch to **All files**: one collapsible group per annotated
+   document, the open one first (marked `open`) and the rest by path, each with its own count.
+   The header count is the session total; the cards are the same cards as the single-file view.
+   Collapse a group: only that group's cards leave.
+3. **The empty file is never a dead end.** Open the third document, which has no feedback. The
+   panel opens on **All files** rather than "No annotations yet", without your having chosen it.
+   Switch to This file there: the empty state offers "View all N in M other files", and clicking
+   it returns to the grouped view.
+4. **The choice sticks.** Pick All files explicitly, then walk through all three documents: the
+   panel stays on All files. Reload the tab: still All files. Pick This file and repeat: it stays
+   This file, except on a document with no feedback of its own (rule 3).
+5. **Jump.** From All files, click a card belonging to another document. The file browser's
+   selection, the header filename and the document all move to that file, the panel stays on All
+   files, and that comment is selected and scrolled into view (a highlight flash in markdown, the
+   placed marker on an HTML file). Clicking a card in the open document still just selects it.
+6. **Cross-file edit and delete.** In All files, edit a comment in another document and save;
+   delete another one. Navigate to that document: both changes are there. Press `Mod+Z` — these
+   are deliberately NOT undoable, so nothing is restored and the open document's own history is
+   undisturbed.
+7. **The toggle never changes what is sent.** Note the count on the toolbar badge and the header
+   primary (`Send Feedback`). Toggle scope back and forth: both are unchanged. Submit from All
+   files and confirm the agent receives every document's feedback, including a cross-file edit
+   made in step 6 and excluding a cross-file delete.
+8. **HTML folder files.** Repeat steps 2, 5 and 6 with a folder containing `.html` documents.
+   Jumping must select the placed marker on the target page.
+9. **Read-only.** Run `plannotator archive` and open a `#share` link: no cross-file mutation
+   affordances appear on any card.
 
 ## Need Help?
 
