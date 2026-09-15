@@ -66,6 +66,13 @@ import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotat
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
 import { getHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
+import {
+  groupAnnotationsByDocument,
+  getAnnotationScopePreference,
+  resolveInitialAnnotationScope,
+  setAnnotationScopePreference,
+  type AnnotationScope,
+} from '@plannotator/ui/utils/annotationScope';
 import { useInputMethodSwitch } from '@plannotator/ui/hooks/useInputMethodSwitch';
 import { usePrintMode } from '@plannotator/ui/hooks/usePrintMode';
 import { requestVimDocumentFocus } from '@plannotator/ui/hooks/useVimDocumentFocus';
@@ -169,6 +176,7 @@ import {
 } from './hooks/usePlanDiffViewAutoExit';
 import { AppHeader } from './components/AppHeader';
 import { useHtmlRefresh, type HtmlRefreshedDocument } from './hooks/useHtmlRefresh';
+import { useAnnotationJump } from './hooks/useAnnotationJump';
 import { AgentNudgeBanner } from './components/AgentNudgeBanner';
 import { useDocumentWebMcp } from './webmcp/useDocumentWebMcp';
 import { useWebMcpActivity } from '@plannotator/ui/webmcp';
@@ -4404,6 +4412,118 @@ const App: React.FC = () => {
   const editAnnotationSilently = (id: string, updates: Partial<Annotation>) =>
     editAnnotation(id, updates, 'silent');
 
+  // --- Cross-file annotations (multi-document annotate sessions) ---------------
+  // A folder session's feedback is spread over many documents, but the panel
+  // only ever showed the open one. These derive the "All files" view: every
+  // document that carries feedback, the open one first.
+  const currentDocumentPath = linkedDocHook.filepath ?? sourceFilePath ?? null;
+
+  const annotationDocumentRoots = useMemo(() => {
+    const roots = fileBrowser.dirs.filter((d) => !d.isVault).map((d) => d.path);
+    if (projectRoot) roots.push(projectRoot);
+    return roots;
+  }, [fileBrowser.dirs, projectRoot]);
+
+  const annotationDocumentGroups = useMemo(() => {
+    const byPath = new Map<string, Annotation[]>();
+    for (const [filepath, entry] of linkedDocHook.getDocAnnotations()) {
+      byPath.set(filepath, entry.annotations);
+    }
+    // The open document's live list (externals included) is the same set its
+    // "This file" timeline renders; the cache copy behind it can be stale.
+    if (currentDocumentPath) byPath.set(currentDocumentPath, allAnnotations);
+    return groupAnnotationsByDocument(
+      Array.from(byPath, ([path, annotations]) => ({ path, annotations })),
+      currentDocumentPath,
+      annotationDocumentRoots,
+    );
+  }, [linkedDocHook.getDocAnnotations, allAnnotations, currentDocumentPath, annotationDocumentRoots]);
+
+  const otherDocumentAnnotationCount = useMemo(
+    () => annotationDocumentGroups.reduce((n, g) => (g.isCurrent ? n : n + g.annotations.length), 0),
+    [annotationDocumentGroups],
+  );
+  // The toggle only exists where it answers something: feedback outside the
+  // open document. Message multi-select owns its own cross-message surface.
+  const isMultiDocumentSession = otherDocumentAnnotationCount > 0 && !messageMultiSelectMode;
+
+  const [annotationScopeChoice, setAnnotationScopeChoice] = useState<AnnotationScope>(
+    () => getAnnotationScopePreference() ?? 'current',
+  );
+  const scopeAnnotationCountRef = useRef(allAnnotations.length);
+  scopeAnnotationCountRef.current = allAnnotations.length;
+  const otherDocumentAnnotationCountRef = useRef(otherDocumentAnnotationCount);
+  otherDocumentAnnotationCountRef.current = otherDocumentAnnotationCount;
+  // A document opened by clicking a card in the All files list: that list is
+  // where the reviewer was, so the arrival must not re-resolve the scope out
+  // from under them.
+  const scopeKeptForPathRef = useRef<string | null>(null);
+  // Re-resolve on every other document change, so landing on a file with no
+  // feedback while feedback exists elsewhere opens on All files instead of "No
+  // annotations yet". Within a document the user's toggle is authoritative.
+  useEffect(() => {
+    if (scopeKeptForPathRef.current !== null && scopeKeptForPathRef.current === currentDocumentPath) {
+      scopeKeptForPathRef.current = null;
+      return;
+    }
+    scopeKeptForPathRef.current = null;
+    setAnnotationScopeChoice(resolveInitialAnnotationScope({
+      saved: getAnnotationScopePreference(),
+      currentCount: scopeAnnotationCountRef.current,
+      otherCount: otherDocumentAnnotationCountRef.current,
+    }));
+    // Keyed on the open document only: recomputing as annotations change would
+    // yank the view out from under a toggle the user just made.
+  }, [currentDocumentPath]);
+
+  const annotationScope: AnnotationScope = isMultiDocumentSession ? annotationScopeChoice : 'current';
+  const handleAnnotationScopeChange = React.useCallback((scope: AnnotationScope) => {
+    setAnnotationScopeChoice(scope);
+    setAnnotationScopePreference(scope);
+  }, []);
+
+  /** Open a document the way a sidebar click would, so the file browser's
+   *  active file, the doc URL and the linked document stay in step. */
+  const navigateToDocument = React.useCallback(async (path: string): Promise<void> => {
+    const dir = fileBrowser.dirs.find((d) => !d.isVault && pathIsInsideDir(path, d.path))?.path;
+    if (dir) {
+      await handleFileBrowserSelect(path, dir);
+      return;
+    }
+    // A linked-doc session's source document is reached by going back, not by
+    // opening it as a linked doc (useLinkedDoc treats that as a backlink).
+    if (sourceFilePath && path === sourceFilePath && linkedDocHook.isActive) {
+      handleLinkedDocBack();
+      return;
+    }
+    await linkedDocHook.open(path);
+  }, [fileBrowser.dirs, handleFileBrowserSelect, handleLinkedDocBack, linkedDocHook, sourceFilePath]);
+
+  const jumpToAnnotation = useAnnotationJump({
+    currentPath: currentDocumentPath,
+    navigate: navigateToDocument,
+    select: handleSelectAnnotation,
+  });
+
+  const handleSelectAnnotationInDocument = React.useCallback((path: string, id: string) => {
+    if (path !== currentDocumentPath) scopeKeptForPathRef.current = path;
+    jumpToAnnotation(path, id);
+  }, [currentDocumentPath, jumpToAnnotation]);
+
+  // Cross-file edits/deletes write straight into the owning document's stored
+  // annotations. They are deliberately NOT recorded in the annotation history:
+  // that stack describes the open document's surface, and an entry that undoes
+  // into a document you are not looking at would restore invisible state.
+  const handleDeleteAnnotationInDocument = React.useCallback((path: string, id: string) => {
+    if (documentReadOnly) return;
+    linkedDocHook.updateStoredAnnotations(path, (anns) => anns.filter((a) => a.id !== id));
+  }, [documentReadOnly, linkedDocHook]);
+
+  const handleEditAnnotationInDocument = React.useCallback((path: string, id: string, updates: Partial<Annotation>) => {
+    if (documentReadOnly) return;
+    linkedDocHook.updateStoredAnnotations(path, (anns) => anns.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+  }, [documentReadOnly, linkedDocHook]);
+
   // WebMCP (browser-agent tools). The hook detects `document.modelContext`
   // once and does nothing in a browser without it; the banner state below
   // is only ever set by the agent's `nudge_user` tool.
@@ -5880,6 +6000,12 @@ const App: React.FC = () => {
         setShowExport(true);
       } : undefined}
       otherFileAnnotations={otherFileAnnotations}
+      annotationScope={isMultiDocumentSession ? annotationScope : undefined}
+      onAnnotationScopeChange={isMultiDocumentSession ? handleAnnotationScopeChange : undefined}
+      documentGroups={isMultiDocumentSession ? annotationDocumentGroups : undefined}
+      onSelectInDocument={handleSelectAnnotationInDocument}
+      onDeleteInDocument={handleDeleteAnnotationInDocument}
+      onEditInDocument={handleEditAnnotationInDocument}
       directEdits={directEditsPanelInfo?.map((item) => ({
         ...item,
         onDiscard: item.id === 'plan' ? () => handleDiscardEdits() : undefined,
