@@ -2194,7 +2194,7 @@ async function defaultRunCommand(
       timedOut = true;
       proc.kill();
       resolveTimeout(124);
-    }, 15_000);
+    }, 30_000);
   });
   const exitCode = await Promise.race([proc.exited, timeout]);
   if (timer) clearTimeout(timer);

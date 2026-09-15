@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -206,7 +206,11 @@ export function createNodePtyWebSocketServer(options) {
 async function waitForFile(path: string): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < 5_000) {
-    if (existsSync(path)) return;
+    if (existsSync(path)) {
+      try {
+        if (statSync(path).size > 0) return;
+      } catch {}
+    }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for ${path}`);

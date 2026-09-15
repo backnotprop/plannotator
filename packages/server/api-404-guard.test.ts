@@ -283,8 +283,9 @@ describe("API route 404 guards", () => {
         expect(await spaResponse.text()).toBe(SPA_HTML);
       } finally {
         server.stop();
+        rmSync(join(dataDirPath, "config.json"), { force: true });
       }
-    });
+    }, 15000);
   }
 
   for (const serverCase of archiveServerCases) {

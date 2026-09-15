@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BUN_VERSION: 1.3.11
-  TARGET_IMAGE: oven/bun:1.3.11-slim@sha256:478281fdd196871c7e51ba6a820b7803a8ae97042ec86cdbc2e1c6b6626442d9
+  BUN_VERSION: 1.4.2
+  TARGET_IMAGE: oven/bun:1.4.2-slim@sha256:cb3bbbb08e13a4a2ff400f24c7a2a1d5efa83f6ef8544d52d95a519631e2fc61
   ZAP_VERSION: 2.17.0
   ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:stable@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef
   DAST_NETWORK: plannotator-dast-${{ github.run_id }}-${{ github.run_attempt }}
