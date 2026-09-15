@@ -1205,11 +1205,18 @@ const additionalTargetsExportBlock = (ann: any): string => {
     // Element identity for the agent, one line per extra target: the
     // selector and the path (a full context block per target would swamp
     // the comment; the rest of the context stays persisted, not exported).
+    //
+    // Gated on the target carrying element context, which is what makes the
+    // element-context work additive in the literal sense it claims: a target
+    // captured before it existed (or restored from an older draft) has an
+    // anchor but no context, and exports byte-identically to before.
     const locators: string[] = [];
-    const selector = target?.anchor?.selector;
-    if (typeof selector === 'string' && selector) locators.push(`\`${safeInline(selector, 300)}\``);
-    const path = target?.context?.path;
-    if (typeof path === 'string' && path) locators.push(`\`${safeInline(path, 512)}\``);
+    if (target?.context && typeof target.context === 'object') {
+      const selector = target?.anchor?.selector;
+      if (typeof selector === 'string' && selector) locators.push(`\`${safeInline(selector, 300)}\``);
+      const path = target?.context?.path;
+      if (typeof path === 'string' && path) locators.push(`\`${safeInline(path, 512)}\``);
+    }
     block += `- ${label}"${clipped}"${locators.length ? ` — ${locators.join(' · ')}` : ''}\n`;
   });
   return block;

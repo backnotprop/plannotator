@@ -1805,6 +1805,28 @@ describe("exportAnnotations — multi-target raw-HTML comments", () => {
     expect(output).toContain(`- "${"x".repeat(120)}…"`);
   });
 
+  test("targets with no element context export byte-identically to the pre-context format", () => {
+    // #1517 added the selector/path locator suffix, and claimed the element
+    // context was additive — but it keyed the suffix off `anchor.selector`,
+    // which every multi-target annotation has always had, so an annotation
+    // restored from an older draft silently changed shape. The locator is a
+    // property of the captured context; without context there is none.
+    const output = exportAnnotations([], [htmlAnn({
+      htmlAdditionalTargets: [
+        { label: "Button", text: "Create", anchor: { selector: "span.btn", tagName: "span", text: "Create" } },
+        { label: "rowchip", text: "adopted by 1" },
+      ],
+    })]);
+    expect(output).toBe(
+      "# Plan Feedback\n\nI've reviewed this plan and have 1 piece of feedback:\n\n" +
+      "## 1. Feedback on: \"Primary chip\"\n> Unify these\n" +
+      "\n**Also applies to 2 more elements:**\n" +
+      "- [Button] \"Create\"\n" +
+      "- [rowchip] \"adopted by 1\"\n" +
+      "\n---\n",
+    );
+  });
+
   test("single-target output is byte-identical to the pre-feature format", () => {
     const single = exportAnnotations([], [htmlAnn()]);
     const empty = exportAnnotations([], [htmlAnn({ htmlAdditionalTargets: [] })]);
