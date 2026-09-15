@@ -1,12 +1,20 @@
 /**
- * Header controls for a raw-HTML or live-app annotation surface: the eye
- * (show/hide the floating tools over the page), the optional refresh, and
- * the pen (Annotate/Interact toggle). Presentation only; every state lives
- * in the host. Each control renders only when its handler is passed, so a
- * read-only document can show the eye without a pen.
+ * Header controls for a raw-HTML or live-app annotation surface: the optional
+ * back (leave a linked document), the eye (show/hide the floating tools over
+ * the page), the optional refresh, and the pen (Annotate/Interact toggle).
+ * Presentation only; every state lives in the host. Each control renders only
+ * when its handler is passed, so a read-only document can show the eye
+ * without a pen.
  *
- * The markup, data attributes (`data-html-tools-toggle`, `data-html-refresh`,
- * `data-html-annotate-toggle`), aria state and the pixel-stable pen border
+ * Back exists because the sidebar's "Viewing / Back to …" header is not a
+ * dependable way out of a raw-HTML linked document: an HTML surface opens
+ * with the sidebar closed and navigating between HTML documents deliberately
+ * leaves it closed, so the way back has to live in the header. It carries no
+ * keyboard shortcut — `Alt`+`Left` and the browser's own Back are the user's,
+ * not ours.
+ *
+ * The markup, data attributes (`data-html-back`, `data-html-tools-toggle`,
+ * `data-html-refresh`, `data-html-annotate-toggle`), aria state and the pixel-stable pen border
  * are the exact ones Plannotator's header shipped with; hosts get the same
  * control, and `labels` overrides the strings without touching the DOM.
  *
@@ -34,12 +42,15 @@ export interface HtmlSurfaceControlShortcuts {
   annotate?: string | null;
   tools?: string | null;
   refresh?: string | null;
+  back?: string | null;
 }
 
 const DEFAULT_HTML_SURFACE_CONTROL_SHORTCUTS: Required<HtmlSurfaceControlShortcuts> = {
   annotate: htmlAnnotateShortcuts.shortcuts.toggleAnnotateMode.bindings[0] ?? null,
   tools: htmlAnnotateShortcuts.shortcuts.toggleTools.bindings[0] ?? null,
   refresh: null,
+  // Deliberately none: Alt+Left and the browser's Back belong to the user.
+  back: null,
 };
 
 /** Description + keycaps. Two lines, so the tooltip answers both "what does
@@ -114,6 +125,11 @@ export interface HtmlSurfaceControlLabels {
   refreshTitle?: string;
   /** Refresh tooltip description and aria-label while a refresh is in flight. */
   refreshingTitle?: string;
+  /** Back visible text. */
+  back?: string;
+  /** Back tooltip description and aria-label. `backDescription` overrides it
+   *  per render, which is how a host names the document Back returns to. */
+  backTitle?: string;
 }
 
 export const DEFAULT_HTML_SURFACE_CONTROL_LABELS: Required<
@@ -127,12 +143,15 @@ export const DEFAULT_HTML_SURFACE_CONTROL_LABELS: Required<
   refreshing: 'Refreshing',
   refreshTitle: 'Refresh document',
   refreshingTitle: 'Refreshing document',
+  back: 'Back',
+  backTitle: 'Back to the document this one was opened from',
 };
 
 // Stable ids: one HTML surface renders at most one of each control.
 const ANNOTATE_SHORTCUT_ID = 'pn-html-annotate-shortcut';
 const TOOLS_SHORTCUT_ID = 'pn-html-tools-shortcut';
 const REFRESH_SHORTCUT_ID = 'pn-html-refresh-shortcut';
+const BACK_SHORTCUT_ID = 'pn-html-back-shortcut';
 
 export interface HtmlSurfaceControlsProps {
   /** Whether Annotate is armed (pen pressed). */
@@ -148,6 +167,12 @@ export interface HtmlSurfaceControlsProps {
   canRefresh?: boolean;
   onRefresh?: () => void;
   isRefreshing?: boolean;
+  /** Leave the linked document for the one the session opened from. The back
+   *  control renders only when provided — i.e. while a linked document is open. */
+  onBack?: () => void;
+  /** Tooltip description and aria-label for back, e.g. "Back to index.html".
+   *  Default: `labels.backTitle`. */
+  backDescription?: string;
   /** Compact touch shells put these actions in a menu instead: render nothing. */
   compact?: boolean;
   labels?: HtmlSurfaceControlLabels;
@@ -163,6 +188,8 @@ export function HtmlSurfaceControls({
   canRefresh = false,
   onRefresh,
   isRefreshing = false,
+  onBack,
+  backDescription,
   compact = false,
   labels,
   shortcuts,
@@ -177,9 +204,43 @@ export function HtmlSurfaceControls({
   const toolsDescription = toolsHidden ? text.showTools : text.hideTools;
   const refreshDescription = isRefreshing ? text.refreshingTitle : text.refreshTitle;
   const showRefresh = canRefresh && !!onRefresh;
+  const backLabel = backDescription ?? text.backTitle;
   return (
     <>
-      {/* The refresh and the eye share one group, left of the pen. Each
+      {/* Back, leftmost: the way out of a linked document that does not
+          depend on the sidebar being open. */}
+      {onBack && (
+        <>
+          <ControlTooltip description={backLabel} binding={keys.back}>
+            <button
+              type="button"
+              data-html-back
+              onClick={onBack}
+              {...(keys.back ? { 'aria-describedby': BACK_SHORTCUT_ID } : {})}
+              className="ml-1 flex items-center gap-1 rounded px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={backLabel}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3.5 w-3.5"
+              >
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              <span className="hidden sm:inline">{text.back}</span>
+            </button>
+          </ControlTooltip>
+          <ShortcutDescription id={BACK_SHORTCUT_ID} binding={keys.back} />
+        </>
+      )}
+
+      {/* The refresh and the eye share one group, left of the pen and right
+          of back. Each
           renders on its own terms: the refresh whenever it is offered
           (canRefresh + onRefresh), the eye whenever onToggleTools is passed,
           so a host without the tools toggle still gets its refresh.

@@ -85,6 +85,7 @@ function openTooltipText(): string | null {
 const pen = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-html-annotate-toggle]');
 const eye = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-html-tools-toggle]');
 const refresh = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-html-refresh]');
+const back = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-html-back]');
 
 describe.if(hasDom)('HtmlSurfaceControls', () => {
   test('each control renders only with its handler; the eye renders even without refresh', () => {
@@ -243,5 +244,50 @@ describe.if(hasDom)('HtmlSurfaceControls', () => {
     // Refresh has no chord: no keycaps, and nothing to describe.
     expect(refresh(el)!.hasAttribute('aria-describedby')).toBe(false);
     expect(el.querySelectorAll('kbd').length).toBe(0);
+  });
+});
+
+describe.if(hasDom)('HtmlSurfaceControls back', () => {
+  // The way out of a linked HTML document. An HTML surface opens with the
+  // sidebar closed and a link click leaves it closed, so the sidebar's own
+  // "Viewing / Back to …" header is not a way back anyone can reach: without
+  // this control a reviewer who follows a link is stranded.
+  test('renders only with a handler, and is the FIRST control', () => {
+    expect(back(render())).toBeNull();
+
+    const el = render({ onBack: () => {} });
+    const button = back(el);
+    expect(button).not.toBeNull();
+    const controls = Array.from(el.querySelectorAll('button'));
+    expect(controls[0]).toBe(button!);
+  });
+
+  test('clicking it calls the handler', () => {
+    let backs = 0;
+    const el = render({ onBack: () => { backs += 1; } });
+    act(() => { back(el)!.click(); });
+    expect(backs).toBe(1);
+  });
+
+  test('backDescription names the target and is the accessible name', async () => {
+    const el = render({ onBack: () => {}, backDescription: 'Back to index.html' });
+    expect(back(el)!.getAttribute('aria-label')).toBe('Back to index.html');
+    await hover(back(el)!);
+    expect(openTooltipText()).toContain('Back to index.html');
+  });
+
+  test('it claims no keyboard shortcut', async () => {
+    // Alt+Left and the browser's own Back belong to the user, so the control
+    // renders no keycap row and describes no chord.
+    const el = render({ onBack: () => {} });
+    expect(back(el)!.hasAttribute('aria-describedby')).toBe(false);
+    await hover(back(el)!);
+    const portal = document.querySelector<HTMLElement>('[data-base-ui-portal]');
+    expect(portal?.querySelectorAll('kbd').length ?? 0).toBe(0);
+  });
+
+  test('the compact touch shell renders nothing, back included', () => {
+    const el = render({ onBack: () => {}, compact: true });
+    expect(el.querySelector('button')).toBeNull();
   });
 });
