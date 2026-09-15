@@ -160,7 +160,33 @@ describe.if(hasDom)('shouldRestoreHtmlChrome (entry, not every render)', () => {
     expect(restore({ isHtmlSurface: false, wasHtmlSurface: true })).toBe(false);
   });
 
-  test('suppressed sessions (archive, goal setup, folder annotate) never restore', () => {
+  test('suppressed sessions (archive, goal setup) never restore', () => {
     expect(restore({ suppressed: true })).toBe(false);
+  });
+});
+
+describe.if(hasDom)('mergeHtmlChromeState (what a session is entitled to record)', () => {
+  const persisted = { sidebarOpen: true, panelOpen: true, toolsHidden: false };
+  const live = { sidebarOpen: false, panelOpen: false, toolsHidden: true };
+
+  test('an ordinary HTML session records all three halves', () => {
+    expect(htmlChromeModule!.mergeHtmlChromeState({
+      persisted,
+      live,
+      sideSurfacesOwned: false,
+    })).toEqual(live);
+  });
+
+  test('a session that does not own its sidebar records only toolsHidden', () => {
+    // A folder annotate session's file browser owns the left sidebar for the
+    // whole session, so its sidebar/panel state says nothing about what the
+    // reviewer wants on an ordinary HTML surface. The eye, though, means the
+    // same thing everywhere — and suppressing that half is what made the
+    // hidden-by-default tools permanent in folder sessions.
+    expect(htmlChromeModule!.mergeHtmlChromeState({
+      persisted,
+      live,
+      sideSurfacesOwned: true,
+    })).toEqual({ sidebarOpen: true, panelOpen: true, toolsHidden: true });
   });
 });

@@ -65,7 +65,7 @@ import { buildDefaultPrompt, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
-import { getHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
+import { getHtmlChromeState, mergeHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
 import {
   groupAnnotationsByDocument,
   getAnnotationScopePreference,
@@ -2281,6 +2281,12 @@ const App: React.FC = () => {
   // (compactDocumentActions). Re-restoring on each entry is also what keeps
   // a markdown surface's sidebar state from leaking into the HTML cookie on
   // the way back.
+  //
+  // A folder annotate session is a partial participant: its file browser owns
+  // the left sidebar (and the panel that rides with it), so those two halves
+  // are neither restored nor written there — but `toolsHidden` is, because it
+  // describes the HTML surface itself and means the same thing everywhere.
+  const htmlChromeSideSurfacesOwned = annotateSource === 'folder';
   const prevHtmlChromeSurfaceRef = useRef(false);
   useEffect(() => {
     if (isLoading || isLoadingShared) return;
@@ -2290,19 +2296,25 @@ const App: React.FC = () => {
     if (!shouldRestoreHtmlChrome({
       isHtmlSurface,
       wasHtmlSurface: wasHtml,
-      suppressed: archive.archiveMode || goalSetupMode || annotateSource === 'folder',
+      suppressed: archive.archiveMode || goalSetupMode,
     })) return;
     const chrome = getHtmlChromeState();
     skipNextHtmlChromeSaveRef.current = true;
-    if (chrome.sidebarOpen) sidebar.open();
-    else sidebar.close();
-    setIsPanelOpen(chrome.panelOpen);
+    // A folder session's file browser owns the left sidebar for the whole
+    // session, so only the toolsHidden half is this surface's to restore.
+    // Suppressing all three (as it used to) made the flipped default permanent
+    // in folder sessions: the eye could never remember "show tools".
+    if (!htmlChromeSideSurfacesOwned) {
+      if (chrome.sidebarOpen) sidebar.open();
+      else sidebar.close();
+      setIsPanelOpen(chrome.panelOpen);
+    }
     setHtmlToolsHidden(chrome.toolsHidden);
     htmlChromeRestoredRef.current = true;
   }, [
-    annotateSource,
     archive.archiveMode,
     goalSetupMode,
+    htmlChromeSideSurfacesOwned,
     isHtmlSurface,
     isLoading,
     isLoadingShared,
@@ -2329,8 +2341,12 @@ const App: React.FC = () => {
       skipNextHtmlChromeSaveRef.current = false;
       return;
     }
-    saveHtmlChromeState({ sidebarOpen: sidebar.isOpen, panelOpen: isPanelOpen, toolsHidden: htmlToolsHidden });
-  }, [isHtmlSurface, sidebar.isOpen, isPanelOpen, htmlToolsHidden]);
+    saveHtmlChromeState(mergeHtmlChromeState({
+      persisted: getHtmlChromeState(),
+      live: { sidebarOpen: sidebar.isOpen, panelOpen: isPanelOpen, toolsHidden: htmlToolsHidden },
+      sideSurfacesOwned: htmlChromeSideSurfacesOwned,
+    }));
+  }, [isHtmlSurface, sidebar.isOpen, isPanelOpen, htmlToolsHidden, htmlChromeSideSurfacesOwned]);
 
   const ensureShareLink = useCallback(async (): Promise<string | null> => {
     const existing = shortShareUrl || shareUrl;

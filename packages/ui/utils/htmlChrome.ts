@@ -22,7 +22,10 @@ import { isStalePreference } from './preferenceTtl';
  * tools. Defaulting hidden can never strand a user for the same reason
  * restoring hidden can't: the control that flips it back lives in the header,
  * never in the hidden chrome. A fresh persisted record still wins in both
- * directions, so a user who showed the tools keeps them next session.
+ * directions, so a user who showed the tools keeps them next session —
+ * including in a folder annotate session, which restores and records the
+ * `toolsHidden` half while leaving the sidebar/panel halves to sessions whose
+ * sidebar it actually owns (see {@link mergeHtmlChromeState}).
  */
 
 const STORAGE_KEY = 'plannotator-html-chrome';
@@ -81,7 +84,9 @@ export interface HtmlChromeRestoreConditions {
   isHtmlSurface: boolean;
   /** The surface rendered on the previous pass was too. */
   wasHtmlSurface: boolean;
-  /** This session never restores (archive, goal setup, folder annotate). */
+  /** This session takes no part in the persisted chrome at all (archive, goal
+   *  setup): nothing is restored and nothing is written. A folder annotate
+   *  session is NOT suppressed — see {@link mergeHtmlChromeState}. */
   suppressed: boolean;
 }
 
@@ -101,6 +106,31 @@ export function shouldRestoreHtmlChrome(conditions: HtmlChromeRestoreConditions)
   if (!conditions.isHtmlSurface) return false;
   if (conditions.wasHtmlSurface) return false;
   return !conditions.suppressed;
+}
+
+/**
+ * The record to persist when the chrome changes on an HTML surface.
+ *
+ * `sideSurfacesOwned` marks a session where the left sidebar and the
+ * annotations drawer are not this surface's to remember — a folder annotate
+ * session, whose file browser owns the sidebar for the whole session. Those two
+ * halves then keep whatever the last ordinary HTML session left, while the
+ * `toolsHidden` half is recorded normally: it is a property of the HTML surface
+ * itself and means the same thing in every session.
+ */
+export function mergeHtmlChromeState(input: {
+  /** The record on disk right now. */
+  persisted: HtmlChromeState;
+  /** The chrome this session is in. */
+  live: HtmlChromeState;
+  sideSurfacesOwned: boolean;
+}): HtmlChromeState {
+  if (!input.sideSurfacesOwned) return input.live;
+  return {
+    sidebarOpen: input.persisted.sidebarOpen,
+    panelOpen: input.persisted.panelOpen,
+    toolsHidden: input.live.toolsHidden,
+  };
 }
 
 export function getHtmlChromeState(): HtmlChromeState {

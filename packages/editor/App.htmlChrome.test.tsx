@@ -148,6 +148,22 @@ const versionedFetch: typeof fetch = async (input) => {
   return annotateFetch(input);
 };
 
+// A folder annotate session that happens to be rendering an HTML document.
+// Its file browser owns the left sidebar, which is why the sidebar/panel halves
+// of the persisted chrome do not apply here — but the eye does.
+const folderAnnotatePlan = {
+  ...htmlAnnotatePlan,
+  mode: "annotate-folder",
+  filePath: "/tmp/docs",
+};
+
+const folderFetch: typeof fetch = async (input) => {
+  const rawUrl = input instanceof Request ? input.url : String(input);
+  const url = new URL(rawUrl, "http://localhost");
+  if (url.pathname === "/api/plan") return Response.json(folderAnnotatePlan);
+  return annotateFetch(input);
+};
+
 function diffToggle(): HTMLButtonElement | undefined {
   return Array.from(document.querySelectorAll("button"))
     .find((button) => /changes vs previous version/.test(button.title));
@@ -647,5 +663,49 @@ describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
 
     await act(async () => penToggle()!.click());
     expect(penToggle()!.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe.if(hasDom)("HTML chrome in a folder annotate session", () => {
+  function persistedChrome(): Record<string, unknown> {
+    const raw = memory.get("plannotator-html-chrome");
+    if (!raw) throw new Error("no persisted chrome record");
+    const { toolsHidden, sidebarOpen, panelOpen } = JSON.parse(raw) as Record<string, unknown>;
+    return { toolsHidden, sidebarOpen, panelOpen };
+  }
+
+  test("a saved 'tools shown' record is honoured (the flipped default is not permanent here)", async () => {
+    // The whole chrome restore used to be suppressed in folder sessions, so
+    // the eye could never remember anything: every folder session opened with
+    // the tools hidden no matter how many times the reviewer showed them.
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: false, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
+    await mountHtmlAnnotate(folderFetch);
+    await settle();
+
+    expect(floatingCluster()).not.toBeNull();
+    expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  test("the eye persists, and a folder session never records its own sidebar/panel state", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: false, sidebarOpen: true, panelOpen: true, savedAt: Date.now() }),
+    );
+    await mountHtmlAnnotate(folderFetch);
+    await settle();
+
+    await act(async () => toolsToggle()!.click());
+    await settle();
+
+    // The eye's own half is recorded; the two halves the folder file browser
+    // owns keep whatever the last ordinary HTML session left.
+    expect(persistedChrome()).toEqual({ toolsHidden: true, sidebarOpen: true, panelOpen: true });
   });
 });
