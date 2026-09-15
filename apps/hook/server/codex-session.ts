@@ -317,6 +317,41 @@ function findLastHookPromptIndex(
   return -1;
 }
 
+/**
+ * The pre-`<hook_prompt>` shape of the same boundary.
+ *
+ * Codex only started recording a blocking Stop hook's continuation as a
+ * `<hook_prompt>` USER message in rust-v0.117.0
+ * (`codex_protocol::items::build_hook_prompt_message`). On rust-v0.114.0,
+ * v0.115.0 and v0.116.0 — the versions the rollout turn-id fallback exists to
+ * support — `codex-rs/core/src/codex.rs` records it as
+ * `DeveloperInstructions::new(continuation_prompt).into()`, i.e. a
+ * `ResponseItem::Message { role: "developer" }`, and then continues the SAME
+ * turn with `stop_hook_active = true`.
+ *
+ * Nothing in that message identifies the hook that wrote it (the text is the
+ * hook's own `reason`, which Plannotator lets the user re-template), so the
+ * role is all there is to key on. The LAST one in the turn is the right
+ * anchor: Codex records the continuation and immediately re-runs the model, so
+ * a later developer message can only come from a turn that kept going after
+ * the block.
+ */
+function isDeveloperMessage(entry: RolloutEntry): boolean {
+  if (entry.type !== "response_item") return false;
+  if (entry.payload?.type !== "message") return false;
+  return entry.payload?.role === "developer";
+}
+
+function findLastDeveloperMessageIndex(
+  entries: RolloutEntry[],
+  startIndex: number
+): number {
+  for (let i = entries.length - 1; i >= Math.max(startIndex, 0); i--) {
+    if (isDeveloperMessage(entries[i])) return i;
+  }
+  return -1;
+}
+
 function getPlanItemText(
   entry: RolloutEntry,
   turnId: string
@@ -353,7 +388,7 @@ export function logCodexStopSkip(
   if (!opts.debug) return;
   const detail =
     reason === "missing-turn-id"
-      ? "missing Stop payload turn_id."
+      ? "unusable Stop payload turn_id (present but blank or not a string)."
       : "missing id-carrying rollout turn marker.";
   (opts.write ?? console.error)(`[DEBUG] Codex Stop plan review skipped: ${detail}`);
 }
@@ -512,9 +547,12 @@ export function getRecentCodexMessages(
  * Fallback source: raw assistant response_item messages that still contain a
  * <proposed_plan> block in the rollout transcript.
  *
- * When stopHookActive is true, this only returns a changed post-feedback plan:
- * - no plan after the last hook prompt => null
- * - identical plan after the last hook prompt => null
+ * When stopHookActive is true, this only returns a changed post-feedback plan,
+ * measured across the boundary the previous blocking Stop left in the turn (a
+ * `<hook_prompt>` user message on Codex >= 0.117, a developer-role message on
+ * the rollout-fallback path that serves Codex < 0.117):
+ * - no plan after that boundary => null
+ * - identical plan after that boundary => null
  *
  * The turn comes from options.turnId, or from the rollout's own turn markers
  * when the Stop payload carried no `turn_id` field, and must be anchored in the
@@ -536,12 +574,21 @@ export function resolveCodexStopPlan(
   rolloutPath: string,
   options: GetLatestCodexPlanOptions = {}
 ): CodexStopPlanLookup {
-  // A payload that NAMES a turn but names it blank is truncated or foreign, not
-  // an old Codex: fail closed before the file is read, so stale plan content is
-  // never even loaded. Keyed on the field being present, because an absent
-  // field is the old-Codex shape handled below.
-  const payloadTurnId = options.turnId?.trim();
-  if (options.turnId !== undefined && !payloadTurnId) {
+  // A payload that NAMES a turn but names it unusably — blank, or any
+  // non-string a foreign/untyped caller hands through — is truncated or
+  // foreign, not an old Codex: fail closed before the file is read, so stale
+  // plan content is never even loaded. Keyed on the field being present,
+  // because an absent field is the old-Codex shape handled below. The
+  // non-string coercion lives here rather than only at the call site so the
+  // module fails closed for every caller instead of throwing at `.trim()`.
+  const rawTurnId: unknown = options.turnId;
+  const payloadTurnId =
+    rawTurnId === undefined
+      ? undefined
+      : typeof rawTurnId === "string"
+        ? rawTurnId.trim()
+        : "";
+  if (rawTurnId !== undefined && !payloadTurnId) {
     return { plan: null, skipReason: "missing-turn-id" };
   }
 
@@ -566,7 +613,13 @@ export function resolveCodexStopPlan(
   }
 
   return {
-    plan: findPlanInTurn(entries, turnStartIndex, turnId, !!options.stopHookActive),
+    plan: findPlanInTurn(entries, turnStartIndex, turnId, {
+      stopHookActive: !!options.stopHookActive,
+      // Only the rollout-fallback path (a Stop payload with no `turn_id`, i.e.
+      // Codex < 0.117) accepts the developer-role continuation boundary, so
+      // every Codex that sends `turn_id` keeps byte-identical behaviour.
+      allowDeveloperBoundary: payloadTurnId === undefined,
+    }),
     skipReason: null,
     ...(payloadTurnId ? {} : { fallbackTurnId: turnId }),
   };
@@ -576,54 +629,75 @@ function normalizePlan(text: string): string {
   return text.replace(/\r\n/g, "\n").trim();
 }
 
-function findPlanInTurn(
-  entries: RolloutEntry[],
-  turnStartIndex: number,
-  turnId: string,
-  stopHookActive: boolean
+function toPlanResult(
+  candidate: CodexPlanCandidate | null
 ): CodexPlanResult | null {
-  const candidates = collectPlanCandidates(entries, turnStartIndex, turnId);
-  if (candidates.length === 0) return null;
+  return candidate ? { text: candidate.text, source: candidate.source } : null;
+}
 
-  if (!stopHookActive) {
-    const latestPlan = pickLatestPreferredPlan(candidates);
-    return latestPlan
-      ? { text: latestPlan.text, source: latestPlan.source }
-      : null;
-  }
-
-  const lastHookPromptIndex = findLastHookPromptIndex(entries, turnStartIndex);
-
-  if (lastHookPromptIndex === -1) {
-    const latestPlan = pickLatestPreferredPlan(candidates);
-    return latestPlan
-      ? { text: latestPlan.text, source: latestPlan.source }
-      : null;
-  }
-
-  const plansAfterHookPrompt = candidates.filter(
-    (candidate) => candidate.index > lastHookPromptIndex
+/**
+ * The deny→resubmit guard: across the boundary the previous blocking Stop left
+ * in the turn, return the plan only when it is genuinely NEW.
+ *
+ * - no plan after the boundary  => the plan on screen is the one already denied
+ * - identical plan after it     => the model resubmitted it unchanged
+ */
+function planChangedAcrossBoundary(
+  candidates: CodexPlanCandidate[],
+  boundaryIndex: number
+): CodexPlanResult | null {
+  const plansAfter = candidates.filter(
+    (candidate) => candidate.index > boundaryIndex
   );
-  if (plansAfterHookPrompt.length === 0) return null;
+  if (plansAfter.length === 0) return null;
 
-  const latestAfterHookPrompt = pickLatestPreferredPlan(plansAfterHookPrompt);
-  if (!latestAfterHookPrompt) return null;
+  const latestAfter = pickLatestPreferredPlan(plansAfter);
+  if (!latestAfter) return null;
 
-  const plansBeforeHookPrompt = candidates.filter(
-    (candidate) => candidate.index < lastHookPromptIndex
+  const latestBefore = pickLatestPreferredPlan(
+    candidates.filter((candidate) => candidate.index < boundaryIndex)
   );
-  const latestBeforeHookPrompt = pickLatestPreferredPlan(plansBeforeHookPrompt);
 
   if (
-    latestBeforeHookPrompt &&
-    normalizePlan(latestBeforeHookPrompt.text) ===
-      normalizePlan(latestAfterHookPrompt.text)
+    latestBefore &&
+    normalizePlan(latestBefore.text) === normalizePlan(latestAfter.text)
   ) {
     return null;
   }
 
-  return {
-    text: latestAfterHookPrompt.text,
-    source: latestAfterHookPrompt.source,
-  };
+  return toPlanResult(latestAfter);
+}
+
+function findPlanInTurn(
+  entries: RolloutEntry[],
+  turnStartIndex: number,
+  turnId: string,
+  options: { stopHookActive: boolean; allowDeveloperBoundary: boolean }
+): CodexPlanResult | null {
+  const candidates = collectPlanCandidates(entries, turnStartIndex, turnId);
+  if (candidates.length === 0) return null;
+
+  if (!options.stopHookActive) {
+    return toPlanResult(pickLatestPreferredPlan(candidates));
+  }
+
+  const lastHookPromptIndex = findLastHookPromptIndex(entries, turnStartIndex);
+  if (lastHookPromptIndex !== -1) {
+    return planChangedAcrossBoundary(candidates, lastHookPromptIndex);
+  }
+
+  // Codex < 0.117 has no `<hook_prompt>` item at all: it records the blocking
+  // Stop hook's reason as a developer-role message and continues the same turn
+  // with `stop_hook_active = true`. Without this the guard above is inert on
+  // exactly the versions the rollout turn-id fallback newly enables, and a
+  // denied plan the model did not revise gets re-served for review on every
+  // Stop of that turn.
+  const lastDeveloperIndex = options.allowDeveloperBoundary
+    ? findLastDeveloperMessageIndex(entries, turnStartIndex)
+    : -1;
+  if (lastDeveloperIndex !== -1) {
+    return planChangedAcrossBoundary(candidates, lastDeveloperIndex);
+  }
+
+  return toPlanResult(pickLatestPreferredPlan(candidates));
 }

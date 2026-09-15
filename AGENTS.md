@@ -232,9 +232,21 @@ hook's JSON decision channel, and Codex only reads a Stop hook's stderr on
 exit code 2, which this hook never uses).
 
 Fail-closed cases are unchanged: a payload that carries `turn_id` as a blank
-string is truncated or foreign, not an old Codex, and is refused **before the
-rollout is read**; a rollout with no id-carrying turn marker at all skips too.
-Both skips stay silent unless `PLANNOTATOR_DEBUG` is set.
+string — or as anything that is not a string — is truncated or foreign, not an
+old Codex, and is refused **before the rollout is read**; a rollout with no
+id-carrying turn marker at all skips too. Both skips stay silent unless
+`PLANNOTATOR_DEBUG` is set.
+
+The deny→resubmit guard follows the same two shapes. When `stop_hook_active` is
+set, the plan is served only if it changed across the boundary the previous
+blocking Stop left in the turn. Codex >= 0.117 records that boundary as a
+`<hook_prompt>` **user** message (`build_hook_prompt_message`); `rust-v0.114.0`,
+`v0.115.0` and `v0.116.0` record it as a **developer** message
+(`DeveloperInstructions::new(continuation_prompt)`), so the rollout-fallback
+path — and only that path, which keeps every `turn_id`-carrying Codex
+byte-identical — also accepts the last developer message in the turn as the
+boundary. Without it the guard is inert on exactly the versions the fallback
+enables, and an unrevised denied plan is re-served on every Stop of the turn.
 
 ## Code Review Flow
 

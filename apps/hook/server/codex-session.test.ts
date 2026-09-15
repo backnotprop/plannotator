@@ -742,7 +742,7 @@ describe("getLatestCodexPlan", () => {
       logCodexStopSkip("missing-turn-id", { debug: "1", write });
       logCodexStopSkip("missing-turn-marker", { debug: "1", write });
       expect(messages).toEqual([
-        "[DEBUG] Codex Stop plan review skipped: missing Stop payload turn_id.",
+        "[DEBUG] Codex Stop plan review skipped: unusable Stop payload turn_id (present but blank or not a string).",
         "[DEBUG] Codex Stop plan review skipped: missing id-carrying rollout turn marker.",
       ]);
     });
@@ -1071,5 +1071,178 @@ describe("getLatestCodexPlan", () => {
       text: "Revised authoritative plan",
       source: "plan-item",
     });
+  });
+});
+
+// Codex rust-v0.114.0/0.115.0/0.116.0 record a blocking Stop hook's reason as a
+// DEVELOPER-role message and continue the same turn with stop_hook_active; the
+// `<hook_prompt>` user message the de-duplication above keys on only arrived in
+// rust-v0.117.0 (`build_hook_prompt_message`). Without a pre-0.117 boundary the
+// guard is inert on exactly the versions the rollout turn-id fallback enables.
+describe("deny/resubmit de-duplication on the rollout-fallback path", () => {
+  test("does not re-serve an unchanged denied plan after a developer-role continuation", () => {
+    const turnId = "turn-fallback-denied";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        completedPlanItem("Original plan", turnId),
+        developerMessage("YOUR PLAN WAS NOT APPROVED.\n\nPlease revise."),
+        assistantMessage("Understood, I will start implementing."),
+      ),
+    );
+
+    expect(resolveCodexStopPlan(path, { stopHookActive: true })).toEqual({
+      plan: null,
+      skipReason: null,
+      fallbackTurnId: turnId,
+    });
+  });
+
+  test("does not re-serve a plan the model resubmitted unchanged", () => {
+    const turnId = "turn-fallback-unchanged";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        completedPlanItem("Original plan", turnId),
+        developerMessage("YOUR PLAN WAS NOT APPROVED.\n\nPlease revise."),
+        completedPlanItem("Original plan", turnId),
+      ),
+    );
+
+    expect(resolveCodexStopPlan(path, { stopHookActive: true }).plan).toBeNull();
+  });
+
+  test("serves the revised plan after a developer-role continuation", () => {
+    const turnId = "turn-fallback-revised";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        completedPlanItem("Original plan", turnId),
+        developerMessage("YOUR PLAN WAS NOT APPROVED.\n\nPlease revise."),
+        completedPlanItem("Revised plan", turnId),
+      ),
+    );
+
+    expect(resolveCodexStopPlan(path, { stopHookActive: true })).toEqual({
+      plan: { text: "Revised plan", source: "plan-item" },
+      skipReason: null,
+      fallbackTurnId: turnId,
+    });
+  });
+
+  test("anchors on the LAST developer message, so turn-setup instructions are not a boundary", () => {
+    // Codex records policy/personality developer instructions when it builds the
+    // turn. Those precede the plan, so only the continuation recorded after it
+    // may act as the boundary.
+    const turnId = "turn-fallback-setup";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        developerMessage("Approval policy: on-request."),
+        completedPlanItem("Original plan", turnId),
+        developerMessage("YOUR PLAN WAS NOT APPROVED.\n\nPlease revise."),
+        assistantMessage("Acknowledged."),
+      ),
+    );
+
+    expect(resolveCodexStopPlan(path, { stopHookActive: true }).plan).toBeNull();
+  });
+
+  test("still serves the plan on a first Stop of the turn", () => {
+    // stop_hook_active is false: nothing has been reviewed yet, so a developer
+    // message in the turn must not suppress anything.
+    const turnId = "turn-fallback-first-stop";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        developerMessage("Approval policy: on-request."),
+        completedPlanItem("Original plan", turnId),
+      ),
+    );
+
+    expect(resolveCodexStopPlan(path).plan).toEqual({
+      text: "Original plan",
+      source: "plan-item",
+    });
+  });
+
+  test("a payload-named turn keeps the 0.117+ behaviour: no developer boundary", () => {
+    // Same rollout, but the Stop payload carried a turn_id, which is the modern
+    // shape. There the `<hook_prompt>` item is authoritative and a developer
+    // message must NOT be treated as a boundary.
+    const turnId = "turn-payload-developer";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        completedPlanItem("Original plan", turnId),
+        developerMessage("Approved command prefix saved:\n[\"git\", \"status\"]"),
+        assistantMessage("Running the plan now."),
+      ),
+    );
+
+    expect(
+      resolveCodexStopPlan(path, { turnId, stopHookActive: true }),
+    ).toEqual({
+      plan: { text: "Original plan", source: "plan-item" },
+      skipReason: null,
+    });
+  });
+
+  test("a payload-named turn still de-duplicates across its hook prompt", () => {
+    const turnId = "turn-payload-hook-prompt";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        completedPlanItem("Original plan", turnId),
+        hookPrompt("Please revise the plan."),
+        assistantMessage("Understood."),
+      ),
+    );
+
+    expect(
+      resolveCodexStopPlan(path, { turnId, stopHookActive: true }).plan,
+    ).toBeNull();
+  });
+
+  test("prefers the hook prompt over a later developer message on the fallback path", () => {
+    // A rollout that somehow carries both shapes: the <hook_prompt> boundary
+    // wins, so a developer message recorded after the revised plan cannot
+    // suppress it.
+    const turnId = "turn-fallback-both";
+    const path = writeTempRollout(
+      buildRollout(
+        sessionMeta(),
+        turnStarted(turnId),
+        completedPlanItem("Original plan", turnId),
+        hookPrompt("Please revise the plan."),
+        completedPlanItem("Revised plan", turnId),
+        developerMessage("Approved command prefix saved:\n[\"git\", \"status\"]"),
+      ),
+    );
+
+    expect(resolveCodexStopPlan(path, { stopHookActive: true }).plan).toEqual({
+      text: "Revised plan",
+      source: "plan-item",
+    });
+  });
+
+  test("fails closed on a non-string turn id instead of throwing", () => {
+    // The Stop payload is untrusted JSON; a foreign or malformed turn_id must
+    // be refused before the rollout is read, from inside the module rather than
+    // only at the CLI call site.
+    for (const raw of [42, true, null, {}, []]) {
+      expect(
+        resolveCodexStopPlan("not-read.jsonl", {
+          turnId: raw as unknown as string,
+        }),
+      ).toEqual({ plan: null, skipReason: "missing-turn-id" });
+    }
   });
 });
