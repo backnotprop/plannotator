@@ -658,6 +658,84 @@ describe("V2 feedback delivery", () => {
 
     expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
   });
+
+  // Regression: `dispose()` has to be TERMINAL, not just "abort what is open".
+  // `stop()` leaves `controller` undefined, which is the same state `watch()`
+  // starts from, so without a latch a notice delivered after the review returned
+  // (the notifier is invoked fire-and-forget) would open a fresh host
+  // subscription with no owner left to abort it — the leak dispose exists to
+  // prevent.
+  test("a notice posted after dispose opens no new event subscription", async () => {
+    const stream = createTestEventStream();
+    const subscribe = mock(stream.subscribe);
+    const synthetic = mock(async (_input: unknown) => ({ id: NOTICE_ROW_ID }));
+    const client = createV2BridgeClient({
+      ctx: { session: { synthetic }, event: { subscribe } } as never,
+      getAgents: async () => [],
+      sessionID: SESSION_ID,
+    });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    expect(subscribe).toHaveBeenCalledTimes(1);
+
+    client.dispose();
+    expect(stream.isAborted()).toBe(true);
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    expect(subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  // #1515 co-promotion, during the host round-trip. `notifyUrl` is invoked
+  // fire-and-forget, so feedback can be delivered while `session.synthetic` is
+  // still in flight; a flag raised only afterwards would read false there and
+  // queue the feedback behind a notice that is then promoted alone as its own
+  // model turn — the exact symptom.
+  test("feedback delivered while the notice is still posting is co-promoted", async () => {
+    const stream = createTestEventStream();
+    let admit: ((row: unknown) => void) | undefined;
+    const synthetic = mock(
+      () => new Promise<unknown>((resolve) => { admit = resolve; }),
+    );
+    const prompt = mock(async (_input: unknown) => ({}));
+    const client = createV2BridgeClient({
+      ctx: {
+        session: { synthetic, prompt },
+        event: { subscribe: stream.subscribe },
+      } as never,
+      getAgents: async () => [],
+      sessionID: SESSION_ID,
+    });
+
+    const posting = client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" });
+    await client.session.prompt(FEEDBACK);
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "steer" });
+
+    admit!({ id: NOTICE_ROW_ID });
+    await posting;
+    client.dispose();
+  });
+
+  // The other direction, and why the provisional arm is safe: a host that
+  // REFUSES the notice must leave nothing armed, or every review on a host
+  // whose `session.synthetic` never works would steer.
+  test("a notice the host refuses lowers the provisional arm again", async () => {
+    const prompt = mock(async (_input: unknown) => ({}));
+    const client = createV2BridgeClient({
+      ctx: {
+        session: {
+          synthetic: async () => { throw new Error("session gone"); },
+          prompt,
+        },
+      } as never,
+      getAgents: async () => [],
+      sessionID: SESSION_ID,
+    });
+
+    await client.notifyUrl!({ url: "http://127.0.0.1:19432", message: "ready" }).catch(() => {});
+    await client.session.prompt(FEEDBACK);
+
+    expect(prompt.mock.calls[0]![0]).toMatchObject({ delivery: "queue" });
+  });
 });
 
 describe("V2 session context translation", () => {

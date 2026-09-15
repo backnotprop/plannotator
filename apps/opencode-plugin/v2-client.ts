@@ -324,9 +324,11 @@ function readSettledInboxRef(
  *
  * Mechanism: subscribe to the host's own event stream and clear the flag when
  * the host reports our row settled. The subscription starts BEFORE the notice
- * is posted (`watch()`), because the row can in principle be promoted between
+ * is posted (`posting()`), because the row can in principle be promoted between
  * admission and the moment we learn its id; ids seen in that window are
- * buffered and `admitted()` consults the buffer.
+ * buffered and `admitted()` consults the buffer. `posting()` also arms the flag
+ * provisionally for the duration of the host round-trip; `admitted()` and
+ * `rejected()` both replace that provisional answer with the real one.
  *
  * Degradation, in order:
  *  - no `ctx.event.subscribe` or no `sessionID`: nothing is watched.
@@ -344,18 +346,38 @@ function readSettledInboxRef(
  * directions.
  */
 export interface NoticePendingTracker {
-  /** Start watching, before the notice is posted. Idempotent. */
-  watch: () => void;
+  /**
+   * A notice is about to be posted: start watching and arm the flag
+   * PROVISIONALLY, before the host round-trip. Idempotent.
+   *
+   * Arming here rather than in `admitted()` closes the window in which the
+   * reviewer's feedback could be delivered while `session.synthetic` is still
+   * in flight — the flag would read false and the feedback would queue behind
+   * a notice that then gets promoted alone as its own model turn, which is
+   * #1515. `admitted()` and `rejected()` both correct the provisional answer,
+   * so nothing stays armed on a guess.
+   */
+  posting: () => void;
   /**
    * Record a notice the host ACCEPTED. `inboxID` is the pending row's id when
    * the host reported one (`session.synthetic` answers with the admitted row).
    */
   admitted: (inboxID: string | undefined) => void;
+  /**
+   * The host REFUSED the notice: nothing of ours is in the inbox, so the
+   * provisional arm comes back down and the feedback keeps its late-arrival
+   * queue delivery.
+   */
+  rejected: () => void;
   /** Is a notice of ours still believed to be an un-promoted row? */
   pending: () => boolean;
   /** Our own prompt just joined the notice's promotion; nothing is ahead now. */
   settle: () => void;
-  /** Stop watching. Safe to call repeatedly. */
+  /**
+   * End the tracker. TERMINAL, unlike `settle`: a later `posting()` opens no
+   * new subscription and a later `admitted()` arms nothing. Safe to call
+   * repeatedly.
+   */
   dispose: () => void;
 }
 
@@ -368,6 +390,14 @@ export function createNoticePendingTracker(
   /** Rows the host reported settled, including any seen before we knew our id. */
   const settled = new Set<string>();
   let controller: AbortController | undefined;
+  /**
+   * `stop()` leaves `controller` undefined, which is also the "not watching
+   * yet" state `posting()` starts from, so aborting alone cannot express "never
+   * again". Without this latch a `notifyUrl` that outlives `dispose()` would
+   * open a fresh host subscription with no owner left to abort it — the leak
+   * the caller's `finally { client.dispose() }` exists to prevent.
+   */
+  let disposed = false;
 
   const stop = () => {
     const own = controller;
@@ -376,7 +406,9 @@ export function createNoticePendingTracker(
   };
 
   return {
-    watch: () => {
+    posting: () => {
+      if (disposed) return;
+      pending = true;
       const subscribe = ctx.event?.subscribe;
       if (controller || typeof subscribe !== "function" || !sessionID) return;
       const own = new AbortController();
@@ -401,17 +433,29 @@ export function createNoticePendingTracker(
       })();
     },
     admitted: (inboxID) => {
+      // After dispose nothing is watching, so a flag raised here could never be
+      // lowered again — exactly the stale "still pending" this tracker exists
+      // to rule out. Stay unarmed instead.
+      if (disposed) return;
       noticeID = inboxID;
       // A row the host already reported settled was never pending for us.
       pending = !(inboxID !== undefined && settled.has(inboxID));
       if (!pending) stop();
+    },
+    rejected: () => {
+      pending = false;
+      stop();
     },
     pending: () => pending,
     settle: () => {
       pending = false;
       stop();
     },
-    dispose: stop,
+    dispose: () => {
+      disposed = true;
+      pending = false;
+      stop();
+    },
   };
 }
 
@@ -479,7 +523,9 @@ export function createSessionUrlNotifier(
   notice?: {
     /**
      * Called before the notice is posted, so a watcher is already listening if
-     * the row is promoted between admission and the moment its id is known.
+     * the row is promoted between admission and the moment its id is known,
+     * and so the notice counts as pending for the whole host round-trip rather
+     * than only after it.
      */
     posting?: () => void;
     /**
@@ -490,6 +536,12 @@ export function createSessionUrlNotifier(
      * right one.
      */
     admitted?: (inboxID: string | undefined) => void;
+    /**
+     * Called when the host REFUSED the notice, to undo `posting`'s provisional
+     * arm. Nothing of ours is in the inbox then, so the feedback that follows
+     * keeps its plain late-arrival delivery.
+     */
+    rejected?: () => void;
   },
 ): ((input: { url: string; message: string }) => Promise<unknown>) | undefined {
   const synthetic = ctx.session?.synthetic;
@@ -497,14 +549,20 @@ export function createSessionUrlNotifier(
   return async ({ url }) => {
     const text = formatSessionUrlNotice(url);
     notice?.posting?.();
-    const admitted = await synthetic({
-      sessionID,
-      text,
-      description: text,
-      resume: false,
-      // #1515: the notice and the feedback must share one promotion.
-      delivery: CO_PROMOTED_DELIVERY,
-    });
+    let admitted: unknown;
+    try {
+      admitted = await synthetic({
+        sessionID,
+        text,
+        description: text,
+        resume: false,
+        // #1515: the notice and the feedback must share one promotion.
+        delivery: CO_PROMOTED_DELIVERY,
+      });
+    } catch (error) {
+      notice?.rejected?.();
+      throw error;
+    }
     notice?.admitted?.(readAdmittedInboxID(admitted));
     return admitted;
   };
@@ -557,8 +615,9 @@ export function createV2BridgeClient(input: {
   // "still waiting" honest once something else promotes the row.
   const notice = createNoticePendingTracker(input.ctx, input.sessionID);
   const notifyUrl = createSessionUrlNotifier(input.ctx, input.sessionID, {
-    posting: notice.watch,
+    posting: notice.posting,
     admitted: notice.admitted,
+    rejected: notice.rejected,
   });
   return {
     ...(notifyUrl && { notifyUrl }),
