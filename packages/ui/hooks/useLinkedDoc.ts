@@ -156,6 +156,20 @@ export interface UseLinkedDocReturn {
   dismissError: () => void;
   /** All linked doc annotations including the active doc's live state (keyed by filepath) */
   getDocAnnotations: () => Map<string, CachedDocState>;
+  /**
+   * Replace the stored annotations of a document that is NOT the active one —
+   * a cached linked doc, or the stashed source document. This is what lets the
+   * panel's cross-file view edit and delete another file's comments without
+   * navigating to it; the active document's annotations are host state
+   * (`setAnnotations`) and are deliberately never touched here.
+   *
+   * Returns false when no stored document matches (including the active one),
+   * so a host can fall back to its own live-state path.
+   */
+  updateStoredAnnotations: (
+    filepath: string,
+    update: (annotations: Annotation[]) => Annotation[],
+  ) => boolean;
   /** Snapshot the root document plus linked-doc cache for cross-document session swaps */
   snapshotSession: () => LinkedDocSessionState;
   /** Restore a root document plus linked-doc cache, closing any active linked document */
@@ -209,6 +223,11 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [docAnnotationCount, setDocAnnotationCount] = useState(0);
+  // Bumped whenever a stored (non-active) document's annotations change in
+  // place. docCache is a ref, so without this the memos keyed on
+  // getDocAnnotations' identity — panel groups, counts, the export — would
+  // keep serving the pre-mutation cache.
+  const [storeRevision, setStoreRevision] = useState(0);
 
   // Stash plan state when navigating to a linked doc
   const savedPlanState = useRef<SavedPlanState | null>(null);
@@ -551,6 +570,39 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     viewerRef,
   ]);
 
+  const updateStoredAnnotations = useCallback((
+    filepath: string,
+    update: (annotations: Annotation[]) => Annotation[],
+  ): boolean => {
+    // The active document's annotations live in host state, not the cache — a
+    // write here would be silently overwritten the next time it is cached.
+    if (linkedDoc && filepath === linkedDoc.filepath) return false;
+
+    const cached = docCache.current.get(filepath);
+    if (cached) {
+      docCache.current.set(filepath, { ...cached, annotations: update([...cached.annotations]) });
+    } else if (savedPlanState.current && sourceFilePath && filepath === sourceFilePath) {
+      const saved = savedPlanState.current;
+      savedPlanState.current = { ...saved, annotations: update([...saved.annotations]) };
+    } else {
+      return false;
+    }
+
+    // Same accounting as activateDocument/back: everything except the document
+    // that is active right now.
+    let total = 0;
+    for (const [fp, entry] of docCache.current.entries()) {
+      if (linkedDoc && fp === linkedDoc.filepath) continue;
+      total += entry.annotations.length + entry.globalAttachments.length;
+    }
+    if (linkedDoc && savedPlanState.current) {
+      total += savedPlanState.current.annotations.length + savedPlanState.current.globalAttachments.length;
+    }
+    setDocAnnotationCount(total);
+    setStoreRevision((r) => r + 1);
+    return true;
+  }, [linkedDoc, sourceFilePath]);
+
   const getDocAnnotations = useCallback((): Map<string, CachedDocState> => {
     const result = new Map(docCache.current);
     // Include stashed original-file annotations when viewing a linked doc
@@ -571,7 +623,9 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       });
     }
     return result;
-  }, [linkedDoc, annotations, globalAttachments, sourceFilePath, sourceConverted, getDocumentMarkdown]);
+    // storeRevision: cross-file edits mutate docCache in place, so the
+    // identity of this callback is what tells memoized readers to recompute.
+  }, [linkedDoc, annotations, globalAttachments, sourceFilePath, sourceConverted, getDocumentMarkdown, storeRevision]);
 
   return {
     isActive: linkedDoc !== null,
@@ -583,6 +637,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     back,
     dismissError,
     getDocAnnotations,
+    updateStoredAnnotations,
     snapshotSession,
     restoreSession,
     docAnnotationCount,

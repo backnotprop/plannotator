@@ -8,6 +8,7 @@ import { OverlayScrollArea } from './OverlayScrollArea';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { resolveReplyParents, resolveThreadRootTimestamps } from '@plannotator/core/annotation-threads';
+import type { AnnotationScope, AnnotationDocumentGroup } from '../utils/annotationScope';
 
 // Card type-word colors. Deletion uses `destructive` (reliably red on every
 // theme, matching the in-document .deletion highlight). Comment uses the
@@ -137,6 +138,26 @@ interface PanelProps {
     *  HTML viewer's onUnanchoredChange report after a refresh). Matching
     *  cards show a small "Unanchored" chip. Absent: no chip, DOM unchanged. */
   unanchoredIds?: ReadonlySet<string>;
+  /**
+   * Multi-document sessions (annotate folder sessions, and any session whose
+   * linked documents carry feedback): which documents the timeline shows.
+   * Supplying this together with `onAnnotationScopeChange` turns on the
+   * `This file | All files` toggle and the grouped cross-file view. Omitting
+   * them — as every host that has not opted in does — leaves the panel exactly
+   * as it was, including the legacy `+N in M other files` affordance.
+   */
+  annotationScope?: AnnotationScope;
+  onAnnotationScopeChange?: (scope: AnnotationScope) => void;
+  /** One group per document carrying feedback, open document first (see
+   *  `groupAnnotationsByDocument`). Only read while the scope is `all`. */
+  documentGroups?: readonly AnnotationDocumentGroup[];
+  /** Select/jump to an annotation by its owning document. A card in another
+   *  document is the host's cue to navigate there first. */
+  onSelectInDocument?: (path: string, id: string) => void;
+  /** Delete an annotation from its owning document's store. */
+  onDeleteInDocument?: (path: string, id: string) => void;
+  /** Edit an annotation in its owning document's store. */
+  onEditInDocument?: (path: string, id: string, updates: Partial<Annotation>) => void;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -164,6 +185,12 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   readOnly = false,
   presentation = 'panel',
   unanchoredIds,
+  annotationScope,
+  onAnnotationScopeChange,
+  documentGroups,
+  onSelectInDocument,
+  onDeleteInDocument,
+  onEditInDocument,
 }) => {
   const isMobile = useIsMobile();
   const embedded = presentation === 'embedded';
@@ -189,6 +216,53 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
     return a.ts - b.ts;
   });
   const totalCount = annotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
+
+  // --- Cross-file scope (opt-in: a host that passes neither prop is unchanged) ---
+  const scopeEnabled = annotationScope !== undefined && onAnnotationScopeChange !== undefined;
+  const scope: AnnotationScope = scopeEnabled ? annotationScope! : 'current';
+  const groups = documentGroups ?? [];
+  const otherGroups = groups.filter((group) => !group.isCurrent);
+  const otherGroupCount = otherGroups.reduce((n, group) => n + group.annotations.length, 0);
+  const groupedTotal = groups.reduce((n, group) => n + group.annotations.length, 0);
+  const showGroups = scope === 'all' && groups.length > 0;
+  const headerCount = showGroups
+    ? groupedTotal + codeAnnotations.length + (editorAnnotations?.length ?? 0)
+    : totalCount;
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleGroup = (path: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+  const scopeToggle = scopeEnabled ? (
+    <div
+      data-annotation-scope-toggle="true"
+      role="group"
+      aria-label="Annotation scope"
+      className="flex items-center gap-0.5 rounded-md bg-surface-1/60 p-0.5"
+    >
+      {(['current', 'all'] as const).map((value) => (
+        <button
+          key={value}
+          type="button"
+          data-annotation-scope={value}
+          aria-pressed={scope === value}
+          onClick={() => onAnnotationScopeChange!(value)}
+          className={cn(
+            'cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors',
+            scope === value
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {value === 'current' ? 'This file' : 'All files'}
+        </button>
+      ))}
+    </div>
+  ) : null;
 
   // Scroll selected annotation card into view
   useEffect(() => {
@@ -218,9 +292,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               <h2 className="text-xs font-medium text-foreground">
                 Annotations
               </h2>
-              {totalCount > 0 && (
+              {headerCount > 0 && (
                 <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary/10 px-1 font-mono text-[10px] font-medium tabular-nums text-primary">
-                  {totalCount}
+                  {headerCount}
                 </span>
               )}
             </div>
@@ -237,19 +311,39 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               </button>
             )}
           </div>
-          {otherFileAnnotations && otherFileAnnotations.count > 0 && (
-            <button
-              onClick={onOtherFileAnnotationsClick}
-              className="px-3 pb-2 text-[10px] text-primary/70 hover:text-primary transition-colors cursor-pointer"
-              title="Show annotated files in sidebar"
-            >
-              +{otherFileAnnotations.count} in {otherFileAnnotations.files} other file{otherFileAnnotations.files === 1 ? '' : 's'}
-            </button>
+          {scopeEnabled ? (
+            <div className="flex items-center justify-between gap-2 px-3 pb-2">
+              {scopeToggle}
+              {otherGroupCount > 0 && scope === 'current' && (
+                <span className="truncate text-[10px] text-muted-foreground/70">
+                  +{otherGroupCount} elsewhere
+                </span>
+              )}
+            </div>
+          ) : (
+            otherFileAnnotations && otherFileAnnotations.count > 0 && (
+              <button
+                onClick={onOtherFileAnnotationsClick}
+                className="px-3 pb-2 text-[10px] text-primary/70 hover:text-primary transition-colors cursor-pointer"
+                title="Show annotated files in sidebar"
+              >
+                +{otherFileAnnotations.count} in {otherFileAnnotations.files} other file{otherFileAnnotations.files === 1 ? '' : 's'}
+              </button>
+            )
           )}
         </div>
       )}
 
-      {embedded && otherFileAnnotations && otherFileAnnotations.count > 0 && (
+      {embedded && scopeEnabled && (
+        <div className="flex min-h-11 flex-shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3">
+          {scopeToggle}
+          {otherGroupCount > 0 && scope === 'current' && (
+            <span className="truncate text-[10px] text-muted-foreground/70">+{otherGroupCount} elsewhere</span>
+          )}
+        </div>
+      )}
+
+      {embedded && !scopeEnabled && otherFileAnnotations && otherFileAnnotations.count > 0 && (
         <button
           type="button"
           data-pn-touch-target="true"
@@ -267,7 +361,127 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
         {directEdits?.map((item) => (
           <DirectEditsCard key={item.id} {...item} onDiscard={readOnly ? undefined : item.onDiscard} />
         ))}
-        {totalCount === 0 ? (
+        {showGroups ? (
+          <>
+            {groups.map((group) => {
+              const collapsed = collapsedGroups.has(group.path);
+              const sorted = [...group.annotations].sort((a, b) => a.createdA - b.createdA);
+              const threaded = threadReplies(sorted);
+              return (
+                <section key={group.path} data-annotation-group={group.path}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.path)}
+                    aria-expanded={!collapsed}
+                    className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-surface-1/50"
+                  >
+                    <svg
+                      className={cn('h-2.5 w-2.5 flex-shrink-0 text-muted-foreground/60 transition-transform', collapsed ? '' : 'rotate-90')}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={3}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span
+                      className={cn('min-w-0 flex-1 truncate font-mono text-[10px]', group.isCurrent ? 'text-foreground' : 'text-muted-foreground')}
+                      title={group.path}
+                    >
+                      {group.label}
+                    </span>
+                    {group.isCurrent && (
+                      <span className="flex-shrink-0 text-[9px] text-muted-foreground/50">open</span>
+                    )}
+                    <span className="flex h-[16px] min-w-[16px] flex-shrink-0 items-center justify-center rounded-full bg-primary/10 px-1 font-mono text-[9px] font-medium tabular-nums text-primary">
+                      {group.annotations.length}
+                    </span>
+                  </button>
+                  {!collapsed && (
+                    <div className="mt-0.5 flex flex-col gap-1.5">
+                      {threaded.map(({ annotation, isReply }) => {
+                        const card = (
+                          <AnnotationCard
+                            annotation={annotation}
+                            isSelected={selectedId === annotation.id}
+                            isMe={isCurrentUser(annotation.author)}
+                            onSelect={() => (group.isCurrent
+                              ? onSelect(annotation.id)
+                              : onSelectInDocument?.(group.path, annotation.id))}
+                            onDelete={() => (group.isCurrent
+                              ? onDelete(annotation.id)
+                              : onDeleteInDocument?.(group.path, annotation.id))}
+                            onEdit={group.isCurrent
+                              ? (onEdit ? (updates: Partial<Annotation>) => onEdit(annotation.id, updates) : undefined)
+                              : (onEditInDocument ? (updates: Partial<Annotation>) => onEditInDocument(group.path, annotation.id, updates) : undefined)}
+                            readOnly={readOnly}
+                            footer={group.isCurrent ? renderCardFooter?.(annotation) : undefined}
+                            unanchored={group.isCurrent ? (unanchoredIds?.has(annotation.id) ?? false) : false}
+                          />
+                        );
+                        return isReply ? (
+                          <div key={annotation.id} data-annotation-reply="true" className="ml-3 border-l-2 border-border/40 pl-1.5">
+                            {card}
+                          </div>
+                        ) : (
+                          <React.Fragment key={annotation.id}>{card}</React.Fragment>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+            {sortedCodeAnnotations.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 pt-2 pb-1">
+                  <div className="flex-1 border-t border-border/30" />
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">Code</span>
+                  <div className="flex-1 border-t border-border/30" />
+                </div>
+                {sortedCodeAnnotations.map((annotation) => (
+                  <CodeAnnotationCard
+                    key={annotation.id}
+                    annotation={annotation}
+                    isSelected={selectedId === annotation.id}
+                    isMe={isCurrentUser(annotation.author)}
+                    onSelect={() => onSelectCodeAnnotation?.(annotation.id)}
+                    onDelete={() => onDeleteCodeAnnotation?.(annotation.id)}
+                    onEdit={onEditCodeAnnotation ? (updates: Partial<CodeAnnotation>) => onEditCodeAnnotation(annotation.id, updates) : undefined}
+                    readOnly={readOnly}
+                  />
+                ))}
+              </>
+            )}
+            {editorAnnotations && editorAnnotations.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 pt-2 pb-1">
+                  <div className="flex-1 border-t border-border/30" />
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">Editor</span>
+                  <div className="flex-1 border-t border-border/30" />
+                </div>
+                {editorAnnotations.map(ann => (
+                  <EditorAnnotationCard
+                    key={ann.id}
+                    annotation={ann}
+                    onDelete={readOnly ? undefined : () => onDeleteEditorAnnotation?.(ann.id)}
+                  />
+                ))}
+              </>
+            )}
+            {otherGroups.length > 0 && onOtherFileAnnotationsClick && (
+              <button
+                type="button"
+                data-annotation-show-in-files="true"
+                onClick={onOtherFileAnnotationsClick}
+                className="mt-1 cursor-pointer self-start px-1.5 text-[10px] text-muted-foreground/60 transition-colors hover:text-primary"
+                title="Show annotated files in the navigator"
+              >
+                Show in files
+              </button>
+            )}
+          </>
+        ) : totalCount === 0 ? (
           (!directEdits || directEdits.length === 0) && (
             <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
               <p className="text-xs text-muted-foreground/60">
@@ -276,6 +490,16 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               <p className="mt-1 text-[11px] text-muted-foreground/40">
                 Select text to annotate
               </p>
+              {scopeEnabled && otherGroupCount > 0 && (
+                <button
+                  type="button"
+                  data-annotation-view-all="true"
+                  onClick={() => onAnnotationScopeChange!('all')}
+                  className="mt-3 cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary"
+                >
+                  View all {otherGroupCount} in {otherGroups.length} other file{otherGroups.length === 1 ? '' : 's'}
+                </button>
+              )}
             </div>
           )
         ) : (
@@ -352,7 +576,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
       </OverlayScrollArea>
 
       {/* Quick Actions Footer */}
-      {totalCount > 0 && (
+      {headerCount > 0 && (
         <div className="border-t border-border/50 px-3 py-2 flex gap-1.5">
           {onQuickCopy && (
             <button
