@@ -55,6 +55,7 @@ import { getPlanSaveSettings } from '@plannotator/ui/utils/planSave';
 import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
+import { useOriginFork, type OriginForkCapability } from '@plannotator/ui/hooks/useOriginFork';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
 import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
 import {
@@ -677,6 +678,9 @@ const App: React.FC = () => {
   const [aiAvailable, setAiAvailable] = useState(false);
   const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; capabilities?: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>>([]);
   const [aiDefaultProvider, setAiDefaultProvider] = useState<string | null>(null);
+  // Origin-fork availability (#1519), reported by /api/ai/capabilities —
+  // null when this document/plan didn't come from a live agent session.
+  const [originForkCapability, setOriginForkCapability] = useState<OriginForkCapability | null>(null);
   const { aiConfig, applyConfigChange } = useAIProviderConfig({
     providers: aiProviders,
     defaultProvider: aiDefaultProvider,
@@ -3513,6 +3517,7 @@ const App: React.FC = () => {
     if (!aiSessionEnabled || !isApiMode || isSharedSession) {
       setAiAvailable(false);
       setAiProviders([]);
+      setOriginForkCapability(null);
       return;
     }
 
@@ -3528,15 +3533,18 @@ const App: React.FC = () => {
           // Provider/model is resolved by useAIProviderConfig's effect once these
           // states land — just record the server default for it to use.
           setAiDefaultProvider(data.defaultProvider ?? null);
+          setOriginForkCapability(data.originFork ?? null);
         } else {
           setAiAvailable(false);
           setAiProviders([]);
+          setOriginForkCapability(null);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setAiAvailable(false);
           setAiProviders([]);
+          setOriginForkCapability(null);
         }
       });
 
@@ -4773,12 +4781,22 @@ const App: React.FC = () => {
     versionInfo,
   ]);
 
+  // Ask AI fork origin (#1519): gates the "Fork the <agent> session" toggle
+  // against the effective provider, and derives forkOrigin from that gate so
+  // switching away from a forking provider clears it for free.
+  const originFork = useOriginFork({
+    originFork: originForkCapability,
+    providers: aiProviders,
+    providerId: aiConfig.providerId,
+    defaultProviderId: aiDefaultProvider,
+  });
   const aiChat = useAIChat({
     context: aiContext,
     providerId: aiConfig.providerId,
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
     threadTitle: aiDocumentMode ? 'Document chat' : 'Plan chat',
+    forkOrigin: originFork.forkOrigin,
   });
   const {
     messages: aiMessages,
@@ -4792,6 +4810,12 @@ const App: React.FC = () => {
     resetThread: resetAIThread,
     sessionId: aiSessionId,
   } = aiChat;
+  // Fork opt-in changes what kind of session the next question creates —
+  // same reset discipline as a provider switch (handleAIConfigChange below).
+  const handleForkOriginToggle = useCallback((enabled: boolean) => {
+    originFork.toggleProps.onToggle(enabled);
+    resetAISession();
+  }, [originFork.toggleProps, resetAISession]);
   const canUseAI = aiAvailable && aiContext !== null;
   const canUseAskAI = canUseAI || isAgentTerminalReady;
   const canUseDocumentAskAI = canUseAskAI;
@@ -6126,6 +6150,13 @@ const App: React.FC = () => {
       aiProviders={visibleAIProviders}
       aiConfig={visibleAIConfig}
       onAIConfigChange={isAgentTerminalReady ? undefined : handleAIConfigChange}
+      originFork={{
+        ...originFork.toggleProps,
+        // The agent-terminal surface is the origin agent's own TUI — forking
+        // it into a provider chat isn't meaningful there.
+        available: originFork.toggleProps.available && !isAgentTerminalReady,
+        onToggle: handleForkOriginToggle,
+      }}
     />
   );
 

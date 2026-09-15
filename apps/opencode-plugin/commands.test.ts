@@ -118,6 +118,9 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     // The empty-config default (since-base) is base-relative, so the seed
     // requests it explicitly rather than promoting.
     expect(options.diffType).toBe("since-base");
+    // Ask AI fork origin (#1519): the invoking OpenCode session, built from
+    // the command event's sessionID and the review's own directory.
+    expect(options.originSession).toEqual({ sessionId: "session-123", cwd: repoDir, agent: "opencode" });
   });
 
   test("a base that does not resolve refuses to start a session", async () => {
@@ -347,6 +350,13 @@ describe("handleAnnotateLastCommand", () => {
     );
 
     expect(deps.startAnnotateServer.mock.calls[0]?.[0].approvalNotesSupported).toBe(true);
+    // Ask AI fork origin (#1519): built from the command event's sessionID
+    // (no `directory` on these deps, so it falls back to process.cwd()).
+    expect(deps.startAnnotateServer.mock.calls[0]?.[0].originSession).toEqual({
+      sessionId: "session-123",
+      cwd: process.cwd(),
+      agent: "opencode",
+    });
     expect(outcome).toEqual({
       approved: true,
       feedback: "Retain this caveat.",

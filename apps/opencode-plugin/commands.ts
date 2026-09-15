@@ -42,6 +42,7 @@ import { statSync } from "fs";
 import path from "path";
 import { resolveValidatedTargetAgent } from "./agent-switch";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import { toOriginSession } from "./origin-session";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -234,6 +235,7 @@ export async function handleReviewCommand(
     gitRef,
     error: diffError,
     origin: "opencode",
+    originSession: toOriginSession({ sessionId, cwd: directory }),
     project: (await detectProjectName()) ?? undefined,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
@@ -461,6 +463,7 @@ export async function handleAnnotateCommand(
     markdown,
     filePath: absolutePath,
     origin: "opencode",
+    originSession: toOriginSession({ sessionId, cwd: directory }),
     mode: annotateMode,
     project: annotateProject,
     folderPath,
@@ -530,7 +533,7 @@ export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
 ): Promise<{ approved: boolean; feedback: string } | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
@@ -584,6 +587,7 @@ export async function handleAnnotateLastCommand(
     markdown: lastText,
     filePath: "last-message",
     origin: "opencode",
+    originSession: toOriginSession({ sessionId, cwd: directory }),
     mode: "annotate-last",
     project: lastProject,
     recentMessages: pickerMessages,

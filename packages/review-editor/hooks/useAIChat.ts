@@ -27,6 +27,8 @@ interface UseAIChatOptions {
   providerId?: string | null;
   model?: string | null;
   reasoningEffort?: string | null;
+  /** Fork the server-known origin session instead of starting fresh (#1519). */
+  forkOrigin?: boolean;
 }
 
 export function useAIChat({
@@ -38,6 +40,7 @@ export function useAIChat({
   providerId,
   model,
   reasoningEffort,
+  forkOrigin,
 }: UseAIChatOptions) {
   const chat = useSharedAIChat({
     context: {
@@ -47,6 +50,7 @@ export function useAIChat({
     providerId,
     model,
     reasoningEffort,
+    forkOrigin,
   });
 
   // View state changes mid-session; the session context is baked once. Read the

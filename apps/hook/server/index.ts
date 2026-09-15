@@ -79,6 +79,8 @@
 import {
   startPlannotatorServer,
   handleServerReady,
+  buildOriginSession,
+  type ParentSession,
 } from "@plannotator/server";
 import {
   startReviewServer,
@@ -343,6 +345,19 @@ const staticFlagIdx = args.indexOf("--static");
 const staticFlag = staticFlagIdx !== -1;
 if (staticFlag) args.splice(staticFlagIdx, 1);
 
+// Value flag: --session-id <id> (annotate only) — lets a caller name the
+// invoking agent session explicitly, the same way opencode-annotate-last's
+// stdin JSON does. Exists for the OpenCode CLI-bridge fallback leg of
+// /plannotator-annotate (buildAnnotateCliArgs), which has no stdin channel:
+// it shells out to the plain `annotate` subcommand, so this flag is the only
+// way that leg can offer Ask AI fork-origin (#1519).
+const sessionIdIdx = args.indexOf("--session-id");
+let sessionIdFlag: string | undefined;
+if (sessionIdIdx !== -1 && args[sessionIdIdx + 1]) {
+  sessionIdFlag = args[sessionIdIdx + 1];
+  args.splice(sessionIdIdx, 2);
+}
+
 // Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
 // --hook (recommended for hooks):
@@ -596,6 +611,49 @@ const detectedOrigin: Origin =
   process.env.GEMINI_CLI ? "gemini-cli" :
   process.env.OMPCODE ? "oh-my-pi" :
   "claude-code";
+
+/**
+ * Best-effort identity of the invoking Claude Code session, for surfaces
+ * launched from inside one (a slash command's `!` bang runs this CLI as a
+ * descendant of the agent's shell, so the ancestor-PID walk finds it). Lets
+ * Ask AI offer to fork that session instead of starting fresh (#1519).
+ * Server-side only — never crosses the wire to the browser. Only
+ * claude-code and opencode providers can fork a session today, so this is
+ * only attempted when detectedOrigin is "claude-code"; a miss returns null,
+ * which just means the toggle isn't offered.
+ *
+ * cwd follows the same PLANNOTATOR_CWD idiom used everywhere else in this
+ * file (the original working directory before a launcher shim `cd`s) rather
+ * than a bare `process.cwd()` — claude-agent-sdk.ts forks with `cwd:
+ * parent.cwd`, so a wrong cwd here roots the forked session in the wrong
+ * directory.
+ */
+function resolveInvokingClaudeSession(): ParentSession | null {
+  if (detectedOrigin !== "claude-code") return null;
+  try {
+    const logPath = resolveSessionLogByAncestorPids();
+    if (!logPath) return null;
+    return buildOriginSession({
+      agent: "claude-code",
+      sessionId: path.basename(logPath, ".jsonl"),
+      cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build the Ask AI fork-origin ParentSession for an OpenCode bridge call
+ * (opencode-plan/opencode-review/opencode-annotate-last), from the
+ * sessionId/directory pair each bridge stdin payload carries. Thin wrapper
+ * around the shared builder (`buildOriginSession`, packages/server) that
+ * also backs the OpenCode plugin's own `toOriginSession` — the one place
+ * the {sessionId, cwd, agent} object actually gets constructed (#1519).
+ */
+function toOpenCodeOriginSession(input: { sessionId?: unknown; directory?: unknown }): ParentSession | null {
+  return buildOriginSession({ agent: "opencode", sessionId: input.sessionId, cwd: input.directory });
+}
 
 type OpenCodeBridgeAgent = {
   name: string;
@@ -1153,6 +1211,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
+    originSession: resolveInvokingClaudeSession(),
     project: reviewProject,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
     gitContext,
@@ -1382,6 +1441,13 @@ if (args[0] === "sessions") {
     markdown,
     filePath: absolutePath,
     origin: detectedOrigin,
+    // An explicit --session-id (the OpenCode CLI-bridge fallback leg of
+    // /plannotator-annotate, which has no stdin channel — see the flag's
+    // definition above) takes priority; otherwise fall back to the
+    // ancestor-PID resolution used by a direct Claude Code invocation.
+    originSession: sessionIdFlag
+      ? buildOriginSession({ agent: detectedOrigin, sessionId: sessionIdFlag, cwd: projectRoot })
+      : resolveInvokingClaudeSession(),
     mode: liveAppResolved ? "annotate-app" : annotateMode,
     liveApp: liveAppResolved
       ? {
@@ -1480,6 +1546,10 @@ if (args[0] === "sessions") {
   const RECENT_MESSAGES_LIMIT = 25;
   let lastMessage: RenderedMessage | null = null;
   let recentMessages: RenderedMessage[] = [];
+  // Claude Code path only: the transcript the message was actually read
+  // from (whichever candidate strategy hit), so its basename (<sessionId>.jsonl)
+  // can seed Ask AI session forking (#1519).
+  let claudeSessionLogPath: string | null = null;
 
   // Copilot CLI sets no env fingerprint, so detection matches ancestor pids
   // against session-state inuse locks (spawns ps). Only attempted when no
@@ -1601,6 +1671,7 @@ if (args[0] === "sessions") {
         if (recent.length > 0) {
           recentMessages = recent;
           lastMessage = recent[0];
+          claudeSessionLogPath = logPath;
           return;
         }
       }
@@ -1641,10 +1712,25 @@ if (args[0] === "sessions") {
     ? recentMessages.map((m) => ({ messageId: m.messageId, text: m.text, timestamp: m.timestamp }))
     : undefined;
 
+  // The session the annotated message came from — lets Ask AI offer to fork
+  // it (#1519). Only claimed when the harness is genuinely Claude Code and
+  // the transcript that produced `annotatedMessage` was actually resolved
+  // (its basename is the session id); no other harness's provider can fork
+  // today.
+  const annotateLastOriginSession: ParentSession | null =
+    detectedOrigin === "claude-code" && claudeSessionLogPath
+      ? buildOriginSession({
+          agent: "claude-code",
+          sessionId: path.basename(claudeSessionLogPath, ".jsonl"),
+          cwd: projectRoot,
+        })
+      : null;
+
   const server = await startAnnotateServer({
     markdown: annotatedMessage.text,
     filePath: "last-message",
     origin: copilotDetected ? "copilot-cli" : detectedOrigin,
+    originSession: annotateLastOriginSession,
     mode: "annotate-last",
     sharingEnabled,
     shareBaseUrl,
@@ -1752,7 +1838,7 @@ if (args[0] === "sessions") {
   // that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ plan?: unknown; timeoutSeconds?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ plan?: unknown; timeoutSeconds?: unknown; sessionId?: unknown; directory?: unknown }>(
     "opencode-plan",
     inputJson,
   );
@@ -1776,6 +1862,7 @@ if (args[0] === "sessions") {
   const server = await startPlannotatorServer({
     plan: planContent,
     origin: "opencode",
+    originSession: toOpenCodeOriginSession(input),
     sharingEnabled: bridgeSharingEnabled,
     shareBaseUrl: bridgeShareBaseUrl,
     pasteApiUrl: bridgePasteApiUrl,
@@ -1832,7 +1919,7 @@ if (args[0] === "sessions") {
   // in a host that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown; sessionId?: unknown; directory?: unknown }>(
     "opencode-review",
     inputJson,
   );
@@ -1964,6 +2051,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
+    originSession: toOpenCodeOriginSession(input),
     project: reviewProject,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
@@ -2031,6 +2119,8 @@ if (args[0] === "sessions") {
   const input = parseOpenCodeBridgeInput<{
     gate?: unknown;
     recentMessages?: unknown;
+    sessionId?: unknown;
+    directory?: unknown;
   }>("opencode-annotate-last", inputJson);
 
   const recentMessages = Array.isArray(input.recentMessages)
@@ -2068,6 +2158,7 @@ if (args[0] === "sessions") {
     markdown: lastMessage.text,
     filePath: "last-message",
     origin: "opencode",
+    originSession: toOpenCodeOriginSession(input),
     mode: "annotate-last",
     recentMessages: pickerMessages,
     sharingEnabled: bridgeSharingEnabled,
@@ -2459,10 +2550,21 @@ if (args[0] === "sessions") {
 
   const planProject = (await detectProjectName()) ?? "_unknown";
 
+  // The session that produced this plan — lets Ask AI offer to fork it
+  // (#1519). The hook event names it directly (no ancestor-PID resolution
+  // needed here), but only Claude Code's session id means anything to a
+  // provider: Gemini isn't a fork-capable harness, and no other origin
+  // reaches this hook-event branch with a genuine session id.
+  const planOriginSession: ParentSession | null =
+    !isGemini && detectedOrigin === "claude-code"
+      ? buildOriginSession({ agent: "claude-code", sessionId: event.session_id, cwd: event.cwd })
+      : null;
+
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
     origin: isGemini ? "gemini-cli" : detectedOrigin,
+    originSession: planOriginSession,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,

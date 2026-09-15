@@ -39,6 +39,7 @@ import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
+import { useOriginFork, type OriginForkCapability } from '@plannotator/ui/hooks/useOriginFork';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
 import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
@@ -1000,6 +1001,9 @@ const ReviewApp: React.FC = () => {
   const [aiAvailable, setAiAvailable] = useState(false);
   const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>>([]);
   const [aiDefaultProvider, setAiDefaultProvider] = useState<string | null>(null);
+  // Origin-fork availability (#1519), reported by /api/ai/capabilities —
+  // null when this review didn't come from a live agent session.
+  const [originForkCapability, setOriginForkCapability] = useState<OriginForkCapability | null>(null);
   const { aiConfig, applyConfigChange } = useAIProviderConfig({
     providers: aiProviders,
     defaultProvider: aiDefaultProvider,
@@ -1107,6 +1111,15 @@ const ReviewApp: React.FC = () => {
     markTerminalToolsAnnouncementSeen();
     setTerminalToolsIntroPending(false);
   }, []);
+  // Ask AI fork origin (#1519): gates the "Fork the <agent> session" toggle
+  // against the effective provider, and derives forkOrigin from that gate so
+  // switching away from a forking provider clears it for free.
+  const originFork = useOriginFork({
+    originFork: originForkCapability,
+    providers: aiProviders,
+    providerId: aiConfig.providerId,
+    defaultProviderId: aiDefaultProvider,
+  });
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1119,6 +1132,7 @@ const ReviewApp: React.FC = () => {
     providerId: aiConfig.providerId,
     model: aiConfig.model,
     reasoningEffort: aiConfig.reasoningEffort,
+    forkOrigin: originFork.forkOrigin,
   });
   const {
     messages: aiMessages,
@@ -1131,6 +1145,12 @@ const ReviewApp: React.FC = () => {
     resetSession: resetAISession,
     sessionId: aiSessionId,
   } = aiChat;
+  // Fork opt-in changes what kind of session the next question creates —
+  // same reset discipline as a provider switch (handleAIConfigChange below).
+  const handleForkOriginToggle = useCallback((enabled: boolean) => {
+    originFork.toggleProps.onToggle(enabled);
+    resetAISession();
+  }, [originFork.toggleProps, resetAISession]);
 
   const codeNav = useCodeNav();
   // The other half of the held-modifier gesture. The diff views paint
@@ -1218,6 +1238,7 @@ const ReviewApp: React.FC = () => {
       setAiAvailable(false);
       setAiProviders([]);
       setAiDefaultProvider(null);
+      setOriginForkCapability(null);
       return;
     }
     fetch('/api/ai/capabilities')
@@ -1228,6 +1249,7 @@ const ReviewApp: React.FC = () => {
           const providers = data.providers ?? [];
           setAiProviders(providers);
           setAiDefaultProvider(data.defaultProvider ?? null);
+          setOriginForkCapability(data.originFork ?? null);
         }
       })
       .catch(() => {});
@@ -5392,6 +5414,7 @@ const ReviewApp: React.FC = () => {
                 aiConfig={aiConfig}
                 onAIConfigChange={handleAIConfigChange}
                 hasAISession={!!aiSessionId}
+                originFork={{ ...originFork.toggleProps, onToggle: handleForkOriginToggle }}
                 agentJobs={agentJobs.jobs}
                 agentCapabilities={agentJobs.capabilities}
                 onAgentLaunch={agentJobs.launchJob}

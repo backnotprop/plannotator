@@ -52,3 +52,22 @@ export function getAgentAIProviderTypes(origin: Origin | null | undefined): read
   }
   return [];
 }
+
+/**
+ * Whether a registered AI provider naturally matches an origin's harness.
+ * Provider registry instance IDs can be custom (a caller may register with
+ * its own `instanceId`), so both the registry id and the provider type name
+ * are checked against `getAgentAIProviderTypes(origin)` — id-only matching
+ * would silently miss a custom instance id. The one shared rule behind
+ * `findOriginAIProvider` (packages/ui/utils/aiProvider.ts, client-side
+ * default-provider matching) and `originForkProviderIds`
+ * (packages/ai/endpoints.ts, server-side origin-fork gating, #1519).
+ */
+export function matchesAgentProvider(
+  origin: Origin | null | undefined,
+  providerId: string,
+  providerName: string,
+): boolean {
+  const providerTypes = getAgentAIProviderTypes(origin);
+  return providerTypes.includes(providerId) || providerTypes.includes(providerName);
+}

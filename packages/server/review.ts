@@ -11,6 +11,7 @@
 
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
+import type { OriginSessionOption } from "./origin-session";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
@@ -152,7 +153,7 @@ export { handleServerReady as handleReviewServerReady } from "./shared-handlers"
 
 // --- Types ---
 
-export interface ReviewServerOptions {
+export interface ReviewServerOptions extends OriginSessionOption {
   /** Raw git diff patch string */
   rawPatch: string;
   /** Git ref used for the diff (e.g., "HEAD", "main..HEAD", "--staged") */
@@ -1700,7 +1701,9 @@ export async function startReviewServer(
   });
 
   // AI provider setup (graceful — capabilities report unavailable if no provider is registered)
-  const aiRuntime = aiEnabled ? await createAIRuntime({ getCwd: resolveAgentCwd }) : null;
+  const aiRuntime = aiEnabled
+    ? await createAIRuntime({ getCwd: resolveAgentCwd, originSession: options.originSession })
+    : null;
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();

@@ -51,6 +51,13 @@ interface UseAIChatOptions {
   reasoningEffort?: string | null;
   buildPrompt?: (params: AskAIParams) => string;
   threadTitle?: string;
+  /**
+   * Fork the server-known origin session instead of starting fresh (#1519).
+   * The client never builds or sends a `ParentSession` itself — this is the
+   * only origin-fork signal posted to `/api/ai/session`; the server merges
+   * in its own `AIEndpointDeps.originSession` when this is true.
+   */
+  forkOrigin?: boolean;
 }
 
 export function buildDefaultPrompt(params: AskAIParams): string {
@@ -200,6 +207,7 @@ export function useAIChat({
   reasoningEffort,
   buildPrompt = buildDefaultPrompt,
   threadTitle = 'Chat',
+  forkOrigin,
 }: UseAIChatOptions) {
   const [thread, setThread] = useState<AIChatThread>(() => createThread(threadTitle));
   const [isCreatingSession, setIsCreatingSession] = useState(false);
@@ -241,6 +249,7 @@ export function useAIChat({
         ...(providerId && { providerId }),
         ...(model && { model }),
         ...(reasoningEffort && { reasoningEffort }),
+        ...(forkOrigin && { forkOrigin: true }),
       }, signal);
 
       if (!res.ok) {
@@ -260,7 +269,7 @@ export function useAIChat({
         setIsCreatingSession(false);
       }
     }
-  }, [context, model, providerId, reasoningEffort, setSessionId]);
+  }, [context, forkOrigin, model, providerId, reasoningEffort, setSessionId]);
 
   // Tell the server to stop the current session's in-flight turn, and resolve
   // once it has. Used by the Stop button and when a new question supersedes a

@@ -8,6 +8,7 @@ import {
   type PiSDKConfig,
 } from "@plannotator/ai";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
+import type { OriginSessionOption } from "./origin-session";
 
 export interface AIRuntime {
   endpoints: AIEndpoints;
@@ -16,7 +17,7 @@ export interface AIRuntime {
 
 export const AI_QUERY_ENDPOINT = "/api/ai/query";
 
-interface CreateAIRuntimeOptions {
+interface CreateAIRuntimeOptions extends OriginSessionOption {
   cwd?: string;
   getCwd?: () => string;
 }
@@ -114,6 +115,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     registry,
     sessionManager,
     getCwd: options.getCwd,
+    originSession: options.originSession,
     beforeCapabilities: async () => {
       await Promise.allSettled(modelDiscovery);
     },

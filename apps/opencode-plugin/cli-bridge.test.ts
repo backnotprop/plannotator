@@ -75,6 +75,35 @@ describe("OpenCode CLI bridge helpers", () => {
     ]);
   });
 
+  test("appends --session-id when the invoking OpenCode session is known (#1519)", () => {
+    const parsed: Parameters<typeof buildAnnotateCliArgs>[0] = {
+      filePath: "plan.html",
+      rawFilePath: "plan.html",
+      gate: false,
+      json: false,
+      hook: false,
+      renderHtml: false,
+      renderMarkdown: false,
+      noJina: false,
+    };
+
+    expect(buildAnnotateCliArgs(parsed, "session-1")).toEqual([
+      "annotate",
+      "plan.html",
+      "--json",
+      "--session-id",
+      "session-1",
+    ]);
+
+    // No sessionId (embedded/native paths never hit the CLI-bridge fallback
+    // leg, so most calls omit it) — the flag must not appear at all.
+    expect(buildAnnotateCliArgs(parsed)).toEqual([
+      "annotate",
+      "plan.html",
+      "--json",
+    ]);
+  });
+
   test("requires a session before launching a gated capable annotate bridge", () => {
     expect(canLaunchGatedAnnotate({ gate: true }, undefined)).toBe(false);
     expect(canLaunchGatedAnnotate({ gate: true }, "session-1")).toBe(true);
