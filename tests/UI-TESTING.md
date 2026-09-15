@@ -12,6 +12,7 @@ steps to ensure your changes work correctly.
 5. [Decision Control Manual Checklist](#decision-control-manual-checklist)
 6. [WebMCP Manual Checklist](#webmcp-manual-checklist)
 7. [Terminal-Tools Announcement Manual Checklist](#terminal-tools-announcement-manual-checklist)
+8. [HTML Sibling-Link Manual Checklist](#html-sibling-link-manual-checklist)
 
 ---
 
@@ -507,6 +508,43 @@ not hand the turn to an earlier dialog.
 8. **Theme and width.** Toggle light/dark: the panel chrome follows the active palette around
    the dark footage. At ~400px wide the video spans the panel, the headline, switch and actions
    wrap without horizontal overflow, and "Got it" stays reachable.
+
+## HTML Sibling-Link Manual Checklist
+
+Not CI. Build a small local site in a scratch folder: `index.html` linking to a sibling
+`01-entry-point.html`, a nested `./sub/02-detail.html` (which links back with `../index.html`),
+an in-page `#section` anchor far enough down the page to need scrolling, an external
+`https://example.com`, a sibling `notes.md`, a `report.pdf`, and an absolute
+`/01-entry-point.html`. Give `index.html` a relative `style.css` and `img.png` so assets are in
+play. Run `plannotator annotate <site>/index.html`.
+
+1. **Nothing loads the app into the frame.** Press `Esc` (or the header pen) to reach Interact,
+   then click each link in turn. At no point does the framed document turn into a second copy of
+   Plannotator, and the browser URL never changes.
+2. **Relative links open as linked documents.** `01-entry-point.html` and `./sub/02-detail.html`
+   each render in place, the sidebar shows "Viewing / Back to file" with the file name, and
+   **Back** returns to `index.html`. From `sub/02-detail.html`, `../index.html` also returns to
+   the root (the same document, so it is a Back, not a third level).
+3. **Annotations stay per document.** Comment on `index.html`, open
+   `01-entry-point.html`, comment there, and go Back. Each document shows only its own comments,
+   and Send Feedback exports both under their own file headings.
+4. **In-page anchors scroll.** Click `#section`: the framed page scrolls to the heading and no
+   document is opened. A link that carries a fragment (`sub/02-detail.html#part`) opens the
+   document AND lands on the fragment.
+5. **External links open a new tab.** `https://example.com` opens in a new tab; the framed
+   document is unchanged and the original tab keeps its annotations.
+6. **Unsupported and absolute forms.** `report.pdf` raises a toast and opens nothing.
+   `/01-entry-point.html` opens the same document the relative link did. `notes.md` opens as
+   markdown.
+7. **Armed mode still annotates links.** Re-arm with the pen (or `Mod+Shift+A`) and click a
+   link: the comment composer opens on the `<a>` element and no navigation happens.
+8. **Live app sessions are untouched.** Run `plannotator annotate http://localhost:<dev port>`
+   against any app and click its own in-app links, armed and in Interact: they navigate the app
+   through the proxy exactly as before.
+
+Known limitation to expect in step 2: a document in a subfolder loads assets that sit below it,
+but `../style.css` and `../img.png` do not resolve (`/api/html-assets` mints one token per HTML
+file's own directory and refuses `..`), so `sub/02-detail.html` renders unstyled.
 
 ## Need Help?
 
