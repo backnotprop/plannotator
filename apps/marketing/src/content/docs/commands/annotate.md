@@ -126,10 +126,10 @@ Live app and HTML sessions share one interaction model:
 
 - The session opens with the pen **armed**, so a click pins the element under the cursor and a drag selects text to comment on.
 - `Esc` steps back one rung at a time: it closes an open draft, then clears the hover outline, then drops you into **Interact** mode, where clicks, forms, links, and navigation reach the page normally.
-- The pen button in the header (or `Cmd/Ctrl+Shift+A`) arms annotation again. Existing comment markers stay visible in both modes, and clicking one still opens it.
+- The pen button in the header (or `Cmd/Ctrl+Shift+A`) toggles annotation back on, and off again. Existing comment markers stay visible in both modes, and clicking one still opens it.
 - Selecting text to comment works in **both** modes, so you can leave a note without arming the pen.
 - These surfaces are comment-only: deletions and quick labels are markdown-only features.
-- The eye button beside the pen hides every floating control over the page when you need an unobstructed view.
+- The page starts with the floating tools **hidden**, so it gets the whole viewport. The eye button beside the pen (or `Cmd/Ctrl+Shift+X`) shows them — the sidebar tabs and the comment/attachments cluster — and hides them again. Your last choice is remembered for the next HTML session.
 
 ### Limits
 
