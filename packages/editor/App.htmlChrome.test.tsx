@@ -577,6 +577,62 @@ describe.if(hasDom)("HTML annotate chrome (tools toggle + pen toggle)", () => {
     expect(chip()).toBeNull();
   });
 
+  test("Mod+Shift+A toggles annotate mode in BOTH directions (the way back in after Esc)", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    await mountHtmlAnnotate();
+
+    const press = async () => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "a", metaKey: true, shiftKey: true, bubbles: true,
+        }));
+      });
+    };
+
+    expect(penToggle()!.getAttribute("aria-pressed")).toBe("true");
+    await press();
+    expect(penToggle()!.getAttribute("aria-pressed")).toBe("false");
+    // The direction Esc cannot provide: the chord re-arms.
+    await press();
+    expect(penToggle()!.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("Mod+Shift+X flips the tools, from the parent document and from inside the iframe", async () => {
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    await mountHtmlAnnotate();
+
+    const pressInParent = async () => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", {
+          key: "x", metaKey: true, shiftKey: true, bubbles: true,
+        }));
+      });
+    };
+    // What the bridge posts when the same chord is pressed with focus inside
+    // the sandboxed page (the parent's listener never sees that keystroke).
+    const pressInFrame = async () => {
+      const iframe = document.querySelector<HTMLIFrameElement>("iframe[srcdoc]");
+      if (!iframe?.contentWindow) throw new Error("HTML iframe missing");
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent("message", {
+          source: iframe.contentWindow,
+          data: { type: "plannotator-bridge-tools-toggle" },
+        }));
+      });
+    };
+
+    expect(floatingCluster()).toBeNull();
+    await pressInParent();
+    expect(floatingCluster()).not.toBeNull();
+    expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("false");
+
+    await pressInFrame();
+    expect(floatingCluster()).toBeNull();
+    expect(toolsToggle()!.getAttribute("aria-pressed")).toBe("true");
+  });
+
   test("the pen toggle starts ARMED (aria-pressed) on a static HTML session and click flips it to Interact", async () => {
     setStorageBackend(memoryBackend);
     seedAnnouncementsSeen();

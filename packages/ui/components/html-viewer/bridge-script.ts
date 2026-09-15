@@ -3579,15 +3579,21 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   });
 
-  // Mod+Shift+A toggles Interact/Annotate from inside the iframe (the parent
-  // registers the same chord, but focus usually lives in here on live apps).
-  // Capture phase so the page cannot swallow the reserved chord; the parent
-  // answers with set-annotate-mode.
+  // The two reserved header chords, mirrored from inside the iframe (the
+  // parent registers both, but focus usually lives in here on live apps):
+  // Mod+Shift+A toggles Interact/Annotate, Mod+Shift+X shows/hides the
+  // floating tools over the page. Capture phase so the page cannot swallow
+  // them; the parent owns both states and answers annotate with
+  // set-annotate-mode. Disarming tears down any pending draft through that
+  // same set-annotate-mode(false) handler, exactly as Esc does.
   document.addEventListener('keydown', function(e) {
     if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return;
-    if (e.key !== 'a' && e.key !== 'A') return;
+    var message = null;
+    if (e.key === 'a' || e.key === 'A') message = 'annotate-toggle';
+    else if (e.key === 'x' || e.key === 'X') message = 'tools-toggle';
+    if (!message) return;
     e.preventDefault();
-    postToParent({ type: PREFIX + 'annotate-toggle' });
+    postToParent({ type: PREFIX + message });
   }, true);
 
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the

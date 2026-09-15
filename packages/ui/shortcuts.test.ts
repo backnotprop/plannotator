@@ -138,6 +138,30 @@ describe('shortcuts', () => {
     }
   });
 
+  // The two HTML-surface chords are the only way back into annotate mode after
+  // Esc and the only keyboard way to the header eye, so they have to reach both
+  // plan registries (the marketing docs page and the help modal read them from
+  // there) and each has to stay a single claimant: the dispatcher has no
+  // cross-scope arbitration, so a second claimant would double-fire and the
+  // toggle would land back where it started.
+  it('binds the HTML annotate and tools chords once on every plan surface', () => {
+    const expected = {
+      toggleAnnotateMode: 'Mod+Shift+A',
+      toggleTools: 'Mod+Shift+X',
+    };
+
+    for (const registry of [planReviewSettingsShortcutRegistry, annotateSettingsShortcutRegistry]) {
+      for (const [actionId, binding] of Object.entries(expected)) {
+        expect(getShortcut(registry, 'html-annotate', actionId)?.bindings).toEqual([binding]);
+
+        const claimants = listRegistryShortcuts(registry)
+          .filter(entry => entry.bindings.includes(binding))
+          .map(entry => `${entry.scopeId}.${entry.actionId}`);
+        expect(claimants).toEqual([`html-annotate.${actionId}`]);
+      }
+    }
+  });
+
   // The mode switcher renders on both plan surfaces, so the scope has to reach
   // both registries — and each digit has to stay a single claimant, since the
   // dispatcher has no cross-scope arbitration.

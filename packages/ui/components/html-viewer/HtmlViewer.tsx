@@ -209,6 +209,9 @@ export interface HtmlViewerProps {
   onAnnotateModeExit?: () => void;
   /** Mod+Shift+A pressed while focus lived inside the iframe. */
   onAnnotateModeToggle?: () => void;
+  /** Mod+Shift+X pressed while focus lived inside the iframe: show/hide the
+   *  host's floating tools over the page. The host owns that state. */
+  onToolsToggle?: () => void;
   /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
   vimModeEnabled?: boolean;
   /** Replace the iframe-local compact badge with the shared live key HUD. */
@@ -317,6 +320,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       annotateModeActive = true,
       onAnnotateModeExit,
       onAnnotateModeToggle,
+      onToolsToggle,
       vimModeEnabled = false,
       vimHudEnabled = false,
       vimHudKeyPanelEnabled = true,
@@ -372,6 +376,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     onAnnotateModeExitRef.current = onAnnotateModeExit;
     const onAnnotateModeToggleRef = useRef(onAnnotateModeToggle);
     onAnnotateModeToggleRef.current = onAnnotateModeToggle;
+    const onToolsToggleRef = useRef(onToolsToggle);
+    onToolsToggleRef.current = onToolsToggle;
 
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
@@ -695,6 +701,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         }
         if (isRecord(e.data) && e.data.type === `${PREFIX}annotate-toggle`) {
           onAnnotateModeToggleRef.current?.();
+          return;
+        }
+        if (isRecord(e.data) && e.data.type === `${PREFIX}tools-toggle`) {
+          onToolsToggleRef.current?.();
           return;
         }
         const vimCopy = parseVimBridgeCopy(e.data);

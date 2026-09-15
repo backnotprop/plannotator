@@ -602,6 +602,7 @@ const App: React.FC = () => {
   // Interact.
   const [htmlAnnotateArmed, setHtmlAnnotateArmed] = useState(true);
   const handleHtmlAnnotateToggle = useCallback(() => setHtmlAnnotateArmed((v) => !v), []);
+  const handleHtmlToolsToggle = useCallback(() => setHtmlToolsHidden((v) => !v), []);
   const handleHtmlAnnotateExit = useCallback(() => setHtmlAnnotateArmed(false), []);
   // Session-level force-markdown preference (`--markdown`). When set, folder/linked HTML
   // files are converted instead of rendered raw — threaded into /api/doc as &convert=1.
@@ -3184,14 +3185,20 @@ const App: React.FC = () => {
     [canHandleDocumentChromeShortcut, toolstripVisible],
   );
 
-  // Interact/Annotate toggle (Mod+Shift+A) — HTML and live-app surfaces only.
-  // The bridge mirrors the same chord inside the iframe and forwards it, so
-  // this parent-side registration covers focus living in the editor chrome.
+  // Interact/Annotate toggle (Mod+Shift+A) and Show/Hide tools (Mod+Shift+X)
+  // — HTML and live-app surfaces only. The bridge mirrors both chords inside
+  // the iframe and forwards them, so this parent-side registration covers
+  // focus living in the editor chrome. The tools chord is NOT gated on
+  // documentReadOnly: the eye renders on read-only documents too.
   useHtmlAnnotateShortcuts({
     handlers: {
       toggleAnnotateMode: {
         when: (event) => isHtmlSurface && !documentReadOnly && canHandleDocumentChromeShortcut(event),
         handle: handleHtmlAnnotateToggle,
+      },
+      toggleTools: {
+        when: (event) => isHtmlSurface && canHandleDocumentChromeShortcut(event),
+        handle: handleHtmlToolsToggle,
       },
     },
   });
@@ -5535,7 +5542,7 @@ const App: React.FC = () => {
               subtitle: htmlToolsHidden
                 ? 'Bring the annotation chrome back over the page'
                 : 'Remove all floating chrome from over the page',
-              onSelect: () => setHtmlToolsHidden((v) => !v),
+              onSelect: handleHtmlToolsToggle,
             }]
           : []),
         // The desktop header's Refresh is header-only too; local HTML files
@@ -5847,7 +5854,7 @@ const App: React.FC = () => {
           htmlAnnotateArmed={htmlAnnotateArmed}
           onToggleHtmlAnnotate={isHtmlSurface && !documentReadOnly ? handleHtmlAnnotateToggle : undefined}
           htmlToolsHidden={htmlToolsHidden}
-          onToggleHtmlTools={isHtmlSurface ? () => setHtmlToolsHidden((v) => !v) : undefined}
+          onToggleHtmlTools={isHtmlSurface ? handleHtmlToolsToggle : undefined}
           canRefreshHtml={htmlRefresh.canRefresh}
           isRefreshingHtml={htmlRefresh.isRefreshing}
           onRefreshHtml={htmlRefresh.refresh}
@@ -6332,6 +6339,9 @@ const App: React.FC = () => {
                     annotateModeActive={htmlAnnotateArmed}
                     onAnnotateModeExit={documentReadOnly ? undefined : handleHtmlAnnotateExit}
                     onAnnotateModeToggle={documentReadOnly ? undefined : handleHtmlAnnotateToggle}
+                    // Mod+Shift+X from inside the iframe. Offered on read-only
+                    // documents too: the eye is not a document mutation.
+                    onToolsToggle={handleHtmlToolsToggle}
                     vimModeEnabled={liveApp ? false : vimModeEnabled && htmlAnnotateArmed}
                     vimHudEnabled={!liveApp && vimModeEnabled && htmlAnnotateArmed && vimHudEnabled}
                     vimHudKeyPanelEnabled={vimHudKeyPanelEnabled}
