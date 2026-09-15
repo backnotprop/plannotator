@@ -521,10 +521,16 @@ play. Run `plannotator annotate <site>/index.html`.
 1. **Nothing loads the app into the frame.** Press `Esc` (or the header pen) to reach Interact,
    then click each link in turn. At no point does the framed document turn into a second copy of
    Plannotator, and the browser URL never changes.
-2. **Relative links open as linked documents.** `01-entry-point.html` and `./sub/02-detail.html`
-   each render in place, the sidebar shows "Viewing / Back to file" with the file name, and
-   **Back** returns to `index.html`. From `sub/02-detail.html`, `../index.html` also returns to
-   the root (the same document, so it is a Back, not a third level).
+2. **Relative links open as linked documents, and never open the sidebar.** With the sidebar
+   CLOSED, click `01-entry-point.html`: it renders in place and the sidebar stays closed. A
+   **Back to index.html** control appears at the left of the header controls; clicking it
+   returns to `index.html`. Repeat with the sidebar OPEN on the Files tab: after the click it is
+   still open, still on Files — never switched to Contents. Then open `./sub/02-detail.html` and
+   use `../index.html` from it: that also returns to the root (the same document, so it is a
+   Back, not a third level). Hover the Back control: the tooltip names the root file and shows
+   no keycaps.
+   A `notes.md` link is the exception and keeps the markdown convention: it opens the sidebar on
+   the Contents tab, where its "Viewing / Back to file" header lives.
 3. **Annotations stay per document.** Comment on `index.html`, open
    `01-entry-point.html`, comment there, and go Back. Each document shows only its own comments,
    and Send Feedback exports both under their own file headings.
@@ -536,9 +542,12 @@ play. Run `plannotator annotate <site>/index.html`.
 6. **Unsupported and absolute forms.** `report.pdf` raises a toast and opens nothing.
    `/01-entry-point.html` opens the same document the relative link did. `notes.md` opens as
    markdown.
-7. **Armed mode still annotates links.** Re-arm with the pen (or `Mod+Shift+A`) and click a
+7. **The chrome survives navigation.** Show the tools (the eye), then follow two HTML links.
+   The tools stay shown and the sidebar keeps whatever state you left it in — neither is reset
+   to the session defaults mid-session.
+8. **Armed mode still annotates links.** Re-arm with the pen (or `Mod+Shift+A`) and click a
    link: the comment composer opens on the `<a>` element and no navigation happens.
-8. **Live app sessions are untouched.** Run `plannotator annotate http://localhost:<dev port>`
+9. **Live app sessions are untouched.** Run `plannotator annotate http://localhost:<dev port>`
    against any app and click its own in-app links, armed and in Interact: they navigate the app
    through the proxy exactly as before.
 
