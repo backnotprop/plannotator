@@ -105,6 +105,31 @@ describe.if(hasDom)('useAnnotationJump', () => {
     expect(select.mock.calls).toEqual([['ann-3']]);
   });
 
+  test('path spellings are compared normalized, not byte-for-byte', async () => {
+    // The panel addresses documents by their NORMALIZED path (that is what
+    // groupAnnotationsByDocument emits) while the host carries the raw server
+    // spelling. On Windows those differ, so a jump inside the open document
+    // used to navigate to a path the host already had open, and a commit for
+    // the destination never matched the pending request: the click did
+    // nothing at all.
+    await mount();
+    await act(async () => api!.setCurrentPath('C:\\repo\\open.md'));
+    await act(async () => api!.jump('C:/repo/open.md', 'ann-win'));
+
+    expect(select.mock.calls).toEqual([['ann-win']]);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  test('a normalized destination is settled by its raw-spelling commit', async () => {
+    await mount();
+    await act(async () => api!.jump('C:/repo/target.md', 'ann-win-2'));
+    expect(navigate.mock.calls).toEqual([['C:/repo/target.md']]);
+
+    await act(async () => api!.setCurrentPath('C:\\repo\\target.md'));
+    await tick();
+    expect(select.mock.calls).toEqual([['ann-win-2']]);
+  });
+
   test('a navigation that never commits leaves no selection armed', async () => {
     await mount(10);
     await act(async () => api!.jump(TARGET, 'ann-4'));

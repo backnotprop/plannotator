@@ -7,6 +7,7 @@
  */
 
 import { useState, useCallback, useRef } from "react";
+import { normalizeBrowserPath } from "@plannotator/core/browser-paths";
 import type { Annotation, ImageAttachment } from "../types";
 import type { ViewerHandle } from "../components/Viewer";
 import type { SidebarTab } from "./useSidebar";
@@ -574,14 +575,25 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     filepath: string,
     update: (annotations: Annotation[]) => Annotation[],
   ): boolean => {
+    // Callers address documents by whatever spelling their list carries — the
+    // panel's groups are normalized (forward slashes, collapsed separators)
+    // while the cache is keyed by the raw server path. On Windows those differ
+    // (`C:/repo/a.md` vs `C:\repo\a.md`) and an unnormalized lookup missed
+    // every time, so a cross-file edit or delete silently did nothing.
+    const wanted = normalizeBrowserPath(filepath);
+
     // The active document's annotations live in host state, not the cache — a
     // write here would be silently overwritten the next time it is cached.
-    if (linkedDoc && filepath === linkedDoc.filepath) return false;
+    if (linkedDoc && wanted === normalizeBrowserPath(linkedDoc.filepath)) return false;
 
-    const cached = docCache.current.get(filepath);
-    if (cached) {
-      docCache.current.set(filepath, { ...cached, annotations: update([...cached.annotations]) });
-    } else if (savedPlanState.current && sourceFilePath && filepath === sourceFilePath) {
+    let cacheKey: string | undefined;
+    for (const key of docCache.current.keys()) {
+      if (normalizeBrowserPath(key) === wanted) { cacheKey = key; break; }
+    }
+    const cached = cacheKey === undefined ? undefined : docCache.current.get(cacheKey);
+    if (cached && cacheKey !== undefined) {
+      docCache.current.set(cacheKey, { ...cached, annotations: update([...cached.annotations]) });
+    } else if (savedPlanState.current && sourceFilePath && wanted === normalizeBrowserPath(sourceFilePath)) {
       const saved = savedPlanState.current;
       savedPlanState.current = { ...saved, annotations: update([...saved.annotations]) };
     } else {

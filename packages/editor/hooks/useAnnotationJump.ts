@@ -11,12 +11,19 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
+import { normalizeBrowserPath } from '../sourceDocumentPaths';
 
 /** Grace for the destination's restored highlights to paint before we scroll
  *  to one. useLinkedDoc re-applies them on a 100ms timeout. */
 const SELECT_AFTER_COMMIT_MS = 160;
 /** A navigation that never commits must not leave a selection pending forever. */
 const COMMIT_TIMEOUT_MS = 5000;
+
+/** Path equality across spellings (Windows separators, doubled slashes). */
+function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a == null || b == null) return false;
+  return normalizeBrowserPath(a) === normalizeBrowserPath(b);
+}
 
 export interface AnnotationJumpOptions {
   /** Path of the document that is open right now. */
@@ -47,7 +54,10 @@ export function useAnnotationJump(options: AnnotationJumpOptions): (path: string
 
   const jump = useCallback((path: string, id: string) => {
     const { currentPath, navigate, select } = optionsRef.current;
-    if (path === currentPath) {
+    // The panel addresses documents by their normalized path while the host
+    // carries the raw server spelling; on Windows those differ, and comparing
+    // them raw made every same-document jump navigate instead of selecting.
+    if (samePath(path, currentPath)) {
       select(id);
       return;
     }
@@ -56,10 +66,10 @@ export function useAnnotationJump(options: AnnotationJumpOptions): (path: string
     timersRef.current.push(setTimeout(() => {
       // Never committed — drop the request rather than selecting an id that
       // does not exist in whatever document is open now.
-      if (pendingRef.current?.path === path) pendingRef.current = null;
+      if (samePath(pendingRef.current?.path, path)) pendingRef.current = null;
     }, optionsRef.current.commitTimeoutMs ?? COMMIT_TIMEOUT_MS));
     void Promise.resolve(navigate(path)).catch(() => {
-      if (pendingRef.current?.path === path) pendingRef.current = null;
+      if (samePath(pendingRef.current?.path, path)) pendingRef.current = null;
     });
   }, []);
 
@@ -67,7 +77,7 @@ export function useAnnotationJump(options: AnnotationJumpOptions): (path: string
   const currentPath = options.currentPath;
   useEffect(() => {
     const pending = pendingRef.current;
-    if (!pending || pending.path !== currentPath) return;
+    if (!pending || !samePath(pending.path, currentPath)) return;
     pendingRef.current = null;
     clearTimers();
     const delay = optionsRef.current.selectAfterCommitMs ?? SELECT_AFTER_COMMIT_MS;

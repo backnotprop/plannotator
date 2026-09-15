@@ -193,6 +193,50 @@ describe.if(hasDom)('cross-file annotation mutations', () => {
     expect(api!.sessionTotal).toBe(2);
   });
 
+  test('a stored document is reached by its normalized spelling (Windows cache keys)', async () => {
+    // The cache is keyed by the RAW path the server sent; the panel addresses
+    // documents by the normalized path `groupAnnotationsByDocument` emits. On
+    // Windows those differ (`C:\\repo\\win.md` vs `C:/repo/win.md`), and the
+    // raw lookup missed every time: Edit and Delete on a cross-file card were
+    // silent no-ops and the comment still shipped in the export.
+    const WIN_RAW = 'C:\\repo\\docs\\win.md';
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(<Harness />);
+    });
+    // Open the Windows-spelled document, annotate it, then leave it: that is
+    // what puts it in the cache under its raw key.
+    await act(async () => { api!.linkedDoc.openLoaded({ filepath: WIN_RAW, markdown: '# win' }); });
+    await act(async () => { api!.setAnnotations([row('w1'), row('w2')]); });
+    await act(async () => { api!.linkedDoc.openLoaded({ filepath: OTHER_PATH, markdown: '# b' }); });
+
+    let accepted = false;
+    await act(async () => {
+      accepted = api!.linkedDoc.updateStoredAnnotations(
+        'C:/repo/docs/win.md',
+        (anns) => anns.filter((a) => a.id !== 'w1'),
+      );
+    });
+
+    expect(accepted).toBe(true);
+    expect(api!.linkedDoc.getDocAnnotations().get(WIN_RAW)?.annotations.map((a) => a.id)).toEqual(['w2']);
+  });
+
+  test('the stashed source document is reached by its normalized spelling too', async () => {
+    await mountWithTwoAnnotatedDocuments();
+
+    let accepted = false;
+    await act(async () => {
+      // Same path as ROOT_PATH, differently spelled.
+      accepted = api!.linkedDoc.updateStoredAnnotations('/repo//a.md', () => []);
+    });
+
+    expect(accepted).toBe(true);
+    expect(api!.linkedDoc.getDocAnnotations().get(ROOT_PATH)?.annotations).toEqual([]);
+  });
+
   test('the active document is never written through the stored-document path', async () => {
     await mountWithTwoAnnotatedDocuments();
     // App routes open-document cards to its own handlers; the store refuses the

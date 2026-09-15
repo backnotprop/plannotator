@@ -4551,15 +4551,42 @@ const App: React.FC = () => {
   // annotations. They are deliberately NOT recorded in the annotation history:
   // that stack describes the open document's surface, and an entry that undoes
   // into a document you are not looking at would restore invisible state.
-  const handleDeleteAnnotationInDocument = React.useCallback((path: string, id: string) => {
+  // `updateStoredAnnotations` returns false when the path names no stored
+  // document — including the open one, whose annotations are host state. Acting
+  // on that return is what keeps a cross-file Edit/Delete from being a silent
+  // no-op: the open document falls back to the live mutators, and anything else
+  // says so instead of appearing to work.
+  const applyCrossDocumentMutation = React.useCallback((
+    path: string,
+    update: (annotations: Annotation[]) => Annotation[],
+    live: () => void,
+  ) => {
     if (documentReadOnly) return;
-    linkedDocHook.updateStoredAnnotations(path, (anns) => anns.filter((a) => a.id !== id));
-  }, [documentReadOnly, linkedDocHook]);
+    if (linkedDocHook.updateStoredAnnotations(path, update)) return;
+    if (normalizeBrowserPath(path) === normalizeBrowserPath(currentDocumentGroupKey)) {
+      live();
+      return;
+    }
+    toast.error('Could not update that comment', {
+      description: 'Open the file it belongs to and try again.',
+    });
+  }, [currentDocumentGroupKey, documentReadOnly, linkedDocHook]);
+
+  const handleDeleteAnnotationInDocument = React.useCallback((path: string, id: string) => {
+    applyCrossDocumentMutation(
+      path,
+      (anns) => anns.filter((a) => a.id !== id),
+      () => handleDeleteAnnotation(id),
+    );
+  }, [applyCrossDocumentMutation, handleDeleteAnnotation]);
 
   const handleEditAnnotationInDocument = React.useCallback((path: string, id: string, updates: Partial<Annotation>) => {
-    if (documentReadOnly) return;
-    linkedDocHook.updateStoredAnnotations(path, (anns) => anns.map((a) => (a.id === id ? { ...a, ...updates } : a)));
-  }, [documentReadOnly, linkedDocHook]);
+    applyCrossDocumentMutation(
+      path,
+      (anns) => anns.map((a) => (a.id === id ? { ...a, ...updates } : a)),
+      () => handleEditAnnotation(id, updates),
+    );
+  }, [applyCrossDocumentMutation, handleEditAnnotation]);
 
   // WebMCP (browser-agent tools). The hook detects `document.modelContext`
   // once and does nothing in a browser without it; the banner state below
