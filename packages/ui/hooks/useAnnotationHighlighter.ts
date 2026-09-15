@@ -364,6 +364,74 @@ const snapRangeStartPastExcluded = (range: Range): boolean => {
   return false;
 };
 
+/** A resolved restore boundary: web-highlighter's own `DomNode` shape. */
+interface RestoreBoundary {
+  $node: Node;
+  offset: number;
+}
+
+/** The nearest text node on one side of `node` that annotation painting can
+ *  reach, skipping every `.annotation-exclude` run. */
+const annotatableTextNeighbour = (
+  root: Element,
+  node: Node,
+  direction: 1 | -1,
+): Text | null => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const all: Text[] = [];
+  let current: Node | null;
+  while ((current = walker.nextNode())) all.push(current as Text);
+
+  const index = all.indexOf(node as Text);
+  if (index < 0) return null;
+  for (let i = index + direction; i >= 0 && i < all.length; i += direction) {
+    const text = all[i]!;
+    if (!text.length) continue;
+    if (isAnnotationExcludedTextNode(text)) continue;
+    return text;
+  }
+  return null;
+};
+
+/**
+ * Move a RESTORED boundary off any `.annotation-exclude` subtree it resolved
+ * into, the same snap {@link snapRangeStartPastExcluded} applies to a live
+ * selection.
+ *
+ * A stored `textOffset` counts every text node under the recorded parent,
+ * excluded chrome included — and so does the resolver that reads it back
+ * (`getTextChildByOffset`), which resolves a boundary sitting exactly at the
+ * end of one text node onto THAT node rather than the start of the next. A
+ * drag from a GitHub alert's icon therefore stores a start of 5, the length of
+ * the hidden "Tip: ", and restores onto the hidden span — where painting never
+ * enters, so every run before the last one was dropped, the verification
+ * rejected what was left, and the text search could not bridge the title into
+ * the body either. The annotation came back from its own draft unpainted.
+ *
+ * Normalizing the stored metas at creation time instead is not available: they
+ * are only meaningful in the resolver's own coordinates, which count the
+ * excluded text. Snapping on restore also covers every draft already on disk.
+ */
+const snapRestoredBoundary = (
+  root: Element,
+  boundary: RestoreBoundary,
+  direction: 1 | -1,
+): RestoreBoundary => {
+  const node = boundary.$node;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return boundary;
+  if (!isAnnotationExcludedTextNode(node)) return boundary;
+  const neighbour = annotatableTextNeighbour(root, node, direction);
+  if (!neighbour) return boundary;
+  return { $node: neighbour, offset: direction === 1 ? 0 : neighbour.length };
+};
+
+/** Whether a snapped pair would describe a backwards range. */
+const restoreBoundariesCross = (start: RestoreBoundary, end: RestoreBoundary): boolean => {
+  if (start.$node === end.$node) return start.offset > end.offset;
+  const position = start.$node.compareDocumentPosition(end.$node);
+  return !(position & Node.DOCUMENT_POSITION_FOLLOWING);
+};
+
 /** One clipped text run of a range, and whether it is excluded chrome. */
 interface RangeTextPiece {
   text: string;
@@ -1154,6 +1222,21 @@ export function useAnnotationHighlighter({
     });
 
     highlighterRef.current = highlighter;
+
+    // Stored positions can resolve into chrome the reviewer could never have
+    // selected; painting never enters such a subtree, so a boundary left there
+    // silently loses every run up to it. Snap both ends onto annotatable text
+    // before the range is built.
+    highlighter.hooks.Serialize.Restore.tap((...args: unknown[]) => {
+      const [, storedStart, storedEnd] = args as [unknown, RestoreBoundary, RestoreBoundary];
+      const root = containerRef.current;
+      if (!root || !storedStart || !storedEnd) return [storedStart, storedEnd];
+      const start = snapRestoredBoundary(root, storedStart, 1);
+      const end = snapRestoredBoundary(root, storedEnd, -1);
+      if (start === storedStart && end === storedEnd) return [storedStart, storedEnd];
+      if (restoreBoundariesCross(start, end)) return [storedStart, storedEnd];
+      return [start, end];
+    });
 
     highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
       if (type === 'from-store') return;
