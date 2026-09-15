@@ -708,4 +708,40 @@ describe.if(hasDom)("HTML chrome in a folder annotate session", () => {
     // owns keep whatever the last ordinary HTML session left.
     expect(persistedChrome()).toEqual({ toolsHidden: true, sidebarOpen: true, panelOpen: true });
   });
+
+  test("annotation activity re-stamps the record without recording the folder sidebar", async () => {
+    // Annotating re-stamps the record so the preference does not expire for
+    // an active reviewer. That re-stamp used to write the live chrome raw,
+    // bypassing the merge: one comment in a folder session (whose file
+    // browser forces the sidebar open) rewrote both halves, and the next
+    // ordinary `annotate page.html` session opened with the sidebar and the
+    // annotations drawer forced open.
+    setStorageBackend(memoryBackend);
+    seedAnnouncementsSeen();
+    memory.set(
+      "plannotator-html-chrome",
+      JSON.stringify({ toolsHidden: false, sidebarOpen: false, panelOpen: false, savedAt: Date.now() }),
+    );
+    await mountHtmlAnnotate(folderFetch);
+    await settle();
+
+    const commentButton = findButtonByText("Comment");
+    if (!commentButton) throw new Error("the floating cluster did not render its Comment button");
+    await act(async () => commentButton.click());
+    await settle();
+
+    const input = document.querySelector<HTMLTextAreaElement>('[data-comment-popover="true"] textarea');
+    if (!input) throw new Error("the global comment composer did not open");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(input, "one comment from a folder session");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const submit = findButtonByText("Add");
+    if (!submit) throw new Error("the global comment composer has no submit control");
+    await act(async () => submit.click());
+    await settle();
+
+    expect(persistedChrome()).toEqual({ toolsHidden: false, sidebarOpen: false, panelOpen: false });
+  });
 });
