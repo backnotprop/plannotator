@@ -14,6 +14,7 @@ import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 import { setExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
+import { resolveHtmlLinkIntent } from '@plannotator/ui/utils/htmlLinkNavigation';
 import { annotateFileFeedback, annotateMessageFeedback, wrapFeedbackForClipboard, type AnnotateFeedbackTemplates } from '@plannotator/shared/feedback-templates';
 import { parseMarkdownToBlocks, exportAnnotations, exportLinkedDocAnnotations, exportEditorAnnotations, exportCodeFileAnnotations, exportMessageAnnotations, extractFrontmatter, wrapFeedbackForAgent, Frontmatter, type LinkedDocAnnotationEntry, type MessageAnnotationEntry } from '@plannotator/ui/utils/parser';
 import { primeSkillCatalog, primeSkillContentsForExport } from '@plannotator/ui/utils/skillCatalog';
@@ -1841,6 +1842,47 @@ const App: React.FC = () => {
       }
     }
   }, [fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, linkedDocHook, imageBaseDir, convertHtml]);
+
+  // A link click inside a raw-HTML document (the bridge swallowed the
+  // navigation; see resolveHtmlLinkIntent for what the href means).
+  const [htmlLinkFragment, setHtmlLinkFragment] = useState<{ path: string; hash: string } | null>(null);
+  const handleHtmlLinkClick = React.useCallback((href: string) => {
+    const intent = resolveHtmlLinkIntent(href, {
+      baseDir: activeDocBaseDir,
+      // Server-absolute links (`/x.html`, or the same spelled with this
+      // server's own origin) mean "the site root this session opened from".
+      rootDir: imageBaseDir?.includes('/') ? imageBaseDir : activeDocBaseDir,
+      serverOrigin: window.location.origin,
+    });
+    if (intent.kind === 'external') {
+      window.open(intent.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (intent.kind === 'unsupported') {
+      toast(`Can't open ${intent.label}`, {
+        description: 'Only markdown, text and HTML documents open in Plannotator.',
+      });
+      return;
+    }
+    if (intent.kind !== 'document') return;
+    setHtmlLinkFragment(intent.hash ? { path: intent.path, hash: intent.hash } : null);
+    // Folder sessions route through the file-browser selection handler so the
+    // active file, the sidebar and the linked doc stay in step.
+    const activeDirState = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
+    if (fileBrowser.activeFile && fileBrowser.activeDirPath && !activeDirState?.isVault) {
+      void handleFileBrowserSelect(intent.path, fileBrowser.activeDirPath);
+      return;
+    }
+    handleOpenLinkedDoc(intent.path);
+  }, [
+    activeDocBaseDir,
+    imageBaseDir,
+    fileBrowser.dirs,
+    fileBrowser.activeDirPath,
+    fileBrowser.activeFile,
+    handleFileBrowserSelect,
+    handleOpenLinkedDoc,
+  ]);
 
   // Wrap linked doc back to also clear file browser active file
   const handleLinkedDocBack = React.useCallback(() => {
@@ -6360,6 +6402,12 @@ const App: React.FC = () => {
                     diffActive={!liveApp && isPlanDiffActive && !!htmlDiffHtml}
                     onToggleDiff={() => setIsPlanDiffActive((v) => !v)}
                     onAskAI={canUseDocumentAskAI ? handleAskAI : undefined}
+                    onOpenLink={liveApp ? undefined : handleHtmlLinkClick}
+                    initialFragment={
+                      htmlLinkFragment && htmlLinkFragment.path === activeHtmlPath
+                        ? htmlLinkFragment.hash
+                        : undefined
+                    }
                     onUnanchoredChange={htmlRefresh.reportAnnotationRestore}
                     readOnly={documentReadOnly}
                   />
