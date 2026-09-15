@@ -84,11 +84,19 @@ describe('AlertBlock title line', () => {
     expect(paragraphs(el)).toEqual(['The sentence.']);
   });
 
-  test.skipIf(!hasDom)('E: an emoji alone keeps the type word as the title', async () => {
+  // DELIBERATE, and a behaviour change against pre-#1509 renders, where the
+  // emoji stayed a paragraph of its own inside the body: an emoji-led first
+  // line is an icon, which is the whole point of admitting an emoji without a
+  // bold title. The grammar's other guards keep it narrow — the emoji must be
+  // the entire line and the next line must be blank — so decorative prose is
+  // untouched. Do not "fix" this by requiring a bold title.
+  test.skipIf(!hasDom)('E: an emoji alone becomes the icon and keeps the type word as the title', async () => {
     const el = await render('warning', '🚧\n\ntot.page is bound to the old D1.');
     expect(titleRow(el).querySelector('.alert-emoji')?.textContent).toBe('🚧');
     expect(titleRow(el).textContent).toBe('🚧Warning');
     expect(srOnly(el)).toBeNull();
+    // The line is relocated, not duplicated: it is gone from the body.
+    expect(el.querySelector('.alert-body')?.textContent).not.toContain('🚧');
     expect(paragraphs(el)).toEqual(['tot.page is bound to the old D1.']);
   });
 

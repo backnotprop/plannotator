@@ -91,8 +91,13 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
               <>
                 {/* The type word stays part of the accessible name. A visually
                     hidden span is read by every engine; an aria-label on this
-                    generic div is prohibited by ARIA and dropped by WebKit. */}
-                <span className="sr-only">{TITLE[kind]}: </span>
+                    generic div is prohibited by ARIA and dropped by WebKit.
+                    `annotation-exclude` keeps it out of the annotation text
+                    stream: without it a drag that starts on the icon quotes
+                    the invisible word ("Warning:Named icon title"), which is
+                    what the panel shows, what the agent is handed, and a quote
+                    no share-link restore can find again. */}
+                <span className="sr-only annotation-exclude">{TITLE[kind]}: </span>
                 <InlineMarkdown text={titleLine.title} {...proseProps} />
               </>
             )

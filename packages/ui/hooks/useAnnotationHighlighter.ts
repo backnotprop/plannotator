@@ -202,6 +202,58 @@ const ANNOTATION_EXCLUDED_SELECTOR = '.annotation-exclude';
 const isAnnotationExcludedTextNode = (node: Node): boolean =>
   Boolean(node.parentElement?.closest(ANNOTATION_EXCLUDED_SELECTOR));
 
+/** Content-only comparison for the quote repair below: the painted highlight
+ *  and the browser's selection string legitimately differ in whitespace
+ *  (innerText inserts blank lines between blocks, wrapper `<mark>`s do not),
+ *  so only the characters themselves are compared. */
+const compactText = (value: string): string => value.replace(/\s+/g, '');
+
+/**
+ * Drop `.annotation-exclude` chrome from a new annotation's quote.
+ *
+ * Excluded nodes are never PAINTED (they are in the highlighter's
+ * `exceptSelectors`) and never searched (the restore TreeWalker rejects
+ * them), but the browser's selection string still contains them — a drag that
+ * starts at the left edge of a GitHub alert's title row reports the visually
+ * hidden "Tip: " that keeps the alert type in its accessible name (#1511).
+ * That string becomes `originalText`: the quote in the panel, the quote handed
+ * to the agent, and the only handle a share link has for re-finding the
+ * highlight — which it then never can, because the search stream skips the
+ * excluded text.
+ *
+ * The painted highlight is therefore the authority on CONTENT and the
+ * selection string on FORMATTING: remove each excluded run and keep the
+ * result only when it matches what was painted, so an unrecognized shape
+ * leaves the quote exactly as before.
+ */
+const quoteWithoutExcludedText = (
+  container: HTMLElement | null,
+  selectionText: string,
+  paintedText: string,
+): string => {
+  if (!container || !selectionText) return selectionText;
+  if (compactText(selectionText) === compactText(paintedText)) return selectionText;
+
+  const excluded = container.querySelectorAll<HTMLElement>(ANNOTATION_EXCLUDED_SELECTOR);
+  if (excluded.length === 0) return selectionText;
+
+  let quote = selectionText;
+  excluded.forEach(element => {
+    const chunk = element.textContent ?? '';
+    // Browsers drop a trailing space at an inline boundary, so a rendered
+    // "Tip: " reads back from the selection as "Tip:".
+    for (const candidate of [chunk, chunk.replace(/\s+$/, '')]) {
+      if (!candidate.trim()) continue;
+      const index = quote.indexOf(candidate);
+      if (index === -1) continue;
+      quote = quote.slice(0, index) + quote.slice(index + candidate.length);
+      break;
+    }
+  });
+
+  return compactText(quote) === compactText(paintedText) ? quote.trim() : selectionText;
+};
+
 const applyMathAnnotationClass = (
   element: HTMLElement,
   id: string,
@@ -865,6 +917,14 @@ export function useAnnotationHighlighter({
         const source = sources[0];
         const doms = highlighter.getDoms(source.id);
         if (doms?.length > 0) {
+          // Repair the quote before anything reads it: the popover preview,
+          // the comment draft key, and the annotation's own `originalText` all
+          // come from `source.text`.
+          source.text = quoteWithoutExcludedText(
+            containerRef.current,
+            source.text,
+            doms.map((dom: HTMLElement) => dom.textContent ?? '').join(''),
+          );
           // Clean up previous pending
           if (pendingSourceRef.current) {
             highlighter.remove(pendingSourceRef.current.id);

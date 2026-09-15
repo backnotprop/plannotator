@@ -463,6 +463,15 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   const lastAutoScrolledHashRef = useRef<string | null>(null);
   const [isStuck, setIsStuck] = useState(false);
 
+  // Reported only when the text-search rescue could not re-anchor either, so
+  // the annotation is listed in the panel with no highlight in the document.
+  const handleRestoreMismatch = useCallback((annotation: Annotation, restoredText: string) => {
+    console.warn(
+      `Annotation ${annotation.id} could not be re-anchored: stored positions resolved onto ` +
+      `"${restoredText.slice(0, 50)}" and its text "${annotation.originalText.slice(0, 50)}" is no longer in the document.`,
+    );
+  }, []);
+
   // Shared annotation infrastructure via hook
   const {
     toolbarState,
@@ -489,6 +498,16 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     selectedAnnotationId,
     mode,
     enabled: !readOnly,
+    // Markdown documents drift between the moment a draft/share is written and
+    // the moment it is restored (a plan revision, a re-rendered block, a
+    // renderer change that adds or drops elements — #1509 hoisted an alert's
+    // bold first line onto the icon row, which renumbers every later
+    // `parentIndex`). web-highlighter's stored metas are positional, so a
+    // drifted anchor resolves onto the WRONG text and paints silently. Verify
+    // the painted text against the annotation's own quote so a bad resolve is
+    // dropped and the text-search rescue runs instead of a wrong highlight.
+    verifyRestoredContent: true,
+    onRestoreMismatch: handleRestoreMismatch,
   });
 
   // Refs for code block annotation path
