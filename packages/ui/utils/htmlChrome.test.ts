@@ -133,3 +133,34 @@ describe.if(hasDom)('getHtmlChromeState / saveHtmlChromeState (cookie round trip
     });
   });
 });
+
+describe.if(hasDom)('shouldRestoreHtmlChrome (entry, not every render)', () => {
+  const restore = (over: Partial<Parameters<typeof shouldRestore>[0]> = {}) =>
+    shouldRestore({ isHtmlSurface: true, wasHtmlSurface: false, suppressed: false, ...over });
+  const shouldRestore = (c: {
+    isHtmlSurface: boolean;
+    wasHtmlSurface: boolean;
+    suppressed: boolean;
+  }) => htmlChromeModule!.shouldRestoreHtmlChrome(c);
+
+  test('arriving on an HTML surface restores', () => {
+    expect(restore()).toBe(true);
+  });
+
+  test('navigating BETWEEN HTML documents does not', () => {
+    // The regression this guards: following a link re-runs the effect with
+    // isHtmlSurface still true, and a restore there would slam the tools back
+    // to hidden and re-apply the remembered sidebar state mid-session —
+    // exactly the two things a link click must leave alone.
+    expect(restore({ wasHtmlSurface: true })).toBe(false);
+  });
+
+  test('a markdown surface never restores, coming or going', () => {
+    expect(restore({ isHtmlSurface: false })).toBe(false);
+    expect(restore({ isHtmlSurface: false, wasHtmlSurface: true })).toBe(false);
+  });
+
+  test('suppressed sessions (archive, goal setup, folder annotate) never restore', () => {
+    expect(restore({ suppressed: true })).toBe(false);
+  });
+});

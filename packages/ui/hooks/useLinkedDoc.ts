@@ -136,13 +136,19 @@ export interface UseLinkedDocReturn {
   error: string | null;
   /** Whether a fetch is in progress */
   isLoading: boolean;
-  /** Open a linked document by path (saves plan state, fetches doc, swaps) */
-  open: (docPath: string, buildUrl?: (path: string) => string, targetTab?: SidebarTab) => Promise<void>;
+  /** Open a linked document by path (saves plan state, fetches doc, swaps).
+   *  `revealSidebar: false` leaves the sidebar exactly as it was. */
+  open: (
+    docPath: string,
+    buildUrl?: (path: string) => string,
+    targetTab?: SidebarTab,
+    options?: { revealSidebar?: boolean },
+  ) => Promise<void>;
   /** Open an already-loaded linked document without refetching from disk */
   openLoaded: (
     doc: LinkedDocLoadData & { filepath: string },
     targetTab?: SidebarTab,
-    options?: { notifyDocumentLoaded?: boolean },
+    options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean },
   ) => void;
   /** Return to the plan (caches doc annotations, restores plan state) */
   back: () => void;
@@ -281,10 +287,19 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   const activateDocument = useCallback((
     data: LinkedDocLoadData & { filepath: string },
     targetTab?: SidebarTab,
-    options: { snapshotCurrent?: boolean; notifyDocumentLoaded?: boolean } = {},
+    options: {
+      snapshotCurrent?: boolean;
+      notifyDocumentLoaded?: boolean;
+      revealSidebar?: boolean;
+    } = {},
   ) => {
     const snapshotCurrent = options.snapshotCurrent ?? true;
     const notifyDocumentLoaded = options.notifyDocumentLoaded ?? true;
+    // Opening a document reveals the sidebar so its "Viewing / Back to …"
+    // header is in reach. A host whose surface has its own way back (the
+    // raw-HTML header's Back control) passes false, and the sidebar is left
+    // exactly as the user had it — closed stays closed, open stays put.
+    const revealSidebar = options.revealSidebar ?? true;
     if (snapshotCurrent) onBeforeNavigate?.();
 
     // Backlink detection: if a linked doc links back to the source file (e.g.,
@@ -368,7 +383,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       versionInfo: diffBaseline.versionInfo,
     });
     setError(null);
-    sidebar.open(targetTab ?? "toc");
+    if (revealSidebar) sidebar.open(targetTab ?? "toc");
     onDocumentActivated?.(data);
 
     // Re-apply cached annotations after DOM settles
@@ -407,16 +422,22 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
   const openLoaded = useCallback((
     doc: LinkedDocLoadData & { filepath: string },
     targetTab?: SidebarTab,
-    options?: { notifyDocumentLoaded?: boolean },
+    options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean },
   ) => {
     activateDocument(doc, targetTab, {
       snapshotCurrent: true,
       notifyDocumentLoaded: options?.notifyDocumentLoaded,
+      revealSidebar: options?.revealSidebar,
     });
   }, [activateDocument]);
 
   const open = useCallback(
-    async (docPath: string, buildUrl?: (path: string) => string, targetTab?: SidebarTab) => {
+    async (
+      docPath: string,
+      buildUrl?: (path: string) => string,
+      targetTab?: SidebarTab,
+      options?: { revealSidebar?: boolean },
+    ) => {
       onBeforeNavigate?.();
       setIsLoading(true);
       setError(null);
@@ -438,7 +459,10 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
           setError("Failed to load document");
           return;
         }
-        activateDocument({ ...data, filepath: data.filepath }, targetTab, { snapshotCurrent: false });
+        activateDocument({ ...data, filepath: data.filepath }, targetTab, {
+          snapshotCurrent: false,
+          revealSidebar: options?.revealSidebar,
+        });
       } catch {
         setError("Failed to connect to server");
       } finally {

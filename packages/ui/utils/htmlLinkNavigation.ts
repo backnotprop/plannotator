@@ -18,8 +18,13 @@ import { hasLinkedDocExtension } from "./markdownExtensions";
 export const MAX_HTML_LINK_HREF_LENGTH = 2048;
 
 export type HtmlLinkIntent =
-	/** A local document to open in the linked-doc overlay. `path` is absolute. */
-	| { kind: "document"; path: string; hash: string }
+	/**
+	 * A local document to open in the linked-doc overlay. `path` is absolute.
+	 * `rendersHtml` is whether it will open as another raw-HTML surface rather
+	 * than as markdown, which is what decides whether the sidebar is revealed:
+	 * HTML surfaces keep it closed and carry their own Back control.
+	 */
+	| { kind: "document"; path: string; hash: string; rendersHtml: boolean }
 	/** Another origin. Opens in a new tab; the frame never navigates. */
 	| { kind: "external"; url: string }
 	/** A local file Plannotator cannot render as a document (`.pdf`, `.zip`, …). */
@@ -47,6 +52,9 @@ export interface HtmlLinkContext {
 	rootDir?: string | null;
 	/** The Plannotator server's own origin, e.g. `http://localhost:19601`. */
 	serverOrigin: string;
+	/** The session's `--markdown` preference: HTML is Turndowned by `/api/doc`,
+	 *  so an `.html` target renders as markdown rather than as an HTML surface. */
+	convertHtml?: boolean;
 }
 
 /** Control characters never appear in a real href; they are how structure gets smuggled. */
@@ -73,7 +81,7 @@ export function resolveHtmlLinkIntent(
 
 	const rootRelative = raw.startsWith("/");
 	const base = rootRelative ? context.rootDir : context.baseDir;
-	return resolveRelative(raw, base);
+	return resolveRelative(raw, base, context);
 }
 
 function resolveAbsolute(raw: string, context: HtmlLinkContext): HtmlLinkIntent {
@@ -94,12 +102,13 @@ function resolveAbsolute(raw: string, context: HtmlLinkContext): HtmlLinkIntent 
 	// The server's own origin: the author wrote `http://localhost:<port>/x.html`
 	// meaning "the file x.html of this site", so treat it as root-relative.
 	// Left alone it would hit the catch-all and render the app in the frame.
-	return resolveRelative(`${url.pathname}${url.hash}`, context.rootDir);
+	return resolveRelative(`${url.pathname}${url.hash}`, context.rootDir, context);
 }
 
 function resolveRelative(
 	raw: string,
 	baseDir: string | null | undefined,
+	context: HtmlLinkContext,
 ): HtmlLinkIntent {
 	const { path: pathPart, hash } = splitHash(stripQuery(raw));
 	if (!pathPart) return { kind: "ignored", reason: "fragment" };
@@ -116,7 +125,12 @@ function resolveRelative(
 	if (!hasLinkedDocExtension(resolved)) {
 		return { kind: "unsupported", path: resolved, label: basename(resolved) };
 	}
-	return { kind: "document", path: resolved, hash };
+	return {
+		kind: "document",
+		path: resolved,
+		hash,
+		rendersHtml: /\.html?$/i.test(resolved) && !context.convertHtml,
+	};
 }
 
 function stripQuery(value: string): string {

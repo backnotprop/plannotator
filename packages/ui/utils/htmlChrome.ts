@@ -75,6 +75,34 @@ export function resolveHtmlChromeState(
   }
 }
 
+/** Inputs to the restore-on-entry decision (see {@link shouldRestoreHtmlChrome}). */
+export interface HtmlChromeRestoreConditions {
+  /** The surface being rendered now is raw HTML or a live app. */
+  isHtmlSurface: boolean;
+  /** The surface rendered on the previous pass was too. */
+  wasHtmlSurface: boolean;
+  /** This session never restores (archive, goal setup, folder annotate). */
+  suppressed: boolean;
+}
+
+/**
+ * Whether to apply the persisted chrome state, i.e. whether this render is an
+ * ENTRY into an HTML surface.
+ *
+ * The `wasHtmlSurface` term is what keeps navigation between two HTML
+ * documents from re-running the restore: `toolsHidden` defaults to true and a
+ * link click deliberately leaves the sidebar alone, so a re-run mid-session
+ * would flip both back under the user. Leaving an HTML surface for a markdown
+ * one and returning IS an entry, and restores again on purpose — that is what
+ * stops the markdown surface's sidebar state from leaking into the HTML
+ * cookie.
+ */
+export function shouldRestoreHtmlChrome(conditions: HtmlChromeRestoreConditions): boolean {
+  if (!conditions.isHtmlSurface) return false;
+  if (conditions.wasHtmlSurface) return false;
+  return !conditions.suppressed;
+}
+
 export function getHtmlChromeState(): HtmlChromeState {
   return resolveHtmlChromeState(storage.getItem(STORAGE_KEY));
 }

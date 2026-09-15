@@ -65,7 +65,7 @@ import { buildDefaultPrompt, useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { getUIPreferences, type UIPreferences, type PlanWidth } from '@plannotator/ui/utils/uiPreferences';
 import { getEditorMode, saveEditorMode } from '@plannotator/ui/utils/editorMode';
 import { getInputMethod, refreshInputMethodStamp, saveInputMethod } from '@plannotator/ui/utils/inputMethod';
-import { getHtmlChromeState, saveHtmlChromeState } from '@plannotator/ui/utils/htmlChrome';
+import { getHtmlChromeState, saveHtmlChromeState, shouldRestoreHtmlChrome } from '@plannotator/ui/utils/htmlChrome';
 import { useInputMethodSwitch } from '@plannotator/ui/hooks/useInputMethodSwitch';
 import { usePrintMode } from '@plannotator/ui/hooks/usePrintMode';
 import { requestVimDocumentFocus } from '@plannotator/ui/hooks/useVimDocumentFocus';
@@ -1763,7 +1763,11 @@ const App: React.FC = () => {
     annotationHistory,
   ]);
 
-  const handleFileBrowserSelect = React.useCallback(async (absolutePath: string, dirPath: string): Promise<void> => {
+  const handleFileBrowserSelect = React.useCallback(async (
+    absolutePath: string,
+    dirPath: string,
+    selectOptions?: { revealSidebar?: boolean },
+  ): Promise<void> => {
     const normalizedAbsolutePath = normalizeBrowserPath(absolutePath);
     const dirState = fileBrowser.dirs.find(d => d.path === dirPath);
     const normalizedDirPath = normalizeBrowserPath(dirPath);
@@ -1812,22 +1816,27 @@ const App: React.FC = () => {
       // (.yaml, .json, .toml, …) would come back as code-file popout payloads.
       : (path: string) => `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(dirPath)}&doc=1${convertHtml ? '&convert=1' : ''}`;
     fileBrowser.setActiveFile(absolutePath);
-    await linkedDocHook.open(absolutePath, buildUrl, 'files');
+    await linkedDocHook.open(absolutePath, buildUrl, 'files', {
+      revealSidebar: selectOptions?.revealSidebar,
+    });
   }, [editableDocuments, linkedDocHook, fileBrowser, convertHtml, isEditingMarkdown]);
 
   // Route linked doc opens through the correct endpoint based on current context
-  const handleOpenLinkedDoc = React.useCallback((docPath: string) => {
+  const handleOpenLinkedDoc = React.useCallback((
+    docPath: string,
+    openOptions?: { revealSidebar?: boolean },
+  ) => {
     const activeDirState = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
     if (activeDirState?.isVault && fileBrowser.activeDirPath) {
       linkedDocHook.open(docPath, (path) =>
         `/api/reference/obsidian/doc?vaultPath=${encodeURIComponent(fileBrowser.activeDirPath!)}&path=${encodeURIComponent(path)}`
-      );
+      , undefined, openOptions);
     } else if (fileBrowser.activeFile && fileBrowser.activeDirPath) {
       // When viewing a file browser doc, resolve links relative to current file's directory
       const baseDir = linkedDocHook.filepath?.replace(/\/[^/]+$/, '') || fileBrowser.activeDirPath;
       linkedDocHook.open(docPath, (path) =>
         `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(baseDir)}${convertHtml ? '&convert=1' : ''}`
-      );
+      , undefined, openOptions);
     } else {
       // Pass the current file's directory as base for relative path resolution
       const baseDir = linkedDocHook.filepath
@@ -1836,9 +1845,9 @@ const App: React.FC = () => {
       if (baseDir) {
         linkedDocHook.open(docPath, (path) =>
           `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(baseDir)}${convertHtml ? '&convert=1' : ''}`
-        );
+        , undefined, openOptions);
       } else {
-        linkedDocHook.open(docPath);
+        linkedDocHook.open(docPath, undefined, undefined, openOptions);
       }
     }
   }, [fileBrowser.dirs, fileBrowser.activeDirPath, fileBrowser.activeFile, linkedDocHook, imageBaseDir, convertHtml]);
@@ -1853,6 +1862,7 @@ const App: React.FC = () => {
       // server's own origin) mean "the site root this session opened from".
       rootDir: imageBaseDir?.includes('/') ? imageBaseDir : activeDocBaseDir,
       serverOrigin: window.location.origin,
+      convertHtml,
     });
     if (intent.kind === 'external') {
       window.open(intent.url, '_blank', 'noopener,noreferrer');
@@ -1866,16 +1876,24 @@ const App: React.FC = () => {
     }
     if (intent.kind !== 'document') return;
     setHtmlLinkFragment(intent.hash ? { path: intent.path, hash: intent.hash } : null);
+    // Following a link between HTML documents must not pop the sidebar open:
+    // the page owns the viewport on this surface, and the header's own Back
+    // control is the way out, so the sidebar is left exactly as the user had
+    // it. A markdown target keeps the markdown convention (the sidebar's
+    // "Viewing / Back to …" header is its only way back), and `--markdown`
+    // sessions convert HTML to markdown, so they follow that convention too.
+    const openOptions = intent.rendersHtml ? { revealSidebar: false } : undefined;
     // Folder sessions route through the file-browser selection handler so the
     // active file, the sidebar and the linked doc stay in step.
     const activeDirState = fileBrowser.dirs.find(d => d.path === fileBrowser.activeDirPath);
     if (fileBrowser.activeFile && fileBrowser.activeDirPath && !activeDirState?.isVault) {
-      void handleFileBrowserSelect(intent.path, fileBrowser.activeDirPath);
+      void handleFileBrowserSelect(intent.path, fileBrowser.activeDirPath, openOptions);
       return;
     }
-    handleOpenLinkedDoc(intent.path);
+    handleOpenLinkedDoc(intent.path, openOptions);
   }, [
     activeDocBaseDir,
+    convertHtml,
     imageBaseDir,
     fileBrowser.dirs,
     fileBrowser.activeDirPath,
@@ -1883,6 +1901,19 @@ const App: React.FC = () => {
     handleFileBrowserSelect,
     handleOpenLinkedDoc,
   ]);
+
+  // The header Back control for a linked HTML document. It exists because an
+  // HTML surface keeps the sidebar closed (and a link click deliberately
+  // leaves it closed), so the sidebar's "Viewing / Back to …" header is not a
+  // way out anyone can count on. Named after the document it returns to, which
+  // is always the session's root: useLinkedDoc keeps one root snapshot, not a
+  // stack, so back() from any depth lands there.
+  const htmlLinkedDocBackTarget = useMemo(() => {
+    if (!isHtmlSurface || !linkedDocHook.isActive) return null;
+    const root = sourceFilePath;
+    if (!root) return 'Back';
+    return `Back to ${root.split('/').pop() || root}`;
+  }, [isHtmlSurface, linkedDocHook.isActive, sourceFilePath]);
 
   // Wrap linked doc back to also clear file browser active file
   const handleLinkedDocBack = React.useCallback(() => {
@@ -2248,8 +2279,11 @@ const App: React.FC = () => {
     if (wideModeType !== null) return;
     const wasHtml = prevHtmlChromeSurfaceRef.current;
     prevHtmlChromeSurfaceRef.current = isHtmlSurface;
-    if (!isHtmlSurface || wasHtml) return;
-    if (archive.archiveMode || goalSetupMode || annotateSource === 'folder') return;
+    if (!shouldRestoreHtmlChrome({
+      isHtmlSurface,
+      wasHtmlSurface: wasHtml,
+      suppressed: archive.archiveMode || goalSetupMode || annotateSource === 'folder',
+    })) return;
     const chrome = getHtmlChromeState();
     skipNextHtmlChromeSaveRef.current = true;
     if (chrome.sidebarOpen) sidebar.open();
@@ -5562,6 +5596,17 @@ const App: React.FC = () => {
               onSelect: handleEditExitClick,
             }]
           : []),
+        // The header Back control is desktop-only too, and an HTML linked
+        // document opens with the sidebar untouched, so the compact shell
+        // would otherwise have no way out of one.
+        ...(htmlLinkedDocBackTarget
+          ? [{
+              id: 'linked-doc-back' as const,
+              label: htmlLinkedDocBackTarget,
+              subtitle: 'Leave this document for the one the session opened from',
+              onSelect: handleLinkedDocBack,
+            }]
+          : []),
         // HTML/live surfaces on the compact touch shell: the desktop pen and
         // eye toggles are header-only and hidden here, and Mod+Shift+A is
         // keyboard-only, so without these menu actions a touch user has NO
@@ -5900,6 +5945,8 @@ const App: React.FC = () => {
           canRefreshHtml={htmlRefresh.canRefresh}
           isRefreshingHtml={htmlRefresh.isRefreshing}
           onRefreshHtml={htmlRefresh.refresh}
+          onHtmlLinkedDocBack={htmlLinkedDocBackTarget ? handleLinkedDocBack : undefined}
+          htmlLinkedDocBackDescription={htmlLinkedDocBackTarget ?? undefined}
           compactTouchLayout={isCompactTouchLayout}
           compactNavigatorAvailable={compactNavigatorAvailable}
           compactNavigatorOpen={isCompactNavigatorOpen}
