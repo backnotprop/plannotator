@@ -76,19 +76,12 @@ type CodeReviewOptions = {
 	vcsType?: VcsSelection;
 	useLocal?: boolean;
 	/**
-	 * Inline unified-diff content to review without a repo (static patch mode).
-	 * Mutually exclusive with `prUrl`, local/VCS modes — mirrors the direct CLI's
-	 * `--patch-file` contract. Wins over the caller's cwd/git detection entirely.
-	 */
-	patch?: string;
-	/**
 	 * Path to a unified-diff file to review without a repo — the file is read
 	 * once at call time (resolved relative to the caller's cwd, not ctx.cwd).
+	 * Mutually exclusive with `prUrl` and local/VCS modes. The path doubles as
+	 * the display label in the review header.
 	 */
 	patchFile?: string;
-	/** Display label for a static patch (header + share title); defaults to
-	 * the patchFile path or "inline patch". */
-	patchLabel?: string;
 	/**
 	 * `defaultBranch` / `diffType` came from user CLI flags (`--base` /
 	 * `--diff-type` on /plannotator-review): validate strictly (provider
@@ -597,21 +590,21 @@ async function createCodeReviewBrowserSession(
 				worktreeCleanup = undefined;
 			}
 		}
-	} else if (options.patch !== undefined || options.patchFile !== undefined) {
+	} else if (options.patchFile !== undefined) {
 		// --- Static Patch Mode ---
 		// Caller-supplied unified diff, reviewed without any repository: the
 		// server serves rawPatch as-is, workspace undefined, gitContext undefined,
 		// diffType "static-patch" — identical to the direct CLI's --patch-file
-		// path. No refresh: there is no live tree to recomputed against; the
+		// path. No refresh: there is no live tree to recompute against; the
 		// initial patch is the session's whole content.
 		if (options.prUrl) {
-			throw new Error("patch/patchFile cannot be combined with prUrl");
+			throw new Error("--patch-file cannot be combined with a PR/MR URL");
 		}
-		rawPatch = options.patch ?? readFileSync(resolve(options.cwd ?? ctx.cwd, options.patchFile!), "utf-8");
+		rawPatch = readFileSync(resolve(options.cwd ?? ctx.cwd, options.patchFile), "utf-8");
 		if (!rawPatch.trim()) {
 			throw new Error("Static patch review requires non-empty unified-diff content.");
 		}
-		gitRef = options.patchLabel ?? options.patchFile ?? "inline patch";
+		gitRef = options.patchFile;
 		diffType = "static-patch";
 	} else {
 		// --- Local Review Mode ---

@@ -689,15 +689,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					ctx.ui.notify(`Plannotator: ${reviewArgs.errors.join("; ")}`, "error");
 					return;
 				}
-				if (reviewArgs.patchFile && reviewArgs.prUrl) {
-					ctx.ui.notify("--patch-file cannot be combined with a PR/MR URL", "error");
-					return;
-				}
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
-					// --patch-file: static patch mode — read at session open,
-					// resolved against the session cwd (fs resolve in
-					// createCodeReviewBrowserSession).
 					patchFile: reviewArgs.patchFile,
 					vcsType: reviewArgs.vcsType,
 					useLocal: reviewArgs.useLocal,

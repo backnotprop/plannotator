@@ -55,6 +55,9 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   const positional: string[] = [];
 
   let patchFile: string | undefined;
+  // --local conflicts with --patch-file only when the user typed it: its
+  // value defaults to true, so check the flag's presence, not the value.
+  let localFlagSeen = false;
 
   // Index-based so value-taking flags consume their value token before the
   // positional collector sees it — otherwise `--base main <PR_URL>` would put
@@ -84,6 +87,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       }
       case "--local":
         useLocal = true;
+        localFlagSeen = true;
         break;
       case "--no-local":
         useLocal = false;
@@ -146,6 +150,18 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   }
 
   const target = positional[0];
+  // Static patch mode wins over VCS detection entirely, so every VCS/PR
+  // selector combined with it is a usage error — fail loudly in one place
+  // rather than silently ignoring the flag in each runtime.
+  if (patchFile !== undefined) {
+    if (target && isReviewUrl(target)) {
+      errors.push("--patch-file cannot be combined with a PR/MR URL");
+    }
+    if (base) errors.push("--patch-file cannot be combined with --base");
+    if (diffType) errors.push("--patch-file cannot be combined with --diff-type");
+    if (vcsType) errors.push("--patch-file cannot be combined with --git/--gitbutler");
+    if (localFlagSeen) errors.push("--patch-file cannot be combined with --local");
+  }
   return {
     prUrl: target && isReviewUrl(target) ? target : undefined,
     patchFile,

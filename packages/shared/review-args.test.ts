@@ -184,6 +184,20 @@ describe("parseReviewArgs", () => {
     expect(result.errors).toEqual([]);
   });
 
+  test("rejects patch file combined with VCS/PR selectors", () => {
+    // given
+    const withPrUrl = ["https://github.com/acme/repo/pull/12", "--patch-file", "reading.diff"];
+    const withBase = ["--patch-file", "reading.diff", "--base", "main"];
+    const withDiffType = ["--patch-file", "reading.diff", "--diff-type", "staged"];
+    const withProvider = ["--patch-file", "reading.diff", "--git"];
+
+    // when / then
+    expect(parseReviewArgs(withPrUrl).errors).toContain("--patch-file cannot be combined with a PR/MR URL");
+    expect(parseReviewArgs(withBase).errors).toContain("--patch-file cannot be combined with --base");
+    expect(parseReviewArgs(withDiffType).errors).toContain("--patch-file cannot be combined with --diff-type");
+    expect(parseReviewArgs(withProvider).errors).toContain("--patch-file cannot be combined with --git/--gitbutler");
+  });
+
   test("rejects a missing or duplicate patch file", () => {
     // given
     const missingPath = ["--patch-file"];

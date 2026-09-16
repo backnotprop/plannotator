@@ -213,13 +213,12 @@ Supported actions and payloads:
 
 - `plan-review`: `{ planContent, planFilePath? }`
 - `review-status`: `{ reviewId }`
-- `code-review`: `{ cwd?, defaultBranch?, diffType?, vcsType?, useLocal?, prUrl?, patch?, patchFile?, patchLabel? }`
+- `code-review`: `{ cwd?, defaultBranch?, diffType?, vcsType?, useLocal?, prUrl?, patchFile? }`
 
-  Pass `patch` (inline unified diff) or `patchFile` (path read at request time,
-  resolved against `cwd`) to review a caller-supplied patch without a local
-  repository — the review opens in static-patch mode with no file-system
-  affordances that would need the worktree. `patchLabel` sets the header
-  label. `patch`/`patchFile` are mutually exclusive with `prUrl`.
+  Pass `patchFile` (path read at request time, resolved against `cwd`) to
+  review a caller-supplied patch without a local repository — the review opens
+  in static-patch mode with no file-system affordances that would need the
+  worktree. `patchFile` is mutually exclusive with `prUrl`.
 - `annotate`: `{ filePath, markdown?, mode?, folderPath? }`
 - `annotate-last`: `{ markdown? }`
 - `archive`: `{ customPlanPath? }`

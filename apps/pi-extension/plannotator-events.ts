@@ -171,14 +171,10 @@ export interface PlannotatorCodeReviewPayload {
 	useLocal?: boolean;
 	cwd?: string;
 	prUrl?: string;
-	/** Inline unified-diff content — static patch mode (no repo required).
-	 * Mutually exclusive with `prUrl`. */
-	patch?: string;
-	/** Path to a unified-diff file — static patch mode. Read by the host at
-	 * request time, resolved against payload.cwd (or the session cwd). */
+	/** Path to a unified-diff file — static patch mode (no repo required).
+	 * Mutually exclusive with `prUrl`. Read by the host at request time,
+	 * resolved against payload.cwd (or the session cwd). */
 	patchFile?: string;
-	/** Display label for the static patch view. */
-	patchLabel?: string;
 }
 
 export interface PlannotatorCodeReviewResult {
@@ -384,9 +380,7 @@ export function registerPlannotatorEventListeners(
 						vcsType: request.payload?.vcsType,
 						useLocal: request.payload?.useLocal,
 						prUrl: request.payload?.prUrl,
-						patch: request.payload?.patch,
 						patchFile: request.payload?.patchFile,
-						patchLabel: request.payload?.patchLabel,
 					});
 					request.respond({ status: "handled", result });
 					return;
