@@ -63,6 +63,13 @@ for f in agent-review-message codex-review claude-review review-findings marker-
     > "generated/$f.ts"
 done
 
+# Tailscale serve orchestration is Node-compatible and shared by the Bun CLI
+# and Pi. Its shared parser/runner dependency is vendored flat above.
+printf '// @generated — DO NOT EDIT. Source: packages/server/tailscale-serve.ts\n' \
+  | cat - "../../packages/server/tailscale-serve.ts" \
+  | sed 's|from "@plannotator/shared/tailscale"|from "./tailscale.ts"|' \
+  > "generated/tailscale-serve.ts"
+
 # tour-review lives in packages/server/tour/ — parent-relative imports and the
 # shared tour types package each map to the flat generated/ layout.
 for f in tour-review; do

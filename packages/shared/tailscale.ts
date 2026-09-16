@@ -6,8 +6,9 @@
  *     tailnet host so remote sessions advertise a reachable URL without the
  *     user hand-copying their MagicDNS name into config. Display-only, like
  *     every urlHost value — binding stays governed by PLANNOTATOR_REMOTE.
- *   - `--tailscale` (Bun CLI): parse/compose the `tailscale serve` commands
- *     that publish a loopback-bound session over the tailnet with HTTPS.
+ *   - `--tailscale` (Bun CLI) and `/plannotator-tailscale` (Pi):
+ *     parse/compose the `tailscale serve` commands that publish a
+ *     loopback-bound session over the tailnet with HTTPS.
  *
  * Pure parsers live here so both runtimes (Bun server, Pi extension) share
  * them. The only process-spawning edge is `runTailscale`, which never invokes

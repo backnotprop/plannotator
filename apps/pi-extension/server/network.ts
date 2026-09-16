@@ -11,6 +11,7 @@ import { delimiter, join } from "node:path";
 import { loadConfig, resolveUrlHost, resolveUseGlimpse } from "../generated/config.ts";
 import { parsePortSelection } from "../generated/port-range.ts";
 import { isAutoUrlHost, resolveAutoHostCached } from "../generated/tailscale.ts";
+import { isTailscaleModeEnabled } from "../tailscale-mode.ts";
 
 const DEFAULT_REMOTE_PORT = 19432;
 const LOOPBACK_HOST = "127.0.0.1";
@@ -85,6 +86,9 @@ function getRemoteOverride(): boolean | null {
 }
 
 export function isRemoteSession(): boolean {
+	// Tailnet-published sessions need remote security behavior even though
+	// tailscale serve proxies to a loopback-only listener.
+	if (isTailscaleModeEnabled()) return true;
 	const remoteOverride = getRemoteOverride();
 	if (remoteOverride !== null) {
 		return remoteOverride;
@@ -130,6 +134,11 @@ function getServerPortConfiguration(): {
 		}
 		// Invalid port - fall back silently, caller can check env var themselves
 	}
+	// `tailscale serve` publishes the chosen loopback port, so let the OS pick
+	// a free one unless PLANNOTATOR_PORT explicitly pins it.
+	if (isTailscaleModeEnabled()) {
+		return { ports: [0], portSource: "random", isRange: false };
+	}
 	if (isRemoteSession()) {
 		return {
 			ports: [DEFAULT_REMOTE_PORT],
@@ -149,6 +158,9 @@ export function getServerPort(): {
 }
 
 export function getServerHostname(): string {
+	// Tailscale serves as the network edge; the Plannotator listener itself
+	// must remain loopback-only.
+	if (isTailscaleModeEnabled()) return LOOPBACK_HOST;
 	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
 }
 

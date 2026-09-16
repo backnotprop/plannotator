@@ -3,6 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator from "./index.ts";
+import {
+	isTailscaleModeEnabled,
+	resetTailscaleModeForTests,
+} from "./tailscale-mode.ts";
 
 type Handler = (event: unknown, context: ReturnType<typeof createContext>) => unknown;
 
@@ -21,6 +25,7 @@ function restoreEnv(name: string, value: string | undefined): void {
 }
 
 afterEach(() => {
+	resetTailscaleModeForTests();
 	restoreEnv("HOME", originalHome);
 	restoreEnv("PI_CODING_AGENT_DIR", originalAgentDir);
 
@@ -128,6 +133,20 @@ function createRuntime(initialTools: string[]) {
 		},
 	};
 }
+
+describe("Plannotator Tailscale command", () => {
+	test("enables and disables tailnet publishing without restarting Pi", async () => {
+		const runtime = createRuntime([]);
+		const context = createContext();
+		const command = runtime.commands.get("plannotator-tailscale");
+
+		expect(command).toBeDefined();
+		await command?.handler("", context);
+		expect(isTailscaleModeEnabled()).toBe(true);
+		await command?.handler("off", context);
+		expect(isTailscaleModeEnabled()).toBe(false);
+	});
+});
 
 describe("Plannotator phase tool ownership", () => {
 	test("leaving planning removes only tools Plannotator added", async () => {

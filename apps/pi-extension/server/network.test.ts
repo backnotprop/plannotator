@@ -22,6 +22,10 @@ import {
 	listenOnPort,
 	openBrowser,
 } from "./network.ts";
+import {
+	resetTailscaleModeForTests,
+	setTailscaleModeEnabled,
+} from "../tailscale-mode.ts";
 
 const savedEnv: Record<string, string | undefined> = {};
 const envKeys = [
@@ -42,6 +46,7 @@ function clearEnv() {
 }
 
 afterEach(() => {
+	resetTailscaleModeForTests();
 	for (const key of envKeys) {
 		if (savedEnv[key] !== undefined) {
 			process.env[key] = savedEnv[key];
@@ -100,6 +105,13 @@ describe("pi remote detection", () => {
 		process.env.SSH_TTY = "/dev/pts/0";
 		expect(isRemoteSession()).toBe(true);
 	});
+
+	test("uses remote security behavior when Tailscale mode is enabled", () => {
+		clearEnv();
+		process.env.PLANNOTATOR_REMOTE = "false";
+		setTailscaleModeEnabled(true);
+		expect(isRemoteSession()).toBe(true);
+	});
 });
 
 describe("pi port selection", () => {
@@ -122,6 +134,14 @@ describe("pi port selection", () => {
 		process.env.SSH_TTY = "/dev/pts/0";
 		process.env.PLANNOTATOR_PORT = "9999";
 		expect(getServerPort()).toEqual({ port: 9999, portSource: "env" });
+	});
+
+	test("Tailscale mode keeps the listener loopback-only on a random port", () => {
+		clearEnv();
+		process.env.SSH_CONNECTION = "192.168.1.1 12345 192.168.1.2 22";
+		setTailscaleModeEnabled(true);
+		expect(getServerPort()).toEqual({ port: 0, portSource: "random" });
+		expect(getServerHostname()).toBe("127.0.0.1");
 	});
 
 	test("expands an inclusive port range", () => {

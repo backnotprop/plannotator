@@ -14,6 +14,7 @@
  * - [DONE:n] markers for execution progress tracking
  * - /plannotator-review command for code review
  * - /plannotator-annotate command for markdown annotation
+ * - /plannotator-tailscale command for tailnet browser access
  */
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -75,6 +76,7 @@ import {
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
 import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
+import { isTailscaleModeEnabled, setTailscaleModeEnabled } from "./tailscale-mode.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 
@@ -188,9 +190,9 @@ function safeNotify(
  */
 function sessionOpenedMessage(label: string, url: string): string {
 	if (!isRemoteSession()) return `${label}. You can keep chatting while it runs.`;
-	// With an advertised-URL host override the link is directly reachable
-	// (e.g. over a tailnet), so the port-forwarding advice would be wrong.
-	return isUrlHostOverridden()
+	// A command-enabled Tailscale session and an advertised-URL host override
+	// are directly reachable, so port-forwarding advice would be wrong.
+	return isTailscaleModeEnabled() || isUrlHostOverridden()
 		? `${label} — open ${url} on your device. You can keep chatting while it runs.`
 		: `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`;
 }
@@ -658,6 +660,29 @@ export default function plannotator(pi: ExtensionAPI): void {
 	}
 
 	// ── Commands & Shortcuts ─────────────────────────────────────────────
+
+	pi.registerCommand("plannotator-tailscale", {
+		description: "Enable private Tailscale URLs for new Plannotator browser sessions; pass off to disable",
+		handler: async (args, ctx) => {
+			const action = (args ?? "").trim().toLowerCase();
+			if (action === "status") {
+				ctx.ui.notify(`Plannotator Tailscale mode is ${isTailscaleModeEnabled() ? "enabled" : "disabled"}.`, "info");
+				return;
+			}
+			if (action !== "" && action !== "on" && action !== "off") {
+				ctx.ui.notify("Usage: /plannotator-tailscale [on|off|status]", "error");
+				return;
+			}
+			const enabled = action !== "off";
+			setTailscaleModeEnabled(enabled);
+			ctx.ui.notify(
+				enabled
+					? "Plannotator Tailscale mode enabled. New reviews will print a private URL you can open on another tailnet device."
+					: "Plannotator Tailscale mode disabled for new reviews.",
+				"info",
+			);
+		},
+	});
 
 	pi.registerCommand("plannotator-plan-mode", {
 		description: "Toggle plannotator planning mode",

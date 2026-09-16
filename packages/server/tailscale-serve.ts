@@ -1,5 +1,5 @@
 /**
- * `--tailscale` session publishing (Bun CLI only).
+ * Tailnet session publishing for the Bun CLI and Pi extension.
  *
  * The server stays LOOPBACK-bound — this is not remote mode. `tailscale
  * serve` reverse-proxies an HTTPS tailnet port to 127.0.0.1, so the session

@@ -23,6 +23,7 @@ import {
 } from "./server.ts";
 import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
 import { openBrowser, isRemoteSession } from "./server/network.ts";
+import { publishBrowserServerOverTailscale } from "./tailscale-mode.ts";
 import { detectProjectName } from "./server/project.ts";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.ts";
 import {
@@ -324,7 +325,8 @@ export async function startPlanReviewBrowserSession(
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	}));
 
-	const session = startBrowserDecisionSession(server, ctx, server.waitForDecision, signal);
+	const browserServer = publishBrowserServerOverTailscale(server);
+	const session = startBrowserDecisionSession(browserServer, ctx, server.waitForDecision, signal);
 	server.onDecision(() => {
 		setTimeout(() => session.stop(), 1500);
 	});
@@ -703,7 +705,8 @@ async function createCodeReviewBrowserSession(
 		onCleanup: worktreeCleanup,
 	}));
 
-	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
+	const browserServer = publishBrowserServerOverTailscale(server);
+	return startBrowserDecisionSession(browserServer, ctx, server.waitForDecision);
 }
 
 export async function openMarkdownAnnotation(
@@ -807,7 +810,8 @@ export async function startMarkdownAnnotationSession(
 		project: detectProjectName(),
 	}));
 
-	return startBrowserDecisionSession(server, ctx, server.waitForDecision);
+	const browserServer = publishBrowserServerOverTailscale(server);
+	return startBrowserDecisionSession(browserServer, ctx, server.waitForDecision);
 }
 
 export async function openLastMessageAnnotation(
@@ -865,7 +869,8 @@ export async function openArchiveBrowserAction(
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 	}));
 
-	return openBrowserAndWait(server, ctx, async () => {
+	const browserServer = publishBrowserServerOverTailscale(server);
+	return openBrowserAndWait(browserServer, ctx, async () => {
 		if (server.waitForDone) {
 			await server.waitForDone();
 		}

@@ -40,6 +40,7 @@
     "plannotator-browser-runtime.ts",
     "plannotator-events.ts",
     "server.ts",
+    "tailscale-mode.ts",
     "tool-scope.ts",
     "config.ts",
     "plannotator.json",
