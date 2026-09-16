@@ -70,6 +70,18 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain(patch);
   });
 
+  test("uses the inline patch as Ask AI context for static patch reviews", () => {
+    // given
+    const diffType = "static-patch";
+
+    // when
+    const message = buildAgentReviewUserMessage(patch, diffType, undefined, undefined, true);
+
+    // then
+    expect(message).toContain(patch);
+    expect(message).not.toContain("working tree");
+  });
+
   test("treats the inline GitButler patch as authoritative", () => {
     const message = buildAgentReviewUserMessage(
       patch,

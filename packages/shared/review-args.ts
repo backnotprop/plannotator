@@ -26,6 +26,7 @@ export type ReviewOpenDiffType = (typeof REVIEW_OPEN_DIFF_TYPES)[number];
 
 export interface ParsedReviewArgs {
   prUrl?: string;
+  patchFile?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
   /** Compare target the session opens against (`--base <ref>`). */
@@ -53,6 +54,8 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   const errors: string[] = [];
   const positional: string[] = [];
 
+  let patchFile: string | undefined;
+
   // Index-based so value-taking flags consume their value token before the
   // positional collector sees it — otherwise `--base main <PR_URL>` would put
   // "main" in positional[0] and lose the URL.
@@ -65,6 +68,20 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       case "--gitbutler":
         vcsType = "gitbutler";
         break;
+      case "--patch-file": {
+        const value = tokens[i + 1];
+        if (value === undefined || value.startsWith("--")) {
+          errors.push("--patch-file requires a path or -");
+          break;
+        }
+        i++;
+        if (patchFile !== undefined) {
+          errors.push("--patch-file may only be specified once");
+          break;
+        }
+        patchFile = value;
+        break;
+      }
       case "--local":
         useLocal = true;
         break;
@@ -131,6 +148,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   const target = positional[0];
   return {
     prUrl: target && isReviewUrl(target) ? target : undefined,
+    patchFile,
     vcsType,
     useLocal,
     base,

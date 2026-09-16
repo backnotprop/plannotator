@@ -170,4 +170,27 @@ describe("parseReviewArgs", () => {
     expect(parsed.errors).toEqual(["Unknown review option: --bse"]);
     expect(parsed.prUrl).toBe("https://github.com/acme/repo/pull/12");
   });
+
+  test("parses one external patch file", () => {
+    // given
+    const input = ["--patch-file", "reading.diff"];
+
+    // when
+    const result = parseReviewArgs(input);
+
+    // then
+    expect(result.patchFile).toBe("reading.diff");
+    expect(result.prUrl).toBeUndefined();
+    expect(result.errors).toEqual([]);
+  });
+
+  test("rejects a missing or duplicate patch file", () => {
+    // given
+    const missingPath = ["--patch-file"];
+    const duplicatePath = ["--patch-file", "one.diff", "--patch-file", "two.diff"];
+
+    // when / then
+    expect(parseReviewArgs(missingPath).errors).toEqual(["--patch-file requires a path or -"]);
+    expect(parseReviewArgs(duplicatePath).errors).toEqual(["--patch-file may only be specified once"]);
+  });
 });

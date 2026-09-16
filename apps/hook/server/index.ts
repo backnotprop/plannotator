@@ -815,6 +815,10 @@ if (args[0] === "sessions") {
     process.exit(1);
   }
   const urlArg = reviewArgs.prUrl;
+  if (reviewArgs.patchFile && urlArg) {
+    console.error("--patch-file cannot be combined with a PR/MR URL");
+    process.exit(1);
+  }
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
   // Caller-pinned open state: `--base` / `--diff-type` seed this session only
@@ -836,7 +840,18 @@ if (args[0] === "sessions") {
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
   let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
 
-  if (isPRMode) {
+  if (reviewArgs.patchFile) {
+    try {
+      rawPatch = reviewArgs.patchFile === "-"
+        ? await Bun.stdin.text()
+        : await Bun.file(reviewArgs.patchFile).text();
+      gitRef = reviewArgs.patchFile === "-" ? "stdin patch" : reviewArgs.patchFile;
+      initialDiffType = "static-patch";
+    } catch (err) {
+      console.error(`Failed to read patch file: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  } else if (isPRMode) {
     // --- PR Review Mode ---
     // The base comes from the pull request — the open-state flags always
     // error here (validated before any auth check or platform fetch).
@@ -1154,7 +1169,7 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: detectedOrigin,
     project: reviewProject,
-    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
+    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
     initialBaseExplicit: initialBaseFromFlags !== undefined,
