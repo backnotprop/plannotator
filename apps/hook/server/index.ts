@@ -1878,7 +1878,30 @@ if (args[0] === "sessions") {
   let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
   let agentCwd: string | undefined;
 
-  if (isPRMode) {
+  if (reviewArgs.patchFile) {
+    if (urlArg) {
+      console.error("--patch-file cannot be combined with a PR/MR URL");
+      process.exit(1);
+    }
+    if (reviewArgs.patchFile === "-") {
+      // The bridge's stdin carries the input JSON; a stdin patch has no
+      // channel. Direct `plannotator review --patch-file -` remains the way.
+      console.error("--patch-file - (stdin) is not available through the OpenCode bridge; pass a file path");
+      process.exit(1);
+    }
+    try {
+      const bridgeCwd = process.env.PLANNOTATOR_CWD || process.cwd();
+      const patchPath = reviewArgs.patchFile.startsWith("/")
+        ? reviewArgs.patchFile
+        : `${bridgeCwd}/${reviewArgs.patchFile}`;
+      rawPatch = await Bun.file(patchPath).text();
+      gitRef = reviewArgs.patchFile;
+      userDiffType = "static-patch";
+    } catch (err) {
+      console.error(`Failed to read patch file: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  } else if (isPRMode) {
     await resolveCliReviewOpenState(reviewArgs, {
       isPRMode: true,
       isWorkspace: false,

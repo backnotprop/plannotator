@@ -203,7 +203,7 @@ Use these inside `instructions` strings. They render once, when the phase is ent
 
 ### Code review
 
-Run `/plannotator-review` to open your current VCS changes in the code review UI. Annotate specific lines, switch between the modes supported by the detected Git, GitButler, or JJ provider, and submit feedback that gets sent to the agent. Pass `--git` or `--gitbutler` to force that provider; GitButler requires `but` 0.21.0 or newer on `PATH`.
+Run `/plannotator-review` to open your current VCS changes in the code review UI. Annotate specific lines, switch between the modes supported by the detected Git, GitButler, or JJ provider, and submit feedback that gets sent to the agent. Pass `--git` or `--gitbutler` to force that provider; GitButler requires `but` 0.21.0 or newer on `PATH`. Pass `--patch-file <path>` to review a static caller-supplied unified diff without a repository.
 
 ### Shared Plannotator event API
 
@@ -213,7 +213,13 @@ Supported actions and payloads:
 
 - `plan-review`: `{ planContent, planFilePath? }`
 - `review-status`: `{ reviewId }`
-- `code-review`: `{ cwd?, defaultBranch?, diffType? }`
+- `code-review`: `{ cwd?, defaultBranch?, diffType?, vcsType?, useLocal?, prUrl?, patch?, patchFile?, patchLabel? }`
+
+  Pass `patch` (inline unified diff) or `patchFile` (path read at request time,
+  resolved against `cwd`) to review a caller-supplied patch without a local
+  repository — the review opens in static-patch mode with no file-system
+  affordances that would need the worktree. `patchLabel` sets the header
+  label. `patch`/`patchFile` are mutually exclusive with `prUrl`.
 - `annotate`: `{ filePath, markdown?, mode?, folderPath? }`
 - `annotate-last`: `{ markdown? }`
 - `archive`: `{ customPlanPath? }`
