@@ -250,4 +250,69 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
     // the controlled-repaint handler.
     expect('onLineSelectionChange' in pierre().options).toBe(false);
   });
+
+  test('multi-line selection + gutter click on the middle line publishes the full range (#991)', async () => {
+    await mount(false);
+
+    const line2 = document.createElement('div');
+    line2.setAttribute('data-line', '2');
+    line2.setAttribute('data-additions', '');
+    const line4 = document.createElement('div');
+    line4.setAttribute('data-line', '4');
+    line4.setAttribute('data-additions', '');
+    host!.appendChild(line2);
+    host!.appendChild(line4);
+
+    const originalGetSelection = window.getSelection;
+    window.getSelection = () => ({
+      isCollapsed: false,
+      toString: () => 'line 2\nline 3\nline 4',
+      anchorNode: line2,
+      focusNode: line4,
+      removeAllRanges: () => {},
+    } as unknown as Selection);
+
+    try {
+      const diffContainer = host!.querySelector('.p-4') as HTMLElement;
+      diffContainer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+      const middleLineRange: SelectedLineRange = { start: 3, end: 3, side: 'additions' };
+      await act(async () => {
+        pierre().options.onGutterUtilityClick?.(middleLineRange);
+      });
+
+      expect(toolbarSelections).toEqual([{ start: 2, end: 4, side: 'additions' }]);
+    } finally {
+      window.getSelection = originalGetSelection;
+      line2.remove();
+      line4.remove();
+    }
+  });
+
+  test('no-selection gutter click preserves the single-line fallback (#991)', async () => {
+    await mount(false);
+
+    const originalGetSelection = window.getSelection;
+    window.getSelection = () => ({
+      isCollapsed: true,
+      toString: () => '',
+      anchorNode: null,
+      focusNode: null,
+      removeAllRanges: () => {},
+    } as unknown as Selection);
+
+    try {
+      const diffContainer = host!.querySelector('.p-4') as HTMLElement;
+      diffContainer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+      const singleLineRange: SelectedLineRange = { start: 3, end: 3, side: 'additions' };
+      await act(async () => {
+        pierre().options.onGutterUtilityClick?.(singleLineRange);
+      });
+
+      expect(toolbarSelections).toEqual([singleLineRange]);
+    } finally {
+      window.getSelection = originalGetSelection;
+    }
+  });
 });

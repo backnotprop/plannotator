@@ -38,3 +38,30 @@ export function getDiffSelection(root: HTMLElement | null): Selection | null {
   }
   return window.getSelection();
 }
+
+export interface DiffSelectionSnapshot {
+  start: number;
+  end: number;
+  side: 'deletions' | 'additions';
+  host?: HTMLElement | null;
+}
+
+export function snapshotDiffSelection(
+  root: HTMLElement | null,
+  customSelection?: Selection | null,
+): DiffSelectionSnapshot | null {
+  const selection = customSelection ?? getDiffSelection(root);
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return null;
+  const anchorLine = getLineNumberFromNode(selection.anchorNode);
+  const focusLine = getLineNumberFromNode(selection.focusNode);
+  if (anchorLine == null || focusLine == null) return null;
+  const side = getSideFromNode(selection.anchorNode);
+  const rootNode = selection.anchorNode?.getRootNode();
+  const host = rootNode instanceof ShadowRoot && rootNode.host instanceof HTMLElement ? rootNode.host : null;
+  return {
+    start: Math.min(anchorLine, focusLine),
+    end: Math.max(anchorLine, focusLine),
+    side,
+    host,
+  };
+}

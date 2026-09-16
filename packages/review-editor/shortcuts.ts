@@ -104,6 +104,20 @@ export const reviewEditorShortcuts = defineShortcutScope({
       hint: 'Available when staging is supported (not in PR review mode).',
       displayOrder: 20,
     },
+    nextHunk: {
+      description: 'Jump to next changed hunk',
+      bindings: ['N'],
+      section: 'File Actions',
+      hint: 'Jumps to the next changed hunk in the active diff.',
+      displayOrder: 30,
+    },
+    prevHunk: {
+      description: 'Jump to previous changed hunk',
+      bindings: ['P'],
+      section: 'File Actions',
+      hint: 'Jumps to the previous changed hunk in the active diff.',
+      displayOrder: 40,
+    },
   },
 });
 

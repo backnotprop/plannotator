@@ -20,7 +20,7 @@ import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotat
 import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import type { AnnotationScrollTarget } from '../types';
-import { getLineNumberFromNode, getSideFromNode, getDiffSelection } from '../utils/diffSelection';
+import { getLineNumberFromNode, getSideFromNode, getDiffSelection, snapshotDiffSelection, type DiffSelectionSnapshot } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { hashString } from '../utils/hashString';
 import { InlineAnnotation } from './InlineAnnotation';
@@ -38,6 +38,14 @@ import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
+import {
+  findHunkLineElement,
+  getElementScrollTop,
+  getHunkTargetLine,
+  resolveTargetHunkIndex,
+  scrollToHunkElement,
+  type HunkLike,
+} from '../utils/hunkNavigation';
 
 interface PierreDiffContentProps {
   filePath: string;
@@ -302,6 +310,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     useOverlayViewport<HTMLDivElement>();
   const splitSurfaceRef = useRef<HTMLDivElement>(null);
   const diffContentRef = useRef<HTMLDivElement>(null);
+  const selectionSnapshotRef = useRef<DiffSelectionSnapshot | null>(null);
   const [fileCommentAnchor, setFileCommentAnchor] = useState<HTMLElement | null>(null);
 
   // Resizable split pane — only applies when Pierre renders a two-column grid
@@ -688,12 +697,36 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [onLineSelection]);
 
   const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
-    handleLineSelectionInteraction('gutter-comment-action', range);
+    const snapshot = selectionSnapshotRef.current;
+    selectionSnapshotRef.current = null;
+    const effectiveRange: SelectedLineRange = snapshot
+      ? { start: snapshot.start, end: snapshot.end, side: snapshot.side }
+      : range;
+    handleLineSelectionInteraction('gutter-comment-action', effectiveRange);
   }, [handleLineSelectionInteraction]);
 
   useEffect(() => {
     const root = diffContentRef.current;
     if (!root) return;
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
+    const onPointerDown = () => {
+      if (clearTimer) {
+        clearTimeout(clearTimer);
+        clearTimer = null;
+      }
+      selectionSnapshotRef.current = snapshotDiffSelection(root);
+    };
+    const onCancel = () => {
+      selectionSnapshotRef.current = null;
+    };
+    const onPointerUp = () => {
+      clearTimer = setTimeout(() => {
+        selectionSnapshotRef.current = null;
+      }, 200);
+    };
+    root.addEventListener('pointerdown', onPointerDown, true);
+    root.addEventListener('pointercancel', onCancel, true);
+    root.addEventListener('pointerup', onPointerUp, true);
     const handler = () => {
       requestAnimationFrame(() => {
         const selection = getDiffSelection(root);
@@ -712,12 +745,77 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       });
     };
     root.addEventListener('mouseup', handler, true);
-    return () => root.removeEventListener('mouseup', handler, true);
+    return () => {
+      if (clearTimer) clearTimeout(clearTimer);
+      root.removeEventListener('pointerdown', onPointerDown, true);
+      root.removeEventListener('pointercancel', onCancel, true);
+      root.removeEventListener('pointerup', onPointerUp, true);
+      root.removeEventListener('mouseup', handler, true);
+    };
   }, []);
 
   const handlePierreLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
     handleLineSelectionInteraction('range-gesture', range);
   }, [handleLineSelectionInteraction]);
+  const jumpHunk = useCallback((direction: 'next' | 'prev') => {
+    const container = containerRef.current;
+    const hunks = (augmentedDiff?.hunks ?? fileDiff?.hunks ?? []) as HunkLike[];
+    if (!container || hunks.length === 0) return;
+
+    const hunkTops: Array<{ index: number; top: number; el: HTMLElement }> = [];
+    for (let i = 0; i < hunks.length; i++) {
+      const target = getHunkTargetLine(hunks[i]);
+      const el = findHunkLineElement(container, target);
+      if (el) {
+        hunkTops.push({
+          index: i,
+          top: getElementScrollTop(container, el),
+          el,
+        });
+      }
+    }
+
+    if (hunkTops.length === 0) return;
+
+    const targetIdx = resolveTargetHunkIndex(
+      hunkTops.map((h) => h.top),
+      container.scrollTop,
+      direction,
+    );
+
+    if (targetIdx != null) {
+      scrollToHunkElement(hunkTops[targetIdx].el);
+    }
+  }, [augmentedDiff, fileDiff]);
+
+  useEffect(() => {
+    if (collapsed || isFocused === false) return;
+    const handler = (e: KeyboardEvent) => {
+      const el = (e.composedPath?.()[0] ?? e.target) as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable)
+      )
+        return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (e.key === 'n' || e.key === 'N') {
+        const hunks = (augmentedDiff?.hunks ?? fileDiff?.hunks ?? []) as HunkLike[];
+        if (hunks.length === 0) return;
+        e.preventDefault();
+        jumpHunk('next');
+      } else if (e.key === 'p' || e.key === 'P') {
+        const hunks = (augmentedDiff?.hunks ?? fileDiff?.hunks ?? []) as HunkLike[];
+        if (hunks.length === 0) return;
+        e.preventDefault();
+        jumpHunk('prev');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [collapsed, isFocused, jumpHunk, augmentedDiff, fileDiff]);
 
   // Token interaction handlers (code area clicks)
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {

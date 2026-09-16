@@ -132,6 +132,7 @@ jobs:
           packages/review-editor/components/TokenHoverCard.test.tsx
           packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
           packages/review-editor/utils/stitchTokenIdentifier.test.ts
+          packages/review-editor/utils/diffSelection.test.ts
           packages/review-editor/hooks/useAutoViewed.test.tsx
           packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
           packages/review-editor/hooks/useCallFlowInstall.test.tsx

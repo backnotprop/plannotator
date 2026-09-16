@@ -324,6 +324,73 @@ describe('AllFilesCodeView compact-touch line selection', () => {
 
     expect(toolbarSelections).toEqual([range]);
   });
+
+  test.skipIf(!hasDom)('multi-line selection + gutter click on the middle line publishes the full range (#991)', async () => {
+    await mount(false);
+    const { options, item } = getSelectionCallbacks();
+
+    const line4 = document.createElement('div');
+    line4.setAttribute('data-line', '4');
+    line4.setAttribute('data-additions', '');
+    const line8 = document.createElement('div');
+    line8.setAttribute('data-line', '8');
+    line8.setAttribute('data-additions', '');
+    host!.appendChild(line4);
+    host!.appendChild(line8);
+
+    const originalGetSelection = window.getSelection;
+    window.getSelection = () => ({
+      isCollapsed: false,
+      toString: () => 'line 4 through 8',
+      anchorNode: line4,
+      focusNode: line8,
+      removeAllRanges: () => {},
+    } as unknown as Selection);
+
+    try {
+      const scrollContainer = (host!.querySelector('.overflow-y-auto') as HTMLElement) ?? host!;
+      scrollContainer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+      const middleLineRange: SelectedLineRange = { start: 6, end: 6, side: 'additions' };
+      await act(async () => {
+        options.onGutterUtilityClick?.(middleLineRange, { item });
+      });
+
+      expect(toolbarSelections).toEqual([{ start: 4, end: 8, side: 'additions' }]);
+    } finally {
+      window.getSelection = originalGetSelection;
+      line4.remove();
+      line8.remove();
+    }
+  });
+
+  test.skipIf(!hasDom)('no-selection gutter click preserves the single-line fallback (#991)', async () => {
+    await mount(false);
+    const { options, item } = getSelectionCallbacks();
+
+    const originalGetSelection = window.getSelection;
+    window.getSelection = () => ({
+      isCollapsed: true,
+      toString: () => '',
+      anchorNode: null,
+      focusNode: null,
+      removeAllRanges: () => {},
+    } as unknown as Selection);
+
+    try {
+      const scrollContainer = (host!.querySelector('.overflow-y-auto') as HTMLElement) ?? host!;
+      scrollContainer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+
+      const singleLineRange: SelectedLineRange = { start: 6, end: 6, side: 'additions' };
+      await act(async () => {
+        options.onGutterUtilityClick?.(singleLineRange, { item });
+      });
+
+      expect(toolbarSelections).toEqual([singleLineRange]);
+    } finally {
+      window.getSelection = originalGetSelection;
+    }
+  });
 });
 
 describe('AllFilesCodeView readOnly (portable guide host)', () => {

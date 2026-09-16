@@ -27,13 +27,21 @@ import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../worke
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
-import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
+import { getDiffSelection, getLineNumberFromNode, getSideFromNode, snapshotDiffSelection, type DiffSelectionSnapshot } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
 import { hashString } from '../utils/hashString';
 import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
+import {
+  findHunkLineElement,
+  getElementScrollTop,
+  getHunkTargetLine,
+  resolveTargetHunkIndex,
+  scrollToHunkElement,
+  type HunkLike,
+} from '../utils/hunkNavigation';
 import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
@@ -637,6 +645,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useWorkerPoolThemeSync(pierreTheme.syntaxTheme);
   const viewerRef = useRef<CodeViewHandle<DiffAnnotationMetadata> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const selectionSnapshotRef = useRef<DiffSelectionSnapshot | null>(null);
   // State mirror of the scroll container so the leading-content portal can
   // mount once CodeView has rendered it (a plain ref can't trigger that).
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -1570,9 +1579,34 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useEffect(() => {
     const root = scrollRef.current;
     if (!root) return;
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
+    const onPointerDown = () => {
+      if (clearTimer) {
+        clearTimeout(clearTimer);
+        clearTimer = null;
+      }
+      selectionSnapshotRef.current = snapshotDiffSelection(root);
+    };
+    const onCancel = () => {
+      selectionSnapshotRef.current = null;
+    };
+    const onPointerUp = () => {
+      clearTimer = setTimeout(() => {
+        selectionSnapshotRef.current = null;
+      }, 200);
+    };
+    root.addEventListener('pointerdown', onPointerDown, true);
+    root.addEventListener('pointercancel', onCancel, true);
+    root.addEventListener('pointerup', onPointerUp, true);
     const handler = () => handleContentTextSelection();
     root.addEventListener('mouseup', handler, true);
-    return () => root.removeEventListener('mouseup', handler, true);
+    return () => {
+      if (clearTimer) clearTimeout(clearTimer);
+      root.removeEventListener('pointerdown', onPointerDown, true);
+      root.removeEventListener('pointercancel', onCancel, true);
+      root.removeEventListener('pointerup', onPointerUp, true);
+      root.removeEventListener('mouseup', handler, true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileSetKey]);
 
@@ -1970,7 +2004,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   const handleGutterUtilityClick = useStableCallback(
     (range: SelectedLineRange, item: CodeViewItem<DiffAnnotationMetadata>) => {
-      handleLineSelectionInteraction('gutter-comment-action', range, item);
+      const snapshot = selectionSnapshotRef.current;
+      selectionSnapshotRef.current = null;
+      let effectiveRange = range;
+      if (snapshot) {
+        const snapshotItemId = snapshot.host ? nodeToItemIdRef.current.get(snapshot.host) : undefined;
+        if (!snapshot.host || !snapshotItemId || snapshotItemId === item.id) {
+          effectiveRange = { start: snapshot.start, end: snapshot.end, side: snapshot.side };
+        }
+      }
+      handleLineSelectionInteraction('gutter-comment-action', effectiveRange, item);
     },
   );
 
@@ -2241,6 +2284,41 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollTargetAnnotation, filePathToItemId]);
+  const jumpHunk = useStableCallback((direction: 'next' | 'prev') => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const hunkTops: Array<{ top: number; el: HTMLElement; itemId: string }> = [];
+    for (const item of identity.items) {
+      if (item.type !== 'diff' || !item.fileDiff?.hunks || isItemCollapsed(item.id)) continue;
+      for (const hunk of item.fileDiff.hunks as HunkLike[]) {
+        const target = getHunkTargetLine(hunk);
+        const el = findHunkLineElement(container, target);
+        if (el) {
+          hunkTops.push({
+            top: getElementScrollTop(container, el),
+            el,
+            itemId: item.id,
+          });
+        }
+      }
+    }
+
+    if (hunkTops.length === 0) return;
+
+    hunkTops.sort((a, b) => a.top - b.top);
+
+    const targetIdx = resolveTargetHunkIndex(
+      hunkTops.map((h) => h.top),
+      container.scrollTop,
+      direction,
+    );
+
+    if (targetIdx != null) {
+      scrollToHunkElement(hunkTops[targetIdx].el);
+    }
+  });
+
 
   useEffect(() => {
     if (!isActive || readOnly) return;
@@ -2316,6 +2394,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onStage?.(currentPath);
         return;
       }
+      // n / p — jump to next / previous changed hunk.
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        jumpHunk('next');
+        return;
+      }
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        jumpHunk('prev');
+        return;
+      }
+
 
       if (e.key !== '[' && e.key !== ']') return;
       e.preventDefault();
@@ -2346,6 +2436,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     canStageFiles,
     canStagePath,
     onStage,
+    jumpHunk,
   ]);
 
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
