@@ -191,7 +191,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.3",
+      "version": "0.25.4",
       "devDependencies": {
         "typescript": "~5.8.2",
       },
