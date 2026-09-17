@@ -926,8 +926,31 @@ export const BRIDGE_SCRIPT = `(function() {
       var svgGroup = node.closest('g');
       if (svgGroup) node = svgGroup;
     }
+    node = preferInertFrameAt(node, x, y);
     node = promoteTinyTarget(node);
     if (node === document.body || node === document.documentElement) return null;
+    return node;
+  }
+
+  // While frames are pointer-transparent (armed pinpoint, srcdoc sessions),
+  // hit-testing passes THROUGH an embedded document to the container painted
+  // behind it — so a click on an embed would pin its wrapper div. The embed is
+  // what the reviewer is pointing at and what the anchor must name, so a point
+  // inside a frame's own rect resolves to that frame. Bounded to the frames
+  // inside the element already resolved, so it costs nothing on ordinary pages.
+  var FRAME_SELECTOR = 'iframe,frame,embed,object';
+  function framesArePointerInert() {
+    return !LIVE && annotateModeActive && currentInputMethod === 'pinpoint';
+  }
+  function preferInertFrameAt(node, x, y) {
+    if (!framesArePointerInert() || !node.querySelectorAll) return node;
+    if (node.matches && node.matches(FRAME_SELECTOR)) return node;
+    var frames = node.querySelectorAll(FRAME_SELECTOR);
+    for (var i = 0; i < frames.length && i < 64; i++) {
+      var r = frames[i].getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return frames[i];
+    }
     return node;
   }
 

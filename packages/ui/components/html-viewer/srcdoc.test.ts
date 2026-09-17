@@ -1091,6 +1091,43 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  // Consequence of making frames pointer-transparent: hit-testing passes
+  // THROUGH the embed to the container painted behind it, so without the
+  // frame preference an armed click on an embed would pin its wrapper div —
+  // the reviewer's comment would name the wrong element.
+  test("an armed click inside an embed's box pins the frame, not the container behind it", async () => {
+    document.body.innerHTML = '<div class="frame"><iframe title="Prototype"></iframe></div>';
+    const wrapper = document.querySelector<HTMLElement>("div.frame")!;
+    const frame = document.querySelector<HTMLElement>("iframe")!;
+    frame.getBoundingClientRect = () => rectOf(0, 0, 600, 400);
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const messages: Array<Record<string, unknown>> = [];
+    const collect = (event: MessageEvent) => {
+      const data = bridgeMessageData(event);
+      if (data?.type === "plannotator-bridge-selection") messages.push(data);
+    };
+    window.addEventListener("message", collect);
+    wrapper.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.removeEventListener("message", collect);
+
+    expect(messages.length).toBe(1);
+    const context = messages[0]!.context as { tag?: string; path?: string } | undefined;
+    expect(context?.tag).toBe("iframe");
+    expect(context?.path).toContain("> iframe");
+    // The pin box covers the embed, not the wrapper.
+    expect(messages[0]!.rect).toMatchObject({ width: 600, height: 400 });
+
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    document.body.replaceChildren();
+  });
+
   test("deeply nested targets get no anchor instead of a quadratic selector walk", async () => {
     // Each ancestor step costs a document-wide uniqueness query against a
     // growing selector, so unbounded depth freezes the tab on one click
