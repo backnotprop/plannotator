@@ -443,16 +443,28 @@ describe('node shadow', () => {
     expect(spec.shadowAmount).toBe(0);
   });
 
+  /**
+   * Fill / label fingerprint: every variable the mapping produces EXCEPT the
+   * two shadow keys, at amount 0 against the shipped 70. The shadow is a
+   * paint-time filter; if a change to it ever moved a fill or a label colour,
+   * this is what catches it.
+   */
+  const fingerprint = (vars: Record<string, unknown>) =>
+    Object.entries(vars)
+      .filter(([k]) => k !== 'dropShadow' && k !== 'nodeShadow')
+      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+      .sort()
+      .join('\n');
+
   test('the shadow touches nothing but the shadow', () => {
-    const off = buildMermaidThemeVariables(PLANNOTATOR_DARK, 'dark', { shadowAmount: 0 })!.themeVariables;
-    const on = buildMermaidThemeVariables(PLANNOTATOR_DARK, 'dark')!.themeVariables;
-    const fingerprint = (vars: Record<string, unknown>) =>
-      Object.entries(vars)
-        .filter(([k]) => k !== 'dropShadow' && k !== 'nodeShadow')
-        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-        .sort()
-        .join('\n');
-    expect(fingerprint(on)).toBe(fingerprint(off));
+    for (const [tokens, mode] of [
+      [PLANNOTATOR_DARK, 'dark'],
+      [PLANNOTATOR_LIGHT, 'light'],
+    ] as Array<[MermaidThemeTokens, MermaidThemeMode]>) {
+      const off = buildMermaidThemeVariables(tokens, mode, { shadowAmount: 0 })!.themeVariables;
+      const on = buildMermaidThemeVariables(tokens, mode)!.themeVariables;
+      expect(fingerprint(on)).toBe(fingerprint(off));
+    }
   });
 
   test('the cache key carries the amount, and the default key is the old (palette, mode) key', () => {
@@ -493,6 +505,9 @@ describe('node shadow', () => {
         }
         // Never Mermaid's fixed grey: the tint comes from the palette.
         expect(filter as string).not.toContain('185, 185, 185');
+        // Fills and labels are identical with the shadow off: paint only.
+        const off = buildMermaidThemeVariables(tokens, mode, { shadowAmount: 0 })!.themeVariables;
+        expect(fingerprint(spec.themeVariables)).toBe(fingerprint(off));
       });
     }
   }
