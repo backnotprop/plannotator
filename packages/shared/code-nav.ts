@@ -130,20 +130,40 @@ export interface CodeNavHoverResponse {
 // Constants
 // ---------------------------------------------------------------------------
 
-const CODE_NAV_IGNORED_GLOBS = [
+/**
+ * Directory exclusions are split in two (#1558).
+ *
+ * A ripgrep glob with no slash matches a path SEGMENT at any depth, so
+ * `--glob !vendor` prunes every directory named `vendor` anywhere in the tree
+ * — including a first-party Java package such as
+ * `src/main/java/com/example/vendor/app/`, whose symbols then resolve to
+ * "No results". The same trap applies to `target` (Maven's build dir, but also
+ * an ordinary package/module name) and to `build` / `dist` / `coverage`, which
+ * are common nested directories in monorepos and in source trees alike.
+ *
+ * ALWAYS_IGNORED names can only ever be tool output, so they stay excluded at
+ * any depth. ROOT_ONLY names are ambiguous and are excluded only at the search
+ * root (`--glob !/vendor`, anchored like a gitignore rule); nested copies that
+ * really are build output are already skipped by ripgrep's default .gitignore
+ * handling.
+ */
+const CODE_NAV_ALWAYS_IGNORED_DIRS = [
   "node_modules",
   ".git",
-  "dist",
-  "build",
   ".next",
   "__pycache__",
   ".turbo",
   ".cache",
-  "target",
-  "vendor",
-  "coverage",
   ".venv",
   ".pytest_cache",
+];
+
+const CODE_NAV_ROOT_ONLY_IGNORED_DIRS = [
+  "vendor",
+  "target",
+  "build",
+  "dist",
+  "coverage",
 ];
 
 const RG_TYPE_MAP: Record<string, string> = {
@@ -261,7 +281,22 @@ function isTestFile(filePath: string): boolean {
 // rg argument construction
 // ---------------------------------------------------------------------------
 
-export function buildRgArgs(symbol: string, language?: string): string[] {
+/** Path segments of a repo-relative file path, `/` and `\` alike. */
+function pathSegments(filePath: string): Set<string> {
+  return new Set(filePath.split(/[/\\]/).filter(Boolean));
+}
+
+export function buildRgArgs(
+  symbol: string,
+  language?: string,
+  /**
+   * Repo-relative path the request originated from. Belt and braces for
+   * #1558: a segment the origin file itself lives under is never excluded for
+   * that request, so a symbol in a changed file can always find its own
+   * siblings even if the directory name looks like tool output.
+   */
+  originFilePath?: string,
+): string[] {
   const args: string[] = [
     "--json",
     "--line-number",
@@ -273,8 +308,20 @@ export function buildRgArgs(symbol: string, language?: string): string[] {
     "--no-messages",
   ];
 
-  for (const dir of CODE_NAV_IGNORED_GLOBS) {
+  const originSegments = originFilePath
+    ? pathSegments(originFilePath)
+    : new Set<string>();
+
+  for (const dir of CODE_NAV_ALWAYS_IGNORED_DIRS) {
+    if (originSegments.has(dir)) continue;
     args.push("--glob", `!${dir}`);
+  }
+
+  for (const dir of CODE_NAV_ROOT_ONLY_IGNORED_DIRS) {
+    if (originSegments.has(dir)) continue;
+    // Leading slash anchors the glob to the search root, so only a top-level
+    // `vendor/` (etc.) is pruned — not a same-named package deeper in the tree.
+    args.push("--glob", `!/${dir}`);
   }
 
   if (language) {
@@ -509,7 +556,7 @@ export async function resolveCodeNav(
     };
   }
 
-  const args = buildRgArgs(request.symbol, request.language);
+  const args = buildRgArgs(request.symbol, request.language, request.filePath);
 
   const result = await runtime.runCommand("rg", args, {
     cwd,
