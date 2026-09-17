@@ -24,7 +24,7 @@ Three paths depending on content type. Each has its own references and structure
 
 Always deliver via Plannotator's annotation UI. Do NOT use `open` or `xdg-open`.
 
-For any deliverable that uses Mermaid, render every diagram with Mermaid 11 in both the light
+For any deliverable that uses Mermaid, render every diagram with Mermaid 12 in both the light
 and dark palettes before opening the annotation UI. Rendering is a hard gate: an exception,
 empty SVG, or error output such as `aria-roledescription="error"` or `Syntax error in text`
 means the explainer is not deliverable. Fix the diagram or theme configuration and rerun both

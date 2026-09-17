@@ -42,7 +42,7 @@ afterEach(() => {
   if (savedRenderer) setMathRenderer(savedRenderer, savedSource ?? 'host');
 });
 
-/** The exact call Mermaid 11 makes in `renderKatexUnsanitized`. */
+/** The exact call Mermaid makes in `renderKatexUnsanitized` (unchanged 11 -> 12). */
 const MERMAID_OPTIONS = { throwOnError: true, displayMode: true, output: 'mathml' } as const;
 
 describe('default export (what Mermaid receives for `katex`)', () => {

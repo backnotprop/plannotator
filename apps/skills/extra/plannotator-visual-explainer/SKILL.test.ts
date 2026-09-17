@@ -80,7 +80,7 @@ describe("plannotator-visual-explainer Mermaid theming", () => {
     );
   });
 
-  test("renders representative Mermaid 11 diagrams in both palettes", async () => {
+  test("renders representative Mermaid 12 diagrams in both palettes", async () => {
     const palettes = [captureMermaidConfig("light"), captureMermaidConfig("dark")];
     const uiPackageDir = join(import.meta.dir, "../../../../packages/ui");
     const renderProbe = String.raw`
@@ -92,8 +92,8 @@ describe("plannotator-visual-explainer Mermaid theming", () => {
         import("mermaid/package.json", { with: { type: "json" } }),
       ]);
 
-      if (!String(mermaidPackage.version).startsWith("11.")) {
-        throw new Error("Expected Mermaid 11, received " + mermaidPackage.version);
+      if (!String(mermaidPackage.version).startsWith("12.")) {
+        throw new Error("Expected Mermaid 12, received " + mermaidPackage.version);
       }
 
       const palettes = JSON.parse(process.env.PLANNOTATOR_MERMAID_PALETTES ?? "[]");
@@ -184,12 +184,12 @@ describe("plannotator-visual-explainer Mermaid theming", () => {
       throw new Error(`Mermaid render probe failed:\n${stderr || stdout}`);
     }
     expect(stdout).toMatch(
-      /Rendered 4 Mermaid 11\.[0-9.]+\.[0-9]+ SVGs without error signatures/,
+      /Rendered 4 Mermaid 12\.[0-9.]+\.[0-9]+ SVGs without error signatures/,
     );
   }, 20_000);
 
   test("keeps Mermaid rendering as a pre-delivery gate", () => {
-    expect(skill).toContain("render every diagram with Mermaid 11");
+    expect(skill).toContain("render every diagram with Mermaid 12");
     expect(skill).toContain('aria-roledescription="error"');
     expect(skill).toContain("Syntax error in text");
     expect(skill).toContain("the explainer is not deliverable");
