@@ -108,6 +108,7 @@ jobs:
           packages/ui/components/MarkdownDiff.frozen.test.tsx
           packages/ui/components/MarkdownEditor.extensions.test.tsx
           packages/ui/components/ThemeProvider.favicon.test.tsx
+          packages/ui/components/MermaidBlock.theme.test.tsx
           packages/ui/components/CommentPopover.skillReferences.test.tsx
           packages/ui/components/SkillReferenceMenu.placement.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts
