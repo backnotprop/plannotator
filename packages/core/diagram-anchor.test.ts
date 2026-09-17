@@ -17,6 +17,7 @@ import {
   buildDiagramAnchor,
   buildDiagramAnchorValue,
   diagramAnchorLocationLine,
+  diagramFirstSourceLine,
   diagramSourceLine,
   diagramTargetName,
   diagramTargetText,
@@ -129,5 +130,49 @@ describe('diagramSourceLine', () => {
     // not a pattern.
     expect(lineMentions('  A.b(1) --> C', 'A.b(1)')).toBe(true);
     expect(lineMentions('  Ab1 --> C', 'A.b(1)')).toBe(false);
+  });
+});
+
+describe('the sequence family and the whole-diagram kind (additive within v: 1)', () => {
+  const source = [
+    'sequenceDiagram',
+    '  participant H as Hook',
+    '  participant S as Server',
+    '  H->>S: plan (stdin JSON)',
+    '  Note over S: stops on decision',
+    '  alt approved',
+    '    S-->>H: allow',
+    '  else denied',
+    '    S--xH: deny',
+    '  end',
+    '',
+  ].join('\n');
+
+  test('sequence ordinals map to the n-th statement of their kind; an actor to the first line that names it', () => {
+    // What regresses: the pane's gutter mark and an agent's grep land on the
+    // wrong message because `msg-2` was looked up as a token, not an ordinal.
+    expect(diagramSourceLine(source, { family: 'sequence', kind: 'edge', id: 'msg-1', label: '' })).toEqual([4, 4]);
+    expect(diagramSourceLine(source, { family: 'sequence', kind: 'edge', id: 'msg-2', label: '' })).toEqual([7, 7]);
+    expect(diagramSourceLine(source, { family: 'sequence', kind: 'edge', id: 'msg-3', label: '' })).toEqual([9, 9]);
+    expect(diagramSourceLine(source, { family: 'sequence', kind: 'edge', id: 'msg-4', label: '' })).toBeNull();
+    expect(diagramSourceLine(source, { family: 'sequence', kind: 'node', id: 'note-1', label: '' })).toEqual([5, 5]);
+    expect(diagramSourceLine(source, { family: 'sequence', kind: 'cluster', id: 'frame-1', label: '' })).toEqual([6, 6]);
+    expect(diagramSourceLine(source, { family: 'sequence', kind: 'node', id: 'S', label: 'Server' })).toEqual([3, 3]);
+  });
+
+  test('a whole-diagram anchor has no id, spans the source, and round-trips', () => {
+    // What regresses: a click that resolves no part does nothing, or the
+    // parser refuses the id-less anchor and the comment lists as unanchored.
+    const whole: DiagramTarget = { family: 'sequence', kind: 'diagram', label: diagramFirstSourceLine(source) };
+    expect(whole.label).toBe('sequenceDiagram');
+    expect(diagramSourceLine(source, whole)).toEqual([1, 10]);
+    const value = buildDiagramAnchorValue(whole, [12, 21]);
+    expect(parseDiagramAnchor(JSON.parse(JSON.stringify(value)))).toEqual(value);
+    expect(diagramAnchorLocationLine(value)).toBe('Diagram (sequence), lines 12–21');
+    expect(diagramTargetName(whole)).toBe('whole diagram');
+    expect(sameTarget(whole, { family: 'other', kind: 'diagram', label: 'pie' })).toBe(true);
+    expect(sameTarget(whole, node)).toBe(false);
+    // A part still needs its id: only the whole-diagram kind may omit it.
+    expect(parseDiagramAnchor({ v: 1, family: 'sequence', kind: 'node', label: 'x' })).toBeNull();
   });
 });

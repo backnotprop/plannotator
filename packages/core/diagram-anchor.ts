@@ -34,11 +34,19 @@ export type DiagramFamily =
   | 'class'
   | 'er'
   | 'requirement'
+  // A sequence diagram. Mermaid gives its parts classes, not ids, so the
+  // ids are ours: an actor is its `name`, a message is `msg-<n>`, a note
+  // `note-<n>`, a loop/alt/opt frame `frame-<n>`, each by document order.
+  | 'sequence'
   | 'other'
   // A Graphviz graph: the id is the DOT node name.
   | 'graphviz';
 
-export type DiagramTargetKind = 'node' | 'edge' | 'cluster';
+/** `diagram` is the WHOLE diagram: no id, the label is the diagram's first
+ * source line and `sourceLine` is the fence's full range. It is what a click
+ * that resolves no part anchors to, so a click never does nothing (gitGraph,
+ * pie, anything a family does not address). Additive within `v: 1`. */
+export type DiagramTargetKind = 'node' | 'edge' | 'cluster' | 'diagram';
 
 /** One addressable part of a rendered diagram. `id` names a node, cluster,
  * class, entity or state; edges carry `from` and `to` where the family
@@ -70,10 +78,11 @@ const FAMILIES: ReadonlySet<string> = new Set<DiagramFamily>([
   'class',
   'er',
   'requirement',
+  'sequence',
   'other',
   'graphviz',
 ]);
-const KINDS: ReadonlySet<string> = new Set<DiagramTargetKind>(['node', 'edge', 'cluster']);
+const KINDS: ReadonlySet<string> = new Set<DiagramTargetKind>(['node', 'edge', 'cluster', 'diagram']);
 
 /** Longest id, from, to or label the parser keeps; a rendered svg never
  * produces more, and the anchor is persisted (drafts, the archive). */
@@ -90,6 +99,7 @@ export const DIAGRAM_ADDITIONAL_TARGETS_KEY = 'diagramAdditionalTargets';
  * id grammar would match by construction, and the render decides. */
 export function sameTarget(a: DiagramTarget, b: DiagramTarget): boolean {
   if (a.kind !== b.kind) return false;
+  if (a.kind === 'diagram') return true;
   if (a.id !== undefined || b.id !== undefined) return a.id === b.id;
   return a.from === b.from && a.to === b.to;
 }
@@ -103,6 +113,7 @@ export function diagramTargetText(target: DiagramTarget): string {
 
 /** The short part name for chips and the composer ("node C", "edge B → C"). */
 export function diagramTargetName(target: DiagramTarget): string {
+  if (target.kind === 'diagram') return 'whole diagram';
   if (target.kind === 'edge') {
     return target.from !== undefined && target.to !== undefined
       ? `edge ${target.from} → ${target.to}`
@@ -117,6 +128,15 @@ export function diagramTargetName(target: DiagramTarget): string {
  * label falls back to its id, and a null `sourceLine` prints no line.
  */
 export function diagramAnchorLocationLine(anchor: DiagramAnchor): string {
+  if (anchor.kind === 'diagram') {
+    // The whole diagram: `Diagram (flowchart), lines 7–12`.
+    let whole = `Diagram (${anchor.family})`;
+    if (anchor.sourceLine !== null) {
+      const [first, last] = anchor.sourceLine;
+      whole += last > first ? `, lines ${first}–${last}` : `, line ${first}`;
+    }
+    return whole;
+  }
   const ref =
     anchor.id !== undefined
       ? anchor.id
@@ -171,11 +191,59 @@ export function lineMentions(line: string, token: string): boolean {
  * draft reads as until it is saved. Mermaid grammar; the Graphviz finder
  * has its own (`subgraph` may sit mid-line there).
  */
+/** A sequence message statement: `A->>B: text`, every arrow Mermaid has
+ * (`->`, `-->`, `->>`, `-->>`, `-x`, `--x`, `-)`, `--)`, `<<->>`, `<<-->>`),
+ * with the optional activation `+` / `-` on the receiver. */
+const SEQUENCE_MESSAGE = /^\s*[^\s:][^:]*?\s*(?:<<)?--?(?:>>|>|x|\))\s*[+-]?\s*[^:]+:/u;
+const SEQUENCE_NOTE = /^\s*note\s+(?:left\s+of|right\s+of|over)\b/iu;
+const SEQUENCE_FRAME = /^\s*(?:loop|alt|opt|par|critical|break|rect)\b/iu;
+
+/** The n-th (1-based) line that matches, as a line range. */
+function nthMatchingLine(lines: readonly string[], pattern: RegExp, n: number): readonly [number, number] | null {
+  let seen = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!pattern.test(lines[i] ?? '')) continue;
+    seen += 1;
+    if (seen === n) return [i + 1, i + 1];
+  }
+  return null;
+}
+
+/** The whole source as a line range (leading and trailing blank lines
+ * excluded); null for an empty source. */
+export function diagramWholeSourceLines(source: string): readonly [number, number] | null {
+  const lines = source.split('\n');
+  let last = lines.length;
+  while (last > 0 && (lines[last - 1] ?? '').trim() === '') last -= 1;
+  let first = 1;
+  while (first <= last && (lines[first - 1] ?? '').trim() === '') first += 1;
+  return last === 0 || first > last ? null : [first, last];
+}
+
+/** The diagram's first non-blank source line: the whole-diagram label. */
+export function diagramFirstSourceLine(source: string): string {
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed !== '') return trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
+  }
+  return '';
+}
+
 export function diagramSourceLine(
   source: string,
   target: DiagramTarget,
 ): readonly [number, number] | null {
+  if (target.kind === 'diagram') return diagramWholeSourceLines(source);
   const lines = source.split('\n');
+  if (target.family === 'sequence' && target.id !== undefined) {
+    // Sequence ids are ordinals by document order, and the statements of a
+    // sequence diagram sit in that same order in the text.
+    const ordinal = /^(msg|note|frame)-(\d+)$/u.exec(target.id);
+    if (ordinal !== null) {
+      const pattern = ordinal[1] === 'msg' ? SEQUENCE_MESSAGE : ordinal[1] === 'note' ? SEQUENCE_NOTE : SEQUENCE_FRAME;
+      return nthMatchingLine(lines, pattern, Number(ordinal[2]));
+    }
+  }
   const matches = (line: string): boolean => {
     if (target.kind === 'edge') {
       if (target.from !== undefined && target.to !== undefined) {
@@ -260,7 +328,7 @@ export function parseDiagramTarget(value: unknown): DiagramTarget | null {
   const id = boundedString(raw['id']);
   const from = boundedString(raw['from']);
   const to = boundedString(raw['to']);
-  if (id === undefined && (from === undefined || to === undefined)) return null;
+  if (kind !== 'diagram' && id === undefined && (from === undefined || to === undefined)) return null;
   const label = boundedString(raw['label']) ?? '';
   return {
     family: family as DiagramFamily,
