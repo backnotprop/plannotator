@@ -11,7 +11,9 @@ import {
 } from '../utils/mermaid';
 import { loadMathRenderer } from '../utils/math';
 import { hasMermaidMath } from '../utils/mermaid-math-slot';
+import { applyMermaidTheme, mermaidThemeKey } from '../utils/mermaidTheme';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
+import { useTheme } from './ThemeProvider';
 
 /** One Retry re-attempts every block whose runtime import failed (see utils/runtimeRetry). */
 const mermaidRetryEpoch = createRuntimeRetryEpoch();
@@ -139,6 +141,14 @@ const MermaidBlockImpl: React.FC<{ block: Block }> = ({ block }) => {
   const [retryToken, setRetryToken] = useState(0);
   const [showSource, setShowSource] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  // The (palette, mode) the diagram must follow: the same resolution the
+  // code fences use (see useFenceTheme). Outside a ThemeProvider the default
+  // context yields the Plannotator dark pair, and with no theme tokens on the
+  // document `applyMermaidTheme` keeps the static config, so a host without
+  // the provider renders exactly as before. A key change re-runs the render
+  // effect below, which is what re-themes an already rendered diagram.
+  const { colorTheme, resolvedMode } = useTheme();
+  const themeKey = mermaidThemeKey(colorTheme, resolvedMode === 'light' ? 'light' : 'dark');
   // A sibling's Retry re-attempts this block too, but only while its own
   // failure was the shared runtime import; a healthy block or a diagram
   // syntax error is left alone.
@@ -238,6 +248,8 @@ const MermaidBlockImpl: React.FC<{ block: Block }> = ({ block }) => {
           }
           if (cancelled) return;
         }
+        // Global initialize, once per (palette, mode) change, before render.
+        applyMermaidTheme(mermaid, themeKey);
         const id = `mermaid-${block.id}`;
         const { svg: renderedSvg } = await mermaid.render(id, block.content);
         if (!cancelled) {
@@ -261,7 +273,7 @@ const MermaidBlockImpl: React.FC<{ block: Block }> = ({ block }) => {
     return () => {
       cancelled = true;
     };
-  }, [block.content, block.id, retryToken]);
+  }, [block.content, block.id, retryToken, themeKey]);
 
   // Reset zoom and pan when content changes
   useEffect(() => {
