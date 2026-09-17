@@ -45,6 +45,18 @@ export const MERMAID_CONFIG: MermaidConfig = {
     clusterBorder: '#475569',
     titleColor: '#f8fafc',
     edgeLabelBackground: '#1e293b',
+    /**
+     * Mermaid 12's neo look shadows every node from a fixed
+     * `drop-shadow(1px 2px 2px rgba(185,185,185,1))` grey, which reads as a
+     * halo. The token-driven mapping replaces it per palette
+     * (`buildMermaidShadow` in `./mermaidTheme`); this static config is what a
+     * host with no theme tokens renders with, so it carries the same
+     * toned-down 0.7 geometry with a fixed colour. The value is what
+     * `buildMermaidShadow(#1e293b, 0.7)` returns for THIS config's own slate
+     * ground, which is dark — hence a light shadow, exactly as Mermaid's own
+     * `insertLookDefs` uses a white flood colour on dark themes.
+     */
+    dropShadow: 'drop-shadow(0.79px 1.58px 1.58px rgba(210, 212, 217, 0.684))',
   },
   flowchart: {
     htmlLabels: true,

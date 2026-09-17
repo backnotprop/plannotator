@@ -19,21 +19,48 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MERMAID_CONFIG } from './mermaid';
-import { contrastRatio, parseCssColor, toHex } from './cssColor';
+import { compositeOver, contrastRatio, parseCssColor, relativeLuminance, toHex, type RgbColor } from './cssColor';
+import { DEFAULT_DIAGRAM_SHADOW, DIAGRAM_SHADOW_OPTIONS } from './diagramShadow';
 import {
+  DEFAULT_MERMAID_SHADOW_AMOUNT,
   MERMAID_LINE_CONTRAST_MIN,
   MERMAID_TEXT_CONTRAST_MIN,
   __resetMermaidThemeForTests,
   applyMermaidTheme,
   buildMermaidConfig,
+  buildMermaidShadow,
   buildMermaidThemeVariables,
   ensureContrast,
+  isDarkBackground,
   mermaidThemeKey,
+  shadowAmountFromKey,
   type MermaidThemeMode,
   type MermaidThemeTokens,
 } from './mermaidTheme';
 
 const HEX = /^#[0-9a-f]{6}$/;
+
+/**
+ * Every shipped palette, both modes. Reads the tokens straight out of the CSS
+ * so a palette added later is swept automatically (by the contrast guard AND
+ * by the shadow sweep below).
+ */
+const themesDir = join(import.meta.dir, '..', 'themes');
+const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith('.css')).sort();
+expect(themeFiles.length).toBeGreaterThan(30);
+
+/** First rule whose selector list names `selector` (some files write `.theme-x,\n.theme-x.light {`). */
+function tokensFromCss(css: string, selector: string): MermaidThemeTokens | undefined {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const rule of stripped.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const selectors = rule[1].split(',').map((sel) => sel.trim());
+    if (!selectors.includes(selector)) continue;
+    const tokens: Record<string, string> = {};
+    for (const m of rule[2].matchAll(/--([a-z-]+)\s*:\s*([^;]+);/g)) tokens[m[1]] = m[2].trim();
+    return tokens as MermaidThemeTokens;
+  }
+  return undefined;
+}
 
 /** The Plannotator base palette, as `themes/plannotator.css` writes it. */
 const PLANNOTATOR_DARK: MermaidThemeTokens = {
@@ -258,27 +285,6 @@ describe('contrast guard', () => {
     expect(ratio(vars, 'nodeBorder', 'background')).toBeGreaterThanOrEqual(1.5);
   });
 
-  /**
-   * Every shipped palette, both modes. Reads the tokens straight out of the
-   * CSS so a palette added later is swept automatically.
-   */
-  const themesDir = join(import.meta.dir, '..', 'themes');
-  const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith('.css')).sort();
-  expect(themeFiles.length).toBeGreaterThan(30);
-
-  /** First rule whose selector list names `selector` (some files write `.theme-x,\n.theme-x.light {`). */
-  function tokensFromCss(css: string, selector: string): MermaidThemeTokens | undefined {
-    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
-    for (const rule of stripped.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
-      const selectors = rule[1].split(',').map((sel) => sel.trim());
-      if (!selectors.includes(selector)) continue;
-      const tokens: Record<string, string> = {};
-      for (const m of rule[2].matchAll(/--([a-z-]+)\s*:\s*([^;]+);/g)) tokens[m[1]] = m[2].trim();
-      return tokens as MermaidThemeTokens;
-    }
-    return undefined;
-  }
-
   const TEXT_PAIRS: Array<[string, string]> = [
     ['primaryTextColor', 'nodeBkg'],
     ['nodeTextColor', 'nodeBkg'],
@@ -384,4 +390,110 @@ describe('applyMermaidTheme', () => {
       __resetMermaidThemeForTests();
     }
   });
+});
+
+/**
+ * Node drop shadow (the `dropShadow` theme variable).
+ *
+ * What regresses if these fail:
+ * - the shipped look changes: Mermaid 12's neo shadow comes back at full
+ *   strength (the grey halo), or disappears entirely;
+ * - the shadow is derived in the wrong polarity, which on a dark page paints a
+ *   black shadow on a near-black ground — a valid filter that renders nothing,
+ *   the exact bug the lab found;
+ * - a shadow amount stops reaching the runtime because the cache key ignores
+ *   it, so the setting silently does nothing until the palette changes;
+ * - the shadow leaks into a fill or a label colour (it is a paint-time filter
+ *   and must touch nothing else).
+ */
+describe('node shadow', () => {
+  /** The `rgba(r, g, b, a)` inside a `drop-shadow(x y blur rgba(...))`. */
+  function shadowColor(filter: string): { color: RgbColor; alpha: number } {
+    const m = /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/u.exec(filter);
+    if (!m) throw new Error(`no rgba in ${filter}`);
+    return {
+      color: { r: Number(m[1]) / 255, g: Number(m[2]) / 255, b: Number(m[3]) / 255, a: 1 },
+      alpha: Number(m[4]),
+    };
+  }
+
+  test('the setting scale and the mapping amount are the same number', () => {
+    expect(DEFAULT_DIAGRAM_SHADOW / 100).toBe(DEFAULT_MERMAID_SHADOW_AMOUNT);
+    expect(DIAGRAM_SHADOW_OPTIONS).toContain(DEFAULT_DIAGRAM_SHADOW);
+  });
+
+  test('amount 1 reproduces Mermaid 12 own geometry, 0.7 is the shipped toning', () => {
+    const ground = parseCssColor('#111318')!;
+    expect(buildMermaidShadow(ground, 1)).toStartWith('drop-shadow(1px 2px 2px ');
+    expect(buildMermaidShadow(ground, 0.7)).toStartWith('drop-shadow(0.79px 1.58px 1.58px ');
+    expect(buildMermaidShadow(ground, 0)).toBe(false);
+    // Out of range is clamped, not trusted.
+    expect(buildMermaidShadow(ground, 4)).toBe(buildMermaidShadow(ground, 1));
+    expect(buildMermaidShadow(ground, -1)).toBe(false);
+  });
+
+  test('a ground the palette could not produce falls back to Mermaid own colour', () => {
+    expect(buildMermaidShadow(undefined, 0.7)).toContain('rgba(185, 185, 185, 1)');
+  });
+
+  test('amount 0 publishes no shadow at all, including the state dots', () => {
+    const spec = buildMermaidThemeVariables(PLANNOTATOR_DARK, 'dark', { shadowAmount: 0 })!;
+    expect(spec.themeVariables.dropShadow).toBe(false);
+    expect(spec.themeVariables.nodeShadow).toBe(false);
+    expect(spec.shadowAmount).toBe(0);
+  });
+
+  test('the shadow touches nothing but the shadow', () => {
+    const off = buildMermaidThemeVariables(PLANNOTATOR_DARK, 'dark', { shadowAmount: 0 })!.themeVariables;
+    const on = buildMermaidThemeVariables(PLANNOTATOR_DARK, 'dark')!.themeVariables;
+    const fingerprint = (vars: Record<string, unknown>) =>
+      Object.entries(vars)
+        .filter(([k]) => k !== 'dropShadow' && k !== 'nodeShadow')
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .sort()
+        .join('\n');
+    expect(fingerprint(on)).toBe(fingerprint(off));
+  });
+
+  test('the cache key carries the amount, and the default key is the old (palette, mode) key', () => {
+    expect(mermaidThemeKey('plannotator', 'dark')).toBe('dark:plannotator');
+    expect(mermaidThemeKey('plannotator', 'dark', DEFAULT_MERMAID_SHADOW_AMOUNT)).toBe('dark:plannotator');
+    expect(mermaidThemeKey('plannotator', 'dark', 0)).not.toBe('dark:plannotator');
+    expect(mermaidThemeKey('plannotator', 'dark', 0)).not.toBe(mermaidThemeKey('plannotator', 'dark', 0.4));
+    expect(shadowAmountFromKey(mermaidThemeKey('plannotator', 'dark', 0.4))).toBe(0.4);
+    expect(shadowAmountFromKey(mermaidThemeKey('plannotator', 'dark'))).toBe(DEFAULT_MERMAID_SHADOW_AMOUNT);
+    // A palette id is never mistaken for an amount.
+    expect(shadowAmountFromKey('light:one-light')).toBe(DEFAULT_MERMAID_SHADOW_AMOUNT);
+  });
+
+  /** Every shipped palette, both modes: a shadow at the default, in the direction that reads. */
+  for (const file of themeFiles) {
+    const css = readFileSync(join(themesDir, file), 'utf8');
+    const id = file.replace(/\.css$/, '');
+    for (const mode of ['dark', 'light'] as MermaidThemeMode[]) {
+      const selector = mode === 'dark' ? `.theme-${id}` : `.theme-${id}.light`;
+      const tokens = tokensFromCss(css, selector);
+      test(`${id} / ${mode}: a default shadow that differs from the ground in the readable direction`, () => {
+        expect(tokens, `${selector} block in ${file}`).toBeDefined();
+        const spec = buildMermaidThemeVariables(tokens, mode)!;
+        expect(spec.shadowAmount).toBe(DEFAULT_MERMAID_SHADOW_AMOUNT);
+        const filter = spec.themeVariables.dropShadow;
+        expect(typeof filter).toBe('string');
+        expect(filter as string).toStartWith('drop-shadow(0.79px 1.58px 1.58px ');
+        const ground = compositeOver(parseCssColor(tokens!.background!)!, { r: 1, g: 1, b: 1, a: 1 });
+        const { color, alpha } = shadowColor(filter as string);
+        const groundL = relativeLuminance(ground);
+        if (isDarkBackground(ground)) {
+          // A shadow on a dark page LIFTS: darker than the ground is invisible.
+          expect(relativeLuminance(color)).toBeGreaterThan(groundL);
+          expect(alpha).toBeCloseTo(0.684, 3);
+        } else {
+          expect(relativeLuminance(color)).toBeLessThan(groundL);
+          expect(alpha).toBeCloseTo(0.46, 3);
+        }
+        // Never Mermaid's fixed grey: the tint comes from the palette.
+        expect(filter as string).not.toContain('185, 185, 185');
+      });
+    }
+  }
 });

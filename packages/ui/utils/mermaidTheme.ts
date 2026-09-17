@@ -24,7 +24,18 @@
  *    Mermaid's colour library does not parse `oklch()`.
  * 3. `applyMermaidTheme(mermaid, key)` is the runtime step `MermaidBlock`
  *    calls before every render: `mermaid.initialize` is global state, so it
- *    runs only when the `(palette, mode)` key changed since the last apply.
+ *    runs only when the `(palette, mode, shadow amount)` key changed since the
+ *    last apply.
+ *
+ * Node shadow: Mermaid 12's neo look paints a drop shadow on every node,
+ * cluster and actor, from its own fixed `rgba(185,185,185,1)` grey at
+ * `1px 2px 2px`. The mapping keeps the look and replaces that one filter:
+ * `themeVariables.dropShadow` is built from the palette's own ground at
+ * `DEFAULT_MERMAID_SHADOW_AMOUNT` (0.7 of Mermaid's geometry), in the polarity
+ * the page reads in — see `buildMermaidShadow`. A host that wants Mermaid's
+ * grey back sets its own `themeVariables.dropShadow` after ours; a host that
+ * wants none passes `{ shadowAmount: 0 }`, which publishes `dropShadow: false`
+ * and the neo rules render `filter: none`.
  *
  * Fallback contract (hosts): when no tokens resolve, the runtime keeps the
  * static `MERMAID_CONFIG` it was initialized with, and nothing is
@@ -106,6 +117,35 @@ export type MermaidThemeTokens = Partial<Record<MermaidThemeTokenName, string>>;
 export interface MermaidThemeSpec {
   theme: 'dark' | 'default';
   themeVariables: Record<string, unknown>;
+  /** The node shadow amount baked into `themeVariables.dropShadow` (0..1). */
+  shadowAmount: number;
+}
+
+/** Options `buildMermaidThemeVariables` accepts beyond the tokens and mode. */
+export interface MermaidThemeOptions {
+  /**
+   * How much node drop shadow to paint, 0..1, where 1 reproduces Mermaid's
+   * own default geometry (`1px 2px 2px`) and 0 means no shadow at all.
+   * Default: `DEFAULT_MERMAID_SHADOW_AMOUNT`.
+   */
+  readonly shadowAmount?: number;
+}
+
+/**
+ * The shipped shadow amount: Mermaid 12's neo look at 70% of its own shadow.
+ * The full-strength default reads as a grey halo around every node on a
+ * Plannotator page; 70 keeps the lift and drops the halo.
+ */
+export const DEFAULT_MERMAID_SHADOW_AMOUNT = 0.7;
+
+/** Mermaid 12's own node shadow, the colour included. Amount 1 reproduces
+ *  this geometry; the colour is ours unless the palette yields nothing. */
+export const MERMAID_DEFAULT_SHADOW_COLOR = 'rgba(185, 185, 185, 1)';
+
+/** Clamp an amount to 0..1 and round it, so it is stable in a cache key. */
+export function clampShadowAmount(amount: number | undefined): number {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) return DEFAULT_MERMAID_SHADOW_AMOUNT;
+  return Math.round(Math.min(1, Math.max(0, amount)) * 1000) / 1000;
 }
 
 /** WCAG minimums the guard enforces. */
@@ -317,6 +357,62 @@ export function isDarkBackground(background: RgbColor): boolean {
   return relativeLuminance(background) < 0.179;
 }
 
+/** `rgba()` from an RgbColor plus an explicit alpha. */
+function rgba(c: RgbColor, alpha: number): string {
+  const ch = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+  return `rgba(${ch(c.r)}, ${ch(c.g)}, ${ch(c.b)}, ${Math.round(alpha * 1000) / 1000})`;
+}
+
+/**
+ * The node drop shadow, as the `drop-shadow(x y blur colour)` string Mermaid's
+ * `dropShadow` theme variable takes, or `false` — its falsy value, which every
+ * `[data-look="neo"] … { filter: … }` rule turns into `filter: none`.
+ *
+ * Geometry scales with the amount over a small floor, so a toned-down shadow
+ * still reads as a lift rather than vanishing: at 1 it is exactly Mermaid's own
+ * `1px 2px 2px`, at 0 there is no shadow at all.
+ *
+ * The COLOUR comes from the palette rather than Mermaid's fixed
+ * `rgba(185,185,185,1)` grey — that grey is the halo that reads as wrong on a
+ * themed page — and its POLARITY follows the page, exactly as Mermaid's own
+ * `insertLookDefs` does (`floodColor = theme.includes('dark') ? '#FFFFFF' :
+ * '#000000'`): on a dark page a shadow's job is to LIFT the node off the
+ * ground, and a black shadow on a near-black ground paints nothing the eye can
+ * see. What is kept from the palette is the tint and the strength, not the
+ * direction:
+ *   - dark page: the ground lifted 82% toward white, alpha 0.18 -> 0.90;
+ *   - light page: the ground darkened 40% toward black, alpha 0.25 -> 0.55.
+ * Each is then asserted to differ from the ground in the READABLE direction,
+ * falling back to plain white or black, so no palette can produce an invisible
+ * shadow; a ground that is not a usable colour at all falls back to Mermaid's
+ * own grey.
+ *
+ * Pure. `ground` is the page's opaque background.
+ */
+export function buildMermaidShadow(ground: RgbColor | undefined, amount: number): string | false {
+  const a = clampShadowAmount(amount);
+  if (a <= 0) return false;
+  const round = (v: number) => Math.round(v * 100) / 100;
+  const geometry = `${round(0.3 + 0.7 * a)}px ${round(0.6 + 1.4 * a)}px ${round(0.6 + 1.4 * a)}px`;
+  const usable =
+    ground !== undefined &&
+    Number.isFinite(ground.r) &&
+    Number.isFinite(ground.g) &&
+    Number.isFinite(ground.b);
+  // Nothing usable from the palette: Mermaid's own colour at our geometry.
+  if (!usable) return `drop-shadow(${geometry} ${MERMAID_DEFAULT_SHADOW_COLOR})`;
+  const dark = isDarkBackground(ground);
+  let colour = dark ? mixOklab(ground, WHITE, 0.82) : mixOklab(ground, BLACK, 0.4);
+  // The dark-page top end is calibrated so amount 1 reads as strongly as
+  // Mermaid's own `rgba(185,185,185,1)` over the same ground — 1 is defined as
+  // "Mermaid's default", so it has to actually look like it.
+  const alpha = dark ? 0.18 + 0.72 * a : 0.25 + 0.3 * a;
+  const groundL = relativeLuminance(ground);
+  if (dark && relativeLuminance(colour) <= groundL) colour = WHITE;
+  if (!dark && relativeLuminance(colour) >= groundL) colour = BLACK;
+  return `drop-shadow(${geometry} ${rgba(colour, alpha)})`;
+}
+
 /**
  * Push a fill's lightness away from `ink` until `ink` reads on it at 4.5:1.
  * Used for the categorical scale, whose single ink is fixed per mode.
@@ -376,10 +472,15 @@ export function buildCategoricalScale(p: Palette, polarity: MermaidThemeMode): R
  * the tokens. Returns `null` when the required tokens are missing or
  * unparsable, which callers treat as "use the static config".
  */
-export function buildMermaidThemeVariables(tokens: MermaidThemeTokens | undefined, mode: MermaidThemeMode): MermaidThemeSpec | null {
+export function buildMermaidThemeVariables(
+  tokens: MermaidThemeTokens | undefined,
+  mode: MermaidThemeMode,
+  options?: MermaidThemeOptions,
+): MermaidThemeSpec | null {
   if (!tokens) return null;
   const p = resolvePalette(tokens);
   if (!p) return null;
+  const shadowAmount = clampShadowAmount(options?.shadowAmount);
 
   // Base theme follows the mode; fill lightness and ink follow the measured page.
   const polarity: MermaidThemeMode = isDarkBackground(p.background) ? 'dark' : 'light';
@@ -428,6 +529,9 @@ export function buildMermaidThemeVariables(tokens: MermaidThemeTokens | undefine
   const scaleLabel = scale.map((c) => toHex(text(scaleInk, c)));
 
   const h = toHex;
+  // The shadow nodes, clusters and actors are painted with. Derived from the
+  // page's own ground, never Mermaid's fixed grey (see buildMermaidShadow).
+  const shadow = buildMermaidShadow(p.background, shadowAmount);
   const vars: Record<string, unknown> = {
     darkMode: mode === 'dark',
     ...(p.fontFamily ? { fontFamily: p.fontFamily } : {}),
@@ -459,6 +563,13 @@ export function buildMermaidThemeVariables(tokens: MermaidThemeTokens | undefine
     errorBkgColor: h(errorBg),
     errorTextColor: h(errorText),
     useGradient: false,
+    // Paint-time only: a filter on the shape, never a fill or a label colour.
+    dropShadow: shadow,
+    // `nodeShadow` gates ONE thing in Mermaid 12: the inline
+    // `filter:url(#…-drop-shadow-small)` a state diagram's small start / end
+    // dots carry, which no theme variable string reaches. Off at amount 0 so
+    // "no shadow" is true of every element.
+    ...(shadow === false ? { nodeShadow: false } : {}),
 
     // Flowchart
     nodeBkg: h(p.card),
@@ -669,7 +780,7 @@ export function buildMermaidThemeVariables(tokens: MermaidThemeTokens | undefine
     vars[`fillType${i}`] = scaleHex[i];
     vars[`venn${i + 1}`] = scaleHex[i];
   }
-  return { theme: mode === 'dark' ? 'dark' : 'default', themeVariables: vars };
+  return { theme: mode === 'dark' ? 'dark' : 'default', themeVariables: vars, shadowAmount };
 }
 
 /** The full Mermaid config for a spec: `MERMAID_CONFIG` with the theme swapped. */
@@ -682,13 +793,31 @@ export function buildMermaidConfig(spec: MermaidThemeSpec | null): MermaidConfig
 // Runtime application (cached by key)
 // ---------------------------------------------------------------------------
 
-/** `mode:palette`, the cache key `applyMermaidTheme` compares. */
-export function mermaidThemeKey(colorTheme: string, mode: MermaidThemeMode): string {
-  return `${mode}:${colorTheme}`;
+/**
+ * `mode:palette`, the cache key `applyMermaidTheme` compares — plus a
+ * `#s<amount>` suffix when the shadow amount is not the shipped default, so a
+ * changed amount re-initializes the runtime. The default amount keeps the key
+ * byte-identical to the `(palette, mode)` pair it always was, which is also
+ * what keeps a host that never names an amount on the same key it had.
+ */
+export function mermaidThemeKey(
+  colorTheme: string,
+  mode: MermaidThemeMode,
+  shadowAmount: number = DEFAULT_MERMAID_SHADOW_AMOUNT,
+): string {
+  const amount = clampShadowAmount(shadowAmount);
+  const base = `${mode}:${colorTheme}`;
+  return amount === DEFAULT_MERMAID_SHADOW_AMOUNT ? base : `${base}#s${amount}`;
 }
 
 function modeFromKey(key: string): MermaidThemeMode {
   return key.startsWith('light:') ? 'light' : 'dark';
+}
+
+/** The amount a key carries, the default when it carries none. */
+export function shadowAmountFromKey(key: string): number {
+  const match = /#s(\d*\.?\d+)$/u.exec(key);
+  return match ? clampShadowAmount(Number(match[1])) : DEFAULT_MERMAID_SHADOW_AMOUNT;
 }
 
 export type MermaidThemeApplyResult = 'unchanged' | 'dynamic' | 'static';
@@ -710,7 +839,9 @@ export function applyMermaidTheme(
   root?: Element | null,
 ): MermaidThemeApplyResult {
   if (appliedRuntime === mermaid && appliedKey === key) return 'unchanged';
-  const spec = buildMermaidThemeVariables(readThemeTokens(root), modeFromKey(key));
+  const spec = buildMermaidThemeVariables(readThemeTokens(root), modeFromKey(key), {
+    shadowAmount: shadowAmountFromKey(key),
+  });
   const sameRuntime = appliedRuntime === mermaid;
   appliedRuntime = mermaid;
   appliedKey = key;
