@@ -1,6 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildRgArgs,
+  resolveCodeNav,
   buildSignature,
   classifyMatch,
   classifyMatchDetailed,
@@ -962,5 +966,141 @@ describe("resolveCodeNavHover", () => {
     expect(result.references).toEqual([]);
     expect(result.referenceCount).toBe(0);
     resetRgCache();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Directory exclusions (#1558)
+// ---------------------------------------------------------------------------
+
+describe("buildRgArgs directory exclusions (#1558)", () => {
+  test("always-ignored names are excluded at any depth (unanchored glob)", () => {
+    const args = buildRgArgs("x");
+    expect(args).toContain("!node_modules");
+    expect(args).not.toContain("!/node_modules");
+  });
+
+  test("ambiguous names are excluded only at the search root (anchored glob)", () => {
+    const args = buildRgArgs("x");
+    for (const dir of ["vendor", "target", "build", "dist", "coverage"]) {
+      expect(args).toContain(`!/${dir}`);
+      expect(args).not.toContain(`!${dir}`);
+    }
+  });
+
+  test("a segment the origin file lives under is not excluded for that request", () => {
+    const args = buildRgArgs(
+      "fetchContent",
+      "java",
+      "src/main/java/com/example/vendor/app/ExampleService.java",
+    );
+    expect(args).not.toContain("!/vendor");
+    // Unrelated exclusions are untouched.
+    expect(args).toContain("!node_modules");
+    expect(args).toContain("!/target");
+  });
+
+  test("the origin-file rule also lifts an always-ignored segment", () => {
+    const args = buildRgArgs("x", undefined, "packages/node_modules/dep/index.js");
+    expect(args).not.toContain("!node_modules");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real-ripgrep exclusion behavior (#1558)
+// ---------------------------------------------------------------------------
+
+const RG_PATH = Bun.which("rg");
+const describeRg = RG_PATH ? describe : describe.skip;
+
+describeRg("resolveCodeNav against real ripgrep (#1558)", () => {
+  const realRuntime: CodeNavRuntime = {
+    async runCommand(command, args, options) {
+      const proc = Bun.spawn([command, ...args], {
+        cwd: options?.cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      return { stdout, stderr, exitCode: await proc.exited };
+    },
+  };
+
+  let root = "";
+
+  const javaSource = (className: string) =>
+    [
+      `public class ${className} {`,
+      `    public String fetchContent() { return "example"; }`,
+      "}",
+      "",
+    ].join("\n");
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "plannotator-code-nav-"));
+    // First-party Java package whose path contains a `vendor` segment.
+    await Bun.write(
+      `${root}/src/main/java/com/example/vendor/app/ExampleService.java`,
+      javaSource("ExampleService"),
+    );
+    // Genuine third-party tree at the repo root.
+    await Bun.write(
+      `${root}/vendor/third_party/Vendored.java`,
+      javaSource("Vendored"),
+    );
+    // Dependency output nested below the root.
+    await Bun.write(
+      `${root}/src/app/node_modules/dep/Dep.java`,
+      javaSource("Dep"),
+    );
+  });
+
+  afterAll(async () => {
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  const resolve = (filePath: string) => {
+    resetRgCache();
+    return resolveCodeNav(
+      realRuntime,
+      {
+        symbol: "fetchContent",
+        filePath,
+        line: 1,
+        charStart: 0,
+        side: "new",
+        language: "java",
+      },
+      root,
+      [],
+    );
+  };
+
+  const paths = (result: Awaited<ReturnType<typeof resolve>>) =>
+    [...result.definitions, ...result.references].map((l) => l.filePath);
+
+  test("finds a symbol in a Java package containing a `vendor` segment", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(
+      found.some((p) => p.includes("com/example/vendor/app/ExampleService.java")),
+    ).toBe(true);
+  });
+
+  test("a root-level vendor/ directory is still excluded", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(found.some((p) => p.includes("vendor/third_party/"))).toBe(false);
+  });
+
+  test("node_modules is excluded at any depth", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(found.some((p) => p.includes("node_modules"))).toBe(false);
+  });
+
+  test("a request from inside an excluded segment can find its own siblings", async () => {
+    const found = paths(await resolve("src/app/node_modules/dep/Caller.java"));
+    expect(found.some((p) => p.includes("node_modules/dep/Dep.java"))).toBe(true);
   });
 });

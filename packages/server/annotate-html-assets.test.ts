@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHtmlAssetRegistry, inlineHtmlLocalAssets } from "./html-assets";
+import { createHtmlAssetRegistry, framedDocumentNotFound, inlineHtmlLocalAssets } from "./html-assets";
 
 describe("annotate raw HTML assets", () => {
   test("rewrites raw HTML support assets and serves them from the source directory", async () => {
@@ -103,5 +103,135 @@ describe("annotate raw HTML assets", () => {
     expect(shareHtml).not.toContain("base64");
     expect(Buffer.from(shareHtml).toString("utf-8")).not.toContain("SECRET_OUTSIDE_CONTENT");
     expect(shareHtml).not.toContain(Buffer.from("SECRET_OUTSIDE_CONTENT").toString("base64"));
+  });
+});
+
+describe("annotate embedded local documents", () => {
+  // realpath: containment realpaths the root but keeps a MISSING target's
+  // lexical path, which on macOS's symlinked tmpdir would never match — the
+  // "file is absent" cases would read as "escapes the root".
+  function site(label: string): string {
+    return realpathSync(mkdtempSync(join(tmpdir(), `plannotator-html-embed-${label}-`)));
+  }
+
+  function registerPage(dir: string, html: string) {
+    const htmlPath = join(dir, "page.html");
+    writeFileSync(htmlPath, html, "utf-8");
+    const assets = createHtmlAssetRegistry();
+    const rewritten = assets.rewriteHtml(html, htmlPath);
+    const base = rewritten.match(/<base href="([^"]+)"/)?.[1];
+    return { assets, rewritten, base: base! };
+  }
+
+  const get = (assets: ReturnType<typeof createHtmlAssetRegistry>, path: string, headers?: HeadersInit) => {
+    const url = new URL(path, "http://localhost");
+    return assets.handle(new Request(String(url), { headers }), url);
+  };
+
+  // The document is a srcdoc with no URL of its own, so relative resolution —
+  // including a src a script assigns from data-src at runtime — only reaches
+  // the right directory because of the <base href> the rewrite installs.
+  test("anchors the served page at its own asset directory and serves sibling documents from it", async () => {
+    const dir = site("serve");
+    writeFileSync(join(dir, "embed.html"), "<html><body>EMBEDDED_SIBLING</body></html>", "utf-8");
+    const { assets, base } = registerPage(
+      dir,
+      '<!doctype html><html><head></head><body><iframe data-src="embed.html"></iframe></body></html>',
+    );
+    expect(base).toMatch(/^\/api\/html-assets\/[0-9a-f]{16}\/$/);
+
+    const response = await get(assets, `${base}embed.html?step=result`, { "sec-fetch-dest": "iframe" });
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toContain("text/html");
+    // Defense in depth for a reviewer who opens the asset URL in a top-level
+    // tab: no allow-same-origin means an opaque origin there too.
+    expect(response?.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
+    expect(response?.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+    expect(response?.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await response?.text()).toContain("EMBEDDED_SIBLING");
+  });
+
+  test("keeps a document in a subdirectory inside the token's root and lets it reach ../ assets", async () => {
+    const dir = site("nested");
+    mkdirSync(join(dir, "sub"));
+    writeFileSync(join(dir, "sub", "deep.html"), "<html><body>DEEP</body></html>", "utf-8");
+    writeFileSync(join(dir, "shared.css"), "body{color:red}", "utf-8");
+    const { assets, base } = registerPage(dir, '<html><head></head><body><iframe src="sub/deep.html"></iframe></body></html>');
+
+    expect((await get(assets, `${base}sub/deep.html`))?.status).toBe(200);
+    // sub/deep.html loads at <base>/sub/deep.html, so its own ../shared.css
+    // resolves back inside the same token root.
+    expect((await get(assets, `${base}shared.css`))?.status).toBe(200);
+  });
+
+  test("refuses a document that climbs out of the annotated file's directory", async () => {
+    const outer = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-html-embed-escape-")));
+    const dir = join(outer, "site");
+    mkdirSync(dir);
+    writeFileSync(join(outer, "secret.html"), "SECRET_OUTSIDE_CONTENT", "utf-8");
+    const { assets, base } = registerPage(dir, "<html><head></head><body></body></html>");
+
+    // Both spellings: URL parsing collapses the dot segments out of the path
+    // before the route sees them (which is itself a guard), and the route's own
+    // normalizer refuses whatever survives. Neither may reach the file.
+    for (const spelling of ["../secret.html", "%2e%2e/secret.html"]) {
+      const response = await get(assets, `${base}${spelling}`, { "sec-fetch-dest": "iframe" });
+      expect(response?.status).toBeGreaterThanOrEqual(400);
+      expect(await response?.text()).not.toContain("SECRET_OUTSIDE_CONTENT");
+    }
+  });
+
+  test("a missing embed gets a small HTML document naming the file, never JSON", async () => {
+    const dir = site("missing");
+    const { assets, base } = registerPage(dir, "<html><head></head><body></body></html>");
+
+    const response = await get(assets, `${base}gone.html`, { "sec-fetch-dest": "iframe" });
+    expect(response?.status).toBe(404);
+    expect(response?.headers.get("content-type")).toContain("text/html");
+    const body = await response?.text();
+    expect(body).toContain("gone.html");
+    expect(body?.startsWith("<!doctype html>")).toBe(true);
+    expect(body).not.toContain('"error"');
+  });
+
+  test("a non-framed asset miss keeps the JSON error shape", async () => {
+    const dir = site("json");
+    const { assets, base } = registerPage(dir, "<html><head></head><body></body></html>");
+    const response = await get(assets, `${base}missing.css`);
+    expect(response?.headers.get("content-type")).toContain("application/json");
+  });
+
+  test("an embedded document over the 2MB annotate cap is refused", async () => {
+    const dir = site("large");
+    writeFileSync(join(dir, "huge.html"), "x".repeat(2 * 1024 * 1024 + 1), "utf-8");
+    const { assets, base } = registerPage(dir, "<html><head></head><body></body></html>");
+    expect((await get(assets, `${base}huge.html`, { "sec-fetch-dest": "iframe" }))?.status).toBe(413);
+  });
+
+  // The bug this whole change is about: the catch-all rendering the editor app
+  // inside an annotated page's embed.
+  test("framedDocumentNotFound answers a framed request instead of letting the app be served", () => {
+    const url = new URL("http://localhost/prototype-slash.html");
+    const framed = framedDocumentNotFound(new Request(String(url), { headers: { "sec-fetch-dest": "iframe" } }), url);
+    expect(framed?.status).toBe(404);
+    expect(framed?.headers.get("content-type")).toContain("text/html");
+    expect(framedDocumentNotFound(new Request(String(url)), url)).toBeNull();
+    expect(
+      framedDocumentNotFound(new Request(String(url), { headers: { "sec-fetch-dest": "document" } }), url),
+    ).toBeNull();
+  });
+
+  // A portable share carries one file: an embed must render empty rather than
+  // resolve onto the share portal's own catch-all.
+  test("portable share HTML gives embeds a base nothing resolves against", () => {
+    const dir = site("share");
+    const htmlPath = join(dir, "page.html");
+    const html = '<html><head></head><body><iframe data-src="embed.html"></iframe></body></html>';
+    writeFileSync(htmlPath, html, "utf-8");
+    writeFileSync(join(dir, "embed.html"), "<html><body>EMBEDDED_SIBLING</body></html>", "utf-8");
+
+    const shared = inlineHtmlLocalAssets(html, htmlPath);
+    expect(shared).toContain('<base href="about:blank">');
+    expect(shared).not.toContain("EMBEDDED_SIBLING");
   });
 });

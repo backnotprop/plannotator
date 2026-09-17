@@ -80,7 +80,7 @@ describe("plannotator-visual-explainer Mermaid theming", () => {
     );
   });
 
-  test("renders representative Mermaid 11 diagrams in both palettes", async () => {
+  test("renders representative Mermaid 12 diagrams in both palettes", async () => {
     const palettes = [captureMermaidConfig("light"), captureMermaidConfig("dark")];
     const uiPackageDir = join(import.meta.dir, "../../../../packages/ui");
     const renderProbe = String.raw`
@@ -92,8 +92,8 @@ describe("plannotator-visual-explainer Mermaid theming", () => {
         import("mermaid/package.json", { with: { type: "json" } }),
       ]);
 
-      if (!String(mermaidPackage.version).startsWith("11.")) {
-        throw new Error("Expected Mermaid 11, received " + mermaidPackage.version);
+      if (!String(mermaidPackage.version).startsWith("12.")) {
+        throw new Error("Expected Mermaid 12, received " + mermaidPackage.version);
       }
 
       const palettes = JSON.parse(process.env.PLANNOTATOR_MERMAID_PALETTES ?? "[]");
@@ -184,14 +184,50 @@ describe("plannotator-visual-explainer Mermaid theming", () => {
       throw new Error(`Mermaid render probe failed:\n${stderr || stdout}`);
     }
     expect(stdout).toMatch(
-      /Rendered 4 Mermaid 11\.[0-9.]+\.[0-9]+ SVGs without error signatures/,
+      /Rendered 4 Mermaid 12\.[0-9.]+\.[0-9]+ SVGs without error signatures/,
     );
   }, 20_000);
 
   test("keeps Mermaid rendering as a pre-delivery gate", () => {
-    expect(skill).toContain("render every diagram with Mermaid 11");
+    expect(skill).toContain("render every diagram with Mermaid 12");
     expect(skill).toContain('aria-roledescription="error"');
     expect(skill).toContain("Syntax error in text");
     expect(skill).toContain("the explainer is not deliverable");
+  });
+});
+
+const diagramShell = readFileSync(
+  join(import.meta.dir, "references/diagram-shell.md"),
+  "utf-8",
+);
+
+describe("plannotator-visual-explainer diagram shell", () => {
+  test("visual-explainer path points at the shell reference", () => {
+    // Failure caught: the shell reference rotting — the path stops telling the
+    // agent to read it, and hand-rolled shells regress the caption overlap.
+    expect(skill).toContain("references/diagram-shell.md");
+  });
+
+  test("shell reference keeps its sections", () => {
+    for (const heading of ["## Clipping contract", "## Skeleton", "## Self-check"]) {
+      expect(diagramShell).toContain(heading);
+    }
+  });
+
+  test("viewport rule pins the positioned clip container", () => {
+    // Deliberate contract pin (#1546): an absolutely-positioned canvas escapes
+    // a static viewport's overflow, painting the zoomed diagram over the
+    // caption. The reference viewport rule must keep both declarations.
+    const rule = diagramShell.match(/\.mermaid-viewport\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).toMatch(/position:\s*relative/);
+    expect(rule).toMatch(/overflow:\s*hidden/);
+  });
+
+  test("canvas stays absolutely positioned", () => {
+    // Failure caught: the canvas losing absolute positioning, which would put
+    // the zoomed SVG back in flow and push the caption down the page instead
+    // of panning inside the viewport.
+    const rule = diagramShell.match(/\.mermaid-canvas\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).toMatch(/position:\s*absolute/);
   });
 });

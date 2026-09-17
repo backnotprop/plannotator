@@ -53,7 +53,7 @@ import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
-import { createHtmlAssetRegistry } from "./html-assets";
+import { createHtmlAssetRegistry, framedDocumentNotFound } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
 import {
@@ -1259,6 +1259,13 @@ export async function startAnnotateServer(
           if (url.pathname.startsWith("/api/")) {
             return handleApiNotFound(url.pathname);
           }
+
+          // Nested-document guard: a request the browser will render inside a
+          // frame must never receive the editor app. Relative embeds are
+          // anchored at their own directory by the asset-route <base href>, so
+          // anything reaching here names a file that genuinely is not there.
+          const framedMiss = framedDocumentNotFound(req, url);
+          if (framedMiss) return framedMiss;
 
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {

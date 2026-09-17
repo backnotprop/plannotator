@@ -60,6 +60,18 @@ body[data-plannotator-pinpoint-cursor],
 body[data-plannotator-pinpoint-cursor] * {
   cursor: crosshair !important;
 }
+/* Armed pinpoint over an EMBEDDED local document: the embed is one element
+ * from the outer page's point of view, and the bridge is never injected into a
+ * nested frame, so a click inside it would simply vanish into another document.
+ * Making frames transparent to the pointer while armed is what lets that click
+ * pin the <iframe>/<embed>/<object> itself. Interact (Esc, the header pen or
+ * Mod+Shift+A) restores native interaction inside the embed — which is also
+ * the only state a link inside it can be followed from.
+ * Live-app sessions never set this attribute: they annotate a real app whose
+ * own nested frames belong to it. */
+body[data-plannotator-frame-inert] :is(iframe, frame, embed, object) {
+  pointer-events: none !important;
+}
 @media (prefers-reduced-motion: reduce) {
   [data-plannotator-pinpoint-box].pn-pin-enter {
     animation: none;
@@ -381,8 +393,10 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
       document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
+      if (!LIVE) document.body.setAttribute('data-plannotator-frame-inert', '');
     } else {
       document.body.removeAttribute('data-plannotator-pinpoint-cursor');
+      document.body.removeAttribute('data-plannotator-frame-inert');
     }
   }
   var pinpointHover = null;
@@ -912,8 +926,31 @@ export const BRIDGE_SCRIPT = `(function() {
       var svgGroup = node.closest('g');
       if (svgGroup) node = svgGroup;
     }
+    node = preferInertFrameAt(node, x, y);
     node = promoteTinyTarget(node);
     if (node === document.body || node === document.documentElement) return null;
+    return node;
+  }
+
+  // While frames are pointer-transparent (armed pinpoint, srcdoc sessions),
+  // hit-testing passes THROUGH an embedded document to the container painted
+  // behind it — so a click on an embed would pin its wrapper div. The embed is
+  // what the reviewer is pointing at and what the anchor must name, so a point
+  // inside a frame's own rect resolves to that frame. Bounded to the frames
+  // inside the element already resolved, so it costs nothing on ordinary pages.
+  var FRAME_SELECTOR = 'iframe,frame,embed,object';
+  function framesArePointerInert() {
+    return !LIVE && annotateModeActive && currentInputMethod === 'pinpoint';
+  }
+  function preferInertFrameAt(node, x, y) {
+    if (!framesArePointerInert() || !node.querySelectorAll) return node;
+    if (node.matches && node.matches(FRAME_SELECTOR)) return node;
+    var frames = node.querySelectorAll(FRAME_SELECTOR);
+    for (var i = 0; i < frames.length && i < 64; i++) {
+      var r = frames[i].getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return frames[i];
+    }
     return node;
   }
 

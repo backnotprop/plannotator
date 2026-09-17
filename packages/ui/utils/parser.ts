@@ -1,6 +1,7 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
 import { resolveReplyParents } from '@plannotator/core/annotation-threads';
+import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { skillReferenceExportBlock } from './skillReferences';
 
 /**
@@ -1131,6 +1132,9 @@ export interface ElementContextExportOptions {
   /** Emit the live-app route line. The grouped export already prints a
    *  `## Page:` heading, so it passes false; a single copied entry passes true. */
   includeRoute?: boolean;
+  /** Print the identity lines WITHOUT the fenced outline, for model turns where
+   *  the 600-char outline is the expensive part. Default true. */
+  includeOutline?: boolean;
 }
 
 /** The agent-facing element block for a raw-HTML / live-app pinpoint: a
@@ -1141,8 +1145,9 @@ export interface ElementContextExportOptions {
 export const elementContextExportBlock = (ann: any, opts: ElementContextExportOptions = {}): string => {
   const context = ann?.elementContext;
   if (!context || typeof context !== 'object' || typeof context.tag !== 'string') return '';
+  const includeOutline = opts.includeOutline ?? true;
   let block = '';
-  if (typeof context.outline === 'string' && context.outline.trim()) {
+  if (includeOutline && typeof context.outline === 'string' && context.outline.trim()) {
     // Fence at 4 backticks; the boundary already defuses 3+ runs inside the
     // outline, and a 4-run here cannot be closed by anything the page wrote.
     const outline = context.outline.replace(/`{3,}/g, "'''").trim();
@@ -1245,10 +1250,14 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
         output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
         if (ann.quickLabelTip) output += `> ${ann.quickLabelTip}\n`;
       } else {
-        output += `${commentHeadingLine(ann)}\n> ${ann?.text ?? ''}\n`;
+        output += `${commentHeadingLine(ann)}\n${diagramLocationExportLine(ann)}> ${ann?.text ?? ''}\n`;
       }
   }
-  output += elementContextExportBlock(ann, opts);
+  const resolvedOpts: ElementContextExportOptions = {
+    includeRoute: opts.includeRoute ?? true,
+    ...(opts.includeOutline !== undefined ? { includeOutline: opts.includeOutline } : {}),
+  };
+  output += elementContextExportBlock(ann, resolvedOpts);
   output += additionalTargetsExportBlock(ann);
   if (Array.isArray(ann?.images) && ann.images.length > 0) {
     output += `**Attached images:**\n`;
@@ -1257,6 +1266,16 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
     });
   }
   return output;
+};
+
+/** The location line under a comment made on a rendered diagram part:
+ *  `Diagram node Approve? (D), line 4` — the part's own id (what the agent
+ *  greps the fence for) and the DOCUMENT line that declares it. Emits
+ *  nothing for every other annotation, keeping their output byte-identical;
+ *  a malformed anchor (an older or foreign writer) is skipped, never thrown. */
+const diagramLocationExportLine = (ann: any): string => {
+  const anchor = ann?.diagramAnchor === undefined ? null : parseDiagramAnchor(ann.diagramAnchor);
+  return anchor === null ? '' : `${safeInline(diagramAnchorLocationLine(anchor), 600)}\n`;
 };
 
 const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
@@ -1427,11 +1446,13 @@ export const exportAnnotations = (
       case 'COMMENT':
         if (ann.isQuickLabel) {
           output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
+          output += diagramLocationExportLine(ann);
           if (ann.quickLabelTip) {
             output += `> ${ann.quickLabelTip}\n`;
           }
         } else {
           output += `${commentHeadingLine(ann)}\n`;
+          output += diagramLocationExportLine(ann);
           output += `> ${ann.text}\n`;
         }
         break;
@@ -1546,6 +1567,7 @@ export const exportLinkedDocAnnotations = (
 
         case 'COMMENT':
           output += `${commentHeadingLine(ann)}\n`;
+          output += diagramLocationExportLine(ann);
           output += `> ${ann.text}\n`;
           break;
 

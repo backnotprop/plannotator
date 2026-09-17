@@ -1,6 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations, exportAnnotationEntry, resolveReferenceLinks } from "./parser";
+import { parseMarkdownToBlocks, computeListIndices, extractFrontmatter, exportAnnotations, exportAnnotationEntry, elementContextExportBlock, resolveReferenceLinks } from "./parser";
 import { shouldStripFrontmatter } from "@plannotator/core/annotatable";
+import { parseHtmlElementContext as coreParseHtmlElementContext } from "@plannotator/core/html-anchor";
+import { parseHtmlElementContext as uiParseHtmlElementContext } from "../components/html-viewer/useHtmlAnnotation";
 import type { Block } from "../types";
 
 /** Tiny factory for list-item blocks used by computeListIndices tests. */
@@ -2066,5 +2068,47 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
     })]);
     expect(output).toContain('- [Button] "Cancel" — `button.btn.btn-ghost` · `body > main > form.signup > div.actions > button:nth-of-type(2)`\n');
     expect(output).toContain('- [Link] "Learn more"\n');
+  });
+
+  test("exportAnnotationEntry with includeOutline: false omits the outline fence but keeps identity lines", () => {
+    // Failure caught: model turn wasting ~600 chars of context window on the HTML outline
+    // when disabled, or conversely dropping selector/path/role/name identity lines when outline is disabled.
+    const ann = navAnn();
+    // Default includes outline
+    const defaultEntry = exportAnnotationEntry(ann);
+    expect(defaultEntry).toContain("````html\n");
+    expect(defaultEntry).toContain("- **selector** `nav#site-nav`\n");
+    expect(defaultEntry).toContain("- **path** `body > div#root > header.site-header > nav#site-nav`\n");
+    expect(defaultEntry).toContain('- **role** navigation · **name** "Primary" · **component** `data-component=AppNav`\n');
+
+    // With includeOutline: false, outline fence is omitted, identity lines remain
+    const outlineLessEntry = exportAnnotationEntry(ann, { includeOutline: false });
+    expect(outlineLessEntry).not.toContain("````html");
+    expect(outlineLessEntry).not.toContain("<nav id=\"site-nav\"");
+    expect(outlineLessEntry).toContain("- **selector** `nav#site-nav`\n");
+    expect(outlineLessEntry).toContain("- **path** `body > div#root > header.site-header > nav#site-nav`\n");
+    expect(outlineLessEntry).toContain('- **role** navigation · **name** "Primary" · **component** `data-component=AppNav`\n');
+    expect(outlineLessEntry).toContain('- **attrs** `aria-label="Primary" data-component="AppNav"`\n');
+    expect(outlineLessEntry).toContain("- **box** 0,0 1280×64 (viewport 1280×800)\n");
+    expect(outlineLessEntry).toContain('- **near** header.site-header · heading h1 "Acme Analytics"\n');
+  });
+
+  test("elementContextExportBlock respects includeOutline option", () => {
+    // Failure caught: elementContextExportBlock ignoring includeOutline: false when called directly.
+    const ann = navAnn();
+    const blockWithOutline = elementContextExportBlock(ann, { includeOutline: true });
+    expect(blockWithOutline).toContain("````html\n");
+    expect(blockWithOutline).toContain("- **selector** `nav#site-nav`\n");
+
+    const blockWithoutOutline = elementContextExportBlock(ann, { includeOutline: false });
+    expect(blockWithoutOutline).not.toContain("````html");
+    expect(blockWithoutOutline).toContain("- **selector** `nav#site-nav`\n");
+    expect(blockWithoutOutline).toContain("- **path** `body > div#root > header.site-header > nav#site-nav`\n");
+  });
+
+  test("no mirror validator remains: useHtmlAnnotation imports and re-exports core parseHtmlElementContext", () => {
+    // Failure caught: UI keeping a duplicated/diverged hand-mirrored parseHtmlElementContext
+    // instead of importing and re-exporting the authoritative core validator.
+    expect(uiParseHtmlElementContext).toBe(coreParseHtmlElementContext);
   });
 });

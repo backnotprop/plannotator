@@ -17,6 +17,32 @@ describe("external annotations SSE", () => {
   });
 });
 
+describe("POST /api/external-annotations: diagram anchors", () => {
+  test("accepts a valid diagramAnchor on a plan comment and refuses a malformed one", async () => {
+    const handler = createExternalAnnotationHandler("plan");
+    const post = async (body: unknown) => {
+      const url = "http://localhost/api/external-annotations";
+      const res = await handler.handle(
+        new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+        new URL(url),
+      );
+      return { status: res?.status, body: (await res!.json()) as { ids?: string[]; error?: string } };
+    };
+    const anchor = { v: 1, family: "flowchart", kind: "node", id: "D", label: "Approve?", sourceLine: [7, 7] };
+    const ok = await post({ source: "review-bot", type: "COMMENT", text: "rename", originalText: "Approve?", diagramAnchor: anchor });
+    expect(ok.status).toBe(201);
+    const snapshotUrl = "http://localhost/api/external-annotations";
+    const snapshot = (await (await handler.handle(new Request(snapshotUrl), new URL(snapshotUrl)))!.json()) as {
+      annotations: Array<{ id: string; diagramAnchor?: unknown }>;
+    };
+    expect(snapshot.annotations.find((a) => a.id === ok.body.ids?.[0])?.diagramAnchor).toEqual(anchor);
+
+    const bad = await post({ source: "review-bot", type: "COMMENT", text: "rename", originalText: "Approve?", diagramAnchor: { kind: "node", id: "D" } });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toContain("diagramAnchor");
+  });
+});
+
 describe("PATCH /api/external-annotations", () => {
   test("cannot clear or change the source marker (skill-injection guard, reproduced end-to-end)", async () => {
     const handler = createExternalAnnotationHandler("review");

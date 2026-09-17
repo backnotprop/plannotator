@@ -65,10 +65,15 @@ import { getExtraMarkdownExtensions, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
+	HTML_ASSET_DOCUMENT_CSP,
+	HTML_ASSET_ERROR_CSP,
 	HTML_ASSET_ROUTE_PREFIX,
+	buildHtmlAssetErrorDocument,
 	encodeHtmlAssetPath,
-	htmlAssetContentType,
-	normalizeHtmlAssetRoutePath,
+	htmlAssetBaseHref,
+	htmlAssetDocumentHeaders,
+	isFramedFetchDest,
+	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
 import { inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
@@ -118,6 +123,12 @@ function parseOptionalApprovalBody(req: IncomingMessage): Promise<Record<string,
 	});
 }
 
+/** node:http repeats some headers; the asset route only ever wants the first. */
+function firstHeader(value: string | string[] | undefined): string | null {
+	if (Array.isArray(value)) return value[0] ?? null;
+	return value ?? null;
+}
+
 function createHtmlAssetRegistry() {
 	const rootsByToken = new Map<string, string>();
 	const tokensByRoot = new Map<string, string>();
@@ -139,6 +150,9 @@ function createHtmlAssetRegistry() {
 			return rewriteHtmlAssetReferences(
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
+				// Root-relative on purpose: a srcdoc document resolves its own
+				// <base href> against the PARENT's URL, which is this server.
+				{ baseHref: htmlAssetBaseHref(token) },
 			);
 		} catch {
 			return htmlContent;
@@ -149,60 +163,70 @@ function createHtmlAssetRegistry() {
 		return inlineHtmlLocalAssets(htmlContent, htmlFilePath);
 	}
 
-	function handle(res: import("node:http").ServerResponse, url: URL): boolean {
-		const prefix = `${HTML_ASSET_ROUTE_PREFIX}/`;
-		if (!url.pathname.startsWith(prefix)) return false;
+	function assetError(
+		res: import("node:http").ServerResponse,
+		status: number,
+		message: string,
+		asDocument: boolean,
+		name?: string,
+	): void {
+		if (!asDocument) {
+			json(res, { error: message }, status);
+			return;
+		}
+		res.writeHead(status, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
+		res.end(buildHtmlAssetErrorDocument(status, message, name));
+	}
 
-		const rest = url.pathname.slice(prefix.length);
-		const slash = rest.indexOf("/");
-		if (slash <= 0) {
-			json(res, { error: "Missing asset token or path" }, 404);
+	function handle(
+		req: import("node:http").IncomingMessage,
+		res: import("node:http").ServerResponse,
+		url: URL,
+	): boolean {
+		const decision = resolveHtmlAssetRoute(
+			{ pathname: url.pathname, secFetchDest: firstHeader(req.headers["sec-fetch-dest"]) },
+			(token) => rootsByToken.get(token),
+		);
+		if (decision.kind === "not-asset-route") return false;
+		if (decision.kind === "error") {
+			assetError(res, decision.status, decision.message, decision.asDocument, decision.name);
 			return true;
 		}
 
-		const token = rest.slice(0, slash);
-		const root = rootsByToken.get(token);
-		if (!root) {
-			json(res, { error: "Unknown asset root" }, 404);
-			return true;
-		}
-
-		const assetPath = normalizeHtmlAssetRoutePath(rest.slice(slash + 1));
-		if (!assetPath) {
-			json(res, { error: "Invalid asset path" }, 400);
-			return true;
-		}
-
-		const contentType = htmlAssetContentType(assetPath);
-		if (!contentType) {
-			json(res, { error: "Unsupported asset type" }, 415);
-			return true;
-		}
-
+		const { root, assetPath, contentType, document, asDocument, maxBytes } = decision;
 		const resolved = resolvePath(root, assetPath);
 		if (!isWithinDirectory(resolved, root)) {
-			json(res, { error: "Access denied" }, 403);
+			assetError(res, 403, "Access denied", asDocument, assetPath);
 			return true;
 		}
 
 		try {
 			if (!existsSync(resolved)) {
-				json(res, { error: "Asset not found" }, 404);
+				assetError(res, 404, "Not found", asDocument, assetPath);
 				return true;
 			}
 			const stat = statSync(resolved);
-			if (stat.size > MAX_HTML_ASSET_BYTES) {
-				json(res, { error: "Asset too large" }, 413);
+			if (stat.size > Math.min(maxBytes, MAX_HTML_ASSET_BYTES)) {
+				assetError(res, 413, "Asset too large", asDocument, assetPath);
 				return true;
 			}
-			res.writeHead(200, {
-				"Content-Type": contentType,
-				"Cache-Control": "no-store",
-				"Access-Control-Allow-Origin": "*",
-			});
+			res.writeHead(
+				200,
+				document
+					? {
+							...htmlAssetDocumentHeaders(HTML_ASSET_DOCUMENT_CSP),
+							"Access-Control-Allow-Origin": "*",
+						}
+					: {
+							"Content-Type": contentType,
+							"Cache-Control": "no-store",
+							"X-Content-Type-Options": "nosniff",
+							"Access-Control-Allow-Origin": "*",
+						},
+			);
 			res.end(readFileSync(resolved));
 		} catch {
-			json(res, { error: "Failed to read asset" }, 500);
+			assetError(res, 500, "Failed to read asset", asDocument, assetPath);
 		}
 		return true;
 	}
@@ -917,7 +941,7 @@ export async function startAnnotateServer(options: {
 			}
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
-		} else if (htmlAssets.handle(res, url)) {
+		} else if (htmlAssets.handle(req, res, url)) {
 			return;
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
 			await handleUploadRequest(req, res);
@@ -1140,6 +1164,14 @@ export async function startAnnotateServer(options: {
 			await handleSaveNotesRequest(req, res);
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
+		} else if (isFramedFetchDest(firstHeader(req.headers["sec-fetch-dest"]))) {
+			// Nested-document guard: a request the browser will render inside a
+			// frame must never receive the editor app. Relative embeds are
+			// anchored at their own directory by the asset-route <base href>, so
+			// anything reaching here names a file that genuinely is not there.
+			const name = url.pathname.split("/").filter(Boolean).pop();
+			res.writeHead(404, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
+			res.end(buildHtmlAssetErrorDocument(404, "Not found", name));
 		} else {
 			html(res, options.htmlContent);
 		}

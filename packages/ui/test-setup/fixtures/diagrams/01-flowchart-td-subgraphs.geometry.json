@@ -1,0 +1,483 @@
+{
+	"mermaid": "11.17.2",
+	"renderId": "diagram-fixture",
+	"viewBox": "0 0 651.12890625 1194.9375",
+	"hostRect": {
+		"x": 0,
+		"y": 0,
+		"width": 960,
+		"height": 640
+	},
+	"svgRect": {
+		"x": 0,
+		"y": 0,
+		"width": 651.125,
+		"height": 1194.921875
+	},
+	"svgCtm": {
+		"a": 0.9999869240023014,
+		"b": 0,
+		"c": 0,
+		"d": 0.9999869240023014,
+		"e": 0.0023039550398429418,
+		"f": 0
+	},
+	"elements": {
+		"diagram-fixture-Agent": {
+			"tag": "g",
+			"class": "cluster",
+			"bbox": {
+				"x": 8,
+				"y": 997.0625,
+				"width": 431.78125,
+				"height": 89
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": "Agent session"
+		},
+		"diagram-fixture-Browser": {
+			"tag": "g",
+			"class": "cluster",
+			"bbox": {
+				"x": 34.37109375,
+				"y": 447.671875,
+				"width": 369.3046875,
+				"height": 475.390625
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": "Browser session"
+		},
+		"diagram-fixture-L_Start_Capture_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 359.343994140625,
+				"y": 71.5,
+				"width": 0.5,
+				"height": 45.5
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_Capture_Serve_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 359.343994140625,
+				"y": 175,
+				"width": 0,
+				"height": 46
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_Serve_Boot_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 224.0229949951172,
+				"y": 332.8900146484375,
+				"width": 94.53901672363281,
+				"height": 135.781982421875
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_Serve_Fail_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 405.4230041503906,
+				"y": 327.5929870605469,
+				"width": 135.91897583007812,
+				"height": 149.07901000976562
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_Boot_UI_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 224.0229949951172,
+				"y": 526.6719970703125,
+				"width": 0,
+				"height": 46
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_UI_Ann_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 224.0229949951172,
+				"y": 630.6719970703125,
+				"width": 0,
+				"height": 46
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_Ann_Dec_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 224.0229949951172,
+				"y": 734.6719970703125,
+				"width": 0,
+				"height": 46
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_Dec_FB_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 121.0780029296875,
+				"y": 866.4520263671875,
+				"width": 71.33499145507812,
+				"height": 152.1109619140625
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_Dec_OK_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 255.63400268554688,
+				"y": 866.4520263671875,
+				"width": 71.75601196289062,
+				"height": 152.1109619140625
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_FB_Done_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 121.1490707397461,
+				"y": 1061.56298828125,
+				"width": 76.43892669677734,
+				"height": 86.9849853515625
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-L_OK_Done_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link",
+			"bbox": {
+				"x": 250.45899963378906,
+				"y": 1061.56298828125,
+				"width": 77.00999450683594,
+				"height": 86.9849853515625
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 0.0023039550398429418,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-flowchart-Start-0": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -115.35881805419922,
+				"y": -31.5,
+				"width": 230.71763610839844,
+				"height": 63
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 359.34135517699184,
+				"f": 39.4994834980909
+			},
+			"label": "User runs /plannotator-review"
+		},
+		"diagram-fixture-flowchart-Capture-1": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -124.078125,
+				"y": -27,
+				"width": 248.15625,
+				"height": 54
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 359.34135517699184,
+				"f": 147.9980647523406
+			},
+			"label": "VCS provider captures diff"
+		},
+		"diagram-fixture-flowchart-Serve-3": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -73.8359375,
+				"y": -74.3359375,
+				"width": 148.671875,
+				"height": 148.671875
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 359.34135517699184,
+				"f": 299.3320233839701
+			},
+			"label": "Diff resolves?"
+		},
+		"diagram-fixture-flowchart-Boot-5": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -98.4140625,
+				"y": -27,
+				"width": 196.828125,
+				"height": 54
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 224.02281212508666,
+				"f": 499.6653412917124
+			},
+			"label": "Start review server"
+		},
+		"diagram-fixture-flowchart-Fail-7": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -102.2265625,
+				"y": -19.5,
+				"width": 204.453125,
+				"height": 39
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 540.8975748672377,
+				"f": 499.6653412917124
+			},
+			"label": "Startup failure exit 1"
+		},
+		"diagram-fixture-flowchart-UI-9": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -69.5,
+				"y": -27,
+				"width": 139,
+				"height": 54
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 224.02281212508666,
+				"f": 603.6639813879518
+			},
+			"label": "Diff viewer"
+		},
+		"diagram-fixture-flowchart-Ann-11": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -82.1484375,
+				"y": -27,
+				"width": 164.296875,
+				"height": 54
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 224.02281212508666,
+				"f": 707.6626214841912
+			},
+			"label": "Annotate code"
+		},
+		"diagram-fixture-flowchart-Dec-13": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -56.1953125,
+				"y": -56.6953125,
+				"width": 113.390625,
+				"height": 113.390625
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 224.02281212508666,
+				"f": 841.3561857845925
+			},
+			"label": "Decision"
+		},
+		"diagram-fixture-flowchart-FB-15": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -78.078125,
+				"y": -19.5,
+				"width": 156.15625,
+				"height": 39
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 121.078845737756,
+				"f": 1041.548880531147
+			},
+			"label": "Feedback prompt"
+		},
+		"diagram-fixture-flowchart-OK-17": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -77.8125,
+				"y": -19.5,
+				"width": 155.625,
+				"height": 39
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 326.9667785124173,
+				"f": 1041.548880531147
+			},
+			"label": "Approved prompt"
+		},
+		"diagram-fixture-flowchart-Done-19": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -25.4375,
+				"y": -25.4375,
+				"width": 50.875,
+				"height": 50.875
+			},
+			"ctm": {
+				"a": 0.9999869240023014,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999869240023014,
+				"e": 224.02281212508666,
+				"f": 1161.484812228673
+			},
+			"label": "Done"
+		}
+	}
+}

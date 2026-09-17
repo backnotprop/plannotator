@@ -43,6 +43,28 @@ describe("pi external annotations: PATCH inReplyTo", () => {
 		return { status: res.status, body: (await res.json()) as { error?: string; annotation?: { inReplyTo?: string } } };
 	};
 
+	test("POST accepts a validated diagramAnchor and refuses a malformed one (Node mirror of the Bun case)", async () => {
+		const post = async (body: unknown) => {
+			const res = await fetch(`${base}/api/external-annotations`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+			return { status: res.status, body: (await res.json()) as { ids?: string[]; error?: string } };
+		};
+		const anchor = { v: 1, family: "flowchart", kind: "node", id: "D", label: "Approve?", sourceLine: [7, 7] };
+		const ok = await post({ source: "review-bot", type: "COMMENT", text: "rename", originalText: "Approve?", diagramAnchor: anchor });
+		expect(ok.status).toBe(201);
+		const snapshot = (await (await fetch(`${base}/api/external-annotations`)).json()) as {
+			annotations: Array<{ id: string; diagramAnchor?: unknown }>;
+		};
+		expect(snapshot.annotations.find((a) => a.id === ok.body.ids?.[0])?.diagramAnchor).toEqual(anchor);
+
+		const bad = await post({ source: "review-bot", type: "COMMENT", text: "rename", originalText: "Approve?", diagramAnchor: { kind: "node" } });
+		expect(bad.status).toBe(400);
+		expect(bad.body.error).toContain("diagramAnchor");
+	});
+
 	test("refuses an inReplyTo that is self, missing, or would close a cycle; accepts a valid reply", async () => {
 		const added = handler.addAnnotations({
 			annotations: [

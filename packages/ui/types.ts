@@ -1,3 +1,7 @@
+import type { DiagramAnchor } from '@plannotator/core/diagram-anchor';
+
+export type { DiagramAnchor } from '@plannotator/core/diagram-anchor';
+
 export enum AnnotationType {
   DELETION = 'DELETION',
   COMMENT = 'COMMENT',
@@ -84,6 +88,7 @@ export interface Annotation {
   htmlAnchor?: HtmlElementAnchor; // raw-HTML pinpoint: serialized element anchor for reliable restoration
   elementContext?: HtmlElementContext; // raw-HTML / live-app pinpoint: bounded agent-facing description of the primary element (never used by restore)
   htmlAdditionalTargets?: HtmlAnnotationTarget[]; // raw-HTML shift-click multi-select: extra elements this one comment covers (primary stays htmlAnchor/originalText)
+  diagramAnchor?: DiagramAnchor; // a comment on a rendered diagram part (Mermaid / Graphviz fence): the part's own id, label and document source line; the highlighter skips it and the diagram overlay restores it (see @plannotator/core/diagram-anchor)
   // web-highlighter metadata for cross-element selections
   startMeta?: AnnotationTextMeta;
   endMeta?: AnnotationTextMeta;

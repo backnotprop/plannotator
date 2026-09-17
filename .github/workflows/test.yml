@@ -109,6 +109,12 @@ jobs:
           packages/ui/components/MarkdownEditor.extensions.test.tsx
           packages/ui/components/ThemeProvider.favicon.test.tsx
           packages/ui/components/MermaidBlock.theme.test.tsx
+          packages/ui/components/DiagramBlock.anchor.test.tsx
+          packages/ui/components/diagram/DiagramViewer.test.tsx
+          packages/ui/utils/diagramAnchor.test.ts
+          packages/ui/utils/diagramAnchorGraphviz.test.ts
+          packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
+          packages/ui/components/Viewer.diagramLazyRestore.test.tsx
           packages/ui/components/CommentPopover.skillReferences.test.tsx
           packages/ui/components/SkillReferenceMenu.placement.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts

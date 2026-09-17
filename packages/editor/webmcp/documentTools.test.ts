@@ -319,6 +319,18 @@ describe('add_comments anchoring cascade', () => {
     expect(fx.annotations[1]!.type).toBe(AnnotationType.GLOBAL_COMMENT);
   });
 
+  test('a reply to a diagram comment inherits the diagram anchor', async () => {
+    // What regresses: the reply has no anchor, falls to text search on the
+    // node's label, and the highlighter wraps a <mark> wherever the prose
+    // (or the svg) repeats it.
+    const fx = fake();
+    const diagramAnchor = { v: 1 as const, family: 'flowchart' as const, kind: 'node' as const, id: 'D', label: 'Approve?', sourceLine: [7, 7] as const };
+    const parent = humanComment(fx, 'Ship behind a flag', 'Rename this step', { diagramAnchor });
+    dataOf(await fx.call('add_comments', { comments: [{ inReplyTo: parent.id, text: 'Agreed.' }] }));
+    expect(fx.annotations[1]!.diagramAnchor).toEqual(diagramAnchor);
+    expect(fx.annotations[1]!.blockId).toBe(parent.blockId);
+  });
+
   test('inReplyTo inherits the parent anchor and threads under it', async () => {
     const fx = fake();
     const parent = humanComment(fx, 'Ship behind a flag', 'Which flag?', { startMeta: { parentTagName: 'P', parentIndex: 3, textOffset: 0 } });

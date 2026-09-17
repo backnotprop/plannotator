@@ -14,6 +14,8 @@
 // adapters import it from the module they already use.
 export { validateReplyTarget } from "./annotation-threads";
 
+import { parseDiagramAnchor, type DiagramAnchor } from "./diagram-anchor";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -113,6 +115,10 @@ interface PlanAnnotation {
   createdA: number;
   author?: string;
   source?: string;
+  /** A comment on a rendered diagram part (see `diagram-anchor.ts`). The
+   *  diagram blocks resolve it against their render; a row that resolves in
+   *  no diagram lists as unanchored. */
+  diagramAnchor?: DiagramAnchor;
 }
 
 const VALID_PLAN_TYPES = ["DELETION", "COMMENT", "GLOBAL_COMMENT"];
@@ -158,6 +164,18 @@ export function transformPlanInput(
       };
     }
 
+    // A diagram anchor is validated by the same fail-closed parser the ui
+    // codec and the feedback archive run; a malformed one is refused rather
+    // than stored as an anchor nothing can restore.
+    let diagramAnchor: DiagramAnchor | undefined;
+    if (obj.diagramAnchor !== undefined) {
+      const parsed = parseDiagramAnchor(obj.diagramAnchor);
+      if (parsed === null) {
+        return { error: `annotations[${i}] invalid "diagramAnchor" (expected { v: 1, family, kind, id | from + to, label, sourceLine })` };
+      }
+      diagramAnchor = parsed;
+    }
+
     annotations.push({
       id: crypto.randomUUID(),
       blockId: "external",
@@ -169,6 +187,7 @@ export function transformPlanInput(
       createdA: Date.now(),
       author: typeof obj.author === "string" ? obj.author : undefined,
       source,
+      ...(diagramAnchor !== undefined && { diagramAnchor }),
     });
   }
 

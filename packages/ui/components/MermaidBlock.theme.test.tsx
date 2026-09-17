@@ -18,16 +18,25 @@
  *
  * DOM-gated (DOM_TESTS=1).
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Block } from '../types';
+import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { MermaidBlock, __setMermaidRuntimeLoaderForTests } from './MermaidBlock';
 import { ThemeProvider, useTheme } from './ThemeProvider';
 import { __resetMermaidThemeForTests } from '../utils/mermaidTheme';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 
 const hasDom = typeof document !== 'undefined';
+
+// happy-dom cannot host DOMPurify: the render slot's parse step is the inert
+// template parse for these tests (the scrub still runs).
+let restoreParser: (() => void) | null = null;
+beforeAll(() => {
+  if (hasDom) restoreParser = installInertDiagramSvgParser();
+});
+afterAll(() => restoreParser?.());
 
 const block: Block = { id: 'themeSweep', type: 'code', language: 'mermaid', content: 'flowchart LR\n  A --> B', order: 0, startLine: 1 };
 const SVG = '<svg viewBox="0 0 10 10" data-sentinel="diagram"><rect width="10" height="10"/></svg>';
