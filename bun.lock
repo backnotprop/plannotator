@@ -290,7 +290,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.40.0",
+      "version": "0.41.0",
       "dependencies": {
         "@base-ui/react": "^1.7.0",
         "@codemirror/autocomplete": "^6.20.3",
