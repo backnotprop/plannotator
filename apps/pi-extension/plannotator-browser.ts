@@ -597,8 +597,13 @@ async function createCodeReviewBrowserSession(
 		// diffType "static-patch" — identical to the direct CLI's --patch-file
 		// path. No refresh: there is no live tree to recompute against; the
 		// initial patch is the session's whole content.
-		if (options.prUrl) {
-			throw new Error("--patch-file cannot be combined with a PR/MR URL");
+		// `-` means stdin, which only the direct CLI has: this host reaches the
+		// review through an extension event with no stdin of its own, so refuse
+		// rather than reading a file literally named "-".
+		if (options.patchFile === "-") {
+			throw new Error(
+				"--patch-file - (stdin) is not available here; pass a file path instead",
+			);
 		}
 		rawPatch = readFileSync(resolve(options.cwd ?? ctx.cwd, options.patchFile), "utf-8");
 		if (!rawPatch.trim()) {

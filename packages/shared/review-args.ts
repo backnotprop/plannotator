@@ -55,8 +55,9 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   const positional: string[] = [];
 
   let patchFile: string | undefined;
-  // --local conflicts with --patch-file only when the user typed it: its
-  // value defaults to true, so check the flag's presence, not the value.
+  // --local / --no-local conflict with --patch-file only when the user typed
+  // one: useLocal defaults to true, so check the flag's presence, not the
+  // value. Both spellings are PR-review selectors, so both are usage errors.
   let localFlagSeen = false;
 
   // Index-based so value-taking flags consume their value token before the
@@ -91,6 +92,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
         break;
       case "--no-local":
         useLocal = false;
+        localFlagSeen = true;
         break;
       case "--base": {
         const value = tokens[i + 1];
@@ -160,7 +162,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     if (base) errors.push("--patch-file cannot be combined with --base");
     if (diffType) errors.push("--patch-file cannot be combined with --diff-type");
     if (vcsType) errors.push("--patch-file cannot be combined with --git/--gitbutler");
-    if (localFlagSeen) errors.push("--patch-file cannot be combined with --local");
+    if (localFlagSeen) errors.push("--patch-file cannot be combined with --local/--no-local");
   }
   return {
     prUrl: target && isReviewUrl(target) ? target : undefined,

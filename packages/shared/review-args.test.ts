@@ -190,12 +190,27 @@ describe("parseReviewArgs", () => {
     const withBase = ["--patch-file", "reading.diff", "--base", "main"];
     const withDiffType = ["--patch-file", "reading.diff", "--diff-type", "staged"];
     const withProvider = ["--patch-file", "reading.diff", "--git"];
+    const withLocal = ["--patch-file", "reading.diff", "--local"];
+    // --no-local is a PR-review selector exactly like --local, and useLocal
+    // defaults to true — so presence, not value, decides the conflict.
+    const withNoLocal = ["--patch-file", "reading.diff", "--no-local"];
 
     // when / then
     expect(parseReviewArgs(withPrUrl).errors).toContain("--patch-file cannot be combined with a PR/MR URL");
     expect(parseReviewArgs(withBase).errors).toContain("--patch-file cannot be combined with --base");
     expect(parseReviewArgs(withDiffType).errors).toContain("--patch-file cannot be combined with --diff-type");
     expect(parseReviewArgs(withProvider).errors).toContain("--patch-file cannot be combined with --git/--gitbutler");
+    expect(parseReviewArgs(withLocal).errors).toContain("--patch-file cannot be combined with --local/--no-local");
+    expect(parseReviewArgs(withNoLocal).errors).toContain("--patch-file cannot be combined with --local/--no-local");
+  });
+
+  test("leaves --no-local alone without a patch file", () => {
+    // given / when
+    const result = parseReviewArgs(["https://github.com/acme/repo/pull/12", "--no-local"]);
+
+    // then
+    expect(result.errors).toEqual([]);
+    expect(result.useLocal).toBe(false);
   });
 
   test("rejects a missing or duplicate patch file", () => {
