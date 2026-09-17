@@ -151,7 +151,7 @@ import {
 } from './dock/reviewPanelTypes';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
-import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo } from '@plannotator/shared/types';
+import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
 import { useCommitsView } from './hooks/useCommitsView';
@@ -651,6 +651,12 @@ const ReviewApp: React.FC = () => {
   // that never sends the field renders no approve-carrying items (PR3
   // behavior); read off every diff payload that carries it.
   const [approvalNotesSupported, setApprovalNotesSupported] = useState(false);
+  // Session-constant capability advert from `/api/diff`: 'patch' means the
+  // diff is caller-supplied bytes (`plannotator review --patch-file`) with no
+  // repository behind it. ABSENT reads as 'vcs', so an old server keeps every
+  // affordance exactly as before.
+  const [sourceKind, setSourceKind] = useState<ReviewSourceKind>('vcs');
+  const isStaticPatch = sourceKind === 'patch';
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
   useEffect(() => {
@@ -1498,7 +1504,11 @@ const ReviewApp: React.FC = () => {
       snapshotId,
     };
   }, [activeDiffBase, diffData?.gitRef, committedBase, snapshotId]);
-  const canUseLiveWorkspaceActions = !activeDiffBase.startsWith('gitbutler:stack:') &&
+  // A static patch has no working tree at all, so everything that reads one —
+  // open-in-app, code navigation, token hover cards, editor annotations —
+  // is off for the same reason a committed GitButler layer turns them off.
+  const canUseLiveWorkspaceActions = !isStaticPatch &&
+    !activeDiffBase.startsWith('gitbutler:stack:') &&
     !activeDiffBase.startsWith('gitbutler:branch:');
   const visibleEditorAnnotations = useMemo(
     () => canUseLiveWorkspaceActions ? editorAnnotations : [],
@@ -2025,6 +2035,7 @@ const ReviewApp: React.FC = () => {
         agentCwd?: string | null;
         sharingEnabled?: boolean;
         approvalNotesSupported?: boolean;
+        sourceKind?: ReviewSourceKind;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
         prStackInfo?: PRStackInfo | null;
@@ -2085,6 +2096,9 @@ const ReviewApp: React.FC = () => {
         if (data.agentCwd !== undefined) setAgentCwd(data.agentCwd);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
+        // Session-constant: a static patch session has no diff-type switch to
+        // re-advertise it on, so `/api/diff` is the only place it can arrive.
+        setSourceKind(data.sourceKind === 'patch' ? 'patch' : 'vcs');
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         updatePRSession({
           ...(data.prMetadata && { prMetadata: data.prMetadata }),
@@ -3203,7 +3217,9 @@ const ReviewApp: React.FC = () => {
   // user refreshes when THEY are ready — never automatically (annotations are
   // line-anchored; rug-pulling the diff under them is worse than staleness).
   const diffFreshness = useDiffFreshness({
-    enabled: !!origin,
+    // Static patch: the bytes are the session. Nothing can go stale, so the
+    // probe would only poll an endpoint with no fingerprint to compare.
+    enabled: !!origin && !isStaticPatch,
     resetKey: diffData?.rawPatch ?? '',
     snapshotId,
     onAgentCwd: setAgentCwd,
@@ -3547,6 +3563,7 @@ const ReviewApp: React.FC = () => {
     prDiffScope,
     agentCwd,
     canUseLiveWorkspaceActions,
+    contextExpansionAvailable: !isStaticPatch,
     allAnnotations,
     externalAnnotations,
     selectedAnnotationId,
@@ -3557,7 +3574,8 @@ const ReviewApp: React.FC = () => {
     onAddCallFlowAnnotation: handleAddCallFlowAnnotation,
     onAddAnnotation: handleAddAnnotation,
     onAddAnnotationForFile: handleAddAnnotationForFile,
-    editSuggestionsEnabled,
+    // Edit Mode reads and writes the file on disk; a static patch has none.
+    editSuggestionsEnabled: editSuggestionsEnabled && !isStaticPatch,
     onAddSuggestionsForFile: handleAddSuggestionsForFile,
     onAddEditorCommentForFile: handleAddEditorCommentForFile,
     onAddFileComment: handleAddFileComment,
@@ -3656,7 +3674,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch,
     allAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -4388,6 +4406,16 @@ const ReviewApp: React.FC = () => {
 
   const compactActionBusy = isSendingFeedback || isApproving || isExiting || isPlatformActioning;
   const showsLocalVsRemoteEmptyState = activeDiffBase === 'local-vs-remote';
+  // Static patch header identity: the patch path the caller passed (or
+  // "stdin patch"), which the server echoes as gitRef. Never a branch or repo.
+  const staticPatchSource = (diffData?.gitRef ?? '').trim();
+  const staticPatchLabel = staticPatchSource
+    ? staticPatchSource.split(/[\\/]/).pop() || staticPatchSource
+    : 'Patch';
+  // Distinguishes "valid patch, nothing in it" from "these bytes are not a
+  // unified diff" for the empty state. The server already refuses a
+  // whitespace-only patch at startup, so anything reaching here has content.
+  const patchHasDiffHeaders = /^(diff --git |--- |\+\+\+ |@@ |Index: )/m.test(diffData?.rawPatch ?? '');
   const compactReviewActions: CompactReviewAction[] = !isCompactTouchLayout
     ? []
     : !origin
@@ -4597,6 +4625,23 @@ const ReviewApp: React.FC = () => {
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
                   {repoInfo.display}
                 </span>
+              </div>
+            ) : isStaticPatch ? (
+              // Honest label for a repo-less session: name the patch that IS
+              // the review, never a branch or repo this process happens to
+              // sit in.
+              <div className={isCompactTouchLayout
+                ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
+                : 'min-w-0 flex flex-1 items-center gap-2 overflow-hidden'
+              }>
+                <span
+                  className="text-xs font-mono text-foreground truncate max-w-[220px]"
+                  title={staticPatchSource || 'Static patch review'}
+                  data-testid="static-patch-label"
+                >
+                  {staticPatchLabel}
+                </span>
+                <span className="text-xs text-muted-foreground/60 hidden sm:inline">Patch</span>
               </div>
             ) : (
               <span className={isCompactTouchLayout
@@ -5332,6 +5377,9 @@ const ReviewApp: React.FC = () => {
                           {activeDiffBase === 'branch' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'merge-base' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'all' && `No tracked files${activeWorktreePath ? ' in this worktree' : ' in this repository'}.`}
+                          {isStaticPatch && (patchHasDiffHeaders
+                            ? 'The patch contains no changes.'
+                            : 'The patch could not be parsed as a unified diff.')}
                         </p>
                       </>
                     )}
