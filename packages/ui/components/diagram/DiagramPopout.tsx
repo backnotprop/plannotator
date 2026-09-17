@@ -42,7 +42,9 @@ export function DiagramPopout({
       className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none"
       dataAttributes={{ 'data-diagram-popout': '', ...dataAttributes }}
     >
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-12">
+      {/* The popout's own chrome: a press here addresses no diagram part
+          (see diagram/diagramControls). */}
+      <div data-diagram-control="" data-diagram-popout-chrome="" className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-4 pr-12">
         <span className="truncate text-xs font-medium text-foreground">{title}</span>
         <span className="flex-1" />
         {hasPane && (

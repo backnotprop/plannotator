@@ -356,6 +356,43 @@ describe.if(hasDom)('hover, click, compose', () => {
     }
   });
 
+  test('a press on the zoom strip over a node opens nothing; 1 px outside it the node opens the composer', async () => {
+    // Owner report: the controls are painted over the canvas and are not in
+    // the svg, so the `elementsFromPoint` walk stepped past them to the part
+    // behind — pressing Zoom out over a node opened the composer on it.
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    // Fit is the control to press here: it is already the current viewport
+    // after mount, so a press that (wrongly) reaches the diagram cannot also
+    // churn the transform and make this test about something else.
+    const fitButton = q<HTMLButtonElement>('[data-diagram-zoom-strip] [aria-label="Fit diagram"]');
+    const nodeShape = nodeD().querySelector('polygon, rect, path') ?? nodeD();
+    const canvas = q('[data-diagram-canvas]');
+    const doc = host!.ownerDocument as Document & { elementsFromPoint?: (x: number, y: number) => Element[] };
+    const original = doc.elementsFromPoint;
+    // What Chromium reports for the two points: inside the strip the button
+    // is topmost with the node still under it; 1 px outside, only the node.
+    const STRIP_X = 300;
+    doc.elementsFromPoint = (x: number) => (x === STRIP_X ? [fitButton, nodeShape, canvas] : [nodeShape, canvas]);
+    try {
+      await act(async () => {
+        pointer('pointerdown', fitButton, { x: STRIP_X, y: 200 });
+        pointer('pointerup', fitButton, { x: STRIP_X, y: 200 });
+      });
+      await settle();
+      expect(host!.querySelectorAll('[data-diagram-composer]').length).toBe(0);
+
+      await act(async () => {
+        pointer('pointerdown', nodeShape, { x: STRIP_X - 1, y: 200 });
+        pointer('pointerup', nodeShape, { x: STRIP_X - 1, y: 200 });
+      });
+      await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+      expect(q('[data-diagram-composer]').textContent).toContain('node D');
+    } finally {
+      doc.elementsFromPoint = original;
+    }
+  });
+
   test('a click that resolves no part comments on the WHOLE diagram, so a click never does nothing', async () => {
     const created: Array<{ anchor: DiagramAnchor }> = [];
     const { rerender } = await mount(viewer({ sourceLineOffset: 10, onCreateComment: (anchor) => { created.push({ anchor }); } }));

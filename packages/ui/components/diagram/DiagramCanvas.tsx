@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils';
 import { diagramHitSource } from '../../utils/diagram-render';
 import { isMac, isModKeyHeld } from '../../utils/platform';
 import { Button } from '../ui/button';
+import { isDiagramControlEvent } from './diagramControls';
 import { svgContentSize } from './svgContentSize';
 import {
   DRAG_THRESHOLD_PX,
@@ -50,6 +51,13 @@ import {
  * callbacks, and a `click A "https://..."` link binding still renders an
  * `<a href>` that the render slot's sanitizer strips, so the canvas owns
  * every click and there is no armed switch.
+ *
+ * Chrome painted OVER the canvas (the zoom strip, the composer, the source
+ * pane, the popout's header) is never a diagram target: a pointer event
+ * whose composed path contains a control resolves nothing, opens no
+ * composer and starts no pan (`diagramControls.ts`). Without that the
+ * `elementsFromPoint` walk stepped past the control to the part behind it,
+ * so pressing Zoom out over a node opened the composer on that node.
  *
  * The render slot hands over a sanitized svg NODE, not markup: the wrapper
  * mounts it with `replaceChildren` once per render, so no html string ever
@@ -171,6 +179,10 @@ export function DiagramCanvas({
     (event: ReactPointerEvent): Element | null => {
       const wrapper = wrapperRef.current;
       if (wrapper === null) return null;
+      // The zoom strip and the composer are painted OVER the canvas and are
+      // not in the svg, so the walk below would step past them to whatever
+      // part sits underneath. A press on chrome addresses no part.
+      if (isDiagramControlEvent(event)) return null;
       // Everything under the pointer, topmost first. Without a layout
       // engine (happy-dom) the event's own target is all there is.
       const doc = wrapper.ownerDocument;
@@ -230,6 +242,11 @@ export function DiagramCanvas({
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    // Pressing a control is not the start of a pan either.
+    if (isDiagramControlEvent(event)) {
+      pressRef.current = null;
+      return;
+    }
     pressRef.current = {
       id: event.pointerId,
       x: event.clientX,
@@ -273,6 +290,13 @@ export function DiagramCanvas({
       const press = pressRef.current;
       if (press === null || press.id !== event.pointerId) return;
       pressRef.current = null;
+      // Released over a control (the press began on the canvas): not a click
+      // on the diagram, and `targetUnder` answering null would otherwise
+      // read as "comment on the whole diagram".
+      if (isDiagramControlEvent(event)) {
+        if (press.panning) setPanning(false);
+        return;
+      }
       if (press.panning) {
         setPanning(false);
         const target = event.currentTarget;
@@ -366,6 +390,7 @@ export function DiagramCanvas({
         // comments). On a narrow screen the strip takes the left edge so it
         // never stacks under a host's own bottom-right controls.
         data-print-hide=""
+        data-diagram-control=""
         data-diagram-zoom-strip=""
         className="absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-md border border-border bg-card/85 p-0.5 backdrop-blur max-md:bottom-4 max-md:left-4 max-md:right-auto"
         role="group"
