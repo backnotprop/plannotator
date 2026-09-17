@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils';
 import { diagramHitSource } from '../../utils/diagram-render';
 import { isMac, isModKeyHeld } from '../../utils/platform';
 import { Button } from '../ui/button';
+import { svgContentSize } from './svgContentSize';
 import {
   DRAG_THRESHOLD_PX,
   TOUCH_DRAG_THRESHOLD_PX,
@@ -57,40 +58,10 @@ import {
  * viewport so rings reproject on every change.
  */
 
-/** A numeric svg length: `206`, `206pt`, `206px`. */
-function svgLength(value: string | null): number {
-  if (value === null) return Number.NaN;
-  return Number.parseFloat(value);
-}
-
-/** The svg's intrinsic size, from its viewBox (Mermaid and Graphviz always
- * write one), else its `width` / `height` attributes (a `pt` or `px` suffix
- * is accepted, as Graphviz writes them). */
-export function svgContentSize(svg: SVGSVGElement): ContentSize | null {
-  const viewBox = svg.getAttribute('viewBox');
-  if (viewBox !== null) {
-    const parts = viewBox
-      .trim()
-      .split(/[\s,]+/u)
-      .map(Number);
-    const width = parts[2];
-    const height = parts[3];
-    if (
-      parts.length === 4 &&
-      width !== undefined &&
-      height !== undefined &&
-      Number.isFinite(width) &&
-      Number.isFinite(height) &&
-      width > 0 &&
-      height > 0
-    ) {
-      return { width, height };
-    }
-  }
-  const width = svgLength(svg.getAttribute('width'));
-  const height = svgLength(svg.getAttribute('height'));
-  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { width, height } : null;
-}
+// `svgContentSize` is the canvas's, but the document's fence block needs it
+// without the canvas: it lives in its own dependency-free module and is
+// re-exported here so every published path keeps resolving.
+export { svgContentSize } from './svgContentSize';
 
 /** One arrow-key press pans this far (the diagram moves WITH the arrow, as
  * a scroll would); Shift multiplies it by five. */
