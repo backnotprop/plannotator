@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { diagramTargetText, type DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { AnnotationType, type Annotation, type Block } from '../types';
@@ -6,9 +6,9 @@ import type { DiagramTheme } from '../utils/diagram-render';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
-import { svgContentSize } from './diagram/DiagramCanvas';
-import { DiagramPopout } from './diagram/DiagramPopout';
+import { DiagramPending, DiagramInlineSource } from './diagram/DiagramPending';
 import { DiagramViewer } from './diagram/DiagramViewer';
+import { svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import { useTheme } from './ThemeProvider';
@@ -34,6 +34,11 @@ const RETRY_EPOCHS: Record<DiagramKind, ReturnType<typeof createRuntimeRetryEpoc
 };
 
 const LABELS: Record<DiagramKind, string> = { mermaid: 'Mermaid', graphviz: 'Graphviz' };
+
+/** The full-size popout is only ever reached by pressing Expand, so it loads
+ * then and not with the document. Its fallback is null: the overlay simply
+ * has not opened yet, and nothing in the document flow moves. */
+const DiagramPopout = lazy(async () => ({ default: (await import('./diagram/DiagramPopout')).DiagramPopout }));
 
 /** The inline box height from the diagram's aspect at a nominal width, so
  * a wide flowchart is not letterboxed in a tall box and a tall state
@@ -260,21 +265,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
       // then the render itself): the source stays readable under a quiet
       // status line. A re-render for a theme change keeps the previous SVG,
       // so this shows only before the first diagram lands.
-      return (
-        <>
-          <div
-            role="status"
-            aria-live="polite"
-            data-diagram-pending=""
-            {...(kind === 'mermaid' ? { 'data-mermaid-pending': '' } : {})}
-            className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"
-          >
-            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/70" aria-hidden="true" />
-            Rendering diagram…
-          </div>
-          <InlineSource block={block} kind={kind} />
-        </>
-      );
+      return <DiagramPending block={block} kind={kind} />;
     },
     [block, kind, label],
   );
@@ -337,7 +328,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </button>
-            <InlineSource block={block} kind={kind} />
+            <DiagramInlineSource block={block} kind={kind} />
           </div>
         ) : (
           <div
@@ -356,21 +347,17 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
         )}
       </div>
       {isExpanded && svgReady && typeof document !== 'undefined' && (
-        <DiagramPopout
-          {...viewerProps}
-          open
-          onClose={() => setIsExpanded(false)}
-          title={`${label} diagram`}
-          renderId={`${kind}-${block.id}-popout`}
-          dataAttributes={{ 'data-block-id': block.id }}
-        />
+        <Suspense fallback={null}>
+          <DiagramPopout
+            {...viewerProps}
+            open
+            onClose={() => setIsExpanded(false)}
+            title={`${label} diagram`}
+            renderId={`${kind}-${block.id}-popout`}
+            dataAttributes={{ 'data-block-id': block.id }}
+          />
+        </Suspense>
       )}
     </>
   );
 };
-
-const InlineSource: React.FC<{ block: Block; kind: DiagramKind }> = ({ block, kind }) => (
-  <pre className="rounded-lg text-[13px] overflow-x-auto bg-muted/50 border border-border/30 p-4">
-    <code className={`pn-code font-mono language-${block.language?.trim().split(/\s+/, 1)[0] ?? kind}`}>{block.content}</code>
-  </pre>
-);
