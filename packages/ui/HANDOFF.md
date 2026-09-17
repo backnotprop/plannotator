@@ -840,6 +840,29 @@ canvas with `data-diagram-control`; `button`, `[role=toolbar]`, inputs, the
 composer and the source pane count without marking
 (`components/diagram/diagramControls`).
 
+**A diagram comment restored before its diagram mounts.** Making the two
+block wrappers lazy opens a window in which the document has painted and a
+draft has restored but no diagram exists in the DOM yet. That window was
+investigated after a report of diagram comments being lost across a reload;
+the report did not hold (the probe behind it never answered the "Draft
+Recovered" modal and then counted an un-restored session), and the three
+properties that make the window safe were already in place. They are now
+pinned, because every one of them is a way to lose a comment that has no text
+to fall back on:
+
+- the highlighter skips a row carrying `diagramAnchor` outright — it is
+  neither painted, attempted nor reported unanchored — including the shape
+  with no quote and no `blockId` that a whole-diagram or label-less anchor
+  produces (`hooks/useAnnotationHighlighter.diagramSkip.test.tsx`);
+- `Viewer`'s "this document has no diagram, so nobody can resolve this row"
+  report keys on the PARSE, never on what has mounted, so a lazy load does
+  not flash the "Unanchored" chip on a comment that restores fine;
+- the row stays listed either way, and the block claims it and paints its
+  badge whenever it mounts — no second restore pass, no reload
+  (`components/Viewer.diagramLazyRestore.test.tsx`, which holds the engine
+  open on a gated runtime loader and asserts the panel row, the absent chip,
+  then the badge).
+
 **Migration for a host that carried the copies.** `useDiagramRender(kind, documentId, source, theme, { retryToken })` now takes the `{ colorTheme, mode }` theme and reports `error.runtimeUnavailable`; `useDiagramAnnotations` becomes the host's projection of its rows onto `comments` plus its mutation behind `onCreateComment` (the viewer half is `useDiagramComments`); `useDiagramDraft`'s `preview`/`dirty`/`stale`/`reload` semantics live in `useDiagramSourceDraft` behind `onSave` (the PATCH, `If-Match`, the query cache and the fence slice stay host-side; answer `stale` on a 412); `DiagramComposer` takes `disabledReason`/`error` instead of a `CommentingPolicy`; the canvas's `onEscape` returns `'consumed' | 'pass'` so a popout can walk the Escape ladder; arrow keys pan (`KEY_PAN_PX`, Shift ×5) in addition to `+` `-` `0`. Icons come from `lucide-react` (already a dependency).
 
 ---
