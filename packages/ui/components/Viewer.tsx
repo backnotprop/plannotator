@@ -5,7 +5,7 @@ import { AnnotationType, type Block, type Annotation, type EditorMode, type Inpu
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
 import { useFenceTheme } from '../hooks/useFenceTheme';
-import { computeListIndices, groupBlocks, type Frontmatter } from '../utils/parser';
+import { computeListIndices, groupBlocks, type Frontmatter, type FrontmatterValue } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { BlockRenderer } from './BlockRenderer';
@@ -198,6 +198,76 @@ interface CodeBlockToolbarTarget {
   readonly activation: 'pointer' | 'keyboard';
 }
 
+// Named type guard so both taken and fallthrough branches narrow.
+function isFrontmatterMap(value: FrontmatterValue): value is { [key: string]: FrontmatterValue } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Renders a single frontmatter field or recursive sub-structure.
+ */
+const FrontmatterRow: React.FC<{ field: string; value: FrontmatterValue }> = ({ field, value }) => {
+  if (isFrontmatterMap(value)) {
+    const subEntries = Object.entries(value);
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="font-medium text-muted-foreground">{field}:</span>
+        <div className="pl-4 grid gap-1.5">
+          {subEntries.map(([k, v]) => (
+            <FrontmatterRow key={k} field={k} value={v} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (Array.isArray(value)) {
+    const isArrayOfMaps = value.some((v) => typeof v === 'object' && v !== null);
+    if (isArrayOfMaps) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          <span className="font-medium text-muted-foreground">{field}:</span>
+          <div className="pl-4 grid gap-2">
+            {value.map((item, i) => (
+              <div key={i} className="p-2 bg-muted/40 border border-border/40 rounded grid gap-1.5">
+                {isFrontmatterMap(item) ? (
+                  Object.entries(item).map(([k, v]) => (
+                    <FrontmatterRow key={k} field={k} value={v} />
+                  ))
+                ) : (
+                  <span className="text-foreground">{typeof item === 'string' ? item : String(item)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex gap-2">
+        <span className="font-medium text-muted-foreground min-w-[80px]">{field}:</span>
+        <span className="text-foreground">
+          <span className="flex flex-wrap gap-1">
+            {value.map((v, i) => (
+              <span key={i} className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs">
+                {typeof v === 'string' ? v : String(v)}
+              </span>
+            ))}
+          </span>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <span className="font-medium text-muted-foreground min-w-[80px]">{field}:</span>
+      <span className="text-foreground">{value}</span>
+    </div>
+  );
+};
+
 /**
  * Renders YAML frontmatter as a styled metadata card.
  */
@@ -209,22 +279,7 @@ const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }
     <div className="mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg">
       <div className="grid gap-2 text-sm">
         {entries.map(([key, value]) => (
-          <div key={key} className="flex gap-2">
-            <span className="font-medium text-muted-foreground min-w-[80px]">{key}:</span>
-            <span className="text-foreground">
-              {Array.isArray(value) ? (
-                <span className="flex flex-wrap gap-1">
-                  {value.map((v, i) => (
-                    <span key={i} className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs">
-                      {v}
-                    </span>
-                  ))}
-                </span>
-              ) : (
-                value
-              )}
-            </span>
-          </div>
+          <FrontmatterRow key={key} field={key} value={value} />
         ))}
       </div>
     </div>

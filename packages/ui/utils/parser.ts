@@ -5,10 +5,18 @@ import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core
 import { skillReferenceExportBlock } from './skillReferences';
 
 /**
+ * Parsed YAML frontmatter value: scalar string, array, or nested map.
+ */
+export type FrontmatterValue =
+  | string
+  | FrontmatterValue[]
+  | { [key: string]: FrontmatterValue };
+
+/**
  * Parsed YAML frontmatter as key-value pairs.
  */
 export interface Frontmatter {
-  [key: string]: string | string[];
+  [key: string]: FrontmatterValue;
 }
 
 /** Number of leading whitespace characters on a line. */
@@ -82,6 +90,24 @@ function parseBlockScalar(
 }
 
 /**
+ * Parse a simple `key: value` pair from a line. Returns null if the line
+ * is not a valid YAML mapping entry (e.g. scalar URLs or quoted strings).
+ */
+function parseKeyValue(str: string): { key: string; value: string } | null {
+  if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+    return null;
+  }
+  const colonIndex = str.indexOf(':');
+  if (colonIndex <= 0) return null;
+  if (colonIndex < str.length - 1 && str[colonIndex + 1] !== ' ' && str[colonIndex + 1] !== '\t') {
+    return null;
+  }
+  const key = str.slice(0, colonIndex).trim();
+  const value = str.slice(colonIndex + 1).trim();
+  return { key, value };
+}
+
+/**
  * Extract YAML frontmatter from markdown if present.
  * Returns the parsed frontmatter, the remaining markdown, and the 1-based
  * line number where content begins in the original file (so downstream
@@ -112,57 +138,122 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
   const consumedTotal = leadingChars + consumedInTrimmed;
   const contentStartLine = (markdown.slice(0, consumedTotal).match(/\n/g) || []).length + 1;
 
-  // Parse simple YAML (key: value pairs)
+  // Parse simple YAML (key: value pairs, indentation-aware)
   const frontmatter: Frontmatter = {};
-  let currentKey: string | null = null;
-  let currentArray: string[] | null = null;
+  const mapStack: { indent: number; map: { [key: string]: FrontmatterValue } }[] = [
+    { indent: -1, map: frontmatter },
+  ];
+  const arrayStack: { indent: number; array: FrontmatterValue[] }[] = [];
+  let pendingKey: {
+    key: string;
+    indent: number;
+    parentMap: { [key: string]: FrontmatterValue };
+  } | null = null;
 
   const lines = frontmatterRaw.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i];
+    const rawLine = lines[i].replace(/\r$/, '');
     const trimmedLine = rawLine.trim();
 
-    // Array item (- value)
-    if (trimmedLine.startsWith('- ') && currentKey) {
-      const value = trimmedLine.slice(2).trim();
-      if (!currentArray) {
-        currentArray = [];
-        frontmatter[currentKey] = currentArray;
+    if (!trimmedLine) continue;
+
+    const lineIndent = indentWidth(rawLine);
+
+    // Array item (- value or - key: value)
+    if (trimmedLine.startsWith('- ')) {
+      const afterDash = trimmedLine.slice(2).trim();
+      const kv = parseKeyValue(afterDash);
+
+      if (pendingKey && lineIndent >= pendingKey.indent) {
+        const newArray: FrontmatterValue[] = [];
+        pendingKey.parentMap[pendingKey.key] = newArray;
+        arrayStack.push({ indent: lineIndent, array: newArray });
+        pendingKey = null;
+      } else {
+        pendingKey = null;
+        while (arrayStack.length > 0 && arrayStack[arrayStack.length - 1].indent > lineIndent) {
+          arrayStack.pop();
+        }
       }
-      currentArray.push(value);
+
+      while (mapStack.length > 1 && mapStack[mapStack.length - 1].indent >= lineIndent) {
+        mapStack.pop();
+      }
+
+      const targetArray = arrayStack.length > 0 ? arrayStack[arrayStack.length - 1].array : null;
+
+      if (kv) {
+        const blockScalar = kv.value.match(/^([|>])[+-]?$/);
+        let scalarVal = kv.value;
+        if (blockScalar) {
+          const { value: parsedScalar, endIndex } = parseBlockScalar(
+            lines,
+            i + 1,
+            lineIndent,
+            blockScalar[1] === '>',
+          );
+          scalarVal = parsedScalar;
+          i = endIndex;
+        }
+
+        const mapElem: { [key: string]: FrontmatterValue } = {};
+        if (scalarVal) {
+          mapElem[kv.key] = scalarVal;
+        } else {
+          pendingKey = { key: kv.key, indent: lineIndent, parentMap: mapElem };
+        }
+
+        if (targetArray) {
+          targetArray.push(mapElem);
+        }
+        mapStack.push({ indent: lineIndent, map: mapElem });
+      } else {
+        if (targetArray) {
+          targetArray.push(afterDash);
+        }
+      }
       continue;
     }
 
     // Key: value pair
-    const colonIndex = trimmedLine.indexOf(':');
-    if (colonIndex > 0) {
-      currentKey = trimmedLine.slice(0, colonIndex).trim();
-      const value = trimmedLine.slice(colonIndex + 1).trim();
-      currentArray = null;
+    const kv = parseKeyValue(trimmedLine);
+    if (kv) {
+      if (pendingKey) {
+        if (lineIndent > pendingKey.indent) {
+          const newMap: { [key: string]: FrontmatterValue } = {};
+          pendingKey.parentMap[pendingKey.key] = newMap;
+          mapStack.push({ indent: pendingKey.indent, map: newMap });
+        }
+        pendingKey = null;
+      }
 
-      // Block scalar: `|` (literal, keep newlines) or `>` (folded, join with
-      // spaces), each with optional chomping indicator (`-`/`+`). The value
-      // spans the following lines indented deeper than the key, e.g.
-      //   description: >-
-      //     line one
-      //     line two
-      // Without this, the indicator (">-") was stored verbatim and the body
-      // silently dropped.
-      const blockScalar = value.match(/^([|>])[+-]?$/);
+      while (arrayStack.length > 0 && arrayStack[arrayStack.length - 1].indent >= lineIndent) {
+        arrayStack.pop();
+      }
+      while (mapStack.length > 1 && mapStack[mapStack.length - 1].indent >= lineIndent) {
+        mapStack.pop();
+      }
+
+      const parentMap = mapStack[mapStack.length - 1].map;
+
+      // Block scalar: `|` or `>`
+      const blockScalar = kv.value.match(/^([|>])[+-]?$/);
       if (blockScalar) {
         const { value: scalarValue, endIndex } = parseBlockScalar(
           lines,
           i + 1,
-          indentWidth(rawLine),
+          lineIndent,
           blockScalar[1] === '>',
         );
-        frontmatter[currentKey] = scalarValue;
+        parentMap[kv.key] = scalarValue;
         i = endIndex;
         continue;
       }
 
-      if (value) {
-        frontmatter[currentKey] = value;
+      if (kv.value) {
+        parentMap[kv.key] = kv.value;
+      } else {
+        pendingKey = { key: kv.key, indent: lineIndent, parentMap };
       }
     }
   }
