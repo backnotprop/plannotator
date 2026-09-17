@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import { cn } from '../../lib/utils';
 import { diagramFamilyOf } from '../../utils/diagram-anchor';
@@ -6,7 +6,6 @@ import { diagramFinder, type DiagramTheme } from '../../utils/diagram-render';
 import { DiagramCanvas, type DiagramCanvasHandle, type DiagramEscapeOutcome } from './DiagramCanvas';
 import { DiagramComposer } from './DiagramComposer';
 import { DiagramOverlay } from './DiagramOverlay';
-import { DiagramSourcePane } from './DiagramSourcePane';
 import { useDiagramComments, type DiagramComment, type DiagramCreateComment } from './useDiagramComments';
 import { useDiagramRender, type DiagramRenderState } from './useDiagramRender';
 import { useDiagramSourceDraft, type SaveResult } from './useDiagramSourceDraft';
@@ -21,6 +20,19 @@ import { useDiagramSourceDraft, type SaveResult } from './useDiagramSourceDraft'
  * (`components/DiagramBlock`) and again at full size in the popout; a host
  * with its own document store renders it wherever a diagram lives.
  */
+/**
+ * The Source pane is CodeMirror, and a viewer that can never open one (every
+ * fence in a Plannotator document today: no host passes `onSave`) must not
+ * carry it. It loads on the first open of the pane and never before, so the
+ * editor stays out of the document-read closure of a chunked host.
+ */
+const DiagramSourcePane = lazy(async () => ({ default: (await import('./DiagramSourcePane')).DiagramSourcePane }));
+
+/** The pane's box while its chunk loads: same class list, so the split it
+ * opens into is already the right size and nothing jumps when it lands.
+ * Never `null` here — that would collapse the row back onto the canvas. */
+const PANE_CLASS = 'order-last min-h-0 shrink-0 basis-2/5 border-t border-border md:order-first md:w-80 md:basis-auto md:border-r md:border-t-0';
+
 export interface DiagramViewerProps {
   readonly kind: DiagramKind;
   /** The diagram text. With `onSave` this is the saved baseline the pane's
@@ -206,12 +218,9 @@ export function DiagramViewer({
           column and the pane stays stacked UNDER the canvas, which
           `order-last` keeps while `md:order-first` puts it left from `md`. */}
       {hasPane && sourceOpen && (
-        <DiagramSourcePane
-          draft={draft}
-          editable={editable}
-          markedLines={markedLines}
-          className="order-last min-h-0 shrink-0 basis-2/5 border-t border-border md:order-first md:w-80 md:basis-auto md:border-r md:border-t-0"
-        />
+        <Suspense fallback={<div data-diagram-source-pane-pending="" aria-hidden="true" className={PANE_CLASS} />}>
+          <DiagramSourcePane draft={draft} editable={editable} markedLines={markedLines} className={PANE_CLASS} />
+        </Suspense>
       )}
       <div className="relative min-h-0 min-w-0 flex-1">
         {showFallback ? (
