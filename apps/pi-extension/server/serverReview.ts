@@ -49,6 +49,7 @@ import {
 	isBinaryPatchFile,
 	isSameCwdCommitSwitch,
 	listPatchFiles,
+	STATIC_PATCH_DIFF_TYPE,
 	parseCommitDiffType,
 	parseWorktreeDiffType,
 	resolveBaseBranch,
@@ -430,7 +431,12 @@ export async function startReviewServer(options: {
 			// Non-fatal: viewed state is best-effort
 		}
 	}
-	let repoInfo = prMeta
+	// Static patch: the session has no repository. Whatever repo the process
+	// happens to sit in is NOT the patch's origin, and advertising it would put
+	// an unrelated repo and branch in the review header.
+	let repoInfo = options.diffType === STATIC_PATCH_DIFF_TYPE
+		? undefined
+		: prMeta
 		? {
 				display: getDisplayRepo(prMeta),
 				branch: `${getMRLabel(prMeta)} ${getMRNumberLabel(prMeta)}`,
@@ -1724,6 +1730,15 @@ export async function startReviewServer(options: {
 	// Session-constant capability advert; rides every diff payload (see the
 	// option's doc). Absent option = false, so old callers advertise honestly.
 	const approvalNotesSupported = options.approvalNotesSupported === true;
+	// Static patch mode (`--patch-file`): caller-supplied diff bytes, no repo,
+	// no working tree. Advertised as `sourceKind: "patch"` on every diff payload
+	// (absent reads as "vcs") and enforced by 400ing the endpoints that would
+	// otherwise resolve the patch's paths against an unrelated cwd. Mirrors
+	// packages/server/review.ts.
+	const isStaticPatchMode = options.diffType === STATIC_PATCH_DIFF_TYPE;
+	const sourceKindAdvert = isStaticPatchMode
+		? ({ sourceKind: "patch" } as const)
+		: ({} as Record<string, never>);
 	const shareBaseUrl =
 		(options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
 	const pasteApiUrl =
@@ -2086,7 +2101,7 @@ export async function startReviewServer(options: {
 				snapshotId: servedSnapshotId,
 				origin: options.origin ?? "pi",
 				mode: isWorkspaceMode ? "workspace" : undefined,
-				diffType: hasLocalAccess || isWorkspaceMode ? servedDiffType : undefined,
+				diffType: hasLocalAccess || isWorkspaceMode || isStaticPatchMode ? servedDiffType : undefined,
 				// Echo the active base so page refresh/reconnect rehydrates the
 				// picker to what the server is actually using, not the detected default.
 				base: hasLocalAccess ? servedBase : undefined,
@@ -2095,6 +2110,7 @@ export async function startReviewServer(options: {
 				gitContext: hasLocalAccess ? servedGitContext : undefined,
 				sharingEnabled,
 				approvalNotesSupported,
+				...sourceKindAdvert,
 				// Mount is the only place the pin matters, so it rides /api/diff
 				// alone (not the switch endpoints).
 				...(options.openStatePinned && { openStatePinned: true }),
@@ -2398,6 +2414,7 @@ export async function startReviewServer(options: {
 						gitRef: currentGitRef,
 						snapshotId: currentSnapshotId(),
 						approvalNotesSupported,
+						...sourceKindAdvert,
 						diffType: currentDiffType,
 						diffOptions: workspace.diffOptions,
 						hideWhitespace: currentHideWhitespace,
@@ -2541,6 +2558,7 @@ export async function startReviewServer(options: {
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
 					approvalNotesSupported,
+					...sourceKindAdvert,
 					diffType: currentDiffType,
 					// Echo the base the server actually used. resolveBaseBranch
 					// trusts the caller verbatim; this echo lets the client
@@ -2603,6 +2621,7 @@ export async function startReviewServer(options: {
 						gitRef: currentGitRef,
 						snapshotId: currentSnapshotId(),
 						approvalNotesSupported,
+						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
 						...(currentError ? { error: currentError } : {}),
@@ -2669,6 +2688,7 @@ export async function startReviewServer(options: {
 						gitRef: currentGitRef,
 						snapshotId: currentSnapshotId(),
 						approvalNotesSupported,
+						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
 						...((currentError ?? upgradeError) ? { error: currentError ?? upgradeError } : {}),
@@ -2709,6 +2729,7 @@ export async function startReviewServer(options: {
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
 					approvalNotesSupported,
+					...sourceKindAdvert,
 					prDiffScope: currentPRDiffScope,
 					semanticDiff: await getSemanticDiffAdvert(),
 					callFlow: await getCallFlowAdvert(),
@@ -2794,6 +2815,7 @@ export async function startReviewServer(options: {
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
 					approvalNotesSupported,
+					...sourceKindAdvert,
 					prMetadata: pr.metadata,
 					// The new PR's checkout (null while warming) so Open-in re-roots
 					// immediately on switch instead of waiting for the 5s probe.
@@ -2984,6 +3006,12 @@ export async function startReviewServer(options: {
 				json(res, { error: message }, 500);
 			}
 		} else if (url.pathname === "/api/file-content" && req.method === "GET") {
+			// No working tree behind a static patch: the patch IS the whole content
+			// of the session, so there is nothing to expand into.
+			if (isStaticPatchMode) {
+				json(res, { error: "File content is unavailable for a static patch review" }, 400);
+				return;
+			}
 			const filePath = url.searchParams.get("path");
 			if (!filePath) {
 				json(res, { error: "Missing path" }, 400);
@@ -3311,6 +3339,10 @@ export async function startReviewServer(options: {
 			}
 			json(res, { instructions: writeGuideInstructions(instructions) });
 		} else if (url.pathname === "/api/git-add" && req.method === "POST") {
+			if (isStaticPatchMode) {
+				json(res, { error: "Staging is unavailable for a static patch review" }, 400);
+				return;
+			}
 			try {
 				const body = await parseBody(req);
 				const filePath = body.filePath as string | undefined;
@@ -3362,6 +3394,13 @@ export async function startReviewServer(options: {
 				json(res, { error: message }, 500);
 			}
 		} else if (url.pathname === "/api/open-in/apps" && req.method === "GET") {
+			// Static patch mode has no tree the patch's paths belong to, so
+			// advertise no apps: the client hides the control rather than offering
+			// to open a same-named file from an unrelated checkout.
+			if (isStaticPatchMode) {
+				json(res, { available: false, apps: [] });
+				return;
+			}
 			// Remote/headless sessions can't open apps on the user's machine —
 			// report unavailable so the UI hides the control entirely.
 			if (isRemote) {
@@ -3372,6 +3411,13 @@ export async function startReviewServer(options: {
 		} else if (url.pathname === "/api/open-in" && req.method === "POST") {
 			if (isGitButlerCommittedView()) {
 				json(res, { error: "Open in app is unavailable for committed GitButler views" }, 400);
+				return;
+			}
+			// A static patch's paths belong to whatever tree produced the patch,
+			// which this process cannot know — resolving them against the session
+			// cwd would open an unrelated file with the same name.
+			if (isStaticPatchMode) {
+				json(res, { ok: false, error: "Open in app is unavailable for a static patch review" }, 400);
 				return;
 			}
 			if (isRemote) {

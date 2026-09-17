@@ -2476,3 +2476,24 @@ export function isBinaryPatchFile(patch: string, filePath: string): boolean {
   }
   return false;
 }
+
+/**
+ * The `static-patch` diff type: the session's content is caller-supplied
+ * unified-diff bytes (`plannotator review --patch-file`), not something a VCS
+ * computed. Nothing in the session may read the working tree.
+ */
+export const STATIC_PATCH_DIFF_TYPE = "static-patch";
+
+/**
+ * Where the session's diff came from, advertised on every diff payload
+ * (`/api/diff` and the switch/PR endpoints) beside `approvalNotesSupported`.
+ * ABSENT reads as `"vcs"`, so an old server is unchanged and an old client
+ * ignoring the field behaves exactly as it always has.
+ *
+ * `"patch"` means static-patch mode: there is no repository, no working tree
+ * and no VCS behind the diff, so every affordance that would touch one
+ * (staging, hunk-context expansion, open-in-app, code navigation, diff-type /
+ * base switching, commit history, baseline freshness) is unavailable and the
+ * corresponding endpoints answer 400.
+ */
+export type ReviewSourceKind = "vcs" | "patch";
