@@ -102,6 +102,37 @@ const cases = [
   },
 ];
 
+/**
+ * Since Mermaid 12 the plan editor takes the lazy path itself, so the window
+ * between mount and the first render is now a user-visible state on every
+ * surface. What regresses: the block flashes the error panel (or nothing)
+ * while the runtime is still loading, instead of the source under a status.
+ */
+describe('Mermaid pending state', () => {
+  test.skipIf(!hasDom)('shows the source under a rendering status until the runtime lands, never the error panel', async () => {
+    let release: (() => void) | null = null;
+    __setMermaidRuntimeLoaderForTests(
+      () => new Promise((resolve) => { release = () => resolve(fakeMermaid); }),
+      { retryDelayMs: RETRY_DELAY_MS },
+    );
+    const el = await mount(<MermaidBlock block={mermaidBlock} />);
+    await settle(RETRY_DELAY_MS);
+
+    expect(el.querySelector('[data-mermaid-pending]')).not.toBeNull();
+    expect(el.textContent).toContain('Rendering diagram');
+    expect(el.textContent).toContain(mermaidBlock.content);
+    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.innerHTML).not.toContain('data-sentinel="diagram"');
+
+    await act(async () => { release!(); });
+    await settle(RETRY_DELAY_MS * 3);
+
+    expect(el.querySelector('[data-mermaid-pending]')).toBeNull();
+    expect(el.textContent).not.toContain('Rendering diagram');
+    expect(el.innerHTML).toContain('data-sentinel="diagram"');
+  });
+});
+
 describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source, errorTitle }) => {
   test.skipIf(!hasDom)('a runtime that fails once renders the diagram after the automatic re-attempt', async () => {
     const loader = flakyLoader(runtime, 1);

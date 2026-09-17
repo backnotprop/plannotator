@@ -22,9 +22,12 @@ const mermaidRetryEpoch = createRuntimeRetryEpoch();
 export { MERMAID_CONFIG, __setMermaidRuntimeLoaderForTests };
 
 /**
- * The runtime comes from the slot in utils/mermaid: filled eagerly by
- * Plannotator (utils/mermaid-eager, imported by the editor App), loaded
- * lazily otherwise. See that module for the retry contract.
+ * The runtime comes from the slot in utils/mermaid: loaded lazily on the
+ * first diagram (Plannotator's own path since Mermaid 12), or already filled
+ * by a host that imported utils/mermaid-eager. See that module for the retry
+ * contract. Until the first render lands the block shows the source fence
+ * under a "Rendering diagram" status; the error panel appears only for a
+ * failure, never as a placeholder.
  */
 const getMermaid = loadMermaidRuntime;
 
@@ -600,6 +603,25 @@ const MermaidBlockImpl: React.FC<{ block: Block }> = ({ block }) => {
     </pre>
   );
 
+  // First render still in flight (the runtime import on the lazy path, then
+  // the render itself): the source stays readable under a quiet status line.
+  // A re-render for a theme change keeps the previous SVG, so this shows only
+  // before the first diagram lands.
+  const pendingSource = (
+    <>
+      <div
+        role="status"
+        aria-live="polite"
+        data-mermaid-pending=""
+        className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"
+      >
+        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/70" aria-hidden="true" />
+        Rendering diagram…
+      </div>
+      {inlineSource}
+    </>
+  );
+
   const diagramBody = (
     <div
       ref={containerRef}
@@ -617,7 +639,7 @@ const MermaidBlockImpl: React.FC<{ block: Block }> = ({ block }) => {
     <>
       <div className="my-5 group relative" data-block-id={block.id}>
         {!isExpanded && controls}
-        {showSource || !svg ? inlineSource : !isExpanded ? diagramBody : <div className="rounded-xl border border-border/30 bg-muted/10 h-[min(65vh,36rem)] min-h-[20rem]" />}
+        {showSource ? inlineSource : !svg ? pendingSource : !isExpanded ? diagramBody : <div className="rounded-xl border border-border/30 bg-muted/10 h-[min(65vh,36rem)] min-h-[20rem]" />}
       </div>
 
       {!showSource && svg && isExpanded && typeof document !== 'undefined' && createPortal(

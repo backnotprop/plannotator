@@ -1,14 +1,16 @@
 // Eager renderer registration (side-effect imports, evaluated before every
-// other module below). These keep Plannotator's first paint, identity minting
-// and failure surface byte-identical now that @plannotator/ui loads KaTeX, the
-// username dictionary and the Mermaid runtime lazily for hosts: math is typeset
-// on the first commit, names come from the full dictionary, and Mermaid stays
-// in this app's entry chunk (the review editor never renders Mermaid and does
-// not import that entry). Guarded by tests/entry-assets.test.ts; do not drop
+// other module below). These keep Plannotator's first paint and identity
+// minting byte-identical now that @plannotator/ui loads KaTeX and the username
+// dictionary lazily for hosts: math is typeset on the first commit and names
+// come from the full dictionary. The Mermaid runtime is deliberately NOT
+// registered here: since Mermaid 12 (ELK layout by default) it loads on the
+// first diagram through `utils/mermaid`'s own `import('mermaid')`, so a plan
+// with no diagram never pays for it in a chunked build (the share portal, any
+// @plannotator/ui host). The single-file builds still inline it through
+// `inlineDynamicImports`. Guarded by tests/entry-assets.test.ts; do not drop
 // or reorder any of these lines.
 import '@plannotator/ui/utils/math-eager';
 import '@plannotator/ui/utils/identity-tater';
-import '@plannotator/ui/utils/mermaid-eager';
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { toast, Toaster } from 'sonner';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';

@@ -2,7 +2,7 @@
  * Mermaid runtime slot (utils/mermaid.ts), sibling of math.test.ts.
  *
  * What regresses if these fail:
- * - a filled slot no longer short-circuits the loader, so Plannotator's eager
+ * - a filled slot no longer short-circuits the loader, so a host's eager
  *   entry (which initialized the runtime at module evaluation) would be
  *   followed by a second import and a second initialize;
  * - the empty-slot path stops memoizing, so every diagram on a page imports

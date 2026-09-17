@@ -2,14 +2,20 @@
  * Mermaid runtime slot.
  *
  * ONE code path feeds `MermaidBlock`: `loadMermaidRuntime()`. It resolves at
- * once from a filled slot and otherwise imports the runtime lazily. Plannotator
- * fills the slot at module evaluation through `./mermaid-eager` (imported by
- * `packages/editor/App.tsx`), which keeps the runtime in its entry chunk on the
- * share portal exactly as it was with the static import, so it cannot fail
- * separately from the app. A host that does not import the eager entry gets
- * the lazy path: the runtime is fetched on the first diagram, a failed import
- * is dropped from the memo so the next call issues a fresh `import()`, and
- * the block re-attempts once and offers Retry.
+ * once from a filled slot and otherwise imports the runtime lazily: the
+ * runtime is fetched on the first diagram, a failed import is dropped from
+ * the memo so the next call issues a fresh `import()`, and the block
+ * re-attempts once and offers Retry.
+ *
+ * Since Mermaid 12 (ELK layout by default, about 1.8 MB more runtime than 11)
+ * the lazy path IS Plannotator's own path: `packages/editor/App.tsx` no longer
+ * imports `./mermaid-eager`, so a plan with no diagram never downloads the
+ * runtime in a chunked build (the share portal, any host that bundles by
+ * route). The single-file builds inline the `import('mermaid')` target through
+ * `inlineDynamicImports`, so there the lazy import resolves from the bundle
+ * itself and nothing is fetched. A host that wants the runtime registered at
+ * startup imports `./mermaid-eager`, which fills the slot at module
+ * evaluation; the slot then short-circuits this loader.
  *
  * This module has NO static import of `mermaid`; the only place the
  * dependency is named at runtime is the default loader's `import('mermaid')`.
@@ -49,7 +55,8 @@ export const MERMAID_CONFIG: MermaidConfig = {
 /**
  * Who filled the slot. The eager value doubles as a build marker: the literal
  * only reaches a bundle when `./mermaid-eager` is evaluated in it, which is
- * what `tests/entry-assets.test.ts` asserts on the built HTML.
+ * how `tests/entry-assets.test.ts` proves on the built HTML that Plannotator's
+ * own bundles do NOT register the runtime eagerly.
  */
 export type MermaidRuntimeSource = 'plannotator-mermaid-eager' | 'loader' | 'host';
 
@@ -69,7 +76,9 @@ let pending: Promise<Mermaid> | null = null;
 
 /**
  * Delay before the block's one automatic re-attempt after a failed lazy
- * import. Only chunking hosts can fail here; a filled slot never loads.
+ * import. Only chunked builds can fail here (the share portal, a host that
+ * bundles by route); a single-file build resolves the import from itself and
+ * a filled slot never loads.
  */
 let retryDelayMs = 750;
 
