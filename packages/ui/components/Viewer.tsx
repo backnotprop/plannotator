@@ -1,5 +1,5 @@
 import { generateId } from '../utils/generateId';
-import React, { useRef, useState, useEffect, useMemo, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useMemo, forwardRef, useImperativeHandle, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '../types';
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
@@ -17,6 +17,20 @@ import { CodePathValidationContext } from './CodePathValidationContext';
 import { useValidatedCodePaths } from '../hooks/useValidatedCodePaths';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { FloatingQuickLabelPicker } from './FloatingQuickLabelPicker';
+
+/**
+ * The diagram engine — the renderer slot, the canvas, the comment overlay,
+ * the popout, and (through the viewer) CodeMirror — is loaded by the first
+ * diagram fence in the document and by nothing else. A markdown document
+ * with no diagram never reaches for it; a chunked host that statically
+ * imports this Viewer pays none of it on a plain document read.
+ *
+ * The Suspense fallback is the SAME pending state the block itself shows
+ * while its engine loads (`DiagramPending`), inside the same boxes, so the
+ * source fence paints once and the two waits read as one.
+ */
+const MermaidBlock = lazy(async () => ({ default: (await import('./MermaidBlock')).MermaidBlock }));
+const GraphvizBlock = lazy(async () => ({ default: (await import('./GraphvizBlock')).GraphvizBlock }));
 
 // Debug error boundary to catch silent toolbar crashes
 class ToolbarErrorBoundary extends React.Component<
@@ -41,8 +55,7 @@ import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
-import { GraphvizBlock } from './GraphvizBlock';
-import { MermaidBlock } from './MermaidBlock';
+import { DiagramBlockPending } from './diagram/DiagramPending';
 import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
 import { getIdentity } from '../utils/identity';
 import { type QuickLabel } from '../utils/quickLabels';
@@ -1168,27 +1181,29 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               );
             })()
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (
-            <MermaidBlock
-              key={group.block.id}
-              block={group.block}
-              annotations={annotations}
-              selectedAnnotationId={selectedAnnotationId}
-              onSelectAnnotation={onSelectAnnotation}
-              onAddAnnotation={readOnly ? undefined : onAddAnnotation}
-              readOnly={readOnly}
-              onRestoreReport={onRestoreReport}
-            />
+            <Suspense key={group.block.id} fallback={<DiagramBlockPending block={group.block} kind="mermaid" />}>
+              <MermaidBlock
+                block={group.block}
+                annotations={annotations}
+                selectedAnnotationId={selectedAnnotationId}
+                onSelectAnnotation={onSelectAnnotation}
+                onAddAnnotation={readOnly ? undefined : onAddAnnotation}
+                readOnly={readOnly}
+                onRestoreReport={onRestoreReport}
+              />
+            </Suspense>
           ) : group.block.type === 'code' && isGraphvizLanguage(group.block.language) ? (
-            <GraphvizBlock
-              key={group.block.id}
-              block={group.block}
-              annotations={annotations}
-              selectedAnnotationId={selectedAnnotationId}
-              onSelectAnnotation={onSelectAnnotation}
-              onAddAnnotation={readOnly ? undefined : onAddAnnotation}
-              readOnly={readOnly}
-              onRestoreReport={onRestoreReport}
-            />
+            <Suspense key={group.block.id} fallback={<DiagramBlockPending block={group.block} kind="graphviz" />}>
+              <GraphvizBlock
+                block={group.block}
+                annotations={annotations}
+                selectedAnnotationId={selectedAnnotationId}
+                onSelectAnnotation={onSelectAnnotation}
+                onAddAnnotation={readOnly ? undefined : onAddAnnotation}
+                readOnly={readOnly}
+                onRestoreReport={onRestoreReport}
+              />
+            </Suspense>
           ) : group.block.type === 'table' ? (
             <TableBlock
               key={group.block.id}
