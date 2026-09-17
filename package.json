@@ -16,7 +16,10 @@
   "bugs": {
     "url": "https://github.com/backnotprop/plannotator/issues"
   },
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev:hook": "bun run --cwd apps/hook dev",
     "dev:portal": "bun run --cwd apps/portal dev",
@@ -51,5 +54,8 @@
     "@types/node": "^25.5.2",
     "@types/turndown": "^5.0.6",
     "bun-types": "^1.4.0"
+  },
+  "overrides": {
+    "lodash-es": "4.18.1"
   }
 }
