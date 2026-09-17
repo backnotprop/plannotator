@@ -60,6 +60,18 @@ body[data-plannotator-pinpoint-cursor],
 body[data-plannotator-pinpoint-cursor] * {
   cursor: crosshair !important;
 }
+/* Armed pinpoint over an EMBEDDED local document: the embed is one element
+ * from the outer page's point of view, and the bridge is never injected into a
+ * nested frame, so a click inside it would simply vanish into another document.
+ * Making frames transparent to the pointer while armed is what lets that click
+ * pin the <iframe>/<embed>/<object> itself. Interact (Esc, the header pen or
+ * Mod+Shift+A) restores native interaction inside the embed — which is also
+ * the only state a link inside it can be followed from.
+ * Live-app sessions never set this attribute: they annotate a real app whose
+ * own nested frames belong to it. */
+body[data-plannotator-frame-inert] :is(iframe, frame, embed, object) {
+  pointer-events: none !important;
+}
 @media (prefers-reduced-motion: reduce) {
   [data-plannotator-pinpoint-box].pn-pin-enter {
     animation: none;
@@ -381,8 +393,10 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
       document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
+      if (!LIVE) document.body.setAttribute('data-plannotator-frame-inert', '');
     } else {
       document.body.removeAttribute('data-plannotator-pinpoint-cursor');
+      document.body.removeAttribute('data-plannotator-frame-inert');
     }
   }
   var pinpointHover = null;

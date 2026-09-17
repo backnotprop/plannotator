@@ -1061,6 +1061,36 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  // An EMBEDDED local document is one element from the outer page's point of
+  // view: the bridge is never injected into a nested frame, so a click inside
+  // it lands in another document and annotates nothing. Armed pinpoint makes
+  // frames transparent to the pointer so the click pins the <iframe> itself;
+  // Interact hands the embed back so it can be used natively.
+  test("armed pinpoint makes nested frames pointer-transparent and Interact restores them", async () => {
+    document.body.innerHTML = '<iframe src="about:blank"></iframe>';
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(true);
+
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: false });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(false);
+
+    // Re-arming, then switching input method away, also clears it.
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(true);
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(false);
+
+    // String-level guard: happy-dom honors neither pointer-events nor :is(),
+    // so the attribute alone would pass with a typo'd rule. The rule that
+    // actually makes the embed pinnable must ship in the annotation CSS.
+    expect(ANNOTATION_HIGHLIGHT_CSS).toContain(
+      "body[data-plannotator-frame-inert] :is(iframe, frame, embed, object) {",
+    );
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    document.body.replaceChildren();
+  });
+
   test("deeply nested targets get no anchor instead of a quadratic selector walk", async () => {
     // Each ancestor step costs a document-wide uniqueness query against a
     // growing selector, so unbounded depth freezes the tab on one click
