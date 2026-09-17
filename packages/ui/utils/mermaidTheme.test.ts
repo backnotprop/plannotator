@@ -217,7 +217,12 @@ describe('buildMermaidThemeVariables', () => {
   test('an alpha muted-foreground is composited, never passed through with alpha', () => {
     const spec = buildMermaidThemeVariables({ background: '#000000', foreground: '#ffffff', 'muted-foreground': '#ffffff99' }, 'dark')!;
     expect(spec.themeVariables.lineColor).toMatch(HEX);
-    expect(spec.themeVariables.lineColor).toBe('#999999');
+    // #ffffff99 over black is #999999, a neutral grey; the guard may lift it
+    // toward the foreground but never re-introduces alpha or a hue.
+    const c = parseCssColor(spec.themeVariables.lineColor as string)!;
+    expect(c.r).toBeCloseTo(c.g, 2);
+    expect(c.g).toBeCloseTo(c.b, 2);
+    expect(c.r).toBeGreaterThanOrEqual(0x99 / 255 - 0.01);
   });
 });
 

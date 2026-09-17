@@ -32,7 +32,12 @@
  * renders exactly as before this module existed.
  *
  * Contrast rule (the "guard"): every text-on-fill pair the mapping produces
- * must reach WCAG 4.5:1 and every line-on-canvas pair 3:1. A pair that falls
+ * must reach WCAG 4.5:1 and every line-on-canvas pair 3:1 (plus a 0.1
+ * headroom, `GUARD_HEADROOM`). Page-level text and lines are guarded against
+ * EVERY surface they can cross, not one: the diagram canvas (the block's
+ * `bg-muted/30` tint over the document card, and over the bare page for a
+ * host that mounts the block there), node fills (`card`), cluster and
+ * composite-state fills (`muted`), popovers and ER rows. A pair that falls
  * short is repaired by moving the text (or line) colour toward the mode's
  * `foreground` token, the smallest step that satisfies the ratio so hue is
  * kept where possible; when `foreground` itself cannot reach the ratio on that
@@ -107,6 +112,13 @@ export interface MermaidThemeSpec {
 export const MERMAID_TEXT_CONTRAST_MIN = 4.5;
 export const MERMAID_LINE_CONTRAST_MIN = 3;
 export const MERMAID_BORDER_CONTRAST_MIN = 1.5;
+/**
+ * Headroom the mapping adds over the text and line minimums. This arithmetic
+ * composites in float and rounds once; a browser composites the container's
+ * `bg-muted/30` tint in its own space, so a pair repaired to exactly 4.5 or
+ * 3.0 here can measure a hair under in the rendered SVG.
+ */
+const GUARD_HEADROOM = 0.1;
 
 /** Target OKLCH lightness of categorical fills per mode (see module doc). */
 const CATEGORICAL_LIGHTNESS: Record<MermaidThemeMode, number> = { dark: 0.74, light: 0.5 };
@@ -191,6 +203,7 @@ export function readThemeTokens(el?: Element | null): MermaidThemeTokens | undef
 
 interface Palette {
   canvas: RgbColor;
+  canvasOnBackground: RgbColor;
   background: RgbColor;
   foreground: RgbColor;
   card: RgbColor;
@@ -227,11 +240,15 @@ function resolvePalette(tokens: MermaidThemeTokens): Palette | null {
   const card = over(tokens.card, opaqueBackground);
   const muted = over(tokens.muted, towardFg(0.08));
   const primary = over(tokens.primary, foreground);
-  const canvas = compositeOver({ ...muted, a: CANVAS_MUTED_ALPHA }, opaqueBackground);
+  // The block's `bg-muted/30` container sits on the document card in
+  // Plannotator (`bg-card` article); a host may place it straight on the page.
+  const canvas = compositeOver({ ...muted, a: CANVAS_MUTED_ALPHA }, card);
+  const canvasOnBackground = compositeOver({ ...muted, a: CANVAS_MUTED_ALPHA }, opaqueBackground);
   const font = tokens['font-sans']?.trim();
 
   return {
     canvas,
+    canvasOnBackground,
     background: opaqueBackground,
     foreground,
     card,
@@ -367,16 +384,28 @@ export function buildMermaidThemeVariables(tokens: MermaidThemeTokens | undefine
   // Base theme follows the mode; fill lightness and ink follow the measured page.
   const polarity: MermaidThemeMode = isDarkBackground(p.background) ? 'dark' : 'light';
   const inks = [p.foreground, p.background] as const;
-  const text = (color: RgbColor, fill: RgbColor): RgbColor => ensureContrast(color, fill, MERMAID_TEXT_CONTRAST_MIN, inks);
-  const line = (color: RgbColor): RgbColor => ensureContrast(color, p.canvas, MERMAID_LINE_CONTRAST_MIN, inks);
+  const rowEven = mixOklab(p.card, p.muted, 0.6);
+  // Every surface page-level text and lines can land on: the canvas (over the
+  // card, and over the bare page for hosts), node fills, cluster fills, ER
+  // rows, popovers. A colour guarded against all of them reads everywhere.
+  const surfaces = [p.canvas, p.canvasOnBackground, p.card, p.muted, p.popover, rowEven] as const;
+  // A little headroom over the published minimums absorbs the compositing
+  // and rounding differences between this arithmetic and a browser's.
+  const textMin = MERMAID_TEXT_CONTRAST_MIN + GUARD_HEADROOM;
+  const lineMin = MERMAID_LINE_CONTRAST_MIN + GUARD_HEADROOM;
+  const text = (color: RgbColor, fill: RgbColor): RgbColor => ensureContrast(color, fill, textMin, inks);
+  const textOnSurfaces = (color: RgbColor): RgbColor =>
+    surfaces.reduce((c, surface) => ensureContrast(c, surface, textMin, inks), quantize(color));
+  const line = (color: RgbColor): RgbColor =>
+    [p.canvas, p.canvasOnBackground, p.muted, p.card].reduce((c, surface) => ensureContrast(c, surface, lineMin, inks), quantize(color));
   const stroke = (color: RgbColor): RgbColor =>
     ensureContrast(color, p.canvas, MERMAID_BORDER_CONTRAST_MIN, [p.mutedForeground, p.foreground]);
 
   const canvas = p.canvas;
-  const fg = text(p.foreground, canvas);
-  const cardText = text(p.cardForeground, p.card);
-  const mutedText = text(p.foreground, p.muted);
-  const popoverText = text(p.foreground, p.popover);
+  const fg = textOnSurfaces(p.foreground);
+  const cardText = textOnSurfaces(p.cardForeground);
+  const mutedText = cardText;
+  const popoverText = cardText;
   const lineColor = line(p.mutedForeground);
   const nodeBorder = stroke(p.border);
   const clusterBorder = stroke(p.border);
@@ -387,7 +416,6 @@ export function buildMermaidThemeVariables(tokens: MermaidThemeTokens | undefine
   // its own text reads on rather than a fixed yellow.
   const noteBg = mixOklab(p.card, p.warning, 0.18);
   const noteText = text(p.cardForeground, noteBg);
-  const rowEven = mixOklab(p.card, p.muted, 0.6);
   const errorBg = mixOklab(p.card, p.destructive, 0.25);
   const errorText = text(p.foreground, errorBg);
   // Ink on a line-coloured shape (sequence numbers sit on `lineColor` discs).
