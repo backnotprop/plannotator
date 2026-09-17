@@ -21,6 +21,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { configStore } from '../config';
+import { DEFAULT_DIAGRAM_SHADOW } from '../utils/diagramShadow';
 import type { Block } from '../types';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { MermaidBlock, __setMermaidRuntimeLoaderForTests } from './MermaidBlock';
@@ -183,6 +185,36 @@ describe('MermaidBlock theming', () => {
     // Both diagrams were re-rendered under the new theme.
     expect(recorded.renders).toBe(4);
     expect(svgCount()).toBe(2);
+  });
+
+  test.skipIf(!hasDom)('the diagram shadow setting reaches the runtime and re-renders mounted diagrams', async () => {
+    const { runtime, recorded } = fakeRuntime();
+    __setMermaidRuntimeLoaderForTests(async () => runtime, { retryDelayMs: 5 });
+
+    await mount(<MermaidBlock block={block} />);
+    await settle();
+
+    const first = recorded.initialize[0] as { themeVariables: Record<string, unknown> };
+    // The shipped default: a toned-down shadow derived from the palette.
+    expect(first.themeVariables.dropShadow as string).toStartWith('drop-shadow(0.79px ');
+
+    try {
+      await act(async () => {
+        configStore.set('diagramShadow', 0);
+      });
+      await settle();
+
+      expect(recorded.initialize).toHaveLength(2);
+      const off = recorded.initialize[1] as { themeVariables: Record<string, unknown> };
+      expect(off.themeVariables.dropShadow).toBe(false);
+      // The mounted diagram was re-rendered, not left on the old shadow.
+      expect(recorded.renders).toBe(2);
+      expect(svgCount()).toBe(1);
+    } finally {
+      await act(async () => {
+        configStore.set('diagramShadow', DEFAULT_DIAGRAM_SHADOW);
+      });
+    }
   });
 
   test.skipIf(!hasDom)('without theme tokens on the document the runtime is never re-initialized (host fallback)', async () => {

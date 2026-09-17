@@ -22,6 +22,7 @@ import {
   type TokenHoverDelay,
   type TokenHoverTrigger,
 } from '@plannotator/core/token-hover';
+import { DEFAULT_DIAGRAM_SHADOW, isDiagramShadow } from '../utils/diagramShadow';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 import {
@@ -167,6 +168,27 @@ export const SETTINGS = {
       return v === 'true' ? true : v === 'false' ? false : undefined;
     },
     toCookie: (v: boolean) => storage.setItem('plannotator-grid-enabled', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
+   * How strong the drop shadow under Mermaid diagram nodes is, 0..100, where
+   * 100 is Mermaid 12's own default geometry. Default 70: the shipped neo look
+   * with its halo toned down (the colour is always derived from the palette,
+   * see `utils/mermaidTheme`). Cookie-only, like the other display knobs.
+   */
+  diagramShadow: {
+    defaultValue: DEFAULT_DIAGRAM_SHADOW as number,
+    fromCookie: () => {
+      // `Number(null)` and `Number('')` are 0, which is a VALID amount here
+      // (unlike the token-hover steps), so an absent cookie must be rejected
+      // before the guard sees it — otherwise no cookie reads as "no shadow".
+      const raw = storage.getItem('plannotator-diagram-shadow');
+      if (raw === null || raw.trim() === '') return undefined;
+      const parsed = Number(raw);
+      return isDiagramShadow(parsed) ? parsed : undefined;
+    },
+    toCookie: (value: number) => storage.setItem('plannotator-diagram-shadow', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 

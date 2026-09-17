@@ -2,7 +2,9 @@ import React, { lazy, Suspense, useCallback, useContext, useEffect, useMemo, use
 import { diagramTargetText, type DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { AnnotationType, type Annotation, type Block } from '../types';
+import { useConfigValue } from '../config';
 import type { DiagramTheme } from '../utils/diagram-render';
+import { diagramShadowAmount } from '../utils/diagramShadow';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
@@ -103,9 +105,17 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   // provider renders exactly as before. A key change re-runs the render,
   // which is what re-themes an already rendered diagram.
   const { colorTheme, resolvedMode } = useTheme();
+  // The node shadow reaches the renderer the same way the palette does: as
+  // part of the theme key, so changing it re-initializes Mermaid and re-renders
+  // every mounted diagram.
+  const diagramShadow = useConfigValue('diagramShadow');
   const theme = useMemo<DiagramTheme>(
-    () => ({ colorTheme, mode: resolvedMode === 'light' ? 'light' : 'dark' }),
-    [colorTheme, resolvedMode],
+    () => ({
+      colorTheme,
+      mode: resolvedMode === 'light' ? 'light' : 'dark',
+      shadowAmount: diagramShadowAmount(diagramShadow),
+    }),
+    [colorTheme, resolvedMode, diagramShadow],
   );
 
   // A sibling's Retry re-attempts this block too, but only while its own

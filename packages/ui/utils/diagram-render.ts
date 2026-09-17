@@ -48,14 +48,21 @@ type Mermaid = Awaited<ReturnType<typeof loadMermaidRuntime>>;
 
 /**
  * The (palette, mode) a render is for: the same pair `useTheme()` resolves
- * for code fences. The mermaid entry passes it to `applyMermaidTheme`, which
- * runs the global `initialize` once per key; the graphviz entry recolors its
- * defaults onto CSS tokens and needs neither. A host without ThemeProvider
- * passes any palette id with the mode it renders in.
+ * for code fences, plus the node shadow amount the user chose. The mermaid
+ * entry passes them to `applyMermaidTheme`, which runs the global `initialize`
+ * once per key; the graphviz entry recolors its defaults onto CSS tokens and
+ * needs neither. A host without ThemeProvider passes any palette id with the
+ * mode it renders in.
  */
 export interface DiagramTheme {
   readonly colorTheme: string;
   readonly mode: MermaidThemeMode;
+  /**
+   * Node drop shadow strength, 0..1 (see `mermaidTheme.buildMermaidShadow`).
+   * Absent means the shipped default, so a host that builds its own
+   * `DiagramTheme` renders exactly what Plannotator renders.
+   */
+  readonly shadowAmount?: number;
 }
 
 export type DiagramRenderError = {
@@ -514,11 +521,11 @@ const mermaidRenderer: DiagramRenderer = {
     }
     // Derive every Mermaid theme variable from the page's tokens before each
     // render, so the diagram follows the palette and mode. Keyed on the
-    // runtime plus (palette, mode), so the lazy runtime is themed on its
-    // first render and re-initialized only when one of the three changes.
+    // runtime plus (palette, mode, shadow amount), so the lazy runtime is
+    // themed on its first render and re-initialized only when one changes.
     // With no tokens on the page it is a no-op and the static
     // MERMAID_CONFIG (securityLevel strict) applies.
-    applyMermaidTheme(runtime, mermaidThemeKey(theme.colorTheme, theme.mode));
+    applyMermaidTheme(runtime, mermaidThemeKey(theme.colorTheme, theme.mode, theme.shadowAmount));
     return renderMermaid(runtime, renderId, source);
   },
 };
