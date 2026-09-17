@@ -1036,6 +1036,11 @@ export function useAnnotationHighlighter({
 
     anns.forEach(ann => {
       if (ann.type === AnnotationType.GLOBAL_COMMENT) return;
+      // A comment on a rendered diagram part has no text anchor: the
+      // diagram overlay restores it against its render and reports its own
+      // verdict, so it is neither attempted nor unanchored here (the same
+      // rule the raw-HTML pinpoints follow on their surface).
+      if (ann.diagramAnchor) return;
       attempted.push(ann.id);
 
       // Skip if already highlighted

@@ -1,0 +1,464 @@
+{
+	"mermaid": "11.17.2",
+	"renderId": "diagram-fixture",
+	"viewBox": "0 0 194.30078125 1098",
+	"hostRect": {
+		"x": 0,
+		"y": 0,
+		"width": 960,
+		"height": 640
+	},
+	"svgRect": {
+		"x": 0,
+		"y": 0,
+		"width": 194.296875,
+		"height": 1097.96875
+	},
+	"svgCtm": {
+		"a": 0.9999715391621129,
+		"b": 0,
+		"c": 0,
+		"d": 0.9999715391621129,
+		"e": 0.0008118565182443273,
+		"f": 0
+	},
+	"elements": {
+		"diagram-fixture-edge0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 107.29299926757812,
+				"y": 22,
+				"width": 0,
+				"height": 50
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge1": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 107.29299926757812,
+				"y": 112,
+				"width": 0,
+				"height": 74
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge5": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 60.71900177001953,
+				"y": 822,
+				"width": 0,
+				"height": 74
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge6": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 60.71900177001953,
+				"y": 936,
+				"width": 25.874000549316406,
+				"height": 50
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge10": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 107.29299926757812,
+				"y": 1026,
+				"width": 0,
+				"height": 49.9930419921875
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge2": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 107.29299926757812,
+				"y": 226,
+				"width": 0,
+				"height": 74
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge3": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 127.99299621582031,
+				"y": 708,
+				"width": 25.874008178710938,
+				"height": 278
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge4": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 60.71900177001953,
+				"y": 708,
+				"width": 7.150001525878906,
+				"height": 74
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 0.0008118565182443273,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-state-root_start-0": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -7,
+				"y": -7,
+				"width": 14,
+				"height": 14
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 14.999573087431694
+			},
+			"label": ""
+		},
+		"diagram-fixture-state-Idle-1": {
+			"tag": "g",
+			"class": "node  statediagram-state",
+			"bbox": {
+				"x": -21.40625,
+				"y": -20,
+				"width": 42.8125,
+				"height": 40
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 91.99738160291439
+			},
+			"label": "Idle"
+		},
+		"diagram-fixture-state-Launching-2": {
+			"tag": "g",
+			"class": "node  statediagram-state",
+			"bbox": {
+				"x": -44,
+				"y": -20,
+				"width": 88,
+				"height": 40
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 205.99413706739526
+			},
+			"label": "Launching"
+		},
+		"diagram-fixture-state-Running-7": {
+			"tag": "g",
+			"class": "statediagram-state statediagram-cluster",
+			"bbox": {
+				"x": 8,
+				"y": 8,
+				"width": 158.015625,
+				"height": 408
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 20.285390773974697,
+				"f": 291.991689435337
+			},
+			"label": "Running"
+		},
+		"diagram-fixture-edge7": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 87.00800323486328,
+				"y": 59.5,
+				"width": 0,
+				"height": 75
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 20.285390773974697,
+				"f": 291.991689435337
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge8": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 87.00800323486328,
+				"y": 174.5,
+				"width": 0,
+				"height": 75
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 20.285390773974697,
+				"f": 291.991689435337
+			},
+			"label": ""
+		},
+		"diagram-fixture-edge9": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid transition",
+			"bbox": {
+				"x": 87.00800323486328,
+				"y": 289.5,
+				"width": 0,
+				"height": 74.99301147460938
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 20.285390773974697,
+				"f": 291.991689435337
+			},
+			"label": ""
+		},
+		"diagram-fixture-state-Running_start-7": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -7,
+				"y": -7,
+				"width": 14,
+				"height": 14
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 344.4901952413479
+			},
+			"label": ""
+		},
+		"diagram-fixture-state-Streaming-8": {
+			"tag": "g",
+			"class": "node  statediagram-state",
+			"bbox": {
+				"x": -44.0078125,
+				"y": -20,
+				"width": 88.015625,
+				"height": 40
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 446.4872922358834
+			},
+			"label": "Streaming"
+		},
+		"diagram-fixture-state-Parsing-9": {
+			"tag": "g",
+			"class": "node  statediagram-state",
+			"bbox": {
+				"x": -33.3046875,
+				"y": -20,
+				"width": 66.609375,
+				"height": 40
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 561.4840192395264
+			},
+			"label": "Parsing"
+		},
+		"diagram-fixture-state-Running_end-9": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -7,
+				"y": -7,
+				"width": 14.013293266296387,
+				"height": 14
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 663.4811162340619
+			},
+			"label": ""
+		},
+		"diagram-fixture-state-Succeeded-10": {
+			"tag": "g",
+			"class": "node  statediagram-state",
+			"bbox": {
+				"x": -46.1484375,
+				"y": -20,
+				"width": 92.296875,
+				"height": 40
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 1005.9713683970856
+			},
+			"label": "Succeeded"
+		},
+		"diagram-fixture-state-Failed-5": {
+			"tag": "g",
+			"class": "node  statediagram-state",
+			"bbox": {
+				"x": -29.8671875,
+				"y": -20,
+				"width": 59.734375,
+				"height": 40
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 60.71783375001779,
+				"f": 801.9771744080145
+			},
+			"label": "Failed"
+		},
+		"diagram-fixture-state-Repairing-6": {
+			"tag": "g",
+			"class": "node  statediagram-state",
+			"bbox": {
+				"x": -41.4140625,
+				"y": -20,
+				"width": 82.828125,
+				"height": 40
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 60.71783375001779,
+				"f": 915.9739298724954
+			},
+			"label": "Repairing"
+		},
+		"diagram-fixture-state-root_end-10": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -7,
+				"y": -7,
+				"width": 14.013293266296387,
+				"height": 14
+			},
+			"ctm": {
+				"a": 0.9999715391621129,
+				"b": 0,
+				"c": 0,
+				"d": 0.9999715391621129,
+				"e": 107.29072695872821,
+				"f": 1082.9691769125682
+			},
+			"label": ""
+		}
+	}
+}

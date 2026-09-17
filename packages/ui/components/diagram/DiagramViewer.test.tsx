@@ -1,0 +1,567 @@
+/**
+ * The diagram viewer over a REAL rendered svg with REAL geometry: the svg is
+ * mermaid's own output for test-setup/fixtures/diagrams/06-flowchart-
+ * review-decision (captured from a headless Chromium, render id
+ * "diagram-fixture"); the numbers beside it are the `getBBox()` and
+ * `getScreenCTM()` Chromium measured for every element.
+ *
+ * Three browser APIs happy-dom does not have are stood in, and nothing
+ * else: (a) the layout engine's answer for a rendered diagram — the captured
+ * svg is handed to the viewer through the package's public host slot
+ * (`setMermaidRuntime(runtime, "host")`), so `renderDiagram` runs the real
+ * slot code over the real bytes and only the layout step is Chromium's;
+ * (b) `SVGGraphicsElement.getBBox` and `getScreenCTM`, installed from the
+ * captured numbers, keyed by the element's rendered id suffix; (c) the
+ * DOMPurify parse step, which happy-dom cannot host (the scrub still runs).
+ * Pointer capture is a no-op stand-in.
+ *
+ * What regresses if these fail:
+ * - rings and badges are placed from stored pixels instead of the current
+ *   CTM, so they drift off their nodes on the first zoom or pan;
+ * - hover and click describe the wrong part (a marker, a label group, the
+ *   background) or the wrong node;
+ * - Enter does not hand the host the anchor: the Mermaid id, the label, the
+ *   DOCUMENT source line (offset applied), the additional targets;
+ * - badge numbers do not follow the `comments` array order;
+ * - a comment whose part is gone is not reported unanchored, or one whose
+ *   id is gone but whose label survives is (restore step 2 runs first);
+ * - a drag pans instead of opening the composer, or a plain click on the
+ *   background does not close an open draft;
+ * - keyboard zoom loses a manual zoom on the next render;
+ * - the Source pane: typing does not preview after the debounce, Save does
+ *   not hand the host the draft, a stale answer does not show Reload while
+ *   keeping the draft, Discard does not restore the baseline.
+ *
+ * DOM-gated (DOM_TESTS=1).
+ */
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { EditorView } from '@codemirror/view';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { installInertDiagramSvgParser } from '../../test-setup/diagramSvg';
+import type { DiagramAnchor, DiagramTarget } from '../../utils/diagram-anchor';
+import { projectElement } from '../../utils/diagram-projection';
+import { __setMermaidRuntimeLoaderForTests, setMermaidRuntime } from '../../utils/mermaid';
+import { DiagramViewer, type DiagramViewerProps } from './DiagramViewer';
+import type { DiagramComment } from './useDiagramComments';
+import { PREVIEW_DEBOUNCE_MS, type SaveResult } from './useDiagramSourceDraft';
+
+const hasDom = typeof document !== 'undefined';
+const FIXTURES = join(import.meta.dir, '..', '..', 'test-setup', 'fixtures', 'diagrams');
+const FIXTURE = '06-flowchart-review-decision';
+const CAPTURE_ID = 'diagram-fixture';
+const SVG = readFileSync(join(FIXTURES, `${FIXTURE}.svg`), 'utf8');
+const SOURCE = ['flowchart LR', '  U([Reviewer]) --> D{Approve?}', '  D -->|Yes| M[(Merge)]', '  D -->|No| R[Revise]', ''].join('\n');
+const THEME = { colorTheme: 'plannotator', mode: 'dark' } as const;
+
+interface CapturedElement {
+  readonly bbox: { x: number; y: number; width: number; height: number };
+  readonly ctm: { a: number; b: number; c: number; d: number; e: number; f: number };
+}
+const GEOMETRY = JSON.parse(readFileSync(join(FIXTURES, `${FIXTURE}.geometry.json`), 'utf8')) as {
+  elements: Record<string, CapturedElement>;
+};
+/** Captured entries keyed by the id suffix after the render id, so they
+ * apply whatever render id the viewer minted. */
+const CAPTURED = Object.entries(GEOMETRY.elements).map(([id, entry]) => [id.slice(CAPTURE_ID.length), entry] as const);
+function capturedFor(el: Element): CapturedElement | null {
+  const found = CAPTURED.find(([suffix]) => el.id.endsWith(suffix));
+  return found === undefined ? null : found[1];
+}
+
+const NODE_D: DiagramAnchor = { v: 1, family: 'flowchart', kind: 'node', id: 'D', label: 'Approve?', sourceLine: [2, 2] };
+const NODE_GONE_LABEL_REVISE: DiagramAnchor = { v: 1, family: 'flowchart', kind: 'node', id: 'Gone', label: 'Revise', sourceLine: null };
+const NODE_GONE: DiagramAnchor = { v: 1, family: 'flowchart', kind: 'node', id: 'Gone', label: 'Nowhere', sourceLine: null };
+
+function comment(id: string, anchor: DiagramAnchor): DiagramComment {
+  return { id, anchor, text: 'a comment', author: 'reviewer' };
+}
+
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+let restoreParser: (() => void) | null = null;
+let renderCalls: string[] = [];
+// happy-dom defines the two geometry methods on SVGGraphicsElement, which
+// would shadow a stub on SVGElement; install where the engine defines them.
+const svgProto = (hasDom ? ((globalThis as { SVGGraphicsElement?: typeof SVGElement }).SVGGraphicsElement ?? SVGElement).prototype : {}) as unknown as Record<string, unknown>;
+const elementProto = (hasDom ? Element.prototype : {}) as unknown as Record<string, unknown>;
+const saved = { getBBox: svgProto['getBBox'], getScreenCTM: svgProto['getScreenCTM'] };
+const noop = (): void => {};
+
+beforeAll(() => {
+  if (!hasDom) return;
+  restoreParser = installInertDiagramSvgParser();
+  setMermaidRuntime(
+    {
+      initialize: noop,
+      render: (id: string, source: string) => {
+        renderCalls.push(source);
+        return Promise.resolve({ svg: SVG.replaceAll(CAPTURE_ID, id) });
+      },
+    } as unknown as Parameters<typeof setMermaidRuntime>[0],
+    'host',
+  );
+  elementProto['setPointerCapture'] ??= noop;
+  elementProto['releasePointerCapture'] ??= noop;
+  elementProto['hasPointerCapture'] ??= () => false;
+  svgProto['getBBox'] = function (this: Element) {
+    const captured = capturedFor(this);
+    if (captured === null) throw new Error(`no captured geometry for ${this.id}`);
+    return { ...captured.bbox };
+  };
+  svgProto['getScreenCTM'] = function (this: Element) {
+    return capturedFor(this)?.ctm ?? null;
+  };
+});
+
+afterAll(() => {
+  if (!hasDom) return;
+  svgProto['getBBox'] = saved.getBBox;
+  svgProto['getScreenCTM'] = saved.getScreenCTM;
+  __setMermaidRuntimeLoaderForTests(undefined);
+  restoreParser?.();
+});
+
+afterEach(async () => {
+  if (root !== null) {
+    const finished = root;
+    await act(async () => {
+      finished.unmount();
+    });
+    root = null;
+  }
+  host?.remove();
+  host = null;
+  renderCalls = [];
+});
+
+async function mount(element: React.ReactElement): Promise<{ rerender: (next: React.ReactElement) => Promise<void> }> {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => {
+    root!.render(element);
+  });
+  return {
+    rerender: async (next) => {
+      await act(async () => {
+        root!.render(next);
+      });
+    },
+  };
+}
+
+async function settle(ms = 25): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
+}
+
+async function waitFor(check: () => void, tries = 40): Promise<void> {
+  let lastError: unknown;
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      check();
+      return;
+    } catch (error) {
+      lastError = error;
+      await settle();
+    }
+  }
+  throw lastError;
+}
+
+function q<T extends Element = HTMLElement>(selector: string): T {
+  const el = host!.querySelector<T>(selector);
+  if (el === null) throw new Error(`missing ${selector}`);
+  return el;
+}
+
+function pointer(type: string, target: Element, init: { x: number; y: number; shift?: boolean; mod?: boolean; pointerId?: number }): void {
+  const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
+  const event = new Ctor(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: init.x,
+    clientY: init.y,
+    button: 0,
+    shiftKey: init.shift ?? false,
+    // The platform modifier, whichever platform happy-dom reports.
+    metaKey: init.mod ?? false,
+    ctrlKey: init.mod ?? false,
+    ...(Ctor !== MouseEvent ? { pointerId: init.pointerId ?? 1 } : {}),
+  } as MouseEventInit);
+  target.dispatchEvent(event);
+}
+
+async function clickPart(target: Element, shift = false): Promise<void> {
+  await act(async () => {
+    pointer('pointerdown', target, { x: 10, y: 10, shift });
+    pointer('pointerup', target, { x: 10, y: 10, shift });
+  });
+}
+
+function viewer(props: Partial<DiagramViewerProps> & { comments?: readonly DiagramComment[] }): React.ReactElement {
+  return <DiagramViewer kind="mermaid" source={SOURCE} theme={THEME} comments={[]} renderId="t" {...props} />;
+}
+
+function nodeD(): Element {
+  return q('[id$="-flowchart-D-1"]');
+}
+
+describe.if(hasDom)('restore and paint', () => {
+  test('paints rings and numbered badges where Chromium put the parts, numbers from array order, and reports the gone ones', async () => {
+    const unanchored: string[][] = [];
+    const rows = [comment('a1', NODE_D), comment('a2', NODE_GONE_LABEL_REVISE), comment('a3', NODE_GONE)];
+    const onUnanchoredChange = (ids: ReadonlySet<string>) => unanchored.push([...ids].sort());
+    const { rerender } = await mount(viewer({ comments: rows, onUnanchoredChange }));
+
+    await waitFor(() => {
+      expect(q('[data-diagram-badge="a1"]').textContent).toBe('1');
+      expect(q('[data-diagram-badge="a2"]').textContent).toBe('2');
+    });
+    expect(host!.querySelector('[data-diagram-badge="a3"]')).toBeNull();
+    expect(unanchored[unanchored.length - 1]).toEqual(['a3']);
+
+    // The ring for node D: Chromium measured the node's box at
+    // (-58.76, -59.26, 118.52 x 118.52) in user units under a CTM that
+    // translates by (207.36, 93.59) and scales by 0.99996, so the screen
+    // rectangle is (148.6, 34.3, 118.5 x 118.5); the ring pads it by 3px.
+    const ring = q<HTMLElement>('[data-diagram-mark="a1"] > div');
+    expect(Number.parseFloat(ring.style.left)).toBeCloseTo(148.6 - 3, 0);
+    expect(Number.parseFloat(ring.style.top)).toBeCloseTo(34.3 - 3, 0);
+    expect(Number.parseFloat(ring.style.width)).toBeCloseTo(118.5 + 6, 0);
+    expect(Number.parseFloat(ring.style.height)).toBeCloseTo(118.5 + 6, 0);
+    // The label fallback ring (a2) sits on node R, not on D.
+    const ringR = q<HTMLElement>('[data-diagram-mark="a2"] > div');
+    expect(Number.parseFloat(ringR.style.left)).toBeCloseTo(339.3 - 3, 0);
+    expect(Number.parseFloat(ringR.style.top)).toBeCloseTo(120.8 - 3, 0);
+
+    // Array order is the number: swap the first two rows.
+    await rerender(viewer({ comments: [rows[1]!, rows[0]!, rows[2]!], onUnanchoredChange }));
+    await waitFor(() => {
+      expect(q('[data-diagram-badge="a2"]').textContent).toBe('1');
+      expect(q('[data-diagram-badge="a1"]').textContent).toBe('2');
+    });
+  });
+
+  test('clicking a badge selects that comment', async () => {
+    const selected: Array<string | null> = [];
+    await mount(viewer({ comments: [comment('a1', NODE_D)], onSelectComment: (id) => selected.push(id) }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-badge="a1"]')).not.toBeNull());
+    await act(async () => {
+      q<HTMLButtonElement>('[data-diagram-badge="a1"]').click();
+    });
+    expect(selected).toEqual(['a1']);
+  });
+});
+
+describe.if(hasDom)('the projection', () => {
+  test('reprojects from the live CTM (a 2x zoom doubles the rectangle) and answers null with no geometry', async () => {
+    await mount(viewer({}));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const node = nodeD() as SVGGraphicsElement;
+    const base = projectElement(node, { left: 0, top: 0 })!;
+    expect(base.left).toBeCloseTo(148.6, 0);
+    expect(base.width).toBeCloseTo(118.5, 0);
+    const captured = capturedFor(node)!;
+    const zoomed = { ...captured.ctm, a: captured.ctm.a * 2, d: captured.ctm.d * 2, e: captured.ctm.e * 2, f: captured.ctm.f * 2 };
+    const original = node.getScreenCTM;
+    (node as unknown as Record<string, unknown>)['getScreenCTM'] = () => zoomed;
+    const doubled = projectElement(node, { left: 0, top: 0 })!;
+    expect(doubled.left).toBeCloseTo(base.left * 2, 0);
+    expect(doubled.width).toBeCloseTo(base.width * 2, 0);
+    (node as unknown as Record<string, unknown>)['getScreenCTM'] = () => null;
+    expect(projectElement(node, { left: 0, top: 0 })).toBeNull();
+    (node as unknown as Record<string, unknown>)['getScreenCTM'] = original;
+  });
+});
+
+describe.if(hasDom)('hover, click, compose', () => {
+  test('a plain mouse-over highlights nothing; the ring under the pointer appears only with the platform modifier held', async () => {
+    // Owner feedback: hover targeting read as messy and fought the pan
+    // hand, so nothing paints on a plain move.
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    await act(async () => {
+      pointer('pointermove', nodeD(), { x: 10, y: 10 });
+    });
+    await settle();
+    expect(host!.querySelector('[data-diagram-hover]')).toBeNull();
+    await act(async () => {
+      pointer('pointermove', nodeD(), { x: 10, y: 10, mod: true });
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-hover]')).not.toBeNull());
+    expect(q('[data-diagram-hover]').textContent).toContain('Approve?');
+    expect(q('[data-diagram-hover]').textContent).toContain('node D');
+    await act(async () => {
+      pointer('pointermove', nodeD(), { x: 11, y: 10 });
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-hover]')).toBeNull());
+  });
+
+  test('every edge gets an invisible 14px hit path beside its stroke, and a click on it opens the composer for that edge', async () => {
+    // Owner feedback: a 1–2 px stroke was only catchable at random spots.
+    const created: Array<{ anchor: DiagramAnchor }> = [];
+    await mount(viewer({ onCreateComment: (anchor) => { created.push({ anchor }); } }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const edges = Array.from(host!.querySelectorAll('path.flowchart-link'));
+    expect(edges.length).toBe(3);
+    for (const edge of edges) {
+      const hit = edge.nextElementSibling!;
+      expect(hit.hasAttribute('data-diagram-hit')).toBe(true);
+      expect(hit.getAttribute('stroke-width')).toBe('14');
+      expect(hit.getAttribute('pointer-events')).toBe('stroke');
+      expect(hit.getAttribute('stroke')).toBe('transparent');
+      expect(hit.hasAttribute('id')).toBe(false);
+      expect(hit.getAttribute('d')).toBe(edge.getAttribute('d'));
+      expect(hit.parentElement).toBe(edge.parentElement);
+    }
+    // The pointer lands on the widened path (what a click 6 px off the
+    // visible stroke hits in a browser); the canvas resolves the edge.
+    const hitDM = q('[id$="-L_D_M_0"]').nextElementSibling!;
+    await clickPart(hitDM);
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    expect(q('[data-diagram-composer]').textContent).toContain('edge D → M');
+    const textarea = q<HTMLTextAreaElement>('[data-diagram-composer] textarea');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'on the edge');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.anchor).toMatchObject({ kind: 'edge', from: 'D', to: 'M', label: 'Yes' });
+  });
+
+  test('click opens the composer at the part; Enter hands the host the anchor with the document line offset and selects nothing else', async () => {
+    const created: Array<{ anchor: DiagramAnchor; text: string; additional: readonly DiagramTarget[] }> = [];
+    await mount(
+      viewer({
+        sourceLineOffset: 10,
+        onCreateComment: (anchor, text, additional) => {
+          created.push({ anchor, text, additional });
+        },
+      }),
+    );
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    await clickPart(nodeD());
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    const composer = q('[data-diagram-composer]');
+    expect(composer.textContent).toContain('Approve?');
+    expect(composer.textContent).toContain('node D');
+    // The declaring line of D in the source is 2; the host's offset makes
+    // it a document line.
+    expect(composer.textContent).toContain('line 12');
+    const textarea = q<HTMLTextAreaElement>('[data-diagram-composer] textarea');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'Rename this step');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.anchor).toEqual({ v: 1, family: 'flowchart', kind: 'node', id: 'D', label: 'Approve?', sourceLine: [12, 12] });
+    expect(created[0]!.text).toBe('Rename this step');
+    expect(created[0]!.additional).toEqual([]);
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).toBeNull());
+  });
+
+  test('shift-click adds an edge to the one draft when the host allows extra targets; the default cap of 0 refuses', async () => {
+    const created: Array<{ additional: readonly DiagramTarget[] }> = [];
+    const { rerender } = await mount(
+      viewer({
+        maxAdditionalTargets: 16,
+        onCreateComment: (_anchor, _text, additional) => {
+          created.push({ additional });
+        },
+      }),
+    );
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    await clickPart(nodeD());
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    await clickPart(q('[id$="-L_D_M_0"]'), true);
+    await waitFor(() => expect(q('[data-diagram-composer]').textContent).toContain('+1 more'));
+    const textarea = q<HTMLTextAreaElement>('[data-diagram-composer] textarea');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'both');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.additional).toEqual([{ family: 'flowchart', kind: 'edge', from: 'D', to: 'M', label: 'Yes' }]);
+
+    // The default cap: a shift-click extends nothing.
+    await rerender(viewer({ onCreateComment: noop }));
+    await clickPart(nodeD());
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    await clickPart(q('[id$="-L_D_M_0"]'), true);
+    await settle();
+    expect(q('[data-diagram-composer]').textContent).not.toContain('more');
+  });
+
+  test('a 20 px press is a pan and never opens the composer; a 2 px one is a click; a plain click on the background closes the draft; Escape closes it too', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    const before = wrapper.style.transform;
+    // A 20 px drag is a pan, never a click.
+    await act(async () => {
+      pointer('pointerdown', nodeD(), { x: 10, y: 10 });
+      pointer('pointermove', nodeD(), { x: 30, y: 10 });
+      pointer('pointerup', nodeD(), { x: 30, y: 10 });
+    });
+    await settle();
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+    expect(wrapper.style.transform).not.toBe(before);
+    expect(wrapper.style.transform).toContain('translate(20px, 0px)');
+    // A slightly moving press (under the 4 px threshold) is still a click.
+    await act(async () => {
+      pointer('pointerdown', nodeD(), { x: 10, y: 10 });
+      pointer('pointermove', nodeD(), { x: 12, y: 11 });
+      pointer('pointerup', nodeD(), { x: 12, y: 11 });
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    await act(async () => {
+      q('[data-diagram-canvas]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).toBeNull());
+
+    await clickPart(nodeD());
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    await clickPart(q('[data-diagram-canvas]'));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).toBeNull());
+
+    await clickPart(nodeD());
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    await act(async () => {
+      q('[data-diagram-canvas]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).toBeNull());
+  });
+
+  test('refuses honestly when the host disables commenting: the reason, no textarea; and opens nothing with no handler at all', async () => {
+    const { rerender } = await mount(viewer({ commentingDisabledReason: 'You have view access here.' }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    await clickPart(nodeD());
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    expect(q('[data-diagram-composer]').textContent).toContain('You have view access here.');
+    expect(host!.querySelector('[data-diagram-composer] textarea')).toBeNull();
+
+    await rerender(viewer({}));
+    await settle();
+    await clickPart(nodeD());
+    await settle();
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+  });
+
+  test('keyboard zoom and fit act on the canvas transform; a re-render keeps a manual zoom until the next fit', async () => {
+    const { rerender } = await mount(viewer({}));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-canvas]')).not.toBeNull());
+    const canvas = q('[data-diagram-canvas]');
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    await act(async () => {
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true }));
+    });
+    expect(wrapper.style.transform).toContain('scale(1.25)');
+    await rerender(viewer({ source: SOURCE + '  R --> Q[Queued]\n', comments: [comment('a1', NODE_D)] }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-badge="a1"]')).not.toBeNull());
+    expect(wrapper.style.transform).toContain('scale(1.25)');
+    await act(async () => {
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true }));
+    });
+    expect(wrapper.style.transform).toContain('scale(1)');
+  });
+});
+
+describe.if(hasDom)('the Source pane', () => {
+  function editor(): EditorView {
+    const view = EditorView.findFromDOM(q('[data-diagram-source-editor] .cm-editor'));
+    if (view === null) throw new Error('no editor');
+    return view;
+  }
+
+  async function type(text: string): Promise<void> {
+    await act(async () => {
+      const view = editor();
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    });
+  }
+
+  test('no onSave means no pane; with onSave the pane previews the draft, saves it, and Discard restores the baseline', async () => {
+    const saves: string[] = [];
+    const onSave = async (source: string): Promise<SaveResult> => {
+      saves.push(source);
+      return { status: 'ok' };
+    };
+    const { rerender } = await mount(viewer({ sourceOpen: true }));
+    await settle();
+    expect(host!.querySelector('[data-diagram-source-pane]')).toBeNull();
+
+    await rerender(viewer({ sourceOpen: true, onSave }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-source-pane]')).not.toBeNull());
+    expect(editor().state.doc.toString()).toBe(SOURCE);
+    const rendersBefore = renderCalls.length;
+
+    await type(SOURCE + '  R --> Q[Queued]\n');
+    await waitFor(() => expect(host!.querySelector('[data-diagram-draft-state]')).not.toBeNull());
+    // The preview lands after the debounce, once, with the draft.
+    await settle(PREVIEW_DEBOUNCE_MS + 40);
+    await waitFor(() => expect(renderCalls.length).toBe(rendersBefore + 1));
+    expect(renderCalls[renderCalls.length - 1]).toContain('Q[Queued]');
+
+    const save = Array.from(host!.querySelectorAll<HTMLButtonElement>('[data-diagram-source-pane] button')).find((b) => b.textContent === 'Save')!;
+    await act(async () => {
+      save.click();
+    });
+    await waitFor(() => expect(saves).toEqual([SOURCE + '  R --> Q[Queued]\n']));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-draft-state]')).toBeNull());
+
+    await type('flowchart LR\n  A --> B\n');
+    await waitFor(() => expect(host!.querySelector('[data-diagram-draft-state]')).not.toBeNull());
+    const discard = Array.from(host!.querySelectorAll<HTMLButtonElement>('[data-diagram-source-pane] button')).find((b) => b.textContent === 'Discard')!;
+    await act(async () => {
+      discard.click();
+    });
+    await waitFor(() => expect(editor().state.doc.toString()).toBe(SOURCE + '  R --> Q[Queued]\n'));
+    expect(host!.querySelector('[data-diagram-draft-state]')).toBeNull();
+  });
+
+  test('a stale answer shows Reload, holds Save and keeps the draft; Reload adopts the newer text as the baseline', async () => {
+    const NEWER = 'flowchart LR\n  X --> Y\n';
+    const onSave = async (): Promise<SaveResult> => ({ status: 'stale', currentSource: NEWER });
+    await mount(viewer({ sourceOpen: true, onSave }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-source-pane]')).not.toBeNull());
+    await type(SOURCE + '  R --> Q\n');
+    const buttons = () => Array.from(host!.querySelectorAll<HTMLButtonElement>('[data-diagram-source-pane] button'));
+    await waitFor(() => expect(buttons().find((b) => b.textContent === 'Save')!.disabled).toBe(false));
+    await act(async () => {
+      buttons().find((b) => b.textContent === 'Save')!.click();
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-reload-strip]')).not.toBeNull());
+    expect(buttons().find((b) => b.textContent === 'Save')!.disabled).toBe(true);
+    expect(editor().state.doc.toString()).toBe(SOURCE + '  R --> Q\n');
+    await act(async () => {
+      buttons().find((b) => b.textContent === 'Reload')!.click();
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-reload-strip]')).toBeNull());
+    // The dirty draft stays; the baseline moved, so Save is live again.
+    expect(editor().state.doc.toString()).toBe(SOURCE + '  R --> Q\n');
+    expect(buttons().find((b) => b.textContent === 'Save')!.disabled).toBe(false);
+    await act(async () => {
+      buttons().find((b) => b.textContent === 'Discard')!.click();
+    });
+    await waitFor(() => expect(editor().state.doc.toString()).toBe(NEWER));
+  });
+
+  test('readOnlySource shows the pane without Save', async () => {
+    const onSave = async (): Promise<SaveResult> => ({ status: 'ok' });
+    await mount(viewer({ sourceOpen: true, onSave, readOnlySource: true }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-source-pane]')).not.toBeNull());
+    expect(q('[data-diagram-source-pane]').textContent).toContain('Read only');
+    expect(Array.from(host!.querySelectorAll('[data-diagram-source-pane] button')).map((b) => b.textContent)).not.toContain('Save');
+  });
+});

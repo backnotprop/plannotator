@@ -118,7 +118,10 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/mermaid.ts')).not.toMatch(staticImport('mermaid'));
     expect(read('packages/ui/utils/mermaid.ts')).toContain("import('mermaid')");
     expect(read('packages/ui/components/GraphvizBlock.tsx')).not.toMatch(staticImport('@viz-js/viz'));
-    expect(read('packages/ui/components/GraphvizBlock.tsx')).toContain("import('@viz-js/viz')");
+    expect(read('packages/ui/components/DiagramBlock.tsx')).not.toMatch(staticImport('@viz-js/viz'));
+    expect(read('packages/ui/utils/diagram-render.ts')).not.toMatch(staticImport('@viz-js/viz'));
+    expect(read('packages/ui/utils/graphviz.ts')).not.toMatch(staticImport('@viz-js/viz'));
+    expect(read('packages/ui/utils/graphviz.ts')).toContain("import('@viz-js/viz')");
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
   });
 

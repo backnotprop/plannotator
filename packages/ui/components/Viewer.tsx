@@ -1147,9 +1147,27 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               );
             })()
           ) : group.block.type === 'code' && isMermaidLanguage(group.block.language) ? (
-            <MermaidBlock key={group.block.id} block={group.block} />
+            <MermaidBlock
+              key={group.block.id}
+              block={group.block}
+              annotations={annotations}
+              selectedAnnotationId={selectedAnnotationId}
+              onSelectAnnotation={onSelectAnnotation}
+              onAddAnnotation={readOnly ? undefined : onAddAnnotation}
+              readOnly={readOnly}
+              onRestoreReport={onRestoreReport}
+            />
           ) : group.block.type === 'code' && isGraphvizLanguage(group.block.language) ? (
-            <GraphvizBlock key={group.block.id} block={group.block} />
+            <GraphvizBlock
+              key={group.block.id}
+              block={group.block}
+              annotations={annotations}
+              selectedAnnotationId={selectedAnnotationId}
+              onSelectAnnotation={onSelectAnnotation}
+              onAddAnnotation={readOnly ? undefined : onAddAnnotation}
+              readOnly={readOnly}
+              onRestoreReport={onRestoreReport}
+            />
           ) : group.block.type === 'table' ? (
             <TableBlock
               key={group.block.id}

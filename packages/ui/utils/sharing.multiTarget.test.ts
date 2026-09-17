@@ -38,6 +38,31 @@ describe("sharing — multi-target annotations", () => {
     expect(JSON.stringify(shareable)).not.toContain("outline");
   });
 
+  test("a diagram anchor follows the same rule: the comment shares, the anchor does not", () => {
+    // A diagram anchor names a part of a render the link's recipient
+    // re-creates from the fence; the quoted label still restores by text
+    // search on the shared document, and the anchor itself never travels.
+    const DIAGRAM: Annotation = {
+      id: "ann-2",
+      blockId: "block-3",
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.COMMENT,
+      text: "Rename this step",
+      originalText: "Approve?",
+      createdA: 2,
+      author: "reviewer",
+      diagramAnchor: { v: 1, family: "flowchart", kind: "node", id: "D", label: "Approve?", sourceLine: [4, 4] },
+    };
+    const shareable = toShareable([DIAGRAM]);
+    expect(shareable).toEqual([["C", "Approve?", "Rename this step", "reviewer", undefined]]);
+    expect(JSON.stringify(shareable)).not.toContain("diagramAnchor");
+    expect(JSON.stringify(shareable)).not.toContain("sourceLine");
+    const restored = fromShareable(shareable);
+    expect(restored[0]!.diagramAnchor).toBeUndefined();
+    expect(restored[0]!.originalText).toBe("Approve?");
+  });
+
   test("round trip keeps the comment but has no target array", () => {
     const restored = fromShareable(toShareable([MULTI]));
     expect(restored.length).toBe(1);

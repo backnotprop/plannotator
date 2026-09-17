@@ -16,12 +16,21 @@
  *
  * DOM-gated (DOM_TESTS=1).
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Block } from '../types';
+import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { MermaidBlock, __setMermaidRuntimeLoaderForTests } from './MermaidBlock';
 import { GraphvizBlock, __setVizLoaderForTests } from './GraphvizBlock';
+
+// happy-dom cannot host DOMPurify: the render slot's parse step is the inert
+// template parse for these tests (the scrub still runs).
+let restoreParser: (() => void) | null = null;
+beforeAll(() => {
+  if (hasDom) restoreParser = installInertDiagramSvgParser();
+});
+afterAll(() => restoreParser?.());
 import {
   getMathRenderer,
   getMathRendererSource,
@@ -39,7 +48,10 @@ const mermaidBlock: Block = { id: 'm1', type: 'code', language: 'mermaid', conte
 const dotBlock: Block = { id: 'g1', type: 'code', language: 'dot', content: 'digraph { A -> B }', order: 0, startLine: 1 };
 
 const fakeMermaid = { initialize() {}, render: async () => ({ svg: SVG }) } as never;
-const fakeViz = { renderString: async () => SVG } as never;
+// The renderer slot drives the engine through `render()` (a value with the
+// status and the errors, never a throw for a bad graph), so the stand-in
+// answers that shape.
+const fakeViz = { render: () => ({ status: 'success', output: SVG, errors: [] }) } as never;
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -214,7 +226,7 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
   });
 
   test.skipIf(!hasDom)('a diagram syntax error keeps the existing panel without a Retry button', async () => {
-    const broken = { initialize() {}, render: async () => { throw new Error('Parse error'); }, renderString: async () => { throw new Error('Parse error'); } } as never;
+    const broken = { initialize() {}, render: () => { throw new Error('Parse error'); } } as never;
     let calls = 0;
     install(() => { calls += 1; return Promise.resolve(broken); });
     const el = await mount(element);

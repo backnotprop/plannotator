@@ -1,0 +1,122 @@
+{
+	"mermaid": "11.17.2",
+	"renderId": "diagram-fixture",
+	"viewBox": "0 0 386.78125 644",
+	"hostRect": {
+		"x": 0,
+		"y": 0,
+		"width": 960,
+		"height": 640
+	},
+	"svgRect": {
+		"x": 0,
+		"y": 0,
+		"width": 386.78125,
+		"height": 644
+	},
+	"svgCtm": {
+		"a": 1,
+		"b": 0,
+		"c": 0,
+		"d": 1,
+		"e": 0,
+		"f": 0
+	},
+	"elements": {
+		"diagram-fixture-strict_gate-result_file-0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid relationshipLine",
+			"bbox": {
+				"x": 193.39100646972656,
+				"y": 378,
+				"width": 0,
+				"height": 74
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 0,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-cli-strict_gate-1": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-dashed relationshipLine",
+			"bbox": {
+				"x": 193.39100646972656,
+				"y": 120,
+				"width": 0,
+				"height": 74
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 0,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-strict_gate": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -185.390625,
+				"y": -92,
+				"width": 370.78125,
+				"height": 184
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 193.390625,
+				"f": 286
+			},
+			"label": "<<Requirement>>"
+		},
+		"diagram-fixture-result_file": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -140.8984375,
+				"y": -92,
+				"width": 281.796875,
+				"height": 184
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 193.390625,
+				"f": 544
+			},
+			"label": "<<Functional Requirement>>"
+		},
+		"diagram-fixture-cli": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -56.3359375,
+				"y": -56,
+				"width": 112.671875,
+				"height": 112
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 193.390625,
+				"f": 64
+			},
+			"label": "<<Element>>"
+		}
+	}
+}
