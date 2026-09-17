@@ -1250,7 +1250,7 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
         output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
         if (ann.quickLabelTip) output += `> ${ann.quickLabelTip}\n`;
       } else {
-        output += `${commentHeadingLine(ann)}\n> ${ann?.text ?? ''}\n`;
+        output += `${commentHeadingLine(ann)}\n${diagramLocationExportLine(ann)}> ${ann?.text ?? ''}\n`;
       }
   }
   const resolvedOpts: ElementContextExportOptions = {
@@ -1567,6 +1567,7 @@ export const exportLinkedDocAnnotations = (
 
         case 'COMMENT':
           output += `${commentHeadingLine(ann)}\n`;
+          output += diagramLocationExportLine(ann);
           output += `> ${ann.text}\n`;
           break;
 

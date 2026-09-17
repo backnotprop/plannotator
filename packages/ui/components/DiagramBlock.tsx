@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { diagramTargetText, type DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import type { DiagramTheme } from '../utils/diagram-render';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
+import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { svgContentSize } from './diagram/DiagramCanvas';
 import { DiagramPopout } from './diagram/DiagramPopout';
 import { DiagramViewer } from './diagram/DiagramViewer';
@@ -120,21 +121,46 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
     setIsExpanded(false);
   }, [block.content]);
 
-  // The comments on this fence, in document order: the badge numbers.
-  const comments = useMemo<readonly DiagramComment[]>(
-    () =>
-      annotations
-        .filter((ann) => ann.diagramAnchor !== undefined && ann.blockId === block.id)
-        .map((ann) => ({
-          id: ann.id,
-          anchor: ann.diagramAnchor!,
-          text: ann.text ?? '',
-          author: ann.author,
-        })),
+  // Comments that name no diagram block of the document (an external POST
+  // carries `blockId: "external"`; a deleted fence leaves a dead id) belong
+  // to whichever diagram resolves their anchor first: see anchorClaims.
+  const sharedClaims = useContext(DiagramAnchorClaimsContext);
+  const ownClaims = useMemo(() => new DiagramAnchorClaims([block.id]), [block.id]);
+  const claims = sharedClaims ?? ownClaims;
+  const claimsVersion = useSyncExternalStore(claims.subscribe, claims.getVersion, claims.getVersion);
+
+  const ownAnnotations = useMemo(
+    () => annotations.filter((ann) => ann.diagramAnchor !== undefined && ann.blockId === block.id),
     [annotations, block.id],
   );
-  const commentIdsRef = useRef<string[]>([]);
-  commentIdsRef.current = comments.map((c) => c.id);
+  const unownedAnnotations = useMemo(
+    () =>
+      annotations.filter(
+        (ann) =>
+          ann.diagramAnchor !== undefined &&
+          ann.blockId !== block.id &&
+          !claims.blockIds.includes(ann.blockId) &&
+          // A Graphviz anchor names a DOT part; it is never a Mermaid one.
+          (ann.diagramAnchor.family === 'graphviz') === (kind === 'graphviz'),
+      ),
+    [annotations, block.id, claims, kind],
+  );
+
+  // The comments on this fence, in document order (the badge numbers): its
+  // own, then the unowned ones it shows or is still trying.
+  const comments = useMemo<readonly DiagramComment[]>(() => {
+    void claimsVersion;
+    const tried = unownedAnnotations.filter((ann) => {
+      const owner = claims.owner(ann.id);
+      return owner === undefined || owner === block.id;
+    });
+    return [...ownAnnotations, ...tried].map((ann) => ({
+      id: ann.id,
+      anchor: ann.diagramAnchor!,
+      text: ann.text ?? '',
+      author: ann.author,
+    }));
+  }, [block.id, claims, claimsVersion, ownAnnotations, unownedAnnotations]);
 
   const selectedCommentId = useMemo(
     () => (selectedAnnotationId !== null && comments.some((c) => c.id === selectedAnnotationId) ? selectedAnnotationId : null),
@@ -163,14 +189,44 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
     };
   }, [block.id, onAddAnnotation, readOnly]);
 
-  const handleUnanchored = useCallback(
-    (ids: ReadonlySet<string>) => {
-      onRestoreReport?.({ attempted: commentIdsRef.current, unanchored: [...ids] });
-    },
-    [onRestoreReport],
-  );
-
+  const [resolution, setResolution] = useState<ReadonlyMap<string, boolean> | null>(null);
   const svgReady = renderState?.svgNode != null;
+  const renderFailed = renderState !== null && renderState.error !== null && !svgReady;
+
+  // This block's verdicts for the unowned comments. A diagram that failed
+  // to render resolves nothing, and must say so or the verdict stays
+  // pending forever.
+  useEffect(() => {
+    if (unownedAnnotations.length === 0) return;
+    const results = new Map<string, boolean>();
+    for (const ann of unownedAnnotations) {
+      if (renderFailed) results.set(ann.id, false);
+      else if (resolution?.has(ann.id)) results.set(ann.id, resolution.get(ann.id) === true);
+    }
+    if (results.size > 0) claims.report(block.id, results);
+  }, [block.id, claims, renderFailed, resolution, unownedAnnotations]);
+
+  // The restore verdict the panel's "Unanchored" chip runs on: this block's
+  // own comments, the unowned ones it shows, and (from the first diagram
+  // block only, so it is said once) the unowned ones nobody resolved.
+  useEffect(() => {
+    if (onRestoreReport === undefined || (resolution === null && !renderFailed)) return;
+    const attempted: string[] = [];
+    const unanchored: string[] = [];
+    for (const ann of ownAnnotations) {
+      attempted.push(ann.id);
+      if (renderFailed || resolution?.get(ann.id) === false) unanchored.push(ann.id);
+    }
+    for (const ann of unownedAnnotations) {
+      const owner = claims.owner(ann.id);
+      if (owner === block.id) attempted.push(ann.id);
+      else if (owner === null && claims.blockIds[0] === block.id) {
+        attempted.push(ann.id);
+        unanchored.push(ann.id);
+      }
+    }
+    if (attempted.length > 0) onRestoreReport({ attempted, unanchored });
+  }, [block.id, claims, claimsVersion, onRestoreReport, ownAnnotations, renderFailed, resolution, unownedAnnotations]);
 
   const renderFallback = useCallback(
     (state: DiagramRenderState) => {
@@ -237,9 +293,12 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
 
   return (
     <>
-      <div ref={rootRef} className="my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
+      {/* `annotation-exclude`: the text highlighter never enters a diagram,
+          so a text restore (a reply that lost its anchor, a quote that also
+          appears in a node label) can never wrap a <mark> inside the svg. */}
+      <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
         {svgReady && !showSource && (
-          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
             <button
               type="button"
               onClick={() => setShowSource(true)}
@@ -289,7 +348,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
             <DiagramViewer
               {...viewerProps}
               renderId={`${kind}-${block.id}`}
-              onUnanchoredChange={handleUnanchored}
+              onResolutionChange={setResolution}
               onRenderState={setRenderState}
               renderFallback={renderFallback}
             />

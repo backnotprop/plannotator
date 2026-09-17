@@ -28,6 +28,7 @@ import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { AnnotationType, type Annotation, type Block } from '../types';
 import { __setMermaidRuntimeLoaderForTests, setMermaidRuntime } from '../utils/mermaid';
 import { parseMarkdownToBlocks } from '../utils/parser';
+import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { MermaidBlock } from './MermaidBlock';
 
 const hasDom = typeof document !== 'undefined';
@@ -77,11 +78,13 @@ beforeAll(() => {
   elementProto['releasePointerCapture'] ??= noop;
   elementProto['hasPointerCapture'] ??= () => false;
   svgProto['getBBox'] = function (this: Element) {
+    if (this.tagName.toLowerCase() === 'svg') return { x: 0, y: 0, width: 452, height: 182 };
     const found = CAPTURED.find(([suffix]) => this.id.endsWith(suffix));
     if (found === undefined) throw new Error(`no captured geometry for ${this.id}`);
     return { ...found[1].bbox };
   };
   svgProto['getScreenCTM'] = function (this: Element) {
+    if (this.tagName.toLowerCase() === 'svg') return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
     return CAPTURED.find(([suffix]) => this.id.endsWith(suffix))?.[1].ctm ?? null;
   };
 });
@@ -209,7 +212,13 @@ describe.if(hasDom)('DiagramBlock: comments become annotations on the document',
       diagramAnchor: { v: 1, family: 'flowchart', kind: 'node', id: 'Gone', label: 'Nowhere', sourceLine: null },
     };
     const other: Annotation = { ...restored, id: 'a3', blockId: 'block-other' };
-    await mount(<MermaidBlock block={block} annotations={[restored, gone, other]} onRestoreReport={(r) => reports.push(r)} />);
+    // Viewer tells the blocks which diagram blocks the document has, so a
+    // comment that names ANOTHER diagram is left to that diagram.
+    await mount(
+      <DiagramAnchorClaimsContext.Provider value={new DiagramAnchorClaims([block.id, 'block-other'])}>
+        <MermaidBlock block={block} annotations={[restored, gone, other]} onRestoreReport={(r) => reports.push(r)} />
+      </DiagramAnchorClaimsContext.Provider>,
+    );
     await waitFor(() => expect(host!.querySelector('[data-diagram-badge="a1"]')).not.toBeNull());
     expect(host!.querySelector('[data-diagram-badge="a2"]')).toBeNull();
     // Another fence's comment is not this block's.
@@ -257,5 +266,60 @@ describe.if(hasDom)('DiagramBlock: comments become annotations on the document',
     await waitFor(() => expect(added).toHaveLength(1));
     expect(added[0]!.blockId).toBe(block.id);
     expect(added[0]!.diagramAnchor?.id).toBe('D');
+  });
+});
+
+describe.if(hasDom)('DiagramBlock: comments that name no diagram block', () => {
+  const external = (id: string, anchorId: string, label: string): Annotation => ({
+    id,
+    blockId: 'external',
+    startOffset: 0,
+    endOffset: 0,
+    type: AnnotationType.COMMENT,
+    text: 'from a tool',
+    originalText: label,
+    createdA: 1,
+    source: 'review-bot',
+    diagramAnchor: { v: 1, family: 'flowchart', kind: 'node', id: anchorId, label, sourceLine: null },
+  });
+
+  test('an externally posted diagram comment is shown by the first diagram that resolves it; one nobody resolves is unanchored', async () => {
+    // What regresses: `blockId: "external"` matches no block, so the comment
+    // is shown by no diagram and is never reported unanchored either.
+    const first = fence();
+    const second: Block = { ...first, id: 'block-second' };
+    const reports: AnnotationRestoreReport[] = [];
+    const annotations = [external('e1', 'D', 'Approve?'), external('e2', 'Nowhere', 'Nothing has this label')];
+    await mount(
+      <DiagramAnchorClaimsContext.Provider value={new DiagramAnchorClaims([first.id, second.id])}>
+        <div id="first"><MermaidBlock block={first} annotations={annotations} onRestoreReport={(r) => reports.push(r)} /></div>
+        <div id="second"><MermaidBlock block={second} annotations={annotations} onRestoreReport={(r) => reports.push(r)} /></div>
+      </DiagramAnchorClaimsContext.Provider>,
+    );
+    await waitFor(() => expect(host!.querySelector('#first [data-diagram-badge="e1"]')).not.toBeNull());
+    // Both diagrams could resolve node D; only the first in document order shows it.
+    await waitFor(() => expect(host!.querySelector('#second [data-diagram-badge="e1"]')).toBeNull());
+    expect(host!.querySelector('[data-diagram-badge="e2"]')).toBeNull();
+    await waitFor(() => {
+      const unanchored = new Set<string>();
+      for (const report of reports) {
+        for (const id of report.attempted) unanchored.delete(id);
+        for (const id of report.unanchored) unanchored.add(id);
+      }
+      expect([...unanchored]).toEqual(['e2']);
+    });
+  });
+
+  test('the diagram is closed to the document\'s text highlighter, and only the popout takes every touch drag', async () => {
+    const block = fence();
+    await mount(<MermaidBlock block={block} annotations={[]} onAddAnnotation={noop} />);
+    await waitFor(() => expect(host!.querySelector('[data-diagram-expand]')).not.toBeNull());
+    expect(host!.querySelector('[data-diagram-block]')!.classList.contains('annotation-exclude')).toBe(true);
+    expect(host!.querySelector('[data-diagram-canvas]')!.classList.contains('touch-none')).toBe(false);
+    await act(async () => {
+      host!.querySelector<HTMLButtonElement>('[data-diagram-expand]')!.click();
+    });
+    await waitFor(() => expect(document.querySelector('[data-diagram-popout] [data-diagram-canvas]')).not.toBeNull());
+    expect(document.querySelector('[data-diagram-popout] [data-diagram-canvas]')!.classList.contains('touch-none')).toBe(true);
   });
 });

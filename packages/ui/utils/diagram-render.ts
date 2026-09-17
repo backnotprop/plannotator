@@ -136,13 +136,24 @@ export function parseDiagramSvg(svg: string): SVGSVGElement | null {
 /**
  * Step two, in place on the tree that is about to be mounted: the belt that
  * does not depend on which DOMPurify profile a later config edit turns on.
- * Forbidden elements go, every `<a>` loses its target (svg `<a>` from a
+ * Forbidden elements go, every `<style>` keeps only rules scoped under the
+ * svg's own root id (`scopeDiagramCss`), every `<a>` loses its target (svg `<a>` from a
  * click binding, `<a>` in an html label alike — the element stays so the
  * label text survives), every `on*` attribute goes, and a reference
  * attribute keeps only a fragment or an http(s) URL.
  */
 export function scrubDiagramSvg(root: SVGSVGElement): void {
   for (const el of Array.from(root.querySelectorAll(FORBIDDEN_ELEMENTS))) el.remove();
+  // A `<style>` inside the svg is a page stylesheet once mounted: it can
+  // restyle elements OUTSIDE the diagram and fetch (`@import`, `url(`).
+  // Mermaid needs its own scoped sheet, so style elements are not dropped
+  // wholesale; each keeps only rules scoped under the svg's root id.
+  const rootId = root.getAttribute('id') ?? '';
+  for (const style of Array.from(root.querySelectorAll('style'))) {
+    const kept = scopeDiagramCss(style.textContent ?? '', rootId);
+    if (kept === '') style.remove();
+    else style.textContent = kept;
+  }
   for (const anchor of Array.from(root.querySelectorAll('a'))) {
     anchor.removeAttribute('href');
     anchor.removeAttribute('xlink:href');
@@ -174,9 +185,12 @@ function scrubAttributes(el: Element): void {
   }
 }
 
-/** The attribute a widened edge hit path carries; the canvas maps a pointer
- * event on one back to the visible edge beside it. */
+/** The attribute an edge's widened hit path carries (its value is the
+ * edge's index in the layer); `diagramHitSource` maps one back to the
+ * visible edge it stands for. */
 export const DIAGRAM_HIT_ATTR = 'data-diagram-hit';
+/** The one group, appended LAST in the svg root, that holds every hit path. */
+export const DIAGRAM_HIT_LAYER_ATTR = 'data-diagram-hit-layer';
 /** The invisible stroke width of an edge hit path. A rendered edge is a 1–2
  * px stroke that the pointer can only catch at random spots (owner
  * feedback); 14 px is a comfortable target without swallowing its
@@ -199,37 +213,206 @@ const EDGE_SELECTOR = [
   'g.edge > path',
 ].join(', ');
 
+/** The geometry a hit path keeps from its edge; everything else (id, class,
+ * every `data-*`, markers, inline style, dash pattern) is left behind, so a
+ * host's `[data-id="L_A_B_0"]` still matches exactly one element. */
+const HIT_GEOMETRY_ATTRS = ['d', 'x1', 'y1', 'x2', 'y2', 'points'];
+
+const hitSources = new WeakMap<Element, Element>();
+
+/** The visible edge a hit path stands for, or null for any other element. */
+export function diagramHitSource(el: Element): Element | null {
+  return hitSources.get(el) ?? null;
+}
+
+/** The transform list that places `el` in the svg root's user space: every
+ * ancestor's `transform` attribute, outermost first, then the element's
+ * own. An svg transform list composes left to right, so joining the
+ * attribute strings IS the composed transform — no layout needed, which is
+ * what lets this run on the detached node the slot hands over. */
+function transformToRoot(el: Element, root: Element): string {
+  const parts: string[] = [];
+  for (let node: Element | null = el; node !== null && node !== root; node = node.parentElement) {
+    const transform = node.getAttribute('transform');
+    if (transform !== null && transform.trim() !== '') parts.unshift(transform.trim());
+  }
+  return parts.join(' ');
+}
+
 /**
- * Give every edge an invisible hit target: a clone of the visible stroke
- * (same geometry, no id, no class, no markers) inserted right AFTER it in
- * the same group, `stroke: transparent`, `fill: none`, `stroke-width: 14`,
- * `pointer-events: stroke`. The visible edge keeps its id, so the finders
- * resolve exactly as before (Graphviz targets the `g.edge` group, which now
- * contains both; Mermaid targets the path, and the canvas maps a hit on
- * the clone to its previous sibling). Idempotent: an edge already followed
- * by a hit path is left alone. Runs after the scrub, on the tree that is
- * about to be mounted, so nothing it adds ever passes through DOMPurify.
+ * Give every edge an invisible hit target, in ONE layer appended last in
+ * the svg root. A sibling clone is not enough: an edge's own LABEL box is
+ * painted after the edge paths and covers it exactly where a person clicks
+ * an edge, and a nested subgraph's cluster rect covers a parent edge the
+ * same way. Each hit path is a bare element of the edge's tag with only its
+ * geometry, a `transform` that re-creates the ancestors' placement,
+ * `stroke: transparent`, `fill: none`, `stroke-width: 14` (set `!important`
+ * so no inherited or scoped rule can narrow it) and `pointer-events:
+ * stroke`. The layer sits over the nodes too, so the canvas resolves a click
+ * by priority over everything under the pointer (node, then edge, then
+ * cluster), never by the topmost element alone. Idempotent; runs after the
+ * scrub, on the tree about to be mounted, so nothing it adds passes through
+ * DOMPurify.
  */
 export function widenEdgeHitAreas(svg: SVGSVGElement): void {
-  const seen = new Set<Element>();
-  for (const edge of Array.from(svg.querySelectorAll(EDGE_SELECTOR))) {
-    if (seen.has(edge) || edge.hasAttribute(DIAGRAM_HIT_ATTR)) continue;
-    seen.add(edge);
-    const next = edge.nextElementSibling;
-    if (next !== null && next.hasAttribute(DIAGRAM_HIT_ATTR)) continue;
-    const hit = edge.cloneNode(false) as SVGElement;
-    for (const name of ['id', 'class', 'marker-start', 'marker-mid', 'marker-end', 'style', 'stroke-dasharray']) {
-      hit.removeAttribute(name);
+  const doc = svg.ownerDocument;
+  svg.querySelector(`:scope > [${DIAGRAM_HIT_LAYER_ATTR}]`)?.remove();
+  const edges = Array.from(new Set(Array.from(svg.querySelectorAll(EDGE_SELECTOR))));
+  if (edges.length === 0) return;
+  const layer = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
+  layer.setAttribute(DIAGRAM_HIT_LAYER_ATTR, '');
+  layer.setAttribute('aria-hidden', 'true');
+  edges.forEach((edge, index) => {
+    const hit = doc.createElementNS('http://www.w3.org/2000/svg', edge.tagName.toLowerCase()) as SVGElement;
+    for (const name of HIT_GEOMETRY_ATTRS) {
+      const value = edge.getAttribute(name);
+      if (value !== null) hit.setAttribute(name, value);
     }
-    hit.setAttribute(DIAGRAM_HIT_ATTR, '');
-    hit.setAttribute('aria-hidden', 'true');
+    const transform = transformToRoot(edge, svg);
+    if (transform !== '') hit.setAttribute('transform', transform);
+    hit.setAttribute(DIAGRAM_HIT_ATTR, String(index));
     hit.setAttribute('fill', 'none');
     hit.setAttribute('stroke', 'transparent');
     hit.setAttribute('stroke-width', String(EDGE_HIT_STROKE_WIDTH));
     hit.setAttribute('pointer-events', 'stroke');
-    hit.setAttribute('style', `fill:none;stroke:transparent;stroke-width:${EDGE_HIT_STROKE_WIDTH}px;pointer-events:stroke`);
-    edge.after(hit);
+    const style = hit.style;
+    if (style) {
+      style.setProperty('fill', 'none', 'important');
+      style.setProperty('stroke', 'transparent', 'important');
+      style.setProperty('stroke-width', `${EDGE_HIT_STROKE_WIDTH}px`, 'important');
+      style.setProperty('stroke-dasharray', 'none', 'important');
+      style.setProperty('marker-start', 'none', 'important');
+      style.setProperty('marker-end', 'none', 'important');
+      style.setProperty('pointer-events', 'stroke', 'important');
+    }
+    hitSources.set(hit, edge);
+    layer.appendChild(hit);
+  });
+  svg.appendChild(layer);
+}
+
+/** CSS functions that fetch. `url(#fragment)` is the one reference kept. */
+const CSS_FETCHERS = /(?:^|[^a-z-])(?:image-set|image|src|cross-fade|paint|element)\(/iu;
+
+/** Resolve CSS escapes (`u\72l(` IS `url(` to a browser) so the checks
+ * below read what the engine would. */
+function decodeCssEscapes(css: string): string {
+  return css.replace(/\\([0-9a-f]{1,6})\s?|\\(.)/giu, (_m, hex: string | undefined, ch: string | undefined) =>
+    hex !== undefined ? String.fromCodePoint(Math.min(Number.parseInt(hex, 16) || 0xfffd, 0x10ffff)) : (ch ?? ''),
+  );
+}
+
+function cssFetches(block: string): boolean {
+  const decoded = decodeCssEscapes(block).toLowerCase();
+  if (decoded.includes('@import')) return true;
+  if (CSS_FETCHERS.test(decoded)) return true;
+  for (let at = decoded.indexOf('url('); at !== -1; at = decoded.indexOf('url(', at + 4)) {
+    const arg = decoded.slice(at + 4).trimStart().replace(/^["']/u, '');
+    if (!arg.startsWith('#')) return true;
   }
+  return false;
+}
+
+/** Split on top-level commas (not inside parens, brackets or strings). */
+function splitSelectors(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let current = '';
+  for (const ch of list) {
+    if (quote !== '') {
+      if (ch === quote) quote = '';
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) {
+      out.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim() !== '') out.push(current.trim());
+  return out;
+}
+
+/**
+ * Keep only what a diagram's own stylesheet may say. Mermaid scopes every
+ * rule it emits under the svg's root id (`#<renderId> .node rect{…}`) plus
+ * its `@keyframes`; that is exactly what survives. Dropped: `@import`, any
+ * rule that fetches (`url(` that is not a `#fragment`, `image-set(`, …),
+ * any rule with a selector NOT scoped under `#<rootId>` (which could
+ * restyle the page around the diagram), and every at-rule but `@keyframes`
+ * and the grouping rules, which are filtered recursively. A brace-matching
+ * pass over the text: a detached `<style>` has no CSSOM to ask.
+ */
+export function scopeDiagramCss(css: string, rootId: string): string {
+  const text = css.replace(/\/\*[\s\S]*?\*\//gu, '');
+  const scoped = (selector: string): boolean => {
+    if (rootId === '') return false;
+    const decoded = decodeCssEscapes(selector).trim();
+    if (!decoded.startsWith(`#${rootId}`)) return false;
+    const next = decoded[rootId.length + 1];
+    return next === undefined || !/[\w-]/u.test(next);
+  };
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    // The prelude runs to the first top-level `{` or `;`.
+    let j = i;
+    let quote = '';
+    while (j < text.length) {
+      const ch = text[j] as string;
+      if (quote !== '') {
+        if (ch === '\\') j += 1;
+        else if (ch === quote) quote = '';
+      } else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === '{' || ch === ';') break;
+      j += 1;
+    }
+    const prelude = text.slice(i, j).trim();
+    if (j >= text.length) break;
+    if (text[j] === ';') {
+      // A statement at-rule (`@import …;`, `@charset`, `@namespace`): dropped.
+      i = j + 1;
+      continue;
+    }
+    // The block runs to its matching `}`.
+    let depth = 0;
+    let k = j;
+    quote = '';
+    for (; k < text.length; k += 1) {
+      const ch = text[k] as string;
+      if (quote !== '') {
+        if (ch === '\\') k += 1;
+        else if (ch === quote) quote = '';
+      } else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    const body = text.slice(j + 1, k);
+    i = k + 1;
+    if (prelude === '') continue;
+    if (prelude.startsWith('@')) {
+      const name = /^@([\w-]+)/u.exec(prelude)?.[1]?.toLowerCase() ?? '';
+      if (/^(?:-\w+-)?keyframes$/u.test(name)) {
+        if (!cssFetches(prelude) && !cssFetches(body)) out += `${prelude}{${body}}`;
+      } else if (name === 'media' || name === 'supports' || name === 'container' || name === 'layer') {
+        if (cssFetches(prelude)) continue;
+        const inner = scopeDiagramCss(body, rootId);
+        if (inner !== '') out += `${prelude}{${inner}}`;
+      }
+      continue;
+    }
+    if (cssFetches(body)) continue;
+    const selectors = splitSelectors(prelude);
+    if (selectors.length === 0 || !selectors.every(scoped)) continue;
+    out += `${prelude}{${body}}`;
+  }
+  return out;
 }
 
 let parseSvg: (svg: string) => SVGSVGElement | null = parseDiagramSvg;

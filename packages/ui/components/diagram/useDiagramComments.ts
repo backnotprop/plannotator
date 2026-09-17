@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildDiagramAnchorValue,
+  diagramFirstSourceLine,
   type DiagramAnchor,
+  type DiagramFamily,
   type DiagramTarget,
 } from '@plannotator/core/diagram-anchor';
 import type { DiagramFinder } from '../../utils/diagram-anchor';
@@ -49,6 +51,9 @@ export interface ResolvedDiagramComment {
   readonly additional: readonly Element[];
   readonly label: string;
   readonly resolved: boolean;
+  /** The comment is on the WHOLE diagram: its ring is the content bounds
+   * and its badge sits top-left. */
+  readonly whole: boolean;
 }
 
 export interface DiagramHover {
@@ -79,6 +84,8 @@ export function useDiagramComments({
   onCreateComment,
   onSelectComment,
   onUnanchoredChange,
+  onResolutionChange,
+  familyOf,
 }: {
   /** The engine's id grammar (mermaid or graphviz), from the renderer
    * slot: the one place the kind reaches this hook. */
@@ -99,6 +106,14 @@ export function useDiagramComments({
   readonly onCreateComment: DiagramCreateComment | undefined;
   readonly onSelectComment: ((id: string | null) => void) | undefined;
   readonly onUnanchoredChange: ((ids: ReadonlySet<string>) => void) | undefined;
+  /** Every comment's verdict (true: its part is in this render), whenever
+   * any verdict or the comment list changes. `onUnanchoredChange` only
+   * speaks when the unanchored SET changes, which says nothing about a new
+   * comment that resolved. */
+  readonly onResolutionChange: ((resolution: ReadonlyMap<string, boolean>) => void) | undefined;
+  /** The family a whole-diagram comment records (the engine's, from the
+   * rendered svg). */
+  readonly familyOf: (svg: Element) => DiagramFamily;
 }): {
   readonly resolved: readonly ResolvedDiagramComment[];
   readonly hover: DiagramHover | null;
@@ -109,6 +124,9 @@ export function useDiagramComments({
   readonly setHoverElement: (element: Element | null) => void;
   /** A click without a drag on the canvas: opens or extends the draft. */
   readonly clickElement: (element: Element | null, shiftKey: boolean) => void;
+  /** The canvas's priority rule over everything under the pointer: a node,
+   * then an edge, then a cluster. */
+  readonly pickTarget: (candidates: readonly Element[]) => Element | null;
   readonly submit: (body: string) => Promise<void>;
   readonly cancel: () => void;
 } {
@@ -116,6 +134,9 @@ export function useDiagramComments({
   const [composer, setComposer] = useState<DiagramComposerDraft | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const composerOpenRef = useRef(false);
+  composerOpenRef.current = composer !== null;
 
   // Resolve every comment's parts against the current render. The
   // renderVersion dependency is the re-resolution after a re-render: the
@@ -132,6 +153,7 @@ export function useDiagramComments({
           additional: [],
           label: anchor.label,
           resolved: comment.resolved === true,
+          whole: anchor.kind === 'diagram',
         };
       }
       const element = finder.findTarget(svgRoot, anchor, renderId);
@@ -145,9 +167,19 @@ export function useDiagramComments({
         additional,
         label: anchor.label,
         resolved: comment.resolved === true,
+        whole: anchor.kind === 'diagram',
       };
     });
   }, [comments, finder, renderId, renderVersion, svgRoot]);
+
+  const lastResolutionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (svgRoot === null || onResolutionChange === undefined) return;
+    const key = resolved.map((entry) => `${entry.id}:${entry.element === null ? 0 : 1}`).join('\n');
+    if (key === lastResolutionRef.current) return;
+    lastResolutionRef.current = key;
+    onResolutionChange(new Map(resolved.map((entry) => [entry.id, entry.element !== null])));
+  }, [onResolutionChange, resolved, svgRoot]);
 
   // The unanchored set: comments whose primary part is gone from this
   // render. Reported only when the membership changes, so the host's state
@@ -185,7 +217,23 @@ export function useDiagramComments({
     (element: Element | null): DiagramHover | null => {
       if (element === null || svgRoot === null || renderId === null) return null;
       const target = finder.targetFromElement(svgRoot, element, renderId);
-      return target === null ? null : { element, target };
+      if (target === null) return null;
+      // The part's ONE element: an edge label resolves to its edge, a
+      // sequence actor's bottom box to the same actor as its top box.
+      return { element: finder.findTarget(svgRoot, target, renderId) ?? element, target };
+    },
+    [finder, renderId, svgRoot],
+  );
+
+  const pickTarget = useCallback(
+    (candidates: readonly Element[]): Element | null => {
+      if (svgRoot === null || renderId === null) return candidates[0] ?? null;
+      const kinds = candidates.map((el) => finder.targetFromElement(svgRoot, el, renderId)?.kind ?? null);
+      for (const kind of ['node', 'edge', 'cluster'] as const) {
+        const at = kinds.indexOf(kind);
+        if (at !== -1) return candidates[at] ?? null;
+      }
+      return null;
     },
     [finder, renderId, svgRoot],
   );
@@ -203,17 +251,26 @@ export function useDiagramComments({
 
   const clickElement = useCallback(
     (element: Element | null, shiftKey: boolean) => {
-      const part = describe(element);
+      let part = describe(element);
       if (part === null) {
-        // The background, a marker, a label group: nothing to compose
-        // on. A plain click there closes an open draft.
-        if (!shiftKey) setComposer(null);
-        return;
+        // The background, a marker, a part no family addresses. A click
+        // there closes an open draft; with none open it comments on the
+        // WHOLE diagram, so a click never does nothing (a sequence note
+        // the codec misses, a gitGraph, a pie, anything future).
+        if (shiftKey) return;
+        if (composerOpenRef.current || !canCreate || svgRoot === null) {
+          setComposer(null);
+          return;
+        }
+        part = {
+          element: svgRoot,
+          target: { family: familyOf(svgRoot), kind: 'diagram', label: diagramFirstSourceLine(savedSource) },
+        };
       }
       if (!canCreate) return;
       setSubmitError(null);
       setComposer((current) => {
-        if (shiftKey && current !== null) {
+        if (shiftKey && current !== null && part.target.kind !== 'diagram' && current.primary.target.kind !== 'diagram') {
           const already =
             current.primary.element === part.element || current.additional.some((extra) => extra.element === part.element);
           if (already || current.additional.length >= maxAdditionalTargets) {
@@ -229,7 +286,7 @@ export function useDiagramComments({
         };
       });
     },
-    [canCreate, describe, finder, maxAdditionalTargets, savedSource, sourceLineOffset],
+    [canCreate, describe, familyOf, finder, maxAdditionalTargets, savedSource, sourceLineOffset, svgRoot],
   );
 
   const cancel = useCallback(() => {
@@ -277,6 +334,7 @@ export function useDiagramComments({
     submitError,
     setHoverElement,
     clickElement,
+    pickTarget,
     submit,
     cancel,
   };

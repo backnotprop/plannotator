@@ -107,11 +107,14 @@ beforeAll(() => {
   elementProto['releasePointerCapture'] ??= noop;
   elementProto['hasPointerCapture'] ??= () => false;
   svgProto['getBBox'] = function (this: Element) {
+    // The svg root's content bounds: the whole-diagram ring.
+    if (this.tagName.toLowerCase() === 'svg') return { x: 0, y: 0, width: 452, height: 182 };
     const captured = capturedFor(this);
     if (captured === null) throw new Error(`no captured geometry for ${this.id}`);
     return { ...captured.bbox };
   };
   svgProto['getScreenCTM'] = function (this: Element) {
+    if (this.tagName.toLowerCase() === 'svg') return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
     return capturedFor(this)?.ctm ?? null;
   };
 });
@@ -302,27 +305,21 @@ describe.if(hasDom)('hover, click, compose', () => {
     await waitFor(() => expect(host!.querySelector('[data-diagram-hover]')).toBeNull());
   });
 
-  test('every edge gets an invisible 14px hit path beside its stroke, and a click on it opens the composer for that edge', async () => {
-    // Owner feedback: a 1–2 px stroke was only catchable at random spots.
+  test('a click on an edge\'s widened hit path, or on its label, opens the composer for that edge', async () => {
+    // Owner feedback: a 1–2 px stroke was only catchable at random spots,
+    // and the label painted over the edge (where a person clicks it) was
+    // not a target at all.
     const created: Array<{ anchor: DiagramAnchor }> = [];
     await mount(viewer({ onCreateComment: (anchor) => { created.push({ anchor }); } }));
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
     const edges = Array.from(host!.querySelectorAll('path.flowchart-link'));
-    expect(edges.length).toBe(3);
-    for (const edge of edges) {
-      const hit = edge.nextElementSibling!;
-      expect(hit.hasAttribute('data-diagram-hit')).toBe(true);
-      expect(hit.getAttribute('stroke-width')).toBe('14');
-      expect(hit.getAttribute('pointer-events')).toBe('stroke');
-      expect(hit.getAttribute('stroke')).toBe('transparent');
-      expect(hit.hasAttribute('id')).toBe(false);
-      expect(hit.getAttribute('d')).toBe(edge.getAttribute('d'));
-      expect(hit.parentElement).toBe(edge.parentElement);
-    }
+    const hits = Array.from(host!.querySelectorAll('[data-diagram-hit-layer] > [data-diagram-hit]'));
+    expect(hits.length).toBe(edges.length);
+    expect(hits.length).toBe(3);
     // The pointer lands on the widened path (what a click 6 px off the
     // visible stroke hits in a browser); the canvas resolves the edge.
-    const hitDM = q('[id$="-L_D_M_0"]').nextElementSibling!;
-    await clickPart(hitDM);
+    const edgeDM = q('[id$="-L_D_M_0"]');
+    await clickPart(hits[edges.indexOf(edgeDM)]!);
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
     expect(q('[data-diagram-composer]').textContent).toContain('edge D → M');
     const textarea = q<HTMLTextAreaElement>('[data-diagram-composer] textarea');
@@ -333,6 +330,55 @@ describe.if(hasDom)('hover, click, compose', () => {
     });
     await waitFor(() => expect(created).toHaveLength(1));
     expect(created[0]!.anchor).toMatchObject({ kind: 'edge', from: 'D', to: 'M', label: 'Yes' });
+
+    // The label "No" is the D → R edge.
+    const labelNo = Array.from(host!.querySelectorAll('g.edgeLabel')).find((g) => g.textContent?.trim() === 'No')!;
+    await clickPart(labelNo.querySelector('p, span, text') ?? labelNo);
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    expect(q('[data-diagram-composer]').textContent).toContain('edge D → R');
+  });
+
+  test('where an edge meets a node the node wins: targets resolve by priority over everything under the pointer', async () => {
+    // The hit layer sits above the nodes, so at an edge's end both are under
+    // the pointer; the topmost element alone would pick the edge.
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const hit = host!.querySelector('[data-diagram-hit-layer] > [data-diagram-hit]')!;
+    const doc = host!.ownerDocument as Document & { elementsFromPoint?: (x: number, y: number) => Element[] };
+    const original = doc.elementsFromPoint;
+    doc.elementsFromPoint = () => [hit, nodeD().querySelector('polygon, rect, path') ?? nodeD(), q('[data-diagram-canvas]')];
+    try {
+      await clickPart(hit);
+      await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+      expect(q('[data-diagram-composer]').textContent).toContain('node D');
+    } finally {
+      doc.elementsFromPoint = original;
+    }
+  });
+
+  test('a click that resolves no part comments on the WHOLE diagram, so a click never does nothing', async () => {
+    const created: Array<{ anchor: DiagramAnchor }> = [];
+    const { rerender } = await mount(viewer({ sourceLineOffset: 10, onCreateComment: (anchor) => { created.push({ anchor }); } }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    await clickPart(q('[data-diagram-svg] > svg'));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    expect(q('[data-diagram-composer]').textContent).toContain('whole diagram');
+    const textarea = q<HTMLTextAreaElement>('[data-diagram-composer] textarea');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'the whole flow is backwards');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(created).toHaveLength(1));
+    // No id; the label is the first source line; the range is the whole
+    // source, offset into the host's document.
+    expect(created[0]!.anchor).toEqual({ v: 1, family: 'flowchart', kind: 'diagram', label: 'flowchart LR', sourceLine: [11, 14] });
+
+    // Restored, it rings the content bounds and is never unanchored.
+    const unanchored: string[][] = [];
+    await rerender(viewer({ comments: [comment('w1', created[0]!.anchor)], onUnanchoredChange: (ids) => unanchored.push([...ids]) }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-badge="w1"]')).not.toBeNull());
+    expect(unanchored[unanchored.length - 1] ?? []).toEqual([]);
   });
 
   test('click opens the composer at the part; Enter hands the host the anchor with the document line offset and selects nothing else', async () => {
@@ -563,5 +609,80 @@ describe.if(hasDom)('the Source pane', () => {
     await waitFor(() => expect(host!.querySelector('[data-diagram-source-pane]')).not.toBeNull());
     expect(q('[data-diagram-source-pane]').textContent).toContain('Read only');
     expect(Array.from(host!.querySelectorAll('[data-diagram-source-pane] button')).map((b) => b.textContent)).not.toContain('Save');
+  });
+});
+
+describe.if(hasDom)('the canvas as a citizen of the page', () => {
+  test('inline it lets a finger scroll the page (never touch-none); a host that owns the screen opts in; the zoom strip never prints', async () => {
+    // Review blocker: `touch-none` on a diagram up to 65vh tall swallowed
+    // every touch drag, so a phone reader could not scroll past it.
+    const { rerender } = await mount(viewer({}));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-canvas]')).not.toBeNull());
+    expect(q('[data-diagram-canvas]').classList.contains('touch-none')).toBe(false);
+    expect(q('[data-diagram-canvas]').classList.contains('touch-pan-y')).toBe(true);
+    expect(q('[data-diagram-zoom-strip]').hasAttribute('data-print-hide')).toBe(true);
+    await rerender(viewer({ canvasClassName: 'touch-none' }));
+    expect(q('[data-diagram-canvas]').classList.contains('touch-none')).toBe(true);
+    expect(q('[data-diagram-canvas]').classList.contains('touch-pan-y')).toBe(false);
+  });
+
+  test('browser chords pass through: Mod+0, Mod+-, Alt+Arrow are neither handled nor swallowed', async () => {
+    await mount(viewer({}));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-canvas]')).not.toBeNull());
+    const canvas = q('[data-diagram-canvas]');
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    const before = wrapper.style.transform;
+    for (const init of [{ key: '0', metaKey: true }, { key: '-', ctrlKey: true }, { key: 'ArrowLeft', altKey: true }, { key: '+', metaKey: true }]) {
+      const event = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
+      await act(async () => {
+        canvas.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(wrapper.style.transform).toBe(before);
+    // The bare key still works.
+    await act(async () => {
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: '-', bubbles: true, cancelable: true }));
+    });
+    expect(wrapper.style.transform).not.toBe(before);
+  });
+
+  test('the modifier-gated ring disarms on the modifier\'s release, on any other key, and on window blur', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const arm = async () => {
+      await act(async () => {
+        pointer('pointermove', nodeD(), { x: 10, y: 10, mod: true });
+      });
+      await waitFor(() => expect(host!.querySelector('[data-diagram-hover]')).not.toBeNull());
+    };
+    for (const disarm of [
+      () => { window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Meta' })); window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control' })); },
+      () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, ctrlKey: true })),
+      () => window.dispatchEvent(new Event('blur')),
+    ]) {
+      await arm();
+      await act(async () => {
+        disarm();
+      });
+      await waitFor(() => expect(host!.querySelector('[data-diagram-hover]')).toBeNull());
+    }
+  });
+
+  test('a finger gets a wider click threshold than a mouse: an 8 px wobble is still a tap', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const touch = (type: string, x: number) => {
+      const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
+      const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: 10, button: 0, ...(Ctor !== MouseEvent ? { pointerId: 7, pointerType: 'touch' } : {}) } as MouseEventInit);
+      if ((event as PointerEvent).pointerType !== 'touch') Object.defineProperty(event, 'pointerType', { value: 'touch' });
+      nodeD().dispatchEvent(event);
+    };
+    await act(async () => {
+      touch('pointerdown', 10);
+      touch('pointermove', 18);
+      touch('pointerup', 18);
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
   });
 });

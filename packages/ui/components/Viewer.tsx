@@ -40,6 +40,7 @@ import { CommentPopover, type CommentAskAIHandler } from './CommentPopover';
 import { TaterSpriteSitting } from './TaterSpriteSitting';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
+import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
 import { GraphvizBlock } from './GraphvizBlock';
 import { MermaidBlock } from './MermaidBlock';
 import { isGraphvizLanguage, isMermaidLanguage } from './diagramLanguages';
@@ -1042,8 +1043,28 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     </>
   );
 
+  // The document's diagram blocks, in order: a diagram comment that names
+  // none of them (an external POST, a deleted fence) is resolved by anchor
+  // against each, first resolver wins (see diagram/anchorClaims).
+  const diagramBlockKey = blocks
+    .filter((b) => b.type === 'code' && (isMermaidLanguage(b.language) || isGraphvizLanguage(b.language)))
+    .map((b) => b.id)
+    .join('\n');
+  const diagramClaims = useMemo(
+    () => new DiagramAnchorClaims(diagramBlockKey === '' ? [] : diagramBlockKey.split('\n')),
+    [diagramBlockKey],
+  );
+  // With no diagram in the document nobody can resolve a diagram comment:
+  // it is unanchored, and the highlighter (which skips it) will not say so.
+  useEffect(() => {
+    if (diagramBlockKey !== '' || onRestoreReport === undefined) return;
+    const ids = annotations.filter((ann) => ann.diagramAnchor !== undefined).map((ann) => ann.id);
+    if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
+  }, [annotations, diagramBlockKey, onRestoreReport]);
+
   return (
     <CodePathValidationContext.Provider value={codePathValidation}>
+    <DiagramAnchorClaimsContext.Provider value={diagramClaims}>
     <div className="relative z-50 w-full" style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}>
       {taterMode && <TaterSpriteSitting />}
       <article
@@ -1462,6 +1483,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         document.body
       )}
     </div>
+    </DiagramAnchorClaimsContext.Provider>
     </CodePathValidationContext.Provider>
   );
 });

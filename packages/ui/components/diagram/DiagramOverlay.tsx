@@ -22,6 +22,7 @@ interface Projected {
   readonly number: number;
   readonly label: string;
   readonly resolved: boolean;
+  readonly whole: boolean;
   readonly rect: ScreenRect;
   readonly additional: readonly ScreenRect[];
 }
@@ -84,6 +85,7 @@ export function DiagramOverlay({
           number: entry.number,
           label: entry.label,
           resolved: entry.resolved,
+          whole: entry.whole,
           rect: pad(rect),
           additional: entry.additional
             .map((el) => projectElement(el, hostRect))
@@ -162,13 +164,16 @@ export function DiagramOverlay({
             type="button"
             data-diagram-badge={entry.id}
             className={cn(
-              'pointer-events-auto absolute flex size-5 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full border font-mono text-[10px] font-medium tabular-nums',
+              'pointer-events-auto absolute flex size-5 -translate-y-1/2 items-center justify-center rounded-full border font-mono text-[10px] font-medium tabular-nums',
+              // A part's badge rides its top-right corner; the whole
+              // diagram's sits top-left, clear of the parts' badges.
+              entry.whole ? '-translate-x-1/2' : 'translate-x-1/2',
               entry.resolved
                 ? 'border-border bg-muted text-muted-foreground'
                 : 'border-primary-foreground/40 bg-primary text-primary-foreground',
               entry.id === selectedCommentId && 'ring-2 ring-primary/40',
             )}
-            style={{ left: entry.rect.left + entry.rect.width, top: entry.rect.top }}
+            style={{ left: entry.whole ? entry.rect.left : entry.rect.left + entry.rect.width, top: entry.rect.top }}
             aria-label={`Comment ${entry.number}: ${entry.label}`}
             title={entry.label}
             onClick={(event) => {

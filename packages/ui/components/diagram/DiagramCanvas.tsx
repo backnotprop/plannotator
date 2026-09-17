@@ -11,11 +11,12 @@ import React, {
   type ReactNode,
 } from 'react';
 import { cn } from '../../lib/utils';
-import { DIAGRAM_HIT_ATTR } from '../../utils/diagram-render';
-import { isModKeyHeld } from '../../utils/platform';
+import { diagramHitSource } from '../../utils/diagram-render';
+import { isMac, isModKeyHeld } from '../../utils/platform';
 import { Button } from '../ui/button';
 import {
   DRAG_THRESHOLD_PX,
+  TOUCH_DRAG_THRESHOLD_PX,
   useDiagramViewport,
   WHEEL_ZOOM_SENSITIVITY,
   ZOOM_STEP,
@@ -27,18 +28,27 @@ import {
  * The canvas: the rendered svg inside a transformed wrapper, edge to edge in
  * its host. Wheel and pinch zoom about the pointer, drag pans, `+` `-` `0`
  * (fit) and the arrow keys on the keyboard, a small control in the corner.
- * Click-to-select, drag-to-pan: a press that does not travel
- * DRAG_THRESHOLD_PX is a click on the part beneath and opens the composer
- * there; one that travels is a pan and never opens it. Nothing highlights
- * on a plain mouse-over (the owner removed hover targeting: it read as
- * messy and fought the pan hand); the only pre-click affordance is the
- * ring under the pointer while the platform modifier is held. Every edge
- * carries an invisible 14 px hit path beside its 1–2 px stroke (the render
- * slot's `widenEdgeHitAreas`), so an edge is as easy to catch as a node.
- * Under strict Mermaid disables click callbacks, and a
- * `click A "https://..."` link binding still renders an `<a href>` that the
- * render slot's sanitizer strips, so the canvas owns every click and there
- * is no armed switch.
+ * Click-to-select, drag-to-pan: a press that does not travel the drag
+ * threshold (4 px for a mouse or pen, 10 px for a finger) is a click and
+ * opens the composer; one that travels is a pan and never opens it. Nothing
+ * highlights on a plain mouse-over (the owner removed hover targeting: it
+ * read as messy and fought the pan hand); the only pre-click affordance is
+ * the ring under the pointer while the platform modifier is held, and it
+ * disarms on the key's release, on any other key, and on window blur.
+ *
+ * What a click means is decided over EVERYTHING under the pointer
+ * (`elementsFromPoint`), never the topmost element alone: every edge has an
+ * invisible 14 px hit path in a layer above the diagram (the render slot's
+ * `widenEdgeHitAreas`), so where an edge meets a node both are under the
+ * pointer, and the caller's `pickTarget` takes the node first, then an edge,
+ * then a cluster.
+ *
+ * In the document flow the canvas lets a finger scroll the page vertically
+ * (`touch-action: pan-y`); a full-size host that owns the screen passes
+ * `touch-none` through `className`. Under strict Mermaid disables click
+ * callbacks, and a `click A "https://..."` link binding still renders an
+ * `<a href>` that the render slot's sanitizer strips, so the canvas owns
+ * every click and there is no armed switch.
  *
  * The render slot hands over a sanitized svg NODE, not markup: the wrapper
  * mounts it with `replaceChildren` once per render, so no html string ever
@@ -100,6 +110,7 @@ export type DiagramEscapeOutcome = 'consumed' | 'pass';
 export function DiagramCanvas({
   svgNode,
   targetSelector,
+  pickTarget,
   dimmed,
   onSvgRoot,
   onHoverElement,
@@ -115,6 +126,10 @@ export function DiagramCanvas({
   /** The engine's selector of every element the pointer can address
    * (the finder's, through the renderer slot). */
   targetSelector: string;
+  /** Choose among the addressable elements under the pointer, topmost
+   * first (the viewer's rule: a node, then an edge, then a cluster).
+   * Default: the topmost. */
+  pickTarget?: (candidates: readonly Element[]) => Element | null;
   /** A parse error keeps the last render under the strip, dimmed. */
   dimmed: boolean;
   /** The mounted svg root after each injection (null on unmount). */
@@ -129,6 +144,8 @@ export function DiagramCanvas({
    * (a popout). Off in the document flow, where it would steal the focus
    * from the reader. */
   autoFocus?: boolean;
+  /** `touch-none` for a host that owns the whole screen (a popout); the
+   * default lets a finger scroll the page past an inline diagram. */
   className?: string;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -169,6 +186,9 @@ export function DiagramCanvas({
     const host = hostRef.current;
     if (host === null) return;
     const onWheel = (event: WheelEvent) => {
+      // A sub-pixel delta (a trackpad coming to rest, a horizontal swipe)
+      // is neither a zoom nor a reason to hold the page's scroll.
+      if (Math.abs(event.deltaY) < 0.1) return;
       event.preventDefault();
       zoomBy(Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY), event.clientX, event.clientY);
     };
@@ -178,20 +198,51 @@ export function DiagramCanvas({
 
   const targetUnder = useCallback(
     (event: ReactPointerEvent): Element | null => {
-      const host = hostRef.current;
-      const target = event.target;
-      if (host === null || !(target instanceof Element)) return null;
       const wrapper = wrapperRef.current;
-      if (wrapper === null || !wrapper.contains(target)) return null;
-      // A pointer on an edge's widened hit path means the visible edge
-      // right before it (the render slot inserts the clone as its next
-      // sibling), so the finder sees the element that carries the id.
-      const hit = target.closest(`[${DIAGRAM_HIT_ATTR}]`);
-      const node: Element = hit !== null && hit.previousElementSibling !== null ? hit.previousElementSibling : target;
-      return node.closest(targetSelector);
+      if (wrapper === null) return null;
+      // Everything under the pointer, topmost first. Without a layout
+      // engine (happy-dom) the event's own target is all there is.
+      const doc = wrapper.ownerDocument;
+      const stack =
+        typeof doc.elementsFromPoint === 'function' ? doc.elementsFromPoint(event.clientX, event.clientY) : [];
+      const under = stack.length > 0 ? stack : event.target instanceof Element ? [event.target] : [];
+      const candidates: Element[] = [];
+      for (const el of under) {
+        if (!wrapper.contains(el)) continue;
+        // A hit path stands for the visible edge it was made from.
+        const node = diagramHitSource(el) ?? el;
+        const target = node.closest(targetSelector);
+        if (target !== null && wrapper.contains(target) && !candidates.includes(target)) candidates.push(target);
+      }
+      if (candidates.length === 0) return null;
+      return pickTarget ? pickTarget(candidates) : (candidates[0] ?? null);
     },
-    [targetSelector],
+    [pickTarget, targetSelector],
   );
+
+  // The modifier-gated ring disarms the way the token hover cards do: on
+  // the modifier's release, on any other key while it is held (Cmd+C is a
+  // copy, not a question about the part under the pointer), and on blur.
+  useEffect(() => {
+    const win = hostRef.current?.ownerDocument.defaultView;
+    if (!win) return;
+    const modKey = isMac ? 'Meta' : 'Control';
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === modKey) onHoverElement(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== modKey) onHoverElement(null);
+    };
+    const onBlur = () => onHoverElement(null);
+    win.addEventListener('keyup', onKeyUp);
+    win.addEventListener('keydown', onKeyDown);
+    win.addEventListener('blur', onBlur);
+    return () => {
+      win.removeEventListener('keyup', onKeyUp);
+      win.removeEventListener('keydown', onKeyDown);
+      win.removeEventListener('blur', onBlur);
+    };
+  }, [onHoverElement]);
 
   // Press bookkeeping: where the pointer went down and whether it became a
   // pan. Pointer capture keeps the pan alive past the host's edge.
@@ -201,6 +252,7 @@ export function DiagramCanvas({
     y: number;
     lastX: number;
     lastY: number;
+    threshold: number;
     panning: boolean;
   } | null>(null);
   const [panning, setPanning] = useState(false);
@@ -213,6 +265,8 @@ export function DiagramCanvas({
       y: event.clientY,
       lastX: event.clientX,
       lastY: event.clientY,
+      // A fingertip wobbles more than a mouse: a tap must still be a tap.
+      threshold: event.pointerType === 'touch' ? TOUCH_DRAG_THRESHOLD_PX : DRAG_THRESHOLD_PX,
       panning: false,
     };
   }, []);
@@ -221,17 +275,14 @@ export function DiagramCanvas({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const press = pressRef.current;
       if (press === null || press.id !== event.pointerId) {
-        // Nothing highlights on a plain mouse-over (owner feedback: a hover
-        // ring reads as messy and fights the pan hand). The pre-click
-        // affordance exists only under the platform modifier — Cmd on
-        // macOS, Ctrl elsewhere — the same held-key gesture the code
-        // review's token cards use.
+        // Nothing highlights on a plain mouse-over; the ring under the
+        // pointer exists only under the platform modifier.
         onHoverElement(isModKeyHeld(event) ? targetUnder(event) : null);
         return;
       }
       if (!press.panning) {
         const travelled = Math.hypot(event.clientX - press.x, event.clientY - press.y);
-        if (travelled < DRAG_THRESHOLD_PX) return;
+        if (travelled < press.threshold) return;
         press.panning = true;
         setPanning(true);
         onHoverElement(null);
@@ -268,6 +319,8 @@ export function DiagramCanvas({
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
       // Keys act on the canvas itself, never on the composer's textarea.
       if (event.target !== event.currentTarget) return;
+      // Mod+0, Mod+-, Alt+Arrow belong to the browser (page zoom, history).
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       switch (event.key) {
         case '+':
         case '=':
@@ -314,7 +367,7 @@ export function DiagramCanvas({
       tabIndex={0}
       aria-label="Diagram canvas. Drag or arrow keys to pan, wheel or plus and minus to zoom, 0 to fit, click a part to comment."
       className={cn(
-        'relative h-full w-full touch-none select-none overflow-hidden outline-none',
+        'relative h-full w-full touch-pan-y select-none overflow-hidden outline-none',
         panning ? 'cursor-grabbing' : 'cursor-grab',
         className,
       )}
@@ -338,8 +391,11 @@ export function DiagramCanvas({
       {overlay(handle)}
       {children}
       <div
-        // On a narrow screen the strip takes the left edge so it never
-        // stacks under a host's own bottom-right controls.
+        // Screen chrome: never printed (rings and badges are, they are the
+        // comments). On a narrow screen the strip takes the left edge so it
+        // never stacks under a host's own bottom-right controls.
+        data-print-hide=""
+        data-diagram-zoom-strip=""
         className="absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-md border border-border bg-card/85 p-0.5 backdrop-blur max-md:bottom-4 max-md:left-4 max-md:right-auto"
         role="group"
         aria-label="Zoom"

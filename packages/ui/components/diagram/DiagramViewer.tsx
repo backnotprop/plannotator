@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import { cn } from '../../lib/utils';
+import { diagramFamilyOf } from '../../utils/diagram-anchor';
 import { diagramFinder, type DiagramTheme } from '../../utils/diagram-render';
 import { DiagramCanvas, type DiagramCanvasHandle, type DiagramEscapeOutcome } from './DiagramCanvas';
 import { DiagramComposer } from './DiagramComposer';
@@ -40,6 +41,9 @@ export interface DiagramViewerProps {
   /** The comments whose part is gone from the current render, once per
    * membership change, after every render. */
   readonly onUnanchoredChange?: (ids: ReadonlySet<string>) => void;
+  /** Every comment's verdict (true: its part is in this render), whenever
+   * a verdict or the comment list changes. */
+  readonly onResolutionChange?: (resolution: ReadonlyMap<string, boolean>) => void;
   /** Escape with no composer open and nothing selected: a popout closes. */
   readonly onDismiss?: () => void;
   /** A stable prefix for the rendered element ids; two viewers over one
@@ -64,6 +68,10 @@ export interface DiagramViewerProps {
   /** Take the keyboard on mount (a popout). */
   readonly autoFocus?: boolean;
   readonly className?: string;
+  /** Classes for the canvas host. The canvas lets a finger scroll the page
+   * past it (`touch-action: pan-y`); a viewer that owns the whole screen
+   * passes `touch-none`. */
+  readonly canvasClassName?: string;
 }
 
 export function DiagramViewer({
@@ -78,6 +86,7 @@ export function DiagramViewer({
   selectedCommentId = null,
   onSelectComment,
   onUnanchoredChange,
+  onResolutionChange,
   onDismiss,
   renderId = 'diagram',
   sourceLineOffset = 0,
@@ -88,8 +97,10 @@ export function DiagramViewer({
   renderFallback,
   autoFocus,
   className,
+  canvasClassName,
 }: DiagramViewerProps) {
   const finder = diagramFinder(kind);
+  const familyOf = useCallback((svg: Element) => (kind === 'graphviz' ? ('graphviz' as const) : diagramFamilyOf(svg)), [kind]);
   const hasPane = onSave !== undefined;
   const editable = hasPane && !readOnlySource;
 
@@ -121,6 +132,8 @@ export function DiagramViewer({
     onCreateComment,
     onSelectComment,
     onUnanchoredChange,
+    onResolutionChange,
+    familyOf,
   });
 
   // The selected comment's source line for the pane's gutter mark. The
@@ -185,7 +198,9 @@ export function DiagramViewer({
   const showFallback = render.svgNode === null;
 
   return (
-    <div data-diagram-viewer="" className={cn('flex h-full min-h-0 w-full flex-col md:flex-row', className)}>
+    // `annotation-exclude`: the document's text highlighter never enters a
+    // diagram, so a text restore can never wrap a <mark> inside the svg.
+    <div data-diagram-viewer="" className={cn('annotation-exclude flex h-full min-h-0 w-full flex-col md:flex-row', className)}>
       {/* The pane comes FIRST in the row (owner ruling: the source sits on
           the left of the diagram while editing). On the phone the row is a
           column and the pane stays stacked UNDER the canvas, which
@@ -217,6 +232,8 @@ export function DiagramViewer({
           <DiagramCanvas
             svgNode={render.svgNode}
             targetSelector={finder.targetSelector}
+            pickTarget={commentsState.pickTarget}
+            className={canvasClassName}
             dimmed={render.error !== null}
             onSvgRoot={onSvgRoot}
             onHoverElement={commentsState.setHoverElement}

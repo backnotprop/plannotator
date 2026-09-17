@@ -25,6 +25,7 @@ export { useDiagramSourceDraft, PREVIEW_DEBOUNCE_MS, type DiagramSourceDraft, ty
 export {
   useDiagramViewport,
   DRAG_THRESHOLD_PX,
+  TOUCH_DRAG_THRESHOLD_PX,
   FIT_PADDING_PX,
   WHEEL_ZOOM_SENSITIVITY,
   ZOOM_MAX,

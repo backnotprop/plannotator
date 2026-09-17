@@ -592,6 +592,10 @@ export function buildDocumentTools(adapter: DocumentToolAdapter, state: Document
             ...(parent.startMeta ? { startMeta: parent.startMeta } : {}),
             ...(parent.endMeta ? { endMeta: parent.endMeta } : {}),
             ...(parent.htmlAnchor ? { htmlAnchor: parent.htmlAnchor } : {}),
+            // A reply to a diagram comment is a diagram comment: without the
+            // anchor it would fall to text search and paint the node's label
+            // wherever the prose repeats it.
+            ...(parent.diagramAnchor ? { diagramAnchor: parent.diagramAnchor } : {}),
             ...(parent.pageUrl ? { pageUrl: parent.pageUrl } : {}),
             ...(parent.diffContext ? { diffContext: parent.diffContext } : {}),
           };

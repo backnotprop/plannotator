@@ -36,7 +36,7 @@ import {
   targetFromElement,
   type DiagramTarget,
 } from './diagram-anchor';
-import { scrubDiagramSvg } from './diagram-render';
+import { diagramHitSource, scopeDiagramCss, scrubDiagramSvg, widenEdgeHitAreas } from './diagram-render';
 
 const hasDom = typeof document !== 'undefined';
 const FIXTURES = join(import.meta.dir, '..', 'test-setup', 'fixtures', 'diagrams');
@@ -154,10 +154,55 @@ describe.if(hasDom)('the other id-bearing families', () => {
     );
   });
 
-  test('sequence: no element ids, so nothing is addressable (a diagram-level comment)', () => {
+  test('sequence: parts carry classes, not ids, so actors go by name and messages, notes and frames by ordinal', () => {
+    // What regresses: clicking a sequence diagram does nothing (the owner's
+    // report), a bottom actor box is a different target from its top box,
+    // or a message's text and its line are two targets.
     const svg = loadSvg('11-sequence-diagram');
-    expect(diagramFamilyOf(svg)).toBe('other');
-    expect(describeAll(svg).size).toBe(0);
+    expect(diagramFamilyOf(svg)).toBe('sequence');
+    const top = svg.querySelector('rect.actor-top[name="H"]')!;
+    const bottom = svg.querySelector('rect.actor-bottom[name="H"]')!;
+    const hook: DiagramTarget = { family: 'sequence', kind: 'node', id: 'H', label: 'Hook' };
+    expect(targetFromElement(svg, top, RENDER_ID)).toEqual(hook);
+    expect(targetFromElement(svg, bottom, RENDER_ID)).toEqual(hook);
+    expect(targetFromElement(svg, bottom.parentElement!.querySelector('text.actor')!, RENDER_ID)).toEqual(hook);
+    expect(findDiagramTarget(svg, hook, RENDER_ID)).toBe(top);
+
+    const lines = Array.from(svg.querySelectorAll('.messageLine0, .messageLine1'));
+    const texts = Array.from(svg.querySelectorAll('text.messageText'));
+    const first: DiagramTarget = { family: 'sequence', kind: 'edge', id: 'msg-1', from: 'CC', to: 'H', label: 'ExitPlanMode' };
+    expect(targetFromElement(svg, lines[0]!, RENDER_ID)).toEqual(first);
+    // The message TEXT is the same message: it is what a person clicks.
+    expect(targetFromElement(svg, texts[0]!, RENDER_ID)).toEqual(first);
+    expect(findDiagramTarget(svg, first, RENDER_ID)).toBe(lines[0]!);
+
+    expect(targetFromElement(svg, svg.querySelector('rect.note')!, RENDER_ID)).toEqual({
+      family: 'sequence', kind: 'node', id: 'note-1', label: 'server stops on decision',
+    });
+    expect(targetFromElement(svg, svg.querySelector('line.loopLine')!, RENDER_ID)).toEqual({
+      family: 'sequence', kind: 'cluster', id: 'frame-1', label: 'alt [approved]',
+    });
+    expect(targetFromElement(svg, svg.querySelector('rect.activation0')!, RENDER_ID)).toBeNull();
+  });
+
+  test('sequence restore: an ordinal that moved is found by its label; an edited label keeps its ordinal', () => {
+    const svg = loadSvg('11-sequence-diagram');
+    const lines = Array.from(svg.querySelectorAll('.messageLine0, .messageLine1'));
+    // A message was inserted above: the stored ordinal now names another
+    // message, but ONE message carries the stored label.
+    expect(findDiagramTarget(svg, { family: 'sequence', kind: 'edge', id: 'msg-1', label: 'open review UI' }, RENDER_ID)).toBe(lines[2]!);
+    // The text was edited in place: nothing carries the label, the ordinal stands.
+    expect(findDiagramTarget(svg, { family: 'sequence', kind: 'edge', id: 'msg-2', label: 'a label nobody has' }, RENDER_ID)).toBe(lines[1]!);
+    expect(findDiagramTarget(svg, { family: 'sequence', kind: 'edge', id: 'msg-99', label: 'gone' }, RENDER_ID)).toBeNull();
+    // An actor whose name is gone restores by its unique label.
+    expect(findDiagramTarget(svg, { family: 'sequence', kind: 'node', id: 'Renamed', label: 'Browser' }, RENDER_ID)).toBe(
+      svg.querySelector('rect.actor-top[name="B"]'),
+    );
+  });
+
+  test('the whole diagram is always restorable: its element is the svg root', () => {
+    const svg = loadSvg('11-sequence-diagram');
+    expect(findDiagramTarget(svg, { family: 'sequence', kind: 'diagram', label: 'sequenceDiagram' }, RENDER_ID)).toBe(svg);
   });
 });
 
@@ -207,5 +252,104 @@ describe.if(hasDom)('scrubDiagramSvg (the belt over the engine output)', () => {
     expect(clean.querySelectorAll('*').length).toBeGreaterThan(50);
     expect(clean.querySelectorAll('[id]').length).toBe(raw.querySelectorAll('[id]').length);
     expect(clean.textContent?.replace(/\s+/gu, ' ').trim()).toBe(raw.textContent?.replace(/\s+/gu, ' ').trim());
+  });
+});
+
+describe.if(hasDom)('edge labels, duplicate labels, and the hit layer', () => {
+  test('an edge LABEL resolves to its edge (it is painted over the edge, and is where a person clicks it)', () => {
+    const svg = loadSvg('06-flowchart-review-decision');
+    const label = Array.from(svg.querySelectorAll('g.edgeLabel')).find((g) => g.textContent?.includes('Yes'))!;
+    expect(label).toBeDefined();
+    expect(targetFromElement(svg, label, RENDER_ID)).toEqual({ family: 'flowchart', kind: 'edge', from: 'D', to: 'M', label: 'Yes' });
+    // Restore lands on the edge path, never on the label group.
+    expect(findDiagramTarget(svg, { family: 'flowchart', kind: 'edge', from: 'D', to: 'M', label: '' }, RENDER_ID)?.tagName.toLowerCase()).toBe('path');
+  });
+
+  test('the label fallback is skipped when two nodes carry the label (the first match is the wrong node half the time)', () => {
+    const svg = parseInertSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg" aria-roledescription="flowchart-v2"><g class="nodes">' +
+        '<g id="r-flowchart-A-0" class="node"><text>Retry</text></g>' +
+        '<g id="r-flowchart-B-1" class="node"><text>Retry</text></g>' +
+        '<g id="r-flowchart-C-2" class="node"><text>Done</text></g></g></svg>',
+    )!;
+    expect(findDiagramTarget(svg, { family: 'flowchart', kind: 'node', id: 'Gone', label: 'Retry' }, 'r')).toBeNull();
+    expect(findDiagramTarget(svg, { family: 'flowchart', kind: 'node', id: 'Gone', label: 'Done' }, 'r')?.id).toBe('r-flowchart-C-2');
+  });
+
+  test('every edge gets ONE bare hit path in a layer appended last, placed by the ancestors\' transforms', () => {
+    // What regresses: an edge is a 1–2 px target; a sibling clone is covered
+    // by the edge's own label box; a clone that keeps `data-id` makes a
+    // host's `[data-id="L_D_M_0"]` match twice.
+    const svg = loadSvg('06-flowchart-review-decision');
+    const dataIdBefore = svg.querySelectorAll('[data-id="L_D_M_0"]').length;
+    widenEdgeHitAreas(svg);
+    widenEdgeHitAreas(svg); // idempotent
+    const layers = svg.querySelectorAll('[data-diagram-hit-layer]');
+    expect(layers.length).toBe(1);
+    expect(svg.lastElementChild).toBe(layers[0]!);
+    const edges = Array.from(svg.querySelectorAll('path.flowchart-link'));
+    const hits = Array.from(layers[0]!.children);
+    expect(hits.length).toBe(edges.length);
+    hits.forEach((hit, index) => {
+      expect(diagramHitSource(hit)).toBe(edges[index]!);
+      expect(hit.getAttribute('d')).toBe(edges[index]!.getAttribute('d'));
+      const names = Array.from(hit.attributes).map((a) => a.name).sort();
+      expect(names.filter((n) => n.startsWith('data-'))).toEqual(['data-diagram-hit']);
+      expect(names).not.toContain('id');
+      expect(names).not.toContain('class');
+      expect(names).not.toContain('marker-end');
+      expect(hit.getAttribute('stroke-width')).toBe('14');
+      expect(hit.getAttribute('pointer-events')).toBe('stroke');
+      expect(hit.getAttribute('stroke')).toBe('transparent');
+    });
+    expect(svg.querySelectorAll('[data-id="L_D_M_0"]').length).toBe(dataIdBefore);
+    expect(diagramHitSource(edges[0]!)).toBeNull();
+  });
+
+  test('a hit path in a nested group carries every ancestor transform, outermost first', () => {
+    const svg = parseInertSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(10,20)"><g class="root" transform="translate(5,5)">' +
+        '<g class="edgePaths"><path class="flowchart-link" d="M0,0L10,10" transform="scale(2)"/></g></g></g>' +
+        '<g class="edge"><path d="M0,0L1,1"/></g></svg>',
+    )!;
+    widenEdgeHitAreas(svg);
+    const hits = Array.from(svg.querySelectorAll('[data-diagram-hit]'));
+    expect(hits.map((h) => h.getAttribute('transform'))).toEqual(['translate(10,20) translate(5,5) scale(2)', null]);
+  });
+});
+
+describe.if(hasDom)('scopeDiagramCss: a <style> in a diagram may only style that diagram', () => {
+  test('the reviewer\'s payload: @import, a rule on an outside element and a fetching url( are dropped; scoped rules and keyframes stay', () => {
+    const css =
+      '@import url(//evil.example/x.css); #victim{color:red!important} ' +
+      '#d1 .node rect{fill:#123} #d1 .bg{background:url(//evil.example/a.png)} #d1 .f{filter:url(#drop)} ' +
+      '#d1 .a, #victim{color:red} #d10 .x{color:red} #d1 .e{background:u\\72l(//evil.example/b.png)} ' +
+      '#d1 .i{background:image-set("//evil.example/c.png" 1x)} @font-face{font-family:x;src:url(//evil.example/f.woff)} ' +
+      '@keyframes dash{to{stroke-dashoffset:0}} @media print{#d1 .node{fill:#000} #victim{display:none}}';
+    const kept = scopeDiagramCss(css, 'd1');
+    expect(kept).toBe('#d1 .node rect{fill:#123}#d1 .f{filter:url(#drop)}@keyframes dash{to{stroke-dashoffset:0}}@media print{#d1 .node{fill:#000}}');
+    // With no root id nothing can be scoped: only keyframes survive.
+    expect(scopeDiagramCss('#d1 .node{fill:red} @keyframes k{to{opacity:1}}', '')).toBe('@keyframes k{to{opacity:1}}');
+  });
+
+  test('the scrub applies it to the mounted tree, and every rule Mermaid itself emitted survives', () => {
+    const hostile = parseInertSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg" id="d1"><style>@import url(//evil.example/x.css); #victim{color:red!important} #d1 .node{fill:red}</style><g class="node"/></svg>',
+    )!;
+    scrubDiagramSvg(hostile);
+    expect(hostile.querySelector('style')?.textContent).toBe('#d1 .node{fill:red}');
+    const onlyHostile = parseInertSvg('<svg xmlns="http://www.w3.org/2000/svg" id="d2"><style>#victim{color:red}</style></svg>')!;
+    scrubDiagramSvg(onlyHostile);
+    expect(onlyHostile.querySelector('style')).toBeNull();
+
+    for (const name of ['06-flowchart-review-decision', '08-state-diagram', '09-class-diagram', '10-er-diagram', '11-sequence-diagram', '15-requirement-diagram']) {
+      const svg = loadSvg(name);
+      const before = svg.querySelector('style')!.textContent!;
+      scrubDiagramSvg(svg);
+      const after = svg.querySelector('style')!.textContent!;
+      const rules = (text: string) => (text.match(/\{/gu) ?? []).length;
+      expect(rules(after)).toBe(rules(before));
+      expect(after.replace(/\s+/gu, '')).toBe(before.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\s+/gu, ''));
+    }
   });
 });

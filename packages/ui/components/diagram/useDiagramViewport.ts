@@ -22,6 +22,9 @@ export const WHEEL_ZOOM_SENSITIVITY = 0.002;
 /** The distance a pointer must travel before a press becomes a pan. Under
  * it, releasing is a click on the part beneath (the pinpoint). */
 export const DRAG_THRESHOLD_PX = 4;
+/** The same threshold for a finger, which wobbles more than a mouse: a tap
+ * that drifts a few pixels must still be a tap. */
+export const TOUCH_DRAG_THRESHOLD_PX = 10;
 /** Fit leaves this much air on every side of the host so the outermost
  * node and its ring never touch the edge; the badge (a 20px disc at the
  * node's top-right corner) stays inside it. */

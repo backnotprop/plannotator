@@ -45,7 +45,11 @@ const TEXT: Annotation = {
   createdA: 2,
 };
 
-const ANNOTATIONS = [DIAGRAM, TEXT];
+/** A text row whose quote exists ONLY inside a diagram (a reply that lost
+ * its anchor, an older writer). */
+const IN_DIAGRAM_ONLY: Annotation = { ...TEXT, id: 't2', originalText: 'OnlyInsideTheDiagram' };
+
+const ANNOTATIONS = [DIAGRAM, TEXT, IN_DIAGRAM_ONLY];
 
 function Harness({ onReport, applyRef }: { onReport: (report: Report) => void; applyRef: { current: (() => void) | null } }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -63,6 +67,12 @@ function Harness({ onReport, applyRef }: { onReport: (report: Report) => void; a
   return (
     <div ref={containerRef}>
       <p data-block-id="block-1">Should we Approve? the plan</p>
+      {/* What DiagramBlock renders: the diagram is excluded from the text layer. */}
+      <div className="annotation-exclude" data-block-id="block-2" data-diagram-block="mermaid">
+        <svg>
+          <text>OnlyInsideTheDiagram</text>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -93,6 +103,10 @@ describe('useAnnotationHighlighter: diagram anchors', () => {
     expect(last!.attempted).toContain('t1');
     expect(host.querySelector('[data-bind-id="d1"], [data-highlight-id="d1"]')).toBeNull();
     expect(host.querySelectorAll('mark').length).toBe(0);
+    // Text restore never enters a diagram: no <mark> is ever wrapped into
+    // the svg, whatever the row's quote is.
+    expect(host.querySelector('[data-diagram-block] mark')).toBeNull();
+    expect(host.querySelector('svg')!.innerHTML).not.toContain('mark');
     await act(async () => root.unmount());
     host.remove();
   });

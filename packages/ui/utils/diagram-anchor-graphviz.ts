@@ -22,7 +22,7 @@
  *
  * Pure: no React, no DOM globals beyond the Element the caller hands in.
  */
-import { lineMentions, sameTarget, type DiagramTarget } from '@plannotator/core/diagram-anchor';
+import { diagramWholeSourceLines, lineMentions, sameTarget, type DiagramTarget } from '@plannotator/core/diagram-anchor';
 import type { DiagramFinder } from './diagram-anchor';
 
 /** The selector of every element the pointer can address in a Graphviz svg. */
@@ -90,14 +90,15 @@ export function graphvizTargetFromElement(_svg: Element, el: Element): DiagramTa
  * label equals the stored label. Null when neither holds.
  */
 export function graphvizFindTarget(svg: Element, target: DiagramTarget): Element | null {
-  for (const el of svg.querySelectorAll(GRAPHVIZ_TARGET_SELECTOR)) {
+  if (target.kind === 'diagram') return svg;
+  for (const el of Array.from(svg.querySelectorAll(GRAPHVIZ_TARGET_SELECTOR))) {
     const candidate = graphvizTargetFromElement(svg, el);
     if (candidate !== null && sameTarget(candidate, target)) return el;
   }
   if (target.kind === 'node' && target.label !== '') {
-    for (const el of svg.querySelectorAll('g.node')) {
-      if (labelOf(el) === target.label) return el;
-    }
+    // Only while the label names ONE node (see the Mermaid finder).
+    const matches = Array.from(svg.querySelectorAll('g.node')).filter((el) => labelOf(el) === target.label);
+    if (matches.length === 1) return matches[0] ?? null;
   }
   return null;
 }
@@ -112,6 +113,7 @@ export function graphvizFindTarget(svg: Element, target: DiagramTarget): Element
  * in an unsaved draft reads as until it is saved.
  */
 export function graphvizSourceLine(source: string, target: DiagramTarget): readonly [number, number] | null {
+  if (target.kind === 'diagram') return diagramWholeSourceLines(source);
   const lines = source.split('\n');
   const matches = (line: string): boolean => {
     if (target.kind === 'edge') {

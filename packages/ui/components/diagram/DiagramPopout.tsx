@@ -22,7 +22,7 @@ export function DiagramPopout({
   container,
   dataAttributes,
   ...viewer
-}: Omit<DiagramViewerProps, 'onDismiss' | 'autoFocus' | 'sourceOpen' | 'className'> & {
+}: Omit<DiagramViewerProps, 'onDismiss' | 'autoFocus' | 'sourceOpen' | 'className' | 'canvasClassName'> & {
   open: boolean;
   onClose: () => void;
   /** The dialog's accessible name and the header label. */
@@ -62,7 +62,8 @@ export function DiagramPopout({
         )}
       </div>
       <div className="min-h-0 flex-1">
-        <DiagramViewer {...viewer} sourceOpen={sourceOpen} onDismiss={onClose} autoFocus />
+        {/* The popout owns the screen: every touch drag is a pan. */}
+        <DiagramViewer {...viewer} sourceOpen={sourceOpen} onDismiss={onClose} autoFocus canvasClassName="touch-none" />
       </div>
     </PopoutDialog>
   );
