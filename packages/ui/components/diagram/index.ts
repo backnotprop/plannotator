@@ -8,7 +8,10 @@
  */
 export { DiagramViewer, type DiagramViewerProps } from './DiagramViewer';
 export { DiagramPopout } from './DiagramPopout';
-export { DiagramCanvas, svgContentSize, KEY_PAN_PX, type DiagramCanvasHandle, type DiagramEscapeOutcome } from './DiagramCanvas';
+export { DiagramPending, DiagramInlineSource, DiagramBlockPending } from './DiagramPending';
+export { isDiagramControlEvent, DIAGRAM_CONTROL_SELECTOR } from './diagramControls';
+export { svgContentSize } from './svgContentSize';
+export { DiagramCanvas, KEY_PAN_PX, type DiagramCanvasHandle, type DiagramEscapeOutcome } from './DiagramCanvas';
 export { DiagramOverlay } from './DiagramOverlay';
 export { DiagramComposer } from './DiagramComposer';
 export { DiagramSourcePane } from './DiagramSourcePane';
