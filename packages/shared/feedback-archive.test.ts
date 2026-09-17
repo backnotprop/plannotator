@@ -313,6 +313,33 @@ describe("feedback archive: project bucketing", () => {
   });
 });
 
+describe("feedback archive: diagram anchors", () => {
+  test("a diagram comment records its validated anchor; a malformed one and a text comment stay anchor-free", () => {
+    // Regression: without the field a comment on a flowchart node archives
+    // as the quote "Approve?" and the index cannot say WHICH node, in WHICH
+    // fence line, the comment was about.
+    const dataDir = useTempDataDir();
+    const anchor = { v: 1, family: "flowchart", kind: "node", id: "D", label: "Approve?", sourceLine: [7, 7] };
+    appendFeedbackRecord({
+      project: PROJECT,
+      origin: "claude-code",
+      surface: "plan",
+      decision: "deny",
+      target: { slug: "plan-2026-09-17" },
+      feedback: "rename",
+      annotations: [
+        { id: "d1", type: "COMMENT", text: "rename", originalText: "Approve?", blockId: "block-4", diagramAnchor: anchor },
+        { id: "d2", type: "COMMENT", text: "junk", originalText: "x", diagramAnchor: { kind: "node" } },
+        { id: "t1", type: "COMMENT", text: "plain", originalText: "some words" },
+      ],
+    });
+    const record = readIndex(dataDir)[0]!;
+    expect(record.annotations?.[0]?.diagramAnchor).toEqual(anchor);
+    expect(record.annotations?.[1]).not.toHaveProperty("diagramAnchor");
+    expect(record.annotations?.[2]).not.toHaveProperty("diagramAnchor");
+  });
+});
+
 describe("feedback archive: element identity", () => {
   test("a raw-HTML pinpoint records its element identity and route; other annotations stay identity-free", () => {
     // Regression: without these fields a pinpoint archives as the bridge's
