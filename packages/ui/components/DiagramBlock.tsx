@@ -134,19 +134,23 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   const claims = sharedClaims ?? ownClaims;
   const claimsVersion = useSyncExternalStore(claims.subscribe, claims.getVersion, claims.getVersion);
 
+  // `diagramAnchor` is read defensively everywhere: a row can reach the
+  // renderer from any local ingest (the external-annotations API, a draft, a
+  // share link), so a nullish or malformed anchor must list as unanchored,
+  // never take the page down with a property read (`null.family`).
   const ownAnnotations = useMemo(
-    () => annotations.filter((ann) => ann.diagramAnchor !== undefined && ann.blockId === block.id),
+    () => annotations.filter((ann) => ann.diagramAnchor != null && ann.blockId === block.id),
     [annotations, block.id],
   );
   const unownedAnnotations = useMemo(
     () =>
       annotations.filter(
         (ann) =>
-          ann.diagramAnchor !== undefined &&
+          ann.diagramAnchor != null &&
           ann.blockId !== block.id &&
           !claims.blockIds.includes(ann.blockId) &&
           // A Graphviz anchor names a DOT part; it is never a Mermaid one.
-          (ann.diagramAnchor.family === 'graphviz') === (kind === 'graphviz'),
+          (ann.diagramAnchor?.family === 'graphviz') === (kind === 'graphviz'),
       ),
     [annotations, block.id, claims, kind],
   );

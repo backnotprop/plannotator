@@ -1071,7 +1071,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // it is unanchored, and the highlighter (which skips it) will not say so.
   useEffect(() => {
     if (diagramBlockKey !== '' || onRestoreReport === undefined) return;
-    const ids = annotations.filter((ann) => ann.diagramAnchor !== undefined).map((ann) => ann.id);
+    // `!= null`, not `!== undefined`: a nullish anchor is no anchor at all —
+    // the highlighter restores such a row by text, so it must not be counted
+    // here as a diagram comment nothing could resolve.
+    const ids = annotations.filter((ann) => ann.diagramAnchor != null).map((ann) => ann.id);
     if (ids.length > 0) onRestoreReport({ attempted: ids, unanchored: ids });
   }, [annotations, diagramBlockKey, onRestoreReport]);
 
