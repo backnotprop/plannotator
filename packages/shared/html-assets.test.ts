@@ -3,7 +3,9 @@ import {
   buildHtmlAssetErrorDocument,
   encodeHtmlAssetPath,
   htmlAssetContentType,
+  isFramedEmbeddedDocumentRequest,
   isFramedFetchDest,
+  pathNamesEmbeddedDocument,
   rewriteCssAssetReferences,
   normalizeHtmlAssetRoutePath,
   resolveHtmlAssetRoute,
@@ -231,5 +233,40 @@ describe("isFramedFetchDest", () => {
     for (const dest of ["document", "script", "image", "empty", "", null, undefined]) {
       expect(isFramedFetchDest(dest)).toBe(false);
     }
+  });
+});
+
+describe("pathNamesEmbeddedDocument", () => {
+  // The #1561 regression: the guard fired on the app document too, so the VS
+  // Code panel (which frames the session URL) rendered "404 Not found".
+  test("the app document is never a missing embed, whatever the query string", () => {
+    for (const pathname of ["/", "//"]) {
+      expect(pathNamesEmbeddedDocument(pathname)).toBe(false);
+    }
+    // A query string is not part of the pathname, so `/?x=1` reads as `/`.
+    expect(pathNamesEmbeddedDocument(new URL("http://localhost/?x=1").pathname)).toBe(false);
+  });
+
+  test("a file reference is a missing embed", () => {
+    for (const pathname of ["/prototype-slash.html", "/chart.svg", "/app.js", "/assets/frame"]) {
+      expect(pathNamesEmbeddedDocument(pathname)).toBe(true);
+    }
+  });
+
+  test("a bare single-segment word stays with the app", () => {
+    // Nothing routes these today; leaving them to the catch-all is what stops a
+    // future SPA route from 404ing inside a frame.
+    for (const pathname of ["/settings", "/review"]) {
+      expect(pathNamesEmbeddedDocument(pathname)).toBe(false);
+    }
+  });
+});
+
+describe("isFramedEmbeddedDocumentRequest", () => {
+  test("needs both a framed destination and a file-shaped path", () => {
+    expect(isFramedEmbeddedDocumentRequest("iframe", "/gone.html")).toBe(true);
+    expect(isFramedEmbeddedDocumentRequest("iframe", "/")).toBe(false);
+    expect(isFramedEmbeddedDocumentRequest("document", "/gone.html")).toBe(false);
+    expect(isFramedEmbeddedDocumentRequest(null, "/gone.html")).toBe(false);
   });
 });

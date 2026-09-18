@@ -103,6 +103,42 @@ describe("pi annotate server: embedded local documents", () => {
 		});
 	});
 
+	// The #1561 regression: the guard keyed on Sec-Fetch-Dest alone, so the app
+	// document 404'd too — and the VS Code extension frames the session URL.
+	test("a framed request for the app document still gets the app shell", async () => {
+		await withSession("framed-root", async ({ url }) => {
+			for (const path of ["/", "/?x=1"]) {
+				const response = await fetch(`${url}${path}`, {
+					headers: { "sec-fetch-dest": "iframe" },
+				});
+				expect(response.status).toBe(200);
+				expect(await response.text()).toContain("PLANNOTATOR_APP_SHELL");
+			}
+		});
+	});
+
+	test("a framed path under a directory is a file reference; a bare word is not", async () => {
+		await withSession("framed-shape", async ({ url }) => {
+			const nested = await fetch(`${url}/assets/frame`, {
+				headers: { "sec-fetch-dest": "iframe" },
+			});
+			expect(nested.status).toBe(404);
+			const bare = await fetch(`${url}/settings`, {
+				headers: { "sec-fetch-dest": "iframe" },
+			});
+			expect(bare.status).toBe(200);
+			expect(await bare.text()).toContain("PLANNOTATOR_APP_SHELL");
+		});
+	});
+
+	test("a plain request for a missing path still gets the app, as before #1561", async () => {
+		await withSession("plain-miss", async ({ url }) => {
+			const response = await fetch(`${url}/prototype-slash.html`);
+			expect(response.status).toBe(200);
+			expect(await response.text()).toContain("PLANNOTATOR_APP_SHELL");
+		});
+	});
+
 	test("an ordinary top-level navigation still gets the app shell", async () => {
 		await withSession("spa", async ({ url }) => {
 			const response = await fetch(`${url}/some/spa/route`, {

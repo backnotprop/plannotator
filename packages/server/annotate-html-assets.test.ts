@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHtmlAssetRegistry, framedDocumentNotFound, inlineHtmlLocalAssets } from "./html-assets";
+import { startAnnotateServer } from "./annotate";
 
 describe("annotate raw HTML assets", () => {
   test("rewrites raw HTML support assets and serves them from the source directory", async () => {
@@ -216,6 +217,12 @@ describe("annotate embedded local documents", () => {
     expect(framed?.status).toBe(404);
     expect(framed?.headers.get("content-type")).toContain("text/html");
     expect(framedDocumentNotFound(new Request(String(url)), url)).toBeNull();
+    // ...but never for the app document itself, which is how the VS Code
+    // extension loads a session (#1561 regression).
+    const root = new URL("http://localhost/");
+    expect(
+      framedDocumentNotFound(new Request(String(root), { headers: { "sec-fetch-dest": "iframe" } }), root),
+    ).toBeNull();
     expect(
       framedDocumentNotFound(new Request(String(url), { headers: { "sec-fetch-dest": "document" } }), url),
     ).toBeNull();
@@ -233,5 +240,97 @@ describe("annotate embedded local documents", () => {
     const shared = inlineHtmlLocalAssets(html, htmlPath);
     expect(shared).toContain('<base href="about:blank">');
     expect(shared).not.toContain("EMBEDDED_SIBLING");
+  });
+});
+
+/**
+ * The catch-all's framed guard, over a real server.
+ *
+ * #1561 scoped the guard to `Sec-Fetch-Dest` alone, so it also answered 404 for
+ * the APP document — and the VS Code extension frames the session URL
+ * (`panel-manager.ts` puts it in an `<iframe src>`, and every subcommand
+ * launched from a VS Code terminal is routed there by `PLANNOTATOR_BROWSER`),
+ * so an annotate session opened from the editor showed "404 Not found".
+ */
+describe("annotate catch-all: framed requests", () => {
+  const APP_SHELL = "<html><body>PLANNOTATOR_APP_SHELL</body></html>";
+  let savedPort: string | undefined;
+  let savedRemote: string | undefined;
+
+  beforeEach(() => {
+    savedPort = process.env.PLANNOTATOR_PORT;
+    savedRemote = process.env.PLANNOTATOR_REMOTE;
+    delete process.env.PLANNOTATOR_PORT;
+    process.env.PLANNOTATOR_REMOTE = "0";
+  });
+
+  afterEach(() => {
+    if (savedPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = savedPort;
+    if (savedRemote === undefined) delete process.env.PLANNOTATOR_REMOTE;
+    else process.env.PLANNOTATOR_REMOTE = savedRemote;
+  });
+
+  async function withServer(run: (url: string) => Promise<void>): Promise<void> {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-framed-catchall-")));
+    const filePath = join(dir, "notes.md");
+    writeFileSync(filePath, "# Notes", "utf-8");
+    const server = await startAnnotateServer({
+      markdown: "# Notes",
+      filePath,
+      htmlContent: APP_SHELL,
+    });
+    try {
+      await run(server.url);
+    } finally {
+      server.stop();
+    }
+  }
+
+  const framed = (url: string, path: string) =>
+    fetch(`${url}${path}`, { headers: { "sec-fetch-dest": "iframe" } });
+
+  test("serves the app to a framed request for the app document", async () => {
+    await withServer(async (url) => {
+      for (const path of ["/", "/?x=1"]) {
+        const response = await framed(url, path);
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toContain("text/html");
+        expect(await response.text()).toContain("PLANNOTATOR_APP_SHELL");
+      }
+    });
+  });
+
+  test("answers a framed file reference with the 404 document", async () => {
+    await withServer(async (url) => {
+      const response = await framed(url, "/prototype-slash.html");
+      expect(response.status).toBe(404);
+      const body = await response.text();
+      expect(body).toContain("prototype-slash.html");
+      expect(body).not.toContain("PLANNOTATOR_APP_SHELL");
+    });
+  });
+
+  test("a framed path under a directory is a file reference; a bare word is not", async () => {
+    await withServer(async (url) => {
+      // Only a root-relative embed is spelled with a directory segment; the app
+      // has no nested routes, so this is a miss worth naming.
+      expect((await framed(url, "/assets/frame")).status).toBe(404);
+      // One bare segment stays with the app, so a future SPA route cannot 404
+      // inside a frame.
+      const bare = await framed(url, "/settings");
+      expect(bare.status).toBe(200);
+      expect(await bare.text()).toContain("PLANNOTATOR_APP_SHELL");
+    });
+  });
+
+  test("a plain request for a missing path still gets the app, as before #1561", async () => {
+    await withServer(async (url) => {
+      for (const path of ["/prototype-slash.html", "/assets/frame", "/"]) {
+        const response = await fetch(`${url}${path}`);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain("PLANNOTATOR_APP_SHELL");
+      }
+    });
   });
 });
