@@ -15,6 +15,10 @@ export interface V2SessionDomain {
   get?: (input: { sessionID: string }) => Promise<{ location?: { directory?: string } }>;
   prompt?: (input: { sessionID: string; text: string; delivery?: unknown }) => Promise<unknown>;
   switchAgent?: (input: { sessionID: string; agent: string }) => Promise<unknown>;
+  switchModel?: (input: {
+    sessionID: string;
+    model: { providerID: string; id: string; variant?: string };
+  }) => Promise<unknown>;
   context?: (input: { sessionID: string }) => Promise<unknown>;
   /**
    * Put a message in the session without starting a model turn NOW.
@@ -175,14 +179,32 @@ export function normalizeAgentList(response: unknown): OpenCodeBridgeAgent[] {
       description: typeof entry.description === "string" ? entry.description : undefined,
       mode: typeof entry.mode === "string" ? entry.mode : undefined,
       hidden: entry.hidden === true,
+      model: normalizeAgentModel(entry.model),
     });
   }
   return agents;
 }
 
+function normalizeAgentModel(value: unknown): OpenCodeBridgeAgent["model"] {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.providerID !== "string" || !value.providerID) return undefined;
+  if (typeof value.id !== "string" || !value.id) return undefined;
+  if (value.variant !== undefined && typeof value.variant !== "string") return undefined;
+  return {
+    providerID: value.providerID,
+    id: value.id,
+    ...(value.variant ? { variant: value.variant } : {}),
+  };
+}
+
 /** True when this host's session domain can switch the active agent. */
 export function supportsSwitchAgent(ctx: V2ContextLike): boolean {
   return typeof ctx.session?.switchAgent === "function";
+}
+
+/** True when this host can persist the model configured for a selected agent. */
+export function supportsSwitchModel(ctx: V2ContextLike): boolean {
+  return typeof ctx.session?.switchModel === "function";
 }
 
 // There is deliberately no `supportsNativeCommands(ctx)`. `ctx.command.transform`

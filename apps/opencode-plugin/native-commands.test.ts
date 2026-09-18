@@ -314,9 +314,20 @@ describe("reclaiming the command names from the config-loaded stubs", () => {
 
 describe("V2 list shapes", () => {
   test("reads an agent list as a bare array or a { data } envelope", () => {
-    const entries = [{ id: "plan", mode: "primary", hidden: false }];
+    const entries = [{
+      id: "plan",
+      mode: "primary",
+      hidden: false,
+      model: { providerID: "openai", id: "gpt-5.6-sol", variant: "high" },
+    }];
     expect(normalizeAgentList(entries)).toEqual([
-      { name: "plan", description: undefined, mode: "primary", hidden: false },
+      {
+        name: "plan",
+        description: undefined,
+        mode: "primary",
+        hidden: false,
+        model: { providerID: "openai", id: "gpt-5.6-sol", variant: "high" },
+      },
     ]);
     expect(normalizeAgentList({ location: {}, data: entries })).toEqual(normalizeAgentList(entries));
   });
@@ -327,21 +338,104 @@ describe("V2 list shapes", () => {
     expect(normalizeAgentList([{ mode: "primary" }])).toEqual([]);
     expect(readListPayload({ data: [{ description: "nameless" }] })).toEqual([]);
   });
+
+  test("drops a malformed configured model without dropping its agent", () => {
+    expect(normalizeAgentList([{
+      id: "build",
+      model: { providerID: "openai", id: 42 },
+    }])).toEqual([{
+      name: "build",
+      description: undefined,
+      mode: undefined,
+      hidden: false,
+      model: undefined,
+    }]);
+  });
 });
 
 describe("V2 agent switching", () => {
-  test("switches the session agent when the host exposes switchAgent", async () => {
+  test("switches the session agent and its configured model", async () => {
+    const calls: string[] = [];
     const switchAgent = mock(async (_input: { sessionID: string; agent: string }) => {});
+    switchAgent.mockImplementation(async () => { calls.push("agent"); });
+    const switchModel = mock(async () => { calls.push("model"); });
     const result = await switchV2SessionAgent({
-      ctx: { session: { switchAgent } },
+      ctx: { session: { switchAgent, switchModel } },
       sessionID: "session-1",
       requestedAgent: "build",
-      getAgents: async () => [{ name: "build" }],
+      getAgents: async () => [{
+        name: "build",
+        model: { providerID: "openai", id: "gpt-5.6-terra", variant: "low" },
+      }],
       warn: () => {},
     });
 
     expect(switchAgent).toHaveBeenCalledWith({ sessionID: "session-1", agent: "build" });
+    expect(switchModel).toHaveBeenCalledWith({
+      sessionID: "session-1",
+      model: { providerID: "openai", id: "gpt-5.6-terra", variant: "low" },
+    });
+    expect(calls).toEqual(["agent", "model"]);
     expect(result).toBe("build");
+  });
+
+  test("keeps the selected model when the target agent has no configured model", async () => {
+    const switchAgent = mock(async () => {});
+    const switchModel = mock(async () => {});
+
+    expect(await switchV2SessionAgent({
+      ctx: { session: { switchAgent, switchModel } },
+      sessionID: "session-1",
+      requestedAgent: "build",
+      getAgents: async () => [{ name: "build" }],
+      warn: () => {},
+    })).toBe("build");
+
+    expect(switchAgent).toHaveBeenCalledTimes(1);
+    expect(switchModel).not.toHaveBeenCalled();
+  });
+
+  test("leaves the session unchanged when it cannot apply a configured model", async () => {
+    const switchAgent = mock(async () => {});
+    const warnings: string[] = [];
+
+    expect(await switchV2SessionAgent({
+      ctx: { session: { switchAgent } },
+      sessionID: "session-1",
+      requestedAgent: "build",
+      getAgents: async () => [{
+        name: "build",
+        model: { providerID: "openai", id: "gpt-5.6-terra" },
+      }],
+      warn: (message) => warnings.push(message),
+    })).toBeUndefined();
+
+    expect(switchAgent).not.toHaveBeenCalled();
+    expect(warnings).toHaveLength(1);
+  });
+
+  test("keeps the switched agent when its model switch fails", async () => {
+    const switchAgent = mock(async () => {});
+    const warnings: string[] = [];
+
+    expect(await switchV2SessionAgent({
+      ctx: {
+        session: {
+          switchAgent,
+          switchModel: async () => { throw new Error("model unavailable"); },
+        },
+      },
+      sessionID: "session-1",
+      requestedAgent: "build",
+      getAgents: async () => [{
+        name: "build",
+        model: { providerID: "openai", id: "gpt-5.6-terra" },
+      }],
+      warn: (message) => warnings.push(message),
+    })).toBe("build");
+
+    expect(switchAgent).toHaveBeenCalledTimes(1);
+    expect(warnings.some((line) => line.includes("model unavailable"))).toBe(true);
   });
 
   test("warns and leaves the agent alone when the host has no switchAgent", async () => {
