@@ -72,7 +72,7 @@ import {
 	encodeHtmlAssetPath,
 	htmlAssetBaseHref,
 	htmlAssetDocumentHeaders,
-	isFramedFetchDest,
+	isFramedEmbeddedDocumentRequest,
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
@@ -1164,11 +1164,14 @@ export async function startAnnotateServer(options: {
 			await handleSaveNotesRequest(req, res);
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
-		} else if (isFramedFetchDest(firstHeader(req.headers["sec-fetch-dest"]))) {
+		} else if (isFramedEmbeddedDocumentRequest(firstHeader(req.headers["sec-fetch-dest"]), url.pathname)) {
 			// Nested-document guard: a request the browser will render inside a
-			// frame must never receive the editor app. Relative embeds are
-			// anchored at their own directory by the asset-route <base href>, so
-			// anything reaching here names a file that genuinely is not there.
+			// frame AND whose path names a file must never receive the editor
+			// app. Relative embeds are anchored at their own directory by the
+			// asset-route <base href>, so anything reaching here names a file
+			// that genuinely is not there. The path condition keeps the app
+			// document itself (`/`, which is how the VS Code extension frames a
+			// session) out of the guard — see pathNamesEmbeddedDocument.
 			const name = url.pathname.split("/").filter(Boolean).pop();
 			res.writeHead(404, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
 			res.end(buildHtmlAssetErrorDocument(404, "Not found", name));

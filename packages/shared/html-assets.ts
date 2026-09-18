@@ -48,6 +48,57 @@ export function isFramedFetchDest(secFetchDest: string | null | undefined): bool
   return typeof secFetchDest === "string" && FRAMED_FETCH_DESTS.has(secFetchDest.trim().toLowerCase());
 }
 
+/**
+ * A single path segment that names a file: `page.html`, `chart.svg`, `app.js`.
+ * Bounded on purpose — a long trailing dot-run in a slug (`v1.2.3-release`) is
+ * still a file shape, but an arbitrary tail is not worth treating as one.
+ */
+const FILE_NAME_SEGMENT = /\.[A-Za-z0-9][A-Za-z0-9_-]{0,9}$/;
+
+/**
+ * Could this path name a MISSING embedded document, as opposed to the app
+ * document itself?
+ *
+ * The annotate catch-all serves the editor app for every non-`/api` path, so
+ * without this the framed-404 guard answers 404 for the app root too — which is
+ * exactly how the VS Code extension loads a session (`panel-manager.ts` puts the
+ * session URL in an `<iframe src>`, and every subcommand launched from a VS Code
+ * terminal is routed there), so the panel rendered "404 Not found" instead of
+ * the app (#1561 regression).
+ *
+ * The rule is the SHAPE OF THE PATH, not `Sec-Fetch-Site`: an annotated page is
+ * a sandboxed srcdoc with an opaque origin, so its nested-document requests are
+ * `cross-site` — the same value the VS Code webview wrapper produces, and a
+ * pasted URL is `none` on both sides. Site can never separate the two; the path
+ * can, because the app is only ever loaded at `/` while an embed that reaches
+ * the catch-all was written as a root-relative file reference (relative ones are
+ * anchored at `/api/html-assets/<token>/` by #1561's `<base href>`, which has
+ * its own 404).
+ */
+export function pathNamesEmbeddedDocument(pathname: string): boolean {
+  const segments = pathname.split("/").filter(Boolean);
+  // `/` (and `//`): the app document. Never a missing embed.
+  if (segments.length === 0) return false;
+  // Under a directory segment (`/assets/frame`): only a file reference is
+  // spelled that way; the app has no nested routes.
+  if (segments.length > 1) return true;
+  // One segment: a file name (`/prototype-slash.html`), not a bare word, which
+  // stays with the app so a future SPA route cannot 404 inside a frame.
+  return FILE_NAME_SEGMENT.test(segments[0]);
+}
+
+/**
+ * The catch-all's guard, shared by both runtimes: a request the browser will
+ * render as a nested document AND whose path names a file gets the small 404
+ * document instead of the editor app.
+ */
+export function isFramedEmbeddedDocumentRequest(
+  secFetchDest: string | null | undefined,
+  pathname: string,
+): boolean {
+  return isFramedFetchDest(secFetchDest) && pathNamesEmbeddedDocument(pathname);
+}
+
 /** `<base href>` value that anchors a document's relative URLs at its own directory. */
 export function htmlAssetBaseHref(token: string): string {
   return `${HTML_ASSET_ROUTE_PREFIX}/${encodeURIComponent(token)}/`;

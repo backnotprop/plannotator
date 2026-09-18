@@ -7,7 +7,7 @@ import {
   encodeHtmlAssetPath,
   htmlAssetBaseHref,
   htmlAssetDocumentHeaders,
-  isFramedFetchDest,
+  isFramedEmbeddedDocumentRequest,
   resolveHtmlAssetRoute,
   rewriteHtmlAssetReferences,
 } from "@plannotator/shared/html-assets";
@@ -39,13 +39,18 @@ function assetError(
 
 /**
  * The catch-all's guard: a request the browser will render as a nested
- * document must never receive the editor app. That is the bug this whole
- * change is about — Plannotator rendering inside an annotated page's embed —
- * and the `<base href>` fix removes the usual way of getting here, so anything
- * still arriving is a genuinely missing file and deserves to say so.
+ * document, AND whose path names a file, must never receive the editor app.
+ * That is the bug this whole change is about — Plannotator rendering inside an
+ * annotated page's embed — and the `<base href>` fix removes the usual way of
+ * getting here, so anything still arriving is a genuinely missing file and
+ * deserves to say so. The path condition is what keeps the app document itself
+ * (`/`) out of it: see `pathNamesEmbeddedDocument` for why the shape of the
+ * path, and not `Sec-Fetch-Site`, is the signal.
  */
 export function framedDocumentNotFound(req: Request, url: URL): Response | null {
-  if (!isFramedFetchDest(req.headers.get("sec-fetch-dest"))) return null;
+  if (!isFramedEmbeddedDocumentRequest(req.headers.get("sec-fetch-dest"), url.pathname)) {
+    return null;
+  }
   const name = url.pathname.split("/").filter(Boolean).pop();
   return new Response(buildHtmlAssetErrorDocument(404, "Not found", name), {
     status: 404,
