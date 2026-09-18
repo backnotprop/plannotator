@@ -71,6 +71,9 @@ export async function runEmbeddedPlanReview(
 ): Promise<EmbeddedPlanReviewResult> {
   input.abortSignal?.throwIfAborted();
   const { startPlannotatorServer, handleServerReady } = await loadPlanServer();
+  const { registerEmbeddedSession, unregisterEmbeddedSession } = await import(
+    "./session-registry"
+  );
   const server = await startPlannotatorServer({
     plan: input.planContent,
     origin: "opencode",
@@ -84,6 +87,7 @@ export async function runEmbeddedPlanReview(
       input.logReady(url, isRemote, port);
     },
   });
+  const sessionKey = await registerEmbeddedSession(server, "plan", "plan");
 
   const timeoutMs = input.timeoutSeconds === null ? null : input.timeoutSeconds * 1000;
   try {
@@ -101,6 +105,7 @@ export async function runEmbeddedPlanReview(
     return result;
   } finally {
     await server.stop();
+    unregisterEmbeddedSession(sessionKey);
   }
 }
 

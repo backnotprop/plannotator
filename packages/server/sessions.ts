@@ -17,6 +17,13 @@ import {
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 
 export interface SessionInfo {
+  /**
+   * Registry key used for the on-disk session file. Defaults to the process id.
+   * A runtime that hosts more than one concurrent session inside a single
+   * process (for example the embedded OpenCode runtime) must pass a unique id
+   * so concurrent sessions do not overwrite one another.
+   */
+  id?: string;
   pid: number;
   port: number;
   url: string;
@@ -26,14 +33,19 @@ export interface SessionInfo {
   label: string;
 }
 
+/** Registry key for a session: an explicit id when present, otherwise the pid. */
+export function sessionKey(info: Pick<SessionInfo, "id" | "pid">): string {
+  return info.id ?? String(info.pid);
+}
+
 function getSessionsDir(): string {
   const dir = join(getPlannotatorDataDir(), "sessions");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-function sessionPath(pid: number): string {
-  return join(getSessionsDir(), `${pid}.json`);
+function sessionPath(key: string): string {
+  return join(getSessionsDir(), `${key}.json`);
 }
 
 /**
@@ -55,18 +67,19 @@ function isAlive(pid: number): boolean {
  */
 export function registerSession(info: SessionInfo): void {
   try {
-    writeFileSync(sessionPath(info.pid), JSON.stringify(info, null, 2), "utf-8");
+    writeFileSync(sessionPath(sessionKey(info)), JSON.stringify(info, null, 2), "utf-8");
   } catch {
     // Session discovery is unavailable; the session itself is unaffected.
   }
 }
 
 /**
- * Unregister the current process's session. No-op if not found.
+ * Unregister a session by its registry key (an explicit session id or a pid).
+ * Defaults to the current process's pid. No-op if not found.
  */
-export function unregisterSession(pid: number = process.pid): void {
+export function unregisterSession(key: string | number = process.pid): void {
   try {
-    const filePath = sessionPath(pid);
+    const filePath = sessionPath(String(key));
     if (existsSync(filePath)) unlinkSync(filePath);
   } catch {
     // Ignore delete failures (including an unwritable sessions dir).
