@@ -283,7 +283,58 @@ function isTestFile(filePath: string): boolean {
 
 /** Path segments of a repo-relative file path, `/` and `\` alike. */
 function pathSegments(filePath: string): Set<string> {
-  return new Set(filePath.split(/[/\\]/).filter(Boolean));
+  return new Set(splitPath(filePath));
+}
+
+/** Ordered path segments, `/` and `\` alike, with `.` and empties dropped. */
+function splitPath(filePath: string): string[] {
+  return filePath.split(/[/\\]/).filter((segment) => segment && segment !== ".");
+}
+
+/**
+ * Is `matchPath` allowed for a request that came from `originFilePath`?
+ *
+ * The origin-file exemption (#1558) lifts a directory exclusion so a symbol in
+ * a changed file can always find its own siblings. Lifting the GLOB, though,
+ * lifts it for the whole tree: a request from
+ * `src/main/java/com/example/vendor/app/Widget.java` also started returning
+ * matches from the repo-ROOT `vendor/`, which is exactly the third-party tree
+ * the exclusion exists for (#1559 follow-up).
+ *
+ * So the exemption is narrowed to the directory INSTANCE the origin lives in:
+ * a match under an excluded directory is kept only when that same directory is
+ * an ancestor of the origin file. Root-only names are additionally only
+ * considered at the search root, which is where `--glob !/vendor` prunes.
+ */
+export function isCodeNavPathAllowed(
+  matchPath: string,
+  originFilePath?: string,
+): boolean {
+  const segments = splitPath(matchPath);
+  const origin = originFilePath ? splitPath(originFilePath) : [];
+  // Only directory segments can be excluded; the last segment is the file.
+  for (let i = 0; i < segments.length - 1; i++) {
+    const name = segments[i]!;
+    const excluded =
+      CODE_NAV_ALWAYS_IGNORED_DIRS.includes(name) ||
+      (i === 0 && CODE_NAV_ROOT_ONLY_IGNORED_DIRS.includes(name));
+    if (!excluded) continue;
+    if (!isAncestorOfOrigin(segments, origin, i)) return false;
+  }
+  return true;
+}
+
+/** Do `segments[0..i]` name the same directory the origin sits under? */
+function isAncestorOfOrigin(
+  segments: string[],
+  origin: string[],
+  i: number,
+): boolean {
+  if (origin.length <= i + 1) return false;
+  for (let j = 0; j <= i; j++) {
+    if (origin[j] !== segments[j]) return false;
+  }
+  return true;
 }
 
 export function buildRgArgs(
@@ -311,6 +362,12 @@ export function buildRgArgs(
   const originSegments = originFilePath
     ? pathSegments(originFilePath)
     : new Set<string>();
+  // Which directory the origin file sits at the TOP of, if any. A root-only
+  // glob prunes the search root alone, so only an origin that actually lives
+  // under that root directory needs the exclusion lifted — a first-party
+  // package deeper in the tree (`src/…/vendor/app/`) was never pruned by it,
+  // and lifting it for that request un-excluded the real `vendor/` (#1559).
+  const originRoot = originFilePath ? (splitPath(originFilePath)[0] ?? "") : "";
 
   for (const dir of CODE_NAV_ALWAYS_IGNORED_DIRS) {
     if (originSegments.has(dir)) continue;
@@ -318,7 +375,7 @@ export function buildRgArgs(
   }
 
   for (const dir of CODE_NAV_ROOT_ONLY_IGNORED_DIRS) {
-    if (originSegments.has(dir)) continue;
+    if (originRoot === dir) continue;
     // Leading slash anchors the glob to the search root, so only a top-level
     // `vendor/` (etc.) is pruned — not a same-named package deeper in the tree.
     args.push("--glob", `!/${dir}`);
@@ -579,7 +636,7 @@ export async function resolveCodeNav(
     result.stdout,
     request.symbol,
     request.language,
-  );
+  ).filter((loc) => isCodeNavPathAllowed(loc.filePath, request.filePath));
 
   const ranked = rankLocations(locations, {
     sourceFilePath: request.filePath,
