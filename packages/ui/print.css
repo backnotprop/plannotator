@@ -177,16 +177,39 @@
 
   /* ========== Typography ========== */
 
-  body, div, span, p, li, td, th, label, strong, em, b, i {
+  /*
+   * `:not([data-diagram-block] *)` keeps every typography rule off DIAGRAM
+   * content. Mermaid 12 draws node and edge labels as real HTML inside
+   * `<foreignObject>` (`span.nodeLabel > p`, `span.edgeLabel`), so a blanket
+   * `div, span, p { color: #1a1a1a !important }` repainted them — over a dark
+   * node fill that prints as an empty box. A diagram colours itself (and
+   * prints in the light half of the palette, see ThemeProvider), and its own
+   * `<style>` has no `!important` to defend itself with, so the exemption has
+   * to live here.
+   */
+  body,
+  div:not([data-diagram-block] *),
+  span:not([data-diagram-block] *),
+  p:not([data-diagram-block] *),
+  li:not([data-diagram-block] *),
+  td:not([data-diagram-block] *),
+  th:not([data-diagram-block] *),
+  label:not([data-diagram-block] *),
+  strong:not([data-diagram-block] *),
+  em:not([data-diagram-block] *),
+  b:not([data-diagram-block] *),
+  i:not([data-diagram-block] *) {
     color: #1a1a1a !important;
   }
 
-  strong, b {
+  strong:not([data-diagram-block] *),
+  b:not([data-diagram-block] *) {
     font-weight: bold !important;
     color: #000 !important;
   }
 
-  em, i {
+  em:not([data-diagram-block] *),
+  i:not([data-diagram-block] *) {
     font-style: italic !important;
     color: #1a1a1a !important;
   }
@@ -231,7 +254,7 @@
     color: #000 !important;
   }
 
-  p {
+  p:not([data-diagram-block] *) {
     margin: 0.5em 0;
     color: #1a1a1a !important;
   }
