@@ -68,6 +68,7 @@ import {
 import {
 	applyPhaseTools,
 	isPlanWritePathAllowed,
+	isPlannotatorSubmitDevicePath,
 	PLAN_MARK_DONE_TOOL,
 	PLAN_SUBMIT_TOOL,
 	releasePhaseTools,
@@ -1465,6 +1466,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		if (event.toolName !== "write" && event.toolName !== "edit") return;
 
 		const inputPath = event.input.path as string;
+		if (isPlannotatorSubmitDevicePath(inputPath)) return;
 		if (!isPlanWritePathAllowed(inputPath, ctx.cwd)) {
 			const verb = event.toolName === "write" ? "writes" : "edits";
 			return {
