@@ -395,7 +395,7 @@ describe("V2 agent switching", () => {
     expect(switchModel).not.toHaveBeenCalled();
   });
 
-  test("leaves the session unchanged when it cannot apply a configured model", async () => {
+  test("switches the agent when the host cannot apply its configured model", async () => {
     const switchAgent = mock(async () => {});
     const warnings: string[] = [];
 
@@ -408,9 +408,9 @@ describe("V2 agent switching", () => {
         model: { providerID: "openai", id: "gpt-5.6-terra" },
       }],
       warn: (message) => warnings.push(message),
-    })).toBeUndefined();
+    })).toBe("build");
 
-    expect(switchAgent).not.toHaveBeenCalled();
+    expect(switchAgent).toHaveBeenCalledWith({ sessionID: "session-1", agent: "build" });
     expect(warnings).toHaveLength(1);
   });
 
@@ -453,16 +453,26 @@ describe("V2 agent switching", () => {
   });
 
   test("a failing switch does not fail the approval", async () => {
+    const switchModel = mock(async () => {});
     const warnings: string[] = [];
     const result = await switchV2SessionAgent({
-      ctx: { session: { switchAgent: async () => { throw new Error("busy"); } } },
+      ctx: {
+        session: {
+          switchAgent: async () => { throw new Error("busy"); },
+          switchModel,
+        },
+      },
       sessionID: "session-1",
       requestedAgent: "build",
-      getAgents: async () => [{ name: "build" }],
+      getAgents: async () => [{
+        name: "build",
+        model: { providerID: "openai", id: "gpt-5.6-terra" },
+      }],
       warn: (message) => warnings.push(message),
     });
 
     expect(result).toBeUndefined();
+    expect(switchModel).not.toHaveBeenCalled();
     expect(warnings.some((line) => line.includes("busy"))).toBe(true);
   });
 

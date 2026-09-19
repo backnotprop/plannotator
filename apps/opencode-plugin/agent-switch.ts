@@ -95,6 +95,7 @@ export async function resolveValidatedTargetAgent(input: {
  * without it the plan is still approved and the caller is told the switch was
  * skipped. An agent's configured model is a separate durable session selection
  * in OpenCode, so this applies both selections in the same order as its clients.
+ * A missing or failing model capability does not undo a successful agent switch.
  * Returns the agent actually switched to, or undefined when the session's agent
  * was left alone.
  */
@@ -126,14 +127,6 @@ export async function switchV2SessionAgent(input: {
     return undefined;
   }
 
-  if (selected.model && !supportsSwitchModel(input.ctx)) {
-    warn(
-      `[Plannotator] This OpenCode 2 host cannot select the model configured for `
-      + `agent "${targetAgent}"; approving the plan without switching agents.`,
-    );
-    return undefined;
-  }
-
   try {
     await input.ctx.session!.switchAgent!({ sessionID: input.sessionID, agent: targetAgent });
   } catch (error) {
@@ -143,6 +136,14 @@ export async function switchV2SessionAgent(input: {
   }
 
   if (!selected.model) return targetAgent;
+
+  if (!supportsSwitchModel(input.ctx)) {
+    warn(
+      `[Plannotator] Switched the OpenCode session to "${targetAgent}", but this host cannot `
+      + "select its configured model.",
+    );
+    return targetAgent;
+  }
 
   try {
     await input.ctx.session!.switchModel!({
