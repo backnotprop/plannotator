@@ -61,7 +61,7 @@
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
-    "parse5": "^7.3.0",
+    "parse5": "^8.0.1",
     "turndown": "^7.2.4"
   },
   "peerDependencies": {
