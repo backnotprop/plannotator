@@ -245,7 +245,9 @@ in 0.42.0 (proven by diffing the mounted `outerHTML` against the base commit).
 - **`AnnotationToolbar` `quickLabels`** (default `true`): `false` hides the Zap
   picker and makes the Alt+digit label shortcuts inert on that toolbar. The
   one-click 👍 is unaffected, and mode state is still yours to clamp.
-- **`CommentPopover` `mentionSource`**: `{ people, emptyNotice?,
+- **`CommentPopover` `mentionSource`** (0.43.2 adds `heading?` above the list
+  and an optional `avatar?: { url?, initials?, tint? }` per person, drawn before
+  the label; both absent → the 0.43.1 rows): `{ people, emptyNotice?,
   onMentionsChange?, onPickBlocked? }` over `MentionPerson`
   (`{ id, kind, label, detail, canOpen }`). Typing `@` at a word boundary opens
   a portaled picker measured from the textarea; picking inserts the readable

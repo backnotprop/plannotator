@@ -694,6 +694,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 id={mentionListboxId}
                 people={mentionAc.menu.items}
                 emptyNotice={mentionAc.menu.emptyNotice}
+                heading={mentionAc.menu.heading}
                 active={mentionAc.menu.activeIndex}
                 anchor={mentionAc.menu.anchor}
                 onPick={(person) => {
@@ -858,6 +859,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             id={mentionListboxId}
             people={mentionAc.menu.items}
             emptyNotice={mentionAc.menu.emptyNotice}
+            heading={mentionAc.menu.heading}
             active={mentionAc.menu.activeIndex}
             anchor={mentionAc.menu.anchor}
             onPick={(person) => {

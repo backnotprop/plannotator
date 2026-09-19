@@ -34,10 +34,45 @@ export function mentionAnchorOf(element: HTMLElement | null): MentionAnchor | nu
   return { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width };
 }
 
+/** The optional avatar column: an image, else initials on a tinted disc. */
+function MentionAvatar({
+  avatar,
+  label,
+}: {
+  readonly avatar: NonNullable<MentionPerson['avatar']>;
+  readonly label: string;
+}) {
+  if (avatar.url) {
+    return (
+      <img
+        data-mention-avatar="image"
+        src={avatar.url}
+        alt=""
+        aria-hidden="true"
+        className="h-4 w-4 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+  const initials = (avatar.initials ?? label.trim().charAt(0)).slice(0, 2).toUpperCase();
+  return (
+    <span
+      data-mention-avatar="initials"
+      aria-hidden="true"
+      style={avatar.tint ? { backgroundColor: avatar.tint } : undefined}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold leading-none ${
+        avatar.tint ? 'text-white' : 'bg-muted text-foreground/80'
+      }`}
+    >
+      {initials}
+    </span>
+  );
+}
+
 export function MentionPicker({
   id,
   people,
   emptyNotice,
+  heading,
   active,
   anchor,
   onPick,
@@ -48,6 +83,8 @@ export function MentionPicker({
   readonly people: readonly MentionPerson[];
   /** Shown as one non-selectable row when `people` is empty. */
   readonly emptyNotice?: string | null;
+  /** Optional heading above the list. Absent → nothing rendered. */
+  readonly heading?: string | null;
   /** Index of the arrow-focused row, or null for "nothing preselected". */
   readonly active: number | null;
   readonly anchor: MentionAnchor | null;
@@ -70,6 +107,11 @@ export function MentionPicker({
       style={{ position: 'fixed', left: anchor.left, width: anchor.width, ...style }}
       className="z-[120] max-h-48 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-xl"
     >
+      {heading && (
+        <p data-mention-heading className="px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {heading}
+        </p>
+      )}
       {people.length === 0 ? (
         <p data-mention-empty className="px-2 py-1 text-[11px] text-muted-foreground">
           {emptyNotice}
@@ -94,6 +136,7 @@ export function MentionPicker({
               active === index ? 'bg-muted text-foreground' : 'text-foreground/85 hover:bg-muted/60'
             }`}
           >
+            {person.avatar && <MentionAvatar avatar={person.avatar} label={person.label} />}
             <span className="min-w-0 flex-1 truncate">{person.label}</span>
             {person.detail && (
               // The NAME is what the person reads; the detail gives way first.

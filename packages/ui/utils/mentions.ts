@@ -21,6 +21,12 @@ export interface MentionPerson {
   /** Right-aligned hint shown after the label (an email, "Agent"), or null. */
   readonly detail: string | null;
   /**
+   * Optional avatar drawn before the label (0.43.2): an image when `url` is
+   * given, else `initials` on a tinted disc (`tint` is any CSS color; absent
+   * means the muted surface). Absent → no avatar column, the 0.43.1 row.
+   */
+  readonly avatar?: { readonly url?: string; readonly initials?: string; readonly tint?: string };
+  /**
    * Whether this person can open the document. Host data: rows render
    * identically either way, and a `false` row is only special when the host
    * supplied `onPickBlocked` (see `MentionSource`).
@@ -37,6 +43,8 @@ export interface MentionSource {
    * to keep the menu closed instead.
    */
   readonly emptyNotice?: string | null;
+  /** Optional heading drawn above the list ("People in this workspace"). Absent → no heading row. */
+  readonly heading?: string | null;
   /** Fires on every text change with the ids whose token still survives in the body. */
   readonly onMentionsChange?: (ids: readonly string[]) => void;
   /**

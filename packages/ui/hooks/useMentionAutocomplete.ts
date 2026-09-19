@@ -15,6 +15,7 @@ export interface MentionMenuState {
   items: readonly MentionPerson[];
   /** Shown as one non-selectable row when `items` is empty. */
   emptyNotice: string | null;
+  heading: string | null;
   /** Explicitly activated row, or null — the menu opens with NOTHING active. */
   activeIndex: number | null;
   /** Measured textarea rect the portaled picker is placed from. */
@@ -112,6 +113,7 @@ export function useMentionAutocomplete(options: {
   );
 
   const emptyNotice = source?.emptyNotice ?? null;
+  const heading = source?.heading ?? null;
   const open =
     trigger !== null
     && trigger.from !== dismissedStart
@@ -236,7 +238,7 @@ export function useMentionAutocomplete(options: {
 
   return {
     menu: open && trigger
-      ? { items, emptyNotice, activeIndex: boundedActive, anchor, query: trigger.query }
+      ? { items, emptyNotice, heading, activeIndex: boundedActive, anchor, query: trigger.query }
       : null,
     onKeyDown,
     onSelect: readCaret,

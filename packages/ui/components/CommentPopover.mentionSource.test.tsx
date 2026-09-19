@@ -209,6 +209,48 @@ describe.if(hasDom)('CommentPopover mentionSource seam', () => {
     expect(el.value).toBe('ping @Priya Nair ');
   });
 
+  test('a heading renders above the list only when the source supplies one', async () => {
+    const submitted: Submitted = { args: [] };
+    await mountPopover({ people: PEOPLE, heading: 'People in this workspace' }, submitted);
+    await type(textarea(), 'ping @');
+    const heading = document.querySelector('[data-mention-heading]');
+    expect(heading).not.toBeNull();
+    expect(heading!.textContent).toBe('People in this workspace');
+    expect(options()).toEqual(['user_1', 'user_2', 'user_3']);
+  });
+
+  test('no heading and no avatars without the optional fields', async () => {
+    const submitted: Submitted = { args: [] };
+    await mountPopover({ people: PEOPLE }, submitted);
+    await type(textarea(), 'ping @');
+    expect(document.querySelector('[data-mention-heading]')).toBeNull();
+    expect(document.querySelector('[data-mention-avatar]')).toBeNull();
+  });
+
+  test('avatars render before the label: an image when url is set, else initials on a disc', async () => {
+    const submitted: Submitted = { args: [] };
+    await mountPopover({
+      people: [
+        person({ id: 'u1', label: 'Marcus Chen', avatar: { url: 'https://example.test/m.png' } }),
+        person({ id: 'u2', label: 'Dana Ruiz', avatar: { initials: 'DR', tint: 'rgb(10, 20, 30)' } }),
+        person({ id: 'u3', label: 'Priya Nair', avatar: {} }),
+      ],
+    }, submitted);
+    await type(textarea(), 'ping @');
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-mention-option]'));
+    expect(rows.map((r) => r.querySelector('[data-mention-avatar]')?.getAttribute('data-mention-avatar')))
+      .toEqual(['image', 'initials', 'initials']);
+    expect(rows[0]!.querySelector('img')!.getAttribute('src')).toBe('https://example.test/m.png');
+    const dana = rows[1]!.querySelector<HTMLElement>('[data-mention-avatar]')!;
+    expect(dana.textContent).toBe('DR');
+    expect(dana.style.backgroundColor).toBe('rgb(10, 20, 30)');
+    // No initials given: the first letter of the label, uppercased.
+    expect(rows[2]!.querySelector('[data-mention-avatar]')!.textContent).toBe('P');
+    // The avatar precedes the label in DOM order.
+    const first = rows[0]!.firstElementChild!;
+    expect(first.getAttribute('data-mention-avatar')).toBe('image');
+  });
+
   test('an empty people list shows the honest-empty notice and is not navigable', async () => {
     const submitted: Submitted = { args: [] };
     await mountPopover({ people: [], emptyNotice: 'Mentions need a team workspace' }, submitted);

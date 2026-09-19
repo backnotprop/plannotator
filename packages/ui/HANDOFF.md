@@ -956,6 +956,8 @@ that state out of `Viewer`, exactly as with `AnnotationToolstrip`'s
 
 ### 3. `CommentPopover` `mentionSource` — an `@` mention source for the composer
 
+> **0.43.2 additions (opt-in, byte-identical when absent):** `MentionSource.heading?: string | null` draws one non-selectable heading row (`data-mention-heading`, e.g. "People in this workspace") above the list; `MentionPerson.avatar?: { url?, initials?, tint? }` draws an avatar (`data-mention-avatar="image" | "initials"`) before the label — an `<img>` when `url` is set, else `initials` (defaulting to the label's first letter) on a disc tinted with `tint` (any CSS color; absent means the muted surface). Neither the grammar, the keyboard state machine, `onMentionsChange`, `onPickBlocked` nor `Annotation.mentions` changes.
+
 ```ts
 import type { MentionPerson, MentionSource } from "@plannotator/ui/types";
 // (also @plannotator/ui/utils/mentions)
@@ -971,6 +973,7 @@ interface MentionPerson {
 interface MentionSource {
   readonly people: readonly MentionPerson[];
   readonly emptyNotice?: string | null;                     // honest-empty row
+  readonly heading?: string | null;                         // 0.43.2: heading row above the list, absent → none
   readonly onMentionsChange?: (ids: readonly string[]) => void;
   readonly onPickBlocked?: (person: MentionPerson) => void;
 }
