@@ -252,7 +252,10 @@ export async function handleReviewCommand(
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
     onReady: (url, isRemote, port) => {
-      handleReviewServerReady(url, isRemote, port);
+      // announce: false — in-process embedded runtime; the raw stderr line
+      // would leak into opentui's TUI renderer. client.app.log below is this
+      // runtime's own visible channel for the URL.
+      handleReviewServerReady(url, isRemote, port, { announce: false });
       client.app.log({ level: "info", message: `[Plannotator] Open code review: ${url}` });
     },
   });
@@ -477,7 +480,10 @@ export async function handleAnnotateCommand(
     agentCwd,
     htmlContent,
     onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
+      // announce: false — in-process embedded runtime; the raw stderr line
+      // would leak into opentui's TUI renderer. client.app.log below is this
+      // runtime's own visible channel for the URL.
+      handleAnnotateServerReady(url, isRemote, port, { announce: false });
       client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });
@@ -594,7 +600,10 @@ export async function handleAnnotateLastCommand(
     approvalNotesSupported: true,
     htmlContent,
     onReady: (url, isRemote, port) => {
-      handleAnnotateServerReady(url, isRemote, port);
+      // announce: false — in-process embedded runtime; the raw stderr line
+      // would leak into opentui's TUI renderer. client.app.log below is this
+      // runtime's own visible channel for the URL.
+      handleAnnotateServerReady(url, isRemote, port, { announce: false });
       client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });

@@ -35,6 +35,8 @@ import {
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunner,
 } from "@plannotator/shared/tailscale";
+import { handleServerReady, SESSION_READY_LINE_PREFIX } from "./shared-handlers";
+import { writeUrlQr } from "./qr";
 
 const activePorts = new Set<number>();
 let exitCleanupInstalled = false;
@@ -136,6 +138,31 @@ export function enableTailscaleServe(
     process.once("SIGHUP", onSigHup);
   }
   return { url };
+}
+
+/**
+ * Announce a published tailnet session and run the shared ready handler.
+ *
+ * The URL has to appear exactly ONCE, on the one stable line agents grep
+ * (`SESSION_READY_LINE_PREFIX`, URL last), so this path owns the announce and
+ * passes `handleServerReady` `{ announce: false }`. Both halves used to print
+ * their own ready line: this one said "served over your tailnet" while the
+ * shared handler said "Plannotator session ready:", which duplicated the URL
+ * and left an agent two candidate lines to parse. It also split the QR block
+ * from the URL it encodes, because the QR was written before the shared
+ * handler's line landed under it.
+ *
+ * Order is the point: ready line, tailnet context, QR. `handleServerReady`
+ * still writes the ready file and still never opens a local browser here (the
+ * advertised URL is for another device).
+ */
+export async function announceTailscaleSession(url: string, port: number): Promise<void> {
+  process.stderr.write(`\n  ${SESSION_READY_LINE_PREFIX}${url}\n`);
+  process.stderr.write("  Served over your tailnet — open it on your device (the URL above).\n");
+  // The URL makes a device hop; the QR skips the retyping (TTY only).
+  writeUrlQr(url);
+  process.stderr.write("\n");
+  await handleServerReady(url, false, port, { skipBrowserOpen: true, announce: false });
 }
 
 /**

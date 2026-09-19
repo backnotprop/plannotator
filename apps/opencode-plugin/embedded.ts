@@ -80,7 +80,11 @@ export async function runEmbeddedPlanReview(
     htmlContent: input.htmlContent,
     opencodeClient: input.client,
     onReady: async (url, isRemote, port) => {
-      await handleServerReady(url, isRemote, port);
+      // announce: false — this runs in-process, sharing stderr with
+      // OpenCode's opentui renderer (passthrough mode). handleServerReady's
+      // raw stderr line would print into the TUI instead of through it;
+      // input.logReady is this runtime's own visible channel for the URL.
+      await handleServerReady(url, isRemote, port, { announce: false });
       input.logReady(url, isRemote, port);
     },
   });
