@@ -180,6 +180,7 @@ describe.if(hasDom)('EditSessionHud (DOM)', () => {
       <EditSessionHud onComplete={() => completed++} onCancel={() => cancelled++} dirtyStore={store} />,
     );
     expect(el.querySelector('[data-testid="edit-session-hud"]')).not.toBeNull();
+    expect(el.querySelector('[data-history-owner="edit-session"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="edit-session-badge"]')).not.toBeNull();
     expect(el.textContent).toContain('Experimental');
     expect(el.querySelector('[data-testid="edit-session-dirty"]')!.textContent).toBe('No changes yet');

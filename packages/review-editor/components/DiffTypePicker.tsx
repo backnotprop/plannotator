@@ -9,7 +9,16 @@ interface DiffTypePickerProps {
   onSelect: (diffType: string) => void;
   isLoading?: boolean;
   hasBasePicker: boolean;
+  /** The live active base (picker selection / server echo / --base flag). */
+  activeBase?: string | null;
 }
+
+/**
+ * Long/full hex SHAs display as their 7-char prefix; branch names, tags, and
+ * HEAD~N pass through unchanged (mirrors review-core's displayRef).
+ */
+const displayRef = (ref: string): string =>
+  /^[0-9a-f]{7,}$/i.test(ref) ? ref.slice(0, 7) : ref;
 
 /**
  * Plain-English explanations shown in a tooltip next to each option.
@@ -17,6 +26,7 @@ interface DiffTypePickerProps {
  */
 const OPTION_HINTS: Record<string, string> = {
   'since-base': "Everything since your branch split from the base — committed, uncommitted, and untracked. What a PR would show if you committed it all and pushed.",
+  'local-vs-remote': "Your local branch and working tree compared with its remote-tracking branch — committed, uncommitted, and untracked differences from the last fetch.",
   uncommitted: "All your local changes — anything you haven't committed yet.",
   staged: "Only what you've run `git add` on.",
   unstaged: "What `git diff` shows with no arguments.",
@@ -41,6 +51,7 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
   onSelect,
   isLoading,
   hasBasePicker,
+  activeBase,
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -49,8 +60,11 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
   const displayLabel = (opt: DiffOption) => {
     if (!hasBasePicker) return opt.label;
     if (opt.id === 'merge-base') return 'Committed changes (PR view)';
-    // since-base falls through to opt.label — the dynamic "All changes since <base>" from
-    // getGitContext — so the dropdown matches the live header.
+    // getGitContext bakes the since-base label from the DETECTED default at
+    // session start; render it from the live active base instead so the
+    // dropdown agrees with the adjacent base picker after a base switch or a
+    // --base launch.
+    if (opt.id === 'since-base' && activeBase) return `All changes since ${displayRef(activeBase)}`;
     return opt.label;
   };
 

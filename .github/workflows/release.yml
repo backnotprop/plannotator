@@ -115,16 +115,26 @@ jobs:
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-darwin-x64
           sha256sum plannotator-darwin-x64 > plannotator-darwin-x64.sha256
 
-          # Linux x64
-          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
+          # Linux x64 (baseline: CPUID-dispatched SIMD, so it still runs on
+          # pre-AVX2 CPUs). Bun's default x64 target is x86-64-v3 and SIGILLs
+          # on Nehalem/Ivy Bridge class hardware. Proven by the emulated-CPU
+          # gate in `smoke-binaries`, which is itself proven by the
+          # default-target control binary compiled below.
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64-baseline --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
           sha256sum plannotator-linux-x64 > plannotator-linux-x64.sha256
 
           # Linux ARM64
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-arm64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-arm64
           sha256sum plannotator-linux-arm64 > plannotator-linux-arm64.sha256
 
-          # Windows x64
-          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-x64.exe
+          # Windows x64 (baseline, same pre-AVX2 rationale as Linux x64 above:
+          # Windows 10 is supported on plenty of pre-Haswell hardware). There is
+          # no cheap way to run an emulated old CPU on a GitHub Windows runner,
+          # so this target is covered by the Bun target contract and the ordinary
+          # Windows smoke leg, not by an old-CPU gate. macOS x64 deliberately
+          # stays on the default target: every Mac that can run a supported
+          # macOS is Haswell or newer.
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64-baseline --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-win32-x64.exe
           sha256sum plannotator-win32-x64.exe > plannotator-win32-x64.exe.sha256
 
           # Windows ARM64 (native, via bun-windows-arm64 — stable since Bun v1.3.10)
@@ -138,17 +148,39 @@ jobs:
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-darwin-x64 --outfile plannotator-paste-darwin-x64
           sha256sum plannotator-paste-darwin-x64 > plannotator-paste-darwin-x64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --outfile plannotator-paste-linux-x64
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64-baseline --outfile plannotator-paste-linux-x64
           sha256sum plannotator-paste-linux-x64 > plannotator-paste-linux-x64.sha256
 
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-linux-arm64 --outfile plannotator-paste-linux-arm64
           sha256sum plannotator-paste-linux-arm64 > plannotator-paste-linux-arm64.sha256
 
-          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64 --outfile plannotator-paste-win32-x64.exe
+          bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-x64-baseline --outfile plannotator-paste-win32-x64.exe
           sha256sum plannotator-paste-win32-x64.exe > plannotator-paste-win32-x64.exe.sha256
 
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
           sha256sum plannotator-paste-win32-arm64.exe > plannotator-paste-win32-arm64.exe.sha256
+
+      # Control subject for the emulated-CPU gate in `smoke-binaries`. Same
+      # source, same Bun, same flags as the shipped Linux x64 binary — only the
+      # target differs (bun-linux-x64 is x86-64-v3/AVX2). The gate asserts this
+      # one dies with SIGILL on the emulated pre-AVX2 CPU, which is what makes
+      # "the baseline binary ran there" a falsifiable claim. Uploaded under its
+      # own artifact name so it can never reach the `binaries` artifact, the
+      # attestation subjects, or the GitHub Release (both of which resolve
+      # `binaries` by name).
+      - name: Compile baseline-gate control binary (default x64 target)
+        run: |
+          VERSION=$(jq -r .version package.json)
+          mkdir -p baseline-control
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile baseline-control/control-cli-linux-x64-default
+
+      - name: Upload baseline-gate control binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: baseline-gate-control
+          path: baseline-control/control-cli-linux-x64-default
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -193,6 +225,131 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+
+      - name: Install QEMU for the older-CPU gate
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          # Retried: a transient apt mirror failure must not fail a release.
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install --no-install-recommends -y qemu-user; then
+              qemu-x86_64 -version | head -n 1
+              exit 0
+            fi
+            echo "apt-get attempt ${attempt}/3 failed; retrying in 5s" >&2
+            sleep 5
+          done
+          echo "FAIL: could not install qemu-user after 3 attempts" >&2
+          exit 1
+
+      - name: Download baseline-gate control binary
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: baseline-gate-control
+          path: control
+
+      # Control for the gate below. Without it, "the baseline binary ran under
+      # -cpu Nehalem" is unfalsifiable: a qemu that quietly emulated AVX2, an
+      # ignored -cpu flag, or a gate that never really executed the artifact
+      # would all look exactly like a pass. This runs the SAME source built with
+      # Bun's default x64 target (x86-64-v3/AVX2) through the SAME qemu
+      # invocation and requires it to die, so a green gate means the gate can
+      # actually tell the two builds apart.
+      - name: Control - default-target x64 binary must SIGILL on the emulated CPU
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        env:
+          CONTROL_BINARY: control/control-cli-linux-x64-default
+          CPU_MODEL: Nehalem
+          RUN_TIMEOUT: 120s
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          chmod +x "$CONTROL_BINARY"
+
+          status=0
+          timeout --kill-after=5s "$RUN_TIMEOUT" qemu-x86_64 -cpu "$CPU_MODEL" "$CONTROL_BINARY" --version \
+            > control.log 2>&1 || status=$?
+          cat control.log || true
+
+          # 132 == 128 + SIGILL(4); qemu-user re-raises the guest signal and
+          # timeout propagates signal deaths the same way.
+          if [ "$status" -ne 132 ]; then
+            echo "FAIL: control binary $CONTROL_BINARY (built with bun-linux-x64, AVX2) exited ${status} under qemu-x86_64 -cpu ${CPU_MODEL}; expected 132 (SIGILL)." >&2
+            echo "The older-CPU gate cannot distinguish a baseline build from a non-baseline one on this runner, so its result would be meaningless. Fix the harness before trusting the gate." >&2
+            exit 1
+          fi
+          echo "OK: default-target control binary died with SIGILL on ${CPU_MODEL}; the gate below can fail."
+
+      - name: Smoke-test Linux x64 baseline CPU compatibility
+        if: runner.os == 'Linux'
+        timeout-minutes: 8
+        env:
+          BINARY: artifacts/plannotator-linux-x64
+          PASTE_BINARY: artifacts/plannotator-paste-linux-x64
+          CPU_MODEL: Nehalem
+          # Ceiling for any single emulated run. Deliberately ABOVE the paste
+          # startup poll ceiling below, so the poll loop — which reports which
+          # binary and which CPU model — is what decides, not this timeout.
+          RUN_TIMEOUT: 120s
+          STARTUP_TIMEOUT_SECONDS: 90
+          STARTUP_POLL_SECONDS: 2
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          chmod +x "$BINARY" "$PASTE_BINARY"
+
+          fail() {
+            echo "FAIL: $1" >&2
+            echo "  binary:       $2" >&2
+            echo "  emulated CPU: qemu-x86_64 -cpu ${CPU_MODEL}" >&2
+            exit 1
+          }
+
+          # Nehalem has SSE4.2 but no AVX, AVX2 or BMI instructions. Execute the
+          # downloaded release artifacts, not a separately compiled probe. The
+          # control step above proves a non-baseline build fails right here.
+          timeout --kill-after=5s "$RUN_TIMEOUT" qemu-x86_64 -cpu "$CPU_MODEL" "$BINARY" --help \
+            || fail "CLI --help did not run on the emulated CPU" "$BINARY"
+
+          expected="plannotator $(jq -r .version package.json)"
+          actual="$(timeout --kill-after=5s "$RUN_TIMEOUT" qemu-x86_64 -cpu "$CPU_MODEL" "$BINARY" --version)" \
+            || fail "CLI --version did not run on the emulated CPU" "$BINARY"
+          if [ "$actual" != "$expected" ]; then
+            fail "expected version '$expected', got '$actual'" "$BINARY"
+          fi
+
+          # Port zero lets the OS choose a free port. The startup message is
+          # emitted only after Bun.serve succeeds; no public health API is needed.
+          paste_dir="$(mktemp -d)"
+          PASTE_PORT=0 PASTE_DATA_DIR="$paste_dir/data" \
+            timeout --kill-after=5s "$RUN_TIMEOUT" qemu-x86_64 -cpu "$CPU_MODEL" "$PASTE_BINARY" > "$paste_dir/server.log" 2>&1 &
+          paste_pid=$!
+          trap '
+            kill "$paste_pid" 2>/dev/null || true
+            wait "$paste_pid" 2>/dev/null || true
+            cat "$paste_dir/server.log"
+            rm -rf "$paste_dir"
+          ' EXIT
+
+          # Emulated startup is slow, so sample often against a generous
+          # ceiling: 45 samples over ${STARTUP_TIMEOUT_SECONDS}s.
+          attempts=$(( STARTUP_TIMEOUT_SECONDS / STARTUP_POLL_SECONDS ))
+          for _ in $(seq 1 "$attempts"); do
+            # Read the log before checking liveness: a server that printed its
+            # banner and then exited has still started on this CPU.
+            if grep -q '^Plannotator paste service running on ' "$paste_dir/server.log"; then
+              echo "OK: Linux x64 CLI and paste service started under qemu-x86_64 -cpu ${CPU_MODEL}"
+              exit 0
+            fi
+            if ! kill -0 "$paste_pid" 2>/dev/null; then
+              fail "paste service exited before reporting startup" "$PASTE_BINARY"
+            fi
+            sleep "$STARTUP_POLL_SECONDS"
+          done
+          fail "paste service did not report startup within ${STARTUP_TIMEOUT_SECONDS}s" "$PASTE_BINARY"
 
       - name: Smoke-test binary
         if: runner.os != 'Windows'

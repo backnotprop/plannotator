@@ -1,9 +1,14 @@
 import { dirname, resolve as resolvePath } from "path";
 import {
+  HTML_ASSET_ERROR_CSP,
+  HTML_ASSET_DOCUMENT_CSP,
   HTML_ASSET_ROUTE_PREFIX,
+  buildHtmlAssetErrorDocument,
   encodeHtmlAssetPath,
-  htmlAssetContentType,
-  normalizeHtmlAssetRoutePath,
+  htmlAssetBaseHref,
+  htmlAssetDocumentHeaders,
+  isFramedEmbeddedDocumentRequest,
+  resolveHtmlAssetRoute,
   rewriteHtmlAssetReferences,
 } from "@plannotator/shared/html-assets";
 import {
@@ -13,6 +18,45 @@ import {
 } from "@plannotator/shared/html-assets-node";
 
 export { inlineHtmlLocalAssets };
+
+/**
+ * A failure inside the asset route. Framed and `.html` requests get a tiny
+ * HTML document naming the file; everything else keeps the JSON shape the
+ * route has always answered with.
+ */
+function assetError(
+  status: number,
+  message: string,
+  asDocument: boolean,
+  name?: string,
+): Response {
+  if (!asDocument) return Response.json({ error: message }, { status });
+  return new Response(buildHtmlAssetErrorDocument(status, message, name), {
+    status,
+    headers: htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP),
+  });
+}
+
+/**
+ * The catch-all's guard: a request the browser will render as a nested
+ * document, AND whose path names a file, must never receive the editor app.
+ * That is the bug this whole change is about — Plannotator rendering inside an
+ * annotated page's embed — and the `<base href>` fix removes the usual way of
+ * getting here, so anything still arriving is a genuinely missing file and
+ * deserves to say so. The path condition is what keeps the app document itself
+ * (`/`) out of it: see `pathNamesEmbeddedDocument` for why the shape of the
+ * path, and not `Sec-Fetch-Site`, is the signal.
+ */
+export function framedDocumentNotFound(req: Request, url: URL): Response | null {
+  if (!isFramedEmbeddedDocumentRequest(req.headers.get("sec-fetch-dest"), url.pathname)) {
+    return null;
+  }
+  const name = url.pathname.split("/").filter(Boolean).pop();
+  return new Response(buildHtmlAssetErrorDocument(404, "Not found", name), {
+    status: 404,
+    headers: htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP),
+  });
+}
 
 export function createHtmlAssetRegistry() {
   const rootsByToken = new Map<string, string>();
@@ -35,6 +79,11 @@ export function createHtmlAssetRegistry() {
       return rewriteHtmlAssetReferences(
         html,
         (assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
+        // The base is root-relative on purpose: a srcdoc document resolves its
+        // own <base href> against the PARENT's URL, which is this server, so
+        // `/api/html-assets/<token>/` lands on the right origin without the
+        // rewrite needing to know the port.
+        { baseHref: htmlAssetBaseHref(token) },
       );
     } catch {
       return html;
@@ -45,54 +94,52 @@ export function createHtmlAssetRegistry() {
     return inlineHtmlLocalAssets(html, htmlFilePath);
   }
 
-  async function handle(_req: Request, url: URL): Promise<Response | null> {
-    const prefix = `${HTML_ASSET_ROUTE_PREFIX}/`;
-    if (!url.pathname.startsWith(prefix)) return null;
-
-    const rest = url.pathname.slice(prefix.length);
-    const slash = rest.indexOf("/");
-    if (slash <= 0) {
-      return Response.json({ error: "Missing asset token or path" }, { status: 404 });
+  async function handle(req: Request, url: URL): Promise<Response | null> {
+    const decision = resolveHtmlAssetRoute(
+      { pathname: url.pathname, secFetchDest: req.headers.get("sec-fetch-dest") },
+      (token) => rootsByToken.get(token),
+    );
+    if (decision.kind === "not-asset-route") return null;
+    if (decision.kind === "error") {
+      return assetError(decision.status, decision.message, decision.asDocument, decision.name);
     }
 
-    const token = rest.slice(0, slash);
-    const root = rootsByToken.get(token);
-    if (!root) {
-      return Response.json({ error: "Unknown asset root" }, { status: 404 });
-    }
-
-    const assetPath = normalizeHtmlAssetRoutePath(rest.slice(slash + 1));
-    if (!assetPath) {
-      return Response.json({ error: "Invalid asset path" }, { status: 400 });
-    }
-
-    const contentType = htmlAssetContentType(assetPath);
-    if (!contentType) {
-      return Response.json({ error: "Unsupported asset type" }, { status: 415 });
-    }
-
+    const { root, assetPath, contentType, document, asDocument, maxBytes } = decision;
     const resolved = resolvePath(root, assetPath);
     if (!isWithinDirectory(resolved, root)) {
-      return Response.json({ error: "Access denied" }, { status: 403 });
+      return assetError(403, "Access denied", asDocument, assetPath);
     }
 
     try {
       const file = Bun.file(resolved);
       if (!(await file.exists())) {
-        return Response.json({ error: "Asset not found" }, { status: 404 });
+        return assetError(404, "Not found", asDocument, assetPath);
       }
-      if (file.size > MAX_HTML_ASSET_BYTES) {
-        return Response.json({ error: "Asset too large" }, { status: 413 });
+      const cap = Math.min(maxBytes, MAX_HTML_ASSET_BYTES);
+      if (file.size > cap) {
+        return assetError(413, "Asset too large", asDocument, assetPath);
+      }
+      if (document) {
+        return new Response(file, {
+          headers: {
+            ...htmlAssetDocumentHeaders(HTML_ASSET_DOCUMENT_CSP),
+            // Kept for parity with the other assets: a nested document load is
+            // not a CORS request, but a `fetch('./page.html')` from the
+            // opaque-origin frame is.
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
       }
       return new Response(file, {
         headers: {
           "Content-Type": contentType,
           "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
           "Access-Control-Allow-Origin": "*",
         },
       });
     } catch {
-      return Response.json({ error: "Failed to read asset" }, { status: 500 });
+      return assetError(500, "Failed to read asset", asDocument, assetPath);
     }
   }
 

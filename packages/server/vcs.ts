@@ -6,6 +6,7 @@ import {
   createGitProvider,
   createJjProvider,
   createVcsApi,
+  resolveAvailableDiffType,
   resolveInitialDiffType,
 } from "@plannotator/shared/vcs-core";
 import {
@@ -65,7 +66,7 @@ export const {
   materializeVcsSnapshot,
 } = api;
 
-export { resolveInitialDiffType, gitRuntime };
+export { resolveAvailableDiffType, resolveInitialDiffType, gitRuntime };
 
 export type {
   DiffOption,

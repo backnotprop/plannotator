@@ -34,6 +34,26 @@ For project-local installation, copy the plugin to:
 .amp/plugins/plannotator.ts
 ```
 
+## CLI compatibility and feedback recovery
+
+The review commands require a CLI that supports `plannotator review --json` and
+returns a structured `{ decision, message }` result. The plugin uses the decision
+to distinguish a dismissal from feedback or approval, never words in the
+reviewer's text. Review feedback and approval instructions are appended to the
+Amp thread; a dismissed review only shows a notification. Running
+`plannotator review` directly still produces plaintext by default.
+
+Annotation commands use the CLI's `{ decision, feedback? }` JSON result. Feedback
+and approval notes are appended using your configured annotation prompts; an
+approval without notes only shows an approval notification.
+
+If an older CLI returns plaintext, or a command succeeds with malformed or
+missing structured output, the plugin shows an **invalid structured output**
+notification instead of guessing a decision. The notice includes the captured
+stdout and stderr so you can recover any feedback manually. Update the CLI with
+the install command above, then reload the Amp plugin. If you use
+`PLANNOTATOR_BIN` or a source-entry override, update that selected CLI as well.
+
 ## Local Development
 
 From a Plannotator checkout:

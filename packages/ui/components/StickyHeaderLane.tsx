@@ -1,11 +1,12 @@
 /**
- * StickyHeaderLane — compact "ghost" header that pins as the user scrolls
+ * StickyHeaderLane — compact "ghost" header that can pin as the user scrolls
  * past the AnnotationToolstrip.
  *
- * At rest (top of doc): invisible, non-interactive. The original toolstrip
- * and badge cluster on the card remain the visible source of truth.
+ * By default, the lane is invisible and non-interactive at rest, leaving the
+ * original toolstrip and badge cluster as the visible source of truth. Hosts
+ * can keep this measured lane visible at rest or let it scroll normally.
  *
- * Layout is driven by two ResizeObserver measurements — the sticky
+ * Layout is driven by two ResizeObserver measurements — the lane
  * wrapper's actual width AND the Viewer action button cluster's actual
  * width — so the bar fits exactly into the space between its left edge
  * and the buttons, with no fixed pixel reserves.
@@ -33,38 +34,43 @@ import {
 } from '../hooks/useScrollViewport';
 import type { EditorMode, InputMethod } from '../types';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
+import {
+  resolveCompactHeaderGeometry,
+  snapCompactHeaderWidth,
+} from './compactHeaderLayout';
 
-// Snap a measured pixel width to a 16px grid. ResizeObserver fires every
-// frame during a drag; without quantization the sticky bar would
-// re-render on every pixel. Hoisted to module scope so the effects
-// (which use [] deps) can't accidentally close over a stale instance.
-// Floor (not round) so wrapper undershoots and actions overshoots — both
-// errors push toward a more cautious layout, avoiding a one-bucket overlap
-// flash right at the 300/460 thresholds during a slow drag.
-const snap = (n: number) => Math.floor(n / 16) * 16;
-
-// Layout geometry — static tuning constants, hoisted alongside `snap`.
-// LEFT_OFFSET: matches the bar's `md:left-5` (20px).
-// GAP: minimum breathing room between the bar's right edge and the
-//      action button cluster's left edge when they share a lane.
-// Two-stage shared-lane shrinkage, mirroring the right side:
-//   WIDE_BAR_WIDTH: full toolstrip (active labels Pinpoint/Markup ~300px)
-//                   + badges (~140px) on a single line.
-//   MIN_BAR_WIDTH:  icon-only toolstrip (~140px) + badges (~140px).
-// Below MIN, even the icon-only bar can't fit beside the (likely also
-// icon-only) action cluster — stack as the final fallback.
+// Matches the bar's `md:left-5` inset. The remaining shared geometry lives
+// in compactHeaderLayout so Viewer-owned and standalone lanes cannot drift.
 const LEFT_OFFSET = 20;
-const GAP = 16;
-const WIDE_BAR_WIDTH = 460;
-const MIN_BAR_WIDTH = 300;
 
-interface StickyHeaderLaneProps {
+/** Controls when the compact header lane is visible and interactive. */
+export type StickyHeaderLaneVisibility = 'stuck' | 'always';
+
+/** Props for the measured compact annotation and document header lane. */
+export interface StickyHeaderLaneProps {
   // Toolstrip state
   inputMethod: InputMethod;
   onInputMethodChange: (method: InputMethod) => void;
   mode: EditorMode;
   onModeChange: (mode: EditorMode) => void;
   taterMode?: boolean;
+  /** Omit the Quick Label tool in the compact toolstrip (mirrors AnnotationToolstripProps.hideQuickLabel). */
+  hideQuickLabel?: boolean;
+
+  /**
+   * Show the lane only after it sticks, or keep it visible at rest too.
+   * Defaults to `'stuck'`, preserving the incumbent ghost-header behavior.
+   * Hosts using `'always'` must reserve a clear header-height region because
+   * the lane remains zero-height and absolutely positioned over its sibling.
+   */
+  visibility?: StickyHeaderLaneVisibility;
+  /**
+   * Keep the lane pinned while its scroll viewport moves. Pass the same value
+   * to `Viewer.stickyActions` so both measured header lanes share one policy.
+   * Defaults to true. Pair false with `visibility="always"`; the default
+   * stuck-only visibility cannot become visible when stickiness is disabled.
+   */
+  sticky?: boolean;
 
   // Badge state
   repoInfo?: { display: string; branch?: string } | null;
@@ -89,12 +95,16 @@ interface StickyHeaderLaneProps {
   remountToken?: string;
 }
 
+/** Render the shared, measured header lane beside the Viewer's action cluster. */
 export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   inputMethod,
   onInputMethodChange,
   mode,
   onModeChange,
   taterMode,
+  hideQuickLabel,
+  visibility = 'stuck',
+  sticky = true,
   repoInfo,
   planDiffStats,
   isPlanDiffActive,
@@ -112,28 +122,26 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   const [wrapperWidth, setWrapperWidth] = useState(0);
   const [actionsWidth, setActionsWidth] = useState(0);
   const scrollViewport = useScrollViewport();
+  const laneIsStuck = sticky && isStuck;
+  const isVisible = visibility === 'always' || laneIsStuck;
+  // Preserve the incumbent ghost lane exactly: its chrome remains mounted
+  // while the whole hidden bar fades out. Only the new always-visible mode
+  // removes chrome at rest for the supported chrome-free presentation.
+  const showChrome = visibility === 'always' ? laneIsStuck : true;
 
-  // Space available for the bar in the shared lane = wrapper width, minus
-  // the bar's left offset, minus the action buttons' measured width, minus
-  // the breathing gap.
-  const availableForBar = wrapperWidth - LEFT_OFFSET - actionsWidth - GAP;
-
-  // Narrow = not enough room in the shared lane for even the icon-only
-  // bar. Falls back to a stacked row below the action buttons.
-  // actionsWidth=0 before measurement is treated as "don't know yet"
-  // (not narrow), so we don't flash the wrong layout on first paint.
-  const measured = wrapperWidth > 0 && actionsWidth > 0;
-  const isNarrow = measured && availableForBar < MIN_BAR_WIDTH;
-  // Tight = shared lane still fits, but only if the toolstrip drops its
-  // active labels and goes icon-only. Lets us stay horizontally aligned
-  // for an extra ~160px of width before stacking.
-  const isToolstripIconOnly =
-    measured && !isNarrow && availableForBar < WIDE_BAR_WIDTH;
+  const headerGeometry = resolveCompactHeaderGeometry({
+    containerWidth: wrapperWidth,
+    trailingWidth: actionsWidth,
+    leadingInset: LEFT_OFFSET,
+  });
+  const availableForBar = headerGeometry.availableForLeading;
+  const isNarrow = headerGeometry.layout === 'narrow';
+  const isToolstripIconOnly = headerGeometry.layout === 'tight';
 
   useEffect(() => {
     if (!wrapperRef.current) return;
     const ro = new ResizeObserver(([entry]) => {
-      const next = snap(entry.contentRect.width);
+      const next = snapCompactHeaderWidth(entry.contentRect.width);
       setWrapperWidth((prev) => (prev === next ? prev : next));
     });
     ro.observe(wrapperRef.current);
@@ -156,7 +164,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     const el = document.querySelector<HTMLElement>('[data-sticky-actions]');
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      const next = snap(entry.contentRect.width);
+      const next = snapCompactHeaderWidth(entry.contentRect.width);
       setActionsWidth((prev) => (prev === next ? prev : next));
     });
     ro.observe(el);
@@ -172,6 +180,10 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   // doubles up with the still-visible toolstrip. Root is the OverlayScrollArea
   // viewport from context, NOT <main> (which doesn't actually scroll).
   useEffect(() => {
+    if (!sticky) {
+      setIsStuck(false);
+      return;
+    }
     if (!sentinelRef.current || !scrollViewport) return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsStuck(!entry.isIntersecting),
@@ -183,17 +195,18 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     );
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [scrollViewport]);
+  }, [scrollViewport, sticky]);
 
   return (
     <>
-      {/* Sentinel — zero-size, rendered in normal flow at the top of the
-          column. When it scrolls out of the OverlayScrollArea viewport,
-          the sticky bar fades in. */}
-      <div ref={sentinelRef} aria-hidden="true" className="h-0 w-0" />
+      {/* Sentinel — present only for sticky positioning. It sits at the top of
+          the column and activates the stuck state after scrolling out of the
+          OverlayScrollArea viewport. */}
+      {sticky && <div ref={sentinelRef} aria-hidden="true" className="h-0 w-0" />}
 
-      {/* Sticky wrapper — zero-height so it never pushes content down. The
-          visible bar is positioned absolutely relative to this wrapper.
+      {/* Zero-height wrapper — sticky by default, relative when sticky is
+          disabled so the absolutely positioned lane scrolls in normal flow.
+          It never pushes document content down.
           The Viewer's outer wrapper uses z-50, so the sticky lane must
           sit above that to paint over the card.
 
@@ -206,8 +219,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
       <div
         ref={wrapperRef}
         data-sticky-header-lane="true"
-        className={`sticky z-[60] w-full self-center pointer-events-none ${
-          isNarrow ? 'top-[52px] md:top-[60px]' : 'top-3'
+        className={`${sticky ? 'sticky' : 'relative'} z-[60] w-full self-center pointer-events-none ${
+          sticky ? (isNarrow ? 'top-[52px] md:top-[60px]' : 'top-3') : ''
         }`}
         style={maxWidth == null ? { height: 0 } : { maxWidth, height: 0 }}
       >
@@ -224,11 +237,13 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
             is the final safety net so any overflow clips inside the chrome
             rather than leaking out.
 
-            `inert` removes the bar from the tab order when not stuck. */}
+            `inert` removes the bar from the tab order whenever it is hidden. */}
         <div
-          inert={!isStuck || undefined}
-          className={`absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 bg-card/95 backdrop-blur-sm shadow-sm border border-border/30 motion-reduce:transform-none ${
-            isStuck
+          inert={!isVisible || undefined}
+          className={`absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 ${
+            showChrome ? 'bg-card/95 backdrop-blur-sm shadow-sm border border-border/30' : ''
+          } motion-reduce:transform-none ${
+            isVisible
               ? 'opacity-100 translate-y-0 pointer-events-auto'
               : 'opacity-0 -translate-y-1 pointer-events-none'
           }`}
@@ -252,6 +267,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
               mode={mode}
               onModeChange={onModeChange}
               taterMode={taterMode}
+              hideQuickLabel={hideQuickLabel}
               compact
               iconOnly={isNarrow || isToolstripIconOnly}
             />

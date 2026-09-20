@@ -26,6 +26,28 @@ PR review uses the `gh` CLI for authentication, so private repos work automatica
 
 GitLab merge request URLs are also supported when the `glab` CLI is installed and authenticated.
 
+**Review a patch file, with no repository:**
+
+```
+plannotator review --patch-file reading.diff
+curl -s https://example.com/change.diff | plannotator review --patch-file -
+```
+
+`--patch-file` opens the review UI against a caller-supplied unified diff — a
+patch from an email, a paste, a CI artifact, or a remote agent — with no Git
+repo, no worktree and no VCS detection. Use `-` to read the patch from stdin.
+
+The patch is the whole session, so everything that would read a working tree is
+switched off: no staging, no hunk-context expansion, no "Open in editor" or code
+navigation, no diff-type or base switching, no Git status or commit panels, and
+no diff-staleness refresh. Annotating, Ask AI, Guided Review and submitting
+feedback all work as usual, and the header names the patch instead of a branch.
+
+Because it replaces VCS detection entirely, `--patch-file` cannot be combined
+with a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or
+`--local`/`--no-local`; each combination is a startup error naming the conflict,
+as is an empty or unreadable patch.
+
 ## How it works
 
 **Local review:**
@@ -87,6 +109,34 @@ If the base branch has moved on GitHub since your last fetch, a "Baseline is beh
 
 You can also pick a specific commit as the diff base from the base branch picker. This lets you compare against any of the last 20 commits on your branch rather than just the branch tip.
 
+## Opening on a specific base
+
+The review can also open against a caller-chosen compare target and diff mode, straight from the command line:
+
+```bash
+# stack: main → feature/part-1 → feature/part-2 (HEAD)
+plannotator review --base feature/part-1
+# opens "All changes since feature/part-1" — only what this layer adds
+
+# committed work on this layer only, no working-tree noise
+plannotator review --base feature/part-1 --diff-type merge-base
+
+# pin to a remote ref or a commit rather than a moving branch tip
+plannotator review --base origin/feature/part-1
+plannotator review --base HEAD~3
+```
+
+`--base` accepts anything git resolves: a local branch, a remote-tracking ref, a tag, or a commit SHA. `--diff-type` accepts the nine git diff modes (`since-base`, `local-vs-remote`, `uncommitted`, `staged`, `unstaged`, `last-commit`, `branch`, `merge-base`, `all`).
+
+Both flags are **session-only**: they seed how the session opens, the base picker and diff type dropdown stay fully usable, and nothing is written to your saved defaults — your next plain `plannotator review` opens exactly as before. A flagged session also skips the one-time first-run setup dialog without consuming it, so it still greets your next ordinary review.
+
+Notes:
+
+- A `--base` ref that does not resolve is a startup error (with near-match branch suggestions), never a silently wrong diff.
+- If your saved default diff mode is not base-relative (for example `uncommitted`), `--base` opens the session on `since-base` for that session and says so on stderr; your saved default is untouched.
+- A base with no remote tracking branch works fine — it simply never shows the "Baseline is behind" banner, which only applies to the remote default branch.
+- The flags are git-only: they error on jj, GitButler, Perforce, multi-repo workspace reviews, and with PR URLs (a PR's base comes from the pull request).
+
 ### Jujutsu (jj) diff modes
 
 In a jj workspace, the diff type picker shows jj-native options instead of git modes:
@@ -129,6 +179,24 @@ The review UI shows your changes in a familiar diff format:
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
+
+### Auto-mark viewed
+
+Files check themselves off as you read. On the all-files surface a file is
+marked viewed when you scroll past it, and in the single-file panel when you
+move on to another file; in both cases only after it was actually on screen
+long enough to have been read, so a fast flick to the bottom marks nothing.
+Collapsed cards never mark, which means generated files stay unchecked until
+you deliberately expand them.
+
+Un-viewing a file is a "come back to this" gesture: auto-view never re-marks a
+file you un-checked, until you mark it viewed by hand again. A file whose
+content changes under a refresh loses its checkmark, because a check on code
+the agent just rewrote is misleading.
+
+It is on by default, and there are two off switches: **Settings → Git →
+Auto-mark viewed**, and the **Auto-mark viewed** row in the gear popover above
+the file list. The first time it fires, a toast points at both.
 
 ### Optional analysis layers
 

@@ -84,6 +84,51 @@ export async function isWSL(): Promise<boolean> {
 }
 
 /**
+ * True for a value that must be handed to cmd.exe under WSL: a Windows-style
+ * path (C:\..., C:/...) or a /mnt/<drive> mount of one, or a `.exe` name.
+ */
+function isWindowsBrowserTarget(value: string): boolean {
+  return (
+    /^[A-Za-z]:[\\/]/.test(value) ||
+    value.startsWith("/mnt/") ||
+    value.toLowerCase().endsWith(".exe")
+  );
+}
+
+/**
+ * Resolve PLANNOTATOR_BROWSER to an executable the Linux side can run
+ * directly: a POSIX path (/..., ./..., ../...) verbatim, or a bare name's
+ * absolute location on the Linux PATH. Null for values that must go through
+ * cmd.exe under WSL instead (a .exe, C:\\..., /mnt/<drive>) (#1472).
+ */
+export function resolvePosixBrowserTarget(value: string): string | null {
+  if (isWindowsBrowserTarget(value)) return null;
+  if (value.startsWith("/") || value.startsWith("./") || value.startsWith("../")) {
+    return value;
+  }
+  for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!entry) continue;
+    try {
+      const candidate = path.join(entry, value);
+      const stat = fs.statSync(candidate);
+      if (stat.isFile() && (stat.mode & 0o111) !== 0) return candidate;
+    } catch {
+      // Not an executable on this PATH entry.
+    }
+  }
+  return null;
+}
+
+/**
+ * True when PLANNOTATOR_BROWSER names something the Linux side can execute
+ * itself. Under WSL those must NOT go through cmd.exe, which cannot resolve
+ * them (#1472).
+ */
+export function isPosixBrowserTarget(value: string): boolean {
+  return resolvePosixBrowserTarget(value) !== null;
+}
+
+/**
  * Open a URL in the browser
  *
  * Uses PLANNOTATOR_BROWSER env var if set, otherwise uses system default.
@@ -189,12 +234,12 @@ export async function openBrowser(
   url: string,
   options?: { isRemote?: boolean; useGlimpse?: boolean }
 ): Promise<boolean> {
+  const rawPlannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
+  const plannotatorBrowser = isNoOpBrowserSentinel(rawPlannotatorBrowser)
+    ? undefined
+    : rawPlannotatorBrowser;
   try {
-    const rawPlannotatorBrowser = process.env.PLANNOTATOR_BROWSER;
     const rawBrowser = process.env.BROWSER;
-    const plannotatorBrowser = isNoOpBrowserSentinel(rawPlannotatorBrowser)
-      ? undefined
-      : rawPlannotatorBrowser;
     const envBrowser = isNoOpBrowserSentinel(rawBrowser) ? undefined : rawBrowser;
     const browser = plannotatorBrowser || envBrowser;
     const isRemote = options?.isRemote ?? false;
@@ -214,6 +259,17 @@ export async function openBrowser(
 
     const platform = process.platform;
     const wsl = await isWSL();
+    // Under WSL a Linux executable must run directly; cmd.exe only wins for
+    // Windows targets (a .exe, a C:\ path, a /mnt/<drive> path). Spawning the
+    // RESOLVED absolute path also sidesteps Bun 1.3's shell, which resolves
+    // bare command names against the PATH captured at startup (#1472).
+    const posixTarget = wsl && plannotatorBrowser
+      ? resolvePosixBrowserTarget(plannotatorBrowser)
+      : null;
+    const viaCmdExe =
+      (platform === "win32" || wsl) &&
+      !!plannotatorBrowser &&
+      posixTarget === null;
 
     if (browser) {
       if (plannotatorBrowser && platform === "darwin") {
@@ -222,10 +278,10 @@ export async function openBrowser(
         } else {
           await $`open -a ${plannotatorBrowser} ${url}`.quiet();
         }
-      } else if ((platform === "win32" || wsl) && plannotatorBrowser) {
+      } else if (viaCmdExe) {
         await $`cmd.exe /c start "" ${plannotatorBrowser} ${url}`.quiet();
       } else {
-        await $`${browser} ${url}`.quiet();
+        await $`${posixTarget ?? browser} ${url}`.quiet();
       }
     } else {
       // Default system browser
@@ -238,7 +294,15 @@ export async function openBrowser(
       }
     }
     return true;
-  } catch {
+  } catch (error) {
+    // An explicitly configured browser that fails is otherwise invisible:
+    // warn before falling back to the VS Code IPC registry (#1472).
+    if (plannotatorBrowser) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(
+        `Plannotator: could not launch PLANNOTATOR_BROWSER="${plannotatorBrowser}": ${message}\n`,
+      );
+    }
     // Shell-based open failed — try VS Code IPC registry as fallback
     return tryVscodeIpc(url);
   }

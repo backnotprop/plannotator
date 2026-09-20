@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ActionMenu } from './ActionMenu';
+import { useVimDocumentFocus } from '../hooks/useVimDocumentFocus';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -49,5 +50,68 @@ describe('ActionMenu panel geometry', () => {
     const panel = await renderMenu('wide');
     expect(panel.classList.contains('w-64')).toBe(true);
     expect(panel.classList.contains('w-56')).toBe(false);
+  });
+});
+
+describe('ActionMenu Escape with vim document focus', () => {
+  afterEach(async () => {
+    if (root) await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+  });
+
+  // Regression: useVimDocumentFocus registers its document-level Escape
+  // handler before the popover's (the vim hook mounts with the app; the
+  // popover hook registers on open). Without the [data-pn-dismissable-popover]
+  // entry in BLOCKING_OVERLAY_SELECTOR, vim reclaims focus and preventDefaults
+  // first, the popover's handler then skips the defaultPrevented event, and
+  // the menu never closes.
+  test.skipIf(!hasDom)('Escape closes an open menu instead of vim reclaiming focus', async () => {
+    const focusCalls: number[] = [];
+    const VimHarness: React.FC = () => {
+      useVimDocumentFocus({
+        enabled: true,
+        blocked: false,
+        focusDocument: () => {
+          focusCalls.push(1);
+          return true;
+        },
+      });
+      return null;
+    };
+
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <>
+          <VimHarness />
+          <ActionMenu
+            renderTrigger={({ toggleMenu }) => <button onClick={toggleMenu}>Open</button>}
+          >
+            {() => <div>Panel</div>}
+          </ActionMenu>
+        </>,
+      );
+    });
+
+    const trigger = host.querySelector('button');
+    if (!trigger) throw new Error('ActionMenu trigger did not render');
+    await act(async () => trigger.click());
+    expect(host.querySelector('[data-pn-dismissable-popover]')).not.toBeNull();
+
+    const callsBeforeEscape = focusCalls.length; // mount-time autofocus may have fired
+
+    await act(async () => {
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+    });
+
+    // The menu closed, and the vim handler did NOT reclaim focus on this Escape.
+    expect(host.querySelector('[data-pn-dismissable-popover]')).toBeNull();
+    expect(focusCalls.length).toBe(callsBeforeEscape);
   });
 });

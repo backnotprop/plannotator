@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -475,17 +475,26 @@ export function buildGuideClaudeCommand(prompt: string, model: string = "sonnet"
   };
 }
 
-const GUIDE_SCHEMA_DIR = getPlannotatorDataDir();
-const GUIDE_SCHEMA_FILE = join(GUIDE_SCHEMA_DIR, "guide-schema.json");
-let guideSchemaMaterialized = false;
+/** Materialized schema path under the current data directory. */
+function guideSchemaPath(): string {
+  return join(getPlannotatorDataDir(), "guide-schema.json");
+}
+
+/** Schema paths this process has already refreshed with its own schema. */
+const materializedGuideSchemaPaths = new Set<string>();
 
 async function ensureGuideSchemaFile(): Promise<string> {
-  if (!guideSchemaMaterialized) {
-    await mkdir(GUIDE_SCHEMA_DIR, { recursive: true });
-    await writeFile(GUIDE_SCHEMA_FILE, GUIDE_SCHEMA_JSON);
-    guideSchemaMaterialized = true;
+  const schemaPath = guideSchemaPath();
+  // Guarded per resolved path, not per process and not by file existence: a
+  // PLANNOTATOR_DATA_DIR change after import materializes the schema in the
+  // new location, and a stale file left by an older binary is overwritten
+  // once per process so the agent always gets the current schema.
+  if (!materializedGuideSchemaPaths.has(schemaPath)) {
+    await mkdir(dirname(schemaPath), { recursive: true });
+    await writeFile(schemaPath, GUIDE_SCHEMA_JSON);
+    materializedGuideSchemaPaths.add(schemaPath);
   }
-  return GUIDE_SCHEMA_FILE;
+  return schemaPath;
 }
 
 export function generateGuideOutputPath(): string {

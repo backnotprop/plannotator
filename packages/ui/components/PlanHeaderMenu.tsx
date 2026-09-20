@@ -40,7 +40,7 @@ interface PlanHeaderMenuProps {
 }
 
 export interface CompactPlanAction {
-  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'done' | 'edit' | 'tools' | 'annotate' | 'refresh' | 'annotations' | 'ai' | 'review';
+  id: 'exit' | 'feedback' | 'approve' | 'copy' | 'done' | 'edit' | 'tools' | 'annotate' | 'refresh' | 'annotations' | 'ai' | 'review' | 'note' | 'discard-finish';
   label: string;
   subtitle?: string;
   onSelect: () => void;

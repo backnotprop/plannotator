@@ -1,6 +1,7 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
 import { resolveReplyParents } from '@plannotator/core/annotation-threads';
+import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { skillReferenceExportBlock } from './skillReferences';
 
 /**
@@ -539,6 +540,39 @@ export const resolveReferenceLinks = (markdown: string): string => {
     })
     .join('\n');
 };
+
+/**
+ * The block list for a whole-file diagram source (`plannotator annotate
+ * flow.mmd`): ONE code block carrying the file's raw text, which `Viewer`
+ * hands to the same `DiagramBlock` a ```mermaid fence in a plan produces.
+ * Everything downstream — diagram comments, the annotations rail, the export's
+ * `Diagram node <label> (<id>), line <n>` location line, drafts, restore — is
+ * the fence path unchanged.
+ *
+ * `diagramSourceLineOffset: 0` is the load-bearing part. `DiagramBlock` passes
+ * it as the viewer's `sourceLineOffset` and the codec adds it to the 1-based
+ * line WITHIN the diagram source; for a fence that offset is the fence's own
+ * opening line, which sits one line above the diagram's first line. A diagram
+ * FILE has no fence, so its first line is document line 1 and the offset is 0
+ * — the 1 a synthesized ```mermaid wrapper would produce puts every exported
+ * diagram line one too high. `startLine`/`sourceLineCount` still describe the
+ * block itself, so the export's `(lines a–b)` label names the file's real
+ * span.
+ */
+export const diagramDocumentBlocks = (text: string, kind: 'mermaid' | 'graphviz'): Block[] => [
+  {
+    id: 'block-0',
+    type: 'code',
+    content: text,
+    // `dot` is what isGraphvizLanguage reads for the Graphviz engine.
+    language: kind === 'graphviz' ? 'dot' : 'mermaid',
+    order: 1,
+    startLine: 1,
+    // A trailing newline ends the last line, it does not start another.
+    sourceLineCount: text === '' ? 0 : text.replace(/\n$/, '').split('\n').length,
+    diagramSourceLineOffset: 0,
+  },
+];
 
 /**
  * A simplified markdown parser that splits content into linear blocks.
@@ -1099,6 +1133,92 @@ const blockEndLine = (block: Block): number => {
 
 /** Resolve the source-line label for a single annotation.
  *  Returns null for global comments, diff-view annotations, or missing blocks. */
+/** Defense in depth for page-controlled strings in agent-read feedback:
+ *  collapse whitespace (no injected markdown structure) and defuse any
+ *  backtick run that could close an inline code span or a fence. */
+const safeInline = (value: unknown, max = 200): string => {
+  const collapsed = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  const defused = collapsed.replace(/`+/g, "'");
+  return defused.length > max ? `${defused.slice(0, max)}…` : defused;
+};
+
+/** The synthesized quote the bridge posts for a text-less element
+ *  (`[element: Navigation]`): a placeholder, not something the agent can use. */
+const isElementPlaceholderQuote = (text: unknown): boolean =>
+  typeof text === 'string' && /^\[element: [^\]]*\]$/.test(text.trim());
+
+/** The heading line for a COMMENT entry. When the quote is the bridge's
+ *  text-less placeholder and the annotation carries element context, name the
+ *  element instead (`Feedback on the <nav> element — "Primary"`); every other
+ *  annotation keeps the quote line exactly as before. */
+const commentHeadingLine = (ann: any): string => {
+  const context = ann?.elementContext;
+  if (context && typeof context.tag === 'string' && isElementPlaceholderQuote(ann.originalText)) {
+    const tag = safeInline(context.tag, 32);
+    const name = context.name ? safeInline(context.name, 120) : '';
+    return `Feedback on the <${tag}> element${name ? ` — "${name}"` : ''}`;
+  }
+  return `Feedback on: "${ann.originalText}"`;
+};
+
+export interface ElementContextExportOptions {
+  /** Emit the live-app route line. The grouped export already prints a
+   *  `## Page:` heading, so it passes false; a single copied entry passes true. */
+  includeRoute?: boolean;
+  /** Print the identity lines WITHOUT the fenced outline, for model turns where
+   *  the 600-char outline is the expensive part. Default true. */
+  includeOutline?: boolean;
+}
+
+/** The agent-facing element block for a raw-HTML / live-app pinpoint: a
+ *  fenced HTML skeleton (the one markdown construct whose interior cannot
+ *  become structure) plus the identity lines an agent greps for. Emits
+ *  nothing when the annotation carries no context, keeping every other
+ *  annotation's output byte-identical. */
+export const elementContextExportBlock = (ann: any, opts: ElementContextExportOptions = {}): string => {
+  const context = ann?.elementContext;
+  if (!context || typeof context !== 'object' || typeof context.tag !== 'string') return '';
+  const includeOutline = opts.includeOutline ?? true;
+  let block = '';
+  if (includeOutline && typeof context.outline === 'string' && context.outline.trim()) {
+    // Fence at 4 backticks; the boundary already defuses 3+ runs inside the
+    // outline, and a 4-run here cannot be closed by anything the page wrote.
+    const outline = context.outline.replace(/`{3,}/g, "'''").trim();
+    block += `\n\`\`\`\`html\n${outline}\n\`\`\`\`\n`;
+  } else {
+    block += '\n';
+  }
+  const selector = ann?.htmlAnchor?.selector;
+  if (typeof selector === 'string' && selector) block += `- **selector** \`${safeInline(selector, 300)}\`\n`;
+  if (context.path) block += `- **path** \`${safeInline(context.path, 512)}\`\n`;
+  const identity: string[] = [];
+  if (context.role) identity.push(`**role** ${safeInline(context.role, 32)}`);
+  if (context.name) identity.push(`**name** "${safeInline(context.name, 120)}"`);
+  if (context.component) identity.push(`**component** \`${safeInline(context.component, 100)}\``);
+  if (identity.length) block += `- ${identity.join(' · ')}\n`;
+  if (Array.isArray(context.attrs) && context.attrs.length) {
+    const attrs = context.attrs
+      .filter((pair: unknown) => Array.isArray(pair) && pair.length === 2)
+      .map((pair: [string, string]) => `${safeInline(pair[0], 40)}="${safeInline(pair[1], 120)}"`)
+      .join(' ');
+    if (attrs) block += `- **attrs** \`${attrs.replace(/`/g, "'")}\`\n`;
+  }
+  if (context.text) block += `- **text** "${safeInline(context.text, 300)}"\n`;
+  if (opts.includeRoute && context.page && context.page.url) {
+    const title = context.page.title ? ` — "${safeInline(context.page.title, 200)}"` : '';
+    block += `- **route** \`${safeInline(context.page.url, 2048)}\`${title}\n`;
+  }
+  const r = context.rect;
+  if (r && ['x', 'y', 'w', 'h', 'vw', 'vh'].every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]))) {
+    block += `- **box** ${r.x},${r.y} ${r.w}×${r.h} (viewport ${r.vw}×${r.vh})\n`;
+  }
+  const near: string[] = [];
+  if (context.landmark) near.push(safeInline(context.landmark, 80));
+  if (context.heading) near.push(`heading ${safeInline(context.heading, 130)}`);
+  if (near.length) block += `- **near** ${near.join(' · ')}\n`;
+  return block;
+};
+
 /** Multi-target raw-HTML comments: list every ADDITIONAL element the one
  *  comment covers (the primary target is already quoted as `originalText`),
  *  labeled with the semantic hover label plus a short excerpt so the agent
@@ -1120,9 +1240,75 @@ const additionalTargetsExportBlock = (ann: any): string => {
     const raw = typeof target?.text === 'string' ? target.text : '';
     const excerpt = raw.replace(/\s+/g, ' ').trim();
     const clipped = excerpt.length > 120 ? `${excerpt.slice(0, 120)}…` : excerpt;
-    block += `- ${label}"${clipped}"\n`;
+    // Element identity for the agent, one line per extra target: the
+    // selector and the path (a full context block per target would swamp
+    // the comment; the rest of the context stays persisted, not exported).
+    //
+    // Gated on the target carrying element context, which is what makes the
+    // element-context work additive in the literal sense it claims: a target
+    // captured before it existed (or restored from an older draft) has an
+    // anchor but no context, and exports byte-identically to before.
+    const locators: string[] = [];
+    if (target?.context && typeof target.context === 'object') {
+      const selector = target?.anchor?.selector;
+      if (typeof selector === 'string' && selector) locators.push(`\`${safeInline(selector, 300)}\``);
+      const path = target?.context?.path;
+      if (typeof path === 'string' && path) locators.push(`\`${safeInline(path, 512)}\``);
+    }
+    block += `- ${label}"${clipped}"${locators.length ? ` — ${locators.join(' · ')}` : ''}\n`;
   });
   return block;
+};
+
+/**
+ * One annotation rendered as a standalone feedback entry (no number, no
+ * document heading), for hosts that surface a single annotation to an agent.
+ * The body is the same shape the full export emits for the entry, including
+ * the element block, so a standalone entry never drifts from what Send
+ * Feedback delivers; the live-app route line is included here because the
+ * standalone entry has no `## Page:` heading above it. Plannotator's own
+ * panel chrome does not use it.
+ */
+export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOptions = { includeRoute: true }): string => {
+  let output = '';
+  switch (ann?.type) {
+    case 'DELETION':
+      output += `Remove this\n\`\`\`\n${ann.originalText}\n\`\`\`\n`;
+      break;
+    case 'GLOBAL_COMMENT':
+      output += `General feedback\n> ${ann.text}\n`;
+      break;
+    default:
+      if (ann?.isQuickLabel) {
+        output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
+        if (ann.quickLabelTip) output += `> ${ann.quickLabelTip}\n`;
+      } else {
+        output += `${commentHeadingLine(ann)}\n${diagramLocationExportLine(ann)}> ${ann?.text ?? ''}\n`;
+      }
+  }
+  const resolvedOpts: ElementContextExportOptions = {
+    includeRoute: opts.includeRoute ?? true,
+    ...(opts.includeOutline !== undefined ? { includeOutline: opts.includeOutline } : {}),
+  };
+  output += elementContextExportBlock(ann, resolvedOpts);
+  output += additionalTargetsExportBlock(ann);
+  if (Array.isArray(ann?.images) && ann.images.length > 0) {
+    output += `**Attached images:**\n`;
+    ann.images.forEach((img: ImageAttachment) => {
+      output += `- [${img.name}] \`${img.path}\`\n`;
+    });
+  }
+  return output;
+};
+
+/** The location line under a comment made on a rendered diagram part:
+ *  `Diagram node Approve? (D), line 4` — the part's own id (what the agent
+ *  greps the fence for) and the DOCUMENT line that declares it. Emits
+ *  nothing for every other annotation, keeping their output byte-identical;
+ *  a malformed anchor (an older or foreign writer) is skipped, never thrown. */
+const diagramLocationExportLine = (ann: any): string => {
+  const anchor = ann?.diagramAnchor === undefined ? null : parseDiagramAnchor(ann.diagramAnchor);
+  return anchor === null ? '' : `${safeInline(diagramAnchorLocationLine(anchor), 600)}\n`;
 };
 
 const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
@@ -1292,12 +1478,14 @@ export const exportAnnotations = (
 
       case 'COMMENT':
         if (ann.isQuickLabel) {
-          output += `[${ann.text}] Feedback on: "${ann.originalText}"\n`;
+          output += `[${ann.text}] ${commentHeadingLine(ann)}\n`;
+          output += diagramLocationExportLine(ann);
           if (ann.quickLabelTip) {
             output += `> ${ann.quickLabelTip}\n`;
           }
         } else {
-          output += `Feedback on: "${ann.originalText}"\n`;
+          output += `${commentHeadingLine(ann)}\n`;
+          output += diagramLocationExportLine(ann);
           output += `> ${ann.text}\n`;
         }
         break;
@@ -1308,6 +1496,9 @@ export const exportAnnotations = (
         break;
     }
 
+    // Raw-HTML / live-app pinpoints describe their element for the agent
+    // (the grouped export's `## Page:` heading already carries the route).
+    output += elementContextExportBlock(ann, { includeRoute: false });
     // Multi-target raw-HTML comments list every additional covered element.
     output += additionalTargetsExportBlock(ann);
 
@@ -1408,7 +1599,8 @@ export const exportLinkedDocAnnotations = (
           break;
 
         case 'COMMENT':
-          output += `Feedback on: "${ann.originalText}"\n`;
+          output += `${commentHeadingLine(ann)}\n`;
+          output += diagramLocationExportLine(ann);
           output += `> ${ann.text}\n`;
           break;
 
@@ -1418,6 +1610,7 @@ export const exportLinkedDocAnnotations = (
           break;
       }
 
+      output += elementContextExportBlock(ann, { includeRoute: false });
       // Multi-target raw-HTML comments list every additional covered element.
       output += additionalTargetsExportBlock(ann);
 

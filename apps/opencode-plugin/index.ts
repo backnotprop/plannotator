@@ -76,6 +76,16 @@ function readBundledHtml(filename: string): string {
   return readFileSync(resolveBundledHtmlPath(filename), "utf-8");
 }
 
+/** Best-effort warm of the sync cache. Never throws, on any failure. */
+function preloadBundledHtml(filename: string, assign: (html: string) => void): void {
+  try {
+    readFile(resolveBundledHtmlPath(filename), "utf-8").then(assign).catch(() => {});
+  } catch {
+    // The asset is not on disk. The lazy getters raise a clear error if and
+    // when a code path actually needs it.
+  }
+}
+
 function getPlanHtml(): string {
   if (!_planHtml) _planHtml = readBundledHtml("plannotator.html");
   return _planHtml;
@@ -234,9 +244,15 @@ async function runPlanReview(input: {
 const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOptions) => {
   const workflowOptions = normalizeWorkflowOptions(rawOptions);
 
-  // Preload HTML in background — populates the sync cache before first use
-  readFile(resolveBundledHtmlPath("plannotator.html"), "utf-8").then(h => { _planHtml = h; }).catch(() => {});
-  readFile(resolveBundledHtmlPath("review-editor.html"), "utf-8").then(h => { _reviewHtml = h; }).catch(() => {});
+  // Preload HTML in background: populates the sync cache before first use.
+  // `resolveBundledHtmlPath` THROWS when the asset is absent, and it runs
+  // synchronously here, outside the .catch that was meant to absorb exactly
+  // that. An unbuilt checkout (or a partial install) therefore took down plugin
+  // construction itself, before any code path that needs the HTML. A missing
+  // asset must only fail the feature that reads it, which is what the lazy
+  // getters already do.
+  preloadBundledHtml("plannotator.html", (html) => { _planHtml = html; });
+  preloadBundledHtml("review-editor.html", (html) => { _reviewHtml = html; });
 
   let cachedAgents: any[] | null = null;
 

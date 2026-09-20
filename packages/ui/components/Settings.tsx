@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal';
 import type { Origin } from '@plannotator/core/agents';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
-import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType } from '../config';
+import type { TokenHoverDelay } from '@plannotator/core/token-hover';
+import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType, setReviewAutoViewed } from '../config';
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
+import { DIAGRAM_SHADOW_OPTIONS } from '../utils/diagramShadow';
 import { loadDiffFont } from '../utils/diffFonts';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity, isIdentityEditable } from '../utils/identity';
@@ -64,7 +66,7 @@ import { useAgents } from '../hooks/useAgents';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
 import { type QuickLabel, getQuickLabels, saveQuickLabels, resetQuickLabels, DEFAULT_QUICK_LABELS, getLabelColors, LABEL_COLOR_MAP } from '../utils/quickLabels';
 import { ThemeTab } from './ThemeTab';
-import { isMac, modKey, altKey } from '../utils/platform';
+import { isMac, modKey, modKeyWord, altKey } from '../utils/platform';
 import { getAIProviderSettings, resolveAIProviderSelection } from '../utils/aiProvider';
 import { AISettingsTab } from './AISettingsTab';
 import { HooksTab } from './settings/HooksTab';
@@ -133,6 +135,23 @@ export const DIFF_STYLE_OPTIONS = [
   { value: 'split' as const, label: 'Split' },
   { value: 'unified' as const, label: 'Unified' },
 ];
+/**
+ * The modifier gate is the platform's primary modifier: Cmd on macOS, Ctrl on
+ * Windows and Linux. Labeled through modKeyWord so the control names the key
+ * the reader actually has.
+ */
+export const TOKEN_HOVER_TRIGGER_OPTIONS = [
+  { value: 'hover' as const, label: 'On hover' },
+  { value: 'modifier' as const, label: `Hold ${modKeyWord}` },
+  { value: 'off' as const, label: 'Off' },
+];
+/** SegmentedControl keys on strings, so the ms values ride as their digits. */
+export type TokenHoverDelayOption = '150' | '300' | '700';
+export const TOKEN_HOVER_DELAY_OPTIONS = [
+  { value: '150' as const, label: 'Fast' },
+  { value: '300' as const, label: 'Default' },
+  { value: '700' as const, label: 'Relaxed' },
+];
 export const OVERFLOW_OPTIONS = [
   { value: 'scroll' as const, label: 'Scroll' },
   { value: 'wrap' as const, label: 'Wrap' },
@@ -157,6 +176,7 @@ const DEFAULT_DIFF_TYPE_OPTIONS = [
   // "All Changes" belongs to since-base (the flagship composite); uncommitted
   // reverts to its plain name so the two stay distinguishable side by side.
   { value: 'since-base' as const, label: 'All Changes (Recommended)', description: "Everything since your branch split from main — committed, uncommitted, and untracked" },
+  { value: 'local-vs-remote' as const, label: 'Local vs Remote Branch', description: "Your local branch and working tree compared with its last-fetched remote-tracking branch" },
   { value: 'uncommitted' as const, label: 'Uncommitted', description: "Everything you've changed since your last commit" },
   { value: 'unstaged' as const, label: 'Unstaged', description: "Only changes you haven't staged yet" },
   { value: 'staged' as const, label: 'Staged', description: "Only changes you've staged for commit" },
@@ -170,22 +190,27 @@ const AGENT_TERMINAL_SIDE_OPTIONS: { value: AnnotateAgentTerminalSide; label: st
   { value: 'hidden', label: 'Hidden' },
 ];
 
-function SegmentedControl<T extends string>({ options, value, onChange }: {
+function SegmentedControl<T extends string>({ options, value, onChange, disabled = false }: {
   options: { value: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
+  /** Visible but inert, for a control whose axis does not apply right now. */
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
+    <div className={['flex items-center gap-1 bg-muted/50 rounded-lg p-0.5', disabled && 'opacity-50'].filter(Boolean).join(' ')}>
       {options.map((opt) => (
         <button
           key={opt.value}
+          {...(disabled ? { disabled: true } : {})}
           onClick={() => onChange(opt.value)}
-          className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+          className={[
+            'flex-1 px-3 py-1.5 text-xs rounded-md transition-colors',
+            disabled && 'cursor-not-allowed',
             value === opt.value
               ? 'bg-background text-foreground shadow-sm font-medium'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
+              : 'text-muted-foreground hover:text-foreground',
+          ].filter(Boolean).join(' ')}
         >
           {opt.label}
         </button>
@@ -375,8 +400,23 @@ function ReviewAnalysisTab() {
 const GitTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnavailable }) => {
   const defaultDiffType = useConfigValue('defaultDiffType');
   const reviewPanelView = useConfigValue('reviewPanelView');
+  const reviewAutoViewed = useConfigValue('reviewAutoViewed');
   return (
     <div className="space-y-5">
+      <div className="space-y-2">
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Viewed files
+        </div>
+        {/* Never write `reviewAutoViewed` directly — setReviewAutoViewed also
+            consumes the first-time notice, since an explicit toggle is proof
+            the reviewer already found the switch. */}
+        <ToggleSwitch
+          checked={reviewAutoViewed}
+          onChange={(v) => setReviewAutoViewed(v)}
+          label="Auto-mark viewed"
+          description="Mark a file viewed when you scroll past it or move on to another file. Files you un-view stay un-viewed, and files that change on refresh become un-viewed."
+        />
+      </div>
       <div className="space-y-2">
         <div>
           <div className="text-sm font-medium">Default review view</div>
@@ -455,6 +495,8 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
   const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
+  const tokenHoverTrigger = useConfigValue('tokenHoverTrigger');
+  const tokenHoverDelay = useConfigValue('tokenHoverDelay');
 
   // Load font for the preview swatch
   useEffect(() => {
@@ -474,6 +516,41 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
           label="Edit Code to Suggest"
           description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
         />
+      </div>
+
+      <div className="border-t border-border" />
+
+      {/* Hover cards (internally tokenHover*; the label is what changed, not
+          the ids). One trigger select rather than a toggle plus a mode: `Off`
+          is a value of the same question, so there is no unreachable
+          enabled-but-off state to reason about. The delay stays a separate
+          axis because "too eager" is a complaint neither the hold-modifier option
+          nor Off answers. */}
+      <div className="space-y-3">
+        <div>
+          <div className="text-sm font-medium">Hover cards</div>
+          <div className="text-xs text-muted-foreground">
+            Rest the pointer on a symbol in a diff to see where it is defined and who
+            references it. Needs ripgrep and a local checkout; nothing appears when the
+            search comes back empty. {modKeyWord}+click still opens the References panel either way.
+          </div>
+        </div>
+        <SegmentedControl
+          options={TOKEN_HOVER_TRIGGER_OPTIONS}
+          value={tokenHoverTrigger}
+          onChange={(v) => configStore.set('tokenHoverTrigger', v)}
+        />
+        <div className="space-y-2">
+          <div className="text-xs text-muted-foreground">
+            How long the pointer rests before a card is requested
+          </div>
+          <SegmentedControl
+            options={TOKEN_HOVER_DELAY_OPTIONS}
+            value={String(tokenHoverDelay) as TokenHoverDelayOption}
+            onChange={(v) => configStore.set('tokenHoverDelay', Number(v) as TokenHoverDelay)}
+            disabled={tokenHoverTrigger === 'off'}
+          />
+        </div>
       </div>
 
       <div className="border-t border-border" />
@@ -883,6 +960,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const gridEnabled = useConfigValue('gridEnabled');
+  const diagramShadow = useConfigValue('diagramShadow');
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
   const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
@@ -1576,6 +1654,34 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${gridEnabled ? 'bg-primary' : 'bg-muted'}`}>
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${gridEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>
+                    </div>
+
+                    <div className="border-t border-border" />
+
+                    {/* Diagram Shadow */}
+                    <div className="space-y-3" data-diagram-shadow-setting>
+                      <div>
+                        <div className="text-sm font-medium">Diagram Shadow</div>
+                        <div className="text-xs text-muted-foreground">
+                          Drop shadow under diagram nodes (100 = Mermaid's own)
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
+                        {DIAGRAM_SHADOW_OPTIONS.map((value) => (
+                          <button
+                            key={value}
+                            onClick={() => configStore.set('diagramShadow', value)}
+                            aria-pressed={diagramShadow === value}
+                            className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+                              diagramShadow === value
+                                ? 'bg-background text-foreground shadow-sm font-medium'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            {value === 0 ? 'None' : String(value)}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="border-t border-border" />

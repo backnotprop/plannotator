@@ -65,6 +65,10 @@ export interface ReviewState {
   agentCwd?: string | null;
   /** Whether live-working-tree actions match the snapshot currently shown. */
   canUseLiveWorkspaceActions?: boolean;
+  /** False when hunk-context expansion has no source to expand from — a static
+   *  patch review has no working tree, so `/api/file-content` answers 400 and
+   *  the diff views must not ask. Absent means available (every VCS session). */
+  contextExpansionAvailable?: boolean;
 
   // Annotations
   allAnnotations: CodeAnnotation[];
@@ -215,7 +219,9 @@ export interface ReviewState {
 
   // Diff navigation
   openDiffFile: (filePath: string) => void;
-  onAllFilesVisibleFileChange: (filePath: string | null) => void;
+  onAllFilesVisibleFileChange: (filePath: string | null, info?: { collapsed: boolean }) => void;
+  /** Auto-mark-viewed: the reader moved on from this file (see useAutoViewed). */
+  onAllFilesFileScrolledPast: (filePath: string) => void;
   isAllFilesActive: boolean;
   // Which left panel drives the all-files item order ('list' = sections order).
   allFilesOrder: 'tree' | 'list';
@@ -252,6 +258,12 @@ export interface ReviewState {
 
   // Code navigation
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
+  /** Token hover cards. Undefined whenever the gate or the setting is off. */
+  onTokenHoverEnter?: (
+    props: import('@pierre/diffs').DiffTokenEventBaseProps,
+    filePath: string,
+  ) => void;
+  onTokenHoverLeave?: () => void;
   codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;
   codeNavIsLoading: boolean;
   codeNavActiveSymbol: string | null;

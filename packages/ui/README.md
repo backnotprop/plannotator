@@ -30,6 +30,7 @@ configurePlannotatorUI({
   webmcp,                      // browser-agent (WebMCP) provider policy: { enabled, namePrefix }
   mathRendererLoader,          // how KaTeX loads when no renderer is registered before first math render
   identityGenerator,           // sync generator behind the default "tater" name (no identityProvider)
+  alertIconRenderer,           // (name) => ReactNode | null for a GitHub alert title line's <!-- icon: name --> (default: null, the type's icon)
 });
 ```
 
@@ -52,13 +53,13 @@ Building your own tooltip and removing the built-in double-click reset are host-
 
 ### Lazy renderers and the eager entries (`utils/math`, `utils/generateIdentity`, `utils/mermaid`; 0.32.0)
 
-The Mermaid runtime, the Graphviz engine, KaTeX and the username dictionary are off the static import graph of `Viewer`, so a host that bundles by route does not download them for a plain markdown read. Graphviz needs nothing from you (the block imports the engine inside its render effect and shows the source fence until the SVG lands, as it always did). Mermaid, KaTeX and the dictionary sit behind synchronous slots:
+The Mermaid runtime, the Graphviz engine, KaTeX and the username dictionary are off the static import graph of `Viewer`, so a host that bundles by route does not download them for a plain markdown read. Graphviz has its own slot since 0.41.0 (`utils/graphviz`, the same shape as Mermaid's: lazy `import('@viz-js/viz')` on the first dot fence, or `setGraphvizRuntime` from the host) and the block shows the source fence under a status until the SVG lands. Mermaid, Graphviz, KaTeX and the dictionary sit behind synchronous slots:
 
 - **Math.** Without registration, a math node renders its TeX as text in the same wrapper (same `data-math-tex` / `data-math-display` / `aria-label` / class names), loads KaTeX via `import('katex')`, and re-renders typeset. To keep math typeset on the very first commit, as Plannotator does, add one line to your entry: `import "@plannotator/ui/utils/math-eager";`. To put KaTeX and its stylesheet on one lazy chunk instead, pass `mathRendererLoader`. The stylesheet remains your job either way (see "Consuming it", step 3). The default `import('katex')` is the only runtime mention of `katex` in the package and lives in `utils/math-default-loader` (0.33.0), called only while no loader is registered; a registered loader is never backfilled by it, though a default load already in flight at registration still fills the slot (pre-existing), so register the loader before the first math render. Chunk emission is static, so a bundler still emits that chunk (never requested) unless you alias the module away; see HANDOFF.md "Lazy renderers and eager entries" for the two-line alias. The Mermaid runtime has its own `import("katex")` for `$$` labels, which leaves a second, shared KaTeX chunk in a host build even with the alias; since 0.34.0 a host redirects that one import (for importers inside the `mermaid` package only) to `@plannotator/ui/utils/mermaid-math-slot`, which typesets the labels through your registered renderer, so one KaTeX chunk remains and it is yours. Recipe and measurement in HANDOFF.md, same section. `resetMathRenderer()` empties the slot only and keeps a registered loader (0.34.0); `setMathRendererLoader(null)` is the explicit way back to the package default.
-- **Mermaid.** Without registration, the first diagram on a page fetches the runtime through `import('mermaid')`; a failed import is dropped from the memo, re-attempted once after a short delay, and the error panel (with the source) offers Retry, which issues another fresh attempt. Plannotator keeps Mermaid eager by policy so it can never fail separately from the app: `import "@plannotator/ui/utils/mermaid-eager";` in your entry does the same for your bundle. Honest limit of any in-page retry: a browser records a failed module fetch in its module map for the page lifetime, so a fresh `import()` of the same chunk URL rejects without a request; the retry recovers failures after the fetch (engine instantiation, initialize) and hosts that version chunk URLs. A host that needs recovery from a failed first fetch uses versioned chunk URLs or a `vite:preloadError` reload at app level.
+- **Mermaid.** Without registration, the first diagram on a page fetches the runtime through `import('mermaid')` and the block shows the source fence under a "Rendering diagram" status until the SVG lands; a failed import is dropped from the memo, re-attempted once after a short delay, and the error panel (with the source) offers Retry, which issues another fresh attempt. **Since 0.40.0 (Mermaid 12.0.0, ELK layout by default, Safari 17.4+) this lazy path is Plannotator's own**: the plan editor no longer imports the eager entry, so a document with no diagram never downloads the runtime in a chunked build. `import "@plannotator/ui/utils/mermaid-eager";` in your entry registers and initializes the runtime at startup instead, if you would rather it never fail separately from the app. Mermaid 12 lays flowchart, state, class, ER and requirement diagrams out with ELK (orthogonal edges, different packing); every generated SVG `id` keeps its 11.x shape, but children of `g.edgePaths` are now in declaration order, so select edges by id (`{renderId}-L_{from}_{to}_{n}`, `{renderId}-edge{n}`), never by DOM position. Details in HANDOFF.md "Mermaid 12 (0.40.0)". **Diagrams follow the colour theme.** Before every render `MermaidBlock` calls `applyMermaidTheme` (`utils/mermaidTheme`), which reads the theme tokens off the document (`--background`, `--foreground`, `--card`, `--border`, `--muted`, `--muted-foreground`, `--primary`, the accent tokens and `--font-sans`; `readThemeTokens`), derives a complete `themeVariables` set for every diagram family from them (`buildMermaidThemeVariables(tokens, mode)`, pure; base theme `dark` under a dark resolved mode, `default` under light; every text-on-fill pair guarded to WCAG 4.5:1 and every line 3:1, rule in the module doc) and runs the global `mermaid.initialize` once per `(palette, mode, shadow amount)` key, re-rendering mounted diagrams when the key changes. The key comes from `useTheme()`, so a host that mounts `ThemeProvider` and ships `theme.css` gets diagrams in its palette with nothing to configure. **The node shadow follows the palette too.** Mermaid 12's neo look shadows every node from a fixed `rgba(185,185,185,1)` grey; the mapping keeps the look and replaces that filter, setting `themeVariables.dropShadow` from the page's own ground at `options.shadowAmount` (0..1, default `DEFAULT_MERMAID_SHADOW_AMOUNT` = **0.7** of Mermaid's geometry; 1 reproduces its `1px 2px 2px` exactly, 0 publishes `dropShadow: false` and the neo rules render `filter: none`). Its polarity follows the page — lighter than the ground on a dark page, darker on a light one, which is what Mermaid's own `insertLookDefs` does and what keeps a shadow visible at all. A host that wants Mermaid's grey passes its own `themeVariables.dropShadow` after ours; one that wants none passes `{ shadowAmount: 0 }`. `mermaidThemeKey(palette, mode, amount?)` appends the amount only when it is not the default, so a host that names none keeps the key it had. **Fallback contract:** with no tokens on the document (no `ThemeProvider`, no `theme.css`) `readThemeTokens` returns `undefined`, nothing is re-initialized, and the runtime keeps the static `MERMAID_CONFIG` it was initialized with, so such a host renders byte-identically to 0.39.0. `MERMAID_CONFIG` keeps its value and meaning (`securityLevel: 'strict'` pinned); the new exports are additive. Honest limit of any in-page retry: a browser records a failed module fetch in its module map for the page lifetime, so a fresh `import()` of the same chunk URL rejects without a request; the retry recovers failures after the fetch (engine instantiation, initialize) and hosts that version chunk URLs. A host that needs recovery from a failed first fetch uses versioned chunk URLs or a `vite:preloadError` reload at app level.
 - **Identity.** With an `identityProvider` the generator is never called and the word lists stay out of your bundle. Without one, default names come from a small built-in pool of the same `adjective-noun-tater` shape; `import "@plannotator/ui/utils/identity-tater";` registers the full dictionary, or pass your own `identityGenerator`.
 
-Plannotator's own entries import the eager modules (`math-eager` and `identity-tater` in both `packages/editor/App.tsx` and `packages/review-editor/App.tsx`; `mermaid-eager` in the plan editor only, since the review editor never renders a Mermaid block), which is what keeps its single-file builds byte-identical and its portal entry chunk shaped as before; `tests/entry-assets.test.ts` fails if any of them is dropped. See HANDOFF.md "Lazy renderers and eager entries".
+Plannotator's own entries import the eager math and identity modules (`math-eager` and `identity-tater` in both `packages/editor/App.tsx` and `packages/review-editor/App.tsx`), which is what keeps math typeset on the first commit and names minted from the full dictionary; neither app imports `mermaid-eager` since 0.40.0, so the Mermaid runtime rides a lazy chunk on the share portal and is inlined by `inlineDynamicImports` in the single-file builds. `tests/entry-assets.test.ts` fails if an eager math/identity import is dropped or an eager Mermaid import creeps back. See HANDOFF.md "Lazy renderers and eager entries" and "Mermaid 12 (0.40.0)".
 
 ### Markdown editor extensions + wiki links (`MarkdownEditor` / `InlineMarkdown`)
 
@@ -73,7 +74,7 @@ Plannotator's own entries import the eager modules (`math-eager` and `identity-t
   const editorExtensions = [wikiLinks({ suggest, resolve, onOpen })]; // stable reference!
   <MarkdownEditor markdown={md} documentId={docId} editorHandleRef={ref} extensions={editorExtensions} />
   ```
-- **`embedPicker(config)` and `embedSlashItem()` are re-exported from the same surface.** Compose the static item into `slashCommands({ items: [...] })` and pass the picker beside it in the stable `extensions` array. `getTargets`, `buildInsertLine`, optional `uploadTarget`, and optional `getNotice` stay live through callbacks. The host owns embed grammar and upload error UI; the package owns filtering, async anchor mapping, single-flight upload state, and paragraph-safe insertion through the re-exported `planEmbedInsert()`.
+- **`embedPicker(config)` and `embedSlashItem()` are re-exported from the same surface.** Compose the static item into `slashCommands({ items: [...] })` and pass the picker beside it in the stable `extensions` array. `getTargets`, `buildInsertLine`, optional `uploadTarget`, and optional `getNotice` stay live through callbacks. Optional `labels` (`upload`, `empty`, `noMatch(query)`) reword the three rows that say "HTML"; absent keys keep the built-in text. The host owns embed grammar and upload error UI; the package owns filtering, async anchor mapping, single-flight upload state, and paragraph-safe insertion through the re-exported `planEmbedInsert()`.
 - **The viewer resolves wiki-links synchronously.** `InlineMarkdown` takes `resolveLinkedDoc?: (target) => { label?; status?: 'active' | 'deleted' } | null` — called with the raw stored target (opaque ids like `doc_01XYZ`, no `.md` normalization). Return a `label` to display live titles (stored label is the fallback, target the last resort); return `status: 'deleted'` for a muted non-link ("Document deleted") instead of a live link. Absent or `null` → rendering is unchanged. Sync-only by design: back it with an in-memory cache.
 
 Requires `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0`. See HANDOFF.md § "Wiki-link seams (0.27.0)".
@@ -102,7 +103,7 @@ Requires `@plannotator/markdown-editor ^0.4.0` and `@plannotator/atomic-editor ^
 
 Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotation experience, all additive and all defaulting to today's behavior. Requires `@plannotator/core` 0.25.0 (the `html-anchor` subpath), so install and publish core before ui:
 
-- **`projectHostThreads(threads, { openOnly?, documentLevel?, maxTargets? })`** and **`buildPersistedHtmlAnchor(source, { maxBytes?, maxTargets? })`** from `components/html-viewer` (pure, from `@plannotator/core/html-anchor`): project stored rows onto the `annotations` prop in the order that becomes the marker numbering, and trim a composed comment's anchor for persistence with cap drops and size drops reported separately. A row with nothing restorable projects as a document-level `GLOBAL_COMMENT` by default (`documentLevel: 'global'`, never reported as unanchored) or, with `documentLevel: 'unanchored'`, as a textless page `COMMENT` the unanchored report names. **HTML-only:** the projection carries `originalText`, `htmlAnchor` and `htmlAdditionalTargets`, and pins `blockId` to `""`, offsets to `0` and no `startMeta` / `endMeta`; on the markdown `Viewer` a projected `COMMENT` with quoted text still re-anchors by whole-document text search, but with `blockId` `""` and offsets `0` it loses export ordering (every such row sorts first and ties), the "lines N-M" location label, disambiguation when the same text repeats (first match wins), and the no-flash meta restore; a host that needs those carries `blockId`, the offsets and the web-highlighter metas in its own projection.
+- **`projectHostThreads(threads, { openOnly?, documentLevel?, maxTargets? })`** and **`buildPersistedHtmlAnchor(source, { maxBytes?, maxTargets? })`** from `components/html-viewer` (pure, from `@plannotator/core/html-anchor`): project stored rows onto the `annotations` prop in the order that becomes the marker numbering, and trim a composed comment's anchor for persistence with cap drops and size drops reported separately. A row with nothing restorable projects as a document-level `GLOBAL_COMMENT` by default (`documentLevel: 'global'`, never reported as unanchored) or, with `documentLevel: 'unanchored'`, as a textless page `COMMENT` the unanchored report names. **HTML-only:** the projection carries `originalText`, `htmlAnchor` and `htmlAdditionalTargets`, and pins `blockId` to `""`, offsets to `0` and no `startMeta` / `endMeta`; on the markdown `Viewer` a projected `COMMENT` with quoted text still re-anchors by whole-document text search, but with `blockId` `""` and offsets `0` it loses export ordering (every such row sorts first and ties), the "lines N-M" location label, disambiguation when the same text repeats (first match wins), and the no-flash meta restore; a host that needs those carries `blockId`, the offsets and the web-highlighter metas in its own projection. **Element context rides both helpers** (next publish, #1521): `buildPersistedHtmlAnchor` accepts `elementContext` on its source and `context` on each additional target and writes them back as `PersistedHtmlAnchor.elementContext` / `HtmlAnnotationTarget.context` (serialized after `htmlAdditionalTargets` and after each target's `anchor`, so a row without context stays byte-identical on the wire), and `projectHostThreads` returns both on the projection so a host panel and its per-row Copy see them. Contexts are shed before targets under `maxBytes`, whose 16 KiB default is unchanged. The validator, `parseHtmlElementContext`, lives in `@plannotator/core/html-anchor` and is re-exported from `components/html-viewer`.
 - **`onUnanchoredChange`** is keyed to the bridge's restore (one complete report per document after the restore batch, the empty set included) and complete over the `annotations` prop: textless page rows are reported without being posted, and a locally minted id the host swapped out of its list is not. It replaces a host's `mark-applied` bookkeeping for the unanchored set; the local-to-server mark swap itself stays host-side. **Nothing is delivered before the bridge's first post-restore report for a document (per reload generation):** a prop-side change before that point does not fire the callback, so do not gate host state on a prop-side delivery arriving first; treat the first call as the restore's verdict.
 - **`hooks/useHtmlRefresh({ fetchSnapshot, onSnapshot, onUnanchored?, onResult? })`**: the refresh cycle with the stale-response and document-change guards, backend behind `fetchSnapshot`.
 - **`components/HtmlSurfaceControls`**: the eye / refresh / pen header controls with Plannotator's markup and `labels` overrides.
@@ -128,6 +129,208 @@ The srcdoc then carries one classic `<script src>` in the exact place the inline
 
 - **`@plannotator/ui/shortcuts`**: the declarative keyboard-shortcut engine (`defineShortcutScope`, `useShortcutScope`) and the per-surface scopes, including `useHtmlAnnotateShortcuts` for the Mod+Shift+A Annotate/Interact chord on HTML surfaces. Pure React plus `utils/platform`; no backend.
 - **`@plannotator/ui/utils/inputMethod`**: `getInputMethod(surface)` / `saveInputMethod(method, surface)` / `refreshInputMethodStamp(method)`, the per-surface pinpoint-or-drag preference with its TTL, persisted through the `storageBackend` seam.
+
+#### Toolstrip host props (0.35.0)
+
+`components/AnnotationToolstrip` is supported host surface: the annotation mode toolstrip with per-tool opt-outs, all defaulting to today's rendering.
+
+- **`hideQuickLabel`** omits the Quick Label tool. `StickyHeaderLane` forwards it, so the pinned scroll header stays consistent. It hides the button only — it does not clamp the mode, so keep host mode state out of `'quickLabel'` (including preferences restored through `utils/editorMode`).
+- **`showHelpLink={false}`** for hosts: the default help modal embeds Plannotator's own video walkthroughs.
+- **`hideInputMethodSwitch`** omits the pinpoint/drag input-method switch.
+
+#### Sticky header lane host props
+
+`components/StickyHeaderLane` is the measured compact companion to `Viewer`'s
+`[data-sticky-actions]` cluster. Its defaults preserve Plannotator's ghost-header
+behavior: hidden and inert at rest, then visible with card chrome once stuck.
+
+- **`visibility="always"`** keeps the existing measured left lane visible and
+  interactive at rest as well as while stuck. Resting lanes have no background,
+  border, backdrop, shadow, or new document padding; stuck lanes retain the
+  incumbent chrome. The lane remains zero-height and absolutely positioned, so
+  the host must reserve a clear header-height region; otherwise its visible
+  controls can cover and intercept interaction with document content below.
+- **`sticky={false}`** uses non-sticky positioning, creates no intersection
+  observer, and scrolls away normally. Pass the same value to
+  `Viewer.stickyActions` so the left lane and right action cluster follow one
+  policy. By itself it leaves the default stuck-only lane permanently hidden;
+  combine it with `visibility="always"` for a visible non-sticky header. The
+  measured Viewer-actions width is still reserved because both clusters share
+  the lane at rest before they scroll away together.
+- Wide, tight icon-only, and narrow stacked layouts continue to derive from the
+  wrapper width and the measured action-cluster width. `hideQuickLabel` is still
+  forwarded to the compact toolstrip.
+
+#### Viewer-owned document header
+
+Use `Viewer.annotationHeader` when the compact annotation controls must be
+visible at rest. Viewer then owns one in-flow header containing those controls
+on the left and its existing Global comment / Copy actions on the right:
+
+```tsx
+<Viewer
+  mode={mode}
+  inputMethod={inputMethod}
+  stickyActions={stickyActions}
+  annotationHeader={{
+    onInputMethodChange: setInputMethod,
+    onModeChange: setMode,
+    hideQuickLabel: true,
+  }}
+  // ...the existing Viewer props
+/>
+```
+
+The trailing action cluster keeps full-width labels unless you also pass
+`actionsLabelMode` (`'full' | 'short' | 'icon'`); the header measures the real
+cluster either way, so omitting it costs earlier stacking on narrow columns,
+never breakage.
+
+The header reserves its real responsive height before document content. It
+keeps active labels in the wide layout, switches the compact toolstrip to
+icons in the tight layout, and stacks the two clusters when narrow or wrapped.
+All Viewer badge context moves into the same measured header. With
+`stickyActions={true}` the complete header pins and gains the existing stuck
+chrome; with `false` it remains in flow and scrolls away. The complete header
+has `data-print-hide`, so it contributes no print layout.
+
+As with Viewer's legacy sticky actions and anchor navigation, hosts with a
+custom scroll element must wrap Viewer in `ScrollViewportProvider` from
+`@plannotator/ui/hooks/useScrollViewport` and pass that actual scroll element.
+Without the provider, CSS page stickiness can still apply, but Viewer cannot
+observe the host scroller to add stuck chrome or calculate anchor clearance.
+
+The header reuses Viewer's `[data-sticky-actions]` cluster, so host CSS that
+restyled that selector for the legacy floating bar (negative margins are the
+common case) applies inside the header too and pulls the action cluster out of
+its row. Scope such rules away from the header, e.g.
+`[data-viewer-document-header] [data-sticky-actions] { margin-top: 0; margin-right: 0; }`.
+
+The config is intentionally typed rather than a React-node slot. Viewer reuses
+its existing `mode`, `inputMethod`, and `taterMode`; the config supplies only
+the state-change callbacks and optional `hideQuickLabel`. Compact toolstrips
+never render the Plannotator help modal. Hiding Quick Label does not clamp the
+mode, so hosts must still prevent stored `'quickLabel'` state from reaching
+Viewer. Omit `annotationHeader` to preserve the legacy floating action bar
+exactly. The standalone `StickyHeaderLane` remains supported for Plannotator's
+hidden-at-rest ghost lane, but its always-visible mode is an overlay and is not
+the in-flow host integration.
+
+### Diagram engine (`components/diagram`; 0.41.0)
+
+One renderer slot and one canvas render every Mermaid and Graphviz diagram — the fences in `Viewer` (`MermaidBlock`, `GraphvizBlock`), their popout, and whatever a host renders itself. `DiagramViewer` from `@plannotator/ui/components/diagram` takes `kind`, `source`, `theme` (`{ colorTheme, mode, shadowAmount? }`), `comments: DiagramComment[]` and `onCreateComment(anchor, text, additionalTargets)`; pass `onSave(source) => Promise<{ status: 'ok' } | { status: 'stale', currentSource }>` to get the Source pane (left of the canvas on desktop, under it on the phone; `readOnlySource` shows it without Save), and `sourceOpen` to toggle it. Zoom, pan and fit are the canvas's (wheel, drag, `+` `-` `0`, arrow keys); a click opens the composer at the part beneath while a drag pans (4 px threshold, 10 px for a finger), nothing highlights on a plain mouse-over (the ring under the pointer needs the platform modifier held), every edge carries an invisible 14 px hit path in one top layer and a click is resolved by priority over everything under the pointer (node, then edge, then cluster; an edge label is its edge), a click on no part comments on the whole diagram (kind `diagram`), sequence diagrams are addressable (actors, messages, notes, frames), a saved comment paints a ring and a numbered badge from the array order, and every comment re-resolves against each render through the engine's finder (id, then label, then unanchored — reported through `onUnanchoredChange`). The anchor is `DiagramAnchor` from `@plannotator/core/diagram-anchor` (`{ v: 1, family, kind, id | from + to, label, sourceLine }`, document lines), and Plannotator stores it as `Annotation.diagramAnchor`. Runtime slots: `utils/mermaid` (as before) and `utils/graphviz` (new, same shape, `@viz-js/viz` pinned `3.30.0`), each lazy on first use or filled by the host. `DiagramPopout` is the full-size viewer in the `PopoutDialog` chrome. See HANDOFF.md § "Diagram engine (0.41.0)" for every export, the adapter, the sanitizer and the migration notes.
+
+### Host toolbar seams (0.43.0)
+
+Two opt-in props for hosts that want their own commands and their own people
+inside the annotation UI. Both default to today's behavior — pass neither and
+the toolbar and the comment composer render byte-for-byte what they rendered
+in 0.42.0 (proven by diffing the mounted `outerHTML` against the base commit).
+
+- **`AnnotationToolbar` `selectionActions`** (forwarded by `Viewer` to both its
+  toolbars, and by `HtmlViewer` to the HTML selection toolbar): an array of
+  `{ id, label, detail?, icon?, onSelect(ctx) }`. They render as ONE wand
+  button (`data-selection-actions`) in the slot the quick-labels Zap occupied,
+  opening the package's dropdown below it (arrows + Enter + Escape, nothing
+  preselected until the first arrow). `onSelect` receives
+  `{ text, blockId, startOffset, endOffset, element }` — the same coordinates
+  an annotation created from that selection would carry (`blockId: ''` and
+  `startOffset: 0` on a surface with no blocks, such as raw HTML) — and the
+  toolbar closes. **The package creates no annotation:** what an action does is yours.
+  An empty array renders no button.
+- **`AnnotationToolbar` `selectionActionsIcon`** (forwarded by `Viewer` and
+  `HtmlViewer`): the glyph on the `selectionActions` button, so a host can match
+  the wand it draws elsewhere. Absent means the package's own wand; nothing else
+  about the button changes.
+- **`AnnotationToolbar` `quickLabels`** (default `true`): `false` hides the Zap
+  picker and makes the Alt+digit label shortcuts inert on that toolbar. The
+  one-click 👍 is unaffected, and mode state is still yours to clamp.
+- **`CommentPopover` `mentionSource`** (0.43.2 adds `heading?` above the list
+  and an optional `avatar?: { url?, initials?, tint? }` per person, drawn before
+  the label; both absent → the 0.43.1 rows): `{ people, emptyNotice?,
+  onMentionsChange?, onPickBlocked? }` over `MentionPerson`
+  (`{ id, kind, label, detail, canOpen }`). Typing `@` at a word boundary opens
+  a portaled picker measured from the textarea; picking inserts the readable
+  `@Label ` token, and the ids ride `onMentionsChange(ids)` plus an optional
+  third `onSubmit(text, images?, mentions?)` argument that is passed **only**
+  when a source is supplied. Deleting a token untags that person. A
+  `canOpen: false` person inserts nothing when you supply `onPickBlocked` (your
+  no-access dialog) and inserts normally when you do not. Not wired to any
+  Plannotator data and not a `configurePlannotatorUI` seam — pass it where you
+  render the composer.
+- **`CommentPopover` mention chips** (0.44.0): with a `mentionSource`, the
+  `@Label` tokens the picker inserted render as chips in the composer's text —
+  the same mirrored overlay skill references use, never a second layer. Each
+  chip span carries `data-mention-token="<person id>"` and
+  `data-mention-kind`, which is `MentionPerson.kind` verbatim — today that is
+  always `user`, because the picker offers users only; `agent` is reserved
+  and matches nothing yet. `MentionSource.tokenClassName?` is appended to the
+  span for your own look. **Metric rule, yours to keep too:** a chip
+  may change color, background, border-radius, box-shadow and text-decoration
+  ONLY — padding, margin, border width, weight, tracking or size move a glyph
+  and drift the caret off the painted text (want a pill? add
+  `box-shadow: 0 0 0 Npx <background>`, which paints without taking space).
+  Only a person you supplied and the author picked is a chip, and editing a
+  byte of the token un-chips it in the same render that drops the id. Two
+  inherited limits: two labels that sanitize to the same token are one token
+  in a plain-text body, so the first person you list owns every occurrence of
+  it; and a restored draft has no chips (and reports no ids) until the author
+  picks again. No source → no overlay element at all.
+- **`Viewer` / `HtmlViewer` `mentionSource`** (0.43.1): the same prop on the two
+  viewers, forwarded to every comment composer each of them mounts, so a host
+  wires mentions once per surface instead of per composer. The ids the author
+  kept ride onto the created annotation as `Annotation.mentions`
+  (`readonly string[]`, present only when a source was supplied and at least
+  one token survived). It is host data: the package never renders, exports,
+  shares or archives it.
+
+See HANDOFF.md § "Host toolbar seams (0.43.0)" for the grammar, the keyboard
+rules and the threading points, and § "mentionSource on the viewers (0.43.1)"
+for the two viewer props and the annotation field. § "Mention token chips in
+the composer (0.44.0)" covers the chips, the metric rule, the merged-range
+refactor behind them, and the three inherited limits (duplicate labels,
+restored drafts, and a label that is a prefix of another label).
+
+### Annotation card seams (`AnnotationPanel`; 0.45.0)
+
+Two more opt-in props, both on the panel and both defaulting to today's
+behavior — pass neither and the panel renders byte-for-byte what it rendered
+in 0.44.0 (proven by diffing mounted `outerHTML` against the base commit for
+an empty panel, every card kind, a card in edit mode, `readOnly` and the
+All-files view).
+
+- **`renderCardHeader?: (annotation) => ReactNode`** — the twin of
+  `renderCardFooter`, rendered inside each plan-annotation card's header row
+  after `author · time` and before the built-in edit/delete actions: the place
+  for a status stamp (resolved, needs reply, a reviewer badge). Its wrapper is
+  `[data-annotation-card-header]` and swallows clicks and keydowns, so
+  interacting with your stamp never selects the card. It renders under
+  `readOnly` for the same reason the footer does — a stamp is a read
+  affordance — and, like the footer, only on the OPEN document's cards in the
+  All-files grouped view. Return `null` for a card and no wrapper exists for
+  it; omit the prop and no wrapper exists at all. The header row is one
+  non-wrapping flex line, so keep the stamp compact: the wrapper shrinks but
+  a node that cannot will overflow toward the built-in actions.
+- **`mentionSource?: MentionSource`** — the same source `Viewer` and
+  `HtmlViewer` take (0.43.1), applied to the card's EDIT box, so a comment can
+  be re-tagged after it was written. The grammar, the picker, the keyboard
+  rules and `onPickBlocked` are the ones documented above. Saving an edit
+  calls `onEdit(id, { text, mentions })` **only** when a source is supplied
+  AND at least one person was picked in that edit session whose token
+  survives; otherwise it is the `onEdit(id, { text })` it always was, so an
+  untouched or pick-less edit can never wipe tags the annotation already
+  carries. Reopening the editor starts a fresh session with nobody picked, and
+  `onMentionsChange` follows that session — it reports `[]` once when the
+  editor opens, so treat it as the live picker state, never as the
+  annotation's stored tags.
+  **One difference from `CommentPopover`: no chips** — the token stays plain
+  text, because the chip layer lives in the composer's mirrored overlay and is
+  not worth duplicating; the follow-up is to move the card's edit box onto
+  `ComposerTextarea`.
+
+Neither prop reaches `CodeAnnotation` cards (the review-editor shape), which
+take no `renderCardFooter` either. See HANDOFF.md § "Annotation card header
+slot and mentions on the edit box (0.45.0)".
 
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
@@ -162,9 +365,9 @@ npm install @plannotator/ui @plannotator/core
 ## Packages & publishing
 
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
-- `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on `@plannotator/core` (exact-version lockstep). Published.
+- `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Versioned together (currently `@plannotator/ui` 0.34.0 on `@plannotator/core` 0.25.0). `core` is bumped only when something under `packages/core` changed, so `ui` can advance alone: 0.33.0 and 0.34.0 are such releases, published on the already available core 0.25.0. When both change, publish `core` then `ui`: build each tarball with **`bun pm pack`** (resolves `workspace:*` to the exact version at pack time, from `bun.lock`, so run `bun install` after a bump), then **`npm publish *.tgz --provenance --access public`**, the repo's existing flow (`--provenance` needs CI OIDC; local publishes drop it, see HANDOFF.md "Publishing & versioning").
+- Currently `@plannotator/ui` 0.43.0 depends exactly on `@plannotator/core` 0.25.5. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

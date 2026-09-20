@@ -237,4 +237,58 @@ describe('code-review annotation draft persistence', () => {
     expect(stillThere!.codeAnnotations).toHaveLength(1);
     await s.unmount();
   });
+
+  test.skipIf(!hasDom)('auto-view suppression round-trips, and an older draft without it restores empty', async () => {
+    // Guards the "come back to this" contract across a reload: a file the
+    // reviewer un-viewed must still be off-limits to auto-view after the draft
+    // comes back. The second half guards backward compatibility — a draft
+    // written before the field must restore, not throw or resurrect state.
+    const s1 = await mountSession(options());
+    await s1.rerender(options({
+      annotations: [ANNOTATION],
+      viewedFiles: new Set(['src/a.ts']),
+      autoViewSuppressed: new Set(['src/b.ts']),
+    }));
+    await tick(DEBOUNCE_WAIT_MS);
+    const saved = loadDraft(DRAFT_KEY) as { autoViewSuppressed?: string[] } | null;
+    expect(saved!.autoViewSuppressed).toEqual(['src/b.ts']);
+    await s1.unmount();
+
+    const s2 = await mountSession(options());
+    // restoreDraft clears the banner, so it is a state update like any other.
+    let restoredSuppressed: string[] = [];
+    await act(async () => { restoredSuppressed = s2.result.current!.restoreDraft().autoViewSuppressed; });
+    expect(restoredSuppressed).toEqual(['src/b.ts']);
+    await s2.unmount();
+
+    // A draft written by a build that predates the field.
+    deleteDraft(DRAFT_KEY);
+    saveDraft(DRAFT_KEY, {
+      codeAnnotations: [ANNOTATION],
+      viewedFiles: ['src/a.ts'],
+      draftGeneration: 1,
+      ts: Date.now(),
+    });
+    const s3 = await mountSession(options());
+    let restored = { viewedFiles: [] as string[], autoViewSuppressed: [] as string[] };
+    await act(async () => { restored = s3.result.current!.restoreDraft(); });
+    expect(restored.viewedFiles).toEqual(['src/a.ts']);
+    expect(restored.autoViewSuppressed).toEqual([]);
+    await s3.unmount();
+  });
+
+  test.skipIf(!hasDom)('suppression alone does not keep an otherwise empty draft alive', async () => {
+    // Deliberate edge (#948 semantics stay untouched): the un-view set is not
+    // content. A session with nothing but suppression is still empty and still
+    // tombstones, so clear-everything keeps meaning what it means today.
+    const s = await mountSession(options());
+    await s.rerender(options({ annotations: [ANNOTATION] }));
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(loadDraft(DRAFT_KEY)).not.toBeNull();
+
+    await s.rerender(options({ annotations: [], autoViewSuppressed: new Set(['src/b.ts']) }));
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(loadDraft(DRAFT_KEY)).toBeNull();
+    await s.unmount();
+  });
 });

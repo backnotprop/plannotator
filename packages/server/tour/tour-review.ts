@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -413,17 +413,26 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
   };
 }
 
-const TOUR_SCHEMA_DIR = getPlannotatorDataDir();
-const TOUR_SCHEMA_FILE = join(TOUR_SCHEMA_DIR, "tour-schema.json");
-let tourSchemaMaterialized = false;
+/** Materialized schema path under the current data directory. */
+function tourSchemaPath(): string {
+  return join(getPlannotatorDataDir(), "tour-schema.json");
+}
+
+/** Schema paths this process has already refreshed with its own schema. */
+const materializedTourSchemaPaths = new Set<string>();
 
 async function ensureTourSchemaFile(): Promise<string> {
-  if (!tourSchemaMaterialized) {
-    await mkdir(TOUR_SCHEMA_DIR, { recursive: true });
-    await writeFile(TOUR_SCHEMA_FILE, TOUR_SCHEMA_JSON);
-    tourSchemaMaterialized = true;
+  const schemaPath = tourSchemaPath();
+  // Guarded per resolved path, not per process and not by file existence: a
+  // PLANNOTATOR_DATA_DIR change after import materializes the schema in the
+  // new location, and a stale file left by an older binary is overwritten
+  // once per process so the agent always gets the current schema.
+  if (!materializedTourSchemaPaths.has(schemaPath)) {
+    await mkdir(dirname(schemaPath), { recursive: true });
+    await writeFile(schemaPath, TOUR_SCHEMA_JSON);
+    materializedTourSchemaPaths.add(schemaPath);
   }
-  return TOUR_SCHEMA_FILE;
+  return schemaPath;
 }
 
 export function generateTourOutputPath(): string {

@@ -66,6 +66,9 @@ const server = await startReviewServer({
   rawPatch,
   gitRef: displayRef,
   htmlContent,
+  // This dev server emits the full decision JSON below — feedback included on
+  // approve — so it advertises approve-with-notes (spec §6.4).
+  approvalNotesSupported: true,
   onReady: (url, isRemote, port) => {
     handleReviewServerReady(url, isRemote, port);
     console.error(`Code review at ${url}`);

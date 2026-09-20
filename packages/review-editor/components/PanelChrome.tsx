@@ -30,6 +30,8 @@ export function PanelControlsRow({
   onToggleShowViewedControls,
   showStageControls = true,
   onToggleShowStageControls,
+  autoViewed = true,
+  onToggleAutoViewed,
 }: {
   stagedCount?: number;
   isSearchVisible?: boolean;
@@ -49,6 +51,11 @@ export function PanelControlsRow({
   onToggleShowViewedControls?: () => void;
   showStageControls?: boolean;
   onToggleShowStageControls?: () => void;
+  /** Auto-mark-viewed (`reviewAutoViewed`). Optional: without the handler the
+   *  switch row is not rendered, so hosts that don't have the feature are
+   *  unchanged. */
+  autoViewed?: boolean;
+  onToggleAutoViewed?: () => void;
 }) {
   const copyLabel =
     copyRawDiffStatus === "success"
@@ -319,6 +326,35 @@ export function PanelControlsRow({
                       />
                     </span>
                   </button>
+                  {onToggleAutoViewed && (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={autoViewed}
+                      onClick={onToggleAutoViewed}
+                      className="flex w-full items-center gap-3 rounded px-2 py-2 text-left hover:bg-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
+                      data-review-auto-viewed-toggle
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-xs">Auto-mark viewed</span>
+                        <span className="block text-[10px] leading-snug text-muted-foreground">
+                          Check files off as you scroll past
+                        </span>
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full border px-0.5 ${
+                          autoViewed
+                            ? "justify-end border-primary/70 bg-primary"
+                            : "justify-start border-border bg-muted"
+                        }`}
+                      >
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${autoViewed ? "bg-primary-foreground" : "bg-muted-foreground/70"}`}
+                        />
+                      </span>
+                    </button>
+                  )}
                 </Popover.Popup>
               </Popover.Positioner>
             </Popover.Portal>

@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import { basename, resolve as resolvePath } from "node:path";
 
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash, deleteDraft } from "../generated/draft.ts";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveGuideHistory, resolveGuideShareUrl } from "../generated/config.ts";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl } from "../generated/config.ts";
+import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 
 export type {
@@ -48,6 +49,7 @@ import {
 	isBinaryPatchFile,
 	isSameCwdCommitSwitch,
 	listPatchFiles,
+	STATIC_PATCH_DIFF_TYPE,
 	parseCommitDiffType,
 	parseWorktreeDiffType,
 	resolveBaseBranch,
@@ -157,7 +159,9 @@ import {
 import {
 	type CodeNavRequest,
 	type CodeNavRuntime,
+	CODE_NAV_MAX_FILE_BYTES,
 	resolveCodeNav,
+	resolveCodeNavHover,
 	validateCodeNavRequest,
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
@@ -188,6 +192,7 @@ import {
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
 	resolveVcsCwd,
+	resolveAvailableDiffType,
 	reviewRuntime,
 	materializeVcsSnapshot,
 	runVcsDiff,
@@ -225,6 +230,18 @@ const piCodeNavRuntime: CodeNavRuntime = {
 				resolve({ stdout: "", stderr: "command not found", exitCode: 1 });
 			});
 		});
+	},
+
+	async readFile(path, options) {
+		try {
+			const full = options?.cwd ? `${options.cwd}/${path}` : path;
+			// Check the size before pulling bytes: rg would not have searched a
+			// file this large either.
+			if (statSync(full).size > CODE_NAV_MAX_FILE_BYTES) return null;
+			return readFileSync(full, "utf-8");
+		} catch {
+			return null;
+		}
 	},
 };
 
@@ -280,10 +297,33 @@ export async function startReviewServer(options: {
 	 * the patch that's already on screen.
 	 */
 	initialBase?: string;
+	/**
+	 * The caller pinned `initialBase` deliberately (a `--base` flag / an
+	 * explicit programmatic choice), not merely as the base its initial patch
+	 * happened to use. Seeds `baseExplicitlyChosen`: canonicalization off,
+	 * startup upgrade suppressed. Additive and opt-in — plain
+	 * forward-the-local-name-and-let-it-upgrade callers are unchanged.
+	 */
+	initialBaseExplicit?: boolean;
+	/**
+	 * The caller pinned this session's opening diff type and/or base (CLI
+	 * flags). Echoed on `/api/diff` so the client must not auto-switch the
+	 * diff on mount, and must not consume the one-time review-setup cookie.
+	 */
+	openStatePinned?: boolean;
 	/** Freshness token captured atomically with the initial provider patch. */
 	initialFingerprint?: string;
 	error?: string;
 	sharingEnabled?: boolean;
+	/**
+	 * Whether this session's decision consumer delivers approve-time feedback
+	 * (decision-control spec §6.4). Mirrors the Bun server: echoed as
+	 * `approvalNotesSupported` on every diff payload (`/api/diff`,
+	 * `/api/diff/switch`, `/api/pr-diff-scope`, `/api/pr-switch`) so the advert
+	 * survives a diff switch. Default false — an absent option advertises
+	 * "not capable" and the client renders no approve-carrying items.
+	 */
+	approvalNotesSupported?: boolean;
 	shareBaseUrl?: string;
 	pasteApiUrl?: string;
 	prMetadata?: PRMetadata;
@@ -295,6 +335,15 @@ export async function startReviewServer(options: {
 	 * once a pool checkout is ready.
 	 */
 	prPatchIncomplete?: boolean;
+	/**
+	 * Detected project name, used to key the durable feedback archive
+	 * (`feedback/{project}/`). Mirrors the annotate server's `project` option.
+	 * Callers should pass `detectProjectName()`; without it the server falls
+	 * back to deriving a name from the review's working directory, which is
+	 * wrong in PR mode (no `gitContext`, and `--local` points `agentCwd` at a
+	 * `pool/pr-<n>` checkout, so records would bucket under `pr-123`).
+	 */
+	project?: string;
 	/** Working directory for agent processes (e.g., --local worktree). Independent of diff pipeline. */
 	agentCwd?: string;
 	/** Local parent directory containing multiple child VCS repositories. */
@@ -382,7 +431,12 @@ export async function startReviewServer(options: {
 			// Non-fatal: viewed state is best-effort
 		}
 	}
-	let repoInfo = prMeta
+	// Static patch: the session has no repository. Whatever repo the process
+	// happens to sit in is NOT the patch's origin, and advertising it would put
+	// an unrelated repo and branch in the review header.
+	let repoInfo = options.diffType === STATIC_PATCH_DIFF_TYPE
+		? undefined
+		: prMeta
 		? {
 				display: getDisplayRepo(prMeta),
 				branch: `${getMRLabel(prMeta)} ${getMRNumberLabel(prMeta)}`,
@@ -426,8 +480,9 @@ export async function startReviewServer(options: {
 	// switch body). Disables the bare-local-name → origin/* canonicalization:
 	// the picker offers local and remote refs as distinct choices, so an
 	// explicit local pick must be honored even when the two point at
-	// different commits.
-	let baseExplicitlyChosen = false;
+	// different commits. A caller-pinned base (`--base` via
+	// initialBaseExplicit) seeds it for the same reason.
+	let baseExplicitlyChosen = options.initialBaseExplicit === true;
 	const resolveReviewBase = (
 		requestedBase?: string,
 		explicitlyChosen = baseExplicitlyChosen,
@@ -711,7 +766,10 @@ export async function startReviewServer(options: {
 			async (remote) => {
 				if (remote && !baseEverSwitched && currentBase !== remote) {
 					const localName = remote.replace(/^origin\//, "");
-					if (!options.initialBase || currentBase === localName) {
+					// An explicitly-pinned base (`--base main`) means the LOCAL ref
+					// on purpose — never upgrade it, even when it is the default's
+					// bare local name. Unpinned forwarded local names keep upgrading.
+					if (!options.initialBaseExplicit && (!options.initialBase || currentBase === localName)) {
 						// Rebuild the diff for the upgraded base BEFORE swapping it in, and
 						// commit base+patch+ref+fingerprint together — otherwise the initial
 						// patch (built against the old base) would be served under the new
@@ -827,6 +885,77 @@ export async function startReviewServer(options: {
 	function currentSnapshotId(): string {
 		return `${draftKey}:${currentDiffType}${isPRMode ? `:${currentPRDiffScope}` : ""}${currentContextRevision ? `:${currentContextRevision}` : ""}`;
 	}
+
+	// --- Durable feedback archive (Node mirror of packages/server/review.ts) ---
+	//
+	// Code review persisted nothing on submit: the draft was deleted, the
+	// decision promise settled, and a timed-out agent meant the review existed
+	// nowhere. Every submission now appends one record to
+	// feedback/{project}/index.jsonl BEFORE the draft is deleted, carrying diff
+	// IDENTITY (refs, view, snapshot id, size) but never the patch bytes.
+	// Project bucketing: prefer the caller's detected project name. The cwd
+	// fallback is only right for a plain local review — PR mode has no
+	// gitContext, and `--local` sets agentCwd to a `pool/pr-<n>` checkout, so
+	// deriving from cwd there would file every PR review under `pr-123`.
+	//
+	// Known limitation, deliberately not chased here: a caller that passes no
+	// project AND reviews a moved/renamed working directory buckets under the
+	// new directory name, exactly like the rest of the data dir does.
+	const feedbackProject = (): string =>
+		options.project?.trim()
+			? options.project
+			: deriveFeedbackProject(options.gitContext?.cwd ?? options.agentCwd ?? process.cwd());
+
+	const feedbackReviewTarget = (): FeedbackReviewTarget => {
+		const target: FeedbackReviewTarget = {
+			diffType: String(currentDiffType),
+			base: currentBase,
+			gitRef: currentGitRef,
+			snapshotId: currentSnapshotId(),
+			changedFiles: countChangedFiles(currentPatch),
+			patchBytes: currentPatch.length,
+		};
+		if (sessionVcsType) target.vcsType = sessionVcsType;
+		else if (workspace) target.vcsType = "workspace";
+		const cwd = options.gitContext?.cwd ?? options.agentCwd;
+		if (cwd) target.cwd = cwd;
+		if (prMeta) {
+			target.pr = {
+				provider: prMeta.platform,
+				repo:
+					prMeta.platform === "github"
+						? `${prMeta.owner}/${prMeta.repo}`
+						: prMeta.projectPath,
+				number: prMeta.platform === "github" ? prMeta.number : prMeta.iid,
+			};
+		}
+		return target;
+	};
+
+	/**
+	 * Returns whether the draft delete may proceed: false only when a durable
+	 * write was expected and failed, so the draft stays as the recovery copy.
+	 */
+	const archiveReviewSubmission = (
+		feedback: unknown,
+		annotations: unknown,
+		decision: FeedbackDecision,
+	): boolean => {
+		if (!resolveFeedbackHistory(loadConfig())) return true;
+		const feedbackText = typeof feedback === "string" ? feedback : "";
+		const annotationList = Array.isArray(annotations) ? annotations : [];
+		const hasContent = feedbackText.trim().length > 0 || annotationList.length > 0;
+		const written = appendFeedbackRecord({
+			project: feedbackProject(),
+			origin: options.origin ?? "pi",
+			surface: "review",
+			decision,
+			target: { review: feedbackReviewTarget() },
+			feedback: feedbackText,
+			annotations: annotationList,
+		});
+		return written !== null || !hasContent;
+	};
 
 	function buildCurrentAiReviewContext(
 		patch: string = currentPatch,
@@ -1598,6 +1727,18 @@ export async function startReviewServer(options: {
 	});
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
+	// Session-constant capability advert; rides every diff payload (see the
+	// option's doc). Absent option = false, so old callers advertise honestly.
+	const approvalNotesSupported = options.approvalNotesSupported === true;
+	// Static patch mode (`--patch-file`): caller-supplied diff bytes, no repo,
+	// no working tree. Advertised as `sourceKind: "patch"` on every diff payload
+	// (absent reads as "vcs") and enforced by 400ing the endpoints that would
+	// otherwise resolve the patch's paths against an unrelated cwd. Mirrors
+	// packages/server/review.ts.
+	const isStaticPatchMode = options.diffType === STATIC_PATCH_DIFF_TYPE;
+	const sourceKindAdvert = isStaticPatchMode
+		? ({ sourceKind: "patch" } as const)
+		: ({} as Record<string, never>);
 	const shareBaseUrl =
 		(options.shareBaseUrl ?? process.env.PLANNOTATOR_SHARE_URL) || undefined;
 	const pasteApiUrl =
@@ -1960,7 +2101,7 @@ export async function startReviewServer(options: {
 				snapshotId: servedSnapshotId,
 				origin: options.origin ?? "pi",
 				mode: isWorkspaceMode ? "workspace" : undefined,
-				diffType: hasLocalAccess || isWorkspaceMode ? servedDiffType : undefined,
+				diffType: hasLocalAccess || isWorkspaceMode || isStaticPatchMode ? servedDiffType : undefined,
 				// Echo the active base so page refresh/reconnect rehydrates the
 				// picker to what the server is actually using, not the detected default.
 				base: hasLocalAccess ? servedBase : undefined,
@@ -1968,6 +2109,11 @@ export async function startReviewServer(options: {
 				...(workspace && { diffOptions: workspace.diffOptions }),
 				gitContext: hasLocalAccess ? servedGitContext : undefined,
 				sharingEnabled,
+				approvalNotesSupported,
+				...sourceKindAdvert,
+				// Mount is the only place the pin matters, so it rides /api/diff
+				// alone (not the switch endpoints).
+				...(options.openStatePinned && { openStatePinned: true }),
 				shareBaseUrl,
 				pasteApiUrl,
 				repoInfo,
@@ -2233,7 +2379,7 @@ export async function startReviewServer(options: {
 			}
 			try {
 				const body = await parseBody(req);
-				const newType = body.diffType as DiffType | WorkspaceDiffType;
+				let newType = body.diffType as DiffType | WorkspaceDiffType;
 				if (typeof newType !== "string" || !newType) {
 					json(res, { error: "Missing diffType" }, 400);
 					return;
@@ -2267,6 +2413,8 @@ export async function startReviewServer(options: {
 						aiReviewContext: buildCurrentAiReviewContext(snapshot.rawPatch),
 						gitRef: currentGitRef,
 						snapshotId: currentSnapshotId(),
+						approvalNotesSupported,
+						...sourceKindAdvert,
 						diffType: currentDiffType,
 						diffOptions: workspace.diffOptions,
 						hideWhitespace: currentHideWhitespace,
@@ -2287,6 +2435,11 @@ export async function startReviewServer(options: {
 				// (diff-type switches, refreshes) must not re-canonicalize it.
 				const nextBaseExplicitlyChosen = baseExplicitlyChosen ||
 					(body.explicitBase === true && typeof body.base === "string" && !!body.base);
+				const requestedDiffType = newType as DiffType;
+				const availability = clientGitContext
+					? resolveAvailableDiffType(clientGitContext, requestedDiffType, nextBaseExplicitlyChosen)
+					: { diffType: requestedDiffType };
+				newType = availability.diffType;
 				const base = resolveReviewBase(
 					typeof body.base === "string" ? body.base : undefined,
 					nextBaseExplicitlyChosen,
@@ -2366,8 +2519,34 @@ export async function startReviewServer(options: {
 				baseBehindRemote = nextBaseBehindRemote;
 				currentError = result.error;
 				draftKey = contentHash(currentPatch);
+				// Session-context adoption is provider-scoped: gitbutler (as
+				// before this change) because its stack topology is the
+				// context, and jj so the jj-line availability/fallback stays
+				// fresh across reloads. Plain git keeps the launch-frozen
+				// session context — currentBranch labels the launch cwd in
+				// WorktreePicker and the feedback branch label, and adopting a
+				// switched worktree's recomputed context here would repoint
+				// those on the next reload.
+				const adoptContext =
+					updatedContext !== undefined &&
+					(sessionVcsType === "gitbutler" || sessionVcsType === "jj");
+				const nextClientContext = adoptContext
+					? updatedContext
+					: clientGitContext;
+				if (nextClientContext) {
+					clientGitContext = {
+						...nextClientContext,
+						diffFallback: availability.fallback
+							? {
+								requestedDiffType,
+								effectiveDiffType: newType,
+								message: availability.fallback.message,
+								candidates: availability.fallback.candidates,
+							}
+							: undefined,
+					};
+				}
 				if (updatedContext && sessionVcsType === "gitbutler") {
-					clientGitContext = updatedContext;
 					currentContextRevision = updatedContextRevision ?? "";
 				}
 				captureDiffFingerprint(result.fingerprint);
@@ -2378,6 +2557,8 @@ export async function startReviewServer(options: {
 					aiReviewContext: buildCurrentAiReviewContext(result.patch, currentBase),
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
+					approvalNotesSupported,
+					...sourceKindAdvert,
 					diffType: currentDiffType,
 					// Echo the base the server actually used. resolveBaseBranch
 					// trusts the caller verbatim; this echo lets the client
@@ -2389,7 +2570,22 @@ export async function startReviewServer(options: {
 					...(commitInfo ? { commitInfo } : {}),
 					...(generatedFiles ? { generatedFiles } : {}),
 					...(baseBehindRemote ? { baseBehindRemote: true } : {}),
-					...(updatedContext ? { gitContext: updatedContext } : {}),
+					// The response still carries a transiently recomputed context
+					// (worktree switches on plain git) even when the session did
+					// not adopt it — matching the pre-jj-line behavior.
+					// Emitted only when a context was actually recomputed: on a
+					// same-cwd commit:<sha> switch (recompute skipped) the client
+					// keeps what it has. Echoing the launch-frozen session context
+					// here would revert the base picker and commit-baseline list
+					// on every Commits-rail click.
+					...(updatedContext
+						? {
+							gitContext: {
+								...updatedContext,
+								diffFallback: clientGitContext?.diffFallback,
+							},
+						}
+						: {}),
 					...(currentError ? { error: currentError } : {}),
 					semanticDiff: switchSemanticDiff,
 					callFlow: switchCallFlow,
@@ -2424,6 +2620,8 @@ export async function startReviewServer(options: {
 						aiReviewContext: buildCurrentAiReviewContext(),
 						gitRef: currentGitRef,
 						snapshotId: currentSnapshotId(),
+						approvalNotesSupported,
+						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
 						...(currentError ? { error: currentError } : {}),
@@ -2489,6 +2687,8 @@ export async function startReviewServer(options: {
 						aiReviewContext: buildCurrentAiReviewContext(),
 						gitRef: currentGitRef,
 						snapshotId: currentSnapshotId(),
+						approvalNotesSupported,
+						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
 						...((currentError ?? upgradeError) ? { error: currentError ?? upgradeError } : {}),
@@ -2528,6 +2728,8 @@ export async function startReviewServer(options: {
 					aiReviewContext: buildCurrentAiReviewContext(),
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
+					approvalNotesSupported,
+					...sourceKindAdvert,
 					prDiffScope: currentPRDiffScope,
 					semanticDiff: await getSemanticDiffAdvert(),
 					callFlow: await getCallFlowAdvert(),
@@ -2612,6 +2814,8 @@ export async function startReviewServer(options: {
 					aiReviewContext: buildCurrentAiReviewContext(),
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
+					approvalNotesSupported,
+					...sourceKindAdvert,
 					prMetadata: pr.metadata,
 					// The new PR's checkout (null while warming) so Open-in re-roots
 					// immediately on switch instead of waiting for the 5s probe.
@@ -2802,6 +3006,12 @@ export async function startReviewServer(options: {
 				json(res, { error: message }, 500);
 			}
 		} else if (url.pathname === "/api/file-content" && req.method === "GET") {
+			// No working tree behind a static patch: the patch IS the whole content
+			// of the session, so there is nothing to expand into.
+			if (isStaticPatchMode) {
+				json(res, { error: "File content is unavailable for a static patch review" }, 400);
+				return;
+			}
 			const filePath = url.searchParams.get("path");
 			if (!filePath) {
 				json(res, { error: "Missing path" }, 400);
@@ -2974,6 +3184,32 @@ export async function startReviewServer(options: {
 			} catch (err) {
 				json(res, { error: err instanceof Error ? err.message : "Code navigation failed" }, 500);
 			}
+		} else if (url.pathname === "/api/code-nav/hover" && req.method === "POST") {
+			// Same guards as /resolve — the hover pipeline reads exactly what
+			// Cmd+click reads.
+			if (isGitButlerCommittedView()) {
+				json(res, { error: "Code navigation is unavailable for committed GitButler views" }, 400);
+				return;
+			}
+			const hasCodeNavAccess = !!workspace || !!options.gitContext || !!options.agentCwd || !!options.worktreePool;
+			if (!hasCodeNavAccess) {
+				json(res, { error: "Code navigation requires local access" }, 400);
+				return;
+			}
+			try {
+				const body = (await parseBody(req)) as unknown as CodeNavRequest;
+				const error = validateCodeNavRequest(body);
+				if (error) {
+					json(res, { error }, 400);
+					return;
+				}
+				const navCwd = resolveAgentCwd();
+				const changedFiles = extractChangedFiles(currentPatch);
+				const result = await resolveCodeNavHover(piCodeNavRuntime, body, navCwd, changedFiles);
+				json(res, result);
+			} catch (err) {
+				json(res, { error: err instanceof Error ? err.message : "Code navigation failed" }, 500);
+			}
 		} else if (url.pathname === "/api/code-nav/file" && req.method === "GET") {
 			if (isGitButlerCommittedView()) {
 				json(res, { error: "Code navigation is unavailable for committed GitButler views" }, 400);
@@ -3103,6 +3339,10 @@ export async function startReviewServer(options: {
 			}
 			json(res, { instructions: writeGuideInstructions(instructions) });
 		} else if (url.pathname === "/api/git-add" && req.method === "POST") {
+			if (isStaticPatchMode) {
+				json(res, { error: "Staging is unavailable for a static patch review" }, 400);
+				return;
+			}
 			try {
 				const body = await parseBody(req);
 				const filePath = body.filePath as string | undefined;
@@ -3154,6 +3394,13 @@ export async function startReviewServer(options: {
 				json(res, { error: message }, 500);
 			}
 		} else if (url.pathname === "/api/open-in/apps" && req.method === "GET") {
+			// Static patch mode has no tree the patch's paths belong to, so
+			// advertise no apps: the client hides the control rather than offering
+			// to open a same-named file from an unrelated checkout.
+			if (isStaticPatchMode) {
+				json(res, { available: false, apps: [] });
+				return;
+			}
 			// Remote/headless sessions can't open apps on the user's machine —
 			// report unavailable so the UI hides the control entirely.
 			if (isRemote) {
@@ -3164,6 +3411,13 @@ export async function startReviewServer(options: {
 		} else if (url.pathname === "/api/open-in" && req.method === "POST") {
 			if (isGitButlerCommittedView()) {
 				json(res, { error: "Open in app is unavailable for committed GitButler views" }, 400);
+				return;
+			}
+			// A static patch's paths belong to whatever tree produced the patch,
+			// which this process cannot know — resolving them against the session
+			// cwd would open an unrelated file with the same name.
+			if (isStaticPatchMode) {
+				json(res, { ok: false, error: "Open in app is unavailable for a static patch review" }, 400);
 				return;
 			}
 			if (isRemote) {
@@ -3269,17 +3523,35 @@ export async function startReviewServer(options: {
 			handleApiNotFound(res, url.pathname);
 			return;
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
+			// Decision-only line: dismissal rate is behavior data, and a
+			// contentless failure must not change the legacy draft behavior.
+			archiveReviewSubmission("", [], "dismissed");
 			deleteDraft(draftKey, readDraftGenerationFromUrl(req));
 			resolveDecision({ approved: false, feedback: '', annotations: [], exit: true });
 			json(res, { ok: true });
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
 			try {
 				const body = await parseBody(req);
-				deleteDraft(draftKey, readDraftGenerationFromBody(body));
+				// Archive BEFORE the draft delete: a failed write keeps the
+				// draft as the reviewer's recovery copy (#678 ordering).
+				// Defensive on the body's own types: a malformed value must
+				// degrade to the legacy behavior (settle + 200), never throw.
+				const approved = (body.approved as boolean) ?? false;
+				const feedbackText = (body.feedback as string) || "";
+				const annotationList = (body.annotations as unknown[]) || [];
+				const hasContent =
+					(typeof feedbackText === "string" && feedbackText.trim().length > 0) ||
+					(Array.isArray(annotationList) && annotationList.length > 0);
+				const durable = archiveReviewSubmission(
+					feedbackText,
+					annotationList,
+					approved ? (hasContent ? "approved-with-notes" : "lgtm") : "feedback",
+				);
+				if (durable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
 				resolveDecision({
-					approved: (body.approved as boolean) ?? false,
-					feedback: (body.feedback as string) || "",
-					annotations: (body.annotations as unknown[]) || [],
+					approved,
+					feedback: feedbackText,
+					annotations: annotationList,
 					agentSwitch: body.agentSwitch as string | undefined,
 				});
 				json(res, { ok: true });

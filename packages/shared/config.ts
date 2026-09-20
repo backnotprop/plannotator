@@ -56,6 +56,7 @@ interface PromptSectionConfig {
 export interface PromptConfig {
   review?: PromptSectionConfig & {
     approved?: string;
+    approvedWithNotes?: string;
     denied?: string;
   };
   plan?: PromptSectionConfig & {
@@ -180,6 +181,16 @@ export interface PlannotatorConfig {
    * annotate sessions fully stateless. Default: true.
    */
   annotateHistory?: boolean;
+  /**
+   * Durably archive every submitted review under ~/.plannotator/feedback/
+   * (or PLANNOTATOR_DATA_DIR): one append-only JSONL record per submission
+   * plus a markdown sidecar for the ones that carry content. NOTE: this
+   * writes the user's own feedback text and the document/code excerpts it
+   * quotes to disk, and nothing prunes the directory. Set to false to never
+   * write. Default: true. Annotate-surface records additionally honor
+   * `annotateHistory`, so the stateless-annotate promise is unchanged.
+   */
+  feedbackHistory?: boolean;
   /**
    * Extra file extensions annotate treats as markdown (#1307), e.g.
    * [".livemd"] for Livebook notebooks. Listed extensions are accepted
@@ -594,7 +605,7 @@ export function isAgentTerminalSide(
 export function resolveDefaultDiffType(cfg?: PlannotatorConfig): DefaultDiffType {
   const v = cfg?.diffOptions?.defaultDiffType as string | undefined;
   if (v === 'branch') return 'merge-base';
-  return v === 'since-base' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'since-base';
+  return v === 'since-base' || v === 'local-vs-remote' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : 'since-base';
 }
 
 /**
@@ -645,6 +656,25 @@ export function resolveAnnotateHistory(config: PlannotatorConfig): boolean {
     return envVal === "1" || envVal.toLowerCase() === "true";
   }
   return coerceConfigBoolean(config.annotateHistory, true);
+}
+
+/**
+ * Resolve whether submitted feedback is archived under feedback/.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_FEEDBACK_HISTORY env var  →  config.feedbackHistory  →  default true
+ *
+ * Deliberately a separate knob from annotateHistory: that one governs copying
+ * ANNOTATED CONTENT into the data dir, this one governs keeping the user's own
+ * SUBMISSIONS, and a code-review user must be able to control the second
+ * without touching the first. Annotate surfaces honor both.
+ */
+export function resolveFeedbackHistory(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_FEEDBACK_HISTORY;
+  if (envVal !== undefined) {
+    return envVal === "1" || envVal.toLowerCase() === "true";
+  }
+  return coerceConfigBoolean(config.feedbackHistory, true);
 }
 
 /**

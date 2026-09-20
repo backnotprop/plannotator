@@ -128,6 +128,11 @@ function createHarness(cwd: string) {
 				.get("plannotator_submit_plan")!
 				.execute("call-1", { filePath }, undefined, undefined, ctx);
 		},
+		markStepDone(step: number) {
+			return tools
+				.get("plannotator_mark_done")!
+				.execute("call-2", { step }, undefined, undefined, ctx);
+		},
 		async endTurn(text: string): Promise<void> {
 			for (const handler of handlers.get("turn_end") ?? []) {
 				await handler({ message: { role: "assistant", content: [{ type: "text", text }] } }, ctx);
@@ -183,11 +188,32 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		}
 	});
 
-	test("a DONE marker closes the matching todo", async () => {
+	test("marking a step during execution persists only that step", async () => {
 		const cwd = makeTempDir("plannotator-todo-sync-");
 		const todosDir = join(cwd, ".pi", "todos");
 		mkdirSync(todosDir, { recursive: true });
-		writeFileSync(join(cwd, "PLAN.md"), PLAN_CONTENT);
+		const planPath = join(cwd, "PLAN.md");
+		writeFileSync(planPath, PLAN_CONTENT);
+
+		const harness = createHarness(cwd);
+		await harness.startSession();
+		await harness.submitPlan("PLAN.md");
+		await harness.markStepDone(1);
+
+		expect(readFileSync(planPath, "utf8")).toBe(
+			"# Plan\n\n- [x] First step\n- [ ] Second step\n",
+		);
+		const byTitle = new Map(readTodos(todosDir).map((todo) => [todo.title, todo]));
+		expect(byTitle.get("1. First step")?.status).toBe("done");
+		expect(byTitle.get("2. Second step")?.status).toBe("open");
+	});
+
+	test("a DONE marker closes the matching todo and persists the plan", async () => {
+		const cwd = makeTempDir("plannotator-todo-sync-");
+		const todosDir = join(cwd, ".pi", "todos");
+		mkdirSync(todosDir, { recursive: true });
+		const planPath = join(cwd, "PLAN.md");
+		writeFileSync(planPath, PLAN_CONTENT);
 
 		const harness = createHarness(cwd);
 		await harness.startSession();
@@ -197,6 +223,7 @@ describe("plan execution mirrors into a detected todo provider", () => {
 		const byTitle = new Map(readTodos(todosDir).map((todo) => [todo.title, todo]));
 		expect(byTitle.get("1. First step")?.status).toBe("done");
 		expect(byTitle.get("2. Second step")?.status).toBe("open");
+		expect(readFileSync(planPath, "utf8")).toBe("# Plan\n\n- [x] First step\n- [ ] Second step\n");
 	});
 
 	test("keeps the progress widget even while mirroring", async () => {

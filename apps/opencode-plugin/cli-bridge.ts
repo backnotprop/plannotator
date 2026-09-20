@@ -5,13 +5,17 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
+  composeReviewApprovedMessage,
   getAnnotateApprovedWithNotesPrompt,
   getAnnotateFileFeedbackPrompt,
   getAnnotateMessageFeedbackPrompt,
-  getReviewApprovedPrompt,
   getReviewDeniedSuffix,
 } from "@plannotator/shared/prompts";
-import { resolveTargetAgent, resolveValidatedTargetAgent } from "./agent-switch";
+import {
+  resolveTargetAgent,
+  resolveValidatedTargetAgent,
+  type OpenCodeAgentModel,
+} from "./agent-switch";
 import {
   deliverOpenCodePrompt,
   isOpenCodePromptDeliveryError,
@@ -27,6 +31,13 @@ interface OpenCodeClient {
   tui?: {
     showToast?: (input: unknown) => unknown;
   };
+  /**
+   * Host-provided visible delivery for a session URL, preferred over the toast
+   * when present. OpenCode 1 clients carry none and keep the toast unchanged;
+   * OpenCode 2's bridge client supplies one because it has no `tui` domain
+   * (see `createSessionUrlNotifier` in `v2-client.ts`).
+   */
+  notifyUrl?: (input: { url: string; message: string }) => unknown;
   session?: {
     messages?: (input: unknown) => Promise<{ data?: any[] }>;
     prompt?: (input: unknown) => Promise<unknown>;
@@ -45,6 +56,8 @@ export interface OpenCodeBridgeAgent {
   description?: string;
   mode?: string;
   hidden?: boolean;
+  /** Model configured for this agent, when the host reports one. */
+  model?: OpenCodeAgentModel;
 }
 
 export interface OpenCodeBridgeContext {
@@ -113,32 +126,38 @@ function getPlannotatorBin(): string {
 const TOAST_URL_RE = /https?:\/\/\S+/;
 
 // client.app.log only reaches OpenCode's server log file — it is never shown
-// in the TUI. Remote users (no auto-opened browser) therefore never saw the
-// session URL. Any URL-bearing message must ALSO go through tui.showToast,
-// which is the SDK's visible surface. Best-effort: older hosts without the
-// /tui/show-toast endpoint just no-op. `toastedUrls` dedupes across the two
-// delivery paths (stderr forwarder + ready-file poller) so one session never
-// stacks two toasts for the same URL.
+// in the TUI, and on OpenCode 2 it is a console.error the host discards
+// outright. Remote users, who get no auto-opened browser, therefore never saw
+// the session URL. Any URL-bearing message must ALSO go through a VISIBLE
+// surface: tui.showToast on OpenCode 1, and client.notifyUrl on OpenCode 2,
+// whose server-plugin context has no tui domain at all. Best-effort on both: a
+// host without the /tui/show-toast endpoint, or without any way to notify,
+// just no-ops. `toastedUrls` dedupes across the two delivery paths (stderr
+// forwarder + ready-file poller) so one session never stacks two notices for
+// the same URL.
 function toastPlannotatorUrl(client: OpenCodeClient, message: string, toastedUrls: Set<string>): void {
   const url = TOAST_URL_RE.exec(message)?.[0];
   if (!url || toastedUrls.has(url)) return;
   toastedUrls.add(url);
   try {
-    const result = (client as any).tui?.showToast?.({
-      body: { title: "Plannotator", message, variant: "info" },
-    });
+    const notify = client.notifyUrl;
+    const result = typeof notify === "function"
+      ? notify({ url, message })
+      : (client as any).tui?.showToast?.({
+        body: { title: "Plannotator", message, variant: "info" },
+      });
     // A fetch-level failure (host restarting) rejects the SDK promise; swallow
-    // it so a cosmetic toast can never surface an unhandled rejection — but
+    // it so a cosmetic notice can never surface an unhandled rejection — but
     // un-mark the URL so the other delivery path (stderr forwarder vs
-    // ready-file poller) can still attempt a toast, and leave a log trail.
+    // ready-file poller) can still attempt one, and leave a log trail.
     if (result && typeof result.catch === "function") {
       result.catch(() => {
         toastedUrls.delete(url);
-        log(client, "info", `[Plannotator] Toast delivery failed for ${url}`);
+        log(client, "info", `[Plannotator] URL delivery failed for ${url}`);
       });
     }
   } catch {
-    // Toast delivery is best-effort.
+    // Visible URL delivery is best-effort.
   }
 }
 
@@ -249,7 +268,11 @@ export function formatUserFacingCliStderrLine(line: string): string | undefined 
   return undefined;
 }
 
-function createCliStderrForwarder(client: OpenCodeClient, toastedUrls: Set<string>) {
+/**
+ * Exported for tests: the stderr forwarder is one of the two paths a session
+ * URL reaches the user by, and both route through `toastPlannotatorUrl`.
+ */
+export function createCliStderrForwarder(client: OpenCodeClient, toastedUrls: Set<string>) {
   let pending = "";
   const forwarded = new Set<string>();
 
@@ -558,8 +581,11 @@ export function buildReviewPromptFromBridgeOutcome(outcome: CliReviewOutcome): {
   const targetAgent = resolveTargetAgent(outcome.agentSwitch);
 
   if (outcome.approved || outcome.decision === "approved") {
+    // PR5 delivery (spec §6.4, consumer #3): the CLI's JSON record carries
+    // feedback on approve; deliver it in the approved-with-notes framing
+    // instead of discarding it.
     return {
-      message: getReviewApprovedPrompt("opencode"),
+      message: composeReviewApprovedMessage("opencode", outcome.feedback),
       ...(targetAgent && { agent: targetAgent }),
     };
   }
@@ -639,6 +665,17 @@ export async function handleCliCommand(input: {
         cwd,
         input: JSON.stringify({
           arguments: input.rawArgs,
+          // Fail-closed approval-notes handshake (same version-skew reasoning
+          // as formatUserFacingCliStderrLine above: the binary and this plugin
+          // version independently). The advert lives in the binary's review
+          // server while DELIVERY lives in this plugin's
+          // buildReviewPromptFromBridgeOutcome, so the binary must advertise
+          // approvalNotesSupported for opencode ONLY when the plugin declares
+          // it delivers approve-time feedback. An old plugin omits the field,
+          // the advert stays false, and the approve-carrying menu items never
+          // render — nothing a new binary does can make an old plugin drop a
+          // reviewer's note.
+          supportsApprovalNotes: true,
           ...buildBridgePayload(input.bridge),
         }),
         readyLabel: "code review",

@@ -10,7 +10,10 @@ import {
   DEFAULT_ANNOTATE_MESSAGE_FEEDBACK_PROMPT,
   DEFAULT_ANNOTATE_APPROVED_PROMPT,
   DEFAULT_ANNOTATE_APPROVED_WITH_NOTES_PROMPT,
+  DEFAULT_REVIEW_APPROVED_WITH_NOTES_PROMPT,
   DEFAULT_REVIEW_DENIED_SUFFIX,
+  LEGACY_REVIEW_APPROVAL_PLACEHOLDER,
+  composeReviewApprovedMessage,
   getConfiguredPrompt,
   getReviewApprovedPrompt,
   getPlanDeniedPrompt,
@@ -550,6 +553,52 @@ describe("mergePromptConfig (expanded)", () => {
     );
     expect(merged?.plan?.runtimes?.pi?.denied).toBe("Pi deny");
     expect(merged?.plan?.runtimes?.opencode?.denied).toBe("OC deny");
+  });
+});
+
+// ─── Approve-with-notes composition (PR5, spec §6.4) ─────────────────────────
+
+describe("composeReviewApprovedMessage", () => {
+  // The one shared composer the four agent-facing review consumers (§6.3)
+  // emit approvals through. Bare approvals must stay byte-identical to the
+  // pre-notes output — every consumer's approved branch depends on it.
+  test("bare approvals emit the approved prompt alone", () => {
+    expect(composeReviewApprovedMessage("opencode", undefined, {})).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
+    expect(composeReviewApprovedMessage("opencode", "", {})).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
+    expect(composeReviewApprovedMessage("opencode", "  \n ", {})).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
+  });
+
+  // Stage-review M0: the bare prompt says "no changes requested" and the
+  // feedback export opens with its own change-request-shaped heading, so
+  // naive concatenation reads as a contradiction — the agent starts fixing
+  // post-approval or discards the guidance. Notes must land inside the
+  // approved-WITH-NOTES template, which frames them as non-blocking.
+  test("approve-time feedback is delivered in the with-notes framing, not appended to the bare prompt", () => {
+    const note = "Rename the flag before merging.";
+    const message = composeReviewApprovedMessage("opencode", note, {});
+    expect(message).toBe(
+      resolveTemplate(DEFAULT_REVIEW_APPROVED_WITH_NOTES_PROMPT, { feedback: note }),
+    );
+    expect(message).toContain(note);
+    expect(message).not.toContain("{{feedback}}");
+    expect(message).not.toBe(`${DEFAULT_REVIEW_APPROVED_PROMPT}\n\n${note}`);
+  });
+
+  test("prompts.review.approvedWithNotes overrides the framing template", () => {
+    expect(
+      composeReviewApprovedMessage("opencode", "the note", {
+        prompts: { review: { approvedWithNotes: "APPROVED. Notes: {{feedback}}" } },
+      }),
+    ).toBe("APPROVED. Notes: the note");
+  });
+
+  // Compatibility (new consumer / old built client): the pre-PR5 client sent
+  // this exact placeholder on every approval; framing it as reviewer guidance
+  // would add filler the reviewer never wrote to every mixed-build approval.
+  test("the legacy LGTM placeholder is filtered, never framed as guidance", () => {
+    expect(
+      composeReviewApprovedMessage("opencode", LEGACY_REVIEW_APPROVAL_PLACEHOLDER, {}),
+    ).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
   });
 });
 

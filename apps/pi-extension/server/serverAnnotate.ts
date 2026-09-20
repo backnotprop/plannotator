@@ -1,3 +1,4 @@
+import { annotateDiagramRenderKind } from "../generated/annotatable.ts";
 import { createServer } from "node:http";
 import type { IncomingMessage } from "node:http";
 import { dirname, resolve as resolvePath } from "node:path";
@@ -17,7 +18,8 @@ import { contentHash, deleteDraft } from "../generated/draft.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
-import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, type PromptRuntime } from "../generated/config.ts";
+import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveSharingEnabled, resolveAnnotateHistory, resolveFeedbackHistory, type PromptRuntime } from "../generated/config.ts";
+import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { getAnnotateFileFeedbackTemplate, getAnnotateMessageFeedbackTemplate } from "../generated/prompts.ts";
 import { disabledSourceSave, type SourceSaveRequest } from "../generated/source-save.ts";
@@ -64,10 +66,15 @@ import { getExtraMarkdownExtensions, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import { createNodeAgentTerminalBridge } from "./agent-terminal.ts";
 import {
+	HTML_ASSET_DOCUMENT_CSP,
+	HTML_ASSET_ERROR_CSP,
 	HTML_ASSET_ROUTE_PREFIX,
+	buildHtmlAssetErrorDocument,
 	encodeHtmlAssetPath,
-	htmlAssetContentType,
-	normalizeHtmlAssetRoutePath,
+	htmlAssetBaseHref,
+	htmlAssetDocumentHeaders,
+	isFramedEmbeddedDocumentRequest,
+	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
 import { inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
@@ -117,6 +124,12 @@ function parseOptionalApprovalBody(req: IncomingMessage): Promise<Record<string,
 	});
 }
 
+/** node:http repeats some headers; the asset route only ever wants the first. */
+function firstHeader(value: string | string[] | undefined): string | null {
+	if (Array.isArray(value)) return value[0] ?? null;
+	return value ?? null;
+}
+
 function createHtmlAssetRegistry() {
 	const rootsByToken = new Map<string, string>();
 	const tokensByRoot = new Map<string, string>();
@@ -138,6 +151,9 @@ function createHtmlAssetRegistry() {
 			return rewriteHtmlAssetReferences(
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
+				// Root-relative on purpose: a srcdoc document resolves its own
+				// <base href> against the PARENT's URL, which is this server.
+				{ baseHref: htmlAssetBaseHref(token) },
 			);
 		} catch {
 			return htmlContent;
@@ -148,60 +164,70 @@ function createHtmlAssetRegistry() {
 		return inlineHtmlLocalAssets(htmlContent, htmlFilePath);
 	}
 
-	function handle(res: import("node:http").ServerResponse, url: URL): boolean {
-		const prefix = `${HTML_ASSET_ROUTE_PREFIX}/`;
-		if (!url.pathname.startsWith(prefix)) return false;
+	function assetError(
+		res: import("node:http").ServerResponse,
+		status: number,
+		message: string,
+		asDocument: boolean,
+		name?: string,
+	): void {
+		if (!asDocument) {
+			json(res, { error: message }, status);
+			return;
+		}
+		res.writeHead(status, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
+		res.end(buildHtmlAssetErrorDocument(status, message, name));
+	}
 
-		const rest = url.pathname.slice(prefix.length);
-		const slash = rest.indexOf("/");
-		if (slash <= 0) {
-			json(res, { error: "Missing asset token or path" }, 404);
+	function handle(
+		req: import("node:http").IncomingMessage,
+		res: import("node:http").ServerResponse,
+		url: URL,
+	): boolean {
+		const decision = resolveHtmlAssetRoute(
+			{ pathname: url.pathname, secFetchDest: firstHeader(req.headers["sec-fetch-dest"]) },
+			(token) => rootsByToken.get(token),
+		);
+		if (decision.kind === "not-asset-route") return false;
+		if (decision.kind === "error") {
+			assetError(res, decision.status, decision.message, decision.asDocument, decision.name);
 			return true;
 		}
 
-		const token = rest.slice(0, slash);
-		const root = rootsByToken.get(token);
-		if (!root) {
-			json(res, { error: "Unknown asset root" }, 404);
-			return true;
-		}
-
-		const assetPath = normalizeHtmlAssetRoutePath(rest.slice(slash + 1));
-		if (!assetPath) {
-			json(res, { error: "Invalid asset path" }, 400);
-			return true;
-		}
-
-		const contentType = htmlAssetContentType(assetPath);
-		if (!contentType) {
-			json(res, { error: "Unsupported asset type" }, 415);
-			return true;
-		}
-
+		const { root, assetPath, contentType, document, asDocument, maxBytes } = decision;
 		const resolved = resolvePath(root, assetPath);
 		if (!isWithinDirectory(resolved, root)) {
-			json(res, { error: "Access denied" }, 403);
+			assetError(res, 403, "Access denied", asDocument, assetPath);
 			return true;
 		}
 
 		try {
 			if (!existsSync(resolved)) {
-				json(res, { error: "Asset not found" }, 404);
+				assetError(res, 404, "Not found", asDocument, assetPath);
 				return true;
 			}
 			const stat = statSync(resolved);
-			if (stat.size > MAX_HTML_ASSET_BYTES) {
-				json(res, { error: "Asset too large" }, 413);
+			if (stat.size > Math.min(maxBytes, MAX_HTML_ASSET_BYTES)) {
+				assetError(res, 413, "Asset too large", asDocument, assetPath);
 				return true;
 			}
-			res.writeHead(200, {
-				"Content-Type": contentType,
-				"Cache-Control": "no-store",
-				"Access-Control-Allow-Origin": "*",
-			});
+			res.writeHead(
+				200,
+				document
+					? {
+							...htmlAssetDocumentHeaders(HTML_ASSET_DOCUMENT_CSP),
+							"Access-Control-Allow-Origin": "*",
+						}
+					: {
+							"Content-Type": contentType,
+							"Cache-Control": "no-store",
+							"X-Content-Type-Options": "nosniff",
+							"Access-Control-Allow-Origin": "*",
+						},
+			);
 			res.end(readFileSync(resolved));
 		} catch {
-			json(res, { error: "Failed to read asset" }, 500);
+			assetError(res, 500, "Failed to read asset", asDocument, assetPath);
 		}
 		return true;
 	}
@@ -300,6 +326,17 @@ export async function startAnnotateServer(options: {
 	// (vendored to generated/annotate-client-lease.ts by vendor.sh).
 	const clientLeaseGraceMs = options.clientLeaseTestOverrides?.graceMs ?? ANNOTATE_CLIENT_LEASE_GRACE_MS;
 	const clientLeaseHeartbeatMs = options.clientLeaseTestOverrides?.heartbeatMs ?? ANNOTATE_CLIENT_LEASE_HEARTBEAT_MS;
+
+	// Diagram sources (.mmd/.mermaid/.dot/.gv) render through the diagram
+	// engine rather than the markdown pipeline: the document body stays the
+	// raw file text and /api/plan names the engine in `renderAs`. Mirrors
+	// packages/server/annotate.ts; the decision itself is shared and pure.
+	const diagramRenderKind = annotateDiagramRenderKind({
+		filePath: options.filePath,
+		mode: options.mode || "annotate",
+		renderHtml: options.renderHtml,
+		sourceConverted: options.sourceConverted,
+	});
 	const clientLease = createAnnotateClientLeaseTracker(
 		() => decision.settle({ feedback: "", annotations: [], exit: true }),
 		{ graceMs: clientLeaseGraceMs },
@@ -397,6 +434,53 @@ export async function startAnnotateServer(options: {
 	// written, when there was no user content to lose, or when the session
 	// does not persist; false only when a durable write was expected and
 	// failed — the draft then stays behind as the recovery copy.
+	// --- Durable feedback archive (Node mirror of packages/server/annotate.ts) ---
+	//
+	// Unlike the legacy #678 record above, the archive covers EVERY annotate
+	// session type: it stores what the reviewer submitted, not a copy of the
+	// annotated document. Both gates apply — PLANNOTATOR_ANNOTATE_HISTORY=0
+	// still means "no annotate content in the data dir at all", and submitted
+	// feedback quotes that content, so the fully-stateless annotate promise
+	// stays verbatim true.
+	const annotateFeedbackSurface: FeedbackSurface =
+		options.mode === "annotate-app"
+			? "annotate-app"
+			: options.mode === "annotate-last"
+				? "annotate-last"
+				: options.mode === "annotate-folder"
+					? "annotate-folder"
+					: singleFileLocalAnnotate
+						? "annotate"
+						: "annotate-url";
+
+	const archiveAnnotateDecision = (
+		feedbackText: string,
+		annotationList: unknown[],
+		decision: FeedbackDecision,
+	): boolean => {
+		if (!resolveFeedbackHistory(loadConfig())) return true;
+		if (!annotateHistoryEnabled) return true;
+		const isUrlTarget = /^https?:\/\//i.test(options.filePath);
+		return (
+			appendFeedbackRecord({
+				project: annotateProjectName,
+				origin: options.origin,
+				surface: annotateFeedbackSurface,
+				decision,
+				target:
+					options.mode === "annotate-app" && options.liveApp
+						? { url: options.liveApp.targetUrl }
+						: isUrlTarget
+							? { url: options.filePath }
+							: options.mode === "annotate-last"
+								? { filePath: options.filePath }
+								: { filePath: resolvePath(options.filePath) },
+				feedback: feedbackText,
+				annotations: annotationList,
+			}) !== null
+		);
+	};
+
 	const persistSubmittedDecision = (
 		feedback: unknown,
 		annotations: unknown,
@@ -407,18 +491,26 @@ export async function startAnnotateServer(options: {
 		// behavior (settle + delete draft + 200), never throw into a 500.
 		const feedbackText = typeof feedback === "string" ? feedback : "";
 		const annotationList = Array.isArray(annotations) ? annotations : [];
-		if (!feedbackText.trim() && annotationList.length === 0) return true; // contentless (e.g. bare approve)
-		if (!annotateHistoryEnabled) return true; // opt-out: stateless annotate sessions
-		if (!singleFileLocalAnnotate) return true; // stateless modes stay stateless
-		return (
-			persistAnnotateSubmission({
-				project: annotateProjectName,
-				sessionPath: resolvePath(options.filePath),
-				feedback: feedbackText,
-				annotations: annotationList,
-				approved,
-			}) !== null
+		const hasContent = feedbackText.trim().length > 0 || annotationList.length > 0;
+		const archived = archiveAnnotateDecision(
+			feedbackText,
+			annotationList,
+			approved ? (hasContent ? "approved-with-notes" : "approved") : "feedback",
 		);
+		// Legacy #678 record: unchanged scope (single local files with content).
+		let legacyDurable = true;
+		if (hasContent && annotateHistoryEnabled && singleFileLocalAnnotate) {
+			legacyDurable =
+				persistAnnotateSubmission({
+					project: annotateProjectName,
+					sessionPath: resolvePath(options.filePath),
+					feedback: feedbackText,
+					annotations: annotationList,
+					approved,
+				}) !== null;
+		}
+		// A failed write only holds the draft back when there was content to lose.
+		return legacyDurable && (archived || !hasContent);
 	};
 
 	// Detect repo info (cached for this session)
@@ -731,7 +823,7 @@ export async function startAnnotateServer(options: {
 				clientLease: options.clientLeaseSupported
 					? { enabled: true as const, reconnectGraceMs: clientLeaseGraceMs }
 					: { enabled: false as const },
-				renderAs: displayRawHtml ? 'html' : 'markdown',
+				renderAs: displayRawHtml ? 'html' : diagramRenderKind ?? 'markdown',
 				...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
 				...(diffHtml ? { diffHtml } : {}),
 				convertHtml: options.convertHtml ?? false,
@@ -861,7 +953,7 @@ export async function startAnnotateServer(options: {
 			}
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
-		} else if (htmlAssets.handle(res, url)) {
+		} else if (htmlAssets.handle(req, res, url)) {
 			return;
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
 			await handleUploadRequest(req, res);
@@ -1005,6 +1097,9 @@ export async function startAnnotateServer(options: {
 				sendAlreadyDecided(res);
 				return;
 			}
+			// Decision-only line — a dismissal has no content, so a failed
+			// write must not change the legacy draft behavior.
+			archiveAnnotateDecision("", [], "dismissed");
 			deleteDraft(draftKey, readDraftGenerationFromUrl(req));
 			clientLease.cancel();
 			json(res, { ok: true });
@@ -1081,6 +1176,17 @@ export async function startAnnotateServer(options: {
 			await handleSaveNotesRequest(req, res);
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
+		} else if (isFramedEmbeddedDocumentRequest(firstHeader(req.headers["sec-fetch-dest"]), url.pathname)) {
+			// Nested-document guard: a request the browser will render inside a
+			// frame AND whose path names a file must never receive the editor
+			// app. Relative embeds are anchored at their own directory by the
+			// asset-route <base href>, so anything reaching here names a file
+			// that genuinely is not there. The path condition keeps the app
+			// document itself (`/`, which is how the VS Code extension frames a
+			// session) out of the guard — see pathNamesEmbeddedDocument.
+			const name = url.pathname.split("/").filter(Boolean).pop();
+			res.writeHead(404, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
+			res.end(buildHtmlAssetErrorDocument(404, "Not found", name));
 		} else {
 			html(res, options.htmlContent);
 		}

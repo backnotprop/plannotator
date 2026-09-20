@@ -1060,6 +1060,9 @@ describe("purge uninstall", () => {
     const fixture = createFixture();
     writeText(join(fixture.dataDir, "plans", "approved.md"));
     writeText(join(fixture.dataDir, "history", "repo", "001.md"));
+    // The feedback archive is Plannotator-authored data: purge must remove it,
+    // and it must not be reported as an unrecognized custom entry.
+    writeText(join(fixture.dataDir, "feedback", "repo", "index.jsonl"));
     writeJson(join(fixture.dataDir, "config.json"), { theme: "dark" });
     writeText(join(fixture.dataDir, "vendor", "sem", "v0.8.0", "sem"));
     const customVendorPath = join(
@@ -1080,7 +1083,11 @@ describe("purge uninstall", () => {
     expect(result.ok).toBe(true);
     expect(existsSync(join(fixture.dataDir, "plans"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "history"))).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "feedback"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "config.json"))).toBe(false);
+    expect(result.preserved).not.toContain(
+      `${join(fixture.dataDir, "feedback")} (unrecognized custom entry)`,
+    );
     expect(existsSync(join(fixture.dataDir, "vendor", "sem"))).toBe(false);
     expect(existsSync(customVendorPath)).toBe(true);
     expect(existsSync(customPath)).toBe(true);

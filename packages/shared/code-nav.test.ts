@@ -1,12 +1,23 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildRgArgs,
+  isCodeNavPathAllowed,
+  resolveCodeNav,
+  buildSignature,
   classifyMatch,
+  classifyMatchDetailed,
   rankLocations,
   parseRgJsonOutput,
+  resolveCodeNavHover,
+  resetRgCache,
+  scanDocComment,
   validateCodeNavRequest,
   extractChangedFiles,
   type CodeNavLocation,
+  type CodeNavRuntime,
 } from "./code-nav";
 
 // ---------------------------------------------------------------------------
@@ -511,5 +522,665 @@ rename to src/newName.ts`;
 
   test("returns empty for empty string", () => {
     expect(extractChangedFiles("")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyMatchDetailed — the kind the classifier used to discard
+// ---------------------------------------------------------------------------
+
+describe("classifyMatchDetailed", () => {
+  // One case per kind the tables can produce. A pattern-table edit that
+  // silently reclassifies (splitting `const|let|var` the wrong way, dropping
+  // go's receiver form) fails here rather than shipping a wrong badge.
+  const cases: Array<[string, string, string | undefined, string | null]> = [
+    ["export function charge(amount) {", "charge", "typescript", "function"],
+    ["const MAX_ATTEMPTS = 3;", "MAX_ATTEMPTS", "typescript", "const"],
+    ["let attempts = 0;", "attempts", "typescript", "variable"],
+    ["export class Gateway {", "Gateway", "typescript", "class"],
+    ["export interface Payment {", "Payment", "typescript", "interface"],
+    ["export type Money = number;", "Money", "typescript", "type"],
+    ["enum Status {", "Status", "typescript", "enum"],
+    ["  private charge(amount: number) {", "charge", "typescript", "method"],
+    ["def charge(amount):", "charge", "python", "function"],
+    ["class Gateway:", "Gateway", "python", "class"],
+    ["MAX_ATTEMPTS = 3", "MAX_ATTEMPTS", "python", "variable"],
+    ["func Charge(amount int) error {", "Charge", "go", "function"],
+    ["func (g *Gateway) Charge(amount int) error {", "Charge", "go", "method"],
+    ["type Gateway struct {", "Gateway", "go", "type"],
+    ["pub fn charge(amount: u64) {", "charge", "rust", "function"],
+    ["pub struct Gateway {", "Gateway", "rust", "struct"],
+    ["pub trait Payable {", "Payable", "rust", "trait"],
+    ["pub mod retry;", "retry", "rust", "module"],
+    // Generic fallback keeps working for languages with no table.
+    ["fn charge(amount) {", "charge", undefined, "function"],
+    ["charge(42);", "charge", "typescript", null],
+  ];
+
+  for (const [snippet, symbol, language, symbolKind] of cases) {
+    test(`${language ?? "generic"}: ${snippet.trim()}`, () => {
+      const result = classifyMatchDetailed(snippet, symbol, language);
+      expect(result.symbolKind).toBe(symbolKind as never);
+      expect(result.kind).toBe(symbolKind === null ? "reference" : "definition");
+      // The thin wrapper must keep agreeing with the detailed classifier.
+      expect(classifyMatch(snippet, symbol, language)).toBe(result.kind);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// scanDocComment — conservative by construction
+// ---------------------------------------------------------------------------
+
+describe("scanDocComment", () => {
+  test("typescript: JSDoc block directly above the definition", () => {
+    const lines = [
+      "/**",
+      " * Charges the card.",
+      " * Idempotent when a key is supplied.",
+      " */",
+      "export function charge(amount, key) {",
+    ];
+    expect(scanDocComment(lines, 4, "typescript")).toBe(
+      "Charges the card.\nIdempotent when a key is supplied.",
+    );
+  });
+
+  test("typescript: contiguous // run directly above", () => {
+    const lines = ["// Charges the card.", "// Retries on 5xx.", "function charge() {}"];
+    expect(scanDocComment(lines, 2, "javascript")).toBe(
+      "Charges the card.\nRetries on 5xx.",
+    );
+  });
+
+  test("typescript: a plain /* */ block is not documentation", () => {
+    const lines = ["/*", " * charge(1)", " */", "function charge() {}"];
+    expect(scanDocComment(lines, 3, "typescript")).toBeNull();
+  });
+
+  test("python: the docstring below wins over a # run above", () => {
+    const lines = [
+      "# internal helper",
+      "def charge(amount):",
+      '    """Charge the card."""',
+      "    pass",
+    ];
+    expect(scanDocComment(lines, 1, "python")).toBe("Charge the card.");
+  });
+
+  test("python: decorators between a # run and the def do not break it", () => {
+    const lines = ["# Charge the card.", "@retry(3)", "@traced", "def charge(amount):", "    pass"];
+    expect(scanDocComment(lines, 3, "python")).toBe("Charge the card.");
+  });
+
+  test("python: multi-line docstring is collected to its closing quotes", () => {
+    const lines = [
+      "def charge(amount):",
+      "    '''",
+      "    Charge the card.",
+      "    Raises on decline.",
+      "    '''",
+      "    pass",
+    ];
+    expect(scanDocComment(lines, 0, "python")).toBe(
+      "Charge the card.\nRaises on decline.",
+    );
+  });
+
+  test("go: the godoc run above the declaration", () => {
+    const lines = ["// Charge bills the card.", "func Charge(amount int) error {"];
+    expect(scanDocComment(lines, 1, "go")).toBe("Charge bills the card.");
+  });
+
+  test("rust: /// run above, looking through #[attr] lines", () => {
+    const lines = [
+      "/// Charge the card.",
+      "#[inline]",
+      "#[allow(dead_code)]",
+      "pub fn charge(amount: u64) {",
+    ];
+    expect(scanDocComment(lines, 3, "rust")).toBe("Charge the card.");
+  });
+
+  test("rust: a plain // comment is not a doc comment", () => {
+    const lines = ["// scratch note", "pub fn charge(amount: u64) {"];
+    expect(scanDocComment(lines, 1, "rust")).toBeNull();
+  });
+
+  test("a blank line between comment and definition breaks the association", () => {
+    const lines = ["// Charges the card.", "", "function charge() {}"];
+    expect(scanDocComment(lines, 2, "typescript")).toBeNull();
+  });
+
+  test("unknown or absent language never guesses", () => {
+    const lines = ["// Charges the card.", "sub charge {"];
+    expect(scanDocComment(lines, 1, "perl")).toBeNull();
+    expect(scanDocComment(lines, 1, undefined)).toBeNull();
+  });
+
+  // Tooling directives are addressed to a linter, never to a reader. Left in,
+  // they become the card's doc paragraph — the exact "garbage over nothing"
+  // failure this scan exists to prevent, and the most common comment line
+  // sitting directly above a definition in a real codebase.
+  test("a lone tooling directive is not documentation", () => {
+    const cases: Array<[string[], string | undefined]> = [
+      [["// eslint-disable-next-line no-console", "function charge() {}"], "typescript"],
+      [["// eslint-disable-line @typescript-eslint/no-explicit-any", "function charge() {}"], "typescript"],
+      [["// @ts-expect-error upstream types are wrong", "function charge() {}"], "typescript"],
+      [["// @ts-ignore", "function charge() {}"], "typescript"],
+      [["// @ts-nocheck", "function charge() {}"], "typescript"],
+      [["// prettier-ignore", "function charge() {}"], "typescript"],
+      [["// biome-ignore lint/suspicious/noExplicitAny: legacy", "function charge() {}"], "typescript"],
+      [["/* istanbul ignore next */", "function charge() {}"], "typescript"],
+      [["/// <reference types=\"node\" />", "function charge() {}"], "typescript"],
+      [["# noqa: E501", "def charge(amount):", "    pass"], "python"],
+      [["# type: ignore[arg-type]", "def charge(amount):", "    pass"], "python"],
+      [["// istanbul ignore next", "func Charge() {}"], "go"],
+    ];
+    for (const [lines, language] of cases) {
+      expect(scanDocComment(lines, lines.length - (language === "python" ? 2 : 1), language)).toBeNull();
+    }
+  });
+
+  test("a directive above real prose is dropped, the prose survives", () => {
+    const lines = [
+      "// eslint-disable-next-line no-console",
+      "// @ts-expect-error",
+      "// Charges the card.",
+      "// Retries on 5xx.",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 4, "typescript")).toBe(
+      "Charges the card.\nRetries on 5xx.",
+    );
+  });
+
+  test("a directive below the prose is dropped too, and only it", () => {
+    // The commonest real position: the directive sits on the line directly
+    // above the definition, which is the TRAILING end of the collected run.
+    // A leading-only strip would leak it onto the end of the paragraph.
+    const lines = [
+      "// Charges the card.",
+      "// Retries on 5xx.",
+      "// eslint-disable-next-line no-console",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 3, "typescript")).toBe(
+      "Charges the card.\nRetries on 5xx.",
+    );
+  });
+
+  test("directives at both ends are dropped, prose between them survives", () => {
+    const lines = [
+      "// @ts-nocheck",
+      "// Charges the card.",
+      "// prettier-ignore",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 3, "typescript")).toBe("Charges the card.");
+  });
+
+  test("a directive between two sentences is left alone", () => {
+    // Only the ends are trimmed: cutting inside prose would mean deciding
+    // what the surrounding sentences meant.
+    const lines = [
+      "// Charges the card.",
+      "// eslint-disable-next-line no-console",
+      "// Retries on 5xx.",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 3, "typescript")).toBe(
+      "Charges the card.\neslint-disable-next-line no-console\nRetries on 5xx.",
+    );
+  });
+
+  test("a JSDoc block whose body is only directives yields nothing", () => {
+    const lines = [
+      "/**",
+      " * eslint-disable no-console",
+      " * @ts-nocheck",
+      " */",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 4, "typescript")).toBeNull();
+  });
+
+  test("prose that merely mentions a directive is untouched", () => {
+    // Only a LEADING run of directives is stripped, and only lines that ARE
+    // one: a sentence about eslint is still documentation.
+    const lines = [
+      "// Callers must keep the eslint-disable in sync with this list.",
+      "function charge() {}",
+    ];
+    expect(scanDocComment(lines, 1, "typescript")).toBe(
+      "Callers must keep the eslint-disable in sync with this list.",
+    );
+  });
+
+  test("decoration with no letters is rejected", () => {
+    const lines = ["// ----------------", "// ================", "function charge() {}"];
+    expect(scanDocComment(lines, 2, "typescript")).toBeNull();
+  });
+
+  test("caps at 10 lines and marks the truncation", () => {
+    const comment = Array.from({ length: 14 }, (_, i) => `// line ${i + 1}`);
+    const result = scanDocComment([...comment, "function charge() {}"], 14, "typescript");
+    expect(result).not.toBeNull();
+    expect(result!.split("\n")).toHaveLength(10);
+    expect(result!.endsWith("…")).toBe(true);
+  });
+
+  test("caps at 600 characters", () => {
+    const lines = [`// ${"a".repeat(900)}`, "function charge() {}"];
+    const result = scanDocComment(lines, 1, "typescript");
+    expect(result!.length).toBe(601); // 600 + the truncation marker
+  });
+
+  test("an out-of-range definition line scans nothing", () => {
+    expect(scanDocComment(["function charge() {}"], 9, "typescript")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildSignature — bounded read-ahead
+// ---------------------------------------------------------------------------
+
+describe("buildSignature", () => {
+  test("a balanced line is the signature on its own", () => {
+    const lines = ["export function charge(amount, key) {", "  return 1;"];
+    expect(buildSignature(lines, 0)).toEqual({
+      text: "export function charge(amount, key) {",
+      approximate: true,
+    });
+  });
+
+  test("reads ahead until the parens balance", () => {
+    const lines = ["function charge(", "  amount,", ") {"];
+    expect(buildSignature(lines, 0)?.text).toBe("function charge( amount, ) {");
+  });
+
+  test("stops after two read-ahead lines even when unbalanced", () => {
+    const lines = ["function charge(", "  a,", "  b,", "  c,", ") {"];
+    // Unbounded read-ahead would swallow the rest of the file.
+    expect(buildSignature(lines, 0)?.text).toBe("function charge( a, b,");
+  });
+
+  test("caps at 300 characters", () => {
+    const result = buildSignature([`const x = "${"y".repeat(500)}";`], 0);
+    expect(result!.text.length).toBe(301); // 300 + the truncation marker
+  });
+
+  test("a blank or missing line has no signature", () => {
+    expect(buildSignature(["   "], 0)).toBeNull();
+    expect(buildSignature([], 0)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveCodeNavHover
+// ---------------------------------------------------------------------------
+
+function rgMatch(filePath: string, line: number, text: string, start = 0): string {
+  return JSON.stringify({
+    type: "match",
+    data: {
+      path: { text: filePath },
+      lines: { text },
+      line_number: line,
+      submatches: [{ start, end: start + 6 }],
+    },
+  });
+}
+
+function stubRuntime(stdout: string, files?: Record<string, string>): CodeNavRuntime {
+  return {
+    async runCommand(_command, args) {
+      if (args[0] === "--version") return { stdout: "rg 14", stderr: "", exitCode: 0 };
+      return { stdout, stderr: "", exitCode: 0 };
+    },
+    ...(files ? { readFile: async (path: string) => files[path] ?? null } : {}),
+  };
+}
+
+const HOVER_REQUEST = {
+  symbol: "charge",
+  filePath: "src/pay.js",
+  line: 4,
+  charStart: 16,
+  side: "new" as const,
+  language: "javascript",
+};
+
+describe("resolveCodeNavHover", () => {
+  test("enriches the top definition from the file the runtime reads", async () => {
+    resetRgCache();
+    const source = [
+      "// Charges the card.",
+      "export function charge(amount, key) {",
+      "  return 1;",
+      "}",
+    ].join("\n");
+    const runtime = stubRuntime(
+      [
+        rgMatch("./src/pay.js", 2, "export function charge(amount, key) {", 16),
+        rgMatch("./src/checkout.js", 12, "  charge(total);", 2),
+        rgMatch("./src/queue.js", 19, "  charge(total);", 2),
+      ].join("\n"),
+      { "src/pay.js": source },
+    );
+
+    const result = await resolveCodeNavHover(runtime, HOVER_REQUEST, "/repo", []);
+
+    expect(result.backend).toBe("search");
+    expect(result.source).toBe("search");
+    expect(result.symbol).toBe("charge");
+    expect(result.definition).not.toBeNull();
+    expect(result.definition!.filePath).toBe("src/pay.js");
+    expect(result.definition!.line).toBe(2);
+    expect(result.definition!.symbolKind).toBe("function");
+    expect(result.definition!.signature).toBe("export function charge(amount, key) {");
+    expect(result.definition!.signatureApproximate).toBe(true);
+    expect(result.definition!.doc).toBe("Charges the card.");
+    // Declared in the shape for a later tier, deliberately unpopulated: the
+    // card renders the signature, so source lines nothing reads are pure cost.
+    expect(result.definition!.preview).toBeNull();
+    expect(result.definition!.otherCandidateCount).toBe(0);
+    expect(result.alternateDefinition).toBeNull();
+    expect(result.references).toHaveLength(2);
+    expect(result.referenceCount).toBe(2);
+    expect(result.capped).toBe(false);
+  });
+
+  test("a runtime without readFile keeps the definition and drops the enrichments", async () => {
+    resetRgCache();
+    const runtime = stubRuntime(
+      rgMatch("./src/pay.js", 2, "export function charge(amount, key) {", 16),
+    );
+
+    const result = await resolveCodeNavHover(runtime, HOVER_REQUEST, "/repo", []);
+
+    expect(result.definition!.line).toBe(2);
+    expect(result.definition!.symbolKind).toBe("function");
+    expect(result.definition!.signature).toBeNull();
+    expect(result.definition!.signatureApproximate).toBe(false);
+    expect(result.definition!.doc).toBeNull();
+    expect(result.definition!.preview).toBeNull();
+  });
+
+  test("names the runner-up at exactly two candidates, and never beyond", async () => {
+    resetRgCache();
+    const two = stubRuntime(
+      [
+        rgMatch("./src/pay.js", 2, "function charge(a) {", 9),
+        rgMatch("./src/legacy.js", 31, "function charge(a) {", 9),
+      ].join("\n"),
+    );
+    const twoResult = await resolveCodeNavHover(two, HOVER_REQUEST, "/repo", []);
+    expect(twoResult.alternateDefinition).toEqual({
+      filePath: "src/legacy.js",
+      line: 31,
+      column: 9,
+    });
+    expect(twoResult.definition!.otherCandidateCount).toBe(1);
+
+    resetRgCache();
+    const three = stubRuntime(
+      [
+        rgMatch("./src/pay.js", 2, "function charge(a) {", 9),
+        rgMatch("./src/legacy.js", 31, "function charge(a) {", 9),
+        rgMatch("./src/old.js", 7, "function charge(a) {", 9),
+      ].join("\n"),
+    );
+    const threeResult = await resolveCodeNavHover(three, HOVER_REQUEST, "/repo", []);
+    expect(threeResult.definition).not.toBeNull();
+    expect(threeResult.alternateDefinition).toBeNull();
+    expect(threeResult.definition!.otherCandidateCount).toBe(2);
+  });
+
+  test("references are sampled at five while the count stays honest", async () => {
+    resetRgCache();
+    const refs = Array.from({ length: 8 }, (_, i) =>
+      rgMatch(`./src/f${i}.js`, i + 1, "  charge(total);", 2),
+    );
+    const runtime = stubRuntime(refs.join("\n"));
+
+    const result = await resolveCodeNavHover(runtime, HOVER_REQUEST, "/repo", []);
+
+    expect(result.definition).toBeNull();
+    expect(result.references).toHaveLength(5);
+    expect(result.referenceCount).toBe(8);
+  });
+
+  test("an unavailable backend answers empty rather than failing", async () => {
+    resetRgCache();
+    const runtime: CodeNavRuntime = {
+      async runCommand() {
+        return { stdout: "", stderr: "not found", exitCode: 1 };
+      },
+    };
+
+    const result = await resolveCodeNavHover(runtime, HOVER_REQUEST, "/repo", []);
+
+    expect(result.backend).toBe("unavailable");
+    expect(result.source).toBe("search");
+    expect(result.definition).toBeNull();
+    expect(result.references).toEqual([]);
+    expect(result.referenceCount).toBe(0);
+    resetRgCache();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Directory exclusions (#1558)
+// ---------------------------------------------------------------------------
+
+describe("buildRgArgs directory exclusions (#1558)", () => {
+  test("always-ignored names are excluded at any depth (unanchored glob)", () => {
+    const args = buildRgArgs("x");
+    expect(args).toContain("!node_modules");
+    expect(args).not.toContain("!/node_modules");
+  });
+
+  test("ambiguous names are excluded only at the search root (anchored glob)", () => {
+    const args = buildRgArgs("x");
+    for (const dir of ["vendor", "target", "build", "dist", "coverage"]) {
+      expect(args).toContain(`!/${dir}`);
+      expect(args).not.toContain(`!${dir}`);
+    }
+  });
+
+  // The anchored glob only ever prunes the SEARCH ROOT, so an origin in a
+  // first-party `…/vendor/app/` package needs nothing lifted — and lifting it
+  // handed that request the real root `vendor/` tree back (#1559 follow-up).
+  test("a deep same-named package does not lift the root-only exclusion", () => {
+    const args = buildRgArgs(
+      "fetchContent",
+      "java",
+      "src/main/java/com/example/vendor/app/ExampleService.java",
+    );
+    expect(args).toContain("!/vendor");
+    expect(args).toContain("!node_modules");
+    expect(args).toContain("!/target");
+  });
+
+  test("an origin that really lives under the root directory lifts it", () => {
+    const args = buildRgArgs("fetchContent", "java", "vendor/third_party/Vendored.java");
+    expect(args).not.toContain("!/vendor");
+    // Only that one name: the other root-only exclusions stand.
+    expect(args).toContain("!/target");
+    expect(args).toContain("!node_modules");
+  });
+
+  test("the origin-file rule also lifts an always-ignored segment", () => {
+    const args = buildRgArgs("x", undefined, "packages/node_modules/dep/index.js");
+    expect(args).not.toContain("!node_modules");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real-ripgrep exclusion behavior (#1558)
+// ---------------------------------------------------------------------------
+
+const RG_PATH = Bun.which("rg");
+const describeRg = RG_PATH ? describe : describe.skip;
+
+describeRg("resolveCodeNav against real ripgrep (#1558)", () => {
+  const realRuntime: CodeNavRuntime = {
+    async runCommand(command, args, options) {
+      const proc = Bun.spawn([command, ...args], {
+        cwd: options?.cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      return { stdout, stderr, exitCode: await proc.exited };
+    },
+  };
+
+  let root = "";
+
+  const javaSource = (className: string) =>
+    [
+      `public class ${className} {`,
+      `    public String fetchContent() { return "example"; }`,
+      "}",
+      "",
+    ].join("\n");
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "plannotator-code-nav-"));
+    // First-party Java package whose path contains a `vendor` segment.
+    await Bun.write(
+      `${root}/src/main/java/com/example/vendor/app/ExampleService.java`,
+      javaSource("ExampleService"),
+    );
+    // Genuine third-party tree at the repo root.
+    await Bun.write(
+      `${root}/vendor/third_party/Vendored.java`,
+      javaSource("Vendored"),
+    );
+    // Dependency output nested below the root.
+    await Bun.write(
+      `${root}/src/app/node_modules/dep/Dep.java`,
+      javaSource("Dep"),
+    );
+    // A neutral first-party file, the third of the QA repro's three.
+    await Bun.write(`${root}/src/other/Other.java`, javaSource("Other"));
+  });
+
+  afterAll(async () => {
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  const resolve = (filePath: string) => {
+    resetRgCache();
+    return resolveCodeNav(
+      realRuntime,
+      {
+        symbol: "fetchContent",
+        filePath,
+        line: 1,
+        charStart: 0,
+        side: "new",
+        language: "java",
+      },
+      root,
+      [],
+    );
+  };
+
+  const paths = (result: Awaited<ReturnType<typeof resolve>>) =>
+    [...result.definitions, ...result.references].map((l) => l.filePath);
+
+  test("finds a symbol in a Java package containing a `vendor` segment", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(
+      found.some((p) => p.includes("com/example/vendor/app/ExampleService.java")),
+    ).toBe(true);
+  });
+
+  test("a root-level vendor/ directory is still excluded", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(found.some((p) => p.includes("vendor/third_party/"))).toBe(false);
+  });
+
+  test("node_modules is excluded at any depth", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(found.some((p) => p.includes("node_modules"))).toBe(false);
+  });
+
+  test("a request from inside an excluded segment can find its own siblings", async () => {
+    const found = paths(await resolve("src/app/node_modules/dep/Caller.java"));
+    expect(found.some((p) => p.includes("node_modules/dep/Dep.java"))).toBe(true);
+  });
+
+  // The QA repro (#1559 follow-up): three files define the same symbol — a
+  // first-party package whose path contains `vendor`, the repo-root `vendor/`
+  // tree, and a neutral file. From the package origin the ROOT match was
+  // returned, because the origin-file rule lifted the anchored glob.
+  test("a first-party `vendor` package does not un-exclude the root vendor tree", async () => {
+    const found = paths(await resolve("src/main/java/com/example/vendor/app/ExampleService.java"));
+    expect(found.some((p) => p.includes("com/example/vendor/app/ExampleService.java"))).toBe(true);
+    expect(found.some((p) => p.includes("src/other/"))).toBe(true);
+    expect(found.some((p) => p.includes("vendor/third_party/"))).toBe(false);
+  });
+
+  test("a file that really lives under root vendor/ still finds its own siblings", async () => {
+    const found = paths(await resolve("vendor/third_party/Caller.java"));
+    expect(found.some((p) => p.includes("vendor/third_party/Vendored.java"))).toBe(true);
+    // The exemption is that directory only: node_modules stays excluded.
+    expect(found.some((p) => p.includes("node_modules"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Origin-file exemption is per directory INSTANCE (#1559 follow-up)
+// ---------------------------------------------------------------------------
+
+/**
+ * The exemption exists so a symbol in a changed file finds its own siblings
+ * even under a directory whose NAME looks like tool output. Lifting the glob
+ * lifted it tree-wide, so a request from a first-party `…/vendor/app/` package
+ * also returned the repo-root `vendor/` third-party tree. The rule is now: a
+ * match under an excluded directory is kept only when that same directory is
+ * an ancestor of the origin file.
+ */
+describe("isCodeNavPathAllowed", () => {
+  const DEEP_ORIGIN = "src/main/java/com/example/vendor/app/Widget.java";
+
+  test("the root-level excluded tree stays excluded for a deep same-named package", () => {
+    expect(isCodeNavPathAllowed("vendor/RootVendorFile.java", DEEP_ORIGIN)).toBe(false);
+    // …while the origin's own package is untouched (it was never pruned).
+    expect(isCodeNavPathAllowed("src/main/java/com/example/vendor/app/Other.java", DEEP_ORIGIN)).toBe(true);
+    expect(isCodeNavPathAllowed("src/other/Other.java", DEEP_ORIGIN)).toBe(true);
+  });
+
+  test("a file that really lives under the root directory keeps its siblings", () => {
+    const origin = "vendor/RootVendorFile.java";
+    expect(isCodeNavPathAllowed("vendor/Sibling.java", origin)).toBe(true);
+    expect(isCodeNavPathAllowed("vendor/nested/Deep.java", origin)).toBe(true);
+    // A DIFFERENT excluded root is still excluded for it.
+    expect(isCodeNavPathAllowed("dist/Built.java", origin)).toBe(false);
+  });
+
+  test("always-ignored names are per instance too", () => {
+    const origin = "packages/app/node_modules/dep/index.js";
+    expect(isCodeNavPathAllowed("packages/app/node_modules/dep/other.js", origin)).toBe(true);
+    expect(isCodeNavPathAllowed("packages/lib/node_modules/dep/index.js", origin)).toBe(false);
+    expect(isCodeNavPathAllowed("node_modules/dep/index.js", origin)).toBe(false);
+  });
+
+  test("with no origin, and for ordinary paths, the plain rules apply", () => {
+    expect(isCodeNavPathAllowed("vendor/x.java")).toBe(false);
+    expect(isCodeNavPathAllowed("src/x.java")).toBe(true);
+    // A nested `vendor/` is not root-level, so the anchored rule leaves it.
+    expect(isCodeNavPathAllowed("src/vendor/x.java")).toBe(true);
+    // A FILE named like an excluded directory is a file, not a directory.
+    expect(isCodeNavPathAllowed("src/vendor")).toBe(true);
+    expect(isCodeNavPathAllowed("./vendor/x.java")).toBe(false);
+    expect(isCodeNavPathAllowed("vendor\\x.java")).toBe(false);
   });
 });

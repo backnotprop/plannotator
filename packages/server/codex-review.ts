@@ -5,7 +5,7 @@
  * The review server (review.ts) calls into this module via the agent-jobs callbacks.
  */
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { appendFile, mkdir, unlink, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -21,19 +21,19 @@ import { classifyFindingPlacement } from "@plannotator/shared/external-annotatio
 // Debug log — only active when PLANNOTATOR_DEBUG is set
 // ---------------------------------------------------------------------------
 
-const DATA_DIR = getPlannotatorDataDir();
 const DEBUG_ENABLED = !!process.env.PLANNOTATOR_DEBUG;
-const DEBUG_LOG_PATH = join(DATA_DIR, "codex-review-debug.log");
 
 async function debugLog(label: string, data?: unknown): Promise<void> {
   if (!DEBUG_ENABLED) return;
   try {
-    await mkdir(DATA_DIR, { recursive: true });
+    // Resolved per call: PLANNOTATOR_DATA_DIR may change after import.
+    const dataDir = getPlannotatorDataDir();
+    await mkdir(dataDir, { recursive: true });
     const timestamp = new Date().toISOString();
     const line = data !== undefined
       ? `[${timestamp}] ${label}: ${typeof data === "string" ? data : JSON.stringify(data, null, 2)}\n`
       : `[${timestamp}] ${label}\n`;
-    await appendFile(DEBUG_LOG_PATH, line);
+    await appendFile(join(dataDir, "codex-review-debug.log"), line);
   } catch { /* never fail the main flow */ }
 }
 
@@ -88,21 +88,28 @@ export const CODEX_REVIEW_SCHEMA = JSON.stringify({
   additionalProperties: false,
 });
 
-const SCHEMA_DIR = DATA_DIR;
-const SCHEMA_FILE = join(SCHEMA_DIR, "codex-review-schema.json");
-let schemaMaterialized = false;
-
-/** Ensure the schema file exists on disk and return its path. */
-async function ensureSchemaFile(): Promise<string> {
-  if (!schemaMaterialized) {
-    await mkdir(SCHEMA_DIR, { recursive: true });
-    await writeFile(SCHEMA_FILE, CODEX_REVIEW_SCHEMA);
-    schemaMaterialized = true;
-  }
-  return SCHEMA_FILE;
+/** Resolve the materialized schema path for the current data directory. */
+export function getCodexReviewSchemaPath(): string {
+  return join(getPlannotatorDataDir(), "codex-review-schema.json");
 }
 
-export { SCHEMA_FILE as CODEX_REVIEW_SCHEMA_PATH };
+/** Schema paths this process has already refreshed with its own schema. */
+const materializedSchemaPaths = new Set<string>();
+
+/** Ensure the schema file exists on disk with the current schema and return its path. */
+async function ensureSchemaFile(): Promise<string> {
+  const schemaPath = getCodexReviewSchemaPath();
+  // Guarded per resolved path, not per process and not by file existence: the
+  // data directory can change after import (so a process-wide flag would keep
+  // returning the old location), and a stale file left by an older binary must
+  // be overwritten once per process so Codex always gets the current schema.
+  if (!materializedSchemaPaths.has(schemaPath)) {
+    await mkdir(dirname(schemaPath), { recursive: true });
+    await writeFile(schemaPath, CODEX_REVIEW_SCHEMA);
+    materializedSchemaPaths.add(schemaPath);
+  }
+  return schemaPath;
+}
 
 // ---------------------------------------------------------------------------
 // System prompt — copied verbatim from codex-rs/core/review_prompt.md

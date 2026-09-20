@@ -43,7 +43,8 @@ import {
   type AnnotateClientLeaseStreamSession,
 } from "@plannotator/shared/annotate-client-lease";
 import { createAnnotateDecisionSettler } from "@plannotator/shared/annotate-decision";
-import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory } from "./config";
+import { saveConfig, detectGitUser, getServerConfig, isAgentTerminalSide, loadConfig, resolveAIEnabled, resolveAnnotateHistory, resolveFeedbackHistory } from "./config";
+import { appendFeedbackRecord, type FeedbackDecision, type FeedbackSurface } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { existsSync } from "fs";
 import { dirname, resolve as resolvePath } from "path";
@@ -52,7 +53,7 @@ import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
-import { createHtmlAssetRegistry } from "./html-assets";
+import { createHtmlAssetRegistry, framedDocumentNotFound } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
 import {
@@ -63,6 +64,7 @@ import {
 } from "@plannotator/shared/live-proxy-core";
 import { randomBytes } from "node:crypto";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
+import { annotateDiagramRenderKind } from "@plannotator/shared/annotatable";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -279,6 +281,18 @@ export async function startAnnotateServer(
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
+  // Diagram sources (.mmd/.mermaid/.dot/.gv) render through the diagram
+  // engine rather than the markdown pipeline: the document body stays the raw
+  // file text and /api/plan names the engine in `renderAs`. Session-level and
+  // path-only (see annotateDiagramRenderKind), so raw-HTML, converted, URL,
+  // folder, message and live-app sessions are untouched.
+  const diagramRenderKind = annotateDiagramRenderKind({
+    filePath,
+    mode,
+    renderHtml,
+    sourceConverted,
+  });
+
   // Per-file version history → powers the native version diff in annotate mode.
   // Unlike the plan flow (slug = first-heading + date), annotate keys history by
   // file path so re-opening the same file groups its versions across edits even
@@ -373,6 +387,58 @@ export async function startAnnotateServer(
   // written, when there was no user content to lose, or when the session
   // does not persist; false only when a durable write was expected and
   // failed — the draft then stays behind as the recovery copy.
+  // --- Durable feedback archive --------------------------------------------
+  //
+  // Unlike the legacy #678 record above, the archive covers EVERY annotate
+  // session type (single file, folder, URL, live app, agent message): it
+  // stores what the reviewer submitted, not a copy of the annotated document.
+  // That is a deliberate, release-noted behavior change — with defaults, URL /
+  // annotate-last / live-app / folder submissions now leave a durable record
+  // for the first time.
+  //
+  // Both gates apply. PLANNOTATOR_ANNOTATE_HISTORY=0 still means "no annotate
+  // content in the data dir at all", and submitted feedback quotes that
+  // content, so it suppresses archive records for every annotate surface and
+  // the documented fully-stateless annotate session stays verbatim true.
+  const annotateFeedbackSurface: FeedbackSurface =
+    mode === "annotate-app"
+      ? "annotate-app"
+      : mode === "annotate-last"
+        ? "annotate-last"
+        : mode === "annotate-folder"
+          ? "annotate-folder"
+          : singleFileLocalAnnotate
+            ? "annotate"
+            : "annotate-url";
+
+  const archiveAnnotateDecision = (
+    feedbackText: string,
+    annotationList: unknown[],
+    decision: FeedbackDecision,
+  ): boolean => {
+    if (!resolveFeedbackHistory(loadConfig())) return true;
+    if (!annotateHistoryEnabled) return true;
+    const isUrlTarget = /^https?:\/\//i.test(filePath);
+    return (
+      appendFeedbackRecord({
+        project: annotateProjectName,
+        origin,
+        surface: annotateFeedbackSurface,
+        decision,
+        target:
+          mode === "annotate-app" && liveApp
+            ? { url: liveApp.targetUrl }
+            : isUrlTarget
+              ? { url: filePath }
+              : mode === "annotate-last"
+                ? { filePath }
+                : { filePath: resolvePath(filePath) },
+        feedback: feedbackText,
+        annotations: annotationList,
+      }) !== null
+    );
+  };
+
   const persistSubmittedDecision = (
     feedback: unknown,
     annotations: unknown,
@@ -383,18 +449,26 @@ export async function startAnnotateServer(
     // behavior (settle + delete draft + 200), never throw into a 500.
     const feedbackText = typeof feedback === "string" ? feedback : "";
     const annotationList = Array.isArray(annotations) ? annotations : [];
-    if (!feedbackText.trim() && annotationList.length === 0) return true; // contentless (e.g. bare approve)
-    if (!annotateHistoryEnabled) return true; // opt-out: stateless annotate sessions
-    if (!singleFileLocalAnnotate) return true; // stateless modes stay stateless
-    return (
-      persistAnnotateSubmission({
-        project: annotateProjectName,
-        sessionPath: resolvePath(filePath),
-        feedback: feedbackText,
-        annotations: annotationList,
-        approved,
-      }) !== null
+    const hasContent = feedbackText.trim().length > 0 || annotationList.length > 0;
+    const archived = archiveAnnotateDecision(
+      feedbackText,
+      annotationList,
+      approved ? (hasContent ? "approved-with-notes" : "approved") : "feedback",
     );
+    // Legacy #678 record: unchanged scope (single local files with content).
+    let legacyDurable = true;
+    if (hasContent && annotateHistoryEnabled && singleFileLocalAnnotate) {
+      legacyDurable =
+        persistAnnotateSubmission({
+          project: annotateProjectName,
+          sessionPath: resolvePath(filePath),
+          feedback: feedbackText,
+          annotations: annotationList,
+          approved,
+        }) !== null;
+    }
+    // A failed write only holds the draft back when there was content to lose.
+    return legacyDurable && (archived || !hasContent);
   };
   const externalAnnotations = createExternalAnnotationHandler("plan");
   const aiRuntime = resolveAIEnabled() ? await createAIRuntime() : null;
@@ -709,7 +783,7 @@ export async function startAnnotateServer(
               clientLease: clientLeaseSupported
                 ? { enabled: true as const, reconnectGraceMs: clientLeaseGraceMs }
                 : { enabled: false as const },
-              renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
+              renderAs: displayRawHtml ? 'html' as const : diagramRenderKind ?? ('markdown' as const),
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
               ...(diffHtml ? { diffHtml } : {}),
               convertHtml,
@@ -1082,6 +1156,9 @@ export async function startAnnotateServer(
             if (!decision.settle({ feedback: "", annotations: [], exit: true })) {
               return alreadyDecided();
             }
+            // Decision-only line — a dismissal has no content, so a failed
+            // write must not change the legacy draft behavior.
+            archiveAnnotateDecision("", [], "dismissed");
             deleteDraft(draftKey, readDraftGenerationFromUrl(req));
             clientLease.cancel();
             return Response.json({ ok: true });
@@ -1195,6 +1272,13 @@ export async function startAnnotateServer(
           if (url.pathname.startsWith("/api/")) {
             return handleApiNotFound(url.pathname);
           }
+
+          // Nested-document guard: a request the browser will render inside a
+          // frame must never receive the editor app. Relative embeds are
+          // anchored at their own directory by the asset-route <base href>, so
+          // anything reaching here names a file that genuinely is not there.
+          const framedMiss = framedDocumentNotFound(req, url);
+          if (framedMiss) return framedMiss;
 
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {

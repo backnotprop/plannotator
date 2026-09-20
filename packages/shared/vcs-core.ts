@@ -5,6 +5,7 @@ import {
   type GitDiffOptions,
   type ReviewGitRuntime,
   detectRemoteDefaultBranch,
+  getCurrentUpstreamBranch,
   getFileContentsForDiff as getGitFileContentsForDiff,
   getGitContext,
   getGitDiffFingerprint,
@@ -167,7 +168,10 @@ export interface PreparedLocalReviewDiff {
   fingerprint?: string;
 }
 
-const GIT_DIFF_TYPES = new Set(["since-base", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
+// Exported so review-args can pin REVIEW_OPEN_DIFF_TYPES (the flat ids
+// `review --diff-type` accepts) against it — a git diff type added to one set
+// and not the other would make a valid mode unreachable from the CLI.
+export const GIT_DIFF_TYPES = new Set(["since-base", "local-vs-remote", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
 const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
 
 function selectNearestProvider(
@@ -231,6 +235,7 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       const effectiveDiffType = parseWorktreeDiffType(diffType)?.subType ?? diffType;
       return (
         effectiveDiffType === "since-base" ||
+        effectiveDiffType === "local-vs-remote" ||
         effectiveDiffType === "uncommitted" ||
         effectiveDiffType === "unstaged"
       );
@@ -512,17 +517,31 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       const { provider, gitContext } = await getContextWithProvider(options.cwd, options.vcsType);
       const ownsRequestedDiffType = options.requestedDiffType !== undefined
         && provider.ownsDiffType(options.requestedDiffType);
-      const diffType = resolveRequestedDiffType(
+      const requestedDiffType = resolveRequestedDiffType(
         provider,
         gitContext,
         options.requestedDiffType,
         options.configuredDiffType,
       );
+      const resolution = resolveAvailableDiffType(gitContext, requestedDiffType, options.requestedBase !== undefined);
+      const fallback = resolution.fallback;
+      const diffType = resolution.diffType;
       const base = resolveInitialBase(gitContext, diffType, options.requestedBase, ownsRequestedDiffType);
       const result = await provider.runDiff(diffType, base, gitContext.cwd ?? options.cwd, {
         hideWhitespace: options.hideWhitespace,
       });
-      const effectiveContext = result.gitContext ?? gitContext;
+      const resultContext = result.gitContext ?? gitContext;
+      const effectiveContext = fallback
+        ? {
+            ...resultContext,
+            diffFallback: {
+              requestedDiffType,
+              effectiveDiffType: diffType,
+              message: fallback.message,
+              candidates: fallback.candidates,
+            },
+          }
+        : resultContext;
 
       return {
         gitContext: effectiveContext,
@@ -613,6 +632,18 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       }
       return provider.materializeSnapshot(options);
     },
+  };
+}
+
+export function resolveAvailableDiffType(
+  gitContext: GitContext,
+  requestedDiffType: DiffType,
+  hasExplicitBase = false,
+): { diffType: DiffType; fallback?: NonNullable<GitContext["diffAvailability"]>[string] } {
+  const fallback = hasExplicitBase ? undefined : gitContext.diffAvailability?.[requestedDiffType];
+  return {
+    diffType: (fallback?.fallbackDiffType ?? requestedDiffType) as DiffType,
+    ...(fallback && { fallback }),
   };
 }
 
@@ -722,6 +753,7 @@ function supportsGitSnapshot(diffType: string): boolean {
   const effective = parseWorktreeDiffType(diffType)?.subType ?? diffType;
   return effective !== "all" && (
     effective === "since-base"
+    || effective === "local-vs-remote"
     || effective === "uncommitted"
     || effective === "staged"
     || effective === "unstaged"
@@ -777,6 +809,14 @@ async function materializeGitSnapshot(
   if (diffType === "since-base") {
     const mergeBase = await git(runtime, cwd, ["merge-base", "--", options.base, "HEAD"]);
     return createSyntheticSnapshot(runtime, cwd, mergeBase, [patch]);
+  }
+  if (diffType === "local-vs-remote") {
+    const upstream = await getCurrentUpstreamBranch(runtime, cwd);
+    if (!upstream) {
+      throw new Error("The current branch does not have a remote tracking branch.");
+    }
+    const from = await resolveCommit(runtime, cwd, upstream);
+    return createSyntheticSnapshot(runtime, cwd, from, [patch]);
   }
   const head = await resolveCommit(runtime, cwd, "HEAD");
   if (diffType === "uncommitted" || diffType === "staged") {
@@ -882,4 +922,3 @@ async function materializeJjSnapshot(
     throw error;
   }
 }
-

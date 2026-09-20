@@ -142,7 +142,7 @@ export function scrollVimTargetIntoView(
 
   const margin = resolveVimScrollMargin(viewportRect.height);
   const stickyBottom = viewport
-    .querySelector<HTMLElement>('[data-sticky-actions]')
+    .querySelector<HTMLElement>('[data-viewer-document-header], [data-sticky-actions]')
     ?.getBoundingClientRect().bottom;
   const topMargin = stickyBottom !== undefined
     ? Math.max(margin, stickyBottom - viewportRect.top + 8)

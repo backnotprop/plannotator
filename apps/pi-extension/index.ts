@@ -16,7 +16,7 @@
  * - /plannotator-annotate command for markdown annotation
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
@@ -30,6 +30,7 @@ import {
 	type ChecklistItem,
 	markCompletedSteps,
 	parseChecklist,
+	renderCompletedChecklist,
 } from "./generated/checklist.ts";
 import { loadConfig, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
@@ -67,6 +68,8 @@ import {
 import {
 	applyPhaseTools,
 	isPlanWritePathAllowed,
+	isPlannotatorSubmitDevicePath,
+	PLAN_MARK_DONE_TOOL,
 	PLAN_SUBMIT_TOOL,
 	releasePhaseTools,
 	type Phase,
@@ -447,6 +450,34 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 	}
 
+	function persistCompletedChecklist(fullPath: string): void {
+		try {
+			const content = readFileSync(fullPath, "utf-8");
+			// One-turn ordinal-desync window: checklistItems were parsed at turn
+			// start, so an agent that edits the plan's checkboxes mid-turn can land
+			// a step number on a neighboring box until the next turn re-parses from
+			// disk. Bounded by upgrade-only writes plus that per-turn re-parse.
+			const updated = renderCompletedChecklist(content, checklistItems);
+			if (updated !== content) writeFileSync(fullPath, updated, "utf-8");
+		} catch {
+			// Progress persistence must not stop plan execution.
+		}
+	}
+
+	async function markStepDone(step: number, ctx: ExtensionContext): Promise<boolean> {
+		if (phase !== "executing") return false;
+		const item = checklistItems.find((candidate) => candidate.step === step);
+		if (!item) return false;
+
+		item.completed = true;
+		if (lastSubmittedPath) persistCompletedChecklist(resolve(ctx.cwd, lastSubmittedPath));
+		updateStatus(ctx);
+		updateWidget(ctx);
+		await syncTodoProvider(ctx);
+		persistState();
+		return true;
+	}
+
 	function captureSavedState(ctx: ExtensionContext): void {
 		savedState = {
 			model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
@@ -515,7 +546,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const phaseTools =
 				phase === "planning" && !configuredTools.includes(PLAN_SUBMIT_TOOL)
 					? [...configuredTools, PLAN_SUBMIT_TOOL]
-					: configuredTools;
+					: phase === "executing" && !configuredTools.includes(PLAN_MARK_DONE_TOOL)
+						? [...configuredTools, PLAN_MARK_DONE_TOOL]
+						: configuredTools;
 			const selection = applyPhaseTools(
 				activeTools,
 				phaseAddedTools,
@@ -635,7 +668,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-review", {
-		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider",
+		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider, --base <ref> / --diff-type <type> to pin the session's opening diff",
 		handler: async (args, ctx) => {
 			if (!hasReviewBrowserHtml()) {
 				ctx.ui.notify(
@@ -651,10 +684,25 @@ export default function plannotator(pi: ExtensionAPI): void {
 			try {
 				const { parseReviewArgs } = await import("./generated/review-args.ts");
 				const reviewArgs = parseReviewArgs(args ?? "");
+				// Argument-shape failures refuse to start a session (same contract
+				// as the CLI's exit 1), surfaced through Pi's notifier.
+				if (reviewArgs.errors.length > 0) {
+					ctx.ui.notify(`Plannotator: ${reviewArgs.errors.join("; ")}`, "error");
+					return;
+				}
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
+					patchFile: reviewArgs.patchFile,
 					vcsType: reviewArgs.vcsType,
 					useLocal: reviewArgs.useLocal,
+					// --base / --diff-type: session-only open state from user flags.
+					// openStateFromFlags turns on strict validation (provider
+					// matrix, base probe) and the explicit/pinned server bits;
+					// programmatic callers omit it and keep the legacy
+					// forward-and-let-it-upgrade behavior.
+					defaultBranch: reviewArgs.base,
+					diffType: reviewArgs.diffType,
+					openStateFromFlags: reviewArgs.base !== undefined || reviewArgs.diffType !== undefined,
 				});
 				ctx.ui.notify(sessionOpenedMessage("Code review opened", session.url), "info");
 				void session
@@ -666,10 +714,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 								return;
 							}
 							if (result.approved) {
-								const { getReviewApprovedPrompt } = await loadPlannotatorPrompts();
+								// PR5 delivery (spec §6.4, consumer #4): bare approvals send
+								// the approved prompt alone; approvals carrying reviewer notes
+								// send the approved-with-notes framing (non-blocking guidance).
+								const { composeReviewApprovedMessage } = await loadPlannotatorPrompts();
 								sendUserMessageWithCurrentSessionFallback(
 									pi,
-									getReviewApprovedPrompt("pi", loadConfig()),
+									composeReviewApprovedMessage("pi", result.feedback, loadConfig()),
 									{ deliverAs: "followUp" },
 									"Plannotator code review feedback could not be sent",
 									origin,
@@ -1115,6 +1166,47 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 
+	// ── Plan execution tools ────────────────────────────────────────────
+
+	pi.registerTool({
+		name: PLAN_MARK_DONE_TOOL,
+		label: "Mark Plan Step Done",
+		description:
+			"Mark one approved-plan checklist step complete. Call this immediately after finishing each step and before starting the next one.",
+		parameters: Type.Object({
+			step: Type.Number({
+				description: "One-based number of the completed plan checklist step.",
+				multipleOf: 1,
+			}),
+		}) as any,
+
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (phase !== "executing") {
+				return {
+					content: [{ type: "text", text: "Error: No approved plan is executing." }],
+					details: { completed: false },
+				};
+			}
+
+			const step = (params as { step?: unknown })?.step;
+			if (
+				typeof step !== "number" ||
+				!Number.isInteger(step) ||
+				!(await markStepDone(step, ctx))
+			) {
+				return {
+					content: [{ type: "text", text: `Error: Plan checklist step ${String(step)} does not exist.` }],
+					details: { completed: false },
+				};
+			}
+
+			return {
+				content: [{ type: "text", text: `Plan checklist step ${step} marked complete.` }],
+				details: { completed: true, step },
+			};
+		},
+	});
+
 	// ── plannotator_submit_plan Tool ────────────────────────────────────
 
 	pi.registerTool({
@@ -1305,9 +1397,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 				persistState();
 				justApprovedPlan = true;
 
+				// Keep this aligned with the executing-phase framing delivered on the
+				// same turn: the tool is the primary mechanism, markers the fallback.
 				const doneMsg =
 					checklistItems.length > 0
-						? `After completing each step, include [DONE:n] in your response where n is the step number.`
+						? `Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
 						: "";
 
 				if (result.feedback) {
@@ -1372,6 +1466,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		if (event.toolName !== "write" && event.toolName !== "edit") return;
 
 		const inputPath = event.input.path as string;
+		if (isPlannotatorSubmitDevicePath(inputPath)) return;
 		if (!isPlanWritePathAllowed(inputPath, ctx.cwd)) {
 			const verb = event.toolName === "write" ? "writes" : "edits";
 			return {
@@ -1436,7 +1531,7 @@ Todo status for ${planRef}: ${todoStats.completedCount}/${todoStats.totalCount} 
 Remaining steps:
 ${todoStats.todoList}
 
-Mark completed steps with [DONE:n] in your response.`
+Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
 				: null;
 
 		if (framingDelivered) {
@@ -1536,6 +1631,7 @@ Mark completed steps with [DONE:n] in your response.`
 		const text = getAssistantMessageText(event.message);
 		if (!text) return;
 		if (markCompletedSteps(text, checklistItems) > 0) {
+			if (lastSubmittedPath) persistCompletedChecklist(resolve(ctx.cwd, lastSubmittedPath));
 			updateStatus(ctx);
 			updateWidget(ctx);
 			await syncTodoProvider(ctx);
@@ -1673,6 +1769,7 @@ Mark completed steps with [DONE:n] in your response.`
 							if (text) markCompletedSteps(text, checklistItems);
 						}
 					}
+					persistCompletedChecklist(fullPath);
 				} else {
 					// Plan file gone — fall back to idle. This demotes a RECORDED
 					// executing phase, so the session provably used plan mode and

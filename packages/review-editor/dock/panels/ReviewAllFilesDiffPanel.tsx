@@ -38,6 +38,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       pendingSelection={state.pendingSelection}
       reviewBase={state.reviewBase}
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
+      contextExpansionAvailable={state.contextExpansionAvailable}
       compactTouchLayout={state.isCompactTouchLayout}
       onLineSelection={state.onLineSelection}
       onAddAnnotationForFile={state.onAddAnnotationForFile}
@@ -68,7 +69,10 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       activeSearchMatchId={state.activeSearchMatchId}
       activeSearchMatch={state.allFilesActiveSearchMatch}
       onCodeNavRequest={state.onCodeNavRequest}
+      onTokenHoverEnter={state.onTokenHoverEnter}
+      onTokenHoverLeave={state.onTokenHoverLeave}
       onVisibleFileChange={state.onAllFilesVisibleFileChange}
+      onFileScrolledPast={state.onAllFilesFileScrolledPast}
       fileOrder={state.allFilesOrder}
       registerCollapseAllToggle={state.registerAllFilesCollapseToggle}
       onAllCollapsedChange={state.onAllFilesCollapsedChange}

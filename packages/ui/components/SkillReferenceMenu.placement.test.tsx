@@ -139,6 +139,18 @@ function list(): HTMLElement {
   return el;
 }
 
+function clippingAncestor(el: HTMLElement): HTMLElement | null {
+  let ancestor = el.parentElement;
+  while (ancestor && ancestor !== document.body) {
+    const style = window.getComputedStyle(ancestor);
+    const clipsOverflow = [style.overflow, style.overflowX, style.overflowY]
+      .some((value) => /^(auto|clip|hidden|scroll)$/.test(value));
+    if (clipsOverflow) return ancestor;
+    ancestor = ancestor.parentElement;
+  }
+  return null;
+}
+
 function makeRect(top: number, bottom: number): DOMRect {
   return {
     x: 100,
@@ -208,6 +220,15 @@ function assertMenuInsideViewport(): { direction: string; maxListHeight: number 
 }
 
 describe('SkillReferenceMenu adaptive placement', () => {
+  test.skipIf(!hasDom)(
+    'the menu escapes the comment card overflow instead of being clipped at its edge',
+    async () => {
+      await mountPopover();
+      await type(textarea(), '$');
+      expect(clippingAncestor(menu()) === null).toBe(true);
+    },
+  );
+
   test.skipIf(!hasDom)(
     'THE bug: composer near the top of the viewport opens the menu BELOW, on screen',
     async () => {

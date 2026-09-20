@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import serverPlugin, {
+  createPlanReadyNotifier,
   pushComposedSystemReminder,
   replacePlanningSystemParts,
 } from "./server";
+import { createV2BridgeClient, formatSessionUrlNotice } from "./v2-client";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const originalAllowSubagents = process.env.PLANNOTATOR_ALLOW_SUBAGENTS;
 
@@ -21,6 +25,13 @@ type SessionContextHook = (event: {
 function createContext(
   options: Record<string, unknown> = {},
   agents: Array<{ id: string; description?: string; mode: string; hidden: boolean }> = [],
+  hostOverrides: {
+    // Pre-#44765 hosts DO expose command.transform, but hand the callback a
+    // draft with no `add`. The adapter must then register nothing, throw
+    // nothing, and behave exactly as it did before.
+    command?: { transform: (apply: (draft: any) => void) => Promise<unknown> };
+    agentListShape?: "envelope" | "array";
+  } = {},
 ) {
   let toolDefinition: Record<string, any> | undefined;
   let sessionContextHook: SessionContextHook | undefined;
@@ -29,8 +40,11 @@ function createContext(
   return {
     context: {
       options,
+      ...(hostOverrides.command ? { command: hostOverrides.command } : {}),
       agent: {
-        list: async () => ({ location: { directory: "/project" }, data: agents }),
+        list: async () => (hostOverrides.agentListShape === "array"
+          ? agents
+          : { location: { directory: "/project" }, data: agents }),
         transform: async () => ({ dispose: async () => {} }),
       },
       session: {
@@ -200,6 +214,106 @@ describe("OpenCode V2 server plugin", () => {
     expect(event.tools.submit_plan).toBeUndefined();
   });
 
+  test("registers the slash commands only on a host that exposes the command API", async () => {
+    const registered: string[] = [];
+    const withCommands = createContext({}, [], {
+      command: {
+        transform: async (apply) => {
+          apply({ add: (definition: { name: string }) => registered.push(definition.name) });
+          return { dispose: async () => {} };
+        },
+      },
+    });
+    await serverPlugin.setup(withCommands.context as never);
+    expect(registered).toEqual([
+      "plannotator-review",
+      "plannotator-annotate",
+      "plannotator-last",
+    ]);
+
+    // No command domain: nothing registered, and the pre-existing submit_plan
+    // contract is untouched.
+    const withoutCommands = createContext();
+    await serverPlugin.setup(withoutCommands.context as never);
+    expect(withoutCommands.getToolDefinition()?.name).toBe("submit_plan");
+  });
+
+  test("a pre-#44765 command draft registers nothing and does not fail setup", async () => {
+    // The real `next` / `latest` shape: transform exists, the draft is
+    // { list, get, update, remove }. Touching `add` here would throw inside the
+    // host's batched reload flush and abort it before commit.
+    let applied = false;
+    const testContext = createContext({}, [], {
+      command: {
+        transform: async (apply) => {
+          applied = true;
+          apply({ list: () => [], get: () => undefined, update: () => {}, remove: () => {} });
+          return { dispose: async () => {} };
+        },
+      },
+    });
+
+    await serverPlugin.setup(testContext.context as never);
+    expect(applied).toBe(true);
+    expect(testContext.getToolDefinition()?.name).toBe("submit_plan");
+  });
+
+  test("a rejecting command transform never fails plugin setup", async () => {
+    // A slash command has a working markdown fallback; the whole Plannotator
+    // integration going down for it would not.
+    const testContext = createContext({}, [], {
+      command: { transform: async () => { throw new Error("command domain unavailable"); } },
+    });
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await serverPlugin.setup(testContext.context as never);
+    } finally {
+      console.error = originalError;
+    }
+    expect(testContext.getToolDefinition()?.name).toBe("submit_plan");
+  });
+
+  test("registers slash commands even when submit_plan is disabled", async () => {
+    // `workflow: "manual"` returns early before the tool registration, which is
+    // exactly the mode that depends on the slash commands existing.
+    const registered: string[] = [];
+    const testContext = createContext({ workflow: "manual" }, [], {
+      command: {
+        transform: async (apply) => {
+          apply({ add: (definition: { name: string }) => registered.push(definition.name) });
+          return { dispose: async () => {} };
+        },
+      },
+    });
+    await serverPlugin.setup(testContext.context as never);
+
+    expect(registered).toHaveLength(3);
+    expect(testContext.getToolDefinition()).toBeUndefined();
+  });
+
+  test("reads a bare-array agent list, so subagent gating still applies", async () => {
+    // Newer plugin hosts answer agent.list() with an array rather than the
+    // `{ data }` envelope; reading `.data` blindly emptied the list and let
+    // subagents keep submit_plan.
+    delete process.env.PLANNOTATOR_ALLOW_SUBAGENTS;
+    const testContext = createContext(
+      { workflow: "all-agents" },
+      [{ id: "researcher", mode: "subagent", hidden: false }],
+      { agentListShape: "array" },
+    );
+    await serverPlugin.setup(testContext.context as never);
+    const event = {
+      agent: "researcher",
+      system: [{ type: "text" as const, text: "Base system prompt" }],
+      messages: [],
+      tools: { submit_plan: { description: "Submit", input: {} } },
+    };
+
+    await testContext.getSessionContextHook()?.(event);
+    expect(event.tools.submit_plan).toBeUndefined();
+  });
+
   test("generic reminder composes into the existing part instead of pushing a second one", async () => {
     process.env.PLANNOTATOR_ALLOW_SUBAGENTS = "1";
     const testContext = createContext(
@@ -261,5 +375,98 @@ describe("system part consolidation (#1114 regression class)", () => {
     expect(text).toContain("Second host part");
     expect(text.endsWith("## Plan Submission reminder")).toBe(true);
     expect(text.indexOf("Host base rules")).toBeLessThan(text.indexOf("Second host part"));
+  });
+});
+
+describe("V2 plan review URL delivery", () => {
+  const SESSION_URL = "http://127.0.0.1:19432";
+
+  // Regression: only the slash-command path was fixed at first. The plan path
+  // builds its own client, so a remote reviewer who reached the review through
+  // submit_plan still saw nothing: no browser is opened for them, and the
+  // plugin's console output is discarded by the host.
+  test("the embedded plan path posts the session URL as a transcript notice", async () => {
+    const synthetic = mock(async (_input: unknown) => ({}));
+    const client = createV2BridgeClient({
+      ctx: { session: { synthetic } } as never,
+      getAgents: async () => [],
+      sessionID: "session-1",
+    });
+
+    createPlanReadyNotifier(client)(SESSION_URL);
+    await Promise.resolve();
+
+    expect(synthetic).toHaveBeenCalledTimes(1);
+    expect(synthetic.mock.calls[0]![0]).toMatchObject({
+      sessionID: "session-1",
+      description: formatSessionUrlNotice(SESSION_URL),
+      resume: false,
+      // #1515: `resume: false` only declines the immediate wake. The row still
+      // waits in the inbox, and a queued row promotes alone while steers
+      // promote as a batch (`SessionInbox.promote`), so queue delivery is what
+      // turns a notice into its own model turn. Mid-tool-call here, a steer
+      // lands at the running turn's next step boundary instead.
+      delivery: "steer",
+    });
+  });
+
+  // Regression: the fallback must stay SILENT, not fall back to app.log. That
+  // is console.error, the same stderr handleServerReady has already printed the
+  // URL to, so logging here would duplicate the line in remote mode and add a
+  // stray one locally. This hook was empty for exactly that reason.
+  test("without session.synthetic the plan path stays silent", () => {
+    const log = mock((_entry: unknown) => {});
+    const client = createV2BridgeClient({
+      ctx: { session: {} },
+      getAgents: async () => [],
+      sessionID: "session-1",
+    });
+    client.app.log = log as never;
+
+    expect(client.notifyUrl).toBeUndefined();
+    expect(() => createPlanReadyNotifier(client)(SESSION_URL)).not.toThrow();
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  // Regression: the notifier tests above all pass while the plan path itself is
+  // wired to nothing, which is exactly the shape the bug had. Reaching the real
+  // wiring means running a plan review, so these two facts are pinned at source
+  // level instead: without the session id the client can build no notifier, and
+  // without the ready hook nothing ever calls it. Either one silently restores
+  // the invisible URL with no other symptom.
+  test("the plan path threads the session id and drives the ready hook", () => {
+    const source = readFileSync(path.join(import.meta.dir, "server.ts"), "utf-8");
+
+    // Booleans, not toMatch: a failing regex against a whole source file dumps
+    // the file into the report and buries the one line that matters.
+    expect(/sessionID:\s*toolContext\.sessionID/.test(source)).toBe(true);
+    expect(/logReady:\s*createPlanReadyNotifier\(/.test(source)).toBe(true);
+  });
+
+  // Regression: the submit_plan path builds its own client, so it owns that
+  // client's notice watch too. A plan review that ends without delivering a
+  // prompt (denied and closed, or approved — the V2 approval handoff is the
+  // agent switch, not a `session.prompt`) would otherwise leave the host event
+  // subscription open for the life of the process. Pinned at source level for
+  // the same reason as the two facts above: reaching the real wiring means
+  // running a plan review.
+  test("the plan path releases the notice watch when the review ends", () => {
+    const source = readFileSync(path.join(import.meta.dir, "server.ts"), "utf-8");
+
+    expect(/\}\s*finally\s*\{[^}]*client\.dispose\(\);/.test(source)).toBe(true);
+  });
+
+  // Regression: a rejected notice must not surface as an unhandled rejection
+  // and must not take the plan review down with it.
+  test("a rejecting notice is caught", async () => {
+    const client = createV2BridgeClient({
+      ctx: { session: { synthetic: async () => { throw new Error("session gone"); } } } as never,
+      getAgents: async () => [],
+      sessionID: "session-1",
+    });
+
+    expect(() => createPlanReadyNotifier(client)(SESSION_URL)).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
   });
 });

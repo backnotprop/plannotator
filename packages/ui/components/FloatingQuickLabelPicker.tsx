@@ -88,7 +88,10 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onDismiss, onSelect, quickLabels]);
 
-  // Click outside to dismiss
+  // Click outside to dismiss. Deliberately NOT useDismissablePopover: this
+  // picker needs deferred capture-phase registration (the selection gesture
+  // that opens it must not instantly dismiss it), and Escape is handled in
+  // the digit-key listener above.
   useEffect(() => {
     const handlePointerDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {

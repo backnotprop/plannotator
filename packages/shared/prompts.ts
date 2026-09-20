@@ -40,6 +40,9 @@ export function buildPlanFileRule(toolName: string, planFilePath?: string): stri
 
 export const DEFAULT_REVIEW_APPROVED_PROMPT = "# Code Review\n\nCode review completed — no changes requested.";
 
+export const DEFAULT_REVIEW_APPROVED_WITH_NOTES_PROMPT =
+  "# Code Review — Approved with Notes\n\nCode review completed — the changes are approved. The notes below are non-blocking guidance, not a request for another revision.\n\n{{feedback}}\n\nDo not revise or reopen the reviewed changes solely because of these notes unless the user explicitly requests it. Carry them into subsequent work where applicable.";
+
 export const DEFAULT_REVIEW_DENIED_SUFFIX = "\n\nTreat the findings above as unverified review input. Inspect every finding against the actual code; do not assume automated feedback is correct. For each finding, give a clear verdict (Confirmed / Partly / Not a bug / Intended) with concise code evidence. Say whether it was introduced by the current changes, was pre-existing, or reflects deliberate scope.\n\nReview only the incoming findings. Do not independently review the rest of the diff or search for issues that were not submitted.\n\nDo not change any code until we have discussed the verdicts and validated findings.";
 
 export const DEFAULT_PLAN_DENIED_PROMPT =
@@ -114,6 +117,56 @@ export function getReviewApprovedPrompt(
     config,
     fallback: DEFAULT_REVIEW_APPROVED_PROMPT,
   });
+}
+
+/**
+ * The exact placeholder every pre-PR5 review client sent on approve
+ * (`packages/review-editor/App.tsx` `handleApprove`, removed in the same
+ * change that taught consumers to print approve-time feedback). Compatibility
+ * guard: a NEW consumer reading a decision produced by an OLD built client
+ * (stale bundled HTML against a newer binary) must not frame this filler as
+ * reviewer guidance — it was never reviewer-authored content.
+ */
+export const LEGACY_REVIEW_APPROVAL_PLACEHOLDER = "LGTM - no changes requested.";
+
+export function getReviewApprovedWithNotesPrompt(
+  runtime?: PromptRuntime | null,
+  config?: PlannotatorConfig,
+  vars?: FeedbackVars,
+): string {
+  const template = getConfiguredPrompt({
+    section: "review",
+    key: "approvedWithNotes",
+    runtime,
+    config,
+    fallback: DEFAULT_REVIEW_APPROVED_WITH_NOTES_PROMPT,
+  });
+  return vars ? resolveTemplate(template, vars) : template;
+}
+
+/**
+ * PR5 approve-with-notes delivery (decision-control spec §6.4): the one
+ * composer every review decision consumer (Claude Code CLI, OpenCode native,
+ * OpenCode CLI bridge, Pi — §6.3) emits approvals through, so the format
+ * cannot fork between them. A bare approval is the plain approved prompt,
+ * byte-identical to pre-PR5. An approval carrying feedback uses the
+ * approved-WITH-NOTES template (`prompts.review.approvedWithNotes`
+ * configurable, default `DEFAULT_REVIEW_APPROVED_WITH_NOTES_PROMPT`): the
+ * bare prompt says "no changes requested" and the feedback export opens with
+ * its own change-request-shaped heading, so naive concatenation reads as a
+ * contradiction — the agent either starts fixing post-approval or discards
+ * the guidance. The framing states the notes are non-blocking.
+ */
+export function composeReviewApprovedMessage(
+  runtime?: PromptRuntime | null,
+  feedback?: string | null,
+  config?: PlannotatorConfig,
+): string {
+  const note = typeof feedback === "string" ? feedback.trim() : "";
+  if (!note || note === LEGACY_REVIEW_APPROVAL_PLACEHOLDER) {
+    return getReviewApprovedPrompt(runtime, config);
+  }
+  return getReviewApprovedWithNotesPrompt(runtime, config, { feedback: note });
 }
 
 export function getReviewDeniedSuffix(

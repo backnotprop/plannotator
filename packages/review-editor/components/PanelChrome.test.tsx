@@ -98,4 +98,54 @@ describe("PanelControlsRow", () => {
       expect(switches?.[1]?.getAttribute("aria-checked")).toBe("false");
     },
   );
+
+  test.skipIf(!hasDom)(
+    "the auto-mark-viewed switch appears only when a handler is supplied, and toggles",
+    async () => {
+      // The gear popover is the easily-reachable off switch for auto-mark-
+      // viewed, two clicks from where the behavior manifests. Guards both
+      // halves: hosts that do not wire it keep exactly two rows (the prop is
+      // optional), and wiring it produces a working third.
+      host = document.createElement("div");
+      document.body.appendChild(host);
+      root = createRoot(host);
+      let autoViewed = true;
+      const render = async () => {
+        await act(async () => {
+          root?.render(
+            <PanelControlsRow
+              viewedCount={3}
+              totalCount={9}
+              showViewedControls
+              onToggleShowViewedControls={() => {}}
+              showStageControls
+              onToggleShowStageControls={() => {}}
+              autoViewed={autoViewed}
+              onToggleAutoViewed={() => { autoViewed = !autoViewed; void render(); }}
+            />,
+          );
+        });
+      };
+      await render();
+
+      await act(async () => {
+        host?.querySelector<HTMLButtonElement>('[aria-label="Tree controls"]')?.click();
+        await Promise.resolve();
+      });
+      const popup = document.querySelector<HTMLElement>("[data-review-tree-settings]");
+      const toggle = popup?.querySelector<HTMLButtonElement>(
+        "[data-review-auto-viewed-toggle]",
+      );
+      expect(toggle).not.toBeNull();
+      expect(toggle?.getAttribute("aria-checked")).toBe("true");
+      await act(async () => toggle?.click());
+      expect(autoViewed).toBe(false);
+      expect(
+        document
+          .querySelector<HTMLElement>("[data-review-tree-settings]")
+          ?.querySelector("[data-review-auto-viewed-toggle]")
+          ?.getAttribute("aria-checked"),
+      ).toBe("false");
+    },
+  );
 });

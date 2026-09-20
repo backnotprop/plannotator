@@ -97,7 +97,11 @@ export function TableOfContents({
     [onNavigate, scrollViewport]
   );
 
-  if (tocItems.length === 0) {
+  // A linked document with no headings of its own — most obviously a raw-HTML
+  // one, which is never parsed into blocks — still needs the "Viewing / Back
+  // to …" header, which lives here. Without it, opening such a document from
+  // a link leaves no visible way back.
+  if (tocItems.length === 0 && !linkedDocFilepath) {
     return null;
   }
 

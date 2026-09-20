@@ -49,7 +49,13 @@ export function inlineHtmlLocalAssets(html: string, htmlFilePath: string): strin
       }
     };
 
-    return rewriteHtmlAssetReferences(html, dataUrlFor);
+    // Embedded local documents do not travel: a portable share carries one
+    // file, and inlining a sibling page as a data: URL would lose that page's
+    // own relative assets anyway. `inertBase` gives a document that HAS embeds
+    // a base nothing resolves against, so an embed renders EMPTY on the share
+    // portal instead of resolving onto the portal's own catch-all and rendering
+    // the app inside the frame (which is exactly the bug this fixes locally).
+    return rewriteHtmlAssetReferences(html, dataUrlFor, { inertBase: true });
   } catch {
     return html;
   }

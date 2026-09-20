@@ -10,6 +10,7 @@ import { useConfigValue } from '@plannotator/ui/config';
  * the import path the review editor has always used.
  */
 import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
 export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
 
 export interface PierreTheme {
@@ -274,16 +275,14 @@ export function usePierreTheme(options?: {
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
           }
-          .pn-token-hover {
-            text-decoration: underline;
-            text-decoration-color: ${primary || 'oklch(0.70 0.20 280)'};
-            text-decoration-thickness: 1.5px;
-            text-underline-offset: 2px;
-            cursor: pointer;
+          .pn-token-hover {${tokenHoverUnderlineCss(primary || 'oklch(0.70 0.20 280)')}
           }
           .pn-token-nav {
             text-decoration-thickness: 2px;
-            cursor: pointer;
+            /* Pierre's [data-*] selectors outrank a bare class inside the
+               shadow root, so the pointer needs the same !important the
+               neighboring overrides use, or the I-beam wins. */
+            cursor: pointer !important;
             opacity: 0.85;
           }
 

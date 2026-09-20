@@ -26,11 +26,20 @@ import {
   getServerConfig,
   resolveGuideShareUrl,
   resolveSharingEnabled,
+  resolveDefaultDiffType,
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
+
+describe("resolveDefaultDiffType", () => {
+  test("accepts local-vs-remote as a persisted review default", () => {
+    expect(resolveDefaultDiffType({
+      diffOptions: { defaultDiffType: "local-vs-remote" },
+    })).toBe("local-vs-remote");
+  });
+});
 
 describe("parseReviewAnalysisConfig", () => {
   test("accepts independent boolean analysis flags", () => {

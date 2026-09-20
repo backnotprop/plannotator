@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator, { PROJECT_TRUST_CAPABILITY_WARNING } from "./index.ts";
 
 type Handler = (event: unknown, context: ReturnType<typeof createContext>) => unknown;
 
-type SessionEntry = { type: string; customType?: string; data?: unknown };
+type SessionEntry = {
+	type: string;
+	customType?: string;
+	data?: unknown;
+	message?: { role: string; content: Array<{ type: string; text: string }> };
+};
 
 type PromptResult =
 	| {
@@ -286,6 +291,36 @@ describe("Plannotator phase framing messages", () => {
 		expect(third?.message?.content).not.toContain("Step one");
 		expect(third?.message?.content).toContain("- [ ] 2. Step two");
 		expect(third?.message?.content).not.toBe(second?.message?.content);
+	});
+
+	test("resync persists completion markers that predate checklist persistence", async () => {
+		const cwd = makeWorkspace();
+		const planPath = join(cwd, "PLAN.md");
+		writeFileSync(planPath, "# Plan\n\n- [ ] Step one\n- [ ] Step two\n", "utf-8");
+		const runtime = createRuntime();
+		const context = createContext({
+			cwd,
+			entries: [
+				{
+					type: "custom",
+					customType: "plannotator",
+					data: {
+						phase: "executing",
+						lastSubmittedPath: "PLAN.md",
+						savedState: { thinkingLevel: "medium" },
+					},
+				},
+				{ type: "custom", customType: "plannotator-execute" },
+				{
+					type: "message",
+					message: { role: "assistant", content: [{ type: "text", text: "Finished. [DONE:1]" }] },
+				},
+			],
+		});
+
+		await runtime.run("session_start", context);
+
+		expect(readFileSync(planPath, "utf-8")).toBe("# Plan\n\n- [x] Step one\n- [ ] Step two\n");
 	});
 
 	test("a resumed session with delivered framing does not re-deliver it", async () => {

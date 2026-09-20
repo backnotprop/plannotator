@@ -11,7 +11,7 @@
  * These tests are the mutation guard: reintroducing any bare-token injection
  * for non-opted-in documents must go red here.
  */
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
 import {
   DIFF_HIGHLIGHT_CSS,
@@ -1061,6 +1061,73 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  // An EMBEDDED local document is one element from the outer page's point of
+  // view: the bridge is never injected into a nested frame, so a click inside
+  // it lands in another document and annotates nothing. Armed pinpoint makes
+  // frames transparent to the pointer so the click pins the <iframe> itself;
+  // Interact hands the embed back so it can be used natively.
+  test("armed pinpoint makes nested frames pointer-transparent and Interact restores them", async () => {
+    document.body.innerHTML = '<iframe src="about:blank"></iframe>';
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(true);
+
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: false });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(false);
+
+    // Re-arming, then switching input method away, also clears it.
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(true);
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    expect(document.body.hasAttribute("data-plannotator-frame-inert")).toBe(false);
+
+    // String-level guard: happy-dom honors neither pointer-events nor :is(),
+    // so the attribute alone would pass with a typo'd rule. The rule that
+    // actually makes the embed pinnable must ship in the annotation CSS.
+    expect(ANNOTATION_HIGHLIGHT_CSS).toContain(
+      "body[data-plannotator-frame-inert] :is(iframe, frame, embed, object) {",
+    );
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    document.body.replaceChildren();
+  });
+
+  // Consequence of making frames pointer-transparent: hit-testing passes
+  // THROUGH the embed to the container painted behind it, so without the
+  // frame preference an armed click on an embed would pin its wrapper div —
+  // the reviewer's comment would name the wrong element.
+  test("an armed click inside an embed's box pins the frame, not the container behind it", async () => {
+    document.body.innerHTML = '<div class="frame"><iframe title="Prototype"></iframe></div>';
+    const wrapper = document.querySelector<HTMLElement>("div.frame")!;
+    const frame = document.querySelector<HTMLElement>("iframe")!;
+    frame.getBoundingClientRect = () => rectOf(0, 0, 600, 400);
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const messages: Array<Record<string, unknown>> = [];
+    const collect = (event: MessageEvent) => {
+      const data = bridgeMessageData(event);
+      if (data?.type === "plannotator-bridge-selection") messages.push(data);
+    };
+    window.addEventListener("message", collect);
+    wrapper.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    window.removeEventListener("message", collect);
+
+    expect(messages.length).toBe(1);
+    const context = messages[0]!.context as { tag?: string; path?: string } | undefined;
+    expect(context?.tag).toBe("iframe");
+    expect(context?.path).toContain("> iframe");
+    // The pin box covers the embed, not the wrapper.
+    expect(messages[0]!.rect).toMatchObject({ width: 600, height: 400 });
+
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    document.body.replaceChildren();
+  });
+
   test("deeply nested targets get no anchor instead of a quadratic selector walk", async () => {
     // Each ancestor step costs a document-wide uniqueness query against a
     // growing selector, so unbounded depth freezes the tab on one click
@@ -1476,6 +1543,116 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     document.body.replaceChildren();
   });
 
+  // --- Element context: the agent-facing description a pinpoint carries ---
+  // Failures to catch: silent regression to label-only capture; secrets or
+  // handlers leaking into feedback on disk; unbounded growth on a container
+  // click; the skeleton dropping the grep keys (id/class) an agent needs.
+
+  const CONTEXT_MARKUP = [
+    '<div id="root"><header class="site-header"><h1>Acme Analytics</h1>',
+    '<nav id="site-nav" class="site-nav sticky" aria-label="Primary" data-component="AppNav">',
+    '<ul class="nav-list"><li><a href="https://acme.test/home?token=abc#frag">Home</a></li>',
+    '<li><a href="/about?tab=2">About</a></li></ul>',
+    '<button class="nav-toggle" aria-label="Open menu" onclick="steal()" style="color:red" data-secret="s3cr3t"><svg></svg></button>',
+    "<script>var secret = 'do-not-export';</script>",
+    "</nav></header><main><h2>Usage</h2><p>Body</p></main></div>",
+  ].join("");
+
+  test("a pinpointed <nav> carries an element context: identity, path, role, name, hooks, skeleton, surroundings", async () => {
+    document.body.innerHTML = CONTEXT_MARKUP;
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    const nav = document.querySelector<HTMLElement>("nav#site-nav")!;
+    hoverAt(nav, 30, 30);
+    const { messages } = await clickAndCollectSelection(nav, 30, 30);
+    expect(messages.length).toBe(1);
+    const context = messages[0]!.context as Record<string, unknown>;
+    expect(context).toBeDefined();
+    expect(context.tag).toBe("nav");
+    expect(context.id).toBe("site-nav");
+    expect(context.classes).toEqual(["site-nav", "sticky"]);
+    expect(context.path).toBe("body > div#root > header.site-header > nav#site-nav");
+    expect(context.role).toBe("navigation"); // implicit role, no role attribute
+    expect(context.name).toBe("Primary"); // aria-label wins the accessible name
+    expect(context.attrs).toEqual([["aria-label", "Primary"], ["data-component", "AppNav"]]);
+    expect(context.component).toBe("data-component=AppNav");
+    expect(context.landmark).toBe("header.site-header");
+    expect(context.heading).toBe('h1 "Acme Analytics"');
+    expect(context.children).toBe(2); // ul + button; the <script> is skipped
+    const outline = String(context.outline);
+    // The root tag prints its grep keys and its allowlisted attributes.
+    expect(outline.startsWith('<nav id="site-nav" class="site-nav sticky" aria-label="Primary" data-component="AppNav">')).toBe(true);
+    // Children as bare tags, leaves with their short text.
+    expect(outline).toContain('<ul class="nav-list">');
+    expect(outline).toContain("<li>Home</li>");
+    expect(outline).toContain('<button class="nav-toggle">');
+    expect(outline.endsWith("</nav>")).toBe(true);
+    // Never: script text, inline handlers, style, non-allowlisted data-*.
+    expect(JSON.stringify(context)).not.toContain("do-not-export");
+    expect(JSON.stringify(context)).not.toContain("steal");
+    expect(JSON.stringify(context)).not.toContain("color:red");
+    expect(JSON.stringify(context)).not.toContain("s3cr3t");
+    // Srcdoc sessions carry no page identity (that is live-mode only).
+    expect(context.page).toBeUndefined();
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+
+    // A text-less icon button: the quote stays the placeholder the export
+    // rewrites, and the context names the element the placeholder cannot.
+    const toggle = document.querySelector<HTMLElement>("button.nav-toggle")!;
+    hoverAt(toggle, 60, 30);
+    const button = await clickAndCollectSelection(toggle, 60, 30);
+    expect(button.messages[0]!.text).toBe("[element: Button]");
+    const buttonContext = button.messages[0]!.context as Record<string, unknown>;
+    expect(buttonContext.name).toBe("Open menu");
+    expect(buttonContext.role).toBe("button");
+    expect(buttonContext.landmark).toBe('nav#site-nav "Primary"');
+    expect(buttonContext.attrs).toEqual([["aria-label", "Open menu"]]);
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+
+    // URLs lose their query and fragment (tokens live there) and keep their
+    // path, in every form: absolute and relative alike.
+    const home = document.querySelector<HTMLElement>('a[href^="https://acme.test"]')!;
+    hoverAt(home, 10, 10);
+    const link = await clickAndCollectSelection(home, 10, 10);
+    const linkContext = link.messages[0]!.context as { attrs: Array<[string, string]>; role: string };
+    expect(linkContext.attrs).toEqual([["href", "https://acme.test/home?…"]]);
+    expect(linkContext.role).toBe("link");
+    expect(JSON.stringify(linkContext)).not.toContain("token=abc");
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    // Fresh coordinates: the hover hit-test is keyed on the pointer position.
+    const about = document.querySelector<HTMLElement>('a[href="/about?tab=2"]')!;
+    hoverAt(about, 90, 12);
+    const rel = await clickAndCollectSelection(about, 90, 12);
+    expect((rel.messages[0]!.context as { attrs: Array<[string, string]> }).attrs).toEqual([["href", "/about?…"]]);
+    expect(JSON.stringify(rel.messages[0]!.context)).not.toContain("tab=2");
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
+  test("a container with hundreds of children stays under the byte budget and collapses its skeleton", async () => {
+    const items: string[] = [];
+    for (let i = 0; i < 400; i++) items.push(`<li class="row">Row number ${i} with some words in it</li>`);
+    document.body.innerHTML = `<main><ul id="big" class="list">${items.join("")}</ul></main>`;
+    postBridge({ type: "plannotator-bridge-set-vim-mode", enabled: false });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+    const list = document.querySelector<HTMLElement>("ul#big")!;
+    hoverAt(list, 30, 30);
+    const { messages } = await clickAndCollectSelection(list, 30, 30);
+    const context = messages[0]!.context as Record<string, unknown>;
+    expect(context.children).toBe(400);
+    expect(new TextEncoder().encode(JSON.stringify(context)).length).toBeLessThanOrEqual(2048);
+    const outline = String(context.outline);
+    expect(outline.length).toBeLessThanOrEqual(600);
+    // The adaptive skeleton shows a few children and counts the rest.
+    expect(outline).toContain("more: li×");
+    expect(String(context.text).length).toBeLessThanOrEqual(301); // 300 + ellipsis
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
+
   test("marker click ownership is identity-gated, not selector-gated (D5)", async () => {
     // A page element spoofing our marker attributes is NOT a viewer overlay:
     // it hovers and annotates like any other element.
@@ -1596,6 +1773,26 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     keys.set("alpha", primaryKey);
     return { primaryKey, keys };
   }
+
+  test("shift-click additional targets carry their own (smaller) element context", async () => {
+    document.body.innerHTML = MULTI_MARKUP;
+    const { keys } = await startMultiDraft();
+    const beta = document.querySelector<HTMLElement>("p.beta")!;
+    const added = await collectMessages(
+      ["plannotator-bridge-multi-target-added"],
+      () => clickAt(beta, 40, 40, true),
+    );
+    expect(added.length).toBe(1);
+    const context = added[0]!.context as Record<string, unknown>;
+    expect(context.tag).toBe("p");
+    expect(context.path).toBe("body > div#hero > p.beta");
+    expect(context.text).toBe("Beta text");
+    expect(new TextEncoder().encode(JSON.stringify(context)).length).toBeLessThanOrEqual(1024);
+    expect(keys.get("alpha")).toBeTruthy();
+    postBridge({ type: "plannotator-bridge-cancel-selection" });
+    postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+    document.body.replaceChildren();
+  });
 
   test("shift-click adds targets to the SAME draft and toggles them off again", async () => {
     document.body.innerHTML = MULTI_MARKUP;
@@ -3778,6 +3975,123 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     });
     postBridge({ type: "plannotator-bridge-clear-marks" });
     document.body.replaceChildren();
+  });
+
+  // --- Local-site link navigation -----------------------------------------
+  // A srcdoc document's base URL is the PARENT page's, so an unhandled link
+  // resolves onto the Plannotator server and its catch-all answers with the
+  // app itself: the whole editor rendered inside the annotated document.
+  // The bridge must therefore never let this frame navigate.
+  describe("link navigation", () => {
+    let capturedLinkPosts: Array<Record<string, unknown>> = [];
+    let stopCapture: (() => void) | null = null;
+
+    function startCapture() {
+      capturedLinkPosts = [];
+      const capture = (event: MessageEvent) => {
+        const data = bridgeMessageData(event);
+        if (data && data.type === "plannotator-bridge-link-click") capturedLinkPosts.push(data);
+      };
+      window.addEventListener("message", capture);
+      stopCapture = () => window.removeEventListener("message", capture);
+    }
+
+    /** postMessage delivery is queued; one macrotask turn settles it. */
+    const flushPosts = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    function clickLink(selector: string): MouseEvent {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el) throw new Error("missing link " + selector);
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      el.dispatchEvent(event);
+      return event;
+    }
+
+    function setUp(html: string, armed: boolean) {
+      document.body.innerHTML = html;
+      postBridge({ type: "plannotator-bridge-set-input-method", method: "pinpoint" });
+      postBridge({ type: "plannotator-bridge-set-annotate-mode", active: armed });
+      startCapture();
+    }
+
+    afterEach(() => {
+      stopCapture?.();
+      stopCapture = null;
+      postBridge({ type: "plannotator-bridge-set-annotate-mode", active: true });
+      postBridge({ type: "plannotator-bridge-set-input-method", method: "drag" });
+      document.body.replaceChildren();
+    });
+
+    test("Interact: a relative document link is swallowed and reported, never navigated", async () => {
+      setUp('<a id="rel" href="01-entry-point.html">Entry</a>', false);
+      const event = clickLink("#rel");
+      await flushPosts();
+      // The default action is what would load the app into this frame.
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts.map((p) => p.href)).toEqual(["01-entry-point.html"]);
+    });
+
+    test("Interact: the RAW href travels — resolution belongs to the parent", async () => {
+      setUp('<a id="rel" href="./sub/02-detail.html?v=2#top">Detail</a>', false);
+      clickLink("#rel");
+      await flushPosts();
+      expect(capturedLinkPosts[0]?.href).toBe("./sub/02-detail.html?v=2#top");
+    });
+
+    test("Interact: a click on a child of the link still resolves to the link", async () => {
+      setUp('<a id="rel" href="a.html"><span id="inner">deep</span></a>', false);
+      const event = clickLink("#inner");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts[0]?.href).toBe("a.html");
+    });
+
+    test("Interact: an off-origin link is reported too — the parent opens the tab", async () => {
+      setUp('<a id="ext" href="https://example.com">Example</a>', false);
+      const event = clickLink("#ext");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts[0]?.href).toBe("https://example.com");
+    });
+
+    test("an in-page #fragment scrolls locally and is never reported", async () => {
+      setUp('<a id="frag" href="#target">Jump</a><h2 id="target">Target</h2>', false);
+      const target = document.querySelector<HTMLElement>("#target")!;
+      let scrolled = 0;
+      target.scrollIntoView = () => { scrolled += 1; };
+      const event = clickLink("#frag");
+      await flushPosts();
+      // Still prevented: in a srcdoc document the browser treats #target as a
+      // cross-document navigation to the PARENT's URL.
+      expect(event.defaultPrevented).toBe(true);
+      expect(scrolled).toBe(1);
+      expect(capturedLinkPosts).toEqual([]);
+    });
+
+    test("scroll-to-fragment replays a linked document's fragment after load", () => {
+      setUp('<h2 id="deep">Deep</h2>', false);
+      const target = document.querySelector<HTMLElement>("#deep")!;
+      let scrolled = 0;
+      target.scrollIntoView = () => { scrolled += 1; };
+      postBridge({ type: "plannotator-bridge-scroll-to-fragment", fragment: "deep" });
+      expect(scrolled).toBe(1);
+    });
+
+    test("armed pinpoint: the click annotates — no navigation, and no link report", async () => {
+      setUp('<a id="rel" href="01-entry-point.html">Entry</a>', true);
+      const event = clickLink("#rel");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(true);
+      expect(capturedLinkPosts).toEqual([]);
+    });
+
+    test("javascript: hrefs stay the page's own scripting", async () => {
+      setUp('<a id="js" href="javascript:void 0">Run</a>', false);
+      const event = clickLink("#js");
+      await flushPosts();
+      expect(event.defaultPrevented).toBe(false);
+      expect(capturedLinkPosts).toEqual([]);
+    });
   });
 });
 

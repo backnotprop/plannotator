@@ -71,6 +71,8 @@ interface SectionsPanelProps {
   onStageFile?: (filePath: string) => void;
   showStageControls?: boolean;
   onToggleShowStageControls?: () => void;
+  autoViewed?: boolean;
+  onToggleAutoViewed?: () => void;
   isLoadingDiff?: boolean;
   /** Base picker ("vs origin/main" affordance). */
   availableBranches?: AvailableBranches;
@@ -222,6 +224,8 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   onStageFile,
   showStageControls = true,
   onToggleShowStageControls,
+  autoViewed,
+  onToggleAutoViewed,
   isLoadingDiff,
   availableBranches,
   selectedBase,
@@ -493,6 +497,8 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
       onToggleShowViewedControls={onToggleShowViewedControls}
       showStageControls={showStageControls}
       onToggleShowStageControls={onToggleShowStageControls}
+      autoViewed={autoViewed}
+      onToggleAutoViewed={onToggleAutoViewed}
     />
   );
 

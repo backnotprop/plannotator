@@ -2,7 +2,7 @@
 
 Plannotator's Droid plugin ships the manual slash-command workflow only:
 
-- `/plannotator-review [PR_URL]` (no args reviews local changes)
+- `/plannotator-review [--base <ref>] [--diff-type <type>] [PR_URL]` (no args reviews local changes; the open-state flags pin the session's opening diff — session-only, git-only)
 - `/plannotator-annotate <file|folder|url>`
 - `/plannotator-last`
 

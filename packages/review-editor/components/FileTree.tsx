@@ -65,6 +65,8 @@ interface FileTreeProps {
   stagedFiles: Set<string>;
   showStageControls?: boolean;
   onToggleShowStageControls?: () => void;
+  autoViewed?: boolean;
+  onToggleAutoViewed?: () => void;
   onCopyRawDiff?: () => void;
   canCopyRawDiff?: boolean;
   copyRawDiffStatus?: 'idle' | 'success' | 'error';
@@ -155,6 +157,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
   stagedFiles,
   showStageControls = true,
   onToggleShowStageControls,
+  autoViewed,
+  onToggleAutoViewed,
   onCopyRawDiff,
   canCopyRawDiff = false,
   copyRawDiffStatus = 'idle',
@@ -340,6 +344,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
       onToggleShowViewedControls={onToggleShowViewedControls}
       showStageControls={showStageControls}
       onToggleShowStageControls={onToggleShowStageControls}
+      autoViewed={autoViewed}
+      onToggleAutoViewed={onToggleAutoViewed}
     />
   );
 
@@ -424,6 +430,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 onSelect={onSelectDiff}
                 isLoading={isLoadingDiff}
                 hasBasePicker={!!onSelectBase && !!availableBranches}
+                activeBase={selectedBase}
               />
             </div>
           )}

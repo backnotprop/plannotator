@@ -1,0 +1,236 @@
+{
+	"mermaid": "11.17.2",
+	"renderId": "diagram-fixture",
+	"viewBox": "-50 -10 899 596",
+	"hostRect": {
+		"x": 0,
+		"y": 0,
+		"width": 960,
+		"height": 640
+	},
+	"svgRect": {
+		"x": 0,
+		"y": 0,
+		"width": 899,
+		"height": 596
+	},
+	"svgCtm": {
+		"a": 1,
+		"b": 0,
+		"c": 0,
+		"d": 1,
+		"e": 50,
+		"f": 10
+	},
+	"elements": {
+		"actor3": {
+			"tag": "line",
+			"class": "actor-line 200",
+			"bbox": {
+				"x": 724,
+				"y": 65,
+				"width": 0,
+				"height": 445
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"root-3": {
+			"tag": "g",
+			"class": "",
+			"bbox": {
+				"x": 649,
+				"y": 0,
+				"width": 150,
+				"height": 65
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"actor2": {
+			"tag": "line",
+			"class": "actor-line 200",
+			"bbox": {
+				"x": 475,
+				"y": 65,
+				"width": 0,
+				"height": 445
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"root-2": {
+			"tag": "g",
+			"class": "",
+			"bbox": {
+				"x": 400,
+				"y": 0,
+				"width": 150,
+				"height": 65
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"actor1": {
+			"tag": "line",
+			"class": "actor-line 200",
+			"bbox": {
+				"x": 275,
+				"y": 65,
+				"width": 0,
+				"height": 445
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"root-1": {
+			"tag": "g",
+			"class": "",
+			"bbox": {
+				"x": 200,
+				"y": 0,
+				"width": 150,
+				"height": 65
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"actor0": {
+			"tag": "line",
+			"class": "actor-line 200",
+			"bbox": {
+				"x": 75,
+				"y": 65,
+				"width": 0,
+				"height": 445
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"root-0": {
+			"tag": "g",
+			"class": "",
+			"bbox": {
+				"x": 0,
+				"y": 0,
+				"width": 150,
+				"height": 65
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"diagram-fixture-computer": {
+			"tag": "symbol",
+			"class": "",
+			"bbox": {
+				"x": 0,
+				"y": 1,
+				"width": 12,
+				"height": 10
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"diagram-fixture-database": {
+			"tag": "symbol",
+			"class": "",
+			"bbox": {
+				"x": 1.0000001192092896,
+				"y": 3.2136449590325356e-7,
+				"width": 10.000000953674316,
+				"height": 12
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		},
+		"diagram-fixture-clock": {
+			"tag": "symbol",
+			"class": "",
+			"bbox": {
+				"x": 0,
+				"y": 0,
+				"width": 12,
+				"height": 12
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 50,
+				"f": 10
+			},
+			"label": ""
+		}
+	}
+}

@@ -45,35 +45,19 @@ describe("jj diff args", () => {
 });
 
 describe("jj compare targets", () => {
-  test("resolves a readable target for the detected line base", async () => {
-    await expect(selectDefaultJjCompareTarget({
-      async runJj() {
-        return { stdout: '[{"name":"main"},{"name":"main","remote":"origin"}]\\t0123456789abcdef\\n', stderr: "", exitCode: 0 };
-      },
-    })).resolves.toBe("main@origin");
-
-    await expect(selectDefaultJjCompareTarget({
-      async runJj() {
-        return { stdout: '[{"name":"main"}]\\t0123456789abcdef\\n', stderr: "", exitCode: 0 };
-      },
-    })).resolves.toBe("main");
-
-    await expect(selectDefaultJjCompareTarget({
-      async runJj() {
-        return { stdout: "[]\\t0123456789abcdef\\n", stderr: "", exitCode: 0 };
-      },
-    })).resolves.toBe("0123456789abcdef");
-
-    // Generated `jj git push --change` bookmarks are never a readable target.
-    await expect(selectDefaultJjCompareTarget({
-      async runJj() {
-        return {
-          stdout: '[{"name":"push-vmopwunwxopv","remote":"origin"}]\\t0123456789abcdef\\n',
-          stderr: "",
-          exitCode: 0,
-        };
-      },
-    })).resolves.toBe("0123456789abcdef");
+  test("uses the exact commit ID for the detected line base", async () => {
+    for (const bookmarks of [
+      '[{"name":"main"},{"name":"main","remote":"origin"}]',
+      '[{"name":"main"}]',
+      "[]",
+      '[{"name":"push-vmopwunwxopv","remote":"origin"}]',
+    ]) {
+      await expect(selectDefaultJjCompareTarget({
+        async runJj() {
+          return { stdout: `${bookmarks}\\t0123456789abcdef\\t"Base"\\n`, stderr: "", exitCode: 0 };
+        },
+      })).resolves.toBe("0123456789abcdef");
+    }
 
     // An unresolvable base degrades to the previous default instead of aborting
     // review startup, which has no handler for a throw.

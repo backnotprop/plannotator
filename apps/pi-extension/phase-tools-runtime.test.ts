@@ -287,14 +287,23 @@ describe("Plannotator phase tool ownership", () => {
 		});
 
 		await runtime.run("session_start", context);
-		expect(runtime.getActiveTools()).toEqual(["read", "bash", "my_tool"]);
+		// The executing phase unions the mark-done tool in beside the user's
+		// configured tools, exactly like planning unions the submit tool.
+		expect(runtime.getActiveTools()).toEqual([
+			"read",
+			"bash",
+			"my_tool",
+			"plannotator_mark_done",
+		]);
 		expect(runtime.lastPersistedState()).toMatchObject({
 			phase: "executing",
-			phaseAddedTools: ["my_tool"],
+			phaseAddedTools: ["my_tool", "plannotator_mark_done"],
 		});
 
 		await runtime.run("agent_end", context);
-		expect(runtime.getActiveTools()).toEqual(["read", "bash"]);
+		const exitTools = runtime.getActiveTools();
+		expect(exitTools).not.toContain("plannotator_mark_done");
+		expect(exitTools).toEqual(["read", "bash"]);
 		expect(runtime.lastPersistedState()).toMatchObject({
 			phase: "idle",
 			phaseAddedTools: [],

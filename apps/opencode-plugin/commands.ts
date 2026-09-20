@@ -13,13 +13,14 @@ import {
   startAnnotateServer,
   handleAnnotateServerReady,
 } from "@plannotator/server/annotate";
-import { type DiffType, prepareLocalReviewDiff, detectManagedVcs } from "@plannotator/server/vcs";
+import { type DiffType, prepareLocalReviewDiff, detectManagedVcs, gitRuntime } from "@plannotator/server/vcs";
+import { resolveReviewOpenState } from "@plannotator/shared/review-open-state";
 import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
 import {
+  composeReviewApprovedMessage,
   getAnnotateApprovedWithNotesPrompt,
-  getReviewApprovedPrompt,
   getReviewDeniedSuffix,
   getAnnotateFileFeedbackPrompt,
 } from "@plannotator/shared/prompts";
@@ -57,6 +58,8 @@ export interface CommandDeps {
    * would leak into other suites). Defaults to the real annotate server.
    */
   startAnnotateServer?: typeof startAnnotateServer;
+  /** Review server starter — injectable for the same reason. */
+  startReviewServer?: typeof startReviewServer;
 }
 
 export async function handleReviewCommand(
@@ -67,8 +70,21 @@ export async function handleReviewCommand(
 
   // @ts-ignore - Event properties contain arguments
   const reviewArgs = parseReviewArgs(event.properties?.arguments || "");
+  // Argument-shape failures refuse to start a session (same contract as the
+  // CLI's exit 1) — surfaced through the plugin's existing log path.
+  if (reviewArgs.errors.length > 0) {
+    for (const parseError of reviewArgs.errors) {
+      client.app.log({ level: "error", message: `[Plannotator] ${parseError}` });
+    }
+    return;
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
+  // Caller-pinned open state (--base/--diff-type): session-only seed, same
+  // contract as the CLI. Fatal validation failures surface through the
+  // plugin's existing log path and refuse to start a session.
+  const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
+  let initialBaseFromFlags: string | undefined;
 
   let rawPatch: string;
   let gitRef: string;
@@ -81,6 +97,18 @@ export async function handleReviewCommand(
   let agentCwd: string | undefined;
 
   if (isPRMode) {
+    if (openStatePinned) {
+      const openState = resolveReviewOpenState({
+        parsed: reviewArgs,
+        isPRMode: true,
+        isWorkspace: false,
+        resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+      });
+      if (openState.error) {
+        client.app.log({ level: "error", message: `[Plannotator] ${openState.error}` });
+        return;
+      }
+    }
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
       client.app.log({ level: "error", message: `Invalid PR/MR URL: ${urlArg}` });
@@ -114,10 +142,43 @@ export async function handleReviewCommand(
     const managedVcs = await detectManagedVcs(cwd, reviewArgs.vcsType);
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
     if (managedVcs || forcedVcs) {
+      const providerId = (managedVcs?.id ?? reviewArgs.vcsType) as
+        | "git"
+        | "gitbutler"
+        | "jj"
+        | "p4"
+        | undefined;
+      let baseResolves: boolean | undefined;
+      if (openStatePinned && reviewArgs.base !== undefined && providerId === "git") {
+        // --end-of-options blocks flag injection; the probe keeps a typo'd
+        // base from producing a mislabelled merge-base→HEAD diff.
+        const probe = await gitRuntime.runGit(
+          ["rev-parse", "--verify", "--quiet", "--end-of-options", `${reviewArgs.base}^{commit}`],
+          { cwd },
+        );
+        baseResolves = probe.exitCode === 0;
+      }
+      const openState = resolveReviewOpenState({
+        parsed: reviewArgs,
+        isPRMode: false,
+        isWorkspace: false,
+        providerId,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        baseResolves,
+      });
+      if (openState.error) {
+        client.app.log({ level: "error", message: `[Plannotator] ${openState.error}` });
+        return;
+      }
+      for (const notice of openState.notices) {
+        client.app.log({ level: "info", message: `[Plannotator] ${notice}` });
+      }
       try {
         const diffResult = await prepareLocalReviewDiff({
           cwd,
           vcsType: reviewArgs.vcsType,
+          requestedDiffType: openState.requestedDiffType,
+          requestedBase: openState.requestedBase,
           configuredDiffType: resolveDefaultDiffType(config),
           hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
         });
@@ -127,11 +188,27 @@ export async function handleReviewCommand(
         gitRef = diffResult.gitRef;
         diffError = diffResult.error;
         initialFingerprint = diffResult.fingerprint;
+        // Forward the base the patch was computed against — without it the
+        // server serves this patch under the detected default: a mixed-base
+        // review.
+        if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
       } catch (err) {
         client.app.log({ level: "error", message: err instanceof Error ? err.message : "Failed to prepare local review diff" });
         return;
       }
     } else {
+      if (openStatePinned) {
+        const openState = resolveReviewOpenState({
+          parsed: reviewArgs,
+          isPRMode: false,
+          isWorkspace: true,
+          resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        });
+        if (openState.error) {
+          client.app.log({ level: "error", message: `[Plannotator] ${openState.error}` });
+          return;
+        }
+      }
       workspace = await buildLocalWorkspaceReview(cwd, {
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
@@ -148,19 +225,30 @@ export async function handleReviewCommand(
     }
   }
 
-  const server = await startReviewServer({
+  // @ts-ignore - Event properties contain sessionID
+  const sessionId = event.properties?.sessionID;
+
+  const startServer = deps.startReviewServer ?? startReviewServer;
+  const server = await startServer({
     rawPatch,
     gitRef,
     error: diffError,
     origin: "opencode",
+    project: (await detectProjectName()) ?? undefined,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
+    initialBase: initialBaseFromFlags,
+    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    openStatePinned,
     initialFingerprint,
     prMetadata,
     workspace,
     agentCwd,
     sharingEnabled: await getSharingEnabled(),
     shareBaseUrl: getShareBaseUrl(),
+    // Approve-time notes are delivered below only when there is a session to
+    // prompt into — same per-session gating as the annotate command's advert.
+    approvalNotesSupported: Boolean(sessionId),
     htmlContent: reviewHtmlContent,
     opencodeClient: client,
     onReady: (url, isRemote, port) => {
@@ -177,10 +265,11 @@ export async function handleReviewCommand(
     return;
   }
 
-  if (result.feedback) {
-    // @ts-ignore - Event properties contain sessionID
-    const sessionId = event.properties?.sessionID;
-
+  // An approval must be delivered even with an empty feedback string: the
+  // old feedback-only gate rode on the removed LGTM placeholder making
+  // `feedback` truthy on every approval — with the placeholder gone (PR5,
+  // spec §6.4), gating on feedback alone would silently drop bare approvals.
+  if (result.feedback || result.approved) {
     if (sessionId) {
       const targetAgent = await resolveValidatedTargetAgent({
         client,
@@ -191,8 +280,9 @@ export async function handleReviewCommand(
       // Append the verification-only suffix when the reviewer sent annotations to
       // act on (PR mode included). Platform PR actions post a status message
       // with no annotations — those go through verbatim, no suffix.
+      // Approvals carry the reviewer's approve-time notes after the prompt.
       const message = result.approved
-        ? getReviewApprovedPrompt("opencode")
+        ? composeReviewApprovedMessage("opencode", result.feedback)
         : result.annotations.length > 0
           ? `${result.feedback}${getReviewDeniedSuffix("opencode")}`
           : result.feedback;

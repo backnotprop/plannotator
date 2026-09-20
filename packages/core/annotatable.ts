@@ -10,6 +10,19 @@
  * - Markdown/plain docs: .md .mdx .txt
  * - Config/data formats: .yaml .yml .json .jsonc .json5 .toml .ini .cfg
  *   .conf .properties .csv .tsv .log .xml .env.example
+ * - Diagram sources: .mmd .mermaid (Mermaid) and .dot .gv (Graphviz)
+ *
+ * Diagram sources are a THIRD FAMILY, not markdown: they are plain UTF-8 text
+ * (so they resolve, size-cap and version-history exactly like a `.txt`), but
+ * the annotate surfaces render them through the diagram engine rather than the
+ * markdown pipeline — the same DiagramBlock/DiagramViewer/DiagramPopout the
+ * ```mermaid / ```dot fences in a plan use, with click-to-comment on nodes,
+ * edges and clusters. `diagramRenderKindForPath` is the single predicate that
+ * says which engine a path belongs to, and it is what the annotate servers
+ * turn into the `renderAs` field on /api/plan and /api/doc. They are
+ * deliberately NOT markdown: `shouldStripFrontmatter` returns false for them,
+ * because a `.mmd` may legitimately open with Mermaid's own `--- ... ---`
+ * config block, which is diagram content and must survive.
  *
  * Deliberate exclusions:
  * - `.env` — commonly holds secrets, and annotate's per-file version history
@@ -39,11 +52,58 @@
 
 /** Built-in plain-text extension pattern (no leading anchor, no trailing `$`). */
 const BUILTIN_TEXT_PATTERN =
-	String.raw`(?:\.(?:mdx?|txt|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
+	String.raw`(?:\.(?:mdx?|txt|mmd|mermaid|dot|gv|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
 
 /** Built-in plain-text + raw-HTML extension pattern. */
 const BUILTIN_DOC_PATTERN =
-	String.raw`(?:\.(?:mdx?|txt|html?|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
+	String.raw`(?:\.(?:mdx?|txt|mmd|mermaid|dot|gv|html?|ya?ml|jsonc?|json5|toml|ini|cfg|conf|properties|csv|tsv|log|xml)|\.env\.example)`;
+
+/** Which diagram engine a diagram-source extension belongs to. */
+export type DiagramRenderKind = "mermaid" | "graphviz";
+
+const MERMAID_FILE_RE = /\.(?:mmd|mermaid)$/i;
+const GRAPHVIZ_FILE_RE = /\.(?:dot|gv)$/i;
+
+/**
+ * The diagram engine `input` should render through, or null when it is not a
+ * diagram source. Pure and path-only: the single source of truth behind the
+ * `renderAs: "mermaid" | "graphviz"` field both annotate servers put on
+ * /api/plan and /api/doc, and behind the editor's single-diagram document.
+ */
+export function diagramRenderKindForPath(input: string): DiagramRenderKind | null {
+	const trimmed = input.trim();
+	if (MERMAID_FILE_RE.test(trimmed)) return "mermaid";
+	if (GRAPHVIZ_FILE_RE.test(trimmed)) return "graphviz";
+	return null;
+}
+
+/** True when `value` is one of the two diagram render kinds. */
+export function isDiagramRenderKind(value: unknown): value is DiagramRenderKind {
+	return value === "mermaid" || value === "graphviz";
+}
+
+/**
+ * The render kind an annotate SESSION should use for its root document, or
+ * null when the session renders markdown/HTML as before. Both runtimes call
+ * this with the same inputs so the Bun server and the Pi mirror cannot drift.
+ *
+ * Only a local file opened as itself qualifies: a raw-HTML session, a source
+ * converted by Turndown/Jina, a URL target (whose path may end in `.dot` by
+ * coincidence), and every non-`annotate` mode (folder pickers, agent
+ * messages, live apps) keep their existing rendering.
+ */
+export function annotateDiagramRenderKind(options: {
+	filePath: string;
+	mode?: string;
+	renderHtml?: boolean;
+	sourceConverted?: boolean;
+}): DiagramRenderKind | null {
+	if (options.renderHtml === true) return null;
+	if (options.sourceConverted === true) return null;
+	if ((options.mode ?? "annotate") !== "annotate") return null;
+	if (/^https?:\/\//i.test(options.filePath.trim())) return null;
+	return diagramRenderKindForPath(options.filePath);
+}
 
 /** Plain-text file extensions annotate accepts as markdown-rendered text (no HTML). */
 export const ANNOTATABLE_TEXT_REGEX = new RegExp(`${BUILTIN_TEXT_PATTERN}$`, "i");
@@ -166,7 +226,7 @@ export function isExtraMarkdownPath(input: string, extra: readonly string[] = []
  * keep in sync with the patterns above.
  */
 export const ANNOTATABLE_EXTENSIONS_HINT =
-	".md, .mdx, .txt, .html, .htm, .yaml, .yml, .json, .jsonc, .json5, .toml, .ini, .cfg, .conf, .properties, .csv, .tsv, .log, .xml, .env.example";
+	".md, .mdx, .txt, .html, .htm, .mmd, .mermaid, .dot, .gv, .yaml, .yml, .json, .jsonc, .json5, .toml, .ini, .cfg, .conf, .properties, .csv, .tsv, .log, .xml, .env.example";
 
 /** The accepted-set hint with any configured extra extensions appended. */
 export function buildAnnotatableExtensionsHint(extra: readonly string[] = []): string {
@@ -197,6 +257,10 @@ export const MAX_ANNOTATABLE_FILE_BYTES = 2 * 1024 * 1024;
  * sources without a file path (plans and agent messages are always markdown);
  * converted sources (URLs, .html via --markdown) keep stripping too since
  * their markdown is generated.
+ *
+ * Diagram sources (.mmd/.mermaid/.dot/.gv) are in the plain-text set but are
+ * never markdown, and Mermaid's own `--- ... ---` config block is diagram
+ * content, so they are checked explicitly before the markdown branch.
  */
 export function shouldStripFrontmatter(
 	path: string | null | undefined,
@@ -204,6 +268,7 @@ export function shouldStripFrontmatter(
 ): boolean {
 	if (!path) return true;
 	const trimmed = path.trim();
+	if (diagramRenderKindForPath(trimmed) !== null) return false;
 	if (/\.mdx?$/i.test(trimmed)) return true;
 	if (isExtraMarkdownPath(trimmed, extra)) return true;
 	return !isAnnotatableTextPath(trimmed, extra);

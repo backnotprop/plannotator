@@ -14,6 +14,7 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 |-------|---------|--------------|
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
 | Plain-text file | `plannotator annotate config.yaml` | Opens the file directly, rendered as plain text |
+| Diagram file | `plannotator annotate flow.mmd` | Renders the whole file as one diagram in the diagram viewer |
 | HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
 | URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
 | Local app URL | `plannotator annotate http://localhost:5173` | Opens your running dev app live and annotates it in place |
@@ -22,6 +23,17 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 ### Supported file types
 
 Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These render exactly like `.txt` — as plain text you can select and annotate.
+
+### Diagram files
+
+`.mmd` and `.mermaid` (Mermaid) and `.dot` and `.gv` (Graphviz) open in the **diagram viewer** instead of as text: the whole file is the diagram, so no ```` ```mermaid ```` fence is needed. It is the same viewer a diagram fence inside a plan gets — themed to your palette, zoom, pan, fit and a full-size popout — and you comment by clicking a node, an edge, a cluster, or the diagram itself.
+
+```bash
+plannotator annotate architecture.mmd
+plannotator annotate deps.dot
+```
+
+Each comment records the part's own id and its real line in the file, so the exported feedback reads `Diagram node Open .mmd (Start), line 2` — the agent can go straight to that line. Diagram files also join folder sessions and version history like any other document, and they render as the diagram in a share link too.
 
 `.env` is deliberately not supported: it commonly holds secrets, and annotate's version history copies file contents into the data dir (`~/.plannotator/history/`). Use `.env.example` for the secret-free template. Source-code files (`.ts`, `.py`, …) are also excluded — use `plannotator review` for code.
 
@@ -126,10 +138,10 @@ Live app and HTML sessions share one interaction model:
 
 - The session opens with the pen **armed**, so a click pins the element under the cursor and a drag selects text to comment on.
 - `Esc` steps back one rung at a time: it closes an open draft, then clears the hover outline, then drops you into **Interact** mode, where clicks, forms, links, and navigation reach the page normally.
-- The pen button in the header (or `Cmd/Ctrl+Shift+A`) arms annotation again. Existing comment markers stay visible in both modes, and clicking one still opens it.
+- The pen button in the header (or `Cmd/Ctrl+Shift+A`) toggles annotation back on, and off again. Existing comment markers stay visible in both modes, and clicking one still opens it.
 - Selecting text to comment works in **both** modes, so you can leave a note without arming the pen.
 - These surfaces are comment-only: deletions and quick labels are markdown-only features.
-- The eye button beside the pen hides every floating control over the page when you need an unobstructed view.
+- The page starts with the floating tools **hidden**, so it gets the whole viewport. The eye button beside the pen (or `Cmd/Ctrl+Shift+X`) shows them — the sidebar tabs and the comment/attachments cluster — and hides them again. Your last choice is remembered for the next HTML session.
 
 ### Limits
 

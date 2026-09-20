@@ -42,6 +42,19 @@ export interface EmbedPickerConfig {
   readonly uploadTarget?: (kind: EmbedKind) => Promise<EmbedTarget | null>;
   /** Return an optional informational row for the current document text. */
   readonly getNotice?: (docBody: string) => string | null;
+  /**
+   * Host copy for the three rows that name the target type (0.45.1). A host
+   * that feeds the picker more than HTML files passes its own wording; each
+   * absent key keeps the built-in text, so Plannotator's menu is unchanged.
+   */
+  readonly labels?: {
+    /** The upload row. Default: "Upload HTML..." */
+    readonly upload?: string;
+    /** The row shown when there are no targets at all. Default: "No HTML files in this workspace" */
+    readonly empty?: string;
+    /** The row shown when the query matches nothing. Default: "No HTML files match “<query>”" */
+    readonly noMatch?: (query: string) => string;
+  };
 }
 
 type IconCompletion = Completion & {
@@ -175,8 +188,8 @@ function createEmbedPickerSource(
       options.push({
         label:
           targets.length === 0
-            ? 'No HTML files in this workspace'
-            : `No HTML files match “${query.trim()}”`,
+            ? config.labels?.empty ?? 'No HTML files in this workspace'
+            : config.labels?.noMatch?.(query.trim()) ?? `No HTML files match “${query.trim()}”`,
         apply: (view, completion, _from, to) => {
           view.dispatch({
             changes: { from: line.from, to, insert: '' },
@@ -209,7 +222,7 @@ function createEmbedPickerSource(
               },
             }
           : {
-              label: 'Upload HTML...',
+              label: config.labels?.upload ?? 'Upload HTML...',
               slashCommandIcon: UPLOAD_ICON,
               apply: (view, completion, from, to) => {
                 startUpload(

@@ -4,9 +4,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import type { Server } from "node:http";
-import { release } from "node:os";
+import os from "node:os";
 import { delimiter, join } from "node:path";
 import { loadConfig, resolveUrlHost, resolveUseGlimpse } from "../generated/config.ts";
 import { parsePortSelection } from "../generated/port-range.ts";
@@ -26,6 +26,41 @@ function isAddressInUseError(err: unknown): boolean {
 export function isNoOpBrowserSentinel(value: string | undefined): boolean {
 	if (!value) return false;
 	return NOOP_BROWSER_VALUES.has(value.trim().toLowerCase());
+}
+
+/**
+ * True for a value that must be handed to cmd.exe under WSL: a Windows-style
+ * path (C:\..., C:/...) or a /mnt/<drive> mount of one, or a `.exe` name.
+ */
+function isWindowsBrowserTarget(value: string): boolean {
+	return (
+		/^[A-Za-z]:[\\/]/.test(value) ||
+		value.startsWith("/mnt/") ||
+		value.toLowerCase().endsWith(".exe")
+	);
+}
+
+/**
+ * True when PLANNOTATOR_BROWSER names something the Linux side can execute
+ * itself: a POSIX path (/..., ./..., ../...) or a bare name resolvable to an
+ * executable on the Linux PATH. Under WSL those must NOT go through cmd.exe,
+ * which cannot resolve them (#1472).
+ */
+export function isPosixBrowserTarget(value: string): boolean {
+	if (isWindowsBrowserTarget(value)) return false;
+	if (value.startsWith("/") || value.startsWith("./") || value.startsWith("../")) {
+		return true;
+	}
+	for (const entry of (process.env.PATH ?? "").split(delimiter)) {
+		if (!entry) continue;
+		try {
+			const stat = statSync(join(entry, value));
+			if (stat.isFile() && (stat.mode & 0o111) !== 0) return true;
+		} catch {
+			// Not an executable on this PATH entry.
+		}
+	}
+	return false;
 }
 
 /**
@@ -326,16 +361,31 @@ export async function openBrowser(url: string): Promise<{
 	try {
 		const platform = process.platform;
 		const wsl =
-			platform === "linux" && release().toLowerCase().includes("microsoft");
+			platform === "linux" && os.release().toLowerCase().includes("microsoft");
+		// Under WSL a Linux executable must run directly; cmd.exe only wins for
+		// Windows targets (a .exe, a C:\ path, a /mnt/<drive> path).
+		const viaCmdExe =
+			(platform === "win32" || wsl) &&
+			!!plannotatorBrowser &&
+			!(wsl && isPosixBrowserTarget(plannotatorBrowser));
 
 		let cmd: string;
 		let args: string[];
 
 		if (browser) {
 			if (plannotatorBrowser && platform === "darwin") {
-				cmd = "open";
-				args = ["-a", plannotatorBrowser, url];
-			} else if ((platform === "win32" || wsl) && plannotatorBrowser) {
+				if (
+					plannotatorBrowser.includes("/") &&
+					!plannotatorBrowser.endsWith(".app")
+				) {
+					// Script/executable path — run directly (open -a fails with -10811)
+					cmd = plannotatorBrowser;
+					args = [url];
+				} else {
+					cmd = "open";
+					args = ["-a", plannotatorBrowser, url];
+				}
+			} else if (viaCmdExe) {
 				cmd = "cmd.exe";
 				args = ["/c", "start", "", plannotatorBrowser, url];
 			} else {
@@ -354,7 +404,20 @@ export async function openBrowser(url: string): Promise<{
 		}
 
 		const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
-		child.once("error", () => {});
+		// A failed launch exists only as an async "error" event; reporting
+		// opened: true unconditionally hides it (#1472).
+		const spawnError = await new Promise<Error | undefined>((resolve) => {
+			child.once("spawn", () => resolve(undefined));
+			child.once("error", (error) => resolve(error));
+		});
+		if (spawnError) {
+			if (plannotatorBrowser) {
+				process.stderr.write(
+					`Plannotator: could not launch PLANNOTATOR_BROWSER="${plannotatorBrowser}": ${spawnError.message}\n`,
+				);
+			}
+			return { opened: false };
+		}
 		child.unref();
 		return { opened: true };
 	} catch {

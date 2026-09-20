@@ -5,131 +5,103 @@
  */
 
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 
-// We need to override the base dirs used by readImprovementHook.
-// Since the module uses homedir() at import time, we mock it via
-// a test harness that sets HOME to a temp directory.
+// Imported statically and BEFORE any PLANNOTATOR_DATA_DIR is set: the module's
+// import-time side effects used to freeze the data directory, so a later env
+// change was silently ignored and every read kept hitting the old location.
+import { getImprovementHookExpectedPath, readImprovementHook } from "./improvement-hooks";
 
-const TEST_HOME = join(tmpdir(), `improvement-hooks-test-${Date.now()}`);
-const NEW_BASE = join(TEST_HOME, ".plannotator", "hooks");
-const LEGACY_BASE = join(TEST_HOME, ".plannotator");
+import { createTestEnvironment } from "../../tests/helpers/environment";
+
+const env = createTestEnvironment(["PLANNOTATOR_DATA_DIR"], "plannotator-improvement-hooks-");
+
 const HOOK_RELATIVE = "compound/enterplanmode-improve-hook.txt";
 
-function setupTestHome() {
-  mkdirSync(join(NEW_BASE, "compound"), { recursive: true });
-  mkdirSync(join(LEGACY_BASE, "compound"), { recursive: true });
+let dataDir = "";
+
+function writeHook(filePath: string, content: string): void {
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, content);
 }
 
-function cleanTestHome() {
-  if (existsSync(TEST_HOME)) {
-    rmSync(TEST_HOME, { recursive: true, force: true });
-  }
-}
+beforeEach(() => {
+  env.reset();
+  dataDir = env.makeTempDir();
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+});
 
-// Since the module reads homedir() at import time, we need to
-// re-import with HOME overridden. Use a helper that spawns a
-// small inline script to test each scenario in isolation.
-async function runScenario(setup: {
-  newPathContent?: string | null;
-  legacyPathContent?: string | null;
-}): Promise<{ content: string; filePath: string } | null> {
-  setupTestHome();
-
-  const newPath = join(NEW_BASE, HOOK_RELATIVE);
-  const legacyPath = join(LEGACY_BASE, HOOK_RELATIVE);
-
-  if (setup.newPathContent !== undefined && setup.newPathContent !== null) {
-    writeFileSync(newPath, setup.newPathContent);
-  }
-  if (setup.legacyPathContent !== undefined && setup.legacyPathContent !== null) {
-    writeFileSync(legacyPath, setup.legacyPathContent);
-  }
-
-  // Run in a subprocess with HOME overridden so homedir() returns TEST_HOME
-  const proc = Bun.spawn(
-    [
-      "bun",
-      "-e",
-      `
-      import { readImprovementHook } from "./packages/shared/improvement-hooks";
-      const result = readImprovementHook("enterplanmode-improve");
-      console.log(JSON.stringify(result));
-    `,
-    ],
-    {
-      env: { ...process.env, HOME: TEST_HOME },
-      cwd: join(import.meta.dir, "../.."),
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-
-  const stdout = await new Response(proc.stdout).text();
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`Subprocess failed (exit ${exitCode}): ${stderr}`);
-  }
-
-  const parsed = JSON.parse(stdout.trim());
-  return parsed;
-}
+afterEach(() => env.restore());
 
 describe("readImprovementHook", () => {
-  beforeEach(setupTestHome);
-  afterEach(cleanTestHome);
+  test("returns content from new path when file exists", () => {
+    const newPath = join(dataDir, "hooks", HOOK_RELATIVE);
+    writeHook(newPath, "Focus on error handling");
 
-  test("returns content from new path when file exists", async () => {
-    const result = await runScenario({
-      newPathContent: "Focus on error handling",
-    });
+    const result = readImprovementHook("enterplanmode-improve");
     expect(result).not.toBeNull();
     expect(result!.content).toBe("Focus on error handling");
-    expect(result!.filePath).toContain(".plannotator/hooks/compound/");
+    expect(result!.filePath).toBe(newPath);
   });
 
-  test("new path wins over legacy path", async () => {
-    const result = await runScenario({
-      newPathContent: "New instructions",
-      legacyPathContent: "Old instructions",
-    });
+  test("new path wins over legacy path", () => {
+    writeHook(join(dataDir, "hooks", HOOK_RELATIVE), "New instructions");
+    writeHook(join(dataDir, HOOK_RELATIVE), "Old instructions");
+
+    const result = readImprovementHook("enterplanmode-improve");
     expect(result).not.toBeNull();
     expect(result!.content).toBe("New instructions");
-    expect(result!.filePath).toContain(".plannotator/hooks/compound/");
+    expect(result!.filePath).toBe(join(dataDir, "hooks", HOOK_RELATIVE));
   });
 
-  test("falls back to legacy path when new path is absent", async () => {
-    const result = await runScenario({
-      legacyPathContent: "Legacy instructions",
-    });
+  test("falls back to legacy path when new path is absent", () => {
+    const legacyPath = join(dataDir, HOOK_RELATIVE);
+    writeHook(legacyPath, "Legacy instructions");
+
+    const result = readImprovementHook("enterplanmode-improve");
     expect(result).not.toBeNull();
     expect(result!.content).toBe("Legacy instructions");
-    expect(result!.filePath).toContain(".plannotator/compound/");
-    expect(result!.filePath).not.toContain(".plannotator/hooks/");
+    expect(result!.filePath).toBe(legacyPath);
   });
 
-  test("returns null when new path exists but is empty (no legacy fallback)", async () => {
-    const result = await runScenario({
-      newPathContent: "",
-      legacyPathContent: "Legacy instructions",
-    });
-    expect(result).toBeNull();
+  test("returns null when new path exists but is empty (no legacy fallback)", () => {
+    writeHook(join(dataDir, "hooks", HOOK_RELATIVE), "");
+    writeHook(join(dataDir, HOOK_RELATIVE), "Legacy instructions");
+
+    expect(readImprovementHook("enterplanmode-improve")).toBeNull();
   });
 
-  test("returns null when no files exist", async () => {
-    const result = await runScenario({});
-    expect(result).toBeNull();
+  test("returns null when no files exist", () => {
+    expect(readImprovementHook("enterplanmode-improve")).toBeNull();
   });
 
-  test("returns null when new path is whitespace-only (no legacy fallback)", async () => {
-    const result = await runScenario({
-      newPathContent: "   \n  \n  ",
-      legacyPathContent: "Legacy instructions",
-    });
-    expect(result).toBeNull();
+  test("returns null when new path is whitespace-only (no legacy fallback)", () => {
+    writeHook(join(dataDir, "hooks", HOOK_RELATIVE), "   \n  \n  ");
+    writeHook(join(dataDir, HOOK_RELATIVE), "Legacy instructions");
+
+    expect(readImprovementHook("enterplanmode-improve")).toBeNull();
+  });
+});
+
+describe("data directory resolution", () => {
+  test("resolves PLANNOTATOR_DATA_DIR set after import", () => {
+    expect(getImprovementHookExpectedPath("enterplanmode-improve")).toBe(
+      join(dataDir, "hooks", HOOK_RELATIVE),
+    );
+  });
+
+  test("follows a later change to PLANNOTATOR_DATA_DIR", () => {
+    expect(getImprovementHookExpectedPath("enterplanmode-improve")).toBe(
+      join(dataDir, "hooks", HOOK_RELATIVE),
+    );
+
+    const second = env.makeTempDir();
+    process.env.PLANNOTATOR_DATA_DIR = second;
+    const secondHook = join(second, "hooks", HOOK_RELATIVE);
+    writeHook(secondHook, "Second location");
+
+    expect(getImprovementHookExpectedPath("enterplanmode-improve")).toBe(secondHook);
+    expect(readImprovementHook("enterplanmode-improve")!.filePath).toBe(secondHook);
   });
 });

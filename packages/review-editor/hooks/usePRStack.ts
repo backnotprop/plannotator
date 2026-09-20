@@ -17,6 +17,7 @@ export interface PRSwitchResponse {
   viewedFiles?: string[];
   error?: string;
   semanticDiff?: SemanticDiffAdvert;
+  approvalNotesSupported?: boolean;
 }
 
 export interface PRStackCallbacks {

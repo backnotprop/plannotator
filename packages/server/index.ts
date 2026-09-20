@@ -41,7 +41,8 @@ import {
 } from "./storage";
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
+import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
@@ -201,6 +202,51 @@ export async function startPlannotatorServer(
     // Never-resolving promise — archive mode uses waitForDone instead
     decisionPromise = new Promise(() => {});
   }
+
+  // Durable feedback archive: append the decision (and any notes the reviewer
+  // attached) to feedback/{project}/index.jsonl at settlement time.
+  //
+  // Deliberately independent of the client-sent `planSave` setting: that one
+  // is off for some users, writes only while enabled, and keys its snapshot by
+  // slug — so approve → deny → approve on one plan keeps a single file per
+  // status and is not a timeline. The archive appends, so every decision on a
+  // plan survives in order.
+  //
+  // The plan TEXT is not copied into the archive. The record names the exact
+  // `history/{project}/{slug}/NNN.md` version this decision was made on, which
+  // storage.ts already wrote before the UI opened, so an analyzer joins the
+  // record to the plan content already on disk.
+  //
+  // Plan policy on failure (design §3.4): log and proceed. A plan approval is
+  // never blocked on the archive, and the plan draft delete is unchanged.
+  //
+  // Data-dir asymmetry worth knowing: getPlanVersionPath resolves against the
+  // data directory storage.ts captured at import time, while the archive
+  // resolves it per call. They agree in every real run (the env var is fixed
+  // before the process starts); they can disagree only if PLANNOTATOR_DATA_DIR
+  // is changed mid-process, in which case planVersionFile names the original
+  // location. That is the honest answer anyway — it is where the version file
+  // actually was written — so this is documented rather than "fixed".
+  const archivePlanDecision = (decision: FeedbackDecision, feedback?: string): void => {
+    if (mode === "archive") return;
+    if (!resolveFeedbackHistory(loadConfig())) return;
+    appendFeedbackRecord({
+      project,
+      origin,
+      surface: "plan",
+      decision,
+      target: {
+        slug,
+        ...(versionInfo.version > 0
+          ? {
+              planVersion: versionInfo.version,
+              planVersionFile: getPlanVersionPath(project, slug, versionInfo.version) ?? undefined,
+            }
+          : {}),
+      },
+      feedback,
+    });
+  };
 
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
@@ -534,6 +580,13 @@ export async function startPlannotatorServer(
               savedPath = saveFinalSnapshot(slug, "approved", plan, annotations, planSaveCustomPath);
             }
 
+            // Archive the submission BEFORE the draft (the reviewer's other
+            // copy) is deleted — the #678 ordering, generalized.
+            archivePlanDecision(
+              typeof feedback === "string" && feedback.trim() ? "approved-with-notes" : "approved",
+              feedback,
+            );
+
             // Clean up draft on successful submit
             deleteDraft(draftKey, draftGeneration);
 
@@ -573,6 +626,8 @@ export async function startPlannotatorServer(
               saveAnnotations(slug, feedback, planSaveCustomPath);
               savedPath = saveFinalSnapshot(slug, "denied", plan, feedback, planSaveCustomPath);
             }
+
+            archivePlanDecision("denied", feedback);
 
             deleteDraft(draftKey, draftGeneration);
             resolveDecision({ approved: false, feedback, savedPath });

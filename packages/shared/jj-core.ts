@@ -6,6 +6,8 @@ import {
   type GitContext,
   type GitDiffOptions,
   type JjEvoLogEntry,
+  type JjLineBaseResolution,
+  type JjRevisionInfo,
   JJ_TRUNK_REVSET,
   jjLineBaseRevset,
   parseRemoteBookmark,
@@ -18,6 +20,8 @@ export {
   jjLineBaseRevset,
   parseRemoteBookmark,
   type JjEvoLogEntry,
+  type JjLineBaseResolution,
+  type JjRevisionInfo,
 } from "./review-core";
 
 export interface ReviewJjRuntime {
@@ -28,16 +32,12 @@ export interface ReviewJjRuntime {
 }
 
 // `reachable(@, mutable())` is JJ's definition of the stack being worked on.
-// Its root parents are where that line diverged from immutable history.
-//
-// `latest(..., 1)` is what keeps the query single-record. A criss-cross history
-// can leave several fork points, and the parser below reads one record only, so
-// the tie-break belongs in the revset where it is deliberate and testable
-// rather than in a silent "first row wins" slice. It also matters for
-// correctness: bookmark preference (remote before local) is only meaningful
-// within one commit, so a multi-row answer could otherwise pick a remote
-// bookmark from one commit over a local bookmark on a nearer one.
-const JJ_LINE_BASE_REVSET = "latest(fork_point(roots(reachable(@, mutable()))-), 1)";
+// Its root parents are where that line diverged from immutable history. A
+// criss-cross history can have several equally valid fork points; requiring
+// exactly one prevents timestamp order from silently choosing review content.
+const JJ_LINE_BASE_CANDIDATES_REVSET = "fork_point(roots(reachable(@, mutable()))-)";
+const JJ_LINE_BASE_REVSET = `exactly(${JJ_LINE_BASE_CANDIDATES_REVSET}, 1)`;
+const JJ_LINE_BASE_TEMPLATE = 'json(bookmarks) ++ "\\t" ++ commit_id ++ "\\t" ++ json(description.first_line()) ++ "\\n"';
 
 // `jj git push --change` mints bookmarks under `git.push-bookmark-prefix`
 // (default `push-`). They name one change, not a line of work, so they are
@@ -66,8 +66,28 @@ export async function getJjContext(
 ): Promise<GitContext> {
   const root = await detectJjWorkspace(runtime, cwd);
   const targets = await listJjCompareTargets(runtime, root ?? cwd);
-  const defaultTarget = await selectDefaultJjCompareTarget(runtime, root ?? cwd);
+  const jjLineBase = await resolveJjLineBase(runtime, root ?? cwd);
+  const defaultTarget = jjLineBase.kind === "resolved"
+    ? jjLineBase.revision.commitId
+    : JJ_TRUNK_REVSET;
   const contextCwd = root ?? cwd;
+  const diffAvailability = jjLineBase.kind === "resolved"
+    ? undefined
+    : {
+        "jj-line": {
+          fallbackDiffType: "jj-current",
+          message: jjLineBase.kind === "ambiguous"
+            ? "Jujutsu found multiple possible line-of-work bases. Showing Current change instead."
+            : `${jjLineBase.reason} Showing Current change instead.`,
+          ...(jjLineBase.kind === "ambiguous" && {
+            candidates: jjLineBase.candidates.map((candidate) => ({
+              revision: candidate.commitId,
+              labels: candidate.bookmarks,
+              subject: candidate.subject,
+            })),
+          }),
+        },
+      };
 
   const evologs = await getJjEvoLogEntries(runtime, root ?? cwd);
 
@@ -97,8 +117,10 @@ export async function getJjContext(
       },
     },
     repository: contextCwd ? { displayFallback: basename(contextCwd) } : undefined,
+    diffAvailability,
     cwd: contextCwd,
     vcsType: "jj",
+    jjLineBase,
     jjEvologs: evologs.length >= 2 ? evologs : undefined,
   };
 }
@@ -370,7 +392,9 @@ export function getJjDiffArgs(
     case "jj-line":
       return {
         args: ["diff", "--git", ...whitespaceArgs, "--from", jjLineBaseRevset(compareTarget), "--to", "@"],
-        label: `Line of work vs ${compareTarget}`,
+        // A frozen full commit id would render as 40+ hex chars in the
+        // header label; show the short form like jj itself does.
+        label: `Line of work vs ${/^[0-9a-f]{40,64}$/.test(compareTarget) ? compareTarget.slice(0, 12) : compareTarget}`,
       };
     case "jj-evolog":
       // compareTarget is the short commit ID of an older evolog entry.
@@ -386,38 +410,73 @@ export function getJjDiffArgs(
   }
 }
 
+export async function resolveJjLineBase(
+  runtime: ReviewJjRuntime,
+  cwd?: string,
+): Promise<JjLineBaseResolution> {
+  const result = await queryJjLineBases(runtime, JJ_LINE_BASE_REVSET, cwd);
+  if (result.exitCode === 0) {
+    const [revision] = parseJjLineBaseRecords(result.stdout);
+    if (!revision || JJ_ROOT_COMMIT_ID.test(revision.commitId)) {
+      return { kind: "unavailable", reason: "The line of work starts at the repository root." };
+    }
+    return { kind: "resolved", revision };
+  }
+
+  // `exactly(..., 1)` deliberately rejects both an empty set and a set with
+  // several fork points. Query the candidates only after that rejection so
+  // the normal path remains one repository lookup.
+  const candidatesResult = await queryJjLineBases(runtime, JJ_LINE_BASE_CANDIDATES_REVSET, cwd);
+  if (candidatesResult.exitCode !== 0) {
+    return {
+      kind: "unavailable",
+      reason: firstErrorLine(result.stderr) ?? "Jujutsu could not resolve a line-of-work base.",
+    };
+  }
+
+  const candidates = parseJjLineBaseRecords(candidatesResult.stdout)
+    .filter((revision) => !JJ_ROOT_COMMIT_ID.test(revision.commitId));
+  if (candidates.length > 1) return { kind: "ambiguous", candidates };
+  if (candidates.length === 1) return { kind: "resolved", revision: candidates[0] };
+  return { kind: "unavailable", reason: "Jujutsu could not find a line-of-work base." };
+}
+
 export async function selectDefaultJjCompareTarget(
   runtime: ReviewJjRuntime,
   cwd?: string,
 ): Promise<string> {
-  const result = await runtime.runJj([
+  const resolution = await resolveJjLineBase(runtime, cwd);
+  return resolution.kind === "resolved" ? resolution.revision.commitId : JJ_TRUNK_REVSET;
+}
+
+function queryJjLineBases(runtime: ReviewJjRuntime, revset: string, cwd?: string) {
+  return runtime.runJj([
     "log",
     "--no-graph",
     "-r",
-    JJ_LINE_BASE_REVSET,
+    revset,
     "-T",
-    'json(bookmarks) ++ "\\t" ++ commit_id ++ "\\n"',
+    JJ_LINE_BASE_TEMPLATE,
   ], { cwd });
-  // Every unresolvable case falls back to `trunk()`, which is what this
-  // returned before the line-of-work base was inferred at all. The only live
-  // caller is `getJjContext`, which runs on the review startup path with no
-  // handler above it, so throwing here does not report a problem: it aborts
-  // `plannotator review` with a stack trace before the server is built. That
-  // also covers a `jj` too old for `fork_point`/`reachable`, where the revset
-  // itself fails and the previous default is still perfectly serviceable.
-  if (result.exitCode !== 0) return JJ_TRUNK_REVSET;
+}
 
-  const [record] = splitJjTemplateRecords(result.stdout);
-  if (!record) return JJ_TRUNK_REVSET;
-
-  const fields = splitJjTemplateFields(record);
-  const bookmark = parseJjResolvedBookmarks(fields?.[0] ?? record)
-    .find((name) => !isGeneratedPushBookmark(name));
-  if (bookmark) return bookmark;
-
-  const commitId = fields?.[1]?.trim();
-  if (commitId && !JJ_ROOT_COMMIT_ID.test(commitId)) return commitId;
-  return JJ_TRUNK_REVSET;
+function parseJjLineBaseRecords(stdout: string): JjRevisionInfo[] {
+  const revisions: JjRevisionInfo[] = [];
+  for (const record of splitJjTemplateRecords(stdout)) {
+    if (!record) continue;
+    const fields = splitJjTemplateFields(record, 3);
+    if (!fields) continue;
+    const commitId = fields[1]?.trim();
+    if (!commitId) continue;
+    const bookmarks = parseJjResolvedBookmarks(fields[0])
+      .filter((name) => !isGeneratedPushBookmark(name));
+    revisions.push({
+      commitId,
+      bookmarks,
+      subject: parseSerializedJjString(fields[2]) ?? "",
+    });
+  }
+  return revisions;
 }
 
 function isGeneratedPushBookmark(target: string): boolean {
@@ -544,14 +603,9 @@ function splitJjTemplateRecords(stdout: string): string[] {
   return stdout.split(/\n|\\n/g);
 }
 
-function splitJjTemplateFields(line: string): [string, string] | null {
-  const literalTab = line.indexOf("\t");
-  if (literalTab !== -1) return [line.slice(0, literalTab), line.slice(literalTab + 1)];
-
-  const escapedTab = line.indexOf("\\t");
-  if (escapedTab !== -1) return [line.slice(0, escapedTab), line.slice(escapedTab + 2)];
-
-  return null;
+function splitJjTemplateFields(line: string, expected = 2): string[] | null {
+  const fields = line.includes("\t") ? line.split("\t") : line.split("\\t");
+  return fields.length >= expected ? fields : null;
 }
 
 function parseSerializedJjString(value: string): string | null {

@@ -37,6 +37,12 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Smoke-test published UI package
+        # This packs the real tarball and installs it with a pinned pnpm CLI in
+        # a temp consumer outside the monorepo. It prevents workspace protocols
+        # from leaking into the manifest published to external consumers.
+        run: bun run --cwd packages/ui smoke:package
+
       # The extension has its own tsconfig (Node libs, no DOM) and is not part
       # of the root typecheck, so nothing was checking it. A type error in the
       # panel cookie seed shipped that way; this is the step that would have
@@ -75,10 +81,12 @@ jobs:
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
-      # (not the whole ui suite) to keep this process light.
+      # (not the whole ui suite) to keep this process light. Files get isolated
+      # globals because theme, storage, and DOM test state must not leak between
+      # suites when Bun schedules them differently across platforms.
       - name: Run UI seam-contract + DOM tests
         run: >-
-          DOM_TESTS=1 bun test
+          DOM_TESTS=1 bun test --isolate
           packages/ui/markdownEditorFidelity.test.tsx
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
@@ -100,7 +108,16 @@ jobs:
           packages/ui/components/MarkdownDiff.frozen.test.tsx
           packages/ui/components/MarkdownEditor.extensions.test.tsx
           packages/ui/components/ThemeProvider.favicon.test.tsx
+          packages/ui/components/MermaidBlock.theme.test.tsx
+          packages/ui/components/DiagramBlock.anchor.test.tsx
+          packages/ui/components/diagram/DiagramViewer.test.tsx
+          packages/ui/utils/diagramAnchor.test.ts
+          packages/ui/utils/diagramAnchorGraphviz.test.ts
+          packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
+          packages/ui/components/Viewer.diagramLazyRestore.test.tsx
+          packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
           packages/ui/components/CommentPopover.skillReferences.test.tsx
+          packages/ui/components/CommentPopover.mentionChips.test.tsx
           packages/ui/components/SkillReferenceMenu.placement.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
@@ -113,12 +130,18 @@ jobs:
           packages/review-editor/edit/selectionActionPopover.test.ts
           packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
           packages/review-editor/components/AllFilesCodeView.generated.test.tsx
+          packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
           packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
           packages/guide-viewer/GuideSectionCard.test.tsx
           packages/guide-viewer/GuideView.test.tsx
           packages/guide-viewer/GuideViewportManager.test.tsx
           packages/review-editor/components/guide/GuideExportButton.test.tsx
           packages/review-editor/hooks/useReviewSearch.test.tsx
+          packages/review-editor/hooks/useTokenHover.test.tsx
+          packages/review-editor/components/TokenHoverCard.test.tsx
+          packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
+          packages/review-editor/utils/stitchTokenIdentifier.test.ts
+          packages/review-editor/hooks/useAutoViewed.test.tsx
           packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
           packages/review-editor/hooks/useCallFlowInstall.test.tsx
           packages/review-editor/hooks/useCallFlowAutoInstall.test.tsx
@@ -131,8 +154,14 @@ jobs:
           packages/review-editor/components/FileTreeNode.controls.test.tsx
           packages/ui/components/Settings.analysis.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
+          packages/ui/components/AnnotationPanel.cardHeader.test.tsx
+          packages/ui/components/AnnotationPanel.editMentions.test.tsx
           packages/ui/components/Viewer.consumer.test.tsx
+          packages/ui/components/Viewer.documentHeader.test.tsx
           packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
+          packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
+          packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
+          packages/ui/utils/undoHistory.dom.test.ts
           packages/ui/utils/codeBlockMark.test.ts
           packages/ui/components/InlineMarkdown.seam.test.tsx
           packages/ui/components/ImageThumbnail.seam.test.tsx
@@ -148,11 +177,23 @@ jobs:
           packages/editor/planDiffAutoExit.test.tsx
           packages/editor/App.archiveReadOnly.test.tsx
           packages/editor/App.htmlChrome.test.tsx
+          packages/editor/App.decisionControl.test.tsx
+          packages/review-editor/App.decisionControl.test.tsx
+          packages/ui/components/TerminalToolsAnnouncementDialog.test.tsx
+          packages/editor/App.terminalToolsAnnouncement.test.tsx
+          packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
           packages/ui/components/HtmlSurfaceControls.test.tsx
           packages/ui/components/AnnotationPanel.unanchored.test.tsx
           packages/ui/hooks/useHtmlRefresh.test.tsx
           packages/ui/hooks/useSharing.contentRevision.test.tsx
+          packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
           packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
+          packages/ui/components/AnnotationToolbar.selectionActions.test.tsx
+          packages/ui/components/CommentPopover.mentionSource.test.tsx
+          packages/ui/components/Viewer.mentionSource.test.tsx
+          packages/ui/components/html-viewer/HtmlViewer.mentionSource.test.tsx
+          packages/ui/components/AnnotationToolstrip.test.tsx
+          packages/ui/components/StickyHeaderLane.test.tsx
           packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
           packages/ui/webmcp/useToolset.seam.test.tsx
@@ -161,6 +202,69 @@ jobs:
           packages/editor/components/AppHeader.webmcpIndicator.test.tsx
           packages/ui/components/MathBlock.firstPaint.test.tsx
           packages/ui/components/DiagramBlock.lazyRetry.test.tsx
+          packages/ui/components/DecisionControl.test.tsx
+          packages/ui/components/ActionMenu.test.tsx
+          packages/ui/components/PlanHeaderMenu.mobile.test.tsx
+          packages/review-editor/components/ReviewHeaderMenu.mobile.test.tsx
+          packages/editor/App.editModeShortcut.test.tsx
+          packages/editor/App.editModeCrossBlockHighlights.test.tsx
+          packages/editor/App.markdownUnanchored.test.tsx
+          packages/ui/components/blocks/AlertBlock.title.test.tsx
+          packages/ui/components/blocks/AlertBlock.seam.test.tsx
+          packages/ui/components/blocks/AlertBlock.annotation.test.tsx
+          packages/ui/components/Viewer.driftedRestore.test.tsx
+          packages/ui/components/Viewer.crossBlockRestore.test.tsx
+          packages/ui/components/Viewer.alertDraftRestore.test.tsx
+          packages/ui/components/AnnotationPanel.allFiles.test.tsx
+          packages/ui/hooks/useLinkedDoc.crossFile.test.tsx
+          packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
+          packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
+          packages/editor/hooks/useAnnotationJump.test.tsx
+          packages/ui/components/TableOfContents.linkedDoc.test.tsx
+          packages/ui/components/CommentPopover.overlayGutter.test.tsx
+          packages/ui/components/CommentPopover.multiTarget.test.tsx
+          packages/ui/aiProviderConfigPersistence.test.tsx
+          packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
+          packages/ui/components/ui/mobile-foundation.test.tsx
+          packages/ui/components/Settings.vim.test.tsx
+          packages/ui/components/Settings.compactDisplay.test.tsx
+          packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
+          packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
+          packages/ui/components/PermissionModeSetup.mobile.test.tsx
+          packages/ui/components/html-viewer/useHtmlAnnotation.mintedIds.test.tsx
+          packages/ui/components/LookAndFeelAnnouncementDialog.test.tsx
+          packages/ui/components/CommentPopover.mobile.test.tsx
+          packages/ui/components/CommentPopover.forcedDialog.test.tsx
+          packages/ui/components/ConfirmDialog.mobile.test.tsx
+          packages/ui/components/ThemeProvider.test.tsx
+          packages/ui/components/MarkdownEditor.embedPicker.test.ts
+          packages/ui/hooks/useViewportEnvironment.test.tsx
+          packages/ui/hooks/useIsMobile.test.tsx
+          packages/ui/hooks/useVimDocumentFocus.test.tsx
+          packages/ui/hooks/useScrollViewport.test.ts
+          packages/review-editor/components/ExpandedCommentDialog.mobile.test.tsx
+          packages/review-editor/components/DiffTypePicker.openState.test.tsx
+          packages/review-editor/components/EditModeAnnouncementDialog.test.tsx
+          packages/review-editor/components/DestinationSpotlight.test.tsx
+          packages/review-editor/dock/panels/PRArtifactGallery.test.tsx
+          packages/review-editor/dock/panels/artifactDocument.test.ts
+          packages/review-editor/dock/ReviewDockRightActions.test.tsx
+          packages/editor/skillPrimeRenderLoop.test.tsx
+          packages/editor/App.compactToc.mobile.test.tsx
+          packages/editor/App.permissionModeSetup.test.tsx
+          packages/editor/components/CompactPlanStage.test.tsx
+          packages/editor/components/FolderAnnotationEmptyState.test.tsx
+          packages/editor/components/AppHeader.mobile.test.tsx
+          packages/editor/components/CompactAnnotationControls.test.tsx
+          packages/editor/components/AnnotateAgentTerminalPanel.displayReset.test.tsx
+
+      # The list above is hand-maintained, and every feature that adds a
+      # DOM-gated test file has to remember it — which is exactly what stopped
+      # happening (34 tests guarding shipped controls never ran). This asserts
+      # that every DOM-gated test file in the repo is named in one of the
+      # DOM_TESTS steps of this workflow, so the list cannot drift again.
+      - name: Guard the DOM test allowlist
+        run: bun test scripts/dom-test-allowlist.test.ts
 
   opencode-v2:
     name: OpenCode 2 installed package

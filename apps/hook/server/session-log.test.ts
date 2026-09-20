@@ -256,8 +256,8 @@ function droidMessage(
 
 describe("projectSlugFromCwd", () => {
   test("converts Unix absolute path to slug", () => {
-    expect(projectSlugFromCwd("/Users/ramos/cupcake/cupcake-rego/feat-annotate-last")).toBe(
-      "-Users-ramos-cupcake-cupcake-rego-feat-annotate-last"
+    expect(projectSlugFromCwd("/Users/alex/example/example-app/feat-annotate-last")).toBe(
+      "-Users-alex-example-example-app-feat-annotate-last"
     );
   });
 
@@ -302,14 +302,14 @@ describe("projectSlugFromCwd", () => {
   });
 
   test("replaces underscores in path components (e.g. feat_branch)", () => {
-    expect(projectSlugFromCwd("/Users/alex/project/.worktrees/feat_aiccn-1234-desc")).toBe(
-      "-Users-alex-project--worktrees-feat-aiccn-1234-desc"
+    expect(projectSlugFromCwd("/Users/alex/project/.worktrees/feat_ticket-1234-desc")).toBe(
+      "-Users-alex-project--worktrees-feat-ticket-1234-desc"
     );
   });
 
   test("handles path with mixed special characters", () => {
-    expect(projectSlugFromCwd("/Users/alex/Code/org/apa/.worktrees/feat_aiccn-2506-agent-scaffolding")).toBe(
-      "-Users-alex-Code-org-apa--worktrees-feat-aiccn-2506-agent-scaffolding"
+    expect(projectSlugFromCwd("/Users/alex/Code/org/apa/.worktrees/feat_ticket-2506-agent-scaffolding")).toBe(
+      "-Users-alex-Code-org-apa--worktrees-feat-ticket-2506-agent-scaffolding"
     );
   });
 });

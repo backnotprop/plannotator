@@ -103,6 +103,8 @@ Approved and denied plans are saved to `~/.plannotator/plans/` by default. You c
 
 Plannotator reads `~/.plannotator/config.json` for persistent settings. This includes display name, diff options, conventional comment labels, and feedback message customization.
 
+The review open-state flags (`plannotator review --base <ref>` / `--diff-type <type>`) seed a single session and never change the saved `defaultDiffType` — Settings → Git and the first-run setup dialog remain the only writers.
+
 You can customize the messages Plannotator sends to the agent when you approve, deny, or annotate plans and documents. See the [custom feedback guide](/docs/guides/custom-feedback/) for the full config shape, template variables, and runtime-specific overrides.
 
 ## Remote mode

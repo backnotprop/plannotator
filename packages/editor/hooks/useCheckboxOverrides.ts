@@ -9,11 +9,30 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Annotation, AnnotationType, Block } from '@plannotator/ui/types';
 
+/** Serializable checkbox override entries used by history replay. */
+export type CheckboxOverrideSnapshot = ReadonlyArray<readonly [string, boolean]>;
+
+/** Checkbox annotation plus its exact position in the document collection. */
+export interface IndexedCheckboxAnnotation {
+  annotation: Annotation;
+  index: number;
+}
+
+/** Reversible state captured for one human checkbox toggle. */
+export interface CheckboxToggleMutation {
+  blockId: string;
+  beforeOverrides: CheckboxOverrideSnapshot;
+  afterOverrides: CheckboxOverrideSnapshot;
+  beforeAnnotations: IndexedCheckboxAnnotation[];
+  afterAnnotations: IndexedCheckboxAnnotation[];
+}
+
 export interface UseCheckboxOverridesOptions {
   blocks: Block[];
   annotations: Annotation[];
-  addAnnotation: (ann: Annotation) => void;
+  addAnnotation: (ann: Annotation) => number;
   removeAnnotation: (id: string) => void;
+  onToggleMutation?: (mutation: CheckboxToggleMutation) => void;
 }
 
 export interface UseCheckboxOverridesReturn {
@@ -23,6 +42,8 @@ export interface UseCheckboxOverridesReturn {
   toggle: (blockId: string, checked: boolean) => void;
   /** Revert an override when a checkbox annotation is deleted from the panel */
   revertOverride: (blockId: string) => void;
+  /** Replace checkbox state while replaying undo/redo. */
+  restoreOverrides: (snapshot: CheckboxOverrideSnapshot) => void;
 }
 
 export function useCheckboxOverrides({
@@ -30,6 +51,7 @@ export function useCheckboxOverrides({
   annotations,
   addAnnotation,
   removeAnnotation,
+  onToggleMutation,
 }: UseCheckboxOverridesOptions): UseCheckboxOverridesReturn {
   const [overrides, setOverrides] = useState<Map<string, boolean>>(new Map());
 
@@ -38,6 +60,10 @@ export function useCheckboxOverrides({
   blocksRef.current = blocks;
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
+  const overridesRef = useRef(overrides);
+  overridesRef.current = overrides;
+  const onToggleMutationRef = useRef(onToggleMutation);
+  onToggleMutationRef.current = onToggleMutation;
 
   // Clean up stale overrides when blocks change (e.g. markdown reloaded)
   useEffect(() => {
@@ -58,6 +84,12 @@ export function useCheckboxOverrides({
     const annotations = annotationsRef.current;
     const block = blocks.find(b => b.id === blockId);
     const isRevertingToOriginal = block && checked === block.checked;
+    const beforeOverrides = [...overridesRef.current.entries()] as CheckboxOverrideSnapshot;
+    const beforeAnnotations = annotations.flatMap((annotation, index) =>
+      annotation.blockId === blockId && annotation.id.startsWith('ann-checkbox-')
+        ? [{ annotation, index }]
+        : [],
+    );
 
     if (isRevertingToOriginal) {
       // Undo: remove the override and delete ALL checkbox annotations for this block
@@ -68,6 +100,13 @@ export function useCheckboxOverrides({
       });
       const toDelete = annotations.filter(a => a.blockId === blockId && a.id.startsWith('ann-checkbox-'));
       toDelete.forEach(a => removeAnnotation(a.id));
+      onToggleMutationRef.current?.({
+        blockId,
+        beforeOverrides,
+        afterOverrides: beforeOverrides.filter(([id]) => id !== blockId),
+        beforeAnnotations,
+        afterAnnotations: [],
+      });
     } else {
       // Toggle: remove any existing checkbox annotations for this block first (prevents duplicates from rapid clicks)
       const existing = annotations.filter(a => a.blockId === blockId && a.id.startsWith('ann-checkbox-'));
@@ -78,6 +117,7 @@ export function useCheckboxOverrides({
         next.set(blockId, checked);
         return next;
       });
+      let afterAnnotations: IndexedCheckboxAnnotation[] = [];
       if (block) {
         // Find the nearest heading above this block for section context
         const blockIdx = blocks.indexOf(block);
@@ -101,8 +141,19 @@ export function useCheckboxOverrides({
           originalText: block.content,
           createdA: Date.now(),
         };
-        addAnnotation(ann);
+        const index = addAnnotation(ann);
+        afterAnnotations = [{ annotation: ann, index }];
       }
+      onToggleMutationRef.current?.({
+        blockId,
+        beforeOverrides,
+        afterOverrides: [
+          ...beforeOverrides.filter(([id]) => id !== blockId),
+          [blockId, checked],
+        ],
+        beforeAnnotations,
+        afterAnnotations,
+      });
     }
   }, [addAnnotation, removeAnnotation]);
 
@@ -114,5 +165,9 @@ export function useCheckboxOverrides({
     });
   }, []);
 
-  return { overrides, toggle, revertOverride };
+  const restoreOverrides = useCallback((snapshot: CheckboxOverrideSnapshot) => {
+    setOverrides(new Map(snapshot));
+  }, []);
+
+  return { overrides, toggle, revertOverride, restoreOverrides };
 }

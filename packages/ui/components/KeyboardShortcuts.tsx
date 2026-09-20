@@ -88,6 +88,7 @@ const documentViewShortcuts: ShortcutSection = {
   title: 'View',
   shortcuts: [
     { keys: [modKey, '.'], desc: 'Toggle focus mode', hint: 'Collapses the Contents sidebar and the right-hand panel together; press again to restore whatever was open before. Markdown documents only; HTML pages keep their own layout.' },
+    { keys: [modKey, 'E'], desc: 'Toggle edit mode', hint: 'Opens the markdown source editor in place, keeping your scroll position; press again to commit your edits and return to annotating. Markdown documents only; a source-backed document with unsaved changes keeps its two-step discard.' },
   ],
 };
 

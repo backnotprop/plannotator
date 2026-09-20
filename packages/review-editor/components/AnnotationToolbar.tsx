@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
@@ -12,6 +12,7 @@ import { useDraggable } from '@plannotator/ui/hooks/useDraggable';
 import {
   hasPrimaryCoarsePointer,
   useVisibleViewportBounds,
+  type VisibleViewportBounds,
 } from '@plannotator/ui/hooks/useViewportEnvironment';
 
 interface AnnotationToolbarProps {
@@ -50,6 +51,46 @@ interface AnnotationToolbarProps {
 
 // The 338px border box contains the 320px composer, padding, and border.
 const TOOLBAR_MAX_WIDTH = 338;
+// Gap between the anchor and the toolbar's near edge when it flips above.
+const TOOLBAR_ANCHOR_GAP = 10;
+// Stand-in for the first render only, before the real height is measured.
+const TOOLBAR_ESTIMATED_HEIGHT = 200;
+
+interface ToolbarVerticalPlacement {
+  top: number;
+  maxHeight: number;
+}
+
+/**
+ * Keeps the WHOLE toolbar — submit row included — inside the visible viewport.
+ *
+ * `anchorTop` is the toolbar's top when it sits below the anchor. When that
+ * would push its bottom past the viewport (a selection on the last lines of a
+ * file), the toolbar flips above the anchor instead of sliding up, so the
+ * submit button stays on screen without scrolling (#1424). A toolbar taller
+ * than the viewport has nowhere to go: it is pinned to the top edge and scrolls
+ * internally, which is the only case where `maxHeight` actually binds.
+ */
+function computeToolbarVerticalPlacement(
+  anchorTop: number,
+  height: number | null,
+  bounds: VisibleViewportBounds,
+  { flip = false }: { flip?: boolean } = {},
+): ToolbarVerticalPlacement {
+  if (height !== null && height > bounds.height) {
+    return { top: bounds.top, maxHeight: bounds.height };
+  }
+
+  const measured = height ?? TOOLBAR_ESTIMATED_HEIGHT;
+  const preferred = flip && anchorTop + measured > bounds.bottom
+    ? anchorTop - TOOLBAR_ANCHOR_GAP - measured
+    : anchorTop;
+
+  return {
+    top: Math.max(bounds.top, Math.min(preferred, bounds.bottom - measured)),
+    maxHeight: bounds.height,
+  };
+}
 
 /** Floating comment input form that appears after line selection */
 export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
@@ -87,8 +128,32 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const toolbarWidth = Math.min(TOOLBAR_MAX_WIDTH, visibleBounds.width);
   const horizontalInset = toolbarWidth / 2;
   const suggestedCodeRef = useRef<HTMLTextAreaElement>(null);
+  const [toolbarHeight, setToolbarHeight] = useState<number | null>(null);
   const handleTabIndent = useTabIndent(setSuggestedCode);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(toolbarRef);
+
+  // The clamp below needs the real box height, not a guess: a fixed reserve let
+  // the expanded suggested-code section push the submit row past the viewport
+  // bottom. Measured after every commit because the height changes with the
+  // suggested-code toggle, Ask AI history, and a manual textarea resize;
+  // setState bails out whenever the measurement is unchanged.
+  // scrollHeight is the UNCLAMPED content height, so a maxHeight this effect
+  // already applied can never feed back into the next measurement.
+  useLayoutEffect(() => {
+    const element = toolbarRef.current;
+    if (!element) return;
+    const measured = Math.max(element.scrollHeight, element.offsetHeight);
+    setToolbarHeight((previous) => (previous === measured ? previous : measured));
+  });
+
+  // Dragged toolbars keep the user's chosen position (clamped into bounds);
+  // anchored ones also flip above the anchor when they would not fit below.
+  const placement = computeToolbarVerticalPlacement(
+    dragPosition ? dragPosition.top : toolbarState.position.top,
+    toolbarHeight,
+    visibleBounds,
+    { flip: !dragPosition },
+  );
 
   // Reset drag when toolbar reopens for a new selection
   useEffect(() => {
@@ -123,20 +188,17 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       style={dragPosition
         ? {
             position: 'fixed',
-            top: dragPosition.top,
+            top: placement.top,
             left: dragPosition.left,
             width: toolbarWidth,
             boxSizing: 'border-box',
             zIndex: 1000,
-            maxHeight: visibleBounds.height,
+            maxHeight: placement.maxHeight,
             overflowY: 'auto',
           }
         : {
             position: 'fixed',
-            top: Math.max(
-              visibleBounds.top,
-              Math.min(toolbarState.position.top, visibleBounds.bottom - 200),
-            ),
+            top: placement.top,
             left: Math.max(
               visibleBounds.left + horizontalInset,
               Math.min(
@@ -148,7 +210,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             width: toolbarWidth,
             boxSizing: 'border-box',
             zIndex: 1000,
-            maxHeight: visibleBounds.height,
+            maxHeight: placement.maxHeight,
             overflowY: 'auto',
           }
       }

@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.0",
+  "version": "0.25.5",
   "type": "module",
   "exports": {
     "./agents": "./agents.ts",
@@ -23,9 +23,11 @@
     "./feedback-templates": "./feedback-templates.ts",
     "./goal-setup": "./goal-setup.ts",
     "./html-anchor": "./html-anchor.ts",
+    "./diagram-anchor": "./diagram-anchor.ts",
     "./open-in-apps": "./open-in-apps.ts",
     "./project": "./project.ts",
     "./source-save": "./source-save.ts",
+    "./token-hover": "./token-hover.ts",
     "./config-types": "./config-types.ts",
     "./storage-types": "./storage-types.ts",
     "./workspace-status-types": "./workspace-status-types.ts",

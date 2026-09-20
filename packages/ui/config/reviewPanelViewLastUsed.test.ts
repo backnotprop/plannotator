@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 import { SETTINGS } from './settings';
 import { ConfigStoreForTest } from './configStore';
-import { setReviewPanelView } from './reviewView';
+import { setReviewDefaultDiffType, setReviewPanelView } from './reviewView';
 
 function installMemoryBackend(): Map<string, string> {
   const values = new Map<string, string>();
@@ -73,5 +73,17 @@ describe('reviewPanelViewLastUsed setting', () => {
     expect(store.get('defaultDiffType')).toBe('since-base');
     // ...but the user's last-used view survived.
     expect(store.get('reviewPanelViewLastUsed')).toBe('tree');
+  });
+
+  test('local-vs-remote persists as a Tree-compatible default', () => {
+    const values = installMemoryBackend();
+    const store = makeStore();
+    setReviewPanelView('sections', undefined, store);
+
+    setReviewDefaultDiffType('local-vs-remote', store);
+
+    expect(store.get('defaultDiffType')).toBe('local-vs-remote');
+    expect(store.get('reviewPanelView')).toBe('tree');
+    expect(values.get('plannotator-default-diff-type')).toBe('local-vs-remote');
   });
 });

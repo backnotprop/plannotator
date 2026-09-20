@@ -78,3 +78,29 @@ packages/ui/styles.js
 packages/ui/components/html-viewer/bridge-script.asset.js
 packages/ui/components/html-viewer/bridge-script.lite.ts
 .wrangler/
+
+# Local working notes at the repo root (untracked by design — never commit).
+# Guard added after 548dad1f swept these into main with a blanket add.
+/DESIGN_*
+/RELEASE_NOTES_*
+/HANDOFF_*
+/MANUAL_QA_*
+/ONBOARDING_*
+/TPM_*
+/BENCH_*
+/adr/0003-example-architecture-decision.md
+/adr/research/RESEARCH-*
+/docs/mintlify-*
+/scripts/version-matrix/
+/scripts/local-smoke-test.sh
+/scripts/plannotator-inventory.sh
+/undefined/
+/*.jpeg
+/*.png
+/guided-review-portable-html-export.html
+/portable-guided-review-html-export.html
+/portable-html-export-for-guided-review.html
+/adr/research/SPIKE-bundle-build-and-serve-architecture-20260619-154926.md
+/adr/research/SPIKE-bundle-optimization-theories-20260619-154926.md
+/adr/research/SPIKE-local-app-annotation-20260810.md
+/scripts/convert-themes.ts
