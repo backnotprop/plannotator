@@ -169,6 +169,8 @@ jobs:
           packages/ui/hooks/useAnnotationDraft.seam.test.tsx
           packages/ui/hooks/useExternalAnnotations.seam.test.tsx
           packages/ui/hooks/useAIChat.seam.test.tsx
+          packages/ui/hooks/useAIChat.forkOrigin.test.tsx
+          packages/ui/hooks/useOriginFork.test.tsx
           packages/ui/hooks/useFileBrowser.seam.test.tsx
           packages/ui/hooks/usePlanDiff.test.tsx
           packages/ui/hooks/useLinkedDoc.test.tsx

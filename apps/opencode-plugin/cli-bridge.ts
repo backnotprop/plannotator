@@ -20,6 +20,7 @@ import {
   deliverOpenCodePrompt,
   isOpenCodePromptDeliveryError,
 } from "./prompt-delivery-error";
+import type { ParentSession } from "@plannotator/server";
 
 type LogLevel = "info" | "error";
 
@@ -475,12 +476,17 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
   }
 }
 
-export function buildAnnotateCliArgs(parsed: ParsedAnnotateArgs): string[] {
+export function buildAnnotateCliArgs(parsed: ParsedAnnotateArgs, sessionId?: string): string[] {
   const args = ["annotate", parsed.rawFilePath, "--json"];
   if (parsed.gate) args.push("--gate");
   if (parsed.renderHtml) args.push("--render-html");
   if (parsed.renderMarkdown) args.push("--markdown");
   if (parsed.noJina) args.push("--no-jina");
+  // Lets Ask AI offer to fork the invoking OpenCode session (#1519): the
+  // plain `annotate` subcommand has no stdin-JSON channel the way
+  // opencode-plan/opencode-annotate-last do, so this is the only way this
+  // CLI-bridge fallback leg of /plannotator-annotate can name it.
+  if (sessionId) args.push("--session-id", sessionId);
   return args;
 }
 
@@ -494,6 +500,8 @@ export function canLaunchGatedAnnotate(
 export async function runCliPlanReview(input: {
   client: OpenCodeClient;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin), already resolved by the caller. */
+  originSession: ParentSession | null;
   cwd?: string;
   timeoutSeconds: number | null;
   abortSignal?: AbortSignal;
@@ -506,6 +514,8 @@ export async function runCliPlanReview(input: {
     input: JSON.stringify({
       plan: input.planContent,
       timeoutSeconds: input.timeoutSeconds,
+      sessionId: input.originSession?.sessionId,
+      directory: input.originSession?.cwd,
       ...buildBridgePayload(input.bridge),
     }),
     readyLabel: "plan review",
@@ -665,6 +675,8 @@ export async function handleCliCommand(input: {
         cwd,
         input: JSON.stringify({
           arguments: input.rawArgs,
+          sessionId: input.sessionId,
+          directory: cwd,
           // Fail-closed approval-notes handshake (same version-skew reasoning
           // as formatUserFacingCliStderrLine above: the binary and this plugin
           // version independently). The advert lives in the binary's review
@@ -715,7 +727,7 @@ export async function handleCliCommand(input: {
 
       const result = await runPlannotatorCli({
         client: input.client,
-        args: buildAnnotateCliArgs(parsed),
+        args: buildAnnotateCliArgs(parsed, input.sessionId),
         cwd,
         readyLabel: "annotation UI",
         bridge: input.bridge,
@@ -762,6 +774,8 @@ export async function handleCliCommand(input: {
         input: JSON.stringify({
           gate: parsed.gate,
           recentMessages,
+          sessionId: input.sessionId,
+          directory: cwd,
           ...buildBridgePayload(input.bridge),
         }),
         readyLabel: "annotation UI",

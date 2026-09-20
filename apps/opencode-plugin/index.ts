@@ -49,6 +49,7 @@ import { resolveValidatedTargetAgent } from "./agent-switch";
 import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
+import { toOriginSession } from "./origin-session";
 
 // Lazy-load HTML at first use instead of embedding in the bundle.
 // The two SPA files are ~20 MB combined — inlining them as string literals
@@ -191,6 +192,8 @@ async function runPlanReview(input: {
   client: any;
   runtime: RuntimeMode;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin). */
+  sessionId?: string;
   sharingEnabled: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
@@ -205,12 +208,17 @@ async function runPlanReview(input: {
     throw new Error(getEmbeddedRuntimeError());
   }
 
+  // Joined once, here, rather than threading sessionId/cwd separately
+  // through the embedded and CLI runners below (#1519).
+  const originSession = toOriginSession({ sessionId: input.sessionId, cwd: input.cwd });
+
   if (shouldUseEmbeddedRuntime(input.runtime)) {
     try {
       const embedded = await importEmbeddedRuntime();
       return await embedded.runEmbeddedPlanReview({
         client: input.client,
         planContent: input.planContent,
+        originSession,
         sharingEnabled: input.sharingEnabled,
         shareBaseUrl: input.shareBaseUrl,
         pasteApiUrl: input.pasteApiUrl,
@@ -234,6 +242,7 @@ async function runPlanReview(input: {
   return await runCliPlanReview({
     client: input.client,
     planContent: input.planContent,
+    originSession,
     cwd: input.cwd,
     timeoutSeconds: input.timeoutSeconds,
     abortSignal: input.abortSignal,
@@ -559,10 +568,11 @@ Do NOT proceed with implementation until your plan is approved.`;
             directory: ctx.directory,
             workflowOptions,
           }, {
-            reviewPlan: async ({ planContent }) => await runPlanReview({
+            reviewPlan: async ({ planContent, sessionId }) => await runPlanReview({
               client: ctx.client,
               runtime: workflowOptions.runtime,
               planContent,
+              sessionId,
               sharingEnabled: await getSharingEnabled(),
               shareBaseUrl: getShareBaseUrl(),
               pasteApiUrl: getPasteApiUrl(),

@@ -8,10 +8,13 @@ import {
   getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import type { ParentSession } from "@plannotator/server";
 
 export interface EmbeddedPlanReviewInput {
   client: any;
   planContent: string;
+  /** The OpenCode session that submitted the plan (Ask AI fork origin), already resolved by the caller. */
+  originSession: ParentSession | null;
   sharingEnabled: boolean;
   shareBaseUrl?: string;
   pasteApiUrl?: string;
@@ -74,6 +77,7 @@ export async function runEmbeddedPlanReview(
   const server = await startPlannotatorServer({
     plan: input.planContent,
     origin: "opencode",
+    originSession: input.originSession,
     sharingEnabled: input.sharingEnabled,
     shareBaseUrl: input.shareBaseUrl,
     pasteApiUrl: input.pasteApiUrl,

@@ -20,6 +20,7 @@ import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import type { OriginForkToggleProps } from '@plannotator/ui/hooks/useOriginFork';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 
@@ -74,6 +75,8 @@ interface ReviewSidebarProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
+  /** Opt-in origin-session forking (#1519) — forwarded to AITab. */
+  originFork?: OriginForkToggleProps;
   // Agent props
   agentJobs?: AgentJobInfo[];
   agentCapabilities?: AgentCapabilities | null;
@@ -273,6 +276,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   aiConfig,
   onAIConfigChange,
   hasAISession,
+  originFork,
   agentJobs,
   agentCapabilities,
   onAgentLaunch,
@@ -737,6 +741,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               aiConfig={aiConfig}
               onAIConfigChange={onAIConfigChange}
               hasAISession={hasAISession}
+              originFork={originFork}
             />
           )}
 

@@ -1,10 +1,12 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AIChatEntry, PendingPermission } from '../../hooks/useAIChat';
 import type { AIProviderOption } from '../../utils/aiProvider';
+import type { OriginForkToggleProps } from '../../hooks/useOriginFork';
 import { formatRelativeTime, renderChatMarkdown } from '../../utils/aiChatFormat';
 import { OverlayScrollArea } from '../OverlayScrollArea';
 import { SparklesIcon } from '../SparklesIcon';
 import { AIProviderBar } from './AIProviderBar';
+import { OriginForkToggle } from './OriginForkToggle';
 import { submitHint } from '../../utils/platform';
 
 interface DocumentAIChatPanelProps {
@@ -19,6 +21,8 @@ interface DocumentAIChatPanelProps {
   aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
+  /** Opt-in origin-session forking (#1519) — see `useOriginFork`. */
+  originFork?: OriginForkToggleProps;
 }
 
 function truncate(text: string, max = 180): string {
@@ -64,6 +68,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   aiProviders = [],
   aiConfig,
   onAIConfigChange,
+  originFork,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
@@ -125,6 +130,12 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
               onRespond={onRespondToPermission ?? (() => {})}
             />
           ))}
+        </div>
+      )}
+
+      {originFork?.available && (
+        <div className="border-t border-border/50 px-2 py-1.5">
+          <OriginForkToggle {...originFork} />
         </div>
       )}
 

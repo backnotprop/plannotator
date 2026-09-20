@@ -113,14 +113,20 @@ done
 printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/bridge-script.ts\n' \
   | cat - "../../packages/ui/components/html-viewer/bridge-script.ts" > "generated/bridge-script.ts"
 
-# Vendor the moved AI context types from core into generated/ai/.
+# Vendor the moved AI context types from core into generated/ai/. ai-context.ts
+# types ParentSession.agent as an Origin (packages/core/agents.ts, same
+# package) — vendor that alongside it so the relative import resolves; the
+# generic ./x -> ./x.ts normalization pass below handles the specifier itself.
 printf '// @generated — DO NOT EDIT. Source: packages/core/ai-context.ts\n' \
   | cat - "../../packages/core/ai-context.ts" > "generated/ai/ai-context.ts"
+printf '// @generated — DO NOT EDIT. Source: packages/core/agents.ts\n' \
+  | cat - "../../packages/core/agents.ts" > "generated/ai/agents.ts"
 
 for f in index types provider session-manager endpoints context base-session; do
   src="../../packages/ai/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" \
     | sed "s|from ['\"]@plannotator/core/ai-context['\"]|from './ai-context.ts'|g" \
+    | sed "s|from ['\"]@plannotator/core/agents['\"]|from './agents.ts'|g" \
     > "generated/ai/$f.ts"
 done
 

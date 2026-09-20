@@ -795,6 +795,134 @@ describe("AI endpoints", () => {
     expect(createRes.status).toBe(200);
   });
 
+  test("forks the server-known origin session when forkOrigin: true", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    reg.register(mockProvider("claude-agent-sdk"));
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      originSession: { sessionId: "origin-123", cwd: "/tmp/project", agent: "claude-code" },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          forkOrigin: true,
+        }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { sessionId: string; parentSessionId: string | null };
+    expect(data.sessionId).toMatch(/^forked-/);
+    expect(data.parentSessionId).toBe("origin-123");
+  });
+
+  test("does not fork without forkOrigin, even when deps.originSession is set", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    reg.register(mockProvider("claude-agent-sdk"));
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      originSession: { sessionId: "origin-123", cwd: "/tmp/project", agent: "claude-code" },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+        }),
+      })
+    );
+    const data = (await res.json()) as { sessionId: string; parentSessionId: string | null };
+    expect(data.sessionId).toMatch(/^session-/);
+    expect(data.parentSessionId).toBeNull();
+  });
+
+  test("does not fork when forkOrigin is true but the resolved provider can't fork", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    reg.register({ ...mockProvider("codex-sdk"), capabilities: { fork: false, resume: true, streaming: true, tools: true } });
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      originSession: { sessionId: "origin-123", cwd: "/tmp/project", agent: "claude-code" },
+    });
+
+    const res = await endpoints["/api/ai/session"](
+      new Request("http://localhost/api/ai/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: { mode: "plan-review", plan: { plan: "# Test" } },
+          forkOrigin: true,
+        }),
+      })
+    );
+    const data = (await res.json()) as { sessionId: string; parentSessionId: string | null };
+    expect(data.sessionId).toMatch(/^session-/);
+    expect(data.parentSessionId).toBeNull();
+  });
+
+  test("capabilities reports originFork with the registry ids that can fork it", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    // Registered under its natural id (agent-runtime.ts never passes a custom
+    // instanceId) — matches production.
+    reg.register(mockProvider("claude-agent-sdk"));
+    reg.register({ ...mockProvider("codex-sdk"), capabilities: { fork: false, resume: true, streaming: true, tools: true } });
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      originSession: { sessionId: "origin-123", cwd: "/tmp/project", agent: "claude-code" },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities")
+    );
+    const data = await res.json();
+    expect(data.originFork).toEqual({ agent: "claude-code", providerIds: ["claude-agent-sdk"] });
+  });
+
+  test("capabilities matches a provider registered under a custom instance id, by provider type name", async () => {
+    // A registry id can be custom (a caller-chosen instanceId rather than
+    // the provider's own name) — originForkProviderIds must still find it by
+    // matching provider.name against the origin's provider types, the same
+    // id-or-name rule findOriginAIProvider uses client-side. Id-only
+    // matching (the pre-fix behavior) would silently drop this provider.
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    reg.register(mockProvider("claude-agent-sdk"), "my-custom-claude-instance");
+    const endpoints = createAIEndpoints({
+      registry: reg,
+      sessionManager: sm,
+      originSession: { sessionId: "origin-123", cwd: "/tmp/project", agent: "claude-code" },
+    });
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities")
+    );
+    const data = await res.json();
+    expect(data.originFork).toEqual({ agent: "claude-code", providerIds: ["my-custom-claude-instance"] });
+  });
+
+  test("capabilities reports originFork: null without a known origin session", async () => {
+    const { reg, endpoints } = setup();
+    reg.register(mockProvider("claude-agent-sdk"));
+
+    const res = await endpoints["/api/ai/capabilities"](
+      new Request("http://localhost/api/ai/capabilities")
+    );
+    const data = await res.json();
+    expect(data.originFork).toBeNull();
+  });
+
   test("session creation activates only the resolved provider before createSession", async () => {
     const reg = new ProviderRegistry();
     const sm = new SessionManager();
