@@ -18,7 +18,14 @@ import {
 
 // Save and restore env between tests
 const savedEnv: Record<string, string | undefined> = {};
-const envKeys = ["PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "SSH_TTY", "SSH_CONNECTION", "PLANNOTATOR_URL_HOST"];
+const envKeys = [
+  "PLANNOTATOR_REMOTE",
+  "PLANNOTATOR_PORT",
+  "SSH_TTY",
+  "SSH_CONNECTION",
+  "PLANNOTATOR_URL_HOST",
+  "PLANNOTATOR_PUBLIC_URL",
+];
 
 function clearEnv() {
   for (const key of envKeys) {
@@ -277,47 +284,10 @@ describe("getServerHostname", () => {
 });
 
 describe("buildAdvertisedUrl", () => {
-  test("defaults to localhost", () => {
+  test("passes the Bun runtime's remote state to the shared URL policy", () => {
     clearEnv();
     process.env.PLANNOTATOR_REMOTE = "1";
-    // An empty (but set) env var suppresses any urlHost in the developer's
-    // real config.json, isolating the default path.
-    process.env.PLANNOTATOR_URL_HOST = "";
-    expect(buildAdvertisedUrl(19432)).toBe("http://localhost:19432");
-  });
-
-  test("a local session ignores the override and advertises localhost", () => {
-    clearEnv();
-    process.env.PLANNOTATOR_URL_HOST = "my-machine.tailnet.ts.net";
-    expect(buildAdvertisedUrl(1234)).toBe("http://localhost:1234");
-  });
-
-  test("appends the runtime port to the override host", () => {
-    clearEnv();
-    process.env.PLANNOTATOR_REMOTE = "1";
-    process.env.PLANNOTATOR_URL_HOST = "my-machine.tailnet.ts.net";
-    expect(buildAdvertisedUrl(19432)).toBe("http://my-machine.tailnet.ts.net:19432");
-  });
-
-  test("keeps bracketed IPv6 hosts intact", () => {
-    clearEnv();
-    process.env.PLANNOTATOR_REMOTE = "1";
-    process.env.PLANNOTATOR_URL_HOST = "[fd7a::1]";
-    expect(buildAdvertisedUrl(9999)).toBe("http://[fd7a::1]:9999");
-  });
-
-  test("an invalid host falls back to localhost instead of throwing", () => {
-    clearEnv();
-    process.env.PLANNOTATOR_REMOTE = "1";
-    process.env.PLANNOTATOR_URL_HOST = "https://evil.example/path";
-    expect(buildAdvertisedUrl(1234)).toBe("http://localhost:1234");
-  });
-
-  test("the override never affects the bind hostname", () => {
-    clearEnv();
-    process.env.PLANNOTATOR_URL_HOST = "my-machine.tailnet.ts.net";
-    expect(getServerHostname()).toBe("127.0.0.1");
-    process.env.PLANNOTATOR_REMOTE = "1";
-    expect(getServerHostname()).toBe("0.0.0.0");
+    process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
+    expect(buildAdvertisedUrl(19432)).toBe("https://plannotator.example.com");
   });
 });
