@@ -6,11 +6,74 @@ import {
   handleFavicon,
   handleSaveNotes,
   handleServerReady,
-  isCodexDesktopHost,
+  SESSION_READY_LINE_PREFIX,
   writeServerReadyMetadata,
 } from "./shared-handlers";
 import { saveConfig } from "./config";
 import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
+
+/** Run `fn` with stderr captured, so assertions see it and the test log doesn't. */
+async function captureStderr(fn: () => Promise<void>): Promise<string> {
+  const writes: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+    writes.push(String(chunk));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    (process.stderr as { write: unknown }).write = original;
+  }
+  return writes.join("");
+}
+
+/**
+ * The session URL must appear exactly once, on the stable one-line format.
+ *
+ * The expected line is written out literally rather than interpolated from
+ * `SESSION_READY_LINE_PREFIX`, because interpolating it would assert the
+ * constant against itself: every one of these tests would stay green while
+ * consumers matching the old text (see `formatUserFacingCliStderrLine` in
+ * `apps/opencode-plugin/cli-bridge.ts`) silently stopped forwarding the URL.
+ * The two-space indent and the newlines around the line are part of the format.
+ */
+function expectSingleSessionReadyLine(output: string, url: string): void {
+  expect(output.split(url).length - 1).toBe(1);
+  expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);
+}
+
+/**
+ * Run `fn` with BOTH streams captured, so a test can assert what landed where.
+ *
+ * The session-ready line is a stderr contract: `--json` and `--hook` reserve
+ * stdout for the decision record an agent parses, so a single stray byte on
+ * stdout from a ready announcement corrupts it. Nothing in `handleServerReady`
+ * may ever write there, in any mode.
+ */
+async function captureStreams(
+  fn: () => Promise<void>,
+): Promise<{ stdout: string; stderr: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const originalOut = process.stdout.write.bind(process.stdout);
+  const originalErr = process.stderr.write.bind(process.stderr);
+  (process.stdout as { write: unknown }).write = (chunk: unknown) => {
+    out.push(String(chunk));
+    return true;
+  };
+  (process.stderr as { write: unknown }).write = (chunk: unknown) => {
+    err.push(String(chunk));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    (process.stdout as { write: unknown }).write = originalOut;
+    (process.stderr as { write: unknown }).write = originalErr;
+  }
+  return { stdout: out.join(""), stderr: err.join("") };
+}
 
 function saveNotesRequest(body: unknown): Request {
   return new Request("http://localhost/api/save-notes", {
@@ -111,126 +174,191 @@ describe("writeServerReadyMetadata", () => {
   });
 });
 
-describe("handleServerReady", () => {
-  test("detects the Codex Desktop app host", () => {
-    expect(isCodexDesktopHost({ __CFBundleIdentifier: "com.openai.codex" })).toBe(true);
-    expect(isCodexDesktopHost({ __CFBundleIdentifier: "com.apple.Terminal" })).toBe(false);
+describe("SESSION_READY_LINE_PREFIX", () => {
+  // Pinned to the literal bytes, because the prefix is a cross-component
+  // contract rather than an implementation detail: `cli-bridge.ts` matches it
+  // with its own hardcoded regex, and the docs quote it as the line agents
+  // grep. Changing it is a breaking change and has to fail here first.
+  test("is the exact text consumers match on", () => {
+    expect(SESSION_READY_LINE_PREFIX).toBe("Plannotator session ready: ");
   });
+});
 
+describe("handleServerReady", () => {
   test("does not open a browser when host-plugin mode handles it", async () => {
     let opened = false;
-    const originalBundleIdentifier = process.env.__CFBundleIdentifier;
-    process.env.__CFBundleIdentifier = "com.apple.Terminal";
 
-    try {
+    await captureStderr(async () => {
       await handleServerReady("http://localhost:12345", false, 12345, {
         skipBrowserOpen: true,
         openBrowser: async () => {
           opened = true;
         },
       });
-    } finally {
-      if (originalBundleIdentifier === undefined) {
-        delete process.env.__CFBundleIdentifier;
-      } else {
-        process.env.__CFBundleIdentifier = originalBundleIdentifier;
-      }
-    }
+    });
 
     expect(opened).toBe(false);
   });
 
-  // Regression: a remote session must surface a reachable URL in the terminal
-  // regardless of URL sharing — otherwise a sharing-disabled remote user is left
-  // with no URL and the agent hangs waiting on the review.
-  test("prints the reachable URL to stderr for a remote session", async () => {
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    try {
-      await handleServerReady("http://localhost:19432", true, 19432, {
-        skipBrowserOpen: true,
-      });
-    } finally {
-      (process.stderr as { write: unknown }).write = original;
-    }
-    expect(writes.join("")).toContain("http://localhost:19432");
-  });
-
-  test("does not print the URL for a local session when the browser opens", async () => {
-    const writes: string[] = [];
+  // Regression (upstream #1134): the URL used to be printed only when the
+  // session was remote, when the Codex desktop host was detected, or when the
+  // browser failed to open. A local session whose browser opened fine printed
+  // nothing, so a closed tab left neither the user nor the agent driving the
+  // session with any way back to it.
+  test("prints the stable URL line for a local session when the browser opens", async () => {
     let opened = "";
-    const original = process.stderr.write.bind(process.stderr);
-    const originalBundleIdentifier = process.env.__CFBundleIdentifier;
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    process.env.__CFBundleIdentifier = "com.apple.Terminal";
-    try {
+
+    const output = await captureStderr(async () => {
       await handleServerReady("http://localhost:3000", false, 3000, {
         openBrowser: async (u: string) => {
           opened = u;
           return true;
         },
       });
-    } finally {
-      (process.stderr as { write: unknown }).write = original;
-      if (originalBundleIdentifier === undefined) {
-        delete process.env.__CFBundleIdentifier;
-      } else {
-        process.env.__CFBundleIdentifier = originalBundleIdentifier;
-      }
-    }
-    expect(writes.join("")).not.toContain("http://localhost:3000");
+    });
+
+    expectSingleSessionReadyLine(output, "http://localhost:3000");
     expect(opened).toBe("http://localhost:3000");
   });
 
-  test("prints the URL for a local Codex Desktop session even when the browser opens", async () => {
-    const writes: string[] = [];
-    const originalWrite = process.stderr.write.bind(process.stderr);
-    const originalBundleIdentifier = process.env.__CFBundleIdentifier;
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    process.env.__CFBundleIdentifier = "com.openai.codex";
-    try {
-      await handleServerReady("http://localhost:3000", false, 3000, {
-        openBrowser: async () => true,
+  // The URL is greppable, so it has to be on one line and it has to be the same
+  // line in every mode — including the modes that add their own context.
+  test("prints the reachable URL once for a remote session, with forwarding context", async () => {
+    const output = await captureStderr(async () => {
+      await handleServerReady("http://localhost:19432", true, 19432, {
+        skipBrowserOpen: true,
       });
-    } finally {
-      (process.stderr as { write: unknown }).write = originalWrite;
-      if (originalBundleIdentifier === undefined) {
-        delete process.env.__CFBundleIdentifier;
-      } else {
-        process.env.__CFBundleIdentifier = originalBundleIdentifier;
-      }
-    }
-    expect(writes.join("")).toContain("http://localhost:3000");
+    });
+
+    expectSingleSessionReadyLine(output, "http://localhost:19432");
+    expect(output).toContain("forward port 19432");
   });
 
   // Regression: a local session whose browser can't be opened (headless box,
-  // devcontainer with no display) must still surface the URL, or the agent
-  // hangs at waitForDecision with the user having no link to visit.
-  test("prints the URL for a local session when the browser fails to open", async () => {
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    (process.stderr as { write: unknown }).write = (chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    };
-    try {
+  // devcontainer with no display) must say so, or the user waits on a tab that
+  // never appears — but the URL still prints exactly once.
+  test("prints the URL once and reports the failure when the browser won't open", async () => {
+    const output = await captureStderr(async () => {
       await handleServerReady("http://localhost:4000", false, 4000, {
         openBrowser: async () => false,
       });
+    });
+
+    expectSingleSessionReadyLine(output, "http://localhost:4000");
+    expect(output).toContain("Could not open a browser automatically");
+  });
+
+  // Regression: OpenCode's embedded runtime runs this in-process, sharing
+  // stderr with its opentui renderer, so the unconditional line above would
+  // print raw text into the TUI instead of through the host's own channel.
+  // `announce: false` must silence every stderr write here while leaving the
+  // ready-file write and the browser launch untouched, so the host's own
+  // notifier stays the only visible surface for the URL.
+  test("announce: false silences stderr but still writes the ready file and opens the browser", async () => {
+    let opened = "";
+    const readyFile = join(mkdtempSync(join(tmpdir(), "plannotator-announce-")), "ready.jsonl");
+
+    const output = await captureStderr(async () => {
+      await handleServerReady("http://localhost:5000", true, 5000, {
+        announce: false,
+        readyFile,
+        openBrowser: async (u: string) => {
+          opened = u;
+          return true;
+        },
+      });
+    });
+
+    expect(output).toBe("");
+    expect(opened).toBe("http://localhost:5000");
+    const [line] = readFileSync(readyFile, "utf8").trim().split(/\r?\n/);
+    expect(JSON.parse(line)).toEqual({ url: "http://localhost:5000", isRemote: true, port: 5000 });
+  });
+
+  // The QR is a convenience for the device hop, so it has to sit UNDER the
+  // line whose URL it encodes: ready line, then the reachability context,
+  // then the QR. (The QR itself is TTY-only, which is why this asserts the
+  // order of the surrounding lines rather than the block's presence.)
+  test("puts the ready line above the device-hop context that carries the QR", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-qr-order-"));
+    const savedHost = process.env.PLANNOTATOR_URL_HOST;
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_URL_HOST = "vps-1.tail1234.ts.net";
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+
+    try {
+      const url = "http://vps-1.tail1234.ts.net:19432";
+      const output = await captureStderr(async () => {
+        await handleServerReady(url, true, 19432, { skipBrowserOpen: true });
+      });
+
+      expectSingleSessionReadyLine(output, url);
+      // An overridden host is directly reachable, so the port-forwarding
+      // advice would be wrong and the QR replaces it.
+      expect(output).toContain("Open it on your device");
+      expect(output).not.toContain("forward port");
+      expect(output.indexOf("Plannotator session ready: ")).toBeLessThan(
+        output.indexOf("Open it on your device"),
+      );
     } finally {
-      (process.stderr as { write: unknown }).write = original;
+      if (savedHost === undefined) delete process.env.PLANNOTATOR_URL_HOST;
+      else process.env.PLANNOTATOR_URL_HOST = savedHost;
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(dir, { recursive: true, force: true });
     }
-    expect(writes.join("")).toContain("http://localhost:4000");
+  });
+
+  // The stdout contract, pinned at the handler rather than only end-to-end:
+  // `--json` / `--hook` put a machine-readable decision record on stdout, so
+  // the ready announcement must stay entirely on stderr no matter which
+  // branch it takes. Every mode, because each one adds its own writes.
+  test.each([
+    ["local session, browser opens", false, true, {}],
+    ["local session, browser fails", false, false, {}],
+    ["remote session", true, true, { skipBrowserOpen: true }],
+    ["suppressed announce", false, true, { announce: false }],
+  ])("writes nothing to stdout (%s)", async (_label, isRemote, browserOpens, options) => {
+    const { stdout, stderr } = await captureStreams(async () => {
+      await handleServerReady("http://localhost:7000", isRemote as boolean, 7000, {
+        openBrowser: async () => browserOpens as boolean,
+        ...(options as object),
+      });
+    });
+
+    expect(stdout).toBe("");
+    // Guard against the assertion passing because nothing ran at all.
+    if ((options as { announce?: boolean }).announce === false) expect(stderr).toBe("");
+    else expect(stderr).toContain("http://localhost:7000");
+  });
+
+  test("publishes ready metadata to the PLANNOTATOR_READY_FILE side channel", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-ready-env-"));
+    const readyFile = join(dir, "ready.jsonl");
+    const original = process.env.PLANNOTATOR_READY_FILE;
+    process.env.PLANNOTATOR_READY_FILE = readyFile;
+
+    try {
+      await captureStderr(async () => {
+        await handleServerReady("http://localhost:5000", false, 5000, {
+          openBrowser: async () => true,
+        });
+      });
+
+      const [line] = readFileSync(readyFile, "utf8").trim().split(/\r?\n/);
+      expect(JSON.parse(line)).toEqual({
+        url: "http://localhost:5000",
+        isRemote: false,
+        port: 5000,
+      });
+    } finally {
+      if (original === undefined) {
+        delete process.env.PLANNOTATOR_READY_FILE;
+      } else {
+        process.env.PLANNOTATOR_READY_FILE = original;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
