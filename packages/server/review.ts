@@ -2289,7 +2289,9 @@ export async function startReviewServer(
             // trusting a cached tip: a narrow/single-branch fetch refspec can
             // exit 0 without advancing refs/remotes/origin/<branch>, so we must
             // observe the actual post-fetch state. If the ref didn't move, the
-            // banner honestly stays instead of silently clearing.
+            // banner honestly stays instead of silently clearing. With the remote
+            // check off (#1553) this is a no-op, which is consistent: that
+            // session never shows the banner in the first place.
             await refreshRemoteBaseInfo();
             return Response.json({ ok: true, baseBehindRemote });
           }

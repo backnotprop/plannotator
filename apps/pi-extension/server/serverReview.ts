@@ -2205,7 +2205,9 @@ export async function startReviewServer(options: {
 			// Re-query the remote (fresh ls-remote) and recompute rather than
 			// trusting a cached tip: a narrow fetch refspec can exit 0 without
 			// advancing refs/remotes/origin/<branch>, so we must observe the
-			// actual post-fetch state instead of silently clearing the banner.
+			// actual post-fetch state instead of silently clearing the banner. With
+			// the remote check off (#1553) this is a no-op, which is consistent:
+			// that session never shows the banner in the first place.
 			await refreshRemoteBaseInfo();
 			json(res, { ok: true, baseBehindRemote });
 		} else if (url.pathname === "/api/diff/fresh" && req.method === "GET") {

@@ -256,8 +256,10 @@ export interface PlannotatorConfig {
    * call is unwanted — most sharply when SSH authentication is backed by a
    * hardware token, where every probe is a physical touch prompt. With it off
    * the session runs entirely from local refs: the base stays what local
-   * discovery resolved and the behind-the-remote banner never shows, while an
-   * explicit Fetch still works. Mirrors the PLANNOTATOR_REMOTE_CHECK env var,
+   * discovery resolved and the behind-the-remote banner never shows — and with
+   * it the one-click Fetch, which lives in that banner, though the
+   * `/api/fetch-base` endpoint itself stays reachable. Mirrors the
+   * PLANNOTATOR_REMOTE_CHECK env var,
    * which takes precedence; `review --no-remote-check` beats both.
    */
   remoteCheck?: boolean;
@@ -873,8 +875,9 @@ export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
  * else — including `1` / `true` — keeps it on. "Off" means the whole session
  * makes no `ls-remote` call at all, startup probes included: the compare
  * target stays whatever local ref discovery resolved, and the
- * behind-the-remote banner never shows. An explicit Fetch is unaffected —
- * that is the user asking for the network.
+ * behind-the-remote banner never shows (and with it the one-click Fetch it
+ * carries). `POST /api/fetch-base` stays reachable on its own predicate: an
+ * explicit Fetch is the user asking for the network.
  */
 export function resolveRemoteCheck(
   cliNoRemoteCheck: boolean,
