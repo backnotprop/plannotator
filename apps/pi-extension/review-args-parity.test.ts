@@ -24,6 +24,16 @@ describe("vendored review-args parity", () => {
     expect(parsed.errors).toEqual([]);
   });
 
+  test("the vendored parser yields --no-git-remote-check", async () => {
+    // #1553: a stale vendor would leave Pi refusing the opt-out flag as an
+    // unknown option, so the one host whose users cannot easily set env vars
+    // would have no way to turn the remote check off.
+    const { parseReviewArgs } = await import("./generated/review-args.ts");
+    const parsed = parseReviewArgs("--no-git-remote-check");
+    expect(parsed.gitRemoteCheck).toBe(false);
+    expect(parsed.errors).toEqual([]);
+  });
+
   test("the vendored open-state validator applies the provider matrix", async () => {
     // Guards the vendor.sh entry for review-open-state: without it Pi's
     // review command would crash on import instead of validating.

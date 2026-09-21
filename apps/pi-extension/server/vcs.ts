@@ -30,6 +30,42 @@ import {
 	resolveInitialDiffType,
 } from "../generated/vcs-core.ts";
 
+/**
+ * Process-group leaders of commands started with `interaction: "forbid"`
+ * (#1553). Mirrors packages/server/git.ts: those run detached so a timeout can
+ * kill the whole transport tree, but a server exiting mid-flight left the
+ * git/ssh pair orphaned — the parent-side timer dies with the parent, so
+ * nothing was ever going to reap them.
+ *
+ * POSIX only: the negative-pid group signal has no Windows equivalent, and the
+ * timeout path already special-cases win32 with taskkill.
+ */
+const isolatedProcessGroups = new Set<number>();
+let isolatedExitHookInstalled = false;
+
+function reapIsolatedProcessGroups(): void {
+	for (const pid of isolatedProcessGroups) {
+		try {
+			process.kill(-pid, "SIGKILL");
+		} catch {
+			// Already gone, or the leader exited between the last read and here.
+		}
+	}
+	isolatedProcessGroups.clear();
+}
+
+function trackIsolatedProcessGroup(pid: number): () => void {
+	if (process.platform === "win32") return () => {};
+	if (!isolatedExitHookInstalled) {
+		isolatedExitHookInstalled = true;
+		// "exit" only: it runs on every process.exit(), and the callback must be
+		// synchronous — process.kill is.
+		process.on("exit", reapIsolatedProcessGroups);
+	}
+	isolatedProcessGroups.add(pid);
+	return () => isolatedProcessGroups.delete(pid);
+}
+
 function runCommand(
 	command: string,
 	args: string[],
@@ -47,6 +83,10 @@ function runCommand(
 			stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 			windowsHide: true,
 		});
+
+		const untrack = isolateProcessGroup && proc.pid
+			? trackIsolatedProcessGroup(proc.pid)
+			: undefined;
 
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		if (options?.timeoutMs) {
@@ -101,6 +141,7 @@ function runCommand(
 
 		proc.on("close", (code) => {
 			if (timer) clearTimeout(timer);
+			untrack?.();
 			resolve({
 				stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
 				stderr: Buffer.concat(stderrChunks).toString("utf-8"),
@@ -111,6 +152,7 @@ function runCommand(
 
 		proc.on("error", () => {
 			if (timer) clearTimeout(timer);
+			untrack?.();
 			resolve({ stdout: "", stderr: notFoundMessage, exitCode: 1 });
 		});
 	});

@@ -107,6 +107,8 @@ Your default view and diff type live in **Settings → Git**. On repos where the
 
 If the base branch has moved on GitHub since your last fetch, a "Baseline is behind" banner offers a one-click fetch so you're reviewing against the real base.
 
+Answering that question needs one network call, `git ls-remote --symref origin HEAD`. It runs when the review opens, when the diff loads, when you switch diff type or base (the "Diff out of date · Refresh" button counts), and when you press Fetch — at most once a minute, and never on a timer, so a review page you leave open makes no further requests. If a remote probe is expensive or intrusive on your setup — most sharply when SSH authentication is backed by a hardware token, where each probe is a physical touch prompt — turn it off entirely with `plannotator review --no-git-remote-check`, `PLANNOTATOR_GIT_REMOTE_CHECK=0`, or `{ "gitRemoteCheck": false }` in `~/.plannotator/config.json`. The compare target then comes from your local refs only and the banner never appears — and with it the one-click Fetch, since that button lives in the banner. Fetching from your own terminal is unaffected. The trade-off: a push that lands mid-review is noticed on your next refresh, switch, or reload rather than within the minute.
+
 You can also pick a specific commit as the diff base from the base branch picker. This lets you compare against any of the last 20 commits on your branch rather than just the branch tip.
 
 ## Opening on a specific base

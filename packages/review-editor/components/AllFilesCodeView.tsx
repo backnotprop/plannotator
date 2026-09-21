@@ -38,6 +38,7 @@ import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotat
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
+import { DiffHScrollbar } from './DiffHScrollbar';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
@@ -2377,7 +2378,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       : null;
 
     return (
-      <div className="flex flex-col">
+      <div className="relative flex flex-col">
         <FileHeader
         compactTouchLayout={compactTouchLayout}
         readOnly={readOnly}
@@ -2486,6 +2487,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             // content below would overlap until an unrelated refresh.
             onHeightChange={() => refreshItem(item.id)}
           />
+        )}
+        {/* This file's own horizontal scrollbar (#1048), riding the sticky
+            header so it stays reachable anywhere in a long diff. Absolutely
+            positioned on the header's bottom edge so it costs no layout
+            height — itemMetrics.diffHeaderHeight must keep matching the
+            header, and a bar that appears only on overflow would otherwise
+            drift the virtualization estimate. */}
+        {!collapsed && diffOverflow !== 'wrap' && (
+          <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
         )}
       </div>
     );

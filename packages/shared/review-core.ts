@@ -455,6 +455,36 @@ export async function getDefaultBranch(
   return "master";
 }
 
+/**
+ * How long a successful remote-default probe stays good (#1553). The probe is
+ * a real network round trip — and on a smartcard-backed SSH setup, a physical
+ * touch prompt — so it is rate limited rather than run on the 5s freshness
+ * cadence.
+ */
+export const REMOTE_BASE_CHECK_INTERVAL_MS = 60_000;
+
+/**
+ * Ceiling for the failure backoff (#1553). A remote that cannot answer is
+ * usually still unable a minute later, and retrying on the base cadence for
+ * the life of the session is what made an idle review keep waking a hardware
+ * key. Doubling from 60s reaches 16 minutes, so 15 minutes is the last step
+ * at or under the cap.
+ */
+export const REMOTE_BASE_CHECK_MAX_INTERVAL_MS = 900_000;
+
+/**
+ * Next probe interval after an attempt: reset to the base interval when the
+ * remote answered, otherwise double up to the cap. Pure so both runtimes share
+ * one policy (and so the policy is testable without a network).
+ */
+export function nextRemoteBaseCheckInterval(
+  currentIntervalMs: number,
+  succeeded: boolean,
+): number {
+  if (succeeded) return REMOTE_BASE_CHECK_INTERVAL_MS;
+  return Math.min(currentIntervalMs * 2, REMOTE_BASE_CHECK_MAX_INTERVAL_MS);
+}
+
 export interface RemoteDefaultInfo {
   /** Tracking ref name, e.g. `origin/main`. */
   branch: string;

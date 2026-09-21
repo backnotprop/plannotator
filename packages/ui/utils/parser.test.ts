@@ -1671,6 +1671,200 @@ tags:
   });
 });
 
+describe("extractFrontmatter — nested structures (#1485)", () => {
+  test("nested maps and arrays of maps parse into hierarchical structure", () => {
+    const md = `---
+title: Nested Plan
+generated:
+  by: agent-alpha
+  at: 2026-09-16T10:00:00Z
+verified:
+  - by: reviewer-beta
+    at: 2026-09-16T11:00:00Z
+    sources:
+      - url: https://example.com/spec
+        name: specification
+---
+# Content`;
+    const { frontmatter, content, contentStartLine } = extractFrontmatter(md);
+    expect(content).toBe("# Content");
+    expect(contentStartLine).toBe(13);
+    expect(frontmatter).toEqual({
+      title: "Nested Plan",
+      generated: {
+        by: "agent-alpha",
+        at: "2026-09-16T10:00:00Z",
+      },
+      verified: [
+        {
+          by: "reviewer-beta",
+          at: "2026-09-16T11:00:00Z",
+          sources: [
+            {
+              url: "https://example.com/spec",
+              name: "specification",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("same-named child keys at different hierarchy levels do not clobber", () => {
+    const md = `---
+generated:
+  by: bot
+  at: 2026-09-16T10:00:00Z
+verified:
+  - by: human
+    at: 2026-09-16T12:00:00Z
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.generated).toEqual({
+      by: "bot",
+      at: "2026-09-16T10:00:00Z",
+    });
+    expect(frontmatter?.verified).toEqual([
+      {
+        by: "human",
+        at: "2026-09-16T12:00:00Z",
+      },
+    ]);
+  });
+
+  test("array-of-map items group correctly per item", () => {
+    const md = `---
+reviewers:
+  - name: alice
+    role: lead
+  - name: bob
+    role: peer
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.reviewers).toEqual([
+      { name: "alice", role: "lead" },
+      { name: "bob", role: "peer" },
+    ]);
+  });
+
+  test("flat scalars and string arrays remain unchanged", () => {
+    const md = `---
+title: Plain Title
+status: draft
+tags:
+  - architecture
+  - performance
+categories:
+  - dev
+  - ops
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter).toEqual({
+      title: "Plain Title",
+      status: "draft",
+      tags: ["architecture", "performance"],
+      categories: ["dev", "ops"],
+    });
+  });
+
+  test("block scalars inside nested maps and CRLF are supported", () => {
+    const md = "---\r\ngenerated:\r\n  summary: >-\r\n    line one\r\n    line two\r\n  by: bot\r\n---\r\nbody";
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.generated).toEqual({
+      summary: "line one line two",
+      by: "bot",
+    });
+  });
+
+  test("array of scalar strings inside a map element parses correctly", () => {
+    const md = `---
+verified:
+  - by: reviewer
+    sources:
+      - https://example.com/a
+      - https://example.com/b
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.verified).toEqual([
+      {
+        by: "reviewer",
+        sources: [
+          "https://example.com/a",
+          "https://example.com/b",
+        ],
+      },
+    ]);
+  });
+
+  test("a quoted key is still a mapping entry, not a dropped row", () => {
+    // Regression: the quoted-scalar guard swallowed the whole line, so
+    // `"title": "Doc"` produced {} and the row vanished from the
+    // frontmatter card entirely.
+    const md = `---
+"title": "Doc"
+'status': draft
+"nested":
+  k: v
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    // Values keep their quotes exactly as an unquoted key would produce
+    // (`title: "Doc"`); only the KEY's quotes are structural.
+    expect(frontmatter).toEqual({
+      title: '"Doc"',
+      status: "draft",
+      nested: { k: "v" },
+    });
+  });
+
+  test("a quoted key parses identically to the same key unquoted", () => {
+    // The point of the fix: quoting a key changes nothing but the key text.
+    const quoted = extractFrontmatter('---\n"title": "Doc"\n"n":\n  k: v\n---\nb');
+    const plain = extractFrontmatter('---\ntitle: "Doc"\nn:\n  k: v\n---\nb');
+    expect(quoted.frontmatter).toEqual(plain.frontmatter!);
+  });
+
+  test("a line that is only a quoted scalar is still not a mapping entry", () => {
+    const md = `---
+ok: 1
+"just a string"
+"nospace":"value"
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter).toEqual({ ok: "1" });
+  });
+
+  test("a nested map as an item's FIRST key does not swallow its siblings", () => {
+    // Regression: the pending key recorded the dash's indent, so `id`
+    // (indented to the key's column, not the dash's) landed inside `meta`.
+    const md = `---
+items:
+  - meta:
+      k: v
+    id: 1
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.items).toEqual([{ meta: { k: "v" }, id: "1" }]);
+  });
+
+  test("an item whose only key is an empty map does not absorb the next item", () => {
+    const md = `---
+items:
+  - meta:
+  - id: 1
+---
+body`;
+    const { frontmatter } = extractFrontmatter(md);
+    expect(frontmatter?.items).toEqual([{}, { id: "1" }]);
+  });
+});
+
 describe("parseMarkdownToBlocks — startLine accuracy", () => {
   test("basic blocks get correct startLine", () => {
     const md = "# Heading\n\nParagraph\n\n- Item";

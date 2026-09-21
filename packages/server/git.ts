@@ -41,6 +41,45 @@ export type {
   WorktreeInfo,
 } from "@plannotator/shared/review-core";
 
+/**
+ * Process-group leaders of git commands started with `interaction: "forbid"`
+ * (#1553). Those run detached in their own group so a timeout can kill the
+ * whole transport tree — but a server that exits while one is still in flight
+ * left the git/ssh pair orphaned: the parent-side timer dies with the parent,
+ * so nothing was ever going to reap them. On a smartcard-backed SSH setup the
+ * orphan keeps the agent busy long after the review window closed.
+ *
+ * POSIX only: the negative-pid group signal has no Windows equivalent, and the
+ * timeout path already special-cases win32 with taskkill. A Windows exit is
+ * left as it was rather than spawning a process from an exit handler.
+ */
+const isolatedGitGroups = new Set<number>();
+let isolatedGitExitHookInstalled = false;
+
+function reapIsolatedGitGroups(): void {
+  for (const pid of isolatedGitGroups) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Already gone, or the group leader exited between the last read and here.
+    }
+  }
+  isolatedGitGroups.clear();
+}
+
+function trackIsolatedGitGroup(pid: number): () => void {
+  if (process.platform === "win32") return () => {};
+  if (!isolatedGitExitHookInstalled) {
+    isolatedGitExitHookInstalled = true;
+    // "exit" only: it runs on every process.exit(), which is where this
+    // server's SIGINT/SIGTERM handling already routes, and the callback must
+    // be synchronous — process.kill is.
+    process.on("exit", reapIsolatedGitGroups);
+  }
+  isolatedGitGroups.add(pid);
+  return () => isolatedGitGroups.delete(pid);
+}
+
 async function runGit(
   args: string[],
   options?: GitCommandOptions,
@@ -57,6 +96,10 @@ async function runGit(
     stderr: "pipe",
     windowsHide: true,
   });
+
+  const untrack = command.isolateProcessGroup
+    ? trackIsolatedGitGroup(proc.pid)
+    : undefined;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   if (options?.timeoutMs) {
@@ -80,15 +123,21 @@ async function runGit(
     }, options.timeoutMs);
   }
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-
-  if (timer) clearTimeout(timer);
-
-  return { stdout, stderr, exitCode };
+  // try/finally so a rejected stream read cannot leave the group leader in the
+  // exit reaper's set (the node:http mirror untracks on both "close" and
+  // "error" for the same reason): a stale pid there is a pid that could be
+  // recycled before the process exits.
+  try {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { stdout, stderr, exitCode };
+  } finally {
+    if (timer) clearTimeout(timer);
+    untrack?.();
+  }
 }
 
 /** Bun-based git runtime. Exported for use with shared utilities (worktree, etc.) */

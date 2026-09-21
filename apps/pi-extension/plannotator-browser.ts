@@ -90,6 +90,13 @@ type CodeReviewOptions = {
 	 * callers omit it and keep the legacy forward-and-let-it-upgrade behavior.
 	 */
 	openStateFromFlags?: boolean;
+	/**
+	 * `false` when the invocation carried `--no-git-remote-check` (#1553): this
+	 * session makes no `git ls-remote` call at all. Forwarded verbatim to the
+	 * review server, which resolves it against PLANNOTATOR_GIT_REMOTE_CHECK and
+	 * `config.gitRemoteCheck`.
+	 */
+	gitRemoteCheck?: boolean;
 };
 
 type CodeReviewDecision = {
@@ -714,6 +721,7 @@ async function createCodeReviewBrowserSession(
 		initialBase,
 		initialBaseExplicit,
 		openStatePinned: openStateFromFlags,
+		gitRemoteCheck: options.gitRemoteCheck,
 		initialFingerprint,
 		prMetadata,
 		prPatchIncomplete,

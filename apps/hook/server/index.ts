@@ -1183,6 +1183,9 @@ if (args[0] === "sessions") {
     initialBase: initialBaseFromFlags,
     initialBaseExplicit: initialBaseFromFlags !== undefined,
     openStatePinned,
+    // `--no-git-remote-check` (#1553): session-only, and only ever a disable —
+    // undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck deciding.
+    gitRemoteCheck: reviewArgs.gitRemoteCheck,
     initialFingerprint,
     prMetadata,
     prPatchIncomplete,
@@ -2005,6 +2008,9 @@ if (args[0] === "sessions") {
     initialBase: initialBaseFromFlags,
     initialBaseExplicit: initialBaseFromFlags !== undefined,
     openStatePinned,
+    // `--no-git-remote-check` (#1553): session-only, and only ever a disable —
+    // undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck deciding.
+    gitRemoteCheck: reviewArgs.gitRemoteCheck,
     initialFingerprint,
     prMetadata,
     prPatchIncomplete,
