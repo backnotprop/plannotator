@@ -703,6 +703,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 					defaultBranch: reviewArgs.base,
 					diffType: reviewArgs.diffType,
 					openStateFromFlags: reviewArgs.base !== undefined || reviewArgs.diffType !== undefined,
+					// `--no-remote-check` (#1553): session-only, and only ever a
+					// disable — undefined leaves the env var / config deciding.
+					remoteCheck: reviewArgs.remoteCheck,
 				});
 				ctx.ui.notify(sessionOpenedMessage("Code review opened", session.url), "info");
 				void session

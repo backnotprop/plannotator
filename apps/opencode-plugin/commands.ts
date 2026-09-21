@@ -240,6 +240,9 @@ export async function handleReviewCommand(
     initialBase: initialBaseFromFlags,
     initialBaseExplicit: initialBaseFromFlags !== undefined,
     openStatePinned,
+    // `--no-remote-check` (#1553): session-only, and only ever a disable —
+    // undefined leaves PLANNOTATOR_REMOTE_CHECK / config.remoteCheck deciding.
+    remoteCheck: reviewArgs.remoteCheck,
     initialFingerprint,
     prMetadata,
     workspace,
