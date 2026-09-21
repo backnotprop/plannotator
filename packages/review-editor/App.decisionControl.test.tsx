@@ -42,10 +42,6 @@ mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
 }));
-// Image assets only Vite can load; the values are never asserted.
-mock.module("@plannotator/ui/assets/workspaces.webp", () => ({ default: "workspaces.webp" }));
-mock.module("@plannotator/ui/assets/review-sections.png", () => ({ default: "review-sections.png" }));
-mock.module("@plannotator/ui/assets/review-tree.png", () => ({ default: "review-tree.png" }));
 
 const hasDom = typeof document !== "undefined";
 
@@ -62,15 +58,14 @@ const memoryBackend: StorageBackend = {
   removeItem: (key) => void memory.delete(key),
 };
 
-/** Suppress the one-time dialog chain (guide intro → look-and-feel → review
- *  setup → edit mode → token hover → terminal tools) so the header is
- *  interactable on first render. */
+/** Suppress the one-time dialog chain (guide intro → look-and-feel → edit
+ *  mode → token hover → terminal tools) so the header is interactable on
+ *  first render. */
 function seedFirstRunSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
   memory.set("plannotator-guide-intro-seen", "2");
   memory.set("plannotator-guide-hint-acked", "true");
-  memory.set("plannotator-review-setup-seen", "true");
   memory.set("plannotator-edit-mode-announcement-seen", "3");
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }

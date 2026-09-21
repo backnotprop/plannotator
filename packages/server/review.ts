@@ -190,8 +190,8 @@ export interface ReviewServerOptions {
   /**
    * The caller pinned this session's opening diff type and/or base (CLI
    * flags). Echoed on `/api/diff` so the client must not auto-switch the diff
-   * on mount, and must not consume the one-time review-setup cookie: the
-   * caller already answered that question for this session, and the answer is
+   * on mount, and must not self-heal the persisted panel-view pair: the caller
+   * already answered that question for this session, and the answer is
    * deliberately not persisted.
    */
   openStatePinned?: boolean;

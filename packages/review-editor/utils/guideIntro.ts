@@ -2,7 +2,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 
 /**
  * One-time gates for the guided-review introduction. Cookie-based, mirroring
- * the review-setup gate. Two independent flags: the intro dialog (seen once,
+ * the other review first-run gates. Two independent flags: the intro dialog (seen once,
  * never again) and the header Guide-button hint (shimmer + dot), which runs
  * until the user's first Guide click regardless of how the dialog was
  * dismissed.

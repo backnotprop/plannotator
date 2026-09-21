@@ -53,8 +53,8 @@ export interface TerminalToolsAnnouncementGateState {
 /**
  * Chain gate for the announcement. It is LAST in each app's first-run dialog
  * chain, after every dialog that asks the user to decide something (code
- * review: guide intro, look-and-feel, review setup, edit mode, token hover
- * cards; plan and annotate: look-and-feel, goal setup, permission mode).
+ * review: guide intro, look-and-feel, edit mode, token hover cards; plan and
+ * annotate: look-and-feel, goal setup, permission mode).
  *
  * Last rather than first because none of those dialogs consume this cookie:
  * a session that is busy asking questions defers the announcement to the next

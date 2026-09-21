@@ -106,7 +106,6 @@ describe('tokenHoverAnnouncementCanShow (never-stack chain gate)', () => {
     featureAvailable: true,
     guideIntroVisible: false,
     lookAndFeelVisible: false,
-    reviewSetupVisible: false,
     editModeVisible: false,
   };
 
@@ -129,7 +128,6 @@ describe('tokenHoverAnnouncementCanShow (never-stack chain gate)', () => {
   test('never renders while any earlier chain dialog is open', () => {
     expect(tokenHoverAnnouncementCanShow({ ...openState, guideIntroVisible: true })).toBe(false);
     expect(tokenHoverAnnouncementCanShow({ ...openState, lookAndFeelVisible: true })).toBe(false);
-    expect(tokenHoverAnnouncementCanShow({ ...openState, reviewSetupVisible: true })).toBe(false);
     expect(tokenHoverAnnouncementCanShow({ ...openState, editModeVisible: true })).toBe(false);
   });
 });

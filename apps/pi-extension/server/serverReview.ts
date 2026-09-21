@@ -308,7 +308,7 @@ export async function startReviewServer(options: {
 	/**
 	 * The caller pinned this session's opening diff type and/or base (CLI
 	 * flags). Echoed on `/api/diff` so the client must not auto-switch the
-	 * diff on mount, and must not consume the one-time review-setup cookie.
+	 * diff on mount, and must not self-heal the persisted panel-view pair.
 	 */
 	openStatePinned?: boolean;
 	/** Freshness token captured atomically with the initial provider patch. */

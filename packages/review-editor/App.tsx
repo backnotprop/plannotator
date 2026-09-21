@@ -155,8 +155,7 @@ import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDif
 import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
 import { useCommitsView } from './hooks/useCommitsView';
-import { ReviewSetupDialog } from './components/ReviewSetupDialog';
-import { initializeReviewSetup, markReviewSetupSeen, shouldOfferReviewSetup, shouldRepairPanelPair } from './utils/reviewSetup';
+import { shouldRepairPanelPair } from './utils/panelPairRepair';
 import { resolvePanelView } from './utils/resolvePanelView';
 import { isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
 import { GuideIntroDialog } from './components/GuideIntroDialog';
@@ -594,13 +593,14 @@ const ReviewApp: React.FC = () => {
   const callFlowAvailable = callFlowEnabled && callFlowAdvert.available;
   const { state: callFlowAnalysis, retry: retryCallFlowAnalysis } = useCallFlowAnalysis(snapshotId, callFlowAvailable);
   const [isFetchingBase, setIsFetchingBase] = useState(false);
-  // Which left panel is showing. The persisted value (Settings / first-run
-  // dialog, written through the coupled setters in config/reviewView)
-  // decides what a review OPENS on unless a last-used view is recorded; the
-  // header toggle is a session control layered over both — it NEVER writes
-  // the persisted view/diff pair. Changing the default is an explicit
-  // Settings/setup-dialog act, not a side effect of looking at another view
-  // mid-review; the toggle only records its choice as the last-used memo.
+  // Which left panel is showing. The persisted value (Settings, written
+  // through the coupled setters in config/reviewView) decides what a review
+  // OPENS on unless a last-used view is recorded; the header toggle is a
+  // session control layered over both — it NEVER writes the persisted
+  // view/diff pair. Changing the default is an explicit Settings act, not a
+  // side effect of looking at another view mid-review; the toggle only
+  // records its choice as the last-used memo. With no cookie at all the
+  // registry default (Tree) decides.
   const persistedPanelView = useConfigValue('reviewPanelView');
   const lastUsedPanelView = useConfigValue('reviewPanelViewLastUsed');
   const [sessionPanelView, setSessionPanelView] = useState<'sections' | 'commits' | 'tree' | null>(null);
@@ -611,16 +611,10 @@ const ReviewApp: React.FC = () => {
     // never recorded — picking it leaves last-used at its previous value.
     if (view !== 'commits') configStore.set('reviewPanelViewLastUsed', view);
   }, []);
-  // First-run review-setup chooser (panel view + tree default diff).
-  const [showReviewSetup, setShowReviewSetup] = useState(false);
   // The caller pinned this session's opening diff type and/or base (CLI
-  // flags). Mount effects must not auto-switch the diff or consume the
-  // one-time review-setup cookie for such a session.
+  // flags). Mount effects must not auto-switch the diff or self-heal the
+  // persisted panel pair for such a session.
   const [openStatePinned, setOpenStatePinned] = useState(false);
-  // True only for the first-run showing (where dismissing applies the recommended
-  // default). A reopen from the header menu must NOT snap the user's mid-session
-  // diff back to the default.
-  const reviewSetupIsFirstRun = useRef(false);
   const [agentCwd, setAgentCwd] = useState<string | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -1062,7 +1056,7 @@ const ReviewApp: React.FC = () => {
     setGuideHintActive(false);
   }, [guideOpen, guideHintActive]);
   // One-time Edit Mode (edit-to-suggest) announcement. LAST in the dialog
-  // chain (guide intro → look-and-feel → review setup → edit mode) — the
+  // chain (guide intro → look-and-feel → edit mode) — the
   // chain dialogs never stack. Skipped forever when the user already enabled
   // the setting from Settings (latched at mount so enabling from the dialog
   // itself doesn't unmount it mid-click).
@@ -1074,7 +1068,6 @@ const ReviewApp: React.FC = () => {
     isLoading,
     guideIntroVisible,
     lookAndFeelVisible: showLookAndFeel,
-    reviewSetupVisible: showReviewSetup,
   });
   const dismissEditModeIntro = useCallback(() => {
     markEditModeAnnouncementSeen();
@@ -1085,7 +1078,7 @@ const ReviewApp: React.FC = () => {
     setEditModeIntroPending(false);
   }, []);
   // One-time token hover card announcement. LAST in the dialog chain (guide
-  // intro → look-and-feel → review setup → edit mode → token hover) — the
+  // intro → look-and-feel → edit mode → token hover) — the
   // chain dialogs never stack. Latched at mount so choosing a trigger inside
   // the dialog does not unmount it mid-click; a user who already has a
   // non-default trigger never sees it (resolveTokenHoverAnnouncementPending).
@@ -1546,7 +1539,6 @@ const ReviewApp: React.FC = () => {
     featureAvailable: tokenHoverAvailable === true,
     guideIntroVisible,
     lookAndFeelVisible: showLookAndFeel,
-    reviewSetupVisible: showReviewSetup,
     editModeVisible: editModeIntroVisible,
   });
   // LAST in the first-run dialog chain: it asks for no decision, so it waits
@@ -1562,7 +1554,6 @@ const ReviewApp: React.FC = () => {
     otherFirstRunDialogVisible:
       guideIntroVisible
       || showLookAndFeel
-      || showReviewSetup
       || editModeIntroVisible
       || tokenHoverIntroVisible,
   });
@@ -2125,40 +2116,6 @@ const ReviewApp: React.FC = () => {
         setGeneratedFiles(new Set(data.generatedFiles ?? []));
         setBaseBehindRemote(data.baseBehindRemote === true);
         setOpenStatePinned(data.openStatePinned === true);
-        // First-run: offer the review-view chooser for a plain local git
-        // session (not workspace/PR/jj/p4), once. An unseen reviewer's panel
-        // is initialized to Tree while inheriting the resolved diff default;
-        // the seen gate leaves returning reviewers' persisted and last-used
-        // views untouched. The user's explicit choice in the dialog then
-        // sticks. Applied to the live session on dismiss.
-        //
-        // Only when since-base is actually AVAILABLE (base ref resolves). On a
-        // repo where getGitContext omits it (trunk / no origin/HEAD), forcing
-        // since-base would degrade to HEAD and hide committed work — the exact
-        // case the offering guard avoids. There, leave the default alone and
-        // don't show the chooser. Matches the sectionsCapable gate used for the
-        // header-menu reopen.
-        const sinceBaseAvailable = !!data.gitContext?.diffOptions?.some(
-          (o: { id: string }) => o.id === 'since-base',
-        );
-        // shouldOfferReviewSetup MUST come first in the && chain:
-        // initializeReviewSetup() consumes the one-time seen cookie as a side
-        // effect of being CALLED, and a caller-pinned session (openStatePinned)
-        // must neither burn that cookie nor open a dialog whose dismiss would
-        // handleDiffSwitch the flags away.
-        if (
-          shouldOfferReviewSetup({
-            openStatePinned: data.openStatePinned,
-            hasGitContext: !!data.gitContext,
-            isWorkspace: data.mode === 'workspace',
-            isPR: !!data.prMetadata,
-            vcsType: data.gitContext?.vcsType,
-            sinceBaseAvailable,
-          }) && initializeReviewSetup()
-        ) {
-          reviewSetupIsFirstRun.current = true;
-          setShowReviewSetup(true);
-        }
       })
       .catch(() => {
         // Not in API mode - use demo content
@@ -2551,7 +2508,7 @@ const ReviewApp: React.FC = () => {
     // (not lost) behind the guide takeover or a first-run dialog — the file
     // still marks and the next auto-view retries the toast.
     if (!needsAutoViewedNotice()) return;
-    if (guideOpen || guideIntroVisible || showLookAndFeel || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible) return;
+    if (guideOpen || guideIntroVisible || showLookAndFeel || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible) return;
     markAutoViewedNoticeSeen();
     toast('Files are marked viewed as you scroll', {
       description: "Scroll past a file or move on to the next and it's checked off. Turn this off in Settings → Git, or from the gear above the file list.",
@@ -2571,7 +2528,7 @@ const ReviewApp: React.FC = () => {
         },
       },
     });
-  }, [guideOpen, guideIntroVisible, showLookAndFeel, showReviewSetup, editModeIntroVisible, tokenHoverIntroVisible, terminalToolsIntroVisible]);
+  }, [guideOpen, guideIntroVisible, showLookAndFeel, editModeIntroVisible, tokenHoverIntroVisible, terminalToolsIntroVisible]);
   const { handleReadingFileChange: handleAutoViewReadingFile, handleFileScrolledPast } = useAutoViewed({
     enabled: autoViewedEnabled,
     // Rule 4 — only the review target. The guide takeover CSS-hides the dock
@@ -3145,21 +3102,20 @@ const ReviewApp: React.FC = () => {
   // diff default (cookie + config.json), and bring the live session along.
   // Keyed to persistedPanelView, NEVER the live panelView: the header toggle
   // is session-only and must not be able to trigger a settings write, even
-  // indirectly through this repair. Only a pair that Settings / the setup
-  // dialog / an old config file actually PERSISTED conflicted gets healed.
+  // indirectly through this repair. Only a pair that Settings or an old config
+  // file actually PERSISTED conflicted gets healed — a reviewer who never
+  // chose a view has no persisted value and is never touched.
   const healedPanelPairOnLoad = useRef(false);
   useEffect(() => {
     if (healedPanelPairOnLoad.current || isLoading || !diffData) return;
     // shouldRepairPanelPair bails ENTIRELY for a caller-pinned session (not
     // just the diff-switch leg): the repair's other half is a config.json
     // write, and a flagged session must not cause a settings write it would
-    // not otherwise cause. First-run resets + applies the pair itself (on
-    // dialog dismiss).
+    // not otherwise cause.
     if (
       !shouldRepairPanelPair({
         openStatePinned,
         sectionsCapable,
-        isFirstRunSetup: reviewSetupIsFirstRun.current,
         persistedPanelView,
         defaultDiffType: configStore.get('defaultDiffType'),
       })
@@ -4245,7 +4201,7 @@ const ReviewApp: React.FC = () => {
     if (event.defaultPrevented || isNativeHistoryOwner(event)) return false;
     if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning || isLoadingDiff) return false;
     if (guideOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showWorktreeDialog || showNoAnnotationsDialog || showExitWarning) return false;
-    if (showLookAndFeel || showGuideIntro || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || tourDialogJobId) return false;
+    if (showLookAndFeel || showGuideIntro || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || tourDialogJobId) return false;
     return !hasActiveHistoryOverlay(document);
   }, [
     guideOpen,
@@ -4266,7 +4222,6 @@ const ReviewApp: React.FC = () => {
     showWorktreeDialog,
     showGuideIntro,
     showLookAndFeel,
-    showReviewSetup,
     submitted,
     tourDialogJobId,
   ]);
@@ -4982,7 +4937,6 @@ const ReviewApp: React.FC = () => {
 
             <ReviewHeaderMenu
               onOpenSettings={() => setOpenSettingsMenu(true)}
-              onOpenReviewSetup={sectionsCapable ? () => { reviewSetupIsFirstRun.current = false; setShowReviewSetup(true); } : undefined}
               onOpenExport={() => setShowExportModal(true)}
               onCopyAgentInstructions={handleCopyAgentInstructions}
               onToggleFileTree={toggleNavigator}
@@ -5630,32 +5584,9 @@ const ReviewApp: React.FC = () => {
           />
         )}
 
-        {/* First-run review-view chooser (panel view + tree default diff).
-            Third in the dialog chain (guide intro → look-and-feel → review
-            setup → edit mode) so the chain dialogs never stack. On dismiss,
-            apply the chosen default to the current session. */}
-        {showReviewSetup && !showLookAndFeel && !guideIntroVisible && (
-          <ReviewSetupDialog
-            isOpen
-            onDismiss={() => {
-              markReviewSetupSeen();
-              setShowReviewSetup(false);
-              // Apply the chosen default to the live session ONLY on first run.
-              // A reopen from the header menu is a glance — it must not yank the
-              // user's mid-session diff selection back to the default.
-              if (!reviewSetupIsFirstRun.current) return;
-              reviewSetupIsFirstRun.current = false;
-              const chosen = configStore.get('defaultDiffType');
-              if (chosen && chosen !== activeDiffBase && !prMetadata && reviewMode !== 'workspace') {
-                void handleDiffSwitch(chosen);
-              }
-            }}
-          />
-        )}
-
         {/* One-time Edit Mode (edit-to-suggest) announcement. LAST in the
-            dialog chain (guide intro → look-and-feel → review setup
-            → edit mode) — editModeAnnouncementCanShow gates on every earlier dialog, so the
+            dialog chain (guide intro → look-and-feel → edit mode) —
+            editModeAnnouncementCanShow gates on every earlier dialog, so the
             chain dialogs never stack. */}
         {editModeIntroVisible && (
           <EditModeAnnouncementDialog
@@ -5665,28 +5596,28 @@ const ReviewApp: React.FC = () => {
           />
         )}
 
-        {/* One-time token hover card announcement. Fifth in the dialog chain
-            (guide intro → look-and-feel → review setup → edit mode → token
-            hover → terminal tools) — tokenHoverAnnouncementCanShow gates on
-            every earlier dialog, so the chain dialogs never stack. */}
+        {/* One-time token hover card announcement. Fourth in the dialog chain
+            (guide intro → look-and-feel → edit mode → token hover → terminal
+            tools) — tokenHoverAnnouncementCanShow gates on every earlier
+            dialog, so the chain dialogs never stack. */}
         {tokenHoverIntroVisible && (
           <TokenHoverAnnouncementDialog isOpen onDismiss={dismissTokenHoverIntro} />
         )}
 
         {/* One-time Plannotator TUI + Herdr Annotate announcement. LAST in the
-            dialog chain (guide intro → look-and-feel → review setup → edit
-            mode → token hover → terminal tools) — terminalToolsAnnouncementCanShow
-            gates on every earlier dialog, so the chain dialogs never stack. */}
+            dialog chain (guide intro → look-and-feel → edit mode → token hover
+            → terminal tools) — terminalToolsAnnouncementCanShow gates on every
+            earlier dialog, so the chain dialogs never stack. */}
         {terminalToolsIntroVisible && (
           <TerminalToolsAnnouncementDialog isOpen onDismiss={dismissTerminalToolsIntro} />
         )}
 
         {/* One-time PR feedback-destination spotlight. Strictly AFTER the
-            first-run dialog chain (guide intro → look-and-feel → review setup
-            → edit mode → token hover → terminal tools): it only mounts once
-            none of the six is showing, so it never stacks with them. PR mode
-            only — the switcher it points at doesn't render otherwise. */}
-        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && !tokenHoverIntroVisible && !terminalToolsIntroVisible && (
+            first-run dialog chain (guide intro → look-and-feel → edit mode →
+            token hover → terminal tools): it only mounts once none of the five
+            is showing, so it never stacks with them. PR mode only — the
+            switcher it points at doesn't render otherwise. */}
+        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !editModeIntroVisible && !tokenHoverIntroVisible && !terminalToolsIntroVisible && (
           <DestinationSpotlight
             targetRef={destToggleRef}
             platformLabel={platformLabel}
