@@ -191,7 +191,7 @@ afterEach(() => {
   else process.env.PLANNOTATOR_PORT = originalPort;
   if (originalPath === undefined) delete process.env.PATH;
   else process.env.PATH = originalPath;
-  delete process.env.PLANNOTATOR_REMOTE_CHECK;
+  delete process.env.PLANNOTATOR_GIT_REMOTE_CHECK;
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -313,7 +313,7 @@ describe("review remote-check traffic", () => {
       }
     }, 30_000);
 
-    test(`${runtime}: remoteCheck off makes the whole session network-free`, async () => {
+    test(`${runtime}: gitRemoteCheck off makes the whole session network-free`, async () => {
       // Failure caught: an opt-out that only silences the periodic probe while
       // the startup ones still fire — the user asked for no remote contact and
       // would still get authentication prompts when the review opens.
@@ -331,7 +331,7 @@ describe("review remote-check traffic", () => {
         diffType: "since-base",
         gitContext,
         initialBase: "origin/main",
-        remoteCheck: false,
+        gitRemoteCheck: false,
         origin: runtime === "Pi" ? "pi" : "claude-code",
         htmlContent: "<!doctype html><html><body>review</body></html>",
       });

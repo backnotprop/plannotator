@@ -259,10 +259,10 @@ export interface PlannotatorConfig {
    * discovery resolved and the behind-the-remote banner never shows — and with
    * it the one-click Fetch, which lives in that banner, though the
    * `/api/fetch-base` endpoint itself stays reachable. Mirrors the
-   * PLANNOTATOR_REMOTE_CHECK env var,
-   * which takes precedence; `review --no-remote-check` beats both.
+   * PLANNOTATOR_GIT_REMOTE_CHECK env var,
+   * which takes precedence; `review --no-git-remote-check` beats both.
    */
-  remoteCheck?: boolean;
+  gitRemoteCheck?: boolean;
   /**
    * Display-only hostname for advertised session URLs (issue #657). Lets a
    * remote-mode user hand out a reachable link (e.g. a Tailscale MagicDNS
@@ -868,8 +868,8 @@ export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
  * Resolve whether code review may query the git remote (issue #1553).
  *
  * Priority (highest wins):
- *   `review --no-remote-check`  →  PLANNOTATOR_REMOTE_CHECK env var
- *   →  config.remoteCheck  →  default true
+ *   `review --no-git-remote-check`  →  PLANNOTATOR_GIT_REMOTE_CHECK env var
+ *   →  config.gitRemoteCheck  →  default true
  *
  * Env values `0` / `false` / `disabled` turn the remote check off; anything
  * else — including `1` / `true` — keeps it on. "Off" means the whole session
@@ -879,18 +879,18 @@ export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
  * carries). `POST /api/fetch-base` stays reachable on its own predicate: an
  * explicit Fetch is the user asking for the network.
  */
-export function resolveRemoteCheck(
-  cliNoRemoteCheck: boolean,
+export function resolveGitRemoteCheck(
+  cliNoGitRemoteCheck: boolean,
   config: PlannotatorConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  if (cliNoRemoteCheck) return false;
-  const envVal = env.PLANNOTATOR_REMOTE_CHECK;
+  if (cliNoGitRemoteCheck) return false;
+  const envVal = env.PLANNOTATOR_GIT_REMOTE_CHECK;
   if (envVal !== undefined) {
     const v = envVal.trim().toLowerCase();
     return v !== "0" && v !== "false" && v !== "disabled";
   }
-  return coerceConfigBoolean(config.remoteCheck, true);
+  return coerceConfigBoolean(config.gitRemoteCheck, true);
 }
 
 /**

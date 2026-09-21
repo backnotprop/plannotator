@@ -115,7 +115,7 @@ import {
   extractMarkerNonce,
   type MarkerEngineId,
 } from "./marker-review";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveRemoteCheck } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGitRemoteCheck } from "./config";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
@@ -242,11 +242,11 @@ export interface ReviewServerOptions {
   /** Per-PR worktree pool. When set, pr-switch creates worktrees instead of checking out. */
   worktreePool?: import("@plannotator/shared/worktree-pool").WorktreePool;
   /**
-   * `false` when the caller passed `review --no-remote-check` (issue #1553).
-   * Highest-priority input to `resolveRemoteCheck`; `undefined` leaves
-   * PLANNOTATOR_REMOTE_CHECK / config.remoteCheck to decide.
+   * `false` when the caller passed `review --no-git-remote-check` (issue #1553).
+   * Highest-priority input to `resolveGitRemoteCheck`; `undefined` leaves
+   * PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck to decide.
    */
-  remoteCheck?: boolean;
+  gitRemoteCheck?: boolean;
   /** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
   onCleanup?: () => void | Promise<void>;
 }
@@ -630,10 +630,10 @@ export async function startReviewServer(
   // Interval policy (base cadence + failure backoff) is shared with the Pi
   // runtime in review-core so the two cannot drift.
   let remoteBaseCheckIntervalMs = REMOTE_BASE_CHECK_INTERVAL_MS;
-  // Session-wide opt-out (#1553): `--no-remote-check`, PLANNOTATOR_REMOTE_CHECK,
-  // or `{ "remoteCheck": false }`. Resolved ONCE so a config edit mid-session
+  // Session-wide opt-out (#1553): `--no-git-remote-check`, PLANNOTATOR_GIT_REMOTE_CHECK,
+  // or `{ "gitRemoteCheck": false }`. Resolved ONCE so a config edit mid-session
   // cannot start network traffic the user opted out of at launch.
-  const remoteCheckEnabled = resolveRemoteCheck(options.remoteCheck === false, loadConfig());
+  const remoteCheckEnabled = resolveGitRemoteCheck(options.gitRemoteCheck === false, loadConfig());
   // Session shape: a plain local git review, so a remote base exists to talk
   // about at all. Kept separate from the opt-out because an EXPLICIT Fetch is
   // the user asking for the network — the opt-out is about the automatic
