@@ -34,6 +34,14 @@ export interface ParsedReviewArgs {
   /** Diff mode the session opens in (`--diff-type <id>`). */
   diffType?: DiffType;
   /**
+   * `false` when the invocation carried `--no-remote-check` (issue #1553):
+   * this session must make no `git ls-remote` call at all. Undefined means
+   * the flag was absent, leaving PLANNOTATOR_REMOTE_CHECK / config.remoteCheck
+   * to decide. Hosts forward it to the review server, which resolves the
+   * precedence in one place.
+   */
+  remoteCheck?: boolean;
+  /**
    * Argument-shape problems the host must surface before starting a session.
    * Always present; empty means the invocation parsed cleanly. Hosts differ in
    * how they surface these (CLI exits 1, Pi/OpenCode notify), which is why the
@@ -51,6 +59,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   let useLocal = true;
   let base: string | undefined;
   let diffType: DiffType | undefined;
+  let remoteCheck: boolean | undefined;
   const errors: string[] = [];
   const positional: string[] = [];
 
@@ -86,6 +95,9 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
         patchFile = value;
         break;
       }
+      case "--no-remote-check":
+        remoteCheck = false;
+        break;
       case "--local":
         useLocal = true;
         localFlagSeen = true;
@@ -171,6 +183,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
     useLocal,
     base,
     diffType,
+    ...(remoteCheck === undefined ? {} : { remoteCheck }),
     errors,
   };
 }

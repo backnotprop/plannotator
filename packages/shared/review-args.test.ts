@@ -54,6 +54,32 @@ describe("parseReviewArgs", () => {
     });
   });
 
+  test("--no-remote-check sets the opt-out bit and is absent otherwise", () => {
+    // #1553: every host (CLI, OpenCode, Pi) forwards this bit to the review
+    // server. It must be absent — not `true` — when the flag is not typed, or
+    // it would outrank PLANNOTATOR_REMOTE_CHECK and config.remoteCheck and
+    // make the env/config opt-out unreachable.
+    expect(parseReviewArgs("--no-remote-check").remoteCheck).toBe(false);
+    expect(parseReviewArgs(["--no-remote-check"]).remoteCheck).toBe(false);
+    expect(parseReviewArgs("--no-remote-check").errors).toEqual([]);
+    expect("remoteCheck" in parseReviewArgs("")).toBe(false);
+    expect("remoteCheck" in parseReviewArgs("--git")).toBe(false);
+  });
+
+  test("--no-remote-check composes with the other review selectors", () => {
+    const parsed = parseReviewArgs("--git --base develop --no-remote-check");
+    expect(parsed).toEqual({
+      prUrl: undefined,
+      patchFile: undefined,
+      vcsType: "git",
+      useLocal: true,
+      base: "develop",
+      diffType: undefined,
+      remoteCheck: false,
+      errors: [],
+    });
+  });
+
   test("accepts argv arrays from the compiled CLI", () => {
     expect(parseReviewArgs(["--git", "--no-local", "https://github.com/acme/repo/pull/12"])).toEqual({
       prUrl: "https://github.com/acme/repo/pull/12",

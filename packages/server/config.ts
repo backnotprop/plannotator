@@ -8,6 +8,7 @@ export {
   resolveCursorSandbox,
   resolveFeedbackHistory,
   resolveGuideHistory,
+  resolveRemoteCheck,
   parseReviewAnalysisConfig,
   isAgentTerminalSide,
   type PlannotatorConfig,

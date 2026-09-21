@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   resolveAIEnabled,
   resolveCursorSandbox,
+  resolveRemoteCheck,
   resolveUseGlimpse,
   resolveAnnotateHistory,
   resolveGuideHistory,
@@ -306,6 +307,12 @@ describe("config.json boolean coercion", () => {
       key: "cursorSandbox",
       resolve: resolveCursorSandbox,
     },
+    {
+      name: "resolveRemoteCheck",
+      envVar: "PLANNOTATOR_REMOTE_CHECK",
+      key: "remoteCheck",
+      resolve: (config) => resolveRemoteCheck(false, config),
+    },
   ];
 
   const originalEnvs = new Map(cases.map((c) => [c.envVar, process.env[c.envVar]]));
@@ -595,5 +602,57 @@ describe("resolveSharingEnabled", () => {
     expect(resolveSharingEnabled({ share: "disabled" }, {})).toBe(false);
     expect(resolveSharingEnabled({ share: "disabled" }, { PLANNOTATOR_SHARE: "enabled" })).toBe(true);
     expect(resolveSharingEnabled({}, { PLANNOTATOR_SHARE: "disabled" })).toBe(false);
+  });
+});
+
+/**
+ * `--no-remote-check` / PLANNOTATOR_REMOTE_CHECK / config.remoteCheck (#1553).
+ * Guards the precedence order itself: this is the switch that decides whether
+ * a review session may touch the network at all, and getting the order wrong
+ * means either an opt-out that silently does nothing (the user still gets a
+ * hardware-key prompt per probe) or an env var that overrides an explicit
+ * command-line flag.
+ */
+describe("resolveRemoteCheck precedence", () => {
+  const ENV_VAR = "PLANNOTATOR_REMOTE_CHECK";
+
+  const cases: Array<{
+    label: string;
+    cli: boolean;
+    env?: string;
+    config: PlannotatorConfig;
+    expected: boolean;
+  }> = [
+    { label: "nothing set → on", cli: false, config: {}, expected: true },
+    { label: "config false → off", cli: false, config: { remoteCheck: false }, expected: false },
+    { label: "config true → on", cli: false, config: { remoteCheck: true }, expected: true },
+    { label: "env 0 → off", cli: false, env: "0", config: {}, expected: false },
+    { label: "env false → off", cli: false, env: "false", config: {}, expected: false },
+    { label: "env disabled → off", cli: false, env: "disabled", config: {}, expected: false },
+    { label: "env FALSE (case) → off", cli: false, env: "FALSE", config: {}, expected: false },
+    { label: "env 1 → on", cli: false, env: "1", config: {}, expected: true },
+    { label: "env garbage → on", cli: false, env: "maybe", config: {}, expected: true },
+    { label: "env beats config false", cli: false, env: "1", config: { remoteCheck: false }, expected: true },
+    { label: "env beats config true", cli: false, env: "0", config: { remoteCheck: true }, expected: false },
+    { label: "CLI flag beats env on", cli: true, env: "1", config: {}, expected: false },
+    { label: "CLI flag beats config true", cli: true, config: { remoteCheck: true }, expected: false },
+  ];
+
+  for (const c of cases) {
+    test(c.label, () => {
+      const env: NodeJS.ProcessEnv = c.env === undefined ? {} : { [ENV_VAR]: c.env };
+      expect(resolveRemoteCheck(c.cli, c.config, env)).toBe(c.expected);
+    });
+  }
+
+  test("reads process.env by default", () => {
+    const original = process.env[ENV_VAR];
+    try {
+      process.env[ENV_VAR] = "0";
+      expect(resolveRemoteCheck(false, {})).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env[ENV_VAR];
+      else process.env[ENV_VAR] = original;
+    }
   });
 });

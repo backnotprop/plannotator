@@ -249,6 +249,19 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
+   * Query the git remote during code review (issue #1553). When true
+   * (default), a local git review runs `git ls-remote --symref origin HEAD`
+   * to discover the remote default branch and to tell whether the baseline is
+   * behind it ("Baseline is behind GitHub"). Set to false when that network
+   * call is unwanted — most sharply when SSH authentication is backed by a
+   * hardware token, where every probe is a physical touch prompt. With it off
+   * the session runs entirely from local refs: the base stays what local
+   * discovery resolved and the behind-the-remote banner never shows, while an
+   * explicit Fetch still works. Mirrors the PLANNOTATOR_REMOTE_CHECK env var,
+   * which takes precedence; `review --no-remote-check` beats both.
+   */
+  remoteCheck?: boolean;
+  /**
    * Display-only hostname for advertised session URLs (issue #657). Lets a
    * remote-mode user hand out a reachable link (e.g. a Tailscale MagicDNS
    * name or tailnet IP) instead of localhost. Host only — the port is chosen
@@ -847,6 +860,34 @@ export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
     return v !== "0" && v !== "false" && v !== "disabled";
   }
   return coerceConfigBoolean(config.cursorSandbox, true);
+}
+
+/**
+ * Resolve whether code review may query the git remote (issue #1553).
+ *
+ * Priority (highest wins):
+ *   `review --no-remote-check`  →  PLANNOTATOR_REMOTE_CHECK env var
+ *   →  config.remoteCheck  →  default true
+ *
+ * Env values `0` / `false` / `disabled` turn the remote check off; anything
+ * else — including `1` / `true` — keeps it on. "Off" means the whole session
+ * makes no `ls-remote` call at all, startup probes included: the compare
+ * target stays whatever local ref discovery resolved, and the
+ * behind-the-remote banner never shows. An explicit Fetch is unaffected —
+ * that is the user asking for the network.
+ */
+export function resolveRemoteCheck(
+  cliNoRemoteCheck: boolean,
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (cliNoRemoteCheck) return false;
+  const envVal = env.PLANNOTATOR_REMOTE_CHECK;
+  if (envVal !== undefined) {
+    const v = envVal.trim().toLowerCase();
+    return v !== "0" && v !== "false" && v !== "disabled";
+  }
+  return coerceConfigBoolean(config.remoteCheck, true);
 }
 
 /**
