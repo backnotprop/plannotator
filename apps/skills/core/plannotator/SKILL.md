@@ -41,7 +41,7 @@ Stdout is the interface, but its contract is command-specific. For `annotate` an
 ## plannotator review
 
 ```bash
-plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--tailscale] [--json] [PR_URL]
+plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-remote-check] [--tailscale] [--json] [PR_URL]
 ```
 
 Reviews local VCS changes, or a pull request when a URL is given. Default stdout stays plaintext: the existing close message, approval prompt, or feedback.
@@ -56,6 +56,7 @@ Classify the outcome only by `decision`, never by `message` text. Notes on an `a
 - Both flags are git-only: they error on jj, GitButler, Perforce, multi-repo workspace reviews, and PR URLs (a PR's base comes from the pull request). A `--base` ref that does not resolve is a startup error naming near-match branches, never a silently wrong diff.
 - `--patch-file <path>` reviews a static caller-supplied unified diff with no repository at all (use `-` to read it from stdin): the session serves the patch as-is with no file-system affordances that need a worktree. It cannot be combined with a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or `--local`/`--no-local`. Every working-tree affordance is off in that session (staging, hunk-context expansion, open-in-editor, code navigation, diff-type/base switching), and the endpoints behind them answer 400.
 - PR review (`plannotator review https://github.com/owner/repo/pull/123`, GitLab MR URLs too) needs an authenticated `gh` or `glab` CLI. `--local` (the default) builds a local checkout of the PR head in the background for full file access; `--no-local` skips it and reviews the platform diff only.
+- `--no-remote-check` stops the session contacting the git remote at all: no `git ls-remote` for the default branch or the "behind GitHub" baseline check. The compare target then comes from local refs only and the staleness banner never shows; an explicit Fetch still works. Use it when a remote probe is expensive or intrusive — most sharply when SSH authentication is backed by a hardware token, where each probe is a physical touch prompt. The same opt-out is available session-wide as `PLANNOTATOR_REMOTE_CHECK=0` or `{ "remoteCheck": false }` in `~/.plannotator/config.json` (the flag beats the env var, which beats the config key). Without it the remote is queried when the review opens, on diff load, on a diff-type/base switch, and on Fetch — never on a timer.
 - `--tailscale` publishes the loopback session over the user's tailnet via `tailscale serve` (HTTPS, never public) and prints the URL with a QR code. A publish failure exits nonzero instead of leaving the server hanging.
 
 ## plannotator annotate
