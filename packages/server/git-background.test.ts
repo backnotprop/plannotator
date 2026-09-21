@@ -298,6 +298,59 @@ describe.skipIf(process.platform === "win32")("background remote discovery", () 
       }
     }, 5_000);
 
+    test(`${fixture.name} process exit kills a still-hanging Git transport`, async () => {
+      // Failure caught (#1553): the parent-side timeout timer is the ONLY
+      // thing that ever reaps an isolated transport, and it dies with the
+      // parent. A review server stopped while an ls-remote was still waiting
+      // on authentication therefore orphaned the git/ssh pair — on a
+      // smartcard-backed setup, one that keeps the agent busy long after the
+      // review window is gone. The timeout here is far longer than the child's
+      // lifetime, so only the exit hook can account for the kill.
+      const { repo, marker, command } = createSshFixture();
+      const runtimeUrl = pathToFileURL(fixture.modulePath).href;
+      const source = `
+        const { existsSync, readFileSync } = await import("node:fs");
+        const runtimeModule = await import(${JSON.stringify(runtimeUrl)});
+        void runtimeModule[${JSON.stringify(fixture.exportName)}].runGit(
+          ["ls-remote", "--symref", "origin", "HEAD"],
+          { cwd: ${JSON.stringify(repo)}, timeoutMs: 120_000, interaction: "forbid" },
+        );
+        const marker = ${JSON.stringify(marker)};
+        for (let i = 0; i < 100; i++) {
+          if (existsSync(marker) && readFileSync(marker, "utf-8").trim()) break;
+          await Bun.sleep(50);
+        }
+        await Bun.sleep(100);
+        process.exit(0);
+      `;
+
+      const result = spawnSync(process.execPath, ["--eval", source], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          GIT_SSH_COMMAND: command,
+          SSH_BEHAVIOR: "hang",
+          SSH_MARKER: marker,
+        },
+        timeout: 10_000,
+      });
+      const invocations = readInvocations(marker);
+      // The group signal and the child's own teardown race by microseconds;
+      // give the kernel a moment before reading process state.
+      await Bun.sleep(100);
+
+      try {
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(0);
+        expect(invocations.length).toBeGreaterThan(0);
+        for (const invocation of invocations) {
+          expect(() => process.kill(invocation.pid, 0)).toThrow();
+        }
+      } finally {
+        terminateTransports(invocations);
+      }
+    }, 15_000);
+
     test(`${fixture.name} interactive fetch keeps the inherited authentication policy`, () => {
       const { repo, marker, command } = createSshFixture();
       const runtimeUrl = pathToFileURL(fixture.modulePath).href;
