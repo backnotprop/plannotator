@@ -22,7 +22,7 @@ describe('folder annotation empty state', () => {
       <FolderAnnotationEmptyState compactTouchLayout={false} onChooseFile={() => {}} />,
     );
 
-    expect(html).toContain('Pick a markdown or HTML file from the sidebar to begin.');
+    expect(html).toContain('Pick a markdown, HTML, or diagram file from the sidebar to begin.');
     expect(html).not.toContain('Choose a file</button>');
   });
 
