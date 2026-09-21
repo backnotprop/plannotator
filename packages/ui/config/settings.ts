@@ -236,15 +236,21 @@ export const SETTINGS = {
 
   // Which left-panel view a code review OPENS in. 'sections' = the git-status
   // view (Committed/Changes/Untracked); 'tree' = the classic file tree.
-  // Cookie-only. Written ONLY by Settings and the first-run setup dialog —
-  // the in-review header toggle is session-scoped and never writes this
-  // (looking at another view mid-review must not silently change the default).
+  // Cookie-only. Written ONLY by Settings — the in-review header toggle is
+  // session-scoped and never writes this (looking at another view mid-review
+  // must not silently change the default).
+  //
+  // The default is 'tree': the classic file tree renders every diff type, so
+  // the (reviewPanelView, defaultDiffType) pair is trivially consistent for a
+  // reviewer who has chosen neither. 'sections' is reachable from the panel's
+  // Tree | Git status | Commits toggle and settable as the default here in
+  // Settings. Anyone with a persisted cookie keeps whatever they chose.
   //
   // Deliberately NOT a value here: 'commits'. The Commits view is session-only
   // and never the opening view — a review always opens on files. A
   // previously-persisted 'commits' cookie is treated as unset.
   reviewPanelView: {
-    defaultValue: 'sections' as 'sections' | 'tree',
+    defaultValue: 'tree' as 'sections' | 'tree',
     fromCookie: () => {
       const v = storage.getItem('plannotator-review-panel-view');
       return v === 'tree' || v === 'sections' ? v : undefined;

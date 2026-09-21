@@ -20,6 +20,10 @@ import { storage } from '../utils/storage';
  * remains the one non-writer that can produce a conflicted pair from a
  * stale config.json; the App-level load reconciler heals that case by
  * calling setReviewPanelView('sections', { recordLastUsed: false }).
+ *
+ * The registry default is 'tree', which any diff type can render, so the pair
+ * only ever needs reconciling for a reviewer who explicitly persisted
+ * 'sections'.
  */
 
 /** Store seam for tests (fresh ConfigStoreForTest); production always uses the singleton. */
@@ -33,7 +37,7 @@ export function setReviewPanelView(
   store.set('reviewPanelView', view);
   // An explicit persisted choice also becomes the last-used view — otherwise
   // a stale last-used cookie would immediately shadow what the user just
-  // picked in Settings / the setup dialog. recordLastUsed: false is for
+  // picked in Settings. recordLastUsed: false is for
   // NON-choices: the App self-heal repairs a conflicted persisted pair
   // without any user action, so it must not overwrite the user's memo.
   if (options?.recordLastUsed !== false) {
@@ -47,8 +51,9 @@ export function setReviewPanelView(
 /**
  * The panel view the reviewer has actually persisted, or `undefined` when they
  * never chose one. Distinct from `configStore.get('reviewPanelView')`, which
- * cannot tell a stored choice apart from the built-in default, which is the
- * difference first-run seeding has to respect before it writes over anything.
+ * cannot tell a stored choice apart from the built-in default. Plannotator
+ * itself no longer needs the distinction (nothing seeds this setting any
+ * more); it stays exported for hosts that must not write over a real choice.
  */
 export function getPersistedReviewPanelView(): 'sections' | 'tree' | undefined {
   return SETTINGS.reviewPanelView.fromCookie();

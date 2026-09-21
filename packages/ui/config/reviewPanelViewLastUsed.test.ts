@@ -87,3 +87,30 @@ describe('reviewPanelViewLastUsed setting', () => {
     expect(values.get('plannotator-default-diff-type')).toBe('local-vs-remote');
   });
 });
+
+describe('reviewPanelView default', () => {
+  test('a profile with no cookie resolves to Tree', () => {
+    // Owner ruling (#1463 / #1474): the first-run "Set up your review view"
+    // chooser is gone, so the registry default IS the opening view for a new
+    // reviewer. Tree is also the view every diff type can render, which is
+    // what makes the coupled (reviewPanelView, defaultDiffType) pair
+    // consistent with no reconciliation.
+    installMemoryBackend();
+    const store = makeStore();
+
+    expect(SETTINGS.reviewPanelView.fromCookie()).toBeUndefined();
+    expect(store.get('reviewPanelView')).toBe('tree');
+    // Nothing is snapped: the resolved diff default is untouched by the view.
+    expect(store.get('defaultDiffType')).toBe('since-base');
+  });
+
+  test('an existing Git status cookie still wins over the new default', () => {
+    // Failure caught: the default flip reaching reviewers who already chose
+    // Git status — the one group this change must be invisible to.
+    const values = installMemoryBackend();
+    values.set('plannotator-review-panel-view', 'sections');
+    const store = makeStore();
+
+    expect(store.get('reviewPanelView')).toBe('sections');
+  });
+});
