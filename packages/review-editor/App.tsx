@@ -2962,7 +2962,7 @@ const ReviewApp: React.FC = () => {
   // mode is active, switch the LIVE diff back along with the view. No writes
   // to the persisted view/diff pair: the toggle only records the last-used
   // memo (via selectPanelView), so there is no pair to keep consistent here
-  // (Settings and the setup dialog, which do persist, enforce the
+  // (Settings, which does persist, enforces the
   // sections ⟺ since-base coupling via the shared setters in
   // config/reviewView).
   const handleSwitchToSections = useCallback(() => {

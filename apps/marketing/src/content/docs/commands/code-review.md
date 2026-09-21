@@ -103,7 +103,7 @@ By default the review opens showing **all changes since your base branch** — e
 - **Last commit** - the diff introduced by the most recent commit
 - **vs main** (or your default branch) - all committed changes on your branch compared to the base branch. Only appears when you're on a branch other than the default.
 
-The first time you open a review, a setup dialog lets you choose your default view and diff type; you can change both later in **Settings → Git** or reopen the dialog from the review header menu. On repos where the base branch can't be resolved, the review falls back to uncommitted changes.
+Your default view and diff type live in **Settings → Git**. On repos where the base branch can't be resolved, the review falls back to uncommitted changes.
 
 If the base branch has moved on GitHub since your last fetch, a "Baseline is behind" banner offers a one-click fetch so you're reviewing against the real base.
 
@@ -128,7 +128,7 @@ plannotator review --base HEAD~3
 
 `--base` accepts anything git resolves: a local branch, a remote-tracking ref, a tag, or a commit SHA. `--diff-type` accepts the nine git diff modes (`since-base`, `local-vs-remote`, `uncommitted`, `staged`, `unstaged`, `last-commit`, `branch`, `merge-base`, `all`).
 
-Both flags are **session-only**: they seed how the session opens, the base picker and diff type dropdown stay fully usable, and nothing is written to your saved defaults — your next plain `plannotator review` opens exactly as before. A flagged session also skips the one-time first-run setup dialog without consuming it, so it still greets your next ordinary review.
+Both flags are **session-only**: they seed how the session opens, the base picker and diff type dropdown stay fully usable, and nothing is written to your saved defaults — your next plain `plannotator review` opens exactly as before.
 
 Notes:
 
