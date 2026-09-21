@@ -6,7 +6,7 @@ import { basename, resolve as resolvePath } from "node:path";
 
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash, deleteDraft } from "../generated/draft.ts";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl } from "../generated/config.ts";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveRemoteCheck } from "../generated/config.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 
@@ -44,6 +44,8 @@ import {
 	type RemoteDefaultInfo,
 	type SinceBaseSections,
 	detectRemoteDefaultInfo,
+	nextRemoteBaseCheckInterval,
+	REMOTE_BASE_CHECK_INTERVAL_MS,
 	getFileContentsForDiff as getFileContentsForDiffCore,
 	getSinceBaseSections,
 	isBinaryPatchFile,
@@ -350,6 +352,12 @@ export async function startReviewServer(options: {
 	workspace?: WorkspaceReviewSession;
 	/** Per-PR worktree pool. When set, pr-switch creates worktrees instead of checking out. */
 	worktreePool?: WorktreePool;
+	/**
+	 * `false` when the caller passed `review --no-remote-check` (issue #1553).
+	 * Highest-priority input to `resolveRemoteCheck`; `undefined` leaves
+	 * PLANNOTATOR_REMOTE_CHECK / config.remoteCheck to decide.
+	 */
+	remoteCheck?: boolean;
 	/** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
 	onCleanup?: () => void | Promise<void>;
 	/** Called when server starts with the URL, remote status, and port */
@@ -609,9 +617,21 @@ export async function startReviewServer(options: {
 	let remoteDefaultInfo: RemoteDefaultInfo | null = null;
 	let baseBehindRemote = false;
 	let lastRemoteBaseCheck = 0;
-	const REMOTE_BASE_CHECK_INTERVAL_MS = 60_000;
-	const remoteBaseCheckApplies = (): boolean =>
+	// Interval policy (base cadence + failure backoff) is shared with the Bun
+	// runtime in review-core so the two cannot drift.
+	let remoteBaseCheckIntervalMs = REMOTE_BASE_CHECK_INTERVAL_MS;
+	// Session-wide opt-out (#1553): `--no-remote-check`, PLANNOTATOR_REMOTE_CHECK,
+	// or `{ "remoteCheck": false }`. Resolved ONCE so a config edit mid-session
+	// cannot start network traffic the user opted out of at launch.
+	const remoteCheckEnabled = resolveRemoteCheck(options.remoteCheck === false, loadConfig());
+	// Session shape: a plain local git review, so a remote base exists to talk
+	// about at all. Kept separate from the opt-out because an EXPLICIT Fetch is
+	// the user asking for the network — the opt-out is about the automatic
+	// probes, so `/api/fetch-base` stays reachable with the remote check off.
+	const gitRemoteSessionApplies = (): boolean =>
 		!!options.gitContext && !isPRMode && (!sessionVcsType || sessionVcsType === "git");
+	const remoteBaseCheckApplies = (): boolean =>
+		remoteCheckEnabled && gitRemoteSessionApplies();
 
 	// Only base-relative diff types (since-base / branch / merge-base) care
 	// about the base being behind the remote; the banner must not show under
@@ -671,12 +691,19 @@ export async function startReviewServer(options: {
 		if (!remoteBaseCheckApplies()) return;
 		lastRemoteBaseCheck = Date.now();
 		remoteDefaultInfo = await detectRemoteDefaultInfo(reviewRuntime, options.gitContext?.cwd);
+		// Negative caching (#1553): detectRemoteDefaultInfo returns null for
+		// every failure mode, so back off on failure and reset the moment the
+		// remote answers again.
+		remoteBaseCheckIntervalMs = nextRemoteBaseCheckInterval(
+			remoteBaseCheckIntervalMs,
+			remoteDefaultInfo !== null,
+		);
 		await recomputeBaseBehindRemote();
 	}
 
 	function maybeRefreshRemoteBaseInfo(): void {
 		if (!remoteBaseCheckApplies()) return;
-		if (Date.now() - lastRemoteBaseCheck < REMOTE_BASE_CHECK_INTERVAL_MS) return;
+		if (Date.now() - lastRemoteBaseCheck < remoteBaseCheckIntervalMs) return;
 		lastRemoteBaseCheck = Date.now();
 		void refreshRemoteBaseInfo().catch(() => {});
 	}
@@ -760,7 +787,12 @@ export async function startReviewServer(options: {
 	// leaving currentBase as bare "main" makes the "behind GitHub" banner
 	// un-clearable (Fetch advances origin/main, not local main). Canonicalizing
 	// "main" -> "origin/main" never overrides a deliberately-chosen feature base.
-	if (options.gitContext && !isPRMode) {
+	//
+	// Skipped entirely when the remote check is off (#1553):
+	// detectRemoteDefaultCompareTarget itself runs an ls-remote, so the opt-out
+	// would not be honest if only the staleness probe were suppressed. The base
+	// then stays whatever local ref discovery resolved.
+	if (options.gitContext && !isPRMode && remoteCheckEnabled) {
 		const gitCwd = options.gitContext.cwd;
 		detectRemoteDefaultCompareTarget(gitCwd, sessionVcsType).then(
 			async (remote) => {
@@ -2150,7 +2182,7 @@ export async function startReviewServer(options: {
 		} else if (url.pathname === "/api/fetch-base" && req.method === "POST") {
 			// Fetch the remote default branch so the local baseline catches up
 			// with GitHub. Client re-runs /api/diff/switch afterwards.
-			if (!remoteBaseCheckApplies()) {
+			if (!gitRemoteSessionApplies()) {
 				json(res, { error: "Not available in this mode" }, 400);
 				return;
 			}
@@ -2217,7 +2249,15 @@ export async function startReviewServer(options: {
 				return;
 			}
 			const fresh = probe == null || probe === baseline;
-			maybeRefreshRemoteBaseInfo();
+			// Deliberately NO maybeRefreshRemoteBaseInfo() here (#1553). This
+			// endpoint is polled every 5s for as long as the page is open, so
+			// hanging the 60s remote probe off it made an idle review contact the
+			// remote once a minute forever — one hardware-key touch prompt per
+			// minute on a smartcard-backed SSH setup, with no visible UI activity.
+			// The remote is now queried on the interactions that can change the
+			// answer: startup, /api/diff, /api/diff/switch (the Refresh button and
+			// the base/diff pickers) and the explicit Fetch. `baseBehindRemote`
+			// still rides every response below, from the cached value.
 			// The probe fingerprint lets the client distinguish "still the same
 			// staleness I dismissed" from "ANOTHER change landed since".
 			json(res, {
@@ -2373,6 +2413,12 @@ export async function startReviewServer(options: {
 			// finish out of arrival order under network jitter, so capturing after
 			// parseBody let a slow-body OLDER request overwrite a newer one.
 			const switchEpoch = ++diffSwitchEpoch;
+			// The remote probe moved here from the 5s freshness poll (#1553).
+			// This endpoint backs the diff-type and base pickers AND the
+			// "Diff out of date · Refresh" button, so it fires when the reviewer
+			// asks for a fresh answer rather than on a timer. Fire-and-forget: a
+			// hanging remote must never make a diff switch wait on the network.
+			maybeRefreshRemoteBaseInfo();
 			if (!hasLocalAccess && !workspace) {
 				json(res, { error: "Not available without local file access" }, 400);
 				return;
