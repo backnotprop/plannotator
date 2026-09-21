@@ -1032,7 +1032,8 @@ the people and what a mention means.
 
 ### Threading points
 
-- `AnnotationToolbar` (`selectionActions`, `selectionActionsIcon`, `quickLabels`) — the props live here. `selectionActionsIcon?: React.ReactNode` (0.43.1) is the glyph on the wand button, forwarded by `Viewer` (both toolbars) and `HtmlViewer`; absent → the package's own wand, which 0.43.1 also simplified to one thick diagonal with a single star (the six-spark glyph read as noise at 16px). Name, `data-selection-actions`, size and behavior of the button are untouched either way.
+- `AnnotationToolbar` (`selectionActions`, `selectionActionsIcon`, `quickLabels`) — the props live here.
+- **ui 0.45.2 (registry default):** `SETTINGS.reviewPanelView.defaultValue` is now `'tree'` (was `'sections'`). `configStore.ensureLoaded` seeds registry defaults into the host's `storageBackend`, so a host that never persisted a panel view now seeds `tree`; a persisted value still wins. No API change. Plannotator removed its first-run review setup dialog in the same change (#1587). `selectionActionsIcon?: React.ReactNode` (0.43.1) is the glyph on the wand button, forwarded by `Viewer` (both toolbars) and `HtmlViewer`; absent → the package's own wand, which 0.43.1 also simplified to one thick diagonal with a single star (the six-spark glyph read as noise at 16px). Name, `data-selection-actions`, size and behavior of the button are untouched either way.
 - `Viewer` forwards both to BOTH of its toolbars (the text-selection toolbar
   and the code-block hover toolbar).
 - `HtmlViewer` forwards `selectionActions` to its selection toolbar. It does
