@@ -123,16 +123,21 @@ async function runGit(
     }, options.timeoutMs);
   }
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-
-  if (timer) clearTimeout(timer);
-  untrack?.();
-
-  return { stdout, stderr, exitCode };
+  // try/finally so a rejected stream read cannot leave the group leader in the
+  // exit reaper's set (the node:http mirror untracks on both "close" and
+  // "error" for the same reason): a stale pid there is a pid that could be
+  // recycled before the process exits.
+  try {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { stdout, stderr, exitCode };
+  } finally {
+    if (timer) clearTimeout(timer);
+    untrack?.();
+  }
 }
 
 /** Bun-based git runtime. Exported for use with shared utilities (worktree, etc.) */
