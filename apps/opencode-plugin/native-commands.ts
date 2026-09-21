@@ -110,14 +110,21 @@ export async function runNativeCommand(
   const client = createV2BridgeClient({ ctx: deps.ctx, getAgents: deps.getAgents, sessionID });
 
   const run = deps.runCommand ?? ((request: CliCommandRequest) => handleCliCommand(request as never));
-  await run({
-    command,
-    client,
-    sessionId: sessionID,
-    rawArgs,
-    cwd: await resolveDirectory(deps.ctx, sessionID),
-    bridge: await deps.getBridgeContext(),
-  });
+  try {
+    await run({
+      command,
+      client,
+      sessionId: sessionID,
+      rawArgs,
+      cwd: await resolveDirectory(deps.ctx, sessionID),
+      bridge: await deps.getBridgeContext(),
+    });
+  } finally {
+    // The client may be watching the host's event stream for its session-URL
+    // notice. A review that ends without sending feedback never settles that
+    // watch on its own, so the invocation closes it. Disposing twice is a no-op.
+    client.dispose();
+  }
 }
 
 function defaultWait(ms: number): Promise<void> {

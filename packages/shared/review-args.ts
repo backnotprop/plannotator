@@ -26,6 +26,7 @@ export type ReviewOpenDiffType = (typeof REVIEW_OPEN_DIFF_TYPES)[number];
 
 export interface ParsedReviewArgs {
   prUrl?: string;
+  patchFile?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
   /** Compare target the session opens against (`--base <ref>`). */
@@ -53,6 +54,12 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   const errors: string[] = [];
   const positional: string[] = [];
 
+  let patchFile: string | undefined;
+  // --local / --no-local conflict with --patch-file only when the user typed
+  // one: useLocal defaults to true, so check the flag's presence, not the
+  // value. Both spellings are PR-review selectors, so both are usage errors.
+  let localFlagSeen = false;
+
   // Index-based so value-taking flags consume their value token before the
   // positional collector sees it — otherwise `--base main <PR_URL>` would put
   // "main" in positional[0] and lose the URL.
@@ -65,11 +72,27 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       case "--gitbutler":
         vcsType = "gitbutler";
         break;
+      case "--patch-file": {
+        const value = tokens[i + 1];
+        if (value === undefined || value.startsWith("--")) {
+          errors.push("--patch-file requires a path or -");
+          break;
+        }
+        i++;
+        if (patchFile !== undefined) {
+          errors.push("--patch-file may only be specified once");
+          break;
+        }
+        patchFile = value;
+        break;
+      }
       case "--local":
         useLocal = true;
+        localFlagSeen = true;
         break;
       case "--no-local":
         useLocal = false;
+        localFlagSeen = true;
         break;
       case "--base": {
         const value = tokens[i + 1];
@@ -129,8 +152,21 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   }
 
   const target = positional[0];
+  // Static patch mode wins over VCS detection entirely, so every VCS/PR
+  // selector combined with it is a usage error — fail loudly in one place
+  // rather than silently ignoring the flag in each runtime.
+  if (patchFile !== undefined) {
+    if (target && isReviewUrl(target)) {
+      errors.push("--patch-file cannot be combined with a PR/MR URL");
+    }
+    if (base) errors.push("--patch-file cannot be combined with --base");
+    if (diffType) errors.push("--patch-file cannot be combined with --diff-type");
+    if (vcsType) errors.push("--patch-file cannot be combined with --git/--gitbutler");
+    if (localFlagSeen) errors.push("--patch-file cannot be combined with --local/--no-local");
+  }
   return {
     prUrl: target && isReviewUrl(target) ? target : undefined,
+    patchFile,
     vcsType,
     useLocal,
     base,

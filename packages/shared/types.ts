@@ -13,6 +13,7 @@ export type {
   RepositoryContext,
   SinceBaseSectionEntry,
   SinceBaseSections,
+  ReviewSourceKind,
 } from "./review-core";
 
 export type {

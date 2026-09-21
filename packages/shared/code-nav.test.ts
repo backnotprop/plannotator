@@ -1,6 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildRgArgs,
+  isCodeNavPathAllowed,
+  resolveCodeNav,
   buildSignature,
   classifyMatch,
   classifyMatchDetailed,
@@ -962,5 +967,220 @@ describe("resolveCodeNavHover", () => {
     expect(result.references).toEqual([]);
     expect(result.referenceCount).toBe(0);
     resetRgCache();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Directory exclusions (#1558)
+// ---------------------------------------------------------------------------
+
+describe("buildRgArgs directory exclusions (#1558)", () => {
+  test("always-ignored names are excluded at any depth (unanchored glob)", () => {
+    const args = buildRgArgs("x");
+    expect(args).toContain("!node_modules");
+    expect(args).not.toContain("!/node_modules");
+  });
+
+  test("ambiguous names are excluded only at the search root (anchored glob)", () => {
+    const args = buildRgArgs("x");
+    for (const dir of ["vendor", "target", "build", "dist", "coverage"]) {
+      expect(args).toContain(`!/${dir}`);
+      expect(args).not.toContain(`!${dir}`);
+    }
+  });
+
+  // The anchored glob only ever prunes the SEARCH ROOT, so an origin in a
+  // first-party `…/vendor/app/` package needs nothing lifted — and lifting it
+  // handed that request the real root `vendor/` tree back (#1559 follow-up).
+  test("a deep same-named package does not lift the root-only exclusion", () => {
+    const args = buildRgArgs(
+      "fetchContent",
+      "java",
+      "src/main/java/com/example/vendor/app/ExampleService.java",
+    );
+    expect(args).toContain("!/vendor");
+    expect(args).toContain("!node_modules");
+    expect(args).toContain("!/target");
+  });
+
+  test("an origin that really lives under the root directory lifts it", () => {
+    const args = buildRgArgs("fetchContent", "java", "vendor/third_party/Vendored.java");
+    expect(args).not.toContain("!/vendor");
+    // Only that one name: the other root-only exclusions stand.
+    expect(args).toContain("!/target");
+    expect(args).toContain("!node_modules");
+  });
+
+  test("the origin-file rule also lifts an always-ignored segment", () => {
+    const args = buildRgArgs("x", undefined, "packages/node_modules/dep/index.js");
+    expect(args).not.toContain("!node_modules");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real-ripgrep exclusion behavior (#1558)
+// ---------------------------------------------------------------------------
+
+const RG_PATH = Bun.which("rg");
+const describeRg = RG_PATH ? describe : describe.skip;
+
+describeRg("resolveCodeNav against real ripgrep (#1558)", () => {
+  const realRuntime: CodeNavRuntime = {
+    async runCommand(command, args, options) {
+      const proc = Bun.spawn([command, ...args], {
+        cwd: options?.cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      return { stdout, stderr, exitCode: await proc.exited };
+    },
+  };
+
+  let root = "";
+
+  const javaSource = (className: string) =>
+    [
+      `public class ${className} {`,
+      `    public String fetchContent() { return "example"; }`,
+      "}",
+      "",
+    ].join("\n");
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), "plannotator-code-nav-"));
+    // First-party Java package whose path contains a `vendor` segment.
+    await Bun.write(
+      `${root}/src/main/java/com/example/vendor/app/ExampleService.java`,
+      javaSource("ExampleService"),
+    );
+    // Genuine third-party tree at the repo root.
+    await Bun.write(
+      `${root}/vendor/third_party/Vendored.java`,
+      javaSource("Vendored"),
+    );
+    // Dependency output nested below the root.
+    await Bun.write(
+      `${root}/src/app/node_modules/dep/Dep.java`,
+      javaSource("Dep"),
+    );
+    // A neutral first-party file, the third of the QA repro's three.
+    await Bun.write(`${root}/src/other/Other.java`, javaSource("Other"));
+  });
+
+  afterAll(async () => {
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  const resolve = (filePath: string) => {
+    resetRgCache();
+    return resolveCodeNav(
+      realRuntime,
+      {
+        symbol: "fetchContent",
+        filePath,
+        line: 1,
+        charStart: 0,
+        side: "new",
+        language: "java",
+      },
+      root,
+      [],
+    );
+  };
+
+  const paths = (result: Awaited<ReturnType<typeof resolve>>) =>
+    [...result.definitions, ...result.references].map((l) => l.filePath);
+
+  test("finds a symbol in a Java package containing a `vendor` segment", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(
+      found.some((p) => p.includes("com/example/vendor/app/ExampleService.java")),
+    ).toBe(true);
+  });
+
+  test("a root-level vendor/ directory is still excluded", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(found.some((p) => p.includes("vendor/third_party/"))).toBe(false);
+  });
+
+  test("node_modules is excluded at any depth", async () => {
+    const found = paths(await resolve("src/main/java/com/example/Caller.java"));
+    expect(found.some((p) => p.includes("node_modules"))).toBe(false);
+  });
+
+  test("a request from inside an excluded segment can find its own siblings", async () => {
+    const found = paths(await resolve("src/app/node_modules/dep/Caller.java"));
+    expect(found.some((p) => p.includes("node_modules/dep/Dep.java"))).toBe(true);
+  });
+
+  // The QA repro (#1559 follow-up): three files define the same symbol — a
+  // first-party package whose path contains `vendor`, the repo-root `vendor/`
+  // tree, and a neutral file. From the package origin the ROOT match was
+  // returned, because the origin-file rule lifted the anchored glob.
+  test("a first-party `vendor` package does not un-exclude the root vendor tree", async () => {
+    const found = paths(await resolve("src/main/java/com/example/vendor/app/ExampleService.java"));
+    expect(found.some((p) => p.includes("com/example/vendor/app/ExampleService.java"))).toBe(true);
+    expect(found.some((p) => p.includes("src/other/"))).toBe(true);
+    expect(found.some((p) => p.includes("vendor/third_party/"))).toBe(false);
+  });
+
+  test("a file that really lives under root vendor/ still finds its own siblings", async () => {
+    const found = paths(await resolve("vendor/third_party/Caller.java"));
+    expect(found.some((p) => p.includes("vendor/third_party/Vendored.java"))).toBe(true);
+    // The exemption is that directory only: node_modules stays excluded.
+    expect(found.some((p) => p.includes("node_modules"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Origin-file exemption is per directory INSTANCE (#1559 follow-up)
+// ---------------------------------------------------------------------------
+
+/**
+ * The exemption exists so a symbol in a changed file finds its own siblings
+ * even under a directory whose NAME looks like tool output. Lifting the glob
+ * lifted it tree-wide, so a request from a first-party `…/vendor/app/` package
+ * also returned the repo-root `vendor/` third-party tree. The rule is now: a
+ * match under an excluded directory is kept only when that same directory is
+ * an ancestor of the origin file.
+ */
+describe("isCodeNavPathAllowed", () => {
+  const DEEP_ORIGIN = "src/main/java/com/example/vendor/app/Widget.java";
+
+  test("the root-level excluded tree stays excluded for a deep same-named package", () => {
+    expect(isCodeNavPathAllowed("vendor/RootVendorFile.java", DEEP_ORIGIN)).toBe(false);
+    // …while the origin's own package is untouched (it was never pruned).
+    expect(isCodeNavPathAllowed("src/main/java/com/example/vendor/app/Other.java", DEEP_ORIGIN)).toBe(true);
+    expect(isCodeNavPathAllowed("src/other/Other.java", DEEP_ORIGIN)).toBe(true);
+  });
+
+  test("a file that really lives under the root directory keeps its siblings", () => {
+    const origin = "vendor/RootVendorFile.java";
+    expect(isCodeNavPathAllowed("vendor/Sibling.java", origin)).toBe(true);
+    expect(isCodeNavPathAllowed("vendor/nested/Deep.java", origin)).toBe(true);
+    // A DIFFERENT excluded root is still excluded for it.
+    expect(isCodeNavPathAllowed("dist/Built.java", origin)).toBe(false);
+  });
+
+  test("always-ignored names are per instance too", () => {
+    const origin = "packages/app/node_modules/dep/index.js";
+    expect(isCodeNavPathAllowed("packages/app/node_modules/dep/other.js", origin)).toBe(true);
+    expect(isCodeNavPathAllowed("packages/lib/node_modules/dep/index.js", origin)).toBe(false);
+    expect(isCodeNavPathAllowed("node_modules/dep/index.js", origin)).toBe(false);
+  });
+
+  test("with no origin, and for ordinary paths, the plain rules apply", () => {
+    expect(isCodeNavPathAllowed("vendor/x.java")).toBe(false);
+    expect(isCodeNavPathAllowed("src/x.java")).toBe(true);
+    // A nested `vendor/` is not root-level, so the anchored rule leaves it.
+    expect(isCodeNavPathAllowed("src/vendor/x.java")).toBe(true);
+    // A FILE named like an excluded directory is a file, not a directory.
+    expect(isCodeNavPathAllowed("src/vendor")).toBe(true);
+    expect(isCodeNavPathAllowed("./vendor/x.java")).toBe(false);
+    expect(isCodeNavPathAllowed("vendor\\x.java")).toBe(false);
   });
 });

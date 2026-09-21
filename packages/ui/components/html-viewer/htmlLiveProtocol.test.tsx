@@ -720,6 +720,23 @@ describe.if(hasDom)('live bridge gate (composed body in the eval harness)', () =
     expect(chord.defaultPrevented).toBe(true);
   });
 
+  test('Mod+Shift+X inside the iframe forwards a tools toggle, and other Mod+Shift chords are left to the page', () => {
+    // The header eye is unreachable from inside the frame otherwise: focus
+    // lives in the page on a live app, so the parent listener never sees it.
+    const countTools = () => primaryPosts('tools-toggle').length;
+    const before = countTools();
+    const chord = new KeyboardEvent('keydown', { key: 'X', shiftKey: true, metaKey: true, bubbles: true, cancelable: true });
+    bridgeDocument.body.dispatchEvent(chord);
+    expect(countTools()).toBe(before + 1);
+    expect(chord.defaultPrevented).toBe(true);
+
+    // Only the two reserved chords are claimed; the page keeps the rest.
+    const other = new KeyboardEvent('keydown', { key: 'K', shiftKey: true, metaKey: true, bubbles: true, cancelable: true });
+    bridgeDocument.body.dispatchEvent(other);
+    expect(countTools()).toBe(before + 1);
+    expect(other.defaultPrevented).toBe(false);
+  });
+
   test('a placed marker still opens its comment in Interact mode', async () => {
     // Committed overlay artifacts are mode-independent: restore an anchored
     // annotation while the session is in Interact, then click its marker.

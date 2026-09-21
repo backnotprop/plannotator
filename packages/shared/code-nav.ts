@@ -130,20 +130,40 @@ export interface CodeNavHoverResponse {
 // Constants
 // ---------------------------------------------------------------------------
 
-const CODE_NAV_IGNORED_GLOBS = [
+/**
+ * Directory exclusions are split in two (#1558).
+ *
+ * A ripgrep glob with no slash matches a path SEGMENT at any depth, so
+ * `--glob !vendor` prunes every directory named `vendor` anywhere in the tree
+ * — including a first-party Java package such as
+ * `src/main/java/com/example/vendor/app/`, whose symbols then resolve to
+ * "No results". The same trap applies to `target` (Maven's build dir, but also
+ * an ordinary package/module name) and to `build` / `dist` / `coverage`, which
+ * are common nested directories in monorepos and in source trees alike.
+ *
+ * ALWAYS_IGNORED names can only ever be tool output, so they stay excluded at
+ * any depth. ROOT_ONLY names are ambiguous and are excluded only at the search
+ * root (`--glob !/vendor`, anchored like a gitignore rule); nested copies that
+ * really are build output are already skipped by ripgrep's default .gitignore
+ * handling.
+ */
+const CODE_NAV_ALWAYS_IGNORED_DIRS = [
   "node_modules",
   ".git",
-  "dist",
-  "build",
   ".next",
   "__pycache__",
   ".turbo",
   ".cache",
-  "target",
-  "vendor",
-  "coverage",
   ".venv",
   ".pytest_cache",
+];
+
+const CODE_NAV_ROOT_ONLY_IGNORED_DIRS = [
+  "vendor",
+  "target",
+  "build",
+  "dist",
+  "coverage",
 ];
 
 const RG_TYPE_MAP: Record<string, string> = {
@@ -261,7 +281,73 @@ function isTestFile(filePath: string): boolean {
 // rg argument construction
 // ---------------------------------------------------------------------------
 
-export function buildRgArgs(symbol: string, language?: string): string[] {
+/** Path segments of a repo-relative file path, `/` and `\` alike. */
+function pathSegments(filePath: string): Set<string> {
+  return new Set(splitPath(filePath));
+}
+
+/** Ordered path segments, `/` and `\` alike, with `.` and empties dropped. */
+function splitPath(filePath: string): string[] {
+  return filePath.split(/[/\\]/).filter((segment) => segment && segment !== ".");
+}
+
+/**
+ * Is `matchPath` allowed for a request that came from `originFilePath`?
+ *
+ * The origin-file exemption (#1558) lifts a directory exclusion so a symbol in
+ * a changed file can always find its own siblings. Lifting the GLOB, though,
+ * lifts it for the whole tree: a request from
+ * `src/main/java/com/example/vendor/app/Widget.java` also started returning
+ * matches from the repo-ROOT `vendor/`, which is exactly the third-party tree
+ * the exclusion exists for (#1559 follow-up).
+ *
+ * So the exemption is narrowed to the directory INSTANCE the origin lives in:
+ * a match under an excluded directory is kept only when that same directory is
+ * an ancestor of the origin file. Root-only names are additionally only
+ * considered at the search root, which is where `--glob !/vendor` prunes.
+ */
+export function isCodeNavPathAllowed(
+  matchPath: string,
+  originFilePath?: string,
+): boolean {
+  const segments = splitPath(matchPath);
+  const origin = originFilePath ? splitPath(originFilePath) : [];
+  // Only directory segments can be excluded; the last segment is the file.
+  for (let i = 0; i < segments.length - 1; i++) {
+    const name = segments[i]!;
+    const excluded =
+      CODE_NAV_ALWAYS_IGNORED_DIRS.includes(name) ||
+      (i === 0 && CODE_NAV_ROOT_ONLY_IGNORED_DIRS.includes(name));
+    if (!excluded) continue;
+    if (!isAncestorOfOrigin(segments, origin, i)) return false;
+  }
+  return true;
+}
+
+/** Do `segments[0..i]` name the same directory the origin sits under? */
+function isAncestorOfOrigin(
+  segments: string[],
+  origin: string[],
+  i: number,
+): boolean {
+  if (origin.length <= i + 1) return false;
+  for (let j = 0; j <= i; j++) {
+    if (origin[j] !== segments[j]) return false;
+  }
+  return true;
+}
+
+export function buildRgArgs(
+  symbol: string,
+  language?: string,
+  /**
+   * Repo-relative path the request originated from. Belt and braces for
+   * #1558: a segment the origin file itself lives under is never excluded for
+   * that request, so a symbol in a changed file can always find its own
+   * siblings even if the directory name looks like tool output.
+   */
+  originFilePath?: string,
+): string[] {
   const args: string[] = [
     "--json",
     "--line-number",
@@ -273,8 +359,26 @@ export function buildRgArgs(symbol: string, language?: string): string[] {
     "--no-messages",
   ];
 
-  for (const dir of CODE_NAV_IGNORED_GLOBS) {
+  const originSegments = originFilePath
+    ? pathSegments(originFilePath)
+    : new Set<string>();
+  // Which directory the origin file sits at the TOP of, if any. A root-only
+  // glob prunes the search root alone, so only an origin that actually lives
+  // under that root directory needs the exclusion lifted — a first-party
+  // package deeper in the tree (`src/…/vendor/app/`) was never pruned by it,
+  // and lifting it for that request un-excluded the real `vendor/` (#1559).
+  const originRoot = originFilePath ? (splitPath(originFilePath)[0] ?? "") : "";
+
+  for (const dir of CODE_NAV_ALWAYS_IGNORED_DIRS) {
+    if (originSegments.has(dir)) continue;
     args.push("--glob", `!${dir}`);
+  }
+
+  for (const dir of CODE_NAV_ROOT_ONLY_IGNORED_DIRS) {
+    if (originRoot === dir) continue;
+    // Leading slash anchors the glob to the search root, so only a top-level
+    // `vendor/` (etc.) is pruned — not a same-named package deeper in the tree.
+    args.push("--glob", `!/${dir}`);
   }
 
   if (language) {
@@ -509,7 +613,7 @@ export async function resolveCodeNav(
     };
   }
 
-  const args = buildRgArgs(request.symbol, request.language);
+  const args = buildRgArgs(request.symbol, request.language, request.filePath);
 
   const result = await runtime.runCommand("rg", args, {
     cwd,
@@ -532,7 +636,7 @@ export async function resolveCodeNav(
     result.stdout,
     request.symbol,
     request.language,
-  );
+  ).filter((loc) => isCodeNavPathAllowed(loc.filePath, request.filePath));
 
   const ranked = rankLocations(locations, {
     sourceFilePath: request.filePath,

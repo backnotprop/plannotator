@@ -24,6 +24,7 @@ import {
   detectRemoteDefaultInfo,
   isBinaryPatchFile,
   listPatchFiles,
+  STATIC_PATCH_DIFF_TYPE,
   type RemoteDefaultInfo,
   type SinceBaseSections,
 } from "@plannotator/shared/review-core";
@@ -278,6 +279,16 @@ export async function startReviewServer(
   // Session-constant capability advert; rides every diff payload (see the
   // option's doc). Absent option = false, so old callers advertise honestly.
   const approvalNotesSupported = options.approvalNotesSupported === true;
+  // Static patch mode (`plannotator review --patch-file`): the diff is
+  // caller-supplied bytes, so there is no repo, no working tree and no VCS
+  // behind it. Advertised to the client as `sourceKind: "patch"` on every diff
+  // payload (absent reads as "vcs"), and enforced here by 400ing the endpoints
+  // that would otherwise resolve patch paths against whatever cwd the server
+  // happens to run in.
+  const isStaticPatchMode = options.diffType === STATIC_PATCH_DIFF_TYPE;
+  const sourceKindAdvert = isStaticPatchMode
+    ? ({ sourceKind: "patch" } as const)
+    : ({} as Record<string, never>);
   const submitPlatformReview = options.prReviewSubmitter ?? submitPRReview;
   const aiEnabled = resolveAIEnabled();
 
@@ -1708,12 +1719,17 @@ export async function startReviewServer(
 
   // Detect repo info (cached for this session)
   // In PR mode, derive from metadata instead of local git
-  let repoInfo = isPRMode && prMetadata
+  // Static patch: the session has no repository. Whatever repo the process
+  // happens to sit in is NOT the patch's origin, and advertising it would put
+  // an unrelated repo and branch in the review header.
+  let repoInfo = isStaticPatchMode
+    ? undefined
+    : isPRMode && prMetadata
     ? { display: getDisplayRepo(prMetadata), branch: `${getMRLabel(prMetadata)} ${getMRNumberLabel(prMetadata)}` }
     : workspace
       ? { display: basename(workspace.root), branch: "Workspace" }
     : await getRepoInfo();
-  if (gitContext?.repository?.displayFallback) {
+  if (!isStaticPatchMode && gitContext?.repository?.displayFallback) {
     repoInfo = {
       ...repoInfo,
       display: repoInfo?.display || gitContext.repository.displayFallback,
@@ -2070,7 +2086,7 @@ export async function startReviewServer(
               snapshotId: servedSnapshotId,
               origin,
               mode: isWorkspaceMode ? "workspace" : undefined,
-              diffType: hasLocalAccess || isWorkspaceMode ? servedDiffType : undefined,
+              diffType: hasLocalAccess || isWorkspaceMode || isStaticPatchMode ? servedDiffType : undefined,
               // Echo the active base so a page refresh or reconnect rehydrates
               // the picker to what the server is actually using — not the
               // detected default.
@@ -2080,6 +2096,7 @@ export async function startReviewServer(
               gitContext: hasLocalAccess ? servedGitContext : undefined,
               sharingEnabled,
               approvalNotesSupported,
+              ...sourceKindAdvert,
               // Mount is the only place the pin matters, so it rides /api/diff
               // alone (not the switch endpoints).
               ...(options.openStatePinned && { openStatePinned: true }),
@@ -2119,6 +2136,10 @@ export async function startReviewServer(
 
           // API: List apps the host can open a file in (Open in App control).
           if (url.pathname === "/api/open-in/apps" && req.method === "GET") {
+            // Static patch mode has no tree the patch's paths belong to, so
+            // advertise no apps: the client hides the control rather than
+            // offering to open a same-named file from an unrelated checkout.
+            if (isStaticPatchMode) return Response.json({ available: false, apps: [] });
             return handleOpenInApps();
           }
 
@@ -2131,6 +2152,16 @@ export async function startReviewServer(
             if (isGitButlerCommittedView()) {
               return Response.json(
                 { error: "Open in app is unavailable for committed GitButler views" },
+                { status: 400 },
+              );
+            }
+            // A static patch's paths are relative to whatever tree produced
+            // the patch, which this process cannot know — resolving them
+            // against process.cwd() would open an unrelated file with the
+            // same name. Refuse instead of guessing.
+            if (isStaticPatchMode) {
+              return Response.json(
+                { error: "Open in app is unavailable for a static patch review" },
                 { status: 400 },
               );
             }
@@ -2440,6 +2471,7 @@ export async function startReviewServer(
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
                   approvalNotesSupported,
+                  ...sourceKindAdvert,
                   diffType: currentDiffType,
                   diffOptions: workspace.diffOptions,
                   hideWhitespace: currentHideWhitespace,
@@ -2600,6 +2632,7 @@ export async function startReviewServer(
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
                 approvalNotesSupported,
+                ...sourceKindAdvert,
                 diffType: currentDiffType,
                 // Echo the base the server actually used. resolveBaseBranch
                 // trusts the caller verbatim; this echo lets the client
@@ -2665,6 +2698,7 @@ export async function startReviewServer(
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
                   approvalNotesSupported,
+                  ...sourceKindAdvert,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
                   ...(currentError && { error: currentError }),
@@ -2722,6 +2756,7 @@ export async function startReviewServer(
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
                   approvalNotesSupported,
+                  ...sourceKindAdvert,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
                   ...((currentError ?? upgradeError) && { error: currentError ?? upgradeError }),
@@ -2770,6 +2805,7 @@ export async function startReviewServer(
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
                 approvalNotesSupported,
+                ...sourceKindAdvert,
                 prDiffScope: currentPRDiffScope,
                 semanticDiff: await getSemanticDiffAdvert(),
                 callFlow: await getCallFlowAdvert(),
@@ -2899,6 +2935,7 @@ export async function startReviewServer(
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
                 approvalNotesSupported,
+                ...sourceKindAdvert,
                 prMetadata: pr.metadata,
                 // The new PR's checkout (null while warming) so Open-in re-roots
                 // immediately on switch instead of waiting for the 5s probe.
@@ -3016,6 +3053,14 @@ export async function startReviewServer(
 
           // API: Get file content for expandable diff context
           if (url.pathname === "/api/file-content" && req.method === "GET") {
+            // No working tree behind a static patch: the patch IS the whole
+            // content of the session, so there is nothing to expand into.
+            if (isStaticPatchMode) {
+              return Response.json(
+                { error: "File content is unavailable for a static patch review" },
+                { status: 400 },
+              );
+            }
             const filePath = url.searchParams.get("path");
             if (!filePath) {
               return Response.json({ error: "Missing path" }, { status: 400 });
@@ -3230,6 +3275,12 @@ export async function startReviewServer(
 
           // API: Stage / unstage a file (disabled when VCS doesn't support it)
           if (url.pathname === "/api/git-add" && req.method === "POST") {
+            if (isStaticPatchMode) {
+              return Response.json(
+                { error: "Staging is unavailable for a static patch review" },
+                { status: 400 },
+              );
+            }
             try {
               const body = (await req.json()) as { filePath?: unknown; undo?: boolean };
               if (typeof body.filePath !== "string" || !body.filePath) {

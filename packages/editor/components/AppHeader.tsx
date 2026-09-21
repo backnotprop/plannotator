@@ -39,6 +39,11 @@ interface AppHeaderProps {
   canRefreshHtml?: boolean;
   isRefreshingHtml?: boolean;
   onRefreshHtml?: () => void;
+  /** Leave a linked HTML document. Passed only while one is open; the sidebar's
+   *  own "Back to …" header is not reachable when the sidebar stays closed. */
+  onHtmlLinkedDocBack?: () => void;
+  /** "Back to <root file name>" for the control's tooltip and accessible name. */
+  htmlLinkedDocBackDescription?: string;
   /** Compact touch layouts replace the brand mark with a task-focused entry
    * into the full-stage document navigator. Desktop never receives it. */
   compactTouchLayout?: boolean;
@@ -148,6 +153,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   canRefreshHtml,
   isRefreshingHtml,
   onRefreshHtml,
+  onHtmlLinkedDocBack,
+  htmlLinkedDocBackDescription,
   compactTouchLayout = false,
   compactNavigatorAvailable = false,
   compactNavigatorOpen = false,
@@ -373,13 +380,14 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {/* HTML and live-app surfaces only: the eye (show/hide tools, the
-            only way back from hidden), the refresh, and the Interact/Annotate
-            pen, in that order. The published control carries the markup;
-            the compact touch shell offers the same three actions in its
-            Options menu instead (compactDocumentActions in App: Show/Hide
-            tools, Interact/Annotate, Refresh from disk). */}
-        {htmlSurface && (onToggleHtmlTools || onToggleHtmlAnnotate) && (
+        {/* HTML and live-app surfaces only: back (while a linked document is
+            open), the eye (show/hide tools, the only way back from hidden),
+            the refresh, and the Interact/Annotate pen, in that order. The
+            published control carries the markup; the compact touch shell
+            offers the same actions in its Options menu instead
+            (compactDocumentActions in App: Back to <file>, Show/Hide tools,
+            Interact/Annotate, Refresh from disk). */}
+        {htmlSurface && (onToggleHtmlTools || onToggleHtmlAnnotate || onHtmlLinkedDocBack) && (
           <HtmlSurfaceControls
             compact={compactTouchLayout}
             armed={!!htmlAnnotateArmed}
@@ -389,6 +397,8 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             canRefresh={!!canRefreshHtml && !!onRefreshHtml}
             onRefresh={() => onRefreshHtml?.()}
             isRefreshing={!!isRefreshingHtml}
+            onBack={onHtmlLinkedDocBack}
+            backDescription={htmlLinkedDocBackDescription}
             labels={PLANNOTATOR_HTML_REFRESH_LABELS}
           />
         )}

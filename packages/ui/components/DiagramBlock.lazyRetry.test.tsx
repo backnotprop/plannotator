@@ -16,12 +16,21 @@
  *
  * DOM-gated (DOM_TESTS=1).
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Block } from '../types';
+import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { MermaidBlock, __setMermaidRuntimeLoaderForTests } from './MermaidBlock';
 import { GraphvizBlock, __setVizLoaderForTests } from './GraphvizBlock';
+
+// happy-dom cannot host DOMPurify: the render slot's parse step is the inert
+// template parse for these tests (the scrub still runs).
+let restoreParser: (() => void) | null = null;
+beforeAll(() => {
+  if (hasDom) restoreParser = installInertDiagramSvgParser();
+});
+afterAll(() => restoreParser?.());
 import {
   getMathRenderer,
   getMathRendererSource,
@@ -39,7 +48,10 @@ const mermaidBlock: Block = { id: 'm1', type: 'code', language: 'mermaid', conte
 const dotBlock: Block = { id: 'g1', type: 'code', language: 'dot', content: 'digraph { A -> B }', order: 0, startLine: 1 };
 
 const fakeMermaid = { initialize() {}, render: async () => ({ svg: SVG }) } as never;
-const fakeViz = { renderString: async () => SVG } as never;
+// The renderer slot drives the engine through `render()` (a value with the
+// status and the errors, never a throw for a bad graph), so the stand-in
+// answers that shape.
+const fakeViz = { render: () => ({ status: 'success', output: SVG, errors: [] }) } as never;
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -101,6 +113,37 @@ const cases = [
     errorTitle: 'Graphviz Error',
   },
 ];
+
+/**
+ * Since Mermaid 12 the plan editor takes the lazy path itself, so the window
+ * between mount and the first render is now a user-visible state on every
+ * surface. What regresses: the block flashes the error panel (or nothing)
+ * while the runtime is still loading, instead of the source under a status.
+ */
+describe('Mermaid pending state', () => {
+  test.skipIf(!hasDom)('shows the source under a rendering status until the runtime lands, never the error panel', async () => {
+    let release: (() => void) | null = null;
+    __setMermaidRuntimeLoaderForTests(
+      () => new Promise((resolve) => { release = () => resolve(fakeMermaid); }),
+      { retryDelayMs: RETRY_DELAY_MS },
+    );
+    const el = await mount(<MermaidBlock block={mermaidBlock} />);
+    await settle(RETRY_DELAY_MS);
+
+    expect(el.querySelector('[data-mermaid-pending]')).not.toBeNull();
+    expect(el.textContent).toContain('Rendering diagram');
+    expect(el.textContent).toContain(mermaidBlock.content);
+    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.innerHTML).not.toContain('data-sentinel="diagram"');
+
+    await act(async () => { release!(); });
+    await settle(RETRY_DELAY_MS * 3);
+
+    expect(el.querySelector('[data-mermaid-pending]')).toBeNull();
+    expect(el.textContent).not.toContain('Rendering diagram');
+    expect(el.innerHTML).toContain('data-sentinel="diagram"');
+  });
+});
 
 describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source, errorTitle }) => {
   test.skipIf(!hasDom)('a runtime that fails once renders the diagram after the automatic re-attempt', async () => {
@@ -183,7 +226,7 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
   });
 
   test.skipIf(!hasDom)('a diagram syntax error keeps the existing panel without a Retry button', async () => {
-    const broken = { initialize() {}, render: async () => { throw new Error('Parse error'); }, renderString: async () => { throw new Error('Parse error'); } } as never;
+    const broken = { initialize() {}, render: () => { throw new Error('Parse error'); } } as never;
     let calls = 0;
     install(() => { calls += 1; return Promise.resolve(broken); });
     const el = await mount(element);

@@ -80,11 +80,15 @@ describe('review entry assets', () => {
     },
   );
 
-  // Mermaid is eager in the plan editor by policy (the portal entry chunk must
-  // keep it, as on main) and deliberately absent from the review editor, which
-  // never renders a Mermaid block: importing it there would grow that bundle.
-  test('only the plan editor registers the eager Mermaid runtime', () => {
-    expect(read('packages/editor/App.tsx')).toContain("import '@plannotator/ui/utils/mermaid-eager';");
+  // Mermaid is LAZY in both apps by policy since Mermaid 12: the runtime (ELK
+  // layout by default, ~1.8 MB more than 11) loads on the first diagram
+  // through utils/mermaid's own import('mermaid'), so a plan with no diagram
+  // never pays for it in a chunked build (the share portal). Re-adding the
+  // eager entry to either app would put the whole runtime back into that
+  // entry chunk with no error anywhere; the review editor never renders a
+  // Mermaid block at all.
+  test('neither app registers the eager Mermaid runtime', () => {
+    expect(read('packages/editor/App.tsx')).not.toContain('mermaid-eager');
     expect(read('packages/review-editor/App.tsx')).not.toContain('mermaid-eager');
   });
 
@@ -114,7 +118,10 @@ describe('review entry assets', () => {
     expect(read('packages/ui/utils/mermaid.ts')).not.toMatch(staticImport('mermaid'));
     expect(read('packages/ui/utils/mermaid.ts')).toContain("import('mermaid')");
     expect(read('packages/ui/components/GraphvizBlock.tsx')).not.toMatch(staticImport('@viz-js/viz'));
-    expect(read('packages/ui/components/GraphvizBlock.tsx')).toContain("import('@viz-js/viz')");
+    expect(read('packages/ui/components/DiagramBlock.tsx')).not.toMatch(staticImport('@viz-js/viz'));
+    expect(read('packages/ui/utils/diagram-render.ts')).not.toMatch(staticImport('@viz-js/viz'));
+    expect(read('packages/ui/utils/graphviz.ts')).not.toMatch(staticImport('@viz-js/viz'));
+    expect(read('packages/ui/utils/graphviz.ts')).toContain("import('@viz-js/viz')");
     expect(read('packages/ui/utils/generateIdentity.ts')).not.toMatch(staticImport('unique-username-generator'));
   });
 
@@ -128,23 +135,25 @@ describe('review entry assets', () => {
   //   dictionary is imported ONLY by identity-tater). These are the guards for
   //   a dropped or tree-shaken side-effect import (a future
   //   `"sideEffects": false` would let Vite discard `import '.../math-eager'`,
-  //   the slot would stay empty and every runtime would paint TeX for a frame;
-  //   a dropped mermaid-eager would move Mermaid into a lazy portal chunk that
-  //   can fail separately). Proven by removing each import and rebuilding: the
-  //   registration marker count drops to zero while the presence markers stay.
-  //   The review bundle must NOT carry the Mermaid marker: it never renders a
-  //   Mermaid block and main's review bundle has no Mermaid in it.
+  //   the slot would stay empty and every runtime would paint TeX for a frame).
+  //   Proven by removing each import and rebuilding: the registration marker
+  //   count drops to zero while the presence markers stay. The Mermaid
+  //   registration marker is asserted ABSENT from both bundles: since Mermaid
+  //   12 the plan editor loads the runtime lazily by policy, and an eager
+  //   import creeping back in would only show up as a bigger portal entry
+  //   chunk. The review bundle carries no Mermaid at all.
   // - Presence markers (a KaTeX class name, a Mermaid diagram id, an
   //   Emscripten symbol from Graphviz, the bridge global), which only say the
   //   runtime is still inlined by inlineDynamicImports. KaTeX is inlined
   //   through utils/math-default-loader.ts's import('katex') whether or not it is registered,
-  //   so `katex-display` cannot prove registration and is not asked to.
+  //   so `katex-display` cannot prove registration and is not asked to; the
+  //   Mermaid diagram id in the plan bundle likewise proves inlining only.
   //
   // dist/ is gitignored, so this is skipped on an unbuilt checkout; the CI job
   // that builds the bundles runs it right after.
   const REGISTRATION_MARKERS = ['plannotator-math-eager', 'uniqueUsernameGenerator'];
   const markerExpectations: Array<[bundle: string, present: string[], absent: string[]]> = [
-    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'plannotator-mermaid-eager', 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], []],
+    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
     ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2']],
   ];
   for (const [path, present, absent] of markerExpectations) {

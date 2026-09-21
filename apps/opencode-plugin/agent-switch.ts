@@ -1,7 +1,19 @@
-import { supportsSwitchAgent, type V2ContextLike } from "./v2-client";
+import {
+  supportsSwitchAgent,
+  supportsSwitchModel,
+  type V2ContextLike,
+} from "./v2-client";
+
+/** OpenCode's durable model selection associated with an agent. */
+export interface OpenCodeAgentModel {
+  providerID: string;
+  id: string;
+  variant?: string;
+}
 
 export interface OpenCodeAgentLike {
   name?: string;
+  model?: OpenCodeAgentModel;
 }
 
 interface OpenCodeClientLike {
@@ -28,7 +40,8 @@ function warnAgentUnavailable(
   delivery: AgentSwitchDelivery,
 ): void {
   const action = delivery === "plan-approval" ? "approving the plan" : "sending feedback";
-  const message = `Configured OpenCode agent "${targetAgent}" is not available; ${action} without switching agents.`;
+  const message = `Configured OpenCode agent "${targetAgent}" is not available; `
+    + `${action} without switching agents.`;
 
   try {
     void client.app?.log?.({ level: "info", message: `[Plannotator] ${message}` });
@@ -80,8 +93,11 @@ export async function resolveValidatedTargetAgent(input: {
  * `ctx.session.switchAgent` arrived with the same plugin-API generation as
  * native command execution, so it is duck-typed rather than imported: on a host
  * without it the plan is still approved and the caller is told the switch was
- * skipped. Returns the agent actually switched to, or undefined when the
- * session's agent was left alone.
+ * skipped. An agent's configured model is a separate durable session selection
+ * in OpenCode, so this applies both selections in the same order as its clients.
+ * A missing or failing model capability does not undo a successful agent switch.
+ * Returns the agent actually switched to, or undefined when the session's agent
+ * was left alone.
  */
 export async function switchV2SessionAgent(input: {
   ctx: V2ContextLike;
@@ -94,22 +110,51 @@ export async function switchV2SessionAgent(input: {
   const targetAgent = resolveTargetAgent(input.requestedAgent);
   if (!targetAgent) return undefined;
 
-  const available = (await input.getAgents()).some((agent) => agent.name === targetAgent);
-  if (!available) {
-    warn(`[Plannotator] Configured OpenCode agent "${targetAgent}" is not available; approving the plan without switching agents.`);
+  const selected = (await input.getAgents()).find((agent) => agent.name === targetAgent);
+  if (!selected) {
+    warn(
+      `[Plannotator] Configured OpenCode agent "${targetAgent}" is not available; `
+      + "approving the plan without switching agents.",
+    );
     return undefined;
   }
 
   if (!supportsSwitchAgent(input.ctx)) {
-    warn("[Plannotator] This OpenCode 2 host does not expose agent switching to plugins; approving the plan without switching agents.");
+    warn(
+      "[Plannotator] This OpenCode 2 host does not expose agent switching to plugins; "
+      + "approving the plan without switching agents.",
+    );
     return undefined;
   }
 
   try {
     await input.ctx.session!.switchAgent!({ sessionID: input.sessionID, agent: targetAgent });
   } catch (error) {
-    warn(`[Plannotator] Could not switch the OpenCode session to "${targetAgent}": ${error instanceof Error ? error.message : String(error)}`);
+    const detail = error instanceof Error ? error.message : String(error);
+    warn(`[Plannotator] Could not switch the OpenCode session to "${targetAgent}": ${detail}`);
     return undefined;
+  }
+
+  if (!selected.model) return targetAgent;
+
+  if (!supportsSwitchModel(input.ctx)) {
+    warn(
+      `[Plannotator] Switched the OpenCode session to "${targetAgent}", but this host cannot `
+      + "select its configured model.",
+    );
+    return targetAgent;
+  }
+
+  try {
+    await input.ctx.session!.switchModel!({
+      sessionID: input.sessionID,
+      model: selected.model,
+    });
+  } catch (error) {
+    warn(
+      `[Plannotator] Switched the OpenCode session to "${targetAgent}", but could not select `
+      + `its configured model: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   return targetAgent;

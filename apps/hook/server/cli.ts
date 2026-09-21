@@ -141,7 +141,7 @@ export function formatTopLevelHelp(): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--tailscale] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [PR_URL]",
     "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
@@ -175,7 +175,7 @@ export function formatTopLevelHelp(): string {
 export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--tailscale] [--json] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--tailscale] [--json] [PR_URL]",
     "",
     "Review local VCS changes or a GitHub/GitLab pull request in the browser.",
     "",
@@ -190,9 +190,12 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                Session-only; never changes your saved defaults. Git only.",
     "  --local       For PR review, prepare a local checkout for full file access (default)",
     "  --no-local    For PR review, skip the local checkout (diff only)",
+    "  --patch-file  Display a static unified diff from a file, or use - for stdin",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --json        Emit one decision/message JSON record instead of plaintext",
     "  PR_URL        GitHub PR or GitLab MR URL to review",
+    "",
+    "  --patch-file cannot be combined with PR_URL.",
     "",
     "JSON output:",
     '  { "decision": "approved" | "annotated" | "dismissed", "message": string }',
@@ -206,6 +209,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  plannotator review --git",
     "  plannotator review --gitbutler",
     "  plannotator review --base feature/part-1   # review one layer of a stacked branch",
+    "  plannotator review --patch-file reading.diff",
     "  plannotator review https://github.com/owner/repo/pull/123",
   ].join("\n"),
   annotate: [

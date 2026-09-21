@@ -1,0 +1,198 @@
+{
+	"mermaid": "11.17.2",
+	"renderId": "diagram-fixture",
+	"viewBox": "0 0 457.75 742",
+	"hostRect": {
+		"x": 0,
+		"y": 0,
+		"width": 960,
+		"height": 640
+	},
+	"svgRect": {
+		"x": 0,
+		"y": 0,
+		"width": 457.75,
+		"height": 742
+	},
+	"svgCtm": {
+		"a": 1,
+		"b": 0,
+		"c": 0,
+		"d": 1,
+		"e": 0,
+		"f": 0
+	},
+	"elements": {
+		"diagram-fixture-id_entity-PROJECT-0_entity-PLAN-1_0": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid relationshipLine",
+			"bbox": {
+				"x": 226.3280029296875,
+				"y": 92,
+				"width": 0,
+				"height": 101
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 0,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-id_entity-PLAN-1_entity-VERSION-2_1": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid relationshipLine",
+			"bbox": {
+				"x": 80.89099884033203,
+				"y": 266.8009948730469,
+				"width": 95.43700408935547,
+				"height": 111.19900512695312
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 0,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-id_entity-PLAN-1_entity-DECISION-3_2": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid relationshipLine",
+			"bbox": {
+				"x": 276.3280029296875,
+				"y": 266.8009948730469,
+				"width": 95.43798828125,
+				"height": 132.57400512695312
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 0,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-id_entity-DECISION-3_entity-REVIEWER-4_3": {
+			"tag": "path",
+			"class": "edge-thickness-normal edge-pattern-solid relationshipLine",
+			"bbox": {
+				"x": 371.7659912109375,
+				"y": 527.625,
+				"width": 0,
+				"height": 122.375
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 0,
+				"f": 0
+			},
+			"label": ""
+		},
+		"diagram-fixture-entity-PROJECT-0": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -52.0390625,
+				"y": -42,
+				"width": 104.078125,
+				"height": 84
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 226.328125,
+				"f": 50
+			},
+			"label": "PROJECT"
+		},
+		"diagram-fixture-entity-PLAN-1": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -50,
+				"y": -42,
+				"width": 100,
+				"height": 84
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 226.328125,
+				"f": 235
+			},
+			"label": "PLAN"
+		},
+		"diagram-fixture-entity-VERSION-2": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -72.890625,
+				"y": -85.5,
+				"width": 145.78125,
+				"height": 171
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 80.890625,
+				"f": 463.5
+			},
+			"label": "VERSION"
+		},
+		"diagram-fixture-entity-DECISION-3": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -77.984375,
+				"y": -64.125,
+				"width": 155.96875,
+				"height": 128.25
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 371.765625,
+				"f": 463.5
+			},
+			"label": "DECISION"
+		},
+		"diagram-fixture-entity-REVIEWER-4": {
+			"tag": "g",
+			"class": "node default",
+			"bbox": {
+				"x": -55.9140625,
+				"y": -42,
+				"width": 111.828125,
+				"height": 84
+			},
+			"ctm": {
+				"a": 1,
+				"b": 0,
+				"c": 0,
+				"d": 1,
+				"e": 371.765625,
+				"f": 692
+			},
+			"label": "REVIEWER"
+		}
+	}
+}

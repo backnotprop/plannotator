@@ -32,7 +32,7 @@ describe("CLI top-level help", () => {
     expect(output).toContain("plannotator [--browser <name>]");
     // Deliberate literal: the review usage line is API surface for agents
     // probing --help (and for the knowledge-skill freshness guard).
-    expect(output).toContain("plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--tailscale] [PR_URL]");
+    expect(output).toContain("plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [PR_URL]");
     expect(output).toContain("plannotator annotate <file.md | file.txt | file.html | https://... | folder/>");
     expect(output).toContain("[--markdown] [--no-jina]");
     expect(output).toContain("plannotator annotate-last [--stdin]");
@@ -113,6 +113,7 @@ describe("CLI subcommand help", () => {
     // Deliberate literals: the open-state flag tokens are API surface.
     expect(formatSubcommandHelp("review")).toContain("--base <ref>");
     expect(formatSubcommandHelp("review")).toContain("--diff-type <type>");
+    expect(formatSubcommandHelp("review")).toContain("--patch-file <path | ->");
     expect(formatSubcommandHelp("review")).toContain("PR_URL");
     expect(formatSubcommandHelp("annotate")).toContain("--no-jina");
     expect(formatSubcommandHelp("annotate")).toContain("--require-approval");

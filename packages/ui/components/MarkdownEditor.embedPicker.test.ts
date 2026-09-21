@@ -225,6 +225,43 @@ describe('embed picker: empty states', () => {
   });
 });
 
+describe('embed picker: host labels', () => {
+  test.skipIf(!hasDom)('a host replaces the three type-naming rows; an absent key keeps the built-in text', async () => {
+    // Sentinel strings: the point is that the host's wording reaches the row,
+    // and that a missing key falls back, not what the words are.
+    const labels = { upload: 'UPLOAD-SENTINEL', empty: 'EMPTY-SENTINEL', noMatch: (q: string) => `NOMATCH-${q}` };
+
+    const empty = await requirePickerResult(createView('/embed ', {
+      getTargets: () => [], buildInsertLine, uploadTarget: async () => null, labels,
+    }));
+    requireOption(empty, 'EMPTY-SENTINEL');
+    requireOption(empty, 'UPLOAD-SENTINEL');
+    expect(empty.options.some((o) => o.label === 'Upload HTML...')).toBe(false);
+
+    const noMatch = await requirePickerResult(createView('/embed missing', {
+      getTargets: () => [REPORT], buildInsertLine, labels,
+    }));
+    requireOption(noMatch, 'NOMATCH-missing');
+
+    // Only `upload` supplied: the empty row keeps the built-in wording.
+    const partial = await requirePickerResult(createView('/embed ', {
+      getTargets: () => [], buildInsertLine, uploadTarget: async () => null, labels: { upload: 'UPLOAD-SENTINEL' },
+    }));
+    requireOption(partial, 'No HTML files in this workspace');
+    requireOption(partial, 'UPLOAD-SENTINEL');
+  });
+
+  test.skipIf(!hasDom)('the custom upload row still uploads and inserts', async () => {
+    const view = createView('/embed ', {
+      getTargets: () => [], buildInsertLine, uploadTarget: async () => REPORT, labels: { upload: 'UPLOAD-SENTINEL' },
+    });
+    const result = await requirePickerResult(view);
+    applyOption(view, result, requireOption(result, 'UPLOAD-SENTINEL'));
+    await settleUpload();
+    expect(view.state.doc.toString()).toContain(buildInsertLine(REPORT));
+  });
+});
+
 describe('embed picker: upload row availability', () => {
   test.skipIf(!hasDom)('shows Upload HTML in populated and empty menus only when configured', async () => {
     const uploadTarget = async (): Promise<EmbedTarget | null> => null;

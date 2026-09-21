@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { useVimDocumentFocus } from "../../hooks/useVimDocumentFocus";
@@ -24,6 +25,8 @@ import {
   type VimHudCommand,
 } from "../../utils/vimHud";
 import { AnnotationToolbar } from "../AnnotationToolbar";
+import type { SelectionAction } from "../../utils/selectionActions";
+import type { MentionSource } from "../../utils/mentions";
 import { AttachmentsButton } from "../AttachmentsButton";
 import {
   CommentPopover,
@@ -190,6 +193,18 @@ export interface HtmlViewerProps {
   currentPageUrl?: string;
   /** Live-mode page navigation reports (ready pageUrl + page-change). */
   onPageChange?: (pageUrl: string) => void;
+  /** A link the framed srcdoc document swallowed rather than navigating to.
+   *  A srcdoc document's base URL is the PARENT page's, so an unhandled
+   *  `<a href="other.html">` would load the host app inside the frame; the
+   *  bridge suppresses every such navigation and relays the RAW href here
+   *  (bounded and screened at the trust boundary) for the host to resolve —
+   *  see `resolveHtmlLinkIntent`. In-page `#fragment` links are scrolled by
+   *  the bridge and never reported. Never fires in live (`src`) sessions,
+   *  which navigate the proxied app for real. */
+  onOpenLink?: (href: string) => void;
+  /** Fragment to scroll to once this document's bridge is ready, for a
+   *  linked document opened from a `#`-carrying link. Bare id, no `#`. */
+  initialFragment?: string;
   annotations: Annotation[];
   onAddAnnotation: (ann: Annotation) => void;
   onSelectAnnotation: (id: string | null) => void;
@@ -209,6 +224,9 @@ export interface HtmlViewerProps {
   onAnnotateModeExit?: () => void;
   /** Mod+Shift+A pressed while focus lived inside the iframe. */
   onAnnotateModeToggle?: () => void;
+  /** Mod+Shift+X pressed while focus lived inside the iframe: show/hide the
+   *  host's floating tools over the page. The host owns that state. */
+  onToolsToggle?: () => void;
   /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
   vimModeEnabled?: boolean;
   /** Replace the iframe-local compact badge with the shared live key HUD. */
@@ -250,6 +268,18 @@ export interface HtmlViewerProps {
    *  to the bridge so the in-page toggle stops at the same number. Default
    *  16 (the package cap); absent leaves every message unchanged. */
   maxAdditionalTargets?: number;
+  /** Opt-in host capability, passed straight through to the selection
+   *  toolbar: the host's own commands for the current selection, rendered as
+   *  one wand button that opens the package's dropdown. Absent → unchanged. */
+  selectionActions?: SelectionAction[];
+  /** Opt-in host capability: the glyph on the `selectionActions` button.
+   *  Absent → the package's own wand. */
+  selectionActionsIcon?: ReactNode;
+  /** Opt-in host capability, forwarded to BOTH comment composers this viewer
+   *  mounts (the pinpoint/selection composer and the global one): the `@`
+   *  mention source for the composer's picker. The picked ids ride onto the
+   *  created annotation as `Annotation.mentions`. Absent → unchanged. */
+  mentionSource?: MentionSource;
   /** scrollIntoView behavior when a selected annotation is scrolled into
    *  view inside the page. Default 'smooth'; pass 'auto' to carry the
    *  parent's reduced-motion preference across the iframe boundary. */
@@ -308,6 +338,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       liveSession,
       currentPageUrl,
       onPageChange,
+      onOpenLink,
+      initialFragment,
       annotations,
       onAddAnnotation,
       onSelectAnnotation,
@@ -317,6 +349,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       annotateModeActive = true,
       onAnnotateModeExit,
       onAnnotateModeToggle,
+      onToolsToggle,
       vimModeEnabled = false,
       vimHudEnabled = false,
       vimHudKeyPanelEnabled = true,
@@ -334,6 +367,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       readOnly = false,
       onUnanchoredChange,
       maxAdditionalTargets,
+      selectionActions,
+      selectionActionsIcon,
+      mentionSource,
       scrollBehavior,
       title = "HTML Plan Viewer",
       bridgeScriptUrl,
@@ -372,6 +408,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     onAnnotateModeExitRef.current = onAnnotateModeExit;
     const onAnnotateModeToggleRef = useRef(onAnnotateModeToggle);
     onAnnotateModeToggleRef.current = onAnnotateModeToggle;
+    const onToolsToggleRef = useRef(onToolsToggle);
+    onToolsToggleRef.current = onToolsToggle;
 
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
@@ -569,6 +607,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onResize: handleResize,
       live: liveSession,
       onPageChange,
+      onLinkClick: onOpenLink,
       onBridgePointer: handleBridgePointer,
       onUnanchoredChange: handleBridgeUnanchored,
       maxAdditionalTargets,
@@ -697,6 +736,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           onAnnotateModeToggleRef.current?.();
           return;
         }
+        if (isRecord(e.data) && e.data.type === `${PREFIX}tools-toggle`) {
+          onToolsToggleRef.current?.();
+          return;
+        }
         const vimCopy = parseVimBridgeCopy(e.data);
         if (vimCopy !== null) {
           const iframe = iframeRef.current;
@@ -797,6 +840,13 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       bridgeReportedRef.current = false;
       postToBridge({ type: `${PREFIX}report-unanchored` });
     }, [iframeReadyVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // A linked document opened from a `#`-carrying link: the srcdoc document
+    // has no URL, so the fragment is replayed once its bridge is ready.
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !initialFragment) return;
+      postToBridge({ type: `${PREFIX}scroll-to-fragment`, fragment: initialFragment });
+    }, [iframeReadyVersion, initialFragment, postToBridge]);
 
     // Live page navigation with a ready iframe: explicitly clear the previous
     // page's marks, then re-apply the filtered set. Relying on dead anchors to
@@ -957,7 +1007,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     }));
 
     const handleGlobalCommentSubmit = useCallback(
-      (text: string, images?: ImageAttachment[]) => {
+      (text: string, images?: ImageAttachment[], mentions?: readonly string[]) => {
         if (readOnly) return;
         onAddAnnotation({
           id: `global-${Date.now()}`,
@@ -970,6 +1020,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           author: getIdentity(),
           createdA: Date.now(),
           images,
+          ...(mentions && mentions.length > 0 ? { mentions } : {}),
         });
         setGlobalCommentPopover(null);
       },
@@ -1170,6 +1221,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               // wrapper filters by id as defense in depth, so no present or
               // future toolbar path can emit an arbitrary label here.
               commentOnly
+              selectionActions={selectionActions}
+              selectionActionsIcon={selectionActionsIcon}
               onQuickLabel={(label) => {
                 if (label.id === THUMBS_UP_LABEL.id) hook.handleQuickLabel(label);
               }}
@@ -1190,6 +1243,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={false}
               draftKey={`html:${hook.commentPopover.draftKey}`}
               onSubmit={hook.handleCommentSubmit}
+              mentionSource={mentionSource}
               // Pinpoint clicks open this composer directly, so it carries
               // the surface's one-click "Looks good" (the global composer
               // does not: a document-wide thumbs-up is not a thing).
@@ -1221,6 +1275,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               isGlobal={true}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
+              mentionSource={mentionSource}
               skillReferences
               onAskAI={onAskAI}
               askAIContext={{ kind: "general", label: "Document" }}

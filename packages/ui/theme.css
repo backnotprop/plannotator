@@ -243,6 +243,68 @@
   animation: vim-announcement-dialog-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* First-run terminal-tools announcement: same entrance as the Vim one, and
+ * under reduced motion the panel still fades in, it just does not travel. */
+.terminal-tools-announcement-backdrop {
+  animation: vim-announcement-backdrop-in 160ms ease-out both;
+}
+
+.terminal-tools-announcement-dialog {
+  animation: vim-announcement-dialog-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-tools-announcement-dialog {
+    animation: vim-announcement-backdrop-in 160ms ease-out both;
+  }
+}
+
+/* The "New · Watch:" corner block on the announcement footage, flush to the
+ * frame's top-left edge. Colors come from the dialog's own --announce-brand*
+ * variables (Herdr Annotate's badge palette, deliberately not app tokens); the
+ * periwinkle edge runs only along the two sides that meet the footage. The
+ * sheen is a slow diagonal highlight across the whole block every 4s, never a
+ * blink; the dialog drops the --sheen class under reduced motion and the media
+ * query below is the backstop. */
+.terminal-tools-announcement-tag {
+  position: absolute;
+  overflow: hidden;
+  background: var(--announce-brand, #312b52);
+  color: var(--announce-brand-text, #c9c6f1);
+  border-right: 1px solid color-mix(in srgb, var(--announce-brand-accent, #B9C0FF) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--announce-brand-accent, #B9C0FF) 55%, transparent);
+  box-shadow:
+    2px 2px 0 rgba(0, 0, 0, 0.18),
+    4px 6px 18px rgba(0, 0, 0, 0.32);
+}
+
+.terminal-tools-announcement-tag--sheen::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    color-mix(in srgb, var(--announce-brand-accent, #B9C0FF) 34%, transparent) 50%,
+    transparent 62%
+  );
+  transform: translateX(-100%);
+  animation: terminal-tools-announcement-sheen 4s ease-in-out infinite;
+}
+
+@keyframes terminal-tools-announcement-sheen {
+  0% { transform: translateX(-100%); }
+  45%, 100% { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-tools-announcement-tag--sheen::after {
+    animation: none;
+    display: none;
+  }
+}
+
 .vim-announcement-switch {
   transition:
     border-color 140ms ease,

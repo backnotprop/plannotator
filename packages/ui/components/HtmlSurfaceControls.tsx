@@ -1,38 +1,135 @@
 /**
- * Header controls for a raw-HTML or live-app annotation surface: the eye
- * (show/hide the floating tools over the page), the optional refresh, and
- * the pen (Annotate/Interact toggle). Presentation only; every state lives
- * in the host. Each control renders only when its handler is passed, so a
- * read-only document can show the eye without a pen.
+ * Header controls for a raw-HTML or live-app annotation surface: the optional
+ * back (leave a linked document), the eye (show/hide the floating tools over
+ * the page), the optional refresh, and the pen (Annotate/Interact toggle).
+ * Presentation only; every state lives in the host. Each control renders only
+ * when its handler is passed, so a read-only document can show the eye
+ * without a pen.
  *
- * The markup, data attributes (`data-html-tools-toggle`, `data-html-refresh`,
- * `data-html-annotate-toggle`), aria state and the pixel-stable pen border
+ * Back exists because the sidebar's "Viewing / Back to …" header is not a
+ * dependable way out of a raw-HTML linked document: an HTML surface opens
+ * with the sidebar closed and navigating between HTML documents deliberately
+ * leaves it closed, so the way back has to live in the header. It carries no
+ * keyboard shortcut — `Alt`+`Left` and the browser's own Back are the user's,
+ * not ours.
+ *
+ * The markup, data attributes (`data-html-back`, `data-html-tools-toggle`,
+ * `data-html-refresh`, `data-html-annotate-toggle`), aria state and the pixel-stable pen border
  * are the exact ones Plannotator's header shipped with; hosts get the same
  * control, and `labels` overrides the strings without touching the DOM.
+ *
+ * Each control's description rides the app's `Tooltip` (hover AND
+ * focus-visible, theme tokens, portal) instead of a native `title`, with the
+ * control's keyboard shortcut rendered under it as keycaps through the
+ * shortcut registry's platform-aware formatter — never a hardcoded "Cmd".
+ * The strings are the same `labels` values the titles used, so a host's
+ * overrides keep working; because `title` no longer supplies the accessible
+ * name, each button carries it explicitly (the pen an `aria-label`, the eye
+ * its sr-only text, the refresh its existing `aria-label`), and the shortcut
+ * is also attached as a persistent `aria-describedby` so it is announced
+ * rather than only drawn.
  */
+import React from 'react';
+import { Tooltip } from './Tooltip';
+import { formatShortcutBindingText, formatShortcutBindingTokens } from '../shortcuts/core';
+import { htmlAnnotateShortcuts } from '../shortcuts/plan-review/htmlAnnotate.shortcuts';
+
+/** Binding overrides, in the registry's normalized syntax (`Mod+Shift+X`).
+ *  `null` renders no shortcut row for that control. Defaults come from the
+ *  `html-annotate` scope, so the tooltips can never drift from the chords the
+ *  app actually dispatches; `refresh` has no chord and defaults to none. */
+export interface HtmlSurfaceControlShortcuts {
+  annotate?: string | null;
+  tools?: string | null;
+  refresh?: string | null;
+  back?: string | null;
+}
+
+const DEFAULT_HTML_SURFACE_CONTROL_SHORTCUTS: Required<HtmlSurfaceControlShortcuts> = {
+  annotate: htmlAnnotateShortcuts.shortcuts.toggleAnnotateMode.bindings[0] ?? null,
+  tools: htmlAnnotateShortcuts.shortcuts.toggleTools.bindings[0] ?? null,
+  refresh: null,
+  // Deliberately none: Alt+Left and the browser's Back belong to the user.
+  back: null,
+};
+
+/** Description + keycaps. Two lines, so the tooltip answers both "what does
+ *  this do" and "what do I press" without a second hover. */
+function ControlTooltip({
+  description,
+  binding,
+  children,
+}: {
+  description: string;
+  binding: string | null;
+  children: React.ReactElement;
+}) {
+  const keys = binding ? formatShortcutBindingTokens(binding) : null;
+  return (
+    <Tooltip
+      side="bottom"
+      wide
+      content={(
+        <span className="flex flex-col gap-1">
+          <span>{description}</span>
+          {keys && keys.length > 0 && (
+            <span className="flex items-center gap-1">
+              {keys.map((key, index) => (
+                <kbd
+                  key={`${key}-${index}`}
+                  className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-border/60 bg-muted px-1 font-mono text-[10px] leading-none text-foreground/80"
+                >
+                  {key}
+                </kbd>
+              ))}
+            </span>
+          )}
+        </span>
+      )}
+    >
+      {children}
+    </Tooltip>
+  );
+}
+
+/** The shortcut as prose for assistive tech ("Cmd+Shift+X"), which keycaps
+ *  alone would not announce. */
+function ShortcutDescription({ id, binding }: { id: string; binding: string | null }) {
+  if (!binding) return null;
+  return (
+    <span id={id} hidden>
+      {`Shortcut: ${formatShortcutBindingText(binding)}`}
+    </span>
+  );
+}
 
 /** String overrides. Every key optional; defaults are Plannotator's strings. */
 export interface HtmlSurfaceControlLabels {
-  /** Pen title while Annotate is armed. */
+  /** Pen tooltip description while Annotate is armed. */
   annotateTitle?: string;
-  /** Pen title while in Interact mode. */
+  /** Pen tooltip description while in Interact mode. */
   interactTitle?: string;
-  /** Pen aria-label while armed. Default: none (the title carries the name). */
+  /** Pen aria-label while armed. Default: the armed description. */
   annotateLabel?: string;
-  /** Pen aria-label while in Interact mode. Default: none. */
+  /** Pen aria-label while in Interact mode. Default: the interact description. */
   interactLabel?: string;
-  /** Eye title and screen-reader text while the tools are visible. */
+  /** Eye tooltip description and screen-reader text while the tools are visible. */
   hideTools?: string;
-  /** Eye title and screen-reader text while the tools are hidden. */
+  /** Eye tooltip description and screen-reader text while the tools are hidden. */
   showTools?: string;
   /** Refresh visible text while idle. */
   refresh?: string;
   /** Refresh visible text while a refresh is in flight. */
   refreshing?: string;
-  /** Refresh title and aria-label while idle. */
+  /** Refresh tooltip description and aria-label while idle. */
   refreshTitle?: string;
-  /** Refresh title and aria-label while a refresh is in flight. */
+  /** Refresh tooltip description and aria-label while a refresh is in flight. */
   refreshingTitle?: string;
+  /** Back visible text. */
+  back?: string;
+  /** Back tooltip description and aria-label. `backDescription` overrides it
+   *  per render, which is how a host names the document Back returns to. */
+  backTitle?: string;
 }
 
 export const DEFAULT_HTML_SURFACE_CONTROL_LABELS: Required<
@@ -46,7 +143,15 @@ export const DEFAULT_HTML_SURFACE_CONTROL_LABELS: Required<
   refreshing: 'Refreshing',
   refreshTitle: 'Refresh document',
   refreshingTitle: 'Refreshing document',
+  back: 'Back',
+  backTitle: 'Back to the document this one was opened from',
 };
+
+// Stable ids: one HTML surface renders at most one of each control.
+const ANNOTATE_SHORTCUT_ID = 'pn-html-annotate-shortcut';
+const TOOLS_SHORTCUT_ID = 'pn-html-tools-shortcut';
+const REFRESH_SHORTCUT_ID = 'pn-html-refresh-shortcut';
+const BACK_SHORTCUT_ID = 'pn-html-back-shortcut';
 
 export interface HtmlSurfaceControlsProps {
   /** Whether Annotate is armed (pen pressed). */
@@ -62,9 +167,17 @@ export interface HtmlSurfaceControlsProps {
   canRefresh?: boolean;
   onRefresh?: () => void;
   isRefreshing?: boolean;
+  /** Leave the linked document for the one the session opened from. The back
+   *  control renders only when provided — i.e. while a linked document is open. */
+  onBack?: () => void;
+  /** Tooltip description and aria-label for back, e.g. "Back to index.html".
+   *  Default: `labels.backTitle`. */
+  backDescription?: string;
   /** Compact touch shells put these actions in a menu instead: render nothing. */
   compact?: boolean;
   labels?: HtmlSurfaceControlLabels;
+  /** Per-control keyboard shortcuts shown in the tooltips. */
+  shortcuts?: HtmlSurfaceControlShortcuts;
 }
 
 export function HtmlSurfaceControls({
@@ -75,16 +188,59 @@ export function HtmlSurfaceControls({
   canRefresh = false,
   onRefresh,
   isRefreshing = false,
+  onBack,
+  backDescription,
   compact = false,
   labels,
+  shortcuts,
 }: HtmlSurfaceControlsProps) {
   if (compact) return null;
   const text = { ...DEFAULT_HTML_SURFACE_CONTROL_LABELS, ...labels };
-  const penLabel = armed ? labels?.annotateLabel : labels?.interactLabel;
+  const keys = { ...DEFAULT_HTML_SURFACE_CONTROL_SHORTCUTS, ...shortcuts };
+  const penDescription = armed ? text.annotateTitle : text.interactTitle;
+  // `title` used to carry the pen's accessible name; with the tooltip in its
+  // place the name has to be stated, or the pen becomes an unnamed button.
+  const penLabel = (armed ? labels?.annotateLabel : labels?.interactLabel) ?? penDescription;
+  const toolsDescription = toolsHidden ? text.showTools : text.hideTools;
+  const refreshDescription = isRefreshing ? text.refreshingTitle : text.refreshTitle;
   const showRefresh = canRefresh && !!onRefresh;
+  const backLabel = backDescription ?? text.backTitle;
   return (
     <>
-      {/* The refresh and the eye share one group, left of the pen. Each
+      {/* Back, leftmost: the way out of a linked document that does not
+          depend on the sidebar being open. */}
+      {onBack && (
+        <>
+          <ControlTooltip description={backLabel} binding={keys.back}>
+            <button
+              type="button"
+              data-html-back
+              onClick={onBack}
+              {...(keys.back ? { 'aria-describedby': BACK_SHORTCUT_ID } : {})}
+              className="ml-1 flex items-center gap-1 rounded px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={backLabel}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3.5 w-3.5"
+              >
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              <span className="hidden sm:inline">{text.back}</span>
+            </button>
+          </ControlTooltip>
+          <ShortcutDescription id={BACK_SHORTCUT_ID} binding={keys.back} />
+        </>
+      )}
+
+      {/* The refresh and the eye share one group, left of the pen and right
+          of back. Each
           renders on its own terms: the refresh whenever it is offered
           (canRefresh + onRefresh), the eye whenever onToggleTools is passed,
           so a host without the tools toggle still gets its refresh.
@@ -96,6 +252,7 @@ export function HtmlSurfaceControls({
       {(showRefresh || onToggleTools) && (
         <div className="ml-1 flex items-center gap-0.5">
           {showRefresh && (
+            <ControlTooltip description={refreshDescription} binding={keys.refresh}>
             <button
               type="button"
               data-html-refresh
@@ -104,9 +261,9 @@ export function HtmlSurfaceControls({
               // dedups in-flight requests, so an extra click is harmless.
               onClick={isRefreshing ? undefined : onRefresh}
               aria-disabled={isRefreshing}
+              {...(keys.refresh ? { 'aria-describedby': REFRESH_SHORTCUT_ID } : {})}
               className="flex items-center gap-1.5 rounded px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-disabled:cursor-wait aria-disabled:opacity-70"
-              title={isRefreshing ? text.refreshingTitle : text.refreshTitle}
-              aria-label={isRefreshing ? text.refreshingTitle : text.refreshTitle}
+              aria-label={refreshDescription}
             >
               <svg
                 aria-hidden="true"
@@ -123,15 +280,18 @@ export function HtmlSurfaceControls({
               </svg>
               <span className="hidden sm:inline">{isRefreshing ? text.refreshing : text.refresh}</span>
             </button>
+            </ControlTooltip>
           )}
+          {showRefresh && <ShortcutDescription id={REFRESH_SHORTCUT_ID} binding={keys.refresh} />}
           {onToggleTools && (
+          <ControlTooltip description={toolsDescription} binding={keys.tools}>
           <button
             type="button"
             data-html-tools-toggle
             onClick={onToggleTools}
             aria-pressed={toolsHidden}
+            {...(keys.tools ? { 'aria-describedby': TOOLS_SHORTCUT_ID } : {})}
             className="cursor-pointer rounded-md border border-transparent p-1.5 text-xs font-medium text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
-            title={toolsHidden ? text.showTools : text.hideTools}
           >
             {toolsHidden ? (
               <svg aria-hidden="true" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -143,9 +303,11 @@ export function HtmlSurfaceControls({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
               </svg>
             )}
-            <span className="sr-only">{toolsHidden ? text.showTools : text.hideTools}</span>
+            <span className="sr-only">{toolsDescription}</span>
           </button>
+          </ControlTooltip>
           )}
+          {onToggleTools && <ShortcutDescription id={TOOLS_SHORTCUT_ID} binding={keys.tools} />}
         </div>
       )}
 
@@ -156,6 +318,7 @@ export function HtmlSurfaceControls({
           unarmed is muted with a TRANSPARENT border of the same width, so
           the button's box is pixel-identical in both states. */}
       {onToggleArmed && (
+        <ControlTooltip description={penDescription} binding={keys.annotate}>
         <button
           type="button"
           data-html-annotate-toggle
@@ -166,14 +329,16 @@ export function HtmlSurfaceControls({
               ? 'border-primary/60 bg-primary/15 text-primary'
               : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
           }`}
-          title={armed ? text.annotateTitle : text.interactTitle}
-          {...(penLabel !== undefined ? { 'aria-label': penLabel } : {})}
+          aria-label={penLabel}
+          {...(keys.annotate ? { 'aria-describedby': ANNOTATE_SHORTCUT_ID } : {})}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.862 4.487zm0 0L19.5 7.125" />
           </svg>
         </button>
+        </ControlTooltip>
       )}
+      {onToggleArmed && <ShortcutDescription id={ANNOTATE_SHORTCUT_ID} binding={keys.annotate} />}
     </>
   );
 }

@@ -65,6 +65,10 @@ export interface ReviewState {
   agentCwd?: string | null;
   /** Whether live-working-tree actions match the snapshot currently shown. */
   canUseLiveWorkspaceActions?: boolean;
+  /** False when hunk-context expansion has no source to expand from — a static
+   *  patch review has no working tree, so `/api/file-content` answers 400 and
+   *  the diff views must not ask. Absent means available (every VCS session). */
+  contextExpansionAvailable?: boolean;
 
   // Annotations
   allAnnotations: CodeAnnotation[];

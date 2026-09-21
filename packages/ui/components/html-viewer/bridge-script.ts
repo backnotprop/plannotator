@@ -60,6 +60,18 @@ body[data-plannotator-pinpoint-cursor],
 body[data-plannotator-pinpoint-cursor] * {
   cursor: crosshair !important;
 }
+/* Armed pinpoint over an EMBEDDED local document: the embed is one element
+ * from the outer page's point of view, and the bridge is never injected into a
+ * nested frame, so a click inside it would simply vanish into another document.
+ * Making frames transparent to the pointer while armed is what lets that click
+ * pin the <iframe>/<embed>/<object> itself. Interact (Esc, the header pen or
+ * Mod+Shift+A) restores native interaction inside the embed — which is also
+ * the only state a link inside it can be followed from.
+ * Live-app sessions never set this attribute: they annotate a real app whose
+ * own nested frames belong to it. */
+body[data-plannotator-frame-inert] :is(iframe, frame, embed, object) {
+  pointer-events: none !important;
+}
 @media (prefers-reduced-motion: reduce) {
   [data-plannotator-pinpoint-box].pn-pin-enter {
     animation: none;
@@ -340,6 +352,7 @@ export const BRIDGE_SCRIPT = `(function() {
   var pendingPinKey = null; // target key for the primary pinpoint target (multi-select)
   var pendingPinLabel = null; // semantic label captured for the primary target
   var pendingPinPoint = null; // normalized {x,y} click point inside the pinned element's rect
+  var pendingPinContext = null; // agent-facing element context for the primary target (see buildElementContext)
   var pendingPinViaPinpoint = false; // pinpoint drafts survive scroll-out (see postSelectionRect)
   // Multi-select is ARMED EXPLICITLY by the parent (arm-multi-select), and only
   // when the comment composer owns the draft. The bridge must never accept a
@@ -380,8 +393,10 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
       document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
+      if (!LIVE) document.body.setAttribute('data-plannotator-frame-inert', '');
     } else {
       document.body.removeAttribute('data-plannotator-pinpoint-cursor');
+      document.body.removeAttribute('data-plannotator-frame-inert');
     }
   }
   var pinpointHover = null;
@@ -466,6 +481,7 @@ export const BRIDGE_SCRIPT = `(function() {
       pinpoint: (extras && extras.pinpoint) || undefined,
       targetKey: (extras && extras.targetKey) || undefined,
       targetLabel: (extras && extras.targetLabel) || undefined,
+      context: (extras && extras.context) || undefined,
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
     });
     renderAnnotationOverlay(); // draft selection highlight (overlay-projected)
@@ -688,6 +704,13 @@ export const BRIDGE_SCRIPT = `(function() {
       scrollToAnnotation(e.data.id, e.data.behavior === 'auto' ? 'auto' : 'smooth');
     }
 
+    else if (type === PREFIX + 'scroll-to-fragment') {
+      // A linked document opened from an in-page link carried a #fragment.
+      // The srcdoc document has no URL of its own, so the parent cannot set
+      // one: it replays the fragment here once the new document is ready.
+      scrollToLocalFragment(typeof e.data.fragment === 'string' ? e.data.fragment : '');
+    }
+
     else if (type === PREFIX + 'focus-mark') {
       focusAnnotationRecord(typeof e.data.id === 'string' ? e.data.id : null, false);
     }
@@ -903,8 +926,31 @@ export const BRIDGE_SCRIPT = `(function() {
       var svgGroup = node.closest('g');
       if (svgGroup) node = svgGroup;
     }
+    node = preferInertFrameAt(node, x, y);
     node = promoteTinyTarget(node);
     if (node === document.body || node === document.documentElement) return null;
+    return node;
+  }
+
+  // While frames are pointer-transparent (armed pinpoint, srcdoc sessions),
+  // hit-testing passes THROUGH an embedded document to the container painted
+  // behind it — so a click on an embed would pin its wrapper div. The embed is
+  // what the reviewer is pointing at and what the anchor must name, so a point
+  // inside a frame's own rect resolves to that frame. Bounded to the frames
+  // inside the element already resolved, so it costs nothing on ordinary pages.
+  var FRAME_SELECTOR = 'iframe,frame,embed,object';
+  function framesArePointerInert() {
+    return !LIVE && annotateModeActive && currentInputMethod === 'pinpoint';
+  }
+  function preferInertFrameAt(node, x, y) {
+    if (!framesArePointerInert() || !node.querySelectorAll) return node;
+    if (node.matches && node.matches(FRAME_SELECTOR)) return node;
+    var frames = node.querySelectorAll(FRAME_SELECTOR);
+    for (var i = 0; i < frames.length && i < 64; i++) {
+      var r = frames[i].getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return frames[i];
+    }
     return node;
   }
 
@@ -2728,8 +2774,441 @@ export const BRIDGE_SCRIPT = `(function() {
     return el;
   }
 
+  // --- Element context: a bounded, agent-facing description of a pinpointed
+  // element, captured at click time (only the bridge can see the DOM). It is
+  // purely descriptive and NEVER consulted by restore (that is the anchor's
+  // job): the exported feedback prints it so an agent working in the app's
+  // source can find the element without having the page. Everything here is
+  // page-controlled, so the parent re-validates and re-caps it all at the
+  // trust boundary; this side keeps the wire payload honest.
+  //
+  // Constraints (the "smart" part is that they adapt to the element):
+  // - attributes are an ALLOWLIST (a page cannot add a key); no form values,
+  //   no on* handlers, no style, no script/style/template contents ever;
+  // - href/src URLs lose their query and fragment (tokens live there),
+  //   relative ones included, and data: URIs keep only their media-type
+  //   prefix;
+  // - the outline tries two levels of children, falls back to one, then to a
+  //   per-tag count, whichever first fits CTX_MAX_OUTLINE, so a click on a
+  //   whole <main> costs the same bytes as a click on a chip;
+  // - text is innerText (rendered words, not the DOM soup), word-boundary
+  //   truncated;
+  // - the serialized context stays under a byte budget by shedding the
+  //   expendable fields in a fixed order; tag/id/role/name/page never shed.
+  var CTX_MAX_BYTES = 2048;        // primary target
+  var CTX_MAX_BYTES_EXTRA = 1024;  // each shift-click additional target
+  var CTX_MAX_TEXT = 300;
+  var CTX_MAX_OUTLINE = 600;
+  var CTX_MAX_PATH_SEGMENTS = 8;
+  var CTX_MAX_CLASSES = 8;
+  var CTX_MAX_ATTRS = 10;
+  var CTX_MAX_ATTR_VALUE = 120;
+  var CTX_MAX_CHILDREN = 6;
+  var CONTEXT_ATTRS = ['href', 'src', 'alt', 'title', 'type', 'name', 'role', 'placeholder', 'for', 'target', 'rel',
+    'aria-label', 'aria-labelledby', 'aria-describedby', 'aria-current', 'aria-expanded', 'aria-hidden', 'aria-controls',
+    'data-annotate', 'data-testid', 'data-test', 'data-test-id', 'data-cy', 'data-qa', 'data-component', 'data-id'];
+  var CONTEXT_SKIP_TAGS = { SCRIPT: 1, STYLE: 1, TEMPLATE: 1, NOSCRIPT: 1 };
+  var CONTEXT_IMPLICIT_ROLE = { NAV: 'navigation', MAIN: 'main', HEADER: 'banner', FOOTER: 'contentinfo', ASIDE: 'complementary',
+    ARTICLE: 'article', SECTION: 'region', FORM: 'form', BUTTON: 'button', A: 'link', IMG: 'img', TABLE: 'table', UL: 'list',
+    OL: 'list', LI: 'listitem', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading',
+    DIALOG: 'dialog', INPUT: 'textbox', TEXTAREA: 'textbox', SELECT: 'combobox', SUMMARY: 'button', PROGRESS: 'progressbar' };
+  var CONTEXT_LANDMARK_SELECTOR = 'main,nav,header,footer,aside,article,section,form,dialog,[role]';
+
+  // Collapse control characters and whitespace runs; the parent does it again.
+  function ctxCollapse(value, max) {
+    var s = String(value == null ? '' : value).replace(/[\\x00-\\x1f\\x7f]+/g, ' ').replace(/\\s+/g, ' ').trim();
+    return max ? ctxTruncate(s, max) : s;
+  }
+
+  // Word-boundary truncation with an ellipsis, never splitting a surrogate pair.
+  function ctxTruncate(s, max) {
+    if (s.length <= max) return s;
+    var cut = s.lastIndexOf(' ', max - 1);
+    if (cut < max * 0.6) cut = max - 1;
+    var last = s.charCodeAt(cut - 1);
+    if (last >= 0xd800 && last <= 0xdbff) cut -= 1;
+    return s.slice(0, cut) + '…';
+  }
+
+  function ctxBytes(value) {
+    var json = JSON.stringify(value);
+    try { return new TextEncoder().encode(json).length; } catch (ex) {}
+    try { return unescape(encodeURIComponent(json)).length; } catch (ex2) { return json.length * 2; }
+  }
+
+  // URL attribute values: keep what locates the element in source, drop
+  // what identifies the user. The path survives in every form; the query and
+  // the fragment never do — a relative URL carries the same per-visit state an
+  // absolute one does (session ids, and the implicit-flow tokens that live in
+  // the fragment specifically), so it is scrubbed the same way.
+  function ctxScrubUrl(value) {
+    var v = String(value).trim();
+    if (/^javascript:/i.test(v)) return null;
+    if (/^data:/i.test(v)) {
+      var comma = v.indexOf(',');
+      return (comma > 0 ? v.slice(0, Math.min(comma, 40)) : v.slice(0, 40)) + ',…';
+    }
+    if (/^https?:\\/\\//i.test(v)) {
+      try {
+        var u = new URL(v);
+        return u.origin + u.pathname + (u.search || u.hash ? '?…' : '');
+      } catch (ex) { return ctxTruncate(v, CTX_MAX_ATTR_VALUE); }
+    }
+    var mark = v.search(/[?#]/);
+    if (mark >= 0) return v.slice(0, mark) + '?…';
+    return v;
+  }
+
+  function ctxAttrs(el) {
+    var out = [];
+    if (!el.getAttribute) return out;
+    for (var i = 0; i < CONTEXT_ATTRS.length && out.length < CTX_MAX_ATTRS; i++) {
+      var name = CONTEXT_ATTRS[i];
+      var value = el.getAttribute(name);
+      if (value == null) continue;
+      if (name === 'href' || name === 'src') {
+        value = ctxScrubUrl(value);
+        if (value == null) continue;
+      }
+      out.push([name, ctxCollapse(value, CTX_MAX_ATTR_VALUE)]);
+    }
+    return out;
+  }
+
+  function ctxClasses(el) {
+    var out = [];
+    if (!el.classList) return out;
+    for (var i = 0; i < el.classList.length && out.length < CTX_MAX_CLASSES; i++) {
+      var cls = String(el.classList[i]);
+      if (!cls || isLikelyGeneratedClass(cls)) continue;
+      out.push(ctxTruncate(cls, 48));
+    }
+    if (el.classList.length > out.length && out.length === CTX_MAX_CLASSES) out.push('+' + (el.classList.length - out.length) + ' more');
+    return out;
+  }
+
+  function ctxFirstClass(el) {
+    if (!el.classList) return null;
+    for (var i = 0; i < el.classList.length; i++) {
+      var cls = String(el.classList[i]);
+      if (cls && !isLikelyGeneratedClass(cls)) return ctxTruncate(cls, 48);
+    }
+    return null;
+  }
+
+  function ctxRole(el) {
+    var explicit = el.getAttribute && el.getAttribute('role');
+    if (explicit && explicit.trim()) return ctxCollapse(explicit, 32);
+    if (el.tagName === 'A' && !(el.getAttribute && el.getAttribute('href'))) return null;
+    return CONTEXT_IMPLICIT_ROLE[el.tagName] || null;
+  }
+
+  function ctxText(el) {
+    var raw = typeof el.innerText === 'string' && el.innerText ? el.innerText : (el.textContent || '');
+    return ctxCollapse(raw, CTX_MAX_TEXT);
+  }
+
+  // Accessible name, in the practical order: aria-label, aria-labelledby,
+  // alt, title, a <label for>, then the element's own short text.
+  function ctxName(el) {
+    if (!el.getAttribute) return null;
+    var aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return ctxCollapse(aria, 120);
+    var by = el.getAttribute('aria-labelledby');
+    if (by && by.trim()) {
+      var ids = by.trim().split(/\\s+/);
+      var parts = [];
+      for (var i = 0; i < ids.length && i < 4; i++) {
+        var ref = document.getElementById(ids[i]);
+        if (ref) parts.push(ref.textContent || '');
+      }
+      var joined = ctxCollapse(parts.join(' '), 120);
+      if (joined) return joined;
+    }
+    var alt = el.getAttribute('alt');
+    if (alt && alt.trim()) return ctxCollapse(alt, 120);
+    var title = el.getAttribute('title');
+    if (title && title.trim()) return ctxCollapse(title, 120);
+    if (el.id && typeof CSS !== 'undefined' && CSS.escape) {
+      var label = null;
+      try { label = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); } catch (ex) {}
+      if (label) {
+        var labelText = ctxCollapse(label.textContent, 120);
+        if (labelText) return labelText;
+      }
+    }
+    var own = ctxCollapse(el.textContent, 120);
+    return own && own.length <= 80 ? own : null;
+  }
+
+  // One path segment: tag, then the strongest cheap identity it carries, and
+  // a position only when a same-tag sibling would otherwise read the same.
+  function ctxSegment(el) {
+    var seg = el.tagName.toLowerCase();
+    if (el.id) return seg + '#' + ctxCollapse(el.id, 60);
+    var cls = ctxFirstClass(el);
+    if (cls) seg += '.' + cls;
+    var hook = el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-component'));
+    if (hook) seg += '[' + (el.getAttribute('data-testid') ? 'data-testid' : 'data-component') + '="' + ctxCollapse(hook, 40) + '"]';
+    // A position only when a same-tag sibling would read identically (same
+    // first class, same hook): p.beta among p.alpha / p.gamma needs none,
+    // the fourth of forty identical <li class="row"> does.
+    var parent = el.parentElement;
+    if (parent) {
+      var same = 0;
+      var index = 0;
+      var typeIndex = 0;
+      var typeCount = 0;
+      for (var i = 0; i < parent.children.length; i++) {
+        var sibling = parent.children[i];
+        if (sibling.tagName !== el.tagName) continue;
+        typeCount++;
+        if (sibling === el) typeIndex = typeCount;
+        if (sibling.id) continue;
+        if (ctxFirstClass(sibling) === cls && !!(sibling.getAttribute && (sibling.getAttribute('data-testid') || sibling.getAttribute('data-component'))) === !!hook) {
+          same++;
+          if (sibling === el) index = same;
+        }
+      }
+      if (same > 1) seg += ':nth-of-type(' + typeIndex + ')';
+    }
+    return seg;
+  }
+
+  function ctxPath(el) {
+    var parts = [];
+    var current = el;
+    while (current && current.nodeType === 1 && current !== document.documentElement) {
+      if (parts.length >= CTX_MAX_PATH_SEGMENTS) { parts.unshift('…'); break; }
+      parts.unshift(ctxSegment(current));
+      if (current === document.body) break;
+      current = current.parentElement;
+    }
+    return parts.join(' > ');
+  }
+
+  function ctxIsSkipped(node) {
+    return !node || node.nodeType !== 1 || CONTEXT_SKIP_TAGS[node.tagName] || isViewerOverlayNode(node);
+  }
+
+  function ctxElementChildren(el) {
+    var kids = [];
+    for (var i = 0; i < el.children.length; i++) {
+      if (!ctxIsSkipped(el.children[i])) kids.push(el.children[i]);
+    }
+    return kids;
+  }
+
+  function ctxTagCounts(nodes) {
+    var counts = {};
+    var order = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var tag = nodes[i].tagName.toLowerCase();
+      if (!counts[tag]) { counts[tag] = 0; order.push(tag); }
+      counts[tag]++;
+    }
+    var out = [];
+    for (var j = 0; j < order.length && j < 4; j++) out.push(order[j] + '×' + counts[order[j]]);
+    if (order.length > 4) out.push('…');
+    return out.join(', ');
+  }
+
+  function ctxAttrString(pairs) {
+    var s = '';
+    for (var i = 0; i < pairs.length; i++) s += ' ' + pairs[i][0] + '="' + pairs[i][1].replace(/"/g, '&quot;') + '"';
+    return s;
+  }
+
+  // id and up to four author classes on an opening tag: the grep keys, first.
+  function ctxIdentityString(el) {
+    var s = '';
+    if (el.id) s += ' id="' + ctxCollapse(el.id, 60) + '"';
+    var classes = [];
+    if (el.classList) {
+      for (var i = 0; i < el.classList.length && classes.length < 4; i++) {
+        var cls = String(el.classList[i]);
+        if (cls && !isLikelyGeneratedClass(cls)) classes.push(ctxTruncate(cls, 48));
+      }
+    }
+    if (classes.length) s += ' class="' + classes.join(' ') + '"';
+    return s;
+  }
+
+  // A child rendered inside the outline: its tag with one identity hook, its
+  // own short text when it has no element children, an ellipsis otherwise.
+  function ctxChildTag(child, depth) {
+    var tag = child.tagName.toLowerCase();
+    var open = '<' + tag;
+    if (child.id) open += ' id="' + ctxCollapse(child.id, 60) + '"';
+    else {
+      var cls = ctxFirstClass(child);
+      if (cls) open += ' class="' + cls + '"';
+    }
+    var hook = child.getAttribute && child.getAttribute('data-testid');
+    if (hook) open += ' data-testid="' + ctxCollapse(hook, 40) + '"';
+    if (tag === 'a' && child.getAttribute('href')) {
+      var href = ctxScrubUrl(child.getAttribute('href'));
+      if (href) open += ' href="' + ctxCollapse(href, 60) + '"';
+    }
+    open += '>';
+    var kids = ctxElementChildren(child);
+    if (!kids.length) {
+      var own = ctxCollapse(child.textContent, 40);
+      return open + own + '</' + tag + '>';
+    }
+    if (depth <= 1) {
+      var leafText = ctxCollapse(child.textContent, 40);
+      return open + (leafText || '…') + '</' + tag + '>';
+    }
+    var lines = [open];
+    var shown = kids.slice(0, CTX_MAX_CHILDREN);
+    for (var i = 0; i < shown.length; i++) lines.push('  ' + ctxChildTag(shown[i], depth - 1));
+    if (kids.length > shown.length) lines.push('  <!-- +' + (kids.length - shown.length) + ' more: ' + ctxTagCounts(kids.slice(shown.length)) + ' -->');
+    lines.push('</' + tag + '>');
+    return lines.join('\\n');
+  }
+
+  function ctxOutlineAtDepth(el, attrs, kids, depth) {
+    var tag = el.tagName.toLowerCase();
+    var open = '<' + tag + ctxIdentityString(el) + ctxAttrString(attrs) + '>';
+    if (!kids.length) {
+      var own = ctxCollapse(el.textContent, 80);
+      return open + own + '</' + tag + '>';
+    }
+    if (depth <= 0) return open + '<!-- ' + kids.length + ' children: ' + ctxTagCounts(kids) + ' -->' + '</' + tag + '>';
+    var lines = [open];
+    var shown = kids.slice(0, CTX_MAX_CHILDREN);
+    for (var i = 0; i < shown.length; i++) {
+      var rendered = ctxChildTag(shown[i], depth);
+      var childLines = rendered.split('\\n');
+      for (var j = 0; j < childLines.length; j++) lines.push('  ' + childLines[j]);
+    }
+    if (kids.length > shown.length) lines.push('  <!-- +' + (kids.length - shown.length) + ' more: ' + ctxTagCounts(kids.slice(shown.length)) + ' -->');
+    lines.push('</' + tag + '>');
+    return lines.join('\\n');
+  }
+
+  // Adaptive depth: two levels, then one, then a per-tag count — the first
+  // that fits the outline cap. A whole-page container never costs more than a chip.
+  function ctxOutline(el, attrs) {
+    var kids = ctxElementChildren(el);
+    var depths = [2, 1, 0];
+    for (var i = 0; i < depths.length; i++) {
+      var out = ctxOutlineAtDepth(el, attrs, kids, depths[i]);
+      if (out.length <= CTX_MAX_OUTLINE) return out;
+    }
+    return ctxTruncate(ctxOutlineAtDepth(el, attrs, kids, 0), CTX_MAX_OUTLINE);
+  }
+
+  function ctxLandmark(el) {
+    var parent = el.parentElement;
+    if (!parent || !parent.closest) return null;
+    var region = null;
+    try { region = parent.closest(CONTEXT_LANDMARK_SELECTOR); } catch (ex) { return null; }
+    if (!region || region === document.body) return null;
+    var seg = ctxSegment(region);
+    var name = region.getAttribute('aria-label');
+    if (name && name.trim()) seg += ' "' + ctxCollapse(name, 60) + '"';
+    return ctxTruncate(seg, 80);
+  }
+
+  // The nearest heading ABOVE the element in document order (or one that
+  // contains it): the section it sits in, which often names the source file.
+  function ctxHeading(el) {
+    var headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
+    var best = null;
+    for (var i = 0; i < headings.length && i < 500; i++) {
+      var h = headings[i];
+      var pos = el.compareDocumentPosition(h);
+      if (pos & 2 || pos & 8) best = h; // PRECEDING or CONTAINS
+      else if (pos & 4) break;          // FOLLOWING: every later heading follows too
+    }
+    if (!best) return null;
+    var text = ctxCollapse(best.textContent, 120);
+    return text ? best.tagName.toLowerCase() + ' "' + text + '"' : null;
+  }
+
+  // The cheapest safe framework hint: an author-placed component marker on
+  // the element or a near ancestor. Deliberately no React fiber reads.
+  function ctxComponent(el) {
+    var current = el;
+    for (var depth = 0; current && current.nodeType === 1 && depth < 6; depth++) {
+      var attrs = ['data-component', 'data-testid', 'data-qa'];
+      for (var i = 0; i < attrs.length; i++) {
+        var value = current.getAttribute && current.getAttribute(attrs[i]);
+        if (value && value.trim()) return attrs[i] + '=' + ctxCollapse(value, 60);
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function ctxRect(el) {
+    var r = el.getBoundingClientRect();
+    return {
+      x: Math.round(r.left), y: Math.round(r.top),
+      w: Math.round(r.width), h: Math.round(r.height),
+      vw: Math.round(window.innerWidth || 0), vh: Math.round(window.innerHeight || 0)
+    };
+  }
+
+  // Shed order when over budget: the fields an agent can live without first.
+  var CTX_SHED_ORDER = ['outline', 'text', 'attrs', 'classes', 'path', 'heading', 'landmark', 'component'];
+
+  function buildElementContext(el, maxBytes) {
+    if (!el || el.nodeType !== 1) return null;
+    try {
+      var attrs = ctxAttrs(el);
+      var context = { tag: el.tagName.toLowerCase() };
+      if (el.id) context.id = ctxCollapse(el.id, 100);
+      var classes = ctxClasses(el);
+      if (classes.length) context.classes = classes;
+      context.path = ctxPath(el);
+      var role = ctxRole(el);
+      if (role) context.role = role;
+      var name = ctxName(el);
+      if (name) context.name = name;
+      if (attrs.length) context.attrs = attrs;
+      var text = ctxText(el);
+      if (text) context.text = text;
+      context.outline = ctxOutline(el, attrs);
+      context.children = ctxElementChildren(el).length;
+      context.rect = ctxRect(el);
+      var landmark = ctxLandmark(el);
+      if (landmark) context.landmark = landmark;
+      var heading = ctxHeading(el);
+      if (heading) context.heading = heading;
+      var component = ctxComponent(el);
+      if (component) context.component = component;
+      if (LIVE) {
+        context.page = { url: currentPageUrl() };
+        var title = ctxCollapse(document.title, 200);
+        if (title) context.page.title = title;
+      }
+      // Byte budget: shed whole fields in order; a shed attrs/classes array
+      // first loses entries from the end before the field goes entirely.
+      for (var s = 0; s < CTX_SHED_ORDER.length && ctxBytes(context) > maxBytes; s++) {
+        var field = CTX_SHED_ORDER[s];
+        if (context[field] === undefined) continue;
+        if ((field === 'attrs' || field === 'classes') && context[field].length > 1) {
+          while (context[field].length > 1 && ctxBytes(context) > maxBytes) context[field].pop();
+          if (ctxBytes(context) <= maxBytes) break;
+        }
+        if (field === 'text' && context.text.length > 80) {
+          context.text = ctxTruncate(context.text, 80);
+          if (ctxBytes(context) <= maxBytes) break;
+        }
+        delete context[field];
+      }
+      return context;
+    } catch (ex) {
+      return null;
+    }
+  }
+
   function clearPendingPin() {
     pendingPinEl = null;
+    pendingPinContext = null;
     pendingPinAnchor = null;
     pendingPinKey = null;
     pendingPinLabel = null;
@@ -2850,6 +3329,7 @@ export const BRIDGE_SCRIPT = `(function() {
       pendingPinKey = next.key;
       pendingPinLabel = next.label;
       pendingPinPoint = next.point || null;
+      pendingPinContext = next.context || null;
       // A promoted primary commits as an element pin: the original text
       // selection belonged to the removed element and no longer applies.
       pendingSelection = { element: true };
@@ -2908,15 +3388,17 @@ export const BRIDGE_SCRIPT = `(function() {
     if (anchor && point) anchor.point = point;
     var label = pinpointHoverLabel(el);
     var text = elementTargetText(el, label);
+    var context = buildElementContext(el, CTX_MAX_BYTES_EXTRA);
     var key = makeTargetKey();
     var box = createMultiTargetBox(el);
-    pendingMultiTargets.push({ key: key, el: el, anchor: anchor, label: label, text: text, point: point, box: box });
+    pendingMultiTargets.push({ key: key, el: el, anchor: anchor, label: label, text: text, point: point, context: context, box: box });
     postToParent({
       type: PREFIX + 'multi-target-added',
       key: key,
       label: label,
       text: text,
-      anchor: anchor || undefined
+      anchor: anchor || undefined,
+      context: context || undefined
     });
   }
 
@@ -3017,11 +3499,15 @@ export const BRIDGE_SCRIPT = `(function() {
     pendingPinPoint = normalizePointInElement(el, clickPoint);
     if (pendingPinAnchor && pendingPinPoint) pendingPinAnchor.point = pendingPinPoint;
     pendingPinViaPinpoint = !!viaPinpoint;
+    // Agent-facing description, captured now while the element is in hand
+    // (an SPA re-render or navigation may have replaced it by submit time).
+    pendingPinContext = buildElementContext(el, CTX_MAX_BYTES);
     var extras = {
       anchor: pendingPinAnchor,
       pinpoint: !!viaPinpoint,
       targetKey: pendingPinKey,
-      targetLabel: pendingPinLabel
+      targetLabel: pendingPinLabel,
+      context: pendingPinContext
     };
     // Pinned outline: stronger accent box that tracks the element until the
     // composer resolves (create-mark or cancel-selection).
@@ -3063,8 +3549,77 @@ export const BRIDGE_SCRIPT = `(function() {
       pinpoint: !!viaPinpoint || undefined,
       targetKey: pendingPinKey || undefined,
       targetLabel: pendingPinLabel || undefined,
+      context: pendingPinContext || undefined,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
     return true;
+  }
+
+  // --- Local-site link navigation (srcdoc sessions only) ---
+  // A srcdoc document has no URL of its own: its base URL is the PARENT page's,
+  // which is the Plannotator server. So a plain link to 02-detail.html resolves
+  // to http://localhost:<port>/02-detail.html, the server's catch-all answers
+  // with the app itself, and the whole editor renders inside the annotated
+  // frame. An in-page #section link is a cross-document navigation for the
+  // same reason.
+  //
+  // The frame therefore never navigates itself. In-page fragments scroll here;
+  // everything else is handed to the parent, which owns resolution against the
+  // current document's directory and is the trust boundary for the href.
+  // Registered BEFORE the pinpoint handler and never stopping propagation, so
+  // an armed click still pins the link element exactly as it always did.
+  //
+  // Live app sessions are excluded outright: they navigate a real origin
+  // through the proxy, which is the whole point of that surface.
+  function scrollToLocalFragment(rawId) {
+    var id = typeof rawId === 'string' ? rawId : '';
+    try { id = decodeURIComponent(id); } catch (ex) {}
+    if (!id) {
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (ex) { window.scrollTo(0, 0); }
+      return true;
+    }
+    var target = null;
+    try { target = document.getElementById(id); } catch (ex) {}
+    if (!target) {
+      var named = document.getElementsByName(id);
+      if (named && named.length) target = named[0];
+    }
+    if (!target) return false;
+    try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    catch (ex) { target.scrollIntoView(); }
+    return true;
+  }
+
+  function navigableLinkHref(node) {
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    if (!el || !el.closest) return '';
+    var link = el.closest('a,area');
+    if (!link) return '';
+    var raw = link.getAttribute('href');
+    // SVG anchors may only carry xlink:href.
+    if (typeof raw !== 'string') raw = link.getAttribute('xlink:href');
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  if (!LIVE) {
+    document.addEventListener('click', function(e) {
+      if (e.defaultPrevented || e.button !== 0) return;
+      if (isViewerOverlayNode(e.target)) return; // markers own their clicks
+      var raw = navigableLinkHref(e.target);
+      if (!raw) return;
+      // The page's own scripting, not a navigation: leave it alone.
+      if (/^javascript:/i.test(raw)) return;
+      if (raw.charAt(0) === '#') {
+        e.preventDefault();
+        scrollToLocalFragment(raw.slice(1));
+        return;
+      }
+      e.preventDefault();
+      // Armed pinpoint: the click belongs to annotation, and the capture-phase
+      // pinpoint handler below is about to pin this element. Navigation is
+      // already suppressed above, which is all this surface owes the click.
+      if (annotateModeActive && currentInputMethod === 'pinpoint') return;
+      postToParent({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
+    }, true);
   }
 
   document.addEventListener('click', function(e) {
@@ -3142,15 +3697,21 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   });
 
-  // Mod+Shift+A toggles Interact/Annotate from inside the iframe (the parent
-  // registers the same chord, but focus usually lives in here on live apps).
-  // Capture phase so the page cannot swallow the reserved chord; the parent
-  // answers with set-annotate-mode.
+  // The two reserved header chords, mirrored from inside the iframe (the
+  // parent registers both, but focus usually lives in here on live apps):
+  // Mod+Shift+A toggles Interact/Annotate, Mod+Shift+X shows/hides the
+  // floating tools over the page. Capture phase so the page cannot swallow
+  // them; the parent owns both states and answers annotate with
+  // set-annotate-mode. Disarming tears down any pending draft through that
+  // same set-annotate-mode(false) handler, exactly as Esc does.
   document.addEventListener('keydown', function(e) {
     if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return;
-    if (e.key !== 'a' && e.key !== 'A') return;
+    var message = null;
+    if (e.key === 'a' || e.key === 'A') message = 'annotate-toggle';
+    else if (e.key === 'x' || e.key === 'X') message = 'tools-toggle';
+    if (!message) return;
     e.preventDefault();
-    postToParent({ type: PREFIX + 'annotate-toggle' });
+    postToParent({ type: PREFIX + message });
   }, true);
 
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the

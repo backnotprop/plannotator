@@ -11,7 +11,11 @@ import {
   getAnnotateMessageFeedbackPrompt,
   getReviewDeniedSuffix,
 } from "@plannotator/shared/prompts";
-import { resolveTargetAgent, resolveValidatedTargetAgent } from "./agent-switch";
+import {
+  resolveTargetAgent,
+  resolveValidatedTargetAgent,
+  type OpenCodeAgentModel,
+} from "./agent-switch";
 import {
   deliverOpenCodePrompt,
   isOpenCodePromptDeliveryError,
@@ -52,6 +56,8 @@ export interface OpenCodeBridgeAgent {
   description?: string;
   mode?: string;
   hidden?: boolean;
+  /** Model configured for this agent, when the host reports one. */
+  model?: OpenCodeAgentModel;
 }
 
 export interface OpenCodeBridgeContext {

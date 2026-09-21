@@ -185,6 +185,10 @@ export interface AllFilesCodeViewProps {
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
   reviewSnapshotId?: string;
+  /** False when there is no source behind the diff to expand into (static
+   *  patch review): the augmentation stage completes as a no-op instead of
+   *  firing a /api/file-content request the server answers 400. */
+  contextExpansionAvailable?: boolean;
   /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
    * matching virtualization metric without changing desktop geometry. */
   compactTouchLayout?: boolean;
@@ -561,6 +565,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   pendingSelection,
   reviewBase,
   reviewSnapshotId,
+  contextExpansionAvailable = true,
   compactTouchLayout,
   onLineSelection,
   onAddAnnotationForFile,
@@ -1233,6 +1238,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewBaseRef.current = reviewBase;
   const reviewSnapshotIdRef = useRef(reviewSnapshotId);
   reviewSnapshotIdRef.current = reviewSnapshotId;
+  const contextExpansionAvailableRef = useRef(contextExpansionAvailable);
+  contextExpansionAvailableRef.current = contextExpansionAvailable;
   const itemIdToFileRef = useRef(itemIdToFile);
   itemIdToFileRef.current = itemIdToFile;
   const fileSetKeyRef = useRef(fileSetKey);
@@ -1348,7 +1355,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // Read-only hosts have no review server: leave the raw-patch context in
     // place and mark the item done so it never re-fires (no dead requests,
     // no console noise from a CSP that blocks connect-src).
-    if (readOnlyRef.current) {
+    if (readOnlyRef.current || !contextExpansionAvailableRef.current) {
       augmentState.set(itemId, { status: 'done', controller, generation });
       return;
     }

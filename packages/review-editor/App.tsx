@@ -41,6 +41,12 @@ import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
 import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
+import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
+import {
+  markTerminalToolsAnnouncementSeen,
+  needsTerminalToolsAnnouncement,
+  terminalToolsAnnouncementCanShow,
+} from '@plannotator/ui/utils/terminalToolsAnnouncement';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
@@ -145,7 +151,7 @@ import {
 } from './dock/reviewPanelTypes';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
-import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo } from '@plannotator/shared/types';
+import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
 import { useCommitsView } from './hooks/useCommitsView';
@@ -645,6 +651,12 @@ const ReviewApp: React.FC = () => {
   // that never sends the field renders no approve-carrying items (PR3
   // behavior); read off every diff payload that carries it.
   const [approvalNotesSupported, setApprovalNotesSupported] = useState(false);
+  // Session-constant capability advert from `/api/diff`: 'patch' means the
+  // diff is caller-supplied bytes (`plannotator review --patch-file`) with no
+  // repository behind it. ABSENT reads as 'vcs', so an old server keeps every
+  // affordance exactly as before.
+  const [sourceKind, setSourceKind] = useState<ReviewSourceKind>('vcs');
+  const isStaticPatch = sourceKind === 'patch';
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
 
   useEffect(() => {
@@ -1089,6 +1101,18 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     if (shouldConsumeTokenHoverAnnouncement()) markTokenHoverAnnouncementSeen();
   }, []);
+  // One-time terminal-tools announcement (Plannotator TUI + Herdr Annotate).
+  // LAST in the dialog chain, after every dialog that asks the reviewer to
+  // decide something. Latched at mount like its siblings: the dismiss writes
+  // the cookie, and re-reading it per render would unmount the dialog under
+  // its own click handler.
+  const [terminalToolsIntroPending, setTerminalToolsIntroPending] = useState(
+    needsTerminalToolsAnnouncement,
+  );
+  const dismissTerminalToolsIntro = useCallback(() => {
+    markTerminalToolsAnnouncementSeen();
+    setTerminalToolsIntroPending(false);
+  }, []);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1480,7 +1504,11 @@ const ReviewApp: React.FC = () => {
       snapshotId,
     };
   }, [activeDiffBase, diffData?.gitRef, committedBase, snapshotId]);
-  const canUseLiveWorkspaceActions = !activeDiffBase.startsWith('gitbutler:stack:') &&
+  // A static patch has no working tree at all, so everything that reads one —
+  // open-in-app, code navigation, token hover cards, editor annotations —
+  // is off for the same reason a committed GitButler layer turns them off.
+  const canUseLiveWorkspaceActions = !isStaticPatch &&
+    !activeDiffBase.startsWith('gitbutler:stack:') &&
     !activeDiffBase.startsWith('gitbutler:branch:');
   const visibleEditorAnnotations = useMemo(
     () => canUseLiveWorkspaceActions ? editorAnnotations : [],
@@ -1520,6 +1548,23 @@ const ReviewApp: React.FC = () => {
     lookAndFeelVisible: showLookAndFeel,
     reviewSetupVisible: showReviewSetup,
     editModeVisible: editModeIntroVisible,
+  });
+  // LAST in the first-run dialog chain: it asks for no decision, so it waits
+  // behind every dialog that does. terminalToolsAnnouncementCanShow explains
+  // why last rather than first.
+  const terminalToolsIntroVisible = terminalToolsAnnouncementCanShow({
+    announcementPending: terminalToolsIntroPending,
+    isLoading,
+    // The code review editor has no archive or shared-session mode; the
+    // portable guide viewer never mounts this App.
+    readOnlySession: false,
+    compact: isCompactTouchLayout,
+    otherFirstRunDialogVisible:
+      guideIntroVisible
+      || showLookAndFeel
+      || showReviewSetup
+      || editModeIntroVisible
+      || tokenHoverIntroVisible,
   });
   const hoveredTokenSymbol = tokenHover.hover?.request.symbol;
   const startTokenHover = tokenHover.onTokenHoverEnter;
@@ -1990,6 +2035,7 @@ const ReviewApp: React.FC = () => {
         agentCwd?: string | null;
         sharingEnabled?: boolean;
         approvalNotesSupported?: boolean;
+        sourceKind?: ReviewSourceKind;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
         prStackInfo?: PRStackInfo | null;
@@ -2050,6 +2096,9 @@ const ReviewApp: React.FC = () => {
         if (data.agentCwd !== undefined) setAgentCwd(data.agentCwd);
         if (data.sharingEnabled !== undefined) setSharingEnabled(data.sharingEnabled);
         setApprovalNotesSupported(readApprovalNotesAdvert(data.approvalNotesSupported));
+        // Session-constant: a static patch session has no diff-type switch to
+        // re-advertise it on, so `/api/diff` is the only place it can arrive.
+        setSourceKind(data.sourceKind === 'patch' ? 'patch' : 'vcs');
         if (data.repoInfo) setRepoInfo(data.repoInfo);
         updatePRSession({
           ...(data.prMetadata && { prMetadata: data.prMetadata }),
@@ -2502,7 +2551,7 @@ const ReviewApp: React.FC = () => {
     // (not lost) behind the guide takeover or a first-run dialog — the file
     // still marks and the next auto-view retries the toast.
     if (!needsAutoViewedNotice()) return;
-    if (guideOpen || guideIntroVisible || showLookAndFeel || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible) return;
+    if (guideOpen || guideIntroVisible || showLookAndFeel || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible) return;
     markAutoViewedNoticeSeen();
     toast('Files are marked viewed as you scroll', {
       description: "Scroll past a file or move on to the next and it's checked off. Turn this off in Settings → Git, or from the gear above the file list.",
@@ -2522,7 +2571,7 @@ const ReviewApp: React.FC = () => {
         },
       },
     });
-  }, [guideOpen, guideIntroVisible, showLookAndFeel, showReviewSetup, editModeIntroVisible, tokenHoverIntroVisible]);
+  }, [guideOpen, guideIntroVisible, showLookAndFeel, showReviewSetup, editModeIntroVisible, tokenHoverIntroVisible, terminalToolsIntroVisible]);
   const { handleReadingFileChange: handleAutoViewReadingFile, handleFileScrolledPast } = useAutoViewed({
     enabled: autoViewedEnabled,
     // Rule 4 — only the review target. The guide takeover CSS-hides the dock
@@ -3168,7 +3217,9 @@ const ReviewApp: React.FC = () => {
   // user refreshes when THEY are ready — never automatically (annotations are
   // line-anchored; rug-pulling the diff under them is worse than staleness).
   const diffFreshness = useDiffFreshness({
-    enabled: !!origin,
+    // Static patch: the bytes are the session. Nothing can go stale, so the
+    // probe would only poll an endpoint with no fingerprint to compare.
+    enabled: !!origin && !isStaticPatch,
     resetKey: diffData?.rawPatch ?? '',
     snapshotId,
     onAgentCwd: setAgentCwd,
@@ -3512,6 +3563,7 @@ const ReviewApp: React.FC = () => {
     prDiffScope,
     agentCwd,
     canUseLiveWorkspaceActions,
+    contextExpansionAvailable: !isStaticPatch,
     allAnnotations,
     externalAnnotations,
     selectedAnnotationId,
@@ -3522,7 +3574,8 @@ const ReviewApp: React.FC = () => {
     onAddCallFlowAnnotation: handleAddCallFlowAnnotation,
     onAddAnnotation: handleAddAnnotation,
     onAddAnnotationForFile: handleAddAnnotationForFile,
-    editSuggestionsEnabled,
+    // Edit Mode reads and writes the file on disk; a static patch has none.
+    editSuggestionsEnabled: editSuggestionsEnabled && !isStaticPatch,
     onAddSuggestionsForFile: handleAddSuggestionsForFile,
     onAddEditorCommentForFile: handleAddEditorCommentForFile,
     onAddFileComment: handleAddFileComment,
@@ -3621,7 +3674,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch,
     allAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -4192,7 +4245,7 @@ const ReviewApp: React.FC = () => {
     if (event.defaultPrevented || isNativeHistoryOwner(event)) return false;
     if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning || isLoadingDiff) return false;
     if (guideOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showWorktreeDialog || showNoAnnotationsDialog || showExitWarning) return false;
-    if (showLookAndFeel || showGuideIntro || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || tourDialogJobId) return false;
+    if (showLookAndFeel || showGuideIntro || showReviewSetup || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || tourDialogJobId) return false;
     return !hasActiveHistoryOverlay(document);
   }, [
     guideOpen,
@@ -4203,6 +4256,7 @@ const ReviewApp: React.FC = () => {
     isSendingFeedback,
     editModeIntroVisible,
     tokenHoverIntroVisible,
+    terminalToolsIntroVisible,
     openSettingsMenu,
     platformCommentDialog,
     showDestinationMenu,
@@ -4352,6 +4406,16 @@ const ReviewApp: React.FC = () => {
 
   const compactActionBusy = isSendingFeedback || isApproving || isExiting || isPlatformActioning;
   const showsLocalVsRemoteEmptyState = activeDiffBase === 'local-vs-remote';
+  // Static patch header identity: the patch path the caller passed (or
+  // "stdin patch"), which the server echoes as gitRef. Never a branch or repo.
+  const staticPatchSource = (diffData?.gitRef ?? '').trim();
+  const staticPatchLabel = staticPatchSource
+    ? staticPatchSource.split(/[\\/]/).pop() || staticPatchSource
+    : 'Patch';
+  // Distinguishes "valid patch, nothing in it" from "these bytes are not a
+  // unified diff" for the empty state. The server already refuses a
+  // whitespace-only patch at startup, so anything reaching here has content.
+  const patchHasDiffHeaders = /^(diff --git |--- |\+\+\+ |@@ |Index: )/m.test(diffData?.rawPatch ?? '');
   const compactReviewActions: CompactReviewAction[] = !isCompactTouchLayout
     ? []
     : !origin
@@ -4561,6 +4625,23 @@ const ReviewApp: React.FC = () => {
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
                   {repoInfo.display}
                 </span>
+              </div>
+            ) : isStaticPatch ? (
+              // Honest label for a repo-less session: name the patch that IS
+              // the review, never a branch or repo this process happens to
+              // sit in.
+              <div className={isCompactTouchLayout
+                ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
+                : 'min-w-0 flex flex-1 items-center gap-2 overflow-hidden'
+              }>
+                <span
+                  className="text-xs font-mono text-foreground truncate max-w-[220px]"
+                  title={staticPatchSource || 'Static patch review'}
+                  data-testid="static-patch-label"
+                >
+                  {staticPatchLabel}
+                </span>
+                <span className="text-xs text-muted-foreground/60 hidden sm:inline">Patch</span>
               </div>
             ) : (
               <span className={isCompactTouchLayout
@@ -5296,6 +5377,9 @@ const ReviewApp: React.FC = () => {
                           {activeDiffBase === 'branch' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'merge-base' && `No changes vs ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''}.`}
                           {activeDiffBase === 'all' && `No tracked files${activeWorktreePath ? ' in this worktree' : ' in this repository'}.`}
+                          {isStaticPatch && (patchHasDiffHeaders
+                            ? 'The patch contains no changes.'
+                            : 'The patch could not be parsed as a unified diff.')}
                         </p>
                       </>
                     )}
@@ -5581,20 +5665,28 @@ const ReviewApp: React.FC = () => {
           />
         )}
 
-        {/* One-time token hover card announcement. LAST in the dialog chain
+        {/* One-time token hover card announcement. Fifth in the dialog chain
             (guide intro → look-and-feel → review setup → edit mode → token
-            hover) — tokenHoverAnnouncementCanShow gates on every earlier
-            dialog, so the chain dialogs never stack. */}
+            hover → terminal tools) — tokenHoverAnnouncementCanShow gates on
+            every earlier dialog, so the chain dialogs never stack. */}
         {tokenHoverIntroVisible && (
           <TokenHoverAnnouncementDialog isOpen onDismiss={dismissTokenHoverIntro} />
         )}
 
+        {/* One-time Plannotator TUI + Herdr Annotate announcement. LAST in the
+            dialog chain (guide intro → look-and-feel → review setup → edit
+            mode → token hover → terminal tools) — terminalToolsAnnouncementCanShow
+            gates on every earlier dialog, so the chain dialogs never stack. */}
+        {terminalToolsIntroVisible && (
+          <TerminalToolsAnnouncementDialog isOpen onDismiss={dismissTerminalToolsIntro} />
+        )}
+
         {/* One-time PR feedback-destination spotlight. Strictly AFTER the
-            first-run dialog chain (guide intro → look-and-feel → review
-            setup → edit mode → token hover): it only mounts once none of the five is
-            showing, so it never stacks with them. PR mode only — the switcher
-            it points at doesn't render otherwise. */}
-        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && !tokenHoverIntroVisible && (
+            first-run dialog chain (guide intro → look-and-feel → review setup
+            → edit mode → token hover → terminal tools): it only mounts once
+            none of the six is showing, so it never stacks with them. PR mode
+            only — the switcher it points at doesn't render otherwise. */}
+        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !showReviewSetup && !editModeIntroVisible && !tokenHoverIntroVisible && !terminalToolsIntroVisible && (
           <DestinationSpotlight
             targetRef={destToggleRef}
             platformLabel={platformLabel}

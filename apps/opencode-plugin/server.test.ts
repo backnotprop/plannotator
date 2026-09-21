@@ -401,8 +401,12 @@ describe("V2 plan review URL delivery", () => {
       sessionID: "session-1",
       description: formatSessionUrlNotice(SESSION_URL),
       resume: false,
-      // #1459: queue delivery keeps the notice out of steer-scoped promotion.
-      delivery: "queue",
+      // #1515: `resume: false` only declines the immediate wake. The row still
+      // waits in the inbox, and a queued row promotes alone while steers
+      // promote as a batch (`SessionInbox.promote`), so queue delivery is what
+      // turns a notice into its own model turn. Mid-tool-call here, a steer
+      // lands at the running turn's next step boundary instead.
+      delivery: "steer",
     });
   });
 
@@ -437,6 +441,19 @@ describe("V2 plan review URL delivery", () => {
     // the file into the report and buries the one line that matters.
     expect(/sessionID:\s*toolContext\.sessionID/.test(source)).toBe(true);
     expect(/logReady:\s*createPlanReadyNotifier\(/.test(source)).toBe(true);
+  });
+
+  // Regression: the submit_plan path builds its own client, so it owns that
+  // client's notice watch too. A plan review that ends without delivering a
+  // prompt (denied and closed, or approved — the V2 approval handoff is the
+  // agent switch, not a `session.prompt`) would otherwise leave the host event
+  // subscription open for the life of the process. Pinned at source level for
+  // the same reason as the two facts above: reaching the real wiring means
+  // running a plan review.
+  test("the plan path releases the notice watch when the review ends", () => {
+    const source = readFileSync(path.join(import.meta.dir, "server.ts"), "utf-8");
+
+    expect(/\}\s*finally\s*\{[^}]*client\.dispose\(\);/.test(source)).toBe(true);
   });
 
   // Regression: a rejected notice must not surface as an unhandled rejection

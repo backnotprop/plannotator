@@ -16,9 +16,16 @@ import { isStalePreference } from './preferenceTtl';
  *
  * `toolsHidden` is the header "Hide tools" toggle: while true, ALL floating
  * chrome over the page (sidebar tongue tabs + the comment/attachments
- * cluster) is removed from the DOM. Restoring it hidden can never strand a
- * user: the header button that flips it back is part of the header, not the
- * hidden chrome.
+ * cluster) is removed from the DOM. It DEFAULTS to true — an HTML document is
+ * authored to fill the viewport, so a first-ever session shows the page and
+ * nothing else, and the header eye (plus Mod+Shift+X) is what reveals the
+ * tools. Defaulting hidden can never strand a user for the same reason
+ * restoring hidden can't: the control that flips it back lives in the header,
+ * never in the hidden chrome. A fresh persisted record still wins in both
+ * directions, so a user who showed the tools keeps them next session —
+ * including in a folder annotate session, which restores and records the
+ * `toolsHidden` half while leaving the sidebar/panel halves to sessions whose
+ * sidebar it actually owns (see {@link mergeHtmlChromeState}).
  */
 
 const STORAGE_KEY = 'plannotator-html-chrome';
@@ -32,11 +39,14 @@ export interface HtmlChromeState {
   toolsHidden: boolean;
 }
 
-/** Default: both side surfaces closed — the page gets the viewport. */
+/**
+ * Default: both side surfaces closed AND the floating tools hidden — the page
+ * gets the whole viewport until the user asks for the tools.
+ */
 export const DEFAULT_HTML_CHROME_STATE: HtmlChromeState = {
   sidebarOpen: false,
   panelOpen: false,
-  toolsHidden: false,
+  toolsHidden: true,
 };
 
 /** Pure resolution logic (exported for tests): raw cookie value → state. */
@@ -66,6 +76,61 @@ export function resolveHtmlChromeState(
   } catch {
     return DEFAULT_HTML_CHROME_STATE;
   }
+}
+
+/** Inputs to the restore-on-entry decision (see {@link shouldRestoreHtmlChrome}). */
+export interface HtmlChromeRestoreConditions {
+  /** The surface being rendered now is raw HTML or a live app. */
+  isHtmlSurface: boolean;
+  /** The surface rendered on the previous pass was too. */
+  wasHtmlSurface: boolean;
+  /** This session takes no part in the persisted chrome at all (archive, goal
+   *  setup): nothing is restored and nothing is written. A folder annotate
+   *  session is NOT suppressed — see {@link mergeHtmlChromeState}. */
+  suppressed: boolean;
+}
+
+/**
+ * Whether to apply the persisted chrome state, i.e. whether this render is an
+ * ENTRY into an HTML surface.
+ *
+ * The `wasHtmlSurface` term is what keeps navigation between two HTML
+ * documents from re-running the restore: `toolsHidden` defaults to true and a
+ * link click deliberately leaves the sidebar alone, so a re-run mid-session
+ * would flip both back under the user. Leaving an HTML surface for a markdown
+ * one and returning IS an entry, and restores again on purpose — that is what
+ * stops the markdown surface's sidebar state from leaking into the HTML
+ * cookie.
+ */
+export function shouldRestoreHtmlChrome(conditions: HtmlChromeRestoreConditions): boolean {
+  if (!conditions.isHtmlSurface) return false;
+  if (conditions.wasHtmlSurface) return false;
+  return !conditions.suppressed;
+}
+
+/**
+ * The record to persist when the chrome changes on an HTML surface.
+ *
+ * `sideSurfacesOwned` marks a session where the left sidebar and the
+ * annotations drawer are not this surface's to remember — a folder annotate
+ * session, whose file browser owns the sidebar for the whole session. Those two
+ * halves then keep whatever the last ordinary HTML session left, while the
+ * `toolsHidden` half is recorded normally: it is a property of the HTML surface
+ * itself and means the same thing in every session.
+ */
+export function mergeHtmlChromeState(input: {
+  /** The record on disk right now. */
+  persisted: HtmlChromeState;
+  /** The chrome this session is in. */
+  live: HtmlChromeState;
+  sideSurfacesOwned: boolean;
+}): HtmlChromeState {
+  if (!input.sideSurfacesOwned) return input.live;
+  return {
+    sidebarOpen: input.persisted.sidebarOpen,
+    panelOpen: input.persisted.panelOpen,
+    toolsHidden: input.live.toolsHidden,
+  };
 }
 
 export function getHtmlChromeState(): HtmlChromeState {

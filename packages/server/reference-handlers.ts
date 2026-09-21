@@ -25,6 +25,7 @@ import {
 	MAX_ANNOTATABLE_FILE_BYTES,
 	isAnnotatableTextPath,
 } from "@plannotator/shared/resolve-file";
+import { diagramRenderKindForPath, isDiagramRenderKind } from "@plannotator/shared/annotatable";
 import {
 	DOC_ACCESS_DENIED,
 	DOC_TOO_LARGE,
@@ -156,7 +157,9 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	if (
 		options.annotateHistory &&
 		typeof data.filepath === "string" &&
-		data.renderAs === "markdown" &&
+		// Diagram sources (.mmd/.dot) take the markdown branch's raw text, so
+		// they keep per-file version history exactly like a .txt.
+		(data.renderAs === "markdown" || isDiagramRenderKind(data.renderAs)) &&
 		data.isConverted !== true &&
 		typeof data.markdown === "string" &&
 		isAnnotatableTextPath(data.filepath)
@@ -215,7 +218,15 @@ async function readDocument(path: string, convert: boolean, options: HandleDocOp
 				? docJson({ markdown: htmlToMarkdown(snapshot.text), filepath: path, isConverted: true, renderAs: "markdown" }, options)
 				: docJson({ rawHtml: snapshot.text, renderAs: "html", filepath: path }, options);
 		}
-		return docJson({ markdown: snapshot.text, filepath: path, renderAs: "markdown" }, options, snapshot);
+		// A diagram source is served as its raw text with the engine named in
+		// `renderAs`; the editor renders it through the same DiagramBlock a
+		// ```mermaid fence uses instead of the markdown pipeline.
+		const diagramKind = diagramRenderKindForPath(path);
+		return docJson(
+			{ markdown: snapshot.text, filepath: path, renderAs: diagramKind ?? "markdown" },
+			options,
+			snapshot,
+		);
 	} catch {
 		return Response.json({ error: "Failed to read file" }, { status: 500 });
 	}

@@ -63,9 +63,11 @@ const memoryBackend: StorageBackend = {
 };
 
 /** Suppress the one-time dialog chain (guide intro → look-and-feel → review
- *  setup → edit mode) so the header is interactable on first render. */
+ *  setup → edit mode → token hover → terminal tools) so the header is
+ *  interactable on first render. */
 function seedFirstRunSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
+  memory.set("plannotator-announce-tui-herdr-seen", "1");
   memory.set("plannotator-guide-intro-seen", "2");
   memory.set("plannotator-guide-hint-acked", "true");
   memory.set("plannotator-review-setup-seen", "true");
@@ -265,9 +267,22 @@ async function settle(): Promise<void> {
   });
 }
 
-async function mount(waitFor: () => unknown): Promise<void> {
-  setStorageBackend(memoryBackend);
+/** seedFirstRunSeen minus the terminal-tools announcement, so one test can
+ *  watch that dialog take its turn at the end of the chain. */
+function seedFirstRunSeenExceptTerminalTools(): void {
   seedFirstRunSeen();
+  // Not in seedFirstRunSeen: this harness leaves the token hover announcement
+  // pending, and it sits directly ahead of the terminal-tools one.
+  memory.set("plannotator-token-hover-announcement-seen", "1");
+  memory.delete("plannotator-announce-tui-herdr-seen");
+}
+
+async function mount(
+  waitFor: () => unknown,
+  seed: () => void = seedFirstRunSeen,
+): Promise<void> {
+  setStorageBackend(memoryBackend);
+  seed();
   globalThis.fetch = makeFetch();
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
@@ -599,8 +614,9 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     await settle();
 
     // The control is state-driven: one durable comment flips the primary.
+    // The label carries no count (maintainer ruling); the count lives in the menu copy only.
     expect(primaryButton()!.textContent).toContain("Send Feedback");
-    expect(primaryButton()!.textContent).toContain("1");
+    expect(primaryButton()!.textContent).not.toMatch(/\d/);
 
     await act(async () => primaryButton()!.click());
     await settle();
@@ -622,6 +638,26 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
   // Guards the exact regression this project exists to fix on the surface
   // that has no Mod+Enter (E16-review): compact at zero must offer a visible
   // positive decision row, and it must post the bare approval body.
+  test("the terminal-tools announcement takes its turn once the rest of the chain is done", async () => {
+    const DIALOG = "[data-terminal-tools-announcement-dialog]";
+    await mount(() => document.querySelector(DIALOG), seedFirstRunSeenExceptTerminalTools);
+
+    // Every other test in this file seeds the key and sees no dialog, so this
+    // pair is what proves the review chain hands the last turn over rather
+    // than swallowing it.
+    expect(document.querySelector(DIALOG)).not.toBeNull();
+
+    const gotIt = Array.from(document.querySelectorAll<HTMLButtonElement>(`${DIALOG} button`))
+      .find((button) => button.textContent?.trim() === "Got it");
+    if (!gotIt) throw new Error("Dismiss action did not render");
+    await act(async () => gotIt.click());
+    await settle();
+
+    expect(document.querySelector(DIALOG)).toBeNull();
+    expect(memory.get("plannotator-announce-tui-herdr-seen")).toBe("1");
+    expect(submissions).toHaveLength(0);
+  });
+
   test("compact touch offers a positive decision row at zero and it posts", async () => {
     // SAFETY: implements the MediaQueryList surface the shell hooks consume;
     // coarse-pointer matches put the app in its compact touch layout.
@@ -805,7 +841,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await settle();
 
     expect(primaryButton()!.textContent).toContain("Post Comments");
-    expect(primaryButton()!.textContent).toContain("1");
 
     const doubleTapAlt = async () => {
       await act(async () => {
@@ -818,11 +853,9 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await doubleTapAlt();
     // Agent spec, same annotation count — the flip swaps the spec, never the state.
     expect(primaryButton()!.textContent).toContain("Send Feedback");
-    expect(primaryButton()!.textContent).toContain("1");
 
     await doubleTapAlt();
     expect(primaryButton()!.textContent).toContain("Post Comments");
-    expect(primaryButton()!.textContent).toContain("1");
     expect(submissions).toHaveLength(0);
   });
 });

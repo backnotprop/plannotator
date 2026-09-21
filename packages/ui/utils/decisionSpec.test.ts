@@ -221,12 +221,13 @@ describe('buildDecisionSpec invariants', () => {
     }
   });
 
-  // Guards a stale count in the label after an annotation is deleted.
-  it('interpolates the live count into the pill and the discard copy', () => {
+  // Guards a stale count in the discard copy after an annotation is deleted,
+  // and pins that the primary label itself never carries a count.
+  it('interpolates the live count into the discard copy, never the primary', () => {
     const zero = buildDecisionSpec({
       app: 'annotate', gate: false, count: 0, hasFeedback: true, approvalNotesSupported: false,
     });
-    expect(zero.primary.count).toBeUndefined();
+    expect('count' in zero.primary).toBe(false);
     // Nothing to discard at zero — no discard item with a lying "0 annotations".
     expect(itemIds(zero)).not.toContain('discard-and-finish');
 
@@ -249,7 +250,8 @@ describe('buildDecisionSpec invariants', () => {
     const three = buildDecisionSpec({
       app: 'review', gate: true, count: 3, hasFeedback: true, approvalNotesSupported: true,
     });
-    expect(three.primary.count).toBe(3);
+    expect('count' in three.primary).toBe(false);
+    expect(three.primary.label).toBe('Send Feedback');
     const discard = three.items.find((item) => item.id === 'discard-and-finish')!;
     expect(discard.label).toContain('3');
     expect(discard.confirm!.title).toContain('3');

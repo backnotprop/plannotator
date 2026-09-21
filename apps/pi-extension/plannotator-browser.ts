@@ -76,6 +76,13 @@ type CodeReviewOptions = {
 	vcsType?: VcsSelection;
 	useLocal?: boolean;
 	/**
+	 * Path to a unified-diff file to review without a repo — the file is read
+	 * once at call time (resolved relative to the caller's cwd, not ctx.cwd).
+	 * Mutually exclusive with `prUrl` and local/VCS modes. The path doubles as
+	 * the display label in the review header.
+	 */
+	patchFile?: string;
+	/**
 	 * `defaultBranch` / `diffType` came from user CLI flags (`--base` /
 	 * `--diff-type` on /plannotator-review): validate strictly (provider
 	 * matrix, PR/workspace refusal, rev-parse base probe), seed the server's
@@ -188,7 +195,7 @@ export async function startServerWithSelfPreemption<T>(
 
 async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
 	const browserResult = await openBrowser(serverUrl);
-	if (isRemoteSession()) {
+	if (ctx.mode === "rpc" || isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
@@ -583,6 +590,27 @@ async function createCodeReviewBrowserSession(
 				worktreeCleanup = undefined;
 			}
 		}
+	} else if (options.patchFile !== undefined) {
+		// --- Static Patch Mode ---
+		// Caller-supplied unified diff, reviewed without any repository: the
+		// server serves rawPatch as-is, workspace undefined, gitContext undefined,
+		// diffType "static-patch" — identical to the direct CLI's --patch-file
+		// path. No refresh: there is no live tree to recompute against; the
+		// initial patch is the session's whole content.
+		// `-` means stdin, which only the direct CLI has: this host reaches the
+		// review through an extension event with no stdin of its own, so refuse
+		// rather than reading a file literally named "-".
+		if (options.patchFile === "-") {
+			throw new Error(
+				"--patch-file - (stdin) is not available here; pass a file path instead",
+			);
+		}
+		rawPatch = readFileSync(resolve(options.cwd ?? ctx.cwd, options.patchFile), "utf-8");
+		if (!rawPatch.trim()) {
+			throw new Error("Static patch review requires non-empty unified-diff content.");
+		}
+		gitRef = options.patchFile;
+		diffType = "static-patch";
 	} else {
 		// --- Local Review Mode ---
 		const cwd = options.cwd ?? ctx.cwd;

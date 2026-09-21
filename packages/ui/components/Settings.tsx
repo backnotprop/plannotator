@@ -6,6 +6,7 @@ import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import type { TokenHoverDelay } from '@plannotator/core/token-hover';
 import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType, setReviewAutoViewed } from '../config';
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
+import { DIAGRAM_SHADOW_OPTIONS } from '../utils/diagramShadow';
 import { loadDiffFont } from '../utils/diffFonts';
 import { TaterSpritePullup } from './TaterSpritePullup';
 import { getIdentity, regenerateIdentity, setCustomIdentity, isIdentityEditable } from '../utils/identity';
@@ -959,6 +960,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   }, [themePreview]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const gridEnabled = useConfigValue('gridEnabled');
+  const diagramShadow = useConfigValue('diagramShadow');
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
   const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
@@ -1652,6 +1654,34 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${gridEnabled ? 'bg-primary' : 'bg-muted'}`}>
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${gridEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>
+                    </div>
+
+                    <div className="border-t border-border" />
+
+                    {/* Diagram Shadow */}
+                    <div className="space-y-3" data-diagram-shadow-setting>
+                      <div>
+                        <div className="text-sm font-medium">Diagram Shadow</div>
+                        <div className="text-xs text-muted-foreground">
+                          Drop shadow under diagram nodes (100 = Mermaid's own)
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
+                        {DIAGRAM_SHADOW_OPTIONS.map((value) => (
+                          <button
+                            key={value}
+                            onClick={() => configStore.set('diagramShadow', value)}
+                            aria-pressed={diagramShadow === value}
+                            className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+                              diagramShadow === value
+                                ? 'bg-background text-foreground shadow-sm font-medium'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            {value === 0 ? 'None' : String(value)}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="border-t border-border" />

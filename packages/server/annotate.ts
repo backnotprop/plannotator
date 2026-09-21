@@ -53,7 +53,7 @@ import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
-import { createHtmlAssetRegistry } from "./html-assets";
+import { createHtmlAssetRegistry, framedDocumentNotFound } from "./html-assets";
 import { createBunAgentTerminalBridge } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
 import {
@@ -64,6 +64,7 @@ import {
 } from "@plannotator/shared/live-proxy-core";
 import { randomBytes } from "node:crypto";
 import { isAgentTerminalWsRoute, supportsAnnotateAgentTerminalMode } from "@plannotator/shared/agent-terminal";
+import { annotateDiagramRenderKind } from "@plannotator/shared/annotatable";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -279,6 +280,18 @@ export async function startAnnotateServer(
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
+
+  // Diagram sources (.mmd/.mermaid/.dot/.gv) render through the diagram
+  // engine rather than the markdown pipeline: the document body stays the raw
+  // file text and /api/plan names the engine in `renderAs`. Session-level and
+  // path-only (see annotateDiagramRenderKind), so raw-HTML, converted, URL,
+  // folder, message and live-app sessions are untouched.
+  const diagramRenderKind = annotateDiagramRenderKind({
+    filePath,
+    mode,
+    renderHtml,
+    sourceConverted,
+  });
 
   // Per-file version history → powers the native version diff in annotate mode.
   // Unlike the plan flow (slug = first-heading + date), annotate keys history by
@@ -770,7 +783,7 @@ export async function startAnnotateServer(
               clientLease: clientLeaseSupported
                 ? { enabled: true as const, reconnectGraceMs: clientLeaseGraceMs }
                 : { enabled: false as const },
-              renderAs: displayRawHtml ? 'html' as const : 'markdown' as const,
+              renderAs: displayRawHtml ? 'html' as const : diagramRenderKind ?? ('markdown' as const),
               ...(displayRawHtml ? { rawHtml: displayRawHtml } : {}),
               ...(diffHtml ? { diffHtml } : {}),
               convertHtml,
@@ -1259,6 +1272,13 @@ export async function startAnnotateServer(
           if (url.pathname.startsWith("/api/")) {
             return handleApiNotFound(url.pathname);
           }
+
+          // Nested-document guard: a request the browser will render inside a
+          // frame must never receive the editor app. Relative embeds are
+          // anchored at their own directory by the asset-route <base href>, so
+          // anything reaching here names a file that genuinely is not there.
+          const framedMiss = framedDocumentNotFound(req, url);
+          if (framedMiss) return framedMiss;
 
           // Serve embedded HTML for all other routes (SPA)
           return new Response(htmlContent, {

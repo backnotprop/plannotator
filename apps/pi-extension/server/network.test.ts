@@ -296,6 +296,42 @@ describe("pi browser no-op sentinels", () => {
 	});
 });
 
+describe("pi PLANNOTATOR_BROWSER script path", () => {
+	// #1391: on darwin, `open -a <script>` fails with LaunchServices -10811,
+	// so a slash-containing non-.app value must be executed directly.
+	test.if(process.platform !== "win32")(
+		"executes a script path directly with the URL as argument",
+		async () => {
+			clearEnv();
+			const { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } =
+				await import("node:fs");
+			const { join } = await import("node:path");
+			const { tmpdir } = await import("node:os");
+			const dir = mkdtempSync(join(tmpdir(), "pn-browser-"));
+			try {
+				const marker = join(dir, "opened.txt");
+				const script = join(dir, "handler.sh");
+				writeFileSync(script, `#!/bin/sh\nprintf '%s' \"$1\" > \"${marker}\"\n`, {
+					mode: 0o755,
+				});
+				process.env.PLANNOTATOR_BROWSER = script;
+
+				const result = await openBrowser("http://127.0.0.1:19432");
+				expect(result.opened).toBe(true);
+
+				// spawn is detached; poll briefly for the marker
+				const deadline = Date.now() + 2000;
+				while (!existsSync(marker) && Date.now() < deadline) {
+					await new Promise((r) => setTimeout(r, 25));
+				}
+				expect(readFileSync(marker, "utf-8")).toBe("http://127.0.0.1:19432");
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		},
+	);
+});
+
 describe("pi buildAdvertisedUrl", () => {
 	test("defaults to localhost", () => {
 		clearEnv();
@@ -447,5 +483,62 @@ describe("pi WSL configured browser launch", () => {
 		expect(isPosixBrowserTarget("/usr/bin/firefox")).toBe(true);
 		expect(isPosixBrowserTarget("chrome.exe")).toBe(false);
 		expect(isPosixBrowserTarget("/mnt/c/Program Files/Chrome/chrome.exe")).toBe(false);
+	});
+});
+
+// --- darwin PLANNOTATOR_BROWSER routing (#1391) ---
+
+/** Pretend to run on macOS: the darwin branch is chosen by process.platform alone. */
+function mockDarwin() {
+	Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+}
+
+describe("pi darwin configured browser launch", () => {
+	afterEach(() => {
+		restoreHostPlatform();
+	});
+
+	// The platform is faked so this also runs on Linux CI; the unfaked test
+	// above only reaches the darwin branch on a real Mac.
+	test("a script path is spawned directly with the URL", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-darwin-"));
+		const log = join(dir, "direct.txt");
+		const script = writeExecutable(dir, "handler.sh", `printf '%s' "$1" > '${log}'`);
+		try {
+			clearEnv();
+			mockDarwin();
+			process.env.PLANNOTATOR_BROWSER = script;
+
+			expect(await openBrowser(URL)).toEqual({ opened: true });
+			await waitForFile(log);
+			expect(readFileSync(log, "utf8")).toBe(URL);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	// The other half of the decision table: widening the script branch must not
+	// swallow app names or .app bundles, which only `open -a` can launch.
+	test("an app name or .app bundle still launches through open -a", async () => {
+		for (const value of ["Google Chrome", "/Applications/Firefox.app"]) {
+			const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-darwin-"));
+			const log = join(dir, "open.txt");
+			writeExecutable(dir, "open", `printf '%s' "$*" > '${log}'`);
+			const originalPath = process.env.PATH;
+			try {
+				process.env.PATH = `${dir}${delimiter}${originalPath ?? ""}`;
+				clearEnv();
+				mockDarwin();
+				process.env.PLANNOTATOR_BROWSER = value;
+
+				expect(await openBrowser(URL)).toEqual({ opened: true });
+				await waitForFile(log);
+				expect(readFileSync(log, "utf8")).toBe(`-a ${value} ${URL}`);
+			} finally {
+				if (originalPath === undefined) delete process.env.PATH;
+				else process.env.PATH = originalPath;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}
 	});
 });

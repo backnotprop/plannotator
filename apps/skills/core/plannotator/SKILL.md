@@ -41,7 +41,7 @@ Stdout is the interface, but its contract is command-specific. For `annotate` an
 ## plannotator review
 
 ```bash
-plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--tailscale] [--json] [PR_URL]
+plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--tailscale] [--json] [PR_URL]
 ```
 
 Reviews local VCS changes, or a pull request when a URL is given. Default stdout stays plaintext: the existing close message, approval prompt, or feedback.
@@ -54,6 +54,7 @@ Classify the outcome only by `decision`, never by `message` text. Notes on an `a
 - The default diff is "everything a PR would show now": merge-base of the trunk vs the working tree plus untracked files. `--base <ref>` opens the session against a different compare target (branch, `origin/<branch>`, tag, or commit) and `--diff-type <type>` opens it in a different mode (`since-base`, `merge-base`, `branch`, `uncommitted`, `staged`, `unstaged`, `last-commit`, `local-vs-remote`, `all`). Both are **session-only**: the reviewer can change either in the UI, and neither writes the user's saved defaults.
 - **Reviewing one layer of a stacked branch? Pass `--base <the branch below yours>`** — `plannotator review --base feature/part-1` shows only what this layer adds, instead of everything since `main`.
 - Both flags are git-only: they error on jj, GitButler, Perforce, multi-repo workspace reviews, and PR URLs (a PR's base comes from the pull request). A `--base` ref that does not resolve is a startup error naming near-match branches, never a silently wrong diff.
+- `--patch-file <path>` reviews a static caller-supplied unified diff with no repository at all (use `-` to read it from stdin): the session serves the patch as-is with no file-system affordances that need a worktree. It cannot be combined with a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or `--local`/`--no-local`. Every working-tree affordance is off in that session (staging, hunk-context expansion, open-in-editor, code navigation, diff-type/base switching), and the endpoints behind them answer 400.
 - PR review (`plannotator review https://github.com/owner/repo/pull/123`, GitLab MR URLs too) needs an authenticated `gh` or `glab` CLI. `--local` (the default) builds a local checkout of the PR head in the background for full file access; `--no-local` skips it and reviews the platform diff only.
 - `--tailscale` publishes the loopback session over the user's tailnet via `tailscale serve` (HTTPS, never public) and prints the URL with a QR code. A publish failure exits nonzero instead of leaving the server hanging.
 
@@ -71,6 +72,7 @@ Targets:
 
 - Markdown and text files: `.md`, `.mdx`, `.txt`.
 - Plain-text config and data files, rendered as text: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, `.env.example`. `.env` itself is deliberately refused (it commonly holds secrets, and annotate history copies file contents). Source-code files belong to `plannotator review`, not annotate.
+- Diagram sources, opened in the full diagram viewer (zoom, pan, popout, click a node/edge/cluster to comment): `.mmd`, `.mermaid` (Mermaid) and `.dot`, `.gv` (Graphviz). The file is the whole diagram — no fence needed — and comments carry the part's id plus its real file line.
 - HTML files (`.html`, `.htm`): rendered as the raw page by default; `--markdown` converts to markdown instead. `--render-html` is accepted for compatibility; raw rendering is already the default.
 - URLs (`https://...`): fetched and converted via Jina Reader by default; `--no-jina` uses plain fetch plus Turndown instead.
 - Running local apps: a loopback `http://localhost:PORT/` URL whose probe returns HTML opens in live-app mode (annotate the real running page). `--app` forces live mode and fails loudly when it cannot apply; `--static` forces the classic conversion pipeline. Non-loopback URLs always use the conversion pipeline.

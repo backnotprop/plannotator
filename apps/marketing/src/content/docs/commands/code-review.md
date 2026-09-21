@@ -26,6 +26,28 @@ PR review uses the `gh` CLI for authentication, so private repos work automatica
 
 GitLab merge request URLs are also supported when the `glab` CLI is installed and authenticated.
 
+**Review a patch file, with no repository:**
+
+```
+plannotator review --patch-file reading.diff
+curl -s https://example.com/change.diff | plannotator review --patch-file -
+```
+
+`--patch-file` opens the review UI against a caller-supplied unified diff — a
+patch from an email, a paste, a CI artifact, or a remote agent — with no Git
+repo, no worktree and no VCS detection. Use `-` to read the patch from stdin.
+
+The patch is the whole session, so everything that would read a working tree is
+switched off: no staging, no hunk-context expansion, no "Open in editor" or code
+navigation, no diff-type or base switching, no Git status or commit panels, and
+no diff-staleness refresh. Annotating, Ask AI, Guided Review and submitting
+feedback all work as usual, and the header names the patch instead of a branch.
+
+Because it replaces VCS detection entirely, `--patch-file` cannot be combined
+with a PR/MR URL, `--base`, `--diff-type`, `--git`/`--gitbutler`, or
+`--local`/`--no-local`; each combination is a startup error naming the conflict,
+as is an empty or unreadable patch.
+
 ## How it works
 
 **Local review:**

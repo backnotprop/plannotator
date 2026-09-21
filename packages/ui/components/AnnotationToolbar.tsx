@@ -6,6 +6,8 @@ import { type QuickLabel, getQuickLabels, THUMBS_UP_LABEL } from "../utils/quick
 import { copyTextToClipboard } from "../utils/clipboard";
 import { acquireTypeToCommentCapture } from "../shortcuts/plan-review/annotationMode.shortcuts";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
+import { FloatingSelectionActionsPicker } from "./SelectionActionsDropdown";
+import { buildSelectionActionContext, type SelectionAction } from "../utils/selectionActions";
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -33,6 +35,27 @@ interface AnnotationToolbarProps {
    *  the one label affordance restored to these surfaces. Markdown surfaces
    *  keep the full toolbar. */
   commentOnly?: boolean;
+  /**
+   * Opt-in host capability: the host's own commands for this selection,
+   * rendered as ONE wand button (`data-selection-actions`) that opens the
+   * package's dropdown below it. Selecting an item calls `onSelect` with the
+   * selection context and closes the toolbar, exactly as a quick label does;
+   * the package creates no annotation — the host decides what an action means.
+   * Absent or empty → no button, no dropdown: today's toolbar.
+   */
+  selectionActions?: SelectionAction[];
+  /**
+   * Opt-in host capability: the glyph on the `selectionActions` button, so a
+   * host can match the wand it draws elsewhere. Absent → the package's own
+   * wand. Nothing else about the button changes (name, data attribute, size).
+   */
+  selectionActionsIcon?: React.ReactNode;
+  /**
+   * Whether the package's own quick labels are offered (default true).
+   * `false` hides the Zap picker button and the Alt+digit label shortcuts on
+   * this toolbar. The one-click 👍 is a separate affordance and is unaffected.
+   */
+  quickLabels?: boolean;
   /** Hide the copy button (set when a keyboard copy handler exists) */
   hideCopyButton?: boolean;
   /** Close toolbar when element scrolls out of viewport */
@@ -51,6 +74,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onClose,
   onRequestComment,
   onQuickLabel,
+  selectionActions,
+  selectionActionsIcon,
+  quickLabels: quickLabelsEnabled = true,
   copyText,
   commentOnly = false,
   hideCopyButton = false,
@@ -62,9 +88,23 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const [showQuickLabels, setShowQuickLabels] = useState(false);
+  const [showSelectionActions, setShowSelectionActions] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const zapButtonRef = useRef<HTMLButtonElement>(null);
+  const actionsButtonRef = useRef<HTMLButtonElement>(null);
   const quickLabels = useMemo(() => getQuickLabels(), []);
+
+  // A picker counts as open only while the button that opens it is actually
+  // rendered. Without this, a host whose `selectionActions` go empty (or who
+  // flips `quickLabels` off) while its dropdown is open unmounts the dropdown
+  // and its Escape handler, but leaves the flag set — and the flag is what
+  // stands the toolbar's own Escape, type-to-comment and outside-dismiss
+  // listeners down, wedging the toolbar until the ✕ is clicked. Both flags are
+  // false whenever the props are absent, so Plannotator's toolbar is
+  // unchanged.
+  const hasSelectionActions = !!selectionActions && selectionActions.length > 0;
+  const selectionActionsOpen = showSelectionActions && hasSelectionActions;
+  const quickLabelsOpen = showQuickLabels && !commentOnly && quickLabelsEnabled;
 
   useEffect(() => { setCopied(false); }, [element]);
 
@@ -119,8 +159,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       if (e.defaultPrevented || e.isComposing) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
 
-      // When picker is open, let FloatingQuickLabelPicker own all keyboard input
-      if (showQuickLabels) return;
+      // When a picker is open, let it own all keyboard input
+      if (quickLabelsOpen || selectionActionsOpen) return;
 
       if (e.key === "Escape") {
         onClose();
@@ -132,7 +172,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
       if (isDigit && !e.ctrlKey && !e.metaKey && e.altKey) {
         e.preventDefault();
-        if (!commentOnly) {
+        if (!commentOnly && quickLabelsEnabled) {
           const digit = parseInt(e.code.slice(5), 10);
           const index = digit === 0 ? 9 : digit - 1;
           if (index < quickLabels.length) {
@@ -158,10 +198,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       window.removeEventListener("keydown", handleKeyDown);
       releaseCapture();
     };
-  }, [onClose, onRequestComment, onQuickLabel, quickLabels, showQuickLabels, commentOnly]);
+  }, [onClose, onRequestComment, onQuickLabel, quickLabels, quickLabelsOpen, selectionActionsOpen, commentOnly, quickLabelsEnabled]);
 
   useDismissOnOutsideAndEscape({
-    enabled: !showQuickLabels,
+    enabled: !quickLabelsOpen && !selectionActionsOpen,
     ref: toolbarRef,
     onDismiss: onClose,
   });
@@ -236,9 +276,37 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           label="Comment"
           className="text-annotation-comment hover:bg-annotation-comment/10"
         />
+        {hasSelectionActions && (
+          <ToolbarButton
+            ref={actionsButtonRef}
+            onClick={() => setShowSelectionActions(prev => !prev)}
+            icon={selectionActionsIcon ?? <WandIcon />}
+            label="Actions"
+            className={selectionActionsOpen ? "text-primary bg-primary/10" : "text-primary hover:bg-primary/10"}
+            dataAttributes={{ 'data-selection-actions': 'true' }}
+          />
+        )}
+        {selectionActionsOpen && actionsButtonRef.current && (
+          <FloatingSelectionActionsPicker
+            anchorEl={actionsButtonRef.current}
+            actions={selectionActions!}
+            onSelect={(action) => {
+              setShowSelectionActions(false);
+              // Read at invoke time, not on every render: a toolbar with no
+              // host actions must not walk the element's text at all.
+              const actionText = copyText
+                ?? element.querySelector('code')?.textContent
+                ?? element.textContent
+                ?? '';
+              action.onSelect(buildSelectionActionContext(element, actionText));
+              onClose();
+            }}
+            onDismiss={() => setShowSelectionActions(false)}
+          />
+        )}
         {onQuickLabel && (
           <>
-            {!commentOnly && (
+            {!commentOnly && quickLabelsEnabled && (
               <ToolbarButton
                 ref={zapButtonRef}
                 onClick={() => setShowQuickLabels(prev => !prev)}
@@ -253,7 +321,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               label="Looks good"
               className="hover:bg-green-500/10"
             />
-            {!commentOnly && showQuickLabels && zapButtonRef.current && (
+            {quickLabelsOpen && zapButtonRef.current && (
               <FloatingQuickLabelPicker
                 anchorEl={zapButtonRef.current}
                 onSelect={(label) => {
@@ -309,6 +377,14 @@ const ZapIcon = () => (
   </svg>
 );
 
+// One thick diagonal wand with a single four-point star at its tip: the
+// earlier glyph carried six sparks and read as noise at 16px.
+const WandIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 21L13.5 10.5M17 3v7M13.5 6.5h7" />
+  </svg>
+);
+
 const CloseIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -320,7 +396,9 @@ const ToolbarButton = React.forwardRef<HTMLButtonElement, {
   icon: React.ReactNode;
   label: string;
   className: string;
-}>(({ onClick, icon, label, className }, ref) => (
+  /** Extra DOM attributes (e.g. data-selection-actions). Absent adds nothing. */
+  dataAttributes?: Record<string, string>;
+}>(({ onClick, icon, label, className, dataAttributes }, ref) => (
   <button
     ref={ref}
     // Icon-only controls: the markers are inert outside the compact touch
@@ -331,6 +409,7 @@ const ToolbarButton = React.forwardRef<HTMLButtonElement, {
     onClick={onClick}
     title={label}
     className={`p-1.5 rounded-md transition-colors ${className}`}
+    {...dataAttributes}
   >
     {icon}
   </button>

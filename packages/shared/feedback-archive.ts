@@ -47,6 +47,7 @@
 
 import { appendFileSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { parseDiagramAnchor, type DiagramAnchor } from "@plannotator/core/diagram-anchor";
 import { getPlannotatorDataDir } from "./data-dir";
 import { extractDirName, extractRepoName, sanitizeTag } from "./project";
 
@@ -170,6 +171,22 @@ export interface FeedbackAnnotationRecord {
    *  Absent means the human wrote it — that is the "my own comments" filter. */
   source?: string;
   author?: string;
+  /** Raw-HTML / live-app pinpoints: the element's identity, so a record
+   *  keeps a durable handle on WHICH element the comment was about (the
+   *  bridge's text-less placeholder quote alone does not). Additive per the
+   *  field contract above; absent for every other annotation kind. */
+  elementTag?: string;
+  elementSelector?: string;
+  elementPath?: string;
+  elementRole?: string;
+  elementName?: string;
+  /** Live-app sessions: the route the annotation was made on. */
+  pageUrl?: string;
+  /** A comment on a rendered diagram part (a Mermaid or Graphviz fence):
+   *  the part's own id, label and document source line, validated by the
+   *  same parser the ui codec runs. Additive per the field contract above;
+   *  absent for every other annotation kind. */
+  diagramAnchor?: DiagramAnchor;
   images?: number;
 }
 
@@ -301,6 +318,22 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   const author = asString(a.author);
   if (author) record.author = author;
   if (Array.isArray(a.images) && a.images.length > 0) record.images = a.images.length;
+  const anchor = typeof a.htmlAnchor === "object" && a.htmlAnchor !== null ? (a.htmlAnchor as Record<string, unknown>) : undefined;
+  const context = typeof a.elementContext === "object" && a.elementContext !== null ? (a.elementContext as Record<string, unknown>) : undefined;
+  const elementTag = asString(context?.tag) ?? asString(anchor?.tagName);
+  if (elementTag) record.elementTag = elementTag;
+  const elementSelector = asString(anchor?.selector);
+  if (elementSelector) record.elementSelector = elementSelector;
+  const elementPath = asString(context?.path);
+  if (elementPath) record.elementPath = elementPath;
+  const elementRole = asString(context?.role);
+  if (elementRole) record.elementRole = elementRole;
+  const elementName = asString(context?.name);
+  if (elementName) record.elementName = elementName;
+  const pageUrl = asString(a.pageUrl);
+  if (pageUrl) record.pageUrl = pageUrl;
+  const diagramAnchor = a.diagramAnchor === undefined ? null : parseDiagramAnchor(a.diagramAnchor);
+  if (diagramAnchor !== null) record.diagramAnchor = diagramAnchor;
   return record;
 }
 
