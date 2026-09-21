@@ -1363,6 +1363,7 @@ export function useAnnotationHighlighter({
             try { highlighter.remove(source.id); } catch (error) {
               warnHighlighterFailure('cleanup of a blank selection', error);
             }
+            pendingRangeRunsRef.current = null;
             window.getSelection()?.removeAllRanges();
             return;
           }

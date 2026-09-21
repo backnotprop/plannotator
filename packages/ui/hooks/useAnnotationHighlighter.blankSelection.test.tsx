@@ -80,6 +80,7 @@ function Harness({
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+let errorListener: ((event: Event) => void) | null = null;
 
 afterEach(async () => {
   if (root) {
@@ -88,6 +89,10 @@ afterEach(async () => {
   }
   host?.remove();
   host = null;
+  if (errorListener) {
+    window.removeEventListener('error', errorListener);
+    errorListener = null;
+  }
   if (hasDom) document.body.innerHTML = '';
 });
 
@@ -123,10 +128,11 @@ async function mount(mode: 'redline' | 'selection' | 'comment', annotations: Ann
   // `error` event on window rather than rethrowing to the dispatcher, which is
   // exactly how a browser surfaces the uncaught TypeError this file is about.
   const uncaught: string[] = [];
-  window.addEventListener('error', (event: Event) => {
+  errorListener = (event: Event) => {
     const e = event as ErrorEvent;
     uncaught.push(String(e.message ?? (e.error as Error | undefined)?.message ?? e));
-  });
+  };
+  window.addEventListener('error', errorListener);
 
   return { container: host.firstElementChild as HTMLElement, added, uncaught, hook, reports };
 }
@@ -246,6 +252,28 @@ describe('useAnnotationHighlighter: a selection with nothing to quote (#881)', (
     expect(ann.startMeta).toEqual({ parentTagName: 'P', parentIndex: 0, textOffset: 0 });
     expect(ann.endMeta).toEqual({ parentTagName: 'P', parentIndex: 0, textOffset: FIRST.length });
     expect(container.querySelector('mark')?.textContent).toBe(FIRST);
+    expect(uncaught).toEqual([]);
+  });
+
+  test.skipIf(!hasDom)('a selection ending on an in-range element boundary still anchors', async () => {
+    // The other half of the serializability rule, and the reason it is a
+    // bounds check rather than "text boundaries only": Chromium ends an
+    // ordinary multi-block drag (and a triple-click) on an ELEMENT boundary
+    // whose offset is inside `childNodes`, which the library resolves and
+    // serializes fine. Narrowing the predicate to text nodes would silently
+    // drop those everyday selections.
+    const { container, added, uncaught } = await mount('redline');
+    const { first, second } = paragraphs(container);
+    const selection = select(first.firstChild!, 0, second, 0);
+    expect(selection.isCollapsed).toBe(false);
+    // Read before the gesture: committing in redline mode clears the selection.
+    const quote = selection.toString();
+    expect(quote.trim()).not.toBe('');
+
+    await pointerEnd(container);
+
+    expect(added.length).toBe(1);
+    expect(added[0]!.originalText).toBe(quote);
     expect(uncaught).toEqual([]);
   });
 });
