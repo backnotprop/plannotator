@@ -175,7 +175,7 @@ The standalone GitButler CLI installer supports macOS and Linux. On Windows, ins
 
 The review UI shows your changes in a familiar diff format:
 
-- **Left panel views** — a `Git status | Tree | Commits` toggle in the header (see below)
+- **Left panel views** — a `Tree | Git status | Commits` toggle in the header (see below)
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
@@ -219,10 +219,10 @@ Call Flow is syntactic and does not resolve types, imports, runtime dispatch, or
 
 ### Panel views
 
-The left panel has three views. The header toggle is session-scoped — glancing at another view never changes your saved default (that's a Settings / setup-dialog decision).
+The left panel has three views. **Tree** is the default. The header toggle is session-scoped — glancing at another view never changes your saved default (change that in Settings → Git).
 
-- **Git status** (default) — your changes grouped the way `git status` groups them: **Committed / Changes / Untracked**. Each row shows viewed state, a stage/unstage button, the change-type letter, and +/- counts. Only available with the "All changes" diff.
-- **Tree** — the classic file tree over whichever diff type you've selected.
+- **Git status** — your changes grouped the way `git status` groups them: **Committed / Changes / Untracked**. Each row shows viewed state, a stage/unstage button, the change-type letter, and +/- counts. Only available with the "All changes" diff.
+- **Tree** (default) — the classic file tree over whichever diff type you've selected.
 - **Commits** — a linear history rail of your branch, newest first, with an "In origin/main" divider where your work meets the base. Clicking a commit opens that commit's own diff (vs its parent), headed by the full commit message. Local git sessions only; a commit is never saved as your opening view.
 
 ## Annotating code
