@@ -213,6 +213,53 @@ const isAnnotationExcludedTextNode = (node: Node): boolean =>
 const compactText = (value: string): string => value.replace(/\s+/g, '');
 
 /**
+ * A quote with nothing but whitespace in it is not an annotation (#881).
+ *
+ * A double-click at a block boundary — just past the end of a heading, a
+ * paragraph, a list item, a fence — leaves a non-collapsed selection whose
+ * whole string is the break BETWEEN two blocks ("\n"). Acting on it produces
+ * an invisible highlight and an `originalText: "\n"` annotation that no
+ * reload can re-anchor, and which is still counted and exported.
+ *
+ * `compactText` rather than `trim`: it also removes the non-breaking spaces
+ * and other Unicode whitespace a rendered document is full of.
+ */
+const isBlankQuote = (value: string | null | undefined): boolean =>
+  compactText(value ?? '') === '';
+
+/**
+ * Whether web-highlighter can serialize a range boundary (#881).
+ *
+ * A non-text boundary is resolved by the library as `childNodes[offset]` and
+ * that node is then serialized. The DOM lets `offset` equal `childNodes.length`
+ * (one past the last child) and browsers really do report that for a
+ * double-click at the end of the last block, which leaves the library holding
+ * `undefined` and throwing `Cannot read properties of undefined (reading
+ * 'parentNode')` out of its own pointer-end listener — an uncaught error, with
+ * no annotation created either way.
+ */
+const boundaryResolves = (node: Node, offset: number): boolean => {
+  // Text, CDATASection and Comment boundaries are offsets INTO the node.
+  if (node.nodeType === 3 || node.nodeType === 4 || node.nodeType === 8) return true;
+  return offset >= 0 && offset < node.childNodes.length && node.childNodes[offset] != null;
+};
+
+const isSerializableRange = (range: Range): boolean =>
+  boundaryResolves(range.startContainer, range.startOffset)
+  && boundaryResolves(range.endContainer, range.endOffset);
+
+/**
+ * One line per page load: a highlighter failure is degraded UX (the selection
+ * is ignored), not something to flood the console — or the user — over.
+ */
+let warnedHighlighterFailure = false;
+const warnHighlighterFailure = (context: string, error: unknown): void => {
+  if (warnedHighlighterFailure) return;
+  warnedHighlighterFailure = true;
+  console.warn(`[plannotator] highlighter ${context} failed; the selection was ignored`, error);
+};
+
+/**
  * The text a set of painted highlight wrappers shows the reader.
  *
  * Not `textContent`: a wrapper can legitimately contain `.annotation-exclude`
@@ -878,6 +925,11 @@ export function useAnnotationHighlighter({
     quickLabelTip?: string,
     mentions?: readonly string[],
   ) => {
+    // #881: the last line before an annotation exists. A quote of pure
+    // whitespace cannot be re-anchored on the next load, so it would come back
+    // as an invisible row that is still counted and still exported.
+    if (isBlankQuote(source?.text)) return;
+
     const doms = highlighter.getDoms(source.id);
     let blockId = '';
     let startOffset = 0;
@@ -1053,6 +1105,14 @@ export function useAnnotationHighlighter({
       // verdict, so it is neither attempted nor unanchored here (the same
       // rule the raw-HTML pinpoints follow on their surface).
       if (ann.diagramAnchor) return;
+      // #881: a row whose quote is only whitespace has nothing to anchor to.
+      // Older drafts carry such rows (a double-click at a block boundary used
+      // to create one), and the stored positions still resolve, so restoring
+      // it paints an invisible mark on a spot the reviewer never chose. Skip
+      // it outright — neither attempted nor unanchored, the same treatment a
+      // diagram row gets, so a legacy draft does not raise an "Unanchored"
+      // chip and a toast on every load.
+      if (isBlankQuote(ann.originalText)) return;
       attempted.push(ann.id);
 
       // Skip if already highlighted
@@ -1292,6 +1352,21 @@ export function useAnnotationHighlighter({
             source.text,
             doms.map((dom: HTMLElement) => dom.textContent ?? '').join(''),
           );
+          // #881, belt to the capture-phase guard's braces: every producer of
+          // a selection highlight lands here (the library's own pointer-end
+          // listener, the touch selectionchange bridge, vim and pinpoint
+          // ranges), and the quote repair above can itself leave nothing but
+          // whitespace. A blank quote opens no toolbar, no composer and
+          // creates no annotation; the painted-but-invisible highlight goes
+          // with it, and the pending selection already on screen is untouched.
+          if (isBlankQuote(source.text)) {
+            try { highlighter.remove(source.id); } catch (error) {
+              warnHighlighterFailure('cleanup of a blank selection', error);
+            }
+            pendingRangeRunsRef.current = null;
+            window.getSelection()?.removeAllRanges();
+            return;
+          }
           // Clean up previous pending
           if (pendingSourceRef.current) {
             highlighter.remove(pendingSourceRef.current.id);
@@ -1352,6 +1427,24 @@ export function useAnnotationHighlighter({
         return;
       }
       const range = selection.getRangeAt(0).cloneRange();
+      // #881: fail closed on a selection there is nothing to annotate in, and
+      // on one the library cannot serialize. Collapsing it HERE — on the
+      // capture phase, before the library's own pointer-end listener reads the
+      // live selection — is what makes its handler a no-op: it bails on a
+      // collapsed selection rather than painting an empty highlight or
+      // throwing out of an event listener we do not own.
+      //
+      // Ahead of the containment check on purpose: the library's handler does
+      // not check containment either. A double-click past the end of the LAST
+      // block leaves a selection whose common ancestor is the scroll container
+      // AROUND the document and whose end boundary is an empty <div> — the
+      // exact shape that throws — so a containment bail here would hand that
+      // selection straight to the serializer.
+      if (isBlankQuote(selection.toString()) || !isSerializableRange(range)) {
+        pendingRangeRunsRef.current = null;
+        selection.removeAllRanges();
+        return;
+      }
       if (!container.contains(range.commonAncestorContainer)) {
         pendingRangeRunsRef.current = null;
         return;
@@ -1466,9 +1559,17 @@ export function useAnnotationHighlighter({
             if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
             if (!containerRef.current?.contains(sel.anchorNode)) return;
             const range = sel.getRangeAt(0).cloneRange();
+            // Same fail-closed rule as the pointer-end guard (#881): touch
+            // selections settle on block boundaries just as often.
+            if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return;
             snapRangeStartPastExcluded(range);
             pendingRangeRunsRef.current = rangeTextPieces(range);
-            highlighter.fromRange(range);
+            try {
+              highlighter.fromRange(range);
+            } catch (error) {
+              pendingRangeRunsRef.current = null;
+              warnHighlighterFailure('painting a touch selection', error);
+            }
           }, 400);
         }
       : null;
@@ -1495,6 +1596,10 @@ export function useAnnotationHighlighter({
     const container = containerRef.current;
     if (!highlighter || !container || range.collapsed) return;
     if (!container.contains(range.commonAncestorContainer)) return;
+    // A caller-built range (vim, pinpoint) can name a boundary the library
+    // cannot serialize just as a pointer selection can (#881); refuse it
+    // rather than let the serializer throw through this call.
+    if (!isSerializableRange(range)) return;
 
     // Pinpoint clicks and vim visual selections anchor on the first
     // annotatable text node of a block, which for a titled GitHub alert is the
@@ -1511,6 +1616,9 @@ export function useAnnotationHighlighter({
 
     try {
       highlighter.fromRange(painted);
+    } catch (error) {
+      pendingRangeRunsRef.current = null;
+      warnHighlighterFailure('painting a range', error);
     } finally {
       pendingModeOverrideRef.current = null;
       selection?.removeAllRanges();
