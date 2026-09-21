@@ -24,11 +24,13 @@ Three paths depending on content type. Each has its own references and structure
 
 Always deliver via Plannotator's annotation UI. Do NOT use `open` or `xdg-open`.
 
-For any deliverable that uses Mermaid, render every diagram with Mermaid 11 in both the light
+For any deliverable that uses Mermaid, render every diagram with Mermaid 12 in both the light
 and dark palettes before opening the annotation UI. Rendering is a hard gate: an exception,
 empty SVG, or error output such as `aria-roledescription="error"` or `Syntax error in text`
 means the explainer is not deliverable. Fix the diagram or theme configuration and rerun both
 palettes until every SVG passes.
+
+For zoomable diagram shells, additionally zoom to the maximum and pan to all extremes in both palettes before delivering: the figure caption must stay fully legible throughout (see `references/diagram-shell.md`).
 
 **Plans/proposals** (user should approve/deny):
 ```bash
@@ -104,8 +106,9 @@ For architecture diagrams, data tables, slide decks, project recaps, comparisons
 2. Read visual-explainer's `SKILL.md` (workflow, diagram types, anti-slop rules)
 3. Read the relevant visual-explainer references and templates for your content type
 4. Read `references/theme-override.md` — Plannotator tokens replacing Nico's palettes
+5. For zoomable Mermaid diagrams with controls and a caption: read `references/diagram-shell.md` and copy its shell — do not hand-roll viewport, canvas, or caption markup
 
-Follow visual-explainer's structure, component classes (`.ve-card`, `.kpi-card`, `.pipeline`), and anti-slop rules. The only override is the color/typography layer — Plannotator tokens instead of Nico's custom palettes.
+Follow visual-explainer's structure, component classes (`.ve-card`, `.kpi-card`, `.pipeline`), and anti-slop rules. Overrides are the color/typography layer — Plannotator tokens instead of Nico's custom palettes — plus the zoomable diagram shell in `references/diagram-shell.md` when the deliverable has one.
 
 ---
 

@@ -6,7 +6,7 @@
  * browser UI and can approve, deny with annotations, or request changes.
  *
  * Features:
- * - /plannotator command or Ctrl+Alt+P to toggle
+ * - /plannotator-plan-mode command or Ctrl+Alt+P to toggle
  * - --plan flag to start in planning mode
  * - Bash unrestricted during planning (prompt-guided)
  * - Writes restricted to markdown files inside cwd during planning
@@ -16,7 +16,7 @@
  * - /plannotator-annotate command for markdown annotation
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
@@ -30,6 +30,7 @@ import {
 	type ChecklistItem,
 	markCompletedSteps,
 	parseChecklist,
+	renderCompletedChecklist,
 } from "./generated/checklist.ts";
 import { loadConfig, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
@@ -67,12 +68,14 @@ import {
 import {
 	applyPhaseTools,
 	isPlanWritePathAllowed,
+	isPlannotatorSubmitDevicePath,
+	PLAN_MARK_DONE_TOOL,
 	PLAN_SUBMIT_TOOL,
 	releasePhaseTools,
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
-import { isRemoteSession } from "./server/network.ts";
+import { isRemoteSession, isUrlHostOverridden } from "./server/network.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 import { classifyAnnotateOutcome } from "./annotate-outcome.ts";
 
@@ -111,8 +114,8 @@ async function loadAnnotateCommandModules() {
 		hasMarkdownFiles: resolveFile.hasMarkdownFiles,
 		resolveUserPath: resolveFile.resolveUserPath,
 		isAnnotatableTextPath: resolveFile.isAnnotatableTextPath,
-		ANNOTATABLE_DOC_REGEX: resolveFile.ANNOTATABLE_DOC_REGEX,
-		ANNOTATABLE_EXTENSIONS_HINT: resolveFile.ANNOTATABLE_EXTENSIONS_HINT,
+		getAnnotatableDocRegex: resolveFile.getAnnotatableDocRegex,
+		getAnnotatableExtensionsHint: resolveFile.getAnnotatableExtensionsHint,
 		MAX_ANNOTATABLE_FILE_BYTES: resolveFile.MAX_ANNOTATABLE_FILE_BYTES,
 		FILE_BROWSER_EXCLUDED: referenceCommon.FILE_BROWSER_EXCLUDED,
 	};
@@ -129,7 +132,29 @@ type PersistedPlannotatorState = {
 	lastSubmittedPath?: string;
 	savedState?: SavedPhaseState;
 	phaseAddedTools?: string[];
+	/** Whether the current phase's entry framing message was already delivered. */
+	framingDelivered?: boolean;
+	/**
+	 * Whether a "plan mode off" notice is still owed to the model after a
+	 * planning/executing → idle transition (#1320). Set on every return to
+	 * idle from a phase, cleared when the notice is delivered or when a new
+	 * phase entry supersedes it. Never set on fresh sessions, so an idle
+	 * session that never entered plan mode still injects nothing (#1269).
+	 */
+	idleNoticePending?: boolean;
 };
+
+/**
+ * One-shot countermand delivered on the first prompt after a planning or
+ * executing phase returns to idle (#1320). It is the SOLE mechanism ending
+ * plan mode in the conversation: delivered framing stays in history untouched
+ * (#1380 — removing it from mid-history shifted every later message and
+ * invalidated the provider's cached prefix), so the model's plan-mode steering
+ * — its own turns, blocked-write tool results, and the framing itself — is
+ * neutralized by this explicit notice, never by silent removal.
+ */
+const PLAN_MODE_OFF_NOTICE = `[PLANNOTATOR - PLAN MODE OFF]
+Plannotator plan mode has ended. Disregard all earlier Plannotator planning or execution instructions from this session: the planning restrictions (markdown-only writes, plan submission for review) and the execution checklist protocol ([DONE:n] markers) no longer apply, and the plan-submission tool is no longer available. Full tool access is restored — respond and use tools normally. If the user wants planning again, they will re-enable plan mode.`;
 
 function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml: boolean }): string | null {
 	const { hasUI, hasPlanHtml } = options;
@@ -163,9 +188,12 @@ function safeNotify(
  * after-turn notify inside openBrowserForServer fires too late to render.
  */
 function sessionOpenedMessage(label: string, url: string): string {
-	return isRemoteSession()
-		? `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`
-		: `${label}. You can keep chatting while it runs.`;
+	if (!isRemoteSession()) return `${label}. You can keep chatting while it runs.`;
+	// With an advertised-URL host override the link is directly reachable
+	// (e.g. over a tailnet), so the port-forwarding advice would be wrong.
+	return isUrlHostOverridden()
+		? `${label} — open ${url} on your device. You can keep chatting while it runs.`
+		: `${label} — open ${url} on your local machine (forward the port if needed). You can keep chatting while it runs.`;
 }
 
 function reportBackgroundError(ctx: ExtensionContext, message: string, err: unknown, origin?: PiSessionIdentity): void {
@@ -255,6 +283,19 @@ function sendUserMessageWithCurrentSessionFallback(
 	}
 }
 
+/**
+ * Warning for hosts whose extension context lacks `ctx.isProjectTrusted`
+ * (#1353). Two audiences reach this path: real Pi older than 0.79.1 (the
+ * release that added the capability) and forks like oh-my-pi that have not
+ * adopted it. Neither Pi's nor oh-my-pi's extension context exposes a host
+ * name or version, so the two are not reliably distinguishable at runtime —
+ * the message states the capability gap without guessing which host it is,
+ * and must stay true for both. "Bundled and global config still load" is a
+ * fact of loadPlannotatorConfig: only project-local config is trust-gated.
+ */
+export const PROJECT_TRUST_CAPABILITY_WARNING =
+	"This host does not expose project trust (ctx.isProjectTrusted, Pi 0.79.1+). Project-local config (.pi/plannotator.json) is disabled; bundled and global config still load.";
+
 export default function plannotator(pi: ExtensionAPI): void {
 	const currentPiSession = registerCurrentPiSession(pi);
 	let phase: Phase = "idle";
@@ -279,6 +320,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 	let phaseAddedTools: string[] = [];
 	let plannotatorConfig = {};
 	let justApprovedPlan = false;
+	// One-shot latch per phase entry: the phase framing message is delivered on
+	// the first prompt of a phase and then lives in conversation history, so it
+	// must never be re-sent on later prompts of the same phase. Reset at every
+	// phase transition; persisted so session resume does not re-deliver.
+	let framingDelivered = false;
+	// One-shot latch for the plan-mode-off countermand (#1320): armed only by
+	// returnToIdle (a genuine planning/executing → idle transition), never on
+	// fresh sessions, so the #1269 inject-nothing-while-idle promise holds
+	// until plan mode has actually been used. Persisted like framingDelivered
+	// so resume/branch switches neither drop nor duplicate the notice.
+	let idleNoticePending = false;
 	/**
 	 * Cleared when this extension instance's session is torn down or replaced.
 	 * Pi builds a fresh instance for the replacement session, so this latch only
@@ -398,6 +450,34 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 	}
 
+	function persistCompletedChecklist(fullPath: string): void {
+		try {
+			const content = readFileSync(fullPath, "utf-8");
+			// One-turn ordinal-desync window: checklistItems were parsed at turn
+			// start, so an agent that edits the plan's checkboxes mid-turn can land
+			// a step number on a neighboring box until the next turn re-parses from
+			// disk. Bounded by upgrade-only writes plus that per-turn re-parse.
+			const updated = renderCompletedChecklist(content, checklistItems);
+			if (updated !== content) writeFileSync(fullPath, updated, "utf-8");
+		} catch {
+			// Progress persistence must not stop plan execution.
+		}
+	}
+
+	async function markStepDone(step: number, ctx: ExtensionContext): Promise<boolean> {
+		if (phase !== "executing") return false;
+		const item = checklistItems.find((candidate) => candidate.step === step);
+		if (!item) return false;
+
+		item.completed = true;
+		if (lastSubmittedPath) persistCompletedChecklist(resolve(ctx.cwd, lastSubmittedPath));
+		updateStatus(ctx);
+		updateWidget(ctx);
+		await syncTodoProvider(ctx);
+		persistState();
+		return true;
+	}
+
 	function captureSavedState(ctx: ExtensionContext): void {
 		savedState = {
 			model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
@@ -411,6 +491,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 			lastSubmittedPath,
 			savedState,
 			phaseAddedTools,
+			framingDelivered,
+			idleNoticePending,
 		});
 	}
 
@@ -464,7 +546,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const phaseTools =
 				phase === "planning" && !configuredTools.includes(PLAN_SUBMIT_TOOL)
 					? [...configuredTools, PLAN_SUBMIT_TOOL]
-					: configuredTools;
+					: phase === "executing" && !configuredTools.includes(PLAN_MARK_DONE_TOOL)
+						? [...configuredTools, PLAN_MARK_DONE_TOOL]
+						: configuredTools;
 			const selection = applyPhaseTools(
 				activeTools,
 				phaseAddedTools,
@@ -484,7 +568,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		if (profile?.thinking) {
-			pi.setThinkingLevel(profile.thinking);
+			// The config accepts every level current Pi knows, which is a superset
+			// of the `ThinkingLevel` union of the pinned Pi floor (#1304). Pi clamps
+			// a level the running model does not support, so handing it one this
+			// build's types have not heard of yet is safe.
+			pi.setThinkingLevel(profile.thinking as ThinkingLevel);
 		}
 
 		updateStatus(ctx);
@@ -494,6 +582,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 	async function enterPlanning(ctx: ExtensionContext): Promise<void> {
 		phase = "planning";
+		framingDelivered = false;
+		// An undelivered plan-mode-off notice is superseded by the planning
+		// framing this entry will deliver; dropping it avoids a stale "plan
+		// mode is off" landing after plan mode came back on.
+		idleNoticePending = false;
 		checklistItems = [];
 		captureSavedState(ctx);
 		await applyPhaseConfig(ctx, { restoreSavedState: false });
@@ -515,6 +608,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 	 */
 	async function returnToIdle(ctx: ExtensionContext): Promise<void> {
 		phase = "idle";
+		framingDelivered = false;
+		// Every caller reaches here FROM planning or executing, so this is the
+		// one place the plan-mode-off notice may be armed (#1320). Fresh idle
+		// sessions never pass through returnToIdle and stay injection-free.
+		idleNoticePending = true;
 		checklistItems = [];
 		lastSubmittedPath = null;
 		// Re-detect for the next plan: a provider that appeared (or a transient
@@ -562,7 +660,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 	// ── Commands & Shortcuts ─────────────────────────────────────────────
 
-	pi.registerCommand("plannotator", {
+	pi.registerCommand("plannotator-plan-mode", {
 		description: "Toggle plannotator planning mode",
 		handler: async (_args, ctx) => {
 			await togglePlanMode(ctx);
@@ -570,7 +668,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("plannotator-review", {
-		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider",
+		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider, --base <ref> / --diff-type <type> to pin the session's opening diff",
 		handler: async (args, ctx) => {
 			if (!hasReviewBrowserHtml()) {
 				ctx.ui.notify(
@@ -586,10 +684,25 @@ export default function plannotator(pi: ExtensionAPI): void {
 			try {
 				const { parseReviewArgs } = await import("./generated/review-args.ts");
 				const reviewArgs = parseReviewArgs(args ?? "");
+				// Argument-shape failures refuse to start a session (same contract
+				// as the CLI's exit 1), surfaced through Pi's notifier.
+				if (reviewArgs.errors.length > 0) {
+					ctx.ui.notify(`Plannotator: ${reviewArgs.errors.join("; ")}`, "error");
+					return;
+				}
 				const session = await startCodeReviewBrowserSession(ctx, {
 					prUrl: reviewArgs.prUrl,
+					patchFile: reviewArgs.patchFile,
 					vcsType: reviewArgs.vcsType,
 					useLocal: reviewArgs.useLocal,
+					// --base / --diff-type: session-only open state from user flags.
+					// openStateFromFlags turns on strict validation (provider
+					// matrix, base probe) and the explicit/pinned server bits;
+					// programmatic callers omit it and keep the legacy
+					// forward-and-let-it-upgrade behavior.
+					defaultBranch: reviewArgs.base,
+					diffType: reviewArgs.diffType,
+					openStateFromFlags: reviewArgs.base !== undefined || reviewArgs.diffType !== undefined,
 				});
 				ctx.ui.notify(sessionOpenedMessage("Code review opened", session.url), "info");
 				void session
@@ -601,10 +714,13 @@ export default function plannotator(pi: ExtensionAPI): void {
 								return;
 							}
 							if (result.approved) {
-								const { getReviewApprovedPrompt } = await loadPlannotatorPrompts();
+								// PR5 delivery (spec §6.4, consumer #4): bare approvals send
+								// the approved prompt alone; approvals carrying reviewer notes
+								// send the approved-with-notes framing (non-blocking guidance).
+								const { composeReviewApprovedMessage } = await loadPlannotatorPrompts();
 								sendUserMessageWithCurrentSessionFallback(
 									pi,
-									getReviewApprovedPrompt("pi", loadConfig()),
+									composeReviewApprovedMessage("pi", result.feedback, loadConfig()),
 									{ deliverAs: "followUp" },
 									"Plannotator code review feedback could not be sent",
 									origin,
@@ -663,17 +779,23 @@ export default function plannotator(pi: ExtensionAPI): void {
 				resolveAtReference,
 				resolveUserPath,
 				isAnnotatableTextPath,
-				ANNOTATABLE_DOC_REGEX,
-				ANNOTATABLE_EXTENSIONS_HINT,
+				getAnnotatableDocRegex,
+				getAnnotatableExtensionsHint,
 				MAX_ANNOTATABLE_FILE_BYTES,
 			} = await loadAnnotateCommandModules();
 			// Split known annotate flags from the path. --json is silently
 			// accepted (Pi writes back via sendUserMessage, not stdout).
 			// `rawFilePath` keeps any leading `@` for the literal-@ fallback
-			// (scoped-package-style names).
-			let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina } = parseAnnotateArgs(args ?? "");
+			// (scoped-package-style names). liveFlags: Pi supports live app
+			// sessions, so --app / --static are recognized here.
+			let { filePath, rawFilePath, gate, renderHtml: renderHtmlFlag, renderMarkdown: renderMarkdownFlag, noJina, app: appFlag, static: staticFlag } = parseAnnotateArgs(args ?? "", { liveFlags: true });
+			// Same flag-conflict-first ordering as the Bun CLI.
+			if (appFlag && staticFlag) {
+				ctx.ui.notify("--app and --static are mutually exclusive", "error");
+				return;
+			}
 			if (!filePath) {
-				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json]", "error");
+				ctx.ui.notify("Usage: /plannotator-annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--app] [--static] [--gate] [--json]", "error");
 				return;
 			}
 
@@ -721,28 +843,91 @@ export default function plannotator(pi: ExtensionAPI): void {
 			let rawHtml: string | undefined;
 			let absolutePath: string;
 			let folderPath: string | undefined;
-			let mode: "annotate" | "annotate-folder" | undefined;
+			let mode: "annotate" | "annotate-folder" | "annotate-app" | undefined;
 			let sourceInfo: string | undefined;
 			let sourceConverted = false;
 			let isFolder = false;
+			let liveTargetUrl: string | undefined;
 
 			// --- URL annotation ---
 			const isUrl = /^https?:\/\//i.test(filePath);
 
+			// --app is contracted to fail loudly whenever it cannot apply; a
+			// file or folder target silently swallowing it would hide the
+			// flag's typo'd use (same contract as the Bun CLI).
+			if (!isUrl && appFlag) {
+				const { LIVE_APP_REQUIRES_URL_MESSAGE } = await import("./generated/live-probe.ts");
+				ctx.ui.notify(LIVE_APP_REQUIRES_URL_MESSAGE, "error");
+				return;
+			}
+
 			if (isUrl) {
-				const useJina = resolveUseJina(noJina, loadConfig());
-				ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
-				try {
-					const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.ts");
-					const result = await urlToMarkdown(filePath, { useJina });
-					markdown = result.markdown;
-					sourceConverted = isConvertedSource(result.source);
-				} catch (err) {
-					ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+				// --- Live app detection (shared probe: same 3s timeout, same
+				// "< 500 + HTML + same loopback origin" gate as the Bun CLI) ---
+				const {
+					LIVE_APP_REMOTE_MESSAGE,
+					LIVE_APP_REQUIRES_HTTP_MESSAGE,
+					LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
+					buildForceAppFailureMessage,
+					buildLiveProbeFallbackNotice,
+					classifyLiveAppCandidate,
+					probeLiveAppTarget,
+				} = await import("./generated/live-probe.ts");
+				const { parsed: parsedUrl, loopback } = classifyLiveAppCandidate(filePath);
+
+				if (appFlag && !loopback) {
+					ctx.ui.notify(LIVE_APP_REQUIRES_LOOPBACK_MESSAGE, "error");
 					return;
 				}
-				absolutePath = filePath;
-				sourceInfo = filePath;
+				if (appFlag && parsedUrl?.protocol === "https:") {
+					// The live proxy is http-only.
+					ctx.ui.notify(LIVE_APP_REQUIRES_HTTP_MESSAGE, "error");
+					return;
+				}
+
+				if (loopback && parsedUrl?.protocol === "http:" && !staticFlag) {
+					const probe = await probeLiveAppTarget(filePath, parsedUrl);
+					if (probe.liveEligible) {
+						// Remote hard-off (layer 1 of 2; the server throw in
+						// serverAnnotate.ts backstops it): a live proxy relays
+						// the user's authenticated dev app, and a remote Pi
+						// session is reachable beyond loopback.
+						if (isRemoteSession()) {
+							ctx.ui.notify(LIVE_APP_REMOTE_MESSAGE, "error");
+							return;
+						}
+						liveTargetUrl = filePath;
+						mode = "annotate-app";
+						ctx.ui.notify(`Live app: ${filePath}`, "info");
+					} else if (appFlag) {
+						ctx.ui.notify(buildForceAppFailureMessage(filePath, probe), "error");
+						return;
+					} else if (probe.probeError !== null) {
+						// A dev server still starting up probes as unreachable;
+						// say so instead of silently downgrading to static.
+						ctx.ui.notify(buildLiveProbeFallbackNotice(filePath, probe.probeError), "info");
+					}
+				}
+
+				if (liveTargetUrl) {
+					markdown = "";
+					absolutePath = filePath;
+					sourceInfo = filePath;
+				} else {
+					const useJina = resolveUseJina(noJina, loadConfig());
+					ctx.ui.notify(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}...`, "info");
+					try {
+						const { isConvertedSource, urlToMarkdown } = await import("./generated/url-to-markdown.ts");
+						const result = await urlToMarkdown(filePath, { useJina });
+						markdown = result.markdown;
+						sourceConverted = isConvertedSource(result.source);
+					} catch (err) {
+						ctx.ui.notify(`Failed to fetch URL: ${err instanceof Error ? err.message : String(err)}`, "error");
+						return;
+					}
+					absolutePath = filePath;
+					sourceInfo = filePath;
+				}
 			} else {
 				// Pick the interpretation of the user input that actually exists:
 				// stripped form first (reference-mode primary), literal as fallback
@@ -767,7 +952,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 
 				if (isFolder) {
-					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
+					if (!hasMarkdownFiles(absolutePath, FILE_BROWSER_EXCLUDED, getAnnotatableDocRegex())) {
 						ctx.ui.notify(`No annotatable files (markdown, plain-text, config, or HTML) found in ${absolutePath}`, "error");
 						return;
 					}
@@ -790,7 +975,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					ctx.ui.notify(`Opening annotation UI for ${filePath}...`, "info");
 				} else {
 					if (!isAnnotatableTextPath(absolutePath)) {
-						ctx.ui.notify(`File type not supported. Supported types: ${ANNOTATABLE_EXTENSIONS_HINT}`, "error");
+						ctx.ui.notify(`File type not supported. Supported types: ${getAnnotatableExtensionsHint()}`, "error");
 						return;
 					}
 					if (statSync(absolutePath).size > MAX_ANNOTATABLE_FILE_BYTES) {
@@ -818,6 +1003,8 @@ export default function plannotator(pi: ExtensionAPI): void {
 					rawHtml,
 					!!rawHtml,
 					renderMarkdownFlag,
+					undefined,
+					liveTargetUrl,
 				);
 				ctx.ui.notify(sessionOpenedMessage("Annotation opened", session.url), "info");
 				void session
@@ -979,6 +1166,47 @@ export default function plannotator(pi: ExtensionAPI): void {
 		},
 	});
 
+	// ── Plan execution tools ────────────────────────────────────────────
+
+	pi.registerTool({
+		name: PLAN_MARK_DONE_TOOL,
+		label: "Mark Plan Step Done",
+		description:
+			"Mark one approved-plan checklist step complete. Call this immediately after finishing each step and before starting the next one.",
+		parameters: Type.Object({
+			step: Type.Number({
+				description: "One-based number of the completed plan checklist step.",
+				multipleOf: 1,
+			}),
+		}) as any,
+
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (phase !== "executing") {
+				return {
+					content: [{ type: "text", text: "Error: No approved plan is executing." }],
+					details: { completed: false },
+				};
+			}
+
+			const step = (params as { step?: unknown })?.step;
+			if (
+				typeof step !== "number" ||
+				!Number.isInteger(step) ||
+				!(await markStepDone(step, ctx))
+			) {
+				return {
+					content: [{ type: "text", text: `Error: Plan checklist step ${String(step)} does not exist.` }],
+					details: { completed: false },
+				};
+			}
+
+			return {
+				content: [{ type: "text", text: `Plan checklist step ${step} marked complete.` }],
+				details: { completed: true, step },
+			};
+		},
+	});
+
 	// ── plannotator_submit_plan Tool ────────────────────────────────────
 
 	pi.registerTool({
@@ -1004,7 +1232,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: "Error: Not in plan mode. Use /plannotator to enter planning mode first.",
+							text: "Error: Not in plan mode. Use /plannotator-plan-mode to enter planning mode first.",
 						},
 					],
 					details: { approved: false },
@@ -1104,6 +1332,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 
 				phase = "executing";
+				framingDelivered = false;
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
@@ -1162,14 +1391,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 				}
 
 				phase = "executing";
+				framingDelivered = false;
 				await applyPhaseConfig(ctx, { restoreSavedState: true });
 				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
 				persistState();
 				justApprovedPlan = true;
 
+				// Keep this aligned with the executing-phase framing delivered on the
+				// same turn: the tool is the primary mechanism, markers the fallback.
 				const doneMsg =
 					checklistItems.length > 0
-						? `After completing each step, include [DONE:n] in your response where n is the step number.`
+						? `Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
 						: "";
 
 				if (result.feedback) {
@@ -1234,6 +1466,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		if (event.toolName !== "write" && event.toolName !== "edit") return;
 
 		const inputPath = event.input.path as string;
+		if (isPlannotatorSubmitDevicePath(inputPath)) return;
 		if (!isPlanWritePathAllowed(inputPath, ctx.cwd)) {
 			const verb = event.toolName === "write" ? "writes" : "edits";
 			return {
@@ -1243,8 +1476,35 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 	});
 
-	// Inject phase-specific context
+	// Deliver phase framing once per phase entry, plus per-turn todo status.
+	// Plannotator never returns or modifies systemPrompt: Pi's base prompt
+	// (AGENTS.md context, skills catalog, tools guidance, user append text) is
+	// left untouched, and cache-busting reduces to conversation-suffix appends
+	// (#922, approach suggested by Karrq).
 	pi.on("before_agent_start", async (_event, ctx) => {
+		if (phase !== "planning" && phase !== "executing") {
+			// Idle injects nothing (#1269) — with one exception: the first
+			// prompt after a planning/executing → idle transition delivers a
+			// one-shot plan-mode-off countermand (#1320). Delivered framing
+			// stays in history (#1380), so this notice is what ends plan mode:
+			// the model's plan-mode turns, blocked-write tool results, and the
+			// framing itself keep steering it until the end is said out loud.
+			// Cache-wise the notice is free unconditionally — a pure
+			// conversation-suffix append on a prefix nothing else perturbs.
+			// Fresh idle sessions never arm the latch and inject nothing.
+			if (phase !== "idle" || !idleNoticePending) return;
+			idleNoticePending = false;
+			persistState();
+			return {
+				message: {
+					customType: "plannotator-framing",
+					content: PLAN_MODE_OFF_NOTICE,
+					display: false,
+					details: { phase },
+				},
+			};
+		}
+
 		const profile = getPhaseProfile();
 		const planRef = lastSubmittedPath ?? "your plan file";
 
@@ -1260,162 +1520,109 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 
 		const todoStats = phase === "executing" ? formatTodoList(checklistItems) : formatTodoList([]);
+		// The closing line restates the completion-marker convention so the
+		// protocol survives even when compaction has swallowed the framing and
+		// re-delivery has not happened yet.
+		const todoStatus =
+			phase === "executing" && todoStats.remainingCount > 0
+				? `[PLANNOTATOR - EXECUTING PLAN]
+Todo status for ${planRef}: ${todoStats.completedCount}/${todoStats.totalCount} steps complete.
 
-		let improveContext: string | null = null;
-		if (phase === "planning") {
-			const hook = readImprovementHook("enterplanmode-improve");
-			const pfmEnabled = loadConfig().pfmReminder === true;
-			improveContext = composeImproveContext({
-				pfmEnabled,
-				improvementHookContent: hook?.content ?? null,
-			});
-		}
+Remaining steps:
+${todoStats.todoList}
 
-		if (profile?.systemPrompt) {
-			const rendered = renderTemplate(
-				profile.systemPrompt,
-				buildPromptVariables({
-					planFilePath: planRef,
-					phase,
-					todoList: todoStats.todoList,
-					completedCount: todoStats.completedCount,
-					totalCount: todoStats.totalCount,
-					remainingCount: todoStats.remainingCount,
-				}),
-			);
-			if (rendered.unknownVariables.length > 0) {
-				ctx.ui.notify(
-					"Plannotator: unknown template variables in " + phase + " prompt: " + rendered.unknownVariables.join(", "),
-					"warning",
-				);
-			}
+Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the next step. [DONE:n] markers remain a fallback for interrupted executions.`
+				: null;
 
-			return { systemPrompt: rendered.text + (improveContext ? "\n\n" + improveContext : "") };
-		}
-
-		if (phase === "planning") {
+		if (framingDelivered) {
+			// Same phase, later prompt: the framing already sits in conversation
+			// history, so inject nothing beyond the small todo snapshot during
+			// execution.
+			if (!todoStatus) return;
 			return {
 				message: {
 					customType: "plannotator-context",
-					content: `[PLANNOTATOR - PLANNING PHASE]
-You are in plan mode. You MUST NOT make any changes to the codebase — no edits, no commits, no installs, no destructive commands. During planning you may only write or edit markdown files (.md, .mdx) inside the working directory.
-
-Use the available reading, searching, and command tools to explore the codebase. Use the available file tools only for markdown plan files.
-
-Do not run destructive commands (rm, git push, npm install, etc.) — focus on reading and exploring the codebase. Web fetching is fine.
-
-## Iterative Planning Workflow
-
-You are pair-planning with the user. Explore the code to build context, then write your findings into a markdown plan file as you go. The plan starts as a rough skeleton and gradually becomes the final plan.
-
-### Picking a plan file
-
-Choose a descriptive filename for your plan. Convention: \`PLAN.md\` at the repo root for a single focused plan, or \`plans/<short-name>.md\` for projects that keep multiple plans. Reuse the same filename across revisions of the same plan so version history links up.
-
-### The Loop
-
-Repeat this cycle until the plan is complete:
-
-1. **Explore** — Use the available reading, searching, and command tools to understand the codebase. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.
-2. **Update the plan file** — After each discovery, immediately capture what you learned in the plan. Don't wait until the end. Use the available file tools to create the initial draft and make targeted updates.
-3. **Ask the user** — When you hit an ambiguity or decision you can't resolve from code alone, ask. Then go back to step 1.
-
-### First Turn
-
-Start by quickly scanning key files to form an initial understanding of the task scope. Then write a skeleton plan (headers and rough notes) and ask the user your first round of questions. Don't explore exhaustively before engaging the user.
-
-### Asking Good Questions
-
-- Never ask what you could find out by reading the code.
-- Batch related questions together.
-- Focus on things only the user can answer: requirements, preferences, tradeoffs, edge-case priorities.
-- Scale depth to the task — a vague feature request needs many rounds; a focused bug fix may need one or none.
-
-### Plan File Structure
-
-Your plan file should use markdown with clear sections:
-- **Context** — Why this change is being made: the problem, what prompted it, the intended outcome.
-- **Approach** — Your recommended approach only, not all alternatives considered.
-- **Files to modify** — List the critical file paths that will be changed.
-- **Reuse** — Reference existing functions and utilities you found, with their file paths.
-- **Steps** — Implementation checklist:
-  - [ ] Step 1 description
-  - [ ] Step 2 description
-- **Verification** — How to test the changes end-to-end (run the code, run tests, manual checks).
-
-Keep the plan concise enough to scan quickly, but detailed enough to execute effectively.
-
-### When to Submit
-
-Your plan is ready when you've addressed all ambiguities and it covers: what to change, which files to modify, what existing code to reuse, and how to verify. Call ${PLAN_SUBMIT_TOOL} with the path to your plan file to submit for review.
-
-### Revising After Feedback
-
-When the user denies a plan with feedback:
-1. Read the plan file to see the current plan.
-2. Make targeted changes addressing the feedback — do NOT rewrite the entire file.
-3. Call ${PLAN_SUBMIT_TOOL} again with the same filePath to resubmit.
-
-### Ending Your Turn
-
-Your turn should only end by either:
-- Asking the user a question to gather more information.
-- Calling ${PLAN_SUBMIT_TOOL} when the plan is ready for review.
-
-Do not end your turn without doing one of these two things.` + (improveContext ? "\n\n---\n\n" + improveContext : ""),
+					content: todoStatus,
 					display: false,
 				},
 			};
 		}
 
-		if (phase === "executing" && checklistItems.length > 0) {
-			const remaining = checklistItems.filter((t) => !t.completed);
-			if (remaining.length > 0) {
-				const todoList = remaining
-					.map((t) => `- [ ] ${t.step}. ${t.text}`)
-					.join("\n");
-				return {
-					message: {
-						customType: "plannotator-context",
-						content: `[PLANNOTATOR - EXECUTING PLAN]
-Full tool access is enabled. Execute the plan from ${planRef}.
+		framingDelivered = true;
+		persistState();
 
-Remaining steps:
-${todoList}
-
-Execute each step in order. After completing a step, include [DONE:n] in your response where n is the step number.`,
-						display: false,
-					},
-				};
-			}
+		if (!profile?.instructions) {
+			// Framing explicitly disabled (instructions null/empty): deliver only
+			// the todo snapshot during execution, nothing during planning.
+			if (!todoStatus) return;
+			return {
+				message: {
+					customType: "plannotator-context",
+					content: todoStatus,
+					display: false,
+				},
+			};
 		}
-	});
 
-	// Filter stale context when idle
-	pi.on("context", async (event) => {
-		if (phase !== "idle") return;
+		const rendered = renderTemplate(
+			profile.instructions,
+			buildPromptVariables({
+				planFilePath: planRef,
+				phase,
+				todoList: todoStats.todoList,
+				completedCount: todoStats.completedCount,
+				totalCount: todoStats.totalCount,
+				remainingCount: todoStats.remainingCount,
+			}),
+		);
+		if (rendered.unknownVariables.length > 0) {
+			ctx.ui.notify(
+				"Plannotator: unknown template variables in " + phase + " instructions: " + rendered.unknownVariables.join(", "),
+				"warning",
+			);
+		}
+
+		let content = rendered.text;
+		if (phase === "planning") {
+			const hook = readImprovementHook("enterplanmode-improve");
+			const pfmEnabled = loadConfig().pfmReminder === true;
+			const improveContext = composeImproveContext({
+				pfmEnabled,
+				improvementHookContent: hook?.content ?? null,
+			});
+			if (improveContext) content += "\n\n---\n\n" + improveContext;
+		}
+		// Instructions render an entry-time todo snapshot when they reference
+		// ${todoList}; otherwise append the snapshot so the first executing
+		// prompt still carries the checklist.
+		if (todoStatus && !profile.instructions.includes("${todoList}")) {
+			content += "\n\n" + todoStatus;
+		}
 
 		return {
-			messages: event.messages.filter((m) => {
-				const msg = m as { customType?: string; role?: string; content?: unknown };
-				if (msg.customType === "plannotator-context") return false;
-				if (msg.role !== "user") return true;
-
-				const content = msg.content;
-				if (typeof content === "string") {
-					return !content.includes("[PLANNOTATOR -");
-				}
-				if (Array.isArray(content)) {
-					return !content.some(
-						(c) =>
-							c.type === "text" &&
-							(c as { text?: string }).text?.includes("[PLANNOTATOR -"),
-					);
-				}
-				return true;
-			}),
+			message: {
+				customType: "plannotator-framing",
+				content,
+				display: false,
+				details: { phase },
+			},
 		};
 	});
+
+	// There is deliberately NO "context" handler (#1380). One existed here and
+	// stripped plannotator-injected messages at phase transitions; Pi applies a
+	// context handler's result only to the outgoing LLM request (the runner
+	// structuredClones history and transformContext shapes the request in
+	// streamAssistantResponse), but the provider's prompt cache keys on the
+	// exact request prefix, so removing an already-sent mid-history message
+	// shifted every later message and re-billed the whole tail as uncached
+	// input (the reporter measured 88 of 119 messages invalidated on one plan
+	// completion). The conversation is append-only instead: delivered framing
+	// and todo snapshots stay in history for the life of the session, and
+	// stale instructions are neutralized by countermands — the executing
+	// framing supersedes planning, and PLAN_MODE_OFF_NOTICE supersedes both —
+	// which models follow by recency. Compaction remains the one boundary that
+	// rewrites history, and it invalidates the provider cache by itself.
 
 	// Track execution progress
 	pi.on("turn_end", async (event, ctx) => {
@@ -1424,6 +1631,7 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 		const text = getAssistantMessageText(event.message);
 		if (!text) return;
 		if (markCompletedSteps(text, checklistItems) > 0) {
+			if (lastSubmittedPath) persistCompletedChecklist(resolve(ctx.cwd, lastSubmittedPath));
 			updateStatus(ctx);
 			updateWidget(ctx);
 			await syncTodoProvider(ctx);
@@ -1488,20 +1696,18 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 	});
 
 	// Restore state on session start/resume
-	pi.on("session_start", async (_event, ctx) => {
-		const loadedConfig = loadPlannotatorConfig(ctx.cwd);
-		plannotatorConfig = loadedConfig.config;
-		for (const warning of loadedConfig.warnings) {
-			ctx.ui.notify(`Plannotator config: ${warning}`, "warning");
-		}
-
-		// Check --plan flag
-		if (pi.getFlag("plan") === true) {
-			phase = "planning";
-		}
-
-		// Restore persisted state
-		const entries = ctx.sessionManager.getEntries();
+	/**
+	 * Re-derive phase, framing latch, and checklist state from the ACTIVE
+	 * session path (root to current leaf). Shared by session_start (resume) and
+	 * session_tree (branch navigation): a branch switch can land on a path
+	 * whose plannotator state differs from memory, or where the delivered
+	 * framing message is absent because it lives on another branch.
+	 */
+	async function resyncPhaseFromSession(
+		ctx: ExtensionContext,
+		options: { phaseWhenUnrecorded: Phase; warnOnPlanning: boolean },
+	): Promise<void> {
+		const entries = ctx.sessionManager.getBranch();
 		const stateEntry = entries
 			.filter(
 				(e: { type: string; customType?: string }) =>
@@ -1510,10 +1716,28 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 			.pop() as { data?: PersistedPlannotatorState } | undefined;
 
 		if (stateEntry?.data) {
-			phase = stateEntry.data.phase ?? phase;
+			phase = stateEntry.data.phase ?? options.phaseWhenUnrecorded;
 			lastSubmittedPath = stateEntry.data.lastSubmittedPath ?? lastSubmittedPath;
 			savedState = stateEntry.data.savedState ?? savedState;
 			phaseAddedTools = stateEntry.data.phaseAddedTools ?? phaseAddedTools;
+			// The framing message persists in the restored conversation history,
+			// so a resumed phase must not deliver it again. A path recorded
+			// before delivery restores the latch open and re-delivers.
+			framingDelivered = stateEntry.data.framingDelivered ?? false;
+			// Same contract for the plan-mode-off notice: a path that recorded
+			// the transition but not yet the delivery still owes it; a path
+			// that recorded the delivery must not repeat it.
+			idleNoticePending = stateEntry.data.idleNoticePending ?? false;
+		} else {
+			// No plannotator activity on this path. Memory savedState and
+			// phaseAddedTools are kept so the idle branch below can hand back
+			// tools and settings a now-abandoned branch's phase had taken.
+			phase = options.phaseWhenUnrecorded;
+			framingDelivered = false;
+			// A path with no plannotator state never had plan mode, so no
+			// countermand is owed — and injecting one here would break the
+			// #1269 fresh-session inject-nothing promise.
+			idleNoticePending = false;
 		}
 
 		if (phase === "planning" && !savedState) {
@@ -1545,24 +1769,32 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 							if (text) markCompletedSteps(text, checklistItems);
 						}
 					}
+					persistCompletedChecklist(fullPath);
 				} else {
-					// Plan file gone — fall back to idle
+					// Plan file gone — fall back to idle. This demotes a RECORDED
+					// executing phase, so the session provably used plan mode and
+					// its framing residue is still in history: owe the countermand.
+					// Arming here cannot break the #1269 fresh-session promise —
+					// only a persisted executing entry reaches this branch.
 					phase = "idle";
 					lastSubmittedPath = null;
+					idleNoticePending = true;
 				}
 			} else {
-				// No path recorded — can't rebuild, fall back to idle
+				// No path recorded — can't rebuild, fall back to idle. Same
+				// recorded-executing demotion as above: the countermand is owed.
 				phase = "idle";
+				idleNoticePending = true;
 			}
 		}
 
-
-
 		if (phase === "planning") {
 			checklistItems = [];
-			const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
-			if (warning) {
-				ctx.ui.notify(warning, "warning");
+			if (options.warnOnPlanning) {
+				const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+				if (warning) {
+					ctx.ui.notify(warning, "warning");
+				}
 			}
 		}
 
@@ -1582,5 +1814,56 @@ Execute each step in order. After completing a step, include [DONE:n] in your re
 		updateStatus(ctx);
 		updateWidget(ctx);
 		persistState();
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
+		// Project trust gate (#1291). Capability absent = fail closed: the
+		// project-local config is skipped and the honest capability warning
+		// fires (see PROJECT_TRUST_CAPABILITY_WARNING). A host that provides
+		// the function is honored verbatim — including one that hardcodes
+		// `true` because it has no project-trust gate by policy (oh-my-pi's
+		// planned shim). A throwing trustFn (real Pi throws on a stale
+		// context) propagates deliberately: config loading never runs, so
+		// project-local config still cannot load.
+		const trustFn = ctx.isProjectTrusted as (() => boolean) | undefined;
+		const projectTrusted = typeof trustFn === "function" ? trustFn.call(ctx) : false;
+		if (typeof trustFn !== "function") {
+			ctx.ui.notify(PROJECT_TRUST_CAPABILITY_WARNING, "warning");
+		}
+		const loadedConfig = loadPlannotatorConfig(ctx.cwd, {
+			projectTrusted,
+		});
+		plannotatorConfig = loadedConfig.config;
+		for (const warning of loadedConfig.warnings) {
+			ctx.ui.notify(`Plannotator config: ${warning}`, "warning");
+		}
+
+		// Check --plan flag
+		if (pi.getFlag("plan") === true) {
+			phase = "planning";
+		}
+
+		await resyncPhaseFromSession(ctx, { phaseWhenUnrecorded: phase, warnOnPlanning: true });
+	});
+
+	// Compaction summarizes conversation history and can swallow the delivered
+	// framing message (custom messages are ordinary compactable messages), so
+	// reopen the latch: the next prompt re-delivers the phase framing. If the
+	// framing survived in the kept tail, re-delivery duplicates it — accepted
+	// (#1380): the copies are identical instructions, the newest governs, and
+	// compaction already invalidated the cached prefix, so appending a fresh
+	// copy costs nothing while removing the survivor would cost the cache.
+	pi.on("session_compact", async () => {
+		if (phase !== "planning" && phase !== "executing") return;
+		framingDelivered = false;
+		persistState();
+	});
+
+	// A /tree branch switch changes the active path out from under the latch:
+	// the new path can carry different phase state, or lack the framing message
+	// that was delivered on the abandoned branch. Re-derive everything from the
+	// new path; a path with no plannotator state at all means idle.
+	pi.on("session_tree", async (_event, ctx) => {
+		await resyncPhaseFromSession(ctx, { phaseWhenUnrecorded: "idle", warnOnPlanning: false });
 	});
 }

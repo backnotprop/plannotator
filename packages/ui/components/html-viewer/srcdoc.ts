@@ -96,6 +96,68 @@ export interface SrcdocInjectionOptions {
   hostTheme: boolean;
   /** The version-diff view is showing (rawHtml is htmlDiff output). */
   diffActive: boolean;
+  /**
+   * Load the bridge through a classic `<script src>` from this URL instead of
+   * inlining `BRIDGE_SCRIPT`. Absent or empty: inline, exactly as before. The
+   * tag takes the inline script's place, so placement is identical on both
+   * paths: at the end of `<head>`, before the body (head scripts of the page
+   * run first, body scripts after the bridge). No `crossorigin` attribute is
+   * set: the srcdoc frame is an opaque origin, and a classic script needs no
+   * CORS to execute. Callers must pass an ABSOLUTE URL (see
+   * {@link resolveBridgeScriptUrl}): the framed page may carry its own
+   * `<base href>`, which precedes the injected tag and would re-anchor a
+   * relative URL onto an attacker-chosen origin.
+   */
+  bridgeScriptUrl?: string;
+}
+
+/**
+ * Resolve a host-supplied bridge URL against the PARENT document (its
+ * `document.baseURI`), never against the framed page. The injection lands at
+ * the end of the page's `<head>`, after any `<base href>` the page declares,
+ * so a relative URL written into the srcdoc would resolve against that base:
+ * a hostile document could point the viewer at an attacker-served bridge and
+ * defeat the version check. Resolving here pins the URL before it is written.
+ * An unparsable input is returned unchanged (nothing loads, the ready timeout
+ * reports it) rather than throwing during render.
+ */
+export function resolveBridgeScriptUrl(bridgeScriptUrl: string, parentBaseUrl: string): string {
+  try {
+    return new URL(bridgeScriptUrl, parentBaseUrl).href;
+  } catch {
+    return bridgeScriptUrl;
+  }
+}
+
+/** Escape a string for a double-quoted HTML attribute value. */
+function escapeAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * The bridge `<script>` element, the ONE injection point for both delivery
+ * paths. Inline is the default and Plannotator's only path; the URL form is
+ * the opt-in for hosts that serve the generated `bridge-script.asset.js`.
+ */
+export function buildBridgeScriptTag(bridgeScriptUrl?: string): string {
+  if (bridgeScriptUrl) {
+    return `<script src="${escapeAttribute(bridgeScriptUrl)}"></script>`;
+  }
+  if (!BRIDGE_SCRIPT) {
+    // Only reachable when a host aliased `./bridge-script` to the generated
+    // `bridge-script.lite` module (which stubs the inline literal) and then
+    // rendered an HtmlViewer without `bridgeScriptUrl`: an empty inline
+    // script would be a silently dead surface, so fail loudly instead.
+    throw new Error(
+      "@plannotator/ui HtmlViewer: the inline bridge script is stubbed out "
+        + "(bridge-script.lite alias) but no bridgeScriptUrl was passed.",
+    );
+  }
+  return `<script>${BRIDGE_SCRIPT}</script>`;
 }
 
 /** The `<style>` + `<script>` block spliced into the document's head. */
@@ -104,6 +166,7 @@ export function buildSrcdocInjection({
   isLight,
   hostTheme,
   diffActive,
+  bridgeScriptUrl,
 }: SrcdocInjectionOptions): string {
   const payload = buildThemeTokenPayload(tokens, hostTheme);
   let themeCSS = ":root {\n";
@@ -117,14 +180,35 @@ export function buildSrcdocInjection({
     themeCSS += `:root { color-scheme: ${isLight ? "light" : "dark"}; }\n`;
   }
   const diffCSS = diffActive ? DIFF_HIGHLIGHT_CSS : "";
-  return `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style><script>${BRIDGE_SCRIPT}</script>`;
+  return `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style>${buildBridgeScriptTag(bridgeScriptUrl)}`;
+}
+
+/**
+ * A document-authored CSP `<meta>` tag (e.g. `default-src 'none'` in
+ * Plannotator's own portable guided-review exports) blocks the inline bridge
+ * script and disables annotation entirely. The iframe `sandbox` attribute is
+ * the security boundary for the annotate surface; the page's CSP was written
+ * for its standalone context, so it is removed before injection.
+ *
+ * The package itself never adds a CSP `<meta>` to the srcdoc document (the
+ * injection is one `<style>` and one `<script>`), so nothing here blocks a
+ * `<script src>` on the URL path. A CSP delivered as an HTTP header on the
+ * HOST page is inherited by the srcdoc document, and the host must allow
+ * `script-src` for the origin the asset is served from.
+ */
+const META_CSP_RE =
+  /<meta\s[^>]*http-equiv\s*=\s*["']?\s*content-security-policy\s*["']?[^>]*\/?>/gi;
+
+export function neutralizeMetaCsp(rawHtml: string): string {
+  return rawHtml.replace(META_CSP_RE, "<!-- plannotator: meta CSP removed for annotation -->");
 }
 
 /** Splice the injection just before `</head>`, or prepend when there is none. */
 export function injectIntoHead(rawHtml: string, injection: string): string {
-  const headClose = rawHtml.indexOf("</head>");
+  const html = neutralizeMetaCsp(rawHtml);
+  const headClose = html.indexOf("</head>");
   if (headClose !== -1) {
-    return rawHtml.slice(0, headClose) + injection + rawHtml.slice(headClose);
+    return html.slice(0, headClose) + injection + html.slice(headClose);
   }
-  return injection + rawHtml;
+  return injection + html;
 }

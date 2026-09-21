@@ -1,5 +1,5 @@
 import React, { useMemo, type JSX } from 'react';
-import { motion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 
 export interface TextShimmerProps {
   children: string;
@@ -16,6 +16,7 @@ function TextShimmerComponent({
   duration = 2,
   spread = 2,
 }: TextShimmerProps) {
+  const shouldReduceMotion = useReducedMotion();
   const MotionComponent = motion.create(
     Component as keyof JSX.IntrinsicElements
   );
@@ -35,9 +36,9 @@ function TextShimmerComponent({
       ]
         .filter(Boolean)
         .join(' ')}
-      initial={{ backgroundPosition: '100% center' }}
-      animate={{ backgroundPosition: '0% center' }}
-      transition={{
+      initial={shouldReduceMotion ? false : { backgroundPosition: '100% center' }}
+      animate={shouldReduceMotion ? undefined : { backgroundPosition: '0% center' }}
+      transition={shouldReduceMotion ? undefined : {
         repeat: Infinity,
         duration,
         ease: 'linear',
@@ -45,7 +46,9 @@ function TextShimmerComponent({
       style={
         {
           '--spread': `${dynamicSpread}px`,
-          backgroundImage: `var(--bg), linear-gradient(var(--base-color), var(--base-color))`,
+          backgroundImage: shouldReduceMotion
+            ? 'linear-gradient(var(--base-color), var(--base-color))'
+            : 'var(--bg), linear-gradient(var(--base-color), var(--base-color))',
         } as React.CSSProperties
       }
     >

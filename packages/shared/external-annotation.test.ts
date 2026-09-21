@@ -4,7 +4,7 @@
  * finding submits cleanly while a broken line finding is still rejected.
  */
 import { describe, expect, test } from "bun:test";
-import { transformReviewInput } from "./external-annotation";
+import { createAnnotationStore, transformReviewInput } from "./external-annotation";
 
 function ok(body: unknown) {
   const r = transformReviewInput(body);
@@ -99,5 +99,52 @@ describe("transformReviewInput — scope-aware location requirements", () => {
       prNumber: 0,
     });
     expect("error" in badNumber && badNumber.error).toContain("invalid prNumber");
+  });
+});
+
+describe("annotation store update — identity fields are pinned", () => {
+  type Ann = { id: string; source?: string; text?: string; dismissed?: boolean };
+
+  test("update cannot clear, change, or set `source` (the injection guard field)", () => {
+    // #1229's exporter defense keys on `source`: annotations carrying one are
+    // tool-submitted and never receive verbatim SKILL.md injection. PATCH is
+    // an unauthenticated localhost surface, so `{"source": ""}` must not be
+    // able to strip the marker and re-arm injection.
+    const store = createAnnotationStore<Ann>();
+    store.add([{ id: "a1", source: "rogue-agent", text: "apply $skill" }]);
+
+    const cleared = store.update("a1", { source: "", text: "edited" } as Partial<Ann>);
+    expect(cleared).toEqual({ id: "a1", source: "rogue-agent", text: "edited" });
+
+    const swapped = store.update("a1", { source: "other-tool" } as Partial<Ann>);
+    expect(swapped!.source).toBe("rogue-agent");
+
+    const undefd = store.update("a1", { source: undefined } as Partial<Ann>);
+    expect(undefd!.source).toBe("rogue-agent");
+  });
+
+  test("update cannot change `id`", () => {
+    const store = createAnnotationStore<Ann>();
+    store.add([{ id: "a1", source: "tool" }]);
+    const updated = store.update("a1", { id: "b2", text: "x" } as Partial<Ann>);
+    expect(updated!.id).toBe("a1");
+    expect(store.getAll().map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  test("an annotation without a source cannot gain one via update", () => {
+    const store = createAnnotationStore<Ann>();
+    store.add([{ id: "a1", text: "reviewer-authored" }]);
+    const updated = store.update("a1", { source: "fake-tool" } as Partial<Ann>);
+    expect(updated!.source).toBeUndefined();
+  });
+
+  test("ordinary field updates still merge and bump the version", () => {
+    const store = createAnnotationStore<Ann>();
+    store.add([{ id: "a1", source: "tool", text: "before" }]);
+    const v = store.version;
+    const updated = store.update("a1", { text: "after", dismissed: true });
+    expect(updated).toEqual({ id: "a1", source: "tool", text: "after", dismissed: true });
+    expect(store.version).toBe(v + 1);
+    expect(store.update("missing", { text: "x" })).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import type { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, ArtifactAnnotationMeta } from '@plannotator/ui/types';
+import type { CallFlowAnnotationTarget, CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, ArtifactAnnotationMeta } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import type { AgentJobInfo } from '@plannotator/ui/types';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
@@ -11,6 +11,16 @@ import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { FeedbackDiffContext } from '../utils/exportFeedback';
 import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import type { EditSelectionComment } from '../edit/useEditSession';
+import type { CallFlowAnalysisState } from '../hooks/useCallFlowAnalysis';
+import type { CallFlowInstallController } from '../hooks/useCallFlowInstall';
+import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
+
+/** One-shot request to open the native code-annotation composer on a source range. */
+export interface LineAnnotationComposeRequest {
+  readonly id: number;
+  readonly filePath: string;
+  readonly range: SelectedLineRange;
+}
 
 /**
  * Shared review state consumed by dockview panel wrappers.
@@ -26,6 +36,10 @@ export interface ReviewState {
   focusedFileIndex: number;
   focusedFilePath: string | null;
   diffStyle: 'split' | 'unified';
+  /** Compact touch shells use a session-only style so desktop preferences stay untouched. */
+  onDiffStyleChange: (style: 'split' | 'unified') => void;
+  /** True only for coarse-pointer phone/tablet layouts, never narrow desktop windows. */
+  isCompactTouchLayout: boolean;
   diffOverflow?: 'scroll' | 'wrap';
   diffIndicators?: 'bars' | 'classic' | 'none';
   lineDiffType?: 'word-alt' | 'word' | 'char' | 'none';
@@ -51,6 +65,10 @@ export interface ReviewState {
   agentCwd?: string | null;
   /** Whether live-working-tree actions match the snapshot currently shown. */
   canUseLiveWorkspaceActions?: boolean;
+  /** False when hunk-context expansion has no source to expand from — a static
+   *  patch review has no working tree, so `/api/file-content` answers 400 and
+   *  the diff views must not ask. Absent means available (every VCS session). */
+  contextExpansionAvailable?: boolean;
 
   // Annotations
   allAnnotations: CodeAnnotation[];
@@ -61,6 +79,13 @@ export interface ReviewState {
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
   onLineSelection: (range: SelectedLineRange | null) => void;
+  /** Resolve a source path and open the native line-annotation composer. */
+  onRequestLineAnnotation: (filePath: string, range: SelectedLineRange) => void;
+  /** Commit one Call Flow comment with a primary inline anchor and related targets. */
+  onAddCallFlowAnnotation: (
+    targets: readonly CallFlowAnnotationTarget[],
+    text: string,
+  ) => boolean;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
   onAddAnnotationForFile: (filePath: string, type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
   /** EXPERIMENTAL edit-to-suggestion flag (cookie setting, default OFF). Only
@@ -111,6 +136,19 @@ export interface ReviewState {
   // Viewed / staged
   viewedFiles: Set<string>;
   onToggleViewed: (filePath: string) => void;
+  // Generated files (#1317): paths marked `linguist-generated` in
+  // `.gitattributes` (server sidecar). Collapsed by default on the all-files
+  // surface; headers show a "generated" tag. Presentation-only view state.
+  generatedFiles: Set<string>;
+  /** Generated files the user explicitly expanded — session-local, survives
+   *  panel remounts. */
+  expandedGeneratedFiles: Set<string>;
+  onGeneratedFileCollapsedChange: (filePath: string, collapsed: boolean) => void;
+  /** Cookie-only chrome preference (#1277): hide the Viewed controls everywhere
+   *  they render. Shortcuts and viewed state itself are unaffected. */
+  showViewedControls: boolean;
+  /** Same preference for the Git-add (stage) controls. */
+  showStageControls: boolean;
   stagedFiles: Set<string>;
   stagingFile: string | null;
   onStage: (filePath: string) => void;
@@ -181,7 +219,9 @@ export interface ReviewState {
 
   // Diff navigation
   openDiffFile: (filePath: string) => void;
-  onAllFilesVisibleFileChange: (filePath: string | null) => void;
+  onAllFilesVisibleFileChange: (filePath: string | null, info?: { collapsed: boolean }) => void;
+  /** Auto-mark-viewed: the reader moved on from this file (see useAutoViewed). */
+  onAllFilesFileScrolledPast: (filePath: string) => void;
   isAllFilesActive: boolean;
   // Which left panel drives the all-files item order ('list' = sections order).
   allFilesOrder: 'tree' | 'list';
@@ -199,6 +239,16 @@ export interface ReviewState {
   onSemanticDiffUnavailable: () => void;
   onSemanticDiffLoadError: () => boolean;
   onSemanticDiffLoadSuccess: () => void;
+  callFlowAvailable: boolean;
+  callFlowAdvert: CallFlowAdvert;
+  callFlowAnalysis: CallFlowAnalysisState;
+  retryCallFlowAnalysis: () => void;
+  /** Whether the complete node range exists in the currently reviewed patch. */
+  isCallFlowNodeInPatch: (node: CallFlowNode) => boolean;
+  isCallFlowActive: boolean;
+  openCallFlowPanel: () => void;
+  /** Opt-in runtime install controller backing the Dock's install funnel. */
+  callFlowInstall: CallFlowInstallController;
 
   // Tour
   openTourPanel: (jobId: string) => void;
@@ -208,6 +258,12 @@ export interface ReviewState {
 
   // Code navigation
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
+  /** Token hover cards. Undefined whenever the gate or the setting is off. */
+  onTokenHoverEnter?: (
+    props: import('@pierre/diffs').DiffTokenEventBaseProps,
+    filePath: string,
+  ) => void;
+  onTokenHoverLeave?: () => void;
   codeNavResult: import('@plannotator/shared/code-nav').CodeNavResponse | null;
   codeNavIsLoading: boolean;
   codeNavActiveSymbol: string | null;

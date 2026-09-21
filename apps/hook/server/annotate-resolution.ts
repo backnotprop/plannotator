@@ -22,14 +22,27 @@ import { loadConfig, resolveUseJina } from "@plannotator/shared/config";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
 import { FILE_BROWSER_EXCLUDED } from "@plannotator/shared/reference-common";
 import {
-  ANNOTATABLE_DOC_REGEX,
-  ANNOTATABLE_EXTENSIONS_HINT,
+  buildAnnotatableDocRegex,
+  buildAnnotatableExtensionsHint,
+} from "@plannotator/shared/annotatable";
+import {
+  getExtraMarkdownExtensions,
   MAX_ANNOTATABLE_FILE_BYTES,
   hasMarkdownFiles,
   resolveMarkdownFile,
   resolveUserPath,
 } from "@plannotator/shared/resolve-file";
 import { isConvertedSource, urlToMarkdown } from "@plannotator/shared/url-to-markdown";
+import { isLoopbackHostname } from "@plannotator/server/live-proxy";
+import {
+  LIVE_APP_REQUIRES_HTTP_MESSAGE,
+  LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
+  LIVE_APP_REQUIRES_URL_MESSAGE,
+  buildForceAppFailureMessage,
+  buildLiveProbeFallbackNotice,
+  classifyLiveAppCandidate,
+  probeLiveAppTarget,
+} from "@plannotator/shared/live-probe";
 
 export interface AnnotateResolutionSuccess {
   ok: true;
@@ -41,6 +54,9 @@ export interface AnnotateResolutionSuccess {
   sourceInfo?: string;
   sourceConverted: boolean;
   isUrl: boolean;
+  /** Loopback HTML target resolved as a LIVE app session (server mode
+   *  "annotate-app"): the URL is proxied, not converted. */
+  liveApp?: boolean;
 }
 
 export interface AnnotateResolutionFailure {
@@ -54,14 +70,32 @@ export type AnnotateResolutionResult =
   | AnnotateResolutionSuccess
   | AnnotateResolutionFailure;
 
+/** The loopback gate for the live-app probe: the proxy-side predicate is the
+ * single source of truth (localhost, IPv6 loopback, or a LITERAL IPv4
+ * address in 127.0.0.0/8, never a string prefix, which DNS names like
+ * 127.0.0.1.evil.example would satisfy). Re-exported for the tests. */
+export { isLoopbackHostname };
+
 export async function resolveAnnotateTarget(options: {
   rawFilePath: string;
   projectRoot: string;
   noJina: boolean;
   renderMarkdown: boolean;
+  /**
+   * Extra extensions the user registered as markdown (#1307). Defaults to the
+   * process-wide set resolved from config.json; passed explicitly by callers
+   * that already hold a resolved list.
+   */
+  extraMarkdownExtensions?: readonly string[];
+  /** --app: force live mode; loud startup failure when it cannot apply. */
+  forceApp?: boolean;
+  /** --static: force the classic conversion pipeline on loopback URLs. */
+  forceStatic?: boolean;
   log?: (line: string) => void;
 }): Promise<AnnotateResolutionResult> {
-  const { rawFilePath, projectRoot, noJina, renderMarkdown } = options;
+  const { rawFilePath, projectRoot, noJina, renderMarkdown, forceApp = false, forceStatic = false } = options;
+  const extraMarkdownExtensions =
+    options.extraMarkdownExtensions ?? getExtraMarkdownExtensions();
   const log = options.log ?? ((line: string) => console.error(line));
 
   // Primary resolution strips the `@` reference marker; rawFilePath is
@@ -77,7 +111,74 @@ export async function resolveAnnotateTarget(options: {
   // --- URL annotation ---
   const isUrl = /^https?:\/\//i.test(filePath);
 
+  // --app is contracted to fail loudly whenever it cannot apply; a file or
+  // folder target silently swallowing it would hide the flag's typo'd use.
+  if (!isUrl && forceApp) {
+    return {
+      ok: false,
+      notFound: false,
+      message: LIVE_APP_REQUIRES_URL_MESSAGE,
+    };
+  }
+
   if (isUrl) {
+    // --- Live app detection (shared with the Pi extension) ---
+    // Loopback http URLs default to LIVE mode when a quick probe returns an
+    // HTML page; --static forces the classic conversion pipeline; --app
+    // forces live mode and fails loudly when it cannot apply. Non-loopback
+    // URLs keep the conversion pipeline untouched. Probe semantics and
+    // messages live in @plannotator/shared/live-probe so every host judges
+    // the same URL identically.
+    const { parsed: parsedUrl, loopback } = classifyLiveAppCandidate(filePath);
+
+    if (forceApp && !loopback) {
+      return {
+        ok: false,
+        notFound: false,
+        message: LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
+      };
+    }
+    if (forceApp && parsedUrl?.protocol === "https:") {
+      // The live proxy is http-only.
+      return {
+        ok: false,
+        notFound: false,
+        message: LIVE_APP_REQUIRES_HTTP_MESSAGE,
+      };
+    }
+
+    if (loopback && parsedUrl?.protocol === "http:" && !forceStatic) {
+      const probe = await probeLiveAppTarget(filePath, parsedUrl);
+      if (probe.liveEligible) {
+        log(`Live app: ${filePath}`);
+        return {
+          ok: true,
+          markdown: "",
+          absolutePath: filePath,
+          annotateMode: "annotate",
+          liveApp: true,
+          sourceInfo: filePath,
+          sourceConverted: false,
+          isUrl,
+        };
+      }
+      if (forceApp) {
+        return {
+          ok: false,
+          notFound: false,
+          message: buildForceAppFailureMessage(filePath, probe),
+        };
+      }
+      // Probe failure or non-HTML without --app: fall through to the static
+      // pipeline, whose own error surfaces verbatim (preserves the legacy
+      // behavior for dead URLs and JSON endpoints). A failed probe says so
+      // first: a dev server still starting up probes as unreachable, and a
+      // silent downgrade to static conversion reads as a broken live session.
+      if (probe.probeError !== null) {
+        log(buildLiveProbeFallbackNotice(filePath, probe.probeError));
+      }
+    }
+
     const useJina = resolveUseJina(noJina, loadConfig());
     log(`Fetching: ${filePath}${useJina ? " (via Jina Reader)" : " (via fetch+Turndown)"}`);
     let markdown: string;
@@ -119,7 +220,7 @@ export async function resolveAnnotateTarget(options: {
   if (folderCandidate !== null) {
     const resolvedArg = resolveUserPath(folderCandidate, projectRoot);
     // Folder annotation mode (markdown/plain text/config + HTML files)
-    if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, ANNOTATABLE_DOC_REGEX)) {
+    if (!hasMarkdownFiles(resolvedArg, FILE_BROWSER_EXCLUDED, buildAnnotatableDocRegex(extraMarkdownExtensions))) {
       return {
         ok: false,
         notFound: false,
@@ -174,9 +275,9 @@ export async function resolveAnnotateTarget(options: {
 
   // Single markdown/plain-text file annotation mode
   // Strip-first with literal-@ fallback (scoped-package-style names).
-  let resolved = resolveMarkdownFile(filePath, projectRoot);
+  let resolved = resolveMarkdownFile(filePath, projectRoot, { extraMarkdownExtensions });
   if (resolved.kind === "not_found" && rawFilePath !== filePath) {
-    resolved = resolveMarkdownFile(rawFilePath, projectRoot);
+    resolved = resolveMarkdownFile(rawFilePath, projectRoot, { extraMarkdownExtensions });
   }
 
   if (resolved.kind === "ambiguous") {
@@ -201,7 +302,7 @@ export async function resolveAnnotateTarget(options: {
         notFound: false,
         message:
           `File type not supported: ${ext}\n` +
-          `Supported types: ${ANNOTATABLE_EXTENSIONS_HINT}\n` +
+          `Supported types: ${buildAnnotatableExtensionsHint(extraMarkdownExtensions)}\n` +
           `For code review, use: plannotator review [file]`,
       };
     }

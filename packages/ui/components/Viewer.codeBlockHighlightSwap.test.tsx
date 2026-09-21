@@ -7,9 +7,9 @@
  * attach after load) replaces those children, so without the swap listener in
  * `Viewer` the mark is silently wiped and never comes back.
  *
- * Both tests assert the SAME pair of facts after the swap: the mark is still
- * there, AND the tokens carry the new theme's colours. Getting one without the
- * other is the bug in either direction.
+ * The swap tests assert the SAME pair of facts after the swap: the mark is
+ * still there, AND the tokens carry the new theme's colours. Getting one
+ * without the other is the bug in either direction.
  *
  * `@pierre/diffs` is stood in for through `__setCodeHighlightModuleForTests`,
  * which keeps Shiki's full bundle out of the test and — more importantly —
@@ -26,6 +26,7 @@ import {
   __resetCodeHighlightCacheForTests,
   __setCodeHighlightModuleForTests,
 } from '../utils/codeHighlight';
+import { syncHistoryHighlight } from '../utils/undoHistory';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -107,11 +108,13 @@ interface Controls {
   setColorTheme: (theme: string) => void;
   viewer: ViewerHandle | null;
   removeAnnotation: (id: string) => void;
+  repaintAnnotation: (id: string) => void;
 }
 const controls: Controls = {
   setColorTheme: () => {},
   viewer: null,
   removeAnnotation: () => {},
+  repaintAnnotation: () => {},
 };
 
 const Harness: React.FC<{ initial: Annotation[] }> = ({ initial }) => {
@@ -126,6 +129,11 @@ const Harness: React.FC<{ initial: Annotation[] }> = ({ initial }) => {
     controls.removeAnnotation = (id: string) => {
       viewerRef.current?.removeHighlight(id);
       setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    };
+    controls.repaintAnnotation = (id: string) => {
+      const annotation = annotations.find((candidate) => candidate.id === id);
+      if (!annotation) return;
+      syncHistoryHighlight(viewerRef.current, annotation, true);
     };
   });
   return (
@@ -197,6 +205,7 @@ afterEach(async () => {
   controls.viewer = null;
   controls.setColorTheme = () => {};
   controls.removeAnnotation = () => {};
+  controls.repaintAnnotation = () => {};
   if (hasDom) document.body.innerHTML = '';
   __resetCodeHighlightCacheForTests();
 });
@@ -238,6 +247,39 @@ describe('code-block annotations across highlight swaps', () => {
     const styles = tokenColors().join(' ');
     expect(styles).toContain(TOKEN_COLOR['kanagawa-wave']);
     expect(styles).not.toContain(TOKEN_COLOR['github-dark']);
+  });
+
+  test.skipIf(!hasDom)('a history repaint survives the next palette change', async () => {
+    const { mod } = fakePierre('immediate');
+    __setCodeHighlightModuleForTests(mod);
+
+    await mountHarness();
+    await flush();
+
+    const block = document.querySelector<HTMLElement>('[data-block-id="code-1"]');
+    if (!block) throw new Error('fenced code block did not render');
+    await act(async () => {
+      block.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      block.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const annotationId = codeEl()
+      .querySelector<HTMLElement>('mark[data-bind-id]')
+      ?.getAttribute('data-bind-id');
+    if (!annotationId) throw new Error('fenced code block was not annotated');
+
+    await act(async () => {
+      controls.repaintAnnotation(annotationId);
+    });
+    expect(codeEl().querySelector(`[data-bind-id="${annotationId}"]`)).not.toBeNull();
+
+    await act(async () => {
+      controls.setColorTheme('kanagawa-wave');
+    });
+    await flush();
+
+    expect(codeEl().querySelector(`[data-bind-id="${annotationId}"]`)).not.toBeNull();
+    expect(tokenColors().join(' ')).toContain(TOKEN_COLOR['kanagawa-wave']);
   });
 
   test.skipIf(!hasDom)(

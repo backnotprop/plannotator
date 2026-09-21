@@ -1,6 +1,7 @@
 name: Test
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - main
@@ -8,25 +9,46 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
+
+      - name: Check release version consistency
+        run: bun run check:release-version
 
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
 
       - name: Type check
         run: bun run typecheck
+
+      - name: Smoke-test published UI package
+        # This packs the real tarball and installs it with a pinned pnpm CLI in
+        # a temp consumer outside the monorepo. It prevents workspace protocols
+        # from leaking into the manifest published to external consumers.
+        run: bun run --cwd packages/ui smoke:package
+
+      # The extension has its own tsconfig (Node libs, no DOM) and is not part
+      # of the root typecheck, so nothing was checking it. A type error in the
+      # panel cookie seed shipped that way; this is the step that would have
+      # caught it.
+      - name: Type check VS Code extension
+        run: bun run --cwd apps/vscode-extension lint
 
       - name: Run tests
         run: bun test
@@ -56,34 +78,90 @@ jobs:
           packages/review-editor/components/DiffViewer.fullContentSwap.test.tsx
           packages/review-editor/components/DiffViewer.oversizedStub.test.tsx
           packages/review-editor/components/DiffViewer.binaryNotice.test.tsx
+          packages/review-editor/components/DiffViewer.headerControls.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
-      # (not the whole ui suite) to keep this process light.
+      # (not the whole ui suite) to keep this process light. Files get isolated
+      # globals because theme, storage, and DOM test state must not leak between
+      # suites when Bun schedules them differently across platforms.
       - name: Run UI seam-contract + DOM tests
         run: >-
-          DOM_TESTS=1 bun test
+          DOM_TESTS=1 bun test --isolate
           packages/ui/markdownEditorFidelity.test.tsx
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
           packages/ui/components/html-viewer/srcdoc.test.ts
+          packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
+          packages/ui/components/html-viewer/htmlLiveProtocol.test.tsx
+          packages/ui/components/html-viewer/HtmlViewer.vimHud.test.tsx
+          packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
+          packages/ui/components/Viewer.vimMode.integration.test.tsx
+          packages/ui/hooks/useVimSelection.test.tsx
+          packages/ui/utils/codeHighlight.test.ts
+          packages/ui/utils/htmlChrome.test.ts
+          packages/ui/utils/inputMethod.test.ts
+          packages/ui/utils/vimNavigation.test.ts
           packages/ui/utils/clipboard.test.ts
+          apps/vscode-extension/src/vscode-theme.test.ts
+          packages/ui/utils/vimScroll.test.ts
           packages/ui/components/InlineMarkdown.resolveLinkedDoc.test.tsx
           packages/ui/components/MarkdownDiff.frozen.test.tsx
           packages/ui/components/MarkdownEditor.extensions.test.tsx
+          packages/ui/components/ThemeProvider.favicon.test.tsx
+          packages/ui/components/MermaidBlock.theme.test.tsx
+          packages/ui/components/DiagramBlock.anchor.test.tsx
+          packages/ui/components/diagram/DiagramViewer.test.tsx
+          packages/ui/utils/diagramAnchor.test.ts
+          packages/ui/utils/diagramAnchorGraphviz.test.ts
+          packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
+          packages/ui/components/Viewer.diagramLazyRestore.test.tsx
+          packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
+          packages/ui/components/CommentPopover.skillReferences.test.tsx
+          packages/ui/components/CommentPopover.mentionChips.test.tsx
+          packages/ui/components/SkillReferenceMenu.placement.test.tsx
           packages/ui/components/sidebar/FileBrowser.test.ts
           packages/editor/editableDocumentsHook.test.tsx
           packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
+          packages/review-editor/components/AnnotationToolbar.placement.test.tsx
+          packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
           packages/review-editor/components/FileHeader.edit.test.tsx
           packages/review-editor/edit/useEditSession.recovery.test.tsx
           packages/review-editor/edit/discardRestoreRender.test.tsx
           packages/review-editor/edit/selectionActionPopover.test.ts
           packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
-          packages/review-editor/components/guide/GuideSectionCard.test.tsx
-          packages/review-editor/components/guide/GuideView.test.tsx
+          packages/review-editor/components/AllFilesCodeView.generated.test.tsx
+          packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
+          packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
+          packages/guide-viewer/GuideSectionCard.test.tsx
+          packages/guide-viewer/GuideView.test.tsx
+          packages/guide-viewer/GuideViewportManager.test.tsx
+          packages/review-editor/components/guide/GuideExportButton.test.tsx
           packages/review-editor/hooks/useReviewSearch.test.tsx
+          packages/review-editor/hooks/useTokenHover.test.tsx
+          packages/review-editor/components/TokenHoverCard.test.tsx
+          packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
+          packages/review-editor/utils/stitchTokenIdentifier.test.ts
+          packages/review-editor/hooks/useAutoViewed.test.tsx
+          packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
+          packages/review-editor/hooks/useCallFlowInstall.test.tsx
+          packages/review-editor/hooks/useCallFlowAutoInstall.test.tsx
+          packages/review-editor/dock/panels/ReviewCallFlowPanel.install.test.tsx
+          packages/review-editor/dock/panels/ReviewCallFlowPanel.raw.test.tsx
+          packages/review-editor/components/CallFlowFileBadge.interaction.test.tsx
+          packages/review-editor/components/CallFlowTreeView.interaction.test.tsx
+          packages/review-editor/components/PanelChrome.test.tsx
+          packages/review-editor/components/FileTree.search-placement.test.tsx
+          packages/review-editor/components/FileTreeNode.controls.test.tsx
+          packages/ui/components/Settings.analysis.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
+          packages/ui/components/AnnotationPanel.cardHeader.test.tsx
+          packages/ui/components/AnnotationPanel.editMentions.test.tsx
           packages/ui/components/Viewer.consumer.test.tsx
+          packages/ui/components/Viewer.documentHeader.test.tsx
           packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
+          packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
+          packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
+          packages/ui/utils/undoHistory.dom.test.ts
           packages/ui/utils/codeBlockMark.test.ts
           packages/ui/components/InlineMarkdown.seam.test.tsx
           packages/ui/components/ImageThumbnail.seam.test.tsx
@@ -98,7 +176,95 @@ jobs:
           packages/ui/components/DocBadges.test.tsx
           packages/editor/planDiffAutoExit.test.tsx
           packages/editor/App.archiveReadOnly.test.tsx
+          packages/editor/App.htmlChrome.test.tsx
+          packages/editor/App.decisionControl.test.tsx
+          packages/review-editor/App.decisionControl.test.tsx
+          packages/ui/components/TerminalToolsAnnouncementDialog.test.tsx
+          packages/editor/App.terminalToolsAnnouncement.test.tsx
+          packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
+          packages/ui/components/HtmlSurfaceControls.test.tsx
+          packages/ui/components/AnnotationPanel.unanchored.test.tsx
+          packages/ui/hooks/useHtmlRefresh.test.tsx
+          packages/ui/hooks/useSharing.contentRevision.test.tsx
+          packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
+          packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
+          packages/ui/components/AnnotationToolbar.selectionActions.test.tsx
+          packages/ui/components/CommentPopover.mentionSource.test.tsx
+          packages/ui/components/Viewer.mentionSource.test.tsx
+          packages/ui/components/html-viewer/HtmlViewer.mentionSource.test.tsx
+          packages/ui/components/AnnotationToolstrip.test.tsx
+          packages/ui/components/StickyHeaderLane.test.tsx
+          packages/ui/components/CommentPopover.quickLookGood.test.tsx
           packages/editor/actionsLabelMode.test.ts
+          packages/ui/webmcp/useToolset.seam.test.tsx
+          packages/ui/components/AnnotationPanel.inReplyTo.test.tsx
+          packages/editor/webmcp/useDocumentWebMcp.toggle.test.tsx
+          packages/editor/components/AppHeader.webmcpIndicator.test.tsx
+          packages/ui/components/MathBlock.firstPaint.test.tsx
+          packages/ui/components/DiagramBlock.lazyRetry.test.tsx
+          packages/ui/components/DecisionControl.test.tsx
+          packages/ui/components/ActionMenu.test.tsx
+          packages/ui/components/PlanHeaderMenu.mobile.test.tsx
+          packages/review-editor/components/ReviewHeaderMenu.mobile.test.tsx
+          packages/editor/App.editModeShortcut.test.tsx
+          packages/editor/App.editModeCrossBlockHighlights.test.tsx
+          packages/editor/App.markdownUnanchored.test.tsx
+          packages/ui/components/blocks/AlertBlock.title.test.tsx
+          packages/ui/components/blocks/AlertBlock.seam.test.tsx
+          packages/ui/components/blocks/AlertBlock.annotation.test.tsx
+          packages/ui/components/Viewer.driftedRestore.test.tsx
+          packages/ui/components/Viewer.crossBlockRestore.test.tsx
+          packages/ui/components/Viewer.alertDraftRestore.test.tsx
+          packages/ui/components/AnnotationPanel.allFiles.test.tsx
+          packages/ui/hooks/useLinkedDoc.crossFile.test.tsx
+          packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
+          packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
+          packages/editor/hooks/useAnnotationJump.test.tsx
+          packages/ui/components/TableOfContents.linkedDoc.test.tsx
+          packages/ui/components/CommentPopover.overlayGutter.test.tsx
+          packages/ui/components/CommentPopover.multiTarget.test.tsx
+          packages/ui/aiProviderConfigPersistence.test.tsx
+          packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
+          packages/ui/components/ui/mobile-foundation.test.tsx
+          packages/ui/components/Settings.vim.test.tsx
+          packages/ui/components/Settings.compactDisplay.test.tsx
+          packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
+          packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
+          packages/ui/components/PermissionModeSetup.mobile.test.tsx
+          packages/ui/components/html-viewer/useHtmlAnnotation.mintedIds.test.tsx
+          packages/ui/components/LookAndFeelAnnouncementDialog.test.tsx
+          packages/ui/components/CommentPopover.mobile.test.tsx
+          packages/ui/components/CommentPopover.forcedDialog.test.tsx
+          packages/ui/components/ConfirmDialog.mobile.test.tsx
+          packages/ui/components/ThemeProvider.test.tsx
+          packages/ui/components/MarkdownEditor.embedPicker.test.ts
+          packages/ui/hooks/useViewportEnvironment.test.tsx
+          packages/ui/hooks/useIsMobile.test.tsx
+          packages/ui/hooks/useVimDocumentFocus.test.tsx
+          packages/ui/hooks/useScrollViewport.test.ts
+          packages/review-editor/components/ExpandedCommentDialog.mobile.test.tsx
+          packages/review-editor/components/DiffTypePicker.openState.test.tsx
+          packages/review-editor/components/EditModeAnnouncementDialog.test.tsx
+          packages/review-editor/components/DestinationSpotlight.test.tsx
+          packages/review-editor/dock/panels/PRArtifactGallery.test.tsx
+          packages/review-editor/dock/panels/artifactDocument.test.ts
+          packages/review-editor/dock/ReviewDockRightActions.test.tsx
+          packages/editor/skillPrimeRenderLoop.test.tsx
+          packages/editor/App.compactToc.mobile.test.tsx
+          packages/editor/App.permissionModeSetup.test.tsx
+          packages/editor/components/CompactPlanStage.test.tsx
+          packages/editor/components/FolderAnnotationEmptyState.test.tsx
+          packages/editor/components/AppHeader.mobile.test.tsx
+          packages/editor/components/CompactAnnotationControls.test.tsx
+          packages/editor/components/AnnotateAgentTerminalPanel.displayReset.test.tsx
+
+      # The list above is hand-maintained, and every feature that adds a
+      # DOM-gated test file has to remember it — which is exactly what stopped
+      # happening (34 tests guarding shipped controls never ran). This asserts
+      # that every DOM-gated test file in the repo is named in one of the
+      # DOM_TESTS steps of this workflow, so the list cannot drift again.
+      - name: Guard the DOM test allowlist
+        run: bun test scripts/dom-test-allowlist.test.ts
 
   opencode-v2:
     name: OpenCode 2 installed package
@@ -108,15 +274,20 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Install OpenCode 2
+        # zizmor: ignore[adhoc-packages] This integration test requires the exact
+        # globally installed CLI. Owner: maintainers; reassess a locked fixture
+        # by 2027-08-11.
         run: npm install --global @opencode-ai/cli@0.0.0-next-16775
 
       - name: Build OpenCode plugin assets
@@ -141,6 +312,87 @@ jobs:
           "$(command -v opencode2)"
           "$RUNNER_TEMP"/plannotator-opencode-*.tgz
 
+  guides-show:
+    name: guides.show viewer (budgets + pinned manifest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # The merge commit plus both parents, so the path gate below can diff
+          # the PR against its base without fetching the whole history.
+          fetch-depth: 2
+
+      # Path gate. The viewer build only reads apps/guides-show and the packages
+      # it bundles, so an unrelated PR skips the install and the build. Anything
+      # this cannot resolve (a push to main, a manual run, a checkout that is not
+      # the PR merge commit) runs the job: skipping is the risky direction.
+      - name: Does this change touch the viewer's inputs?
+        id: gate
+        run: |
+          set -eu
+          run=true
+          # HEAD is the PR merge commit, so HEAD^1 is the base tip and diffing
+          # the two is exactly the PR's changes. Requiring HEAD^2 confirms this
+          # really is the merge commit before trusting that.
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] \
+             && base=$(git rev-parse --verify --quiet 'HEAD^1') \
+             && git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            changed=$(git diff --name-only "$base" HEAD)
+            if grep -Eq '^(apps/guides-show/|packages/(guide-viewer|ui|review-editor|core)/)' <<< "$changed"; then
+              run=true
+            else
+              run=false
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.gate.outputs.run == 'true'
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: bun install --frozen-lockfile
+
+      # The release workflow (guides-show-deploy.yml) refuses to publish when
+      # the viewer build blows its size budgets or the checked-in manifest no
+      # longer matches it, but that gate fires at the tag. The manifest pin is
+      # compiled into the release binaries independently of the viewer deploy,
+      # so a budget or manifest break has to surface on the PR that causes it.
+      # Regenerate with `bun run --cwd apps/guides-show build:viewer &&
+      # bun run --cwd apps/guides-show sync:manifest`.
+      - name: Build viewer
+        if: steps.gate.outputs.run == 'true'
+        run: bun run --cwd apps/guides-show build:viewer
+
+      - name: Size budgets
+        if: steps.gate.outputs.run == 'true'
+        run: bun run --cwd apps/guides-show check:budgets
+
+      # The viewer build is deterministic across platforms at the pinned Bun and
+      # lockfile (macOS and Linux produce identical hashes from a clean install),
+      # but a drifted local environment silently builds different bytes: a bun
+      # store with stale duplicate package versions reproduced exactly that. This
+      # Linux build is the authority the pin must match, so publish its manifest;
+      # when the check below fails and a fresh local regen still disagrees,
+      # download this artifact to apps/guides-show/dist/viewer/manifest.json, run
+      # `bun run --cwd apps/guides-show sync:manifest`, commit the result, and
+      # rebuild your environment (rm -rf node_modules && bun install --frozen-lockfile).
+      - name: Publish built viewer manifest for pin regeneration
+        if: always() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        with:
+          name: guide-viewer-manifest
+          path: apps/guides-show/dist/viewer/manifest.json
+          retention-days: 7
+
+      - name: Checked-in manifest matches this build
+        if: steps.gate.outputs.run == 'true'
+        run: bun run --cwd apps/guides-show check:manifest
+
   uninstall-windows:
     # Run the filesystem and path logic under real Windows path semantics.
     # The tests inject temporary homes and process boundaries, so this job
@@ -149,13 +401,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Run focused uninstall tests
         run: bun test packages/server/uninstall.test.ts apps/hook/server/cli.test.ts
@@ -169,17 +423,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Generate Pi extension shared copies
         shell: bash
@@ -206,6 +462,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Seed fake ~/.gemini/settings.json with pre-existing hook
         shell: pwsh
@@ -241,7 +499,9 @@ jobs:
           '@
           Set-Content -Path "$env:USERPROFILE\.gemini\settings.json" -Value $fixture -NoNewline
 
-      - name: Run install.cmd end-to-end
+      - name: Run install.cmd end-to-end # zizmor: ignore[misfeature]
+        # CMD is the subject of this regression test; replacing the shell would
+        # invalidate it. Owner: maintainers; reassess by 2027-08-11.
         shell: cmd
         # v0.17.1 is pinned intentionally. This test needs a real binary
         # to download so it can exercise install.cmd end-to-end — SHA256
@@ -459,6 +719,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Run install.ps1 end-to-end
         shell: pwsh

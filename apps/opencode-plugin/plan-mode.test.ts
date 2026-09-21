@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  composeSystemPrompt,
   normalizeEditPermission,
   stripConflictingPlanModeRules,
 } from "./plan-mode";
@@ -70,5 +71,19 @@ describe("stripConflictingPlanModeRules", () => {
         "Call plan_exit when the plan is ready.\nKeep the plan concise.",
       ]),
     ).toEqual(["Keep the plan concise."]);
+  });
+});
+
+describe("composeSystemPrompt", () => {
+  test.each([
+    ["always one element", ["a"], ["b"], ["a\n\nb"]],
+    ["empty strip case", [], ["prompt"], ["prompt"]],
+    ["multi-element order", ["base", "extra"], ["add1", "add2"], ["base\n\nextra\n\nadd1\n\nadd2"]],
+    ["content order (plan path)", ["strip1"], ["plan", "improve"], ["strip1\n\nplan\n\nimprove"]],
+    ["trailing newlines trimmed", ["base\n"], ["add\n\n"], ["base\n\nadd"]],
+    ["empty string entry collapses", ["", "a"], ["b"], ["a\n\nb"]],
+    ["empty inputs", [], [], [""]],
+  ])("%s", (_name, system, additions, expected) => {
+    expect(composeSystemPrompt(system, additions)).toEqual(expected);
   });
 });

@@ -22,10 +22,15 @@ export interface PhaseModelRef {
  */
 export interface PhaseProfile {
   model?: PhaseModelRef | null;
-  thinking?: ThinkingLevel | null;
+  thinking?: ConfiguredThinkingLevel | null;
   activeTools?: string[] | null;
   statusLabel?: string | null;
-  systemPrompt?: string | null;
+  /**
+   * Phase framing template, delivered ONCE as a conversation message when the
+   * phase is entered. Plannotator never modifies Pi's system prompt (#922);
+   * the obsolete `systemPrompt` config key is ignored with a warning.
+   */
+  instructions?: string | null;
 }
 
 export interface PlannotatorConfig {
@@ -39,12 +44,17 @@ export interface LoadedPlannotatorConfig {
   warnings: string[];
 }
 
+export interface LoadPlannotatorConfigOptions {
+  /** Whether Pi approved project-local inputs for this working directory. */
+  projectTrusted: boolean;
+}
+
 export interface ResolvedPhaseProfile {
   model?: PhaseModelRef;
-  thinking?: ThinkingLevel;
+  thinking?: ConfiguredThinkingLevel;
   activeTools?: string[];
   statusLabel?: string;
-  systemPrompt?: string;
+  instructions?: string;
 }
 
 export interface PromptVariables {
@@ -63,7 +73,27 @@ export interface PromptRenderResult {
 
 const INTERNAL_CONFIG_PATH = join(dirname(fileURLToPath(import.meta.url)), "plannotator.json");
 const PHASES: PhaseName[] = ["planning", "executing", "reviewing"];
-const THINKING_LEVELS = new Set<string>(["minimal", "low", "medium", "high", "xhigh"]);
+/**
+ * Thinking levels accepted in plannotator.json, in Pi's own order.
+ *
+ * This list is deliberately a SUPERSET of the `ThinkingLevel` union of the
+ * pinned `@earendil-works/pi-agent-core` floor (>=0.79.1, which stops at
+ * "xhigh"): Pi added "max" in 0.84 and clamps a level the running model does
+ * not support (`clampThinkingLevel`), so accepting a newer level costs nothing
+ * on an older Pi while silently rejecting it breaks the config on a newer one
+ * (#1304). The compile-time guard below runs the check in the other direction —
+ * every level the pinned Pi type knows must be accepted here — so the next
+ * level Pi adds fails the typecheck instead of being silently dropped.
+ */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+export type ConfiguredThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
+
+type AcceptedThinkingLevel<T extends ConfiguredThinkingLevel> = T;
+/** Compile-time assertion: adding a level to Pi's `ThinkingLevel` fails here until it is listed above. */
+export type AllPiThinkingLevelsAccepted = AcceptedThinkingLevel<ThinkingLevel>;
 
 function getAgentConfigDir(): string {
   const envDir = process.env.PI_CODING_AGENT_DIR;
@@ -95,13 +125,31 @@ function normalizeModel(value: unknown): PhaseModelRef | null | undefined {
   return { provider, id };
 }
 
-function normalizeThinking(value: unknown): ThinkingLevel | null | undefined {
-  if (value === null) return null;
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
+/**
+ * Where a profile came from, so a rejected value can name itself instead of
+ * disappearing. `scope` is the JSON path of the profile ("defaults",
+ * "phases.planning"); `path` is the config file it was read from.
+ */
+interface ProfileContext {
+  path: string;
+  scope: string;
+  warnings: string[];
+}
 
-  return THINKING_LEVELS.has(trimmed as ThinkingLevel) ? (trimmed as ThinkingLevel) : undefined;
+function normalizeThinking(value: unknown, key: string, ctx: ProfileContext): ConfiguredThinkingLevel | null | undefined {
+  if (value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (THINKING_LEVEL_SET.has(trimmed)) return trimmed as ConfiguredThinkingLevel;
+  }
+
+  // An unrecognized level falls through to the inherited one, which looks
+  // exactly like the configured level having been applied (#1304). Say so.
+  ctx.warnings.push(
+    `Ignoring unknown ${key} ${JSON.stringify(value)} at ${ctx.scope} in ${ctx.path}: expected one of ${THINKING_LEVELS.map((level) => `"${level}"`).join(", ")}. Keeping the inherited thinking level.`,
+  );
+  return undefined;
 }
 
 function normalizeTools(value: unknown): string[] | null | undefined {
@@ -126,18 +174,20 @@ function normalizePrompt(value: unknown): string | null | undefined {
   return value.length > 0 ? value : null;
 }
 
-function normalizeProfile(raw: unknown): PhaseProfile | null | undefined {
+function normalizeProfile(raw: unknown, ctx: ProfileContext): PhaseProfile | null | undefined {
   if (raw === null) return null;
   if (!isRecord(raw)) return undefined;
 
   const profile: PhaseProfile = {};
 
   if ("model" in raw) profile.model = normalizeModel(raw.model);
-  if ("thinking" in raw) profile.thinking = normalizeThinking(raw.thinking);
-  if ("thinkingLevel" in raw && profile.thinking === undefined) profile.thinking = normalizeThinking(raw.thinkingLevel);
+  if ("thinking" in raw) profile.thinking = normalizeThinking(raw.thinking, "thinking", ctx);
+  if ("thinkingLevel" in raw && profile.thinking === undefined) {
+    profile.thinking = normalizeThinking(raw.thinkingLevel, "thinkingLevel", ctx);
+  }
   if ("activeTools" in raw) profile.activeTools = normalizeTools(raw.activeTools);
   if ("statusLabel" in raw) profile.statusLabel = normalizeLabel(raw.statusLabel);
-  if ("systemPrompt" in raw) profile.systemPrompt = normalizePrompt(raw.systemPrompt);
+  if ("instructions" in raw) profile.instructions = normalizePrompt(raw.instructions);
 
   return profile;
 }
@@ -157,7 +207,7 @@ function mergeProfile(base: PhaseProfile | null | undefined, override: PhaseProf
     thinking: override.thinking !== undefined ? override.thinking : base.thinking,
     activeTools: override.activeTools !== undefined ? override.activeTools : base.activeTools,
     statusLabel: override.statusLabel !== undefined ? override.statusLabel : base.statusLabel,
-    systemPrompt: override.systemPrompt !== undefined ? override.systemPrompt : base.systemPrompt,
+    instructions: override.instructions !== undefined ? override.instructions : base.instructions,
   };
 
   return merged;
@@ -197,22 +247,51 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
       `Ignoring unknown executionMode ${JSON.stringify(raw.executionMode)} in ${path}: expected "automatic" or "external". Falling back to automatic.`,
     );
   }
-  if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults);
+  if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults, { path, scope: "defaults", warnings });
 
   if ("phases" in raw && isRecord(raw.phases)) {
     const phases: Partial<Record<PhaseName, PhaseProfile | null>> = {};
     for (const phase of PHASES) {
-      const normalized = normalizeProfile(raw.phases[phase]);
+      const normalized = normalizeProfile(raw.phases[phase], { path, scope: `phases.${phase}`, warnings });
       if (normalized !== undefined) phases[phase] = normalized;
     }
     if (Object.keys(phases).length > 0) config.phases = phases;
   }
 
+  // Plannotator no longer modifies Pi's system prompt (#922). The old
+  // systemPrompt key is ignored; say so once instead of silently dropping it.
+  const obsoleteScopes: string[] = [];
+  if (isRecord(raw.defaults) && "systemPrompt" in raw.defaults) obsoleteScopes.push("defaults");
+  if (isRecord(raw.phases)) {
+    for (const phase of PHASES) {
+      const phaseRaw = raw.phases[phase];
+      if (isRecord(phaseRaw) && "systemPrompt" in phaseRaw) obsoleteScopes.push(`phases.${phase}`);
+    }
+  }
+  if (obsoleteScopes.length > 0) {
+    warnings.push(
+      `Ignoring obsolete "systemPrompt" under ${obsoleteScopes.join(", ")} in ${path}: Plannotator no longer modifies the system prompt. Rename the key to "instructions" to deliver the text as a phase-entry message instead.`,
+    );
+  }
+
   return { config, warnings };
 }
 
-export function loadPlannotatorConfig(cwd: string): LoadedPlannotatorConfig {
+export function loadPlannotatorConfig(
+  cwd: string,
+  options: LoadPlannotatorConfigOptions,
+): LoadedPlannotatorConfig {
   const warnings: string[] = [];
+
+  // The bundled config carries the planning rules and phase instructions. A
+  // packaging regression that drops it would otherwise silently produce a
+  // rule-less planning phase, so its absence is worth a warning (user global
+  // and project configs stay optional and silent).
+  if (!existsSync(INTERNAL_CONFIG_PATH)) {
+    warnings.push(
+      `Built-in config missing at ${INTERNAL_CONFIG_PATH}: phase instructions and planning tools will not apply. Reinstall the extension.`,
+    );
+  }
 
   const internal = loadConfigSource(INTERNAL_CONFIG_PATH);
   warnings.push(...internal.warnings);
@@ -222,7 +301,9 @@ export function loadPlannotatorConfig(cwd: string): LoadedPlannotatorConfig {
   warnings.push(...globalConfig.warnings);
 
   const projectPath = join(cwd, ".pi", "plannotator.json");
-  const projectConfig = loadConfigSource(projectPath);
+  const projectConfig = options.projectTrusted
+    ? loadConfigSource(projectPath)
+    : { config: {}, warnings: [] };
   warnings.push(...projectConfig.warnings);
 
   const merged = mergeConfig(mergeConfig(internal.config, globalConfig.config), projectConfig.config);
@@ -242,7 +323,7 @@ export function resolvePhaseProfile(config: PlannotatorConfig, phase: PhaseName)
     thinking: resolveThinking(defaults.thinking, phaseConfig.thinking),
     activeTools: resolveTools(defaults.activeTools, phaseConfig.activeTools),
     statusLabel: resolveString(defaults.statusLabel, phaseConfig.statusLabel),
-    systemPrompt: resolveString(defaults.systemPrompt, phaseConfig.systemPrompt),
+    instructions: resolveString(defaults.instructions, phaseConfig.instructions),
   };
 }
 
@@ -253,7 +334,10 @@ function resolveModel(base: PhaseModelRef | null | undefined, override: PhaseMod
   return base ?? undefined;
 }
 
-function resolveThinking(base: ThinkingLevel | null | undefined, override: ThinkingLevel | null | undefined): ThinkingLevel | undefined {
+function resolveThinking(
+  base: ConfiguredThinkingLevel | null | undefined,
+  override: ConfiguredThinkingLevel | null | undefined,
+): ConfiguredThinkingLevel | undefined {
   if (override !== undefined) {
     return override ?? undefined;
   }

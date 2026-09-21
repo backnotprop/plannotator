@@ -21,6 +21,8 @@ import {
   formatPurgeWarning,
   runPlannotatorUninstall,
   type UninstallEnvironment,
+  WINDOWS_PATH_RESTORE_SCRIPT,
+  WINDOWS_PATH_SCRIPT,
   WINDOWS_SELF_DELETE_SCRIPT,
 } from "./uninstall";
 
@@ -76,6 +78,95 @@ describe("Windows self-delete worker", () => {
     expect(WINDOWS_SELF_DELETE_SCRIPT).toContain("}\n$parent=");
     expect(WINDOWS_SELF_DELETE_SCRIPT).toContain("if($parent){Remove-Item");
   });
+});
+
+describe("Windows PATH scripts", () => {
+  const scripts = {
+    remove: WINDOWS_PATH_SCRIPT,
+    restore: WINDOWS_PATH_RESTORE_SCRIPT,
+  } as const;
+
+  test("edit the registry directly and never call the blocking .NET setter", () => {
+    // SetEnvironmentVariable('Path', ..., 'User') broadcasts WM_SETTINGCHANGE
+    // synchronously to every window and can stall past the 15 s command
+    // timeout on a machine with a hung GUI process (the CI smoke flake).
+    for (const script of Object.values(scripts)) {
+      expect(script).not.toContain("SetEnvironmentVariable");
+      expect(script).toContain("Microsoft.Win32.Registry");
+      // The broadcast that replaces it must be bounded (SMTO_ABORTIFHUNG) and
+      // must not be able to reach the exit code.
+      expect(script).toContain("SendMessageTimeout");
+      expect(script).toMatch(/'Environment',0x2,\d+,\[ref\]\$r\)\}catch\{\}; exit 0$/);
+    }
+    // The value is read unexpanded and written back with its own kind so
+    // %VARS% in unrelated entries survive.
+    expect(scripts.remove).toContain("DoNotExpandEnvironmentNames");
+    expect(scripts.remove).toContain("$k.SetValue('Path',$n,$kind)");
+    // The completed-write echo must come after the write and before the
+    // broadcast in BOTH scripts: it is what lets the caller trust a write
+    // whose process was killed or faulted while broadcasting.
+    const echoes = {
+      remove: "Write-Output (ConvertTo-Json",
+      restore: "Write-Output 'PLANNOTATOR_PATH_RESTORED'",
+    } as const;
+    for (const [name, script] of Object.entries(scripts) as Array<
+      [keyof typeof scripts, string]
+    >) {
+      const writeIndex = script.indexOf("$k.SetValue(");
+      const echoIndex = script.indexOf(echoes[name]);
+      const broadcastIndex = script.indexOf("SendMessageTimeout(");
+      expect(`${name}: ${writeIndex}`).not.toBe(`${name}: -1`);
+      expect(echoIndex).toBeGreaterThan(writeIndex);
+      expect(broadcastIndex).toBeGreaterThan(echoIndex);
+    }
+  });
+
+  test("stay single-quoted so they survive -Command argv quoting", () => {
+    // Both scripts travel as one argv element to powershell.exe; a literal
+    // double quote would be re-escaped by the spawn layer and break parsing.
+    for (const script of Object.values(scripts)) {
+      expect(script).not.toContain('"');
+    }
+  });
+
+  const powershell =
+    Bun.which("pwsh") ||
+    Bun.which("pwsh.exe") ||
+    Bun.which("powershell.exe") ||
+    process.env.PLANNOTATOR_TEST_POWERSHELL ||
+    null;
+
+  test.skipIf(!powershell)(
+    "parse cleanly in a real PowerShell (no registry access)",
+    async () => {
+      // Parser.ParseInput only parses; nothing is executed, so this touches
+      // neither the registry nor the environment. Runs on Windows CI and on
+      // any dev box with pwsh.
+      for (const [name, script] of Object.entries(scripts)) {
+        const proc = Bun.spawn(
+          [
+            powershell!,
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$errors=$null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:PLANNOTATOR_TEST_SCRIPT,[ref]$null,[ref]$errors); if($errors.Count -gt 0){$errors | ForEach-Object { Write-Output $_.Message }; exit 1}; exit 0",
+          ],
+          {
+            stdin: "ignore",
+            stdout: "pipe",
+            stderr: "pipe",
+            env: { ...process.env, PLANNOTATOR_TEST_SCRIPT: script },
+          },
+        );
+        const [stdout, exitCode] = await Promise.all([
+          new Response(proc.stdout).text(),
+          proc.exited,
+        ]);
+        expect(`${name}: ${stdout.trim()}`).toBe(`${name}: `);
+        expect(exitCode).toBe(0);
+      }
+    },
+  );
 });
 
 function createFixture(
@@ -176,6 +267,9 @@ describe("default uninstall", () => {
     writeText(
       join(dataDir, "vendor", "agent-terminal", "webtui-0.0.9", "server.js"),
     );
+    writeText(
+      join(dataDir, "vendor", "call-flow", "calldiff-0.4.1", "package.json"),
+    );
     writeText(join(dataDir, "vendor", "other-tool", "keep.txt"));
     writeText(join(dataDir, "install-prefs"), "full\n");
     writeText(join(dataDir, "migrations", "legacy"));
@@ -184,6 +278,8 @@ describe("default uninstall", () => {
       "plannotator-review",
       "plannotator-annotate",
       "plannotator-last",
+      // The knowledge-layer CLI reference skill, installed to the same scopes.
+      "plannotator",
     ]) {
       writeText(join(homeDir, ".claude", "skills", skill, "SKILL.md"));
       writeText(join(homeDir, ".agents", "skills", skill, "SKILL.md"));
@@ -376,6 +472,8 @@ describe("default uninstall", () => {
     expect(result.ok).toBe(true);
     expect(existsSync(binary)).toBe(false);
     expect(existsSync(join(homeDir, ".claude", "skills", "plannotator-review"))).toBe(false);
+    expect(existsSync(join(homeDir, ".claude", "skills", "plannotator"))).toBe(false);
+    expect(existsSync(join(homeDir, ".agents", "skills", "plannotator"))).toBe(false);
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-compound"))).toBe(true);
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-archive"))).toBe(false);
     expect(existsSync(join(homeDir, ".kiro", "skills", "plannotator-setup-goal"))).toBe(false);
@@ -390,6 +488,7 @@ describe("default uninstall", () => {
     expect(readJson(join(dataDir, "config.json"))).toEqual({ theme: "dark" });
     expect(existsSync(join(dataDir, "vendor", "sem"))).toBe(false);
     expect(existsSync(join(dataDir, "vendor", "agent-terminal"))).toBe(false);
+    expect(existsSync(join(dataDir, "vendor", "call-flow"))).toBe(false);
     expect(existsSync(join(dataDir, "vendor", "other-tool", "keep.txt"))).toBe(true);
     expect(existsSync(join(dataDir, "install-prefs"))).toBe(true);
     expect(existsSync(join(dataDir, "migrations"))).toBe(true);
@@ -454,6 +553,60 @@ describe("default uninstall", () => {
       `${customKiroAgent} (custom or unrecognized Kiro agent)`,
     );
     expect(fixture.commandCalls).toEqual([]);
+  });
+
+  test("removes the knowledge skill from every scope that installs it, and only those", async () => {
+    // The knowledge skill is named `plannotator` — the same bare name as a
+    // legacy slash command and as anything else a user might name after the
+    // product. That is exactly why KNOWLEDGE_SKILLS is a separate list from
+    // CORE_SKILLS: folding it into CORE_SKILLS would put `plannotator` into
+    // LEGACY_COMMAND_NAMES and STALE_CODEX_SKILLS, and uninstall would start
+    // deleting a user's own commands/plannotator.md. This test is the wall.
+    const fixture = createFixture();
+    const { homeDir } = fixture;
+    const alternateConfig = join(fixture.root, "xdg-config");
+    fixture.environment = {
+      ...fixture.environment,
+      env: { XDG_CONFIG_HOME: alternateConfig },
+    };
+
+    // Scopes an install actually writes the knowledge skill to.
+    const installedScopes = [
+      join(homeDir, ".claude", "skills", "plannotator"),
+      join(homeDir, ".agents", "skills", "plannotator"),
+      join(homeDir, ".kiro", "skills", "plannotator"),
+      join(alternateConfig, "opencode", "skills", "plannotator"),
+      // Pre-0.27 Claude layout; cleanupStaleSkillLayout must know the
+      // knowledge skill too, or an upgrader keeps a dead copy forever.
+      join(homeDir, ".claude", "skills", "core", "plannotator"),
+    ];
+    for (const scope of installedScopes) {
+      writeText(join(scope, "SKILL.md"), "# Plannotator CLI Reference");
+    }
+
+    // Paths that merely share the name and are NOT ours to delete.
+    const userOwned = [
+      join(homeDir, ".claude", "commands", "plannotator.md"),
+      join(alternateConfig, "opencode", "commands", "plannotator.md"),
+      join(homeDir, ".codex", "skills", "plannotator", "SKILL.md"),
+    ];
+    for (const path of userOwned) {
+      writeText(path, "the user's own file");
+    }
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      fixture.environment,
+    );
+
+    expect(result.ok).toBe(true);
+    for (const scope of installedScopes) {
+      expect(existsSync(scope), `${scope} should have been removed`).toBe(false);
+    }
+    for (const path of userOwned) {
+      expect(existsSync(path), `${path} must survive uninstall`).toBe(true);
+      expect(readFileSync(path, "utf8")).toBe("the user's own file");
+    }
   });
 
   test("dry-run reports work without mutating files or invoking hosts", async () => {
@@ -907,6 +1060,9 @@ describe("purge uninstall", () => {
     const fixture = createFixture();
     writeText(join(fixture.dataDir, "plans", "approved.md"));
     writeText(join(fixture.dataDir, "history", "repo", "001.md"));
+    // The feedback archive is Plannotator-authored data: purge must remove it,
+    // and it must not be reported as an unrecognized custom entry.
+    writeText(join(fixture.dataDir, "feedback", "repo", "index.jsonl"));
     writeJson(join(fixture.dataDir, "config.json"), { theme: "dark" });
     writeText(join(fixture.dataDir, "vendor", "sem", "v0.8.0", "sem"));
     const customVendorPath = join(
@@ -927,7 +1083,11 @@ describe("purge uninstall", () => {
     expect(result.ok).toBe(true);
     expect(existsSync(join(fixture.dataDir, "plans"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "history"))).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "feedback"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "config.json"))).toBe(false);
+    expect(result.preserved).not.toContain(
+      `${join(fixture.dataDir, "feedback")} (unrecognized custom entry)`,
+    );
     expect(existsSync(join(fixture.dataDir, "vendor", "sem"))).toBe(false);
     expect(existsSync(customVendorPath)).toBe(true);
     expect(existsSync(customPath)).toBe(true);
@@ -1479,10 +1639,229 @@ describe("host and platform integrations", () => {
 
     expect(result.ok).toBe(false);
     expect(result.errors).toContain(
-      `Could not remove ${dirname(currentExe)} from the Windows user PATH.`,
+      `Could not remove ${dirname(currentExe)} from the Windows user PATH (exit 1).`,
     );
     expect(existsSync(currentExe)).toBe(true);
     expect(fixture.scheduledDeletes).toEqual([]);
+  });
+
+  test("proceeds without a PATH error when the entry is not present (exit 3)", async () => {
+    const fixture = createFixture();
+    const localAppData = join(fixture.homeDir, "AppData", "Local");
+    const currentExe = join(localAppData, "plannotator", "plannotator.exe");
+    writeText(currentExe);
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      {
+        ...fixture.environment,
+        platform: "win32",
+        execPath: currentExe,
+        env: { LOCALAPPDATA: localAppData },
+        which: () => "C:\\Windows\\powershell.exe",
+        runCommand: async () => ({ exitCode: 3, timedOut: false }),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.removed).not.toContain(
+      `Windows user PATH entry ${dirname(currentExe)}`,
+    );
+    expect(fixture.scheduledDeletes).toEqual([
+      { target: currentExe, parent: dirname(currentExe) },
+    ]);
+  });
+
+  test("reports a timed-out PATH edit as a timeout and keeps the CLI", async () => {
+    const fixture = createFixture();
+    const localAppData = join(fixture.homeDir, "AppData", "Local");
+    const currentExe = join(localAppData, "plannotator", "plannotator.exe");
+    writeText(currentExe);
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      {
+        ...fixture.environment,
+        platform: "win32",
+        execPath: currentExe,
+        env: { LOCALAPPDATA: localAppData },
+        which: () => "C:\\Windows\\powershell.exe",
+        // Killed before the script echoed anything: the edit is unproven.
+        runCommand: async () => ({ exitCode: 124, timedOut: true, stdout: "" }),
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain(
+      `Could not remove ${dirname(currentExe)} from the Windows user PATH (command timed out).`,
+    );
+    expect(existsSync(currentExe)).toBe(true);
+    expect(fixture.scheduledDeletes).toEqual([]);
+  });
+
+  test("treats a timeout after the rollback echo as a completed PATH edit", async () => {
+    const fixture = createFixture();
+    const localAppData = join(fixture.homeDir, "AppData", "Local");
+    const currentExe = join(localAppData, "plannotator", "plannotator.exe");
+    writeText(currentExe);
+    const originalPath = `C:\\Before;${dirname(currentExe)};C:\\After;;`;
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      {
+        ...fixture.environment,
+        platform: "win32",
+        execPath: currentExe,
+        env: { LOCALAPPDATA: localAppData },
+        which: () => "C:\\Windows\\powershell.exe",
+        // The script echoes the original PATH only after the registry write,
+        // so an echo followed by a kill means only the broadcast stalled.
+        runCommand: async () => ({
+          exitCode: 124,
+          timedOut: true,
+          stdout: `${JSON.stringify(originalPath)}\n`,
+        }),
+      },
+    );
+
+    const pathLabel = `Windows user PATH entry ${dirname(currentExe)}`;
+    expect(result.ok).toBe(true);
+    expect(result.removed).toContain(pathLabel);
+    expect(result.warnings.some((w) => w.includes("timed out"))).toBe(true);
+    expect(fixture.scheduledDeletes).toEqual([
+      { target: currentExe, parent: dirname(currentExe) },
+    ]);
+  });
+
+  test("treats a non-zero exit after the rollback echo as a completed PATH edit", async () => {
+    const fixture = createFixture();
+    const localAppData = join(fixture.homeDir, "AppData", "Local");
+    const currentExe = join(localAppData, "plannotator", "plannotator.exe");
+    writeText(currentExe);
+    const originalPath = `C:\\Before;${dirname(currentExe)};C:\\After;;`;
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      {
+        ...fixture.environment,
+        platform: "win32",
+        execPath: currentExe,
+        env: { LOCALAPPDATA: localAppData },
+        which: () => "C:\\Windows\\powershell.exe",
+        // A native fault inside Add-Type / SendMessageTimeout is not
+        // catchable and ends the process with an NTSTATUS code; the echo
+        // already on stdout still proves the write completed.
+        runCommand: async () => ({
+          exitCode: -1073741819,
+          timedOut: false,
+          stdout: `${JSON.stringify(originalPath)}\n`,
+        }),
+      },
+    );
+
+    const pathLabel = `Windows user PATH entry ${dirname(currentExe)}`;
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.removed).toContain(pathLabel);
+    expect(result.warnings.some((w) => w.includes("exit -1073741819"))).toBe(true);
+    expect(fixture.scheduledDeletes).toEqual([
+      { target: currentExe, parent: dirname(currentExe) },
+    ]);
+  });
+
+  test("treats a restore that printed its sentinel as completed however the process ended", async () => {
+    for (const ending of [
+      { exitCode: 124, timedOut: true, needle: "timed out" },
+      { exitCode: -1073741819, timedOut: false, needle: "exit -1073741819" },
+    ]) {
+      const fixture = createFixture();
+      const localAppData = join(fixture.homeDir, "AppData", "Local");
+      const currentExe = join(localAppData, "plannotator", "plannotator.exe");
+      writeText(currentExe);
+      let commandCount = 0;
+
+      const result = await runPlannotatorUninstall(
+        { purge: false, dryRun: false },
+        {
+          ...fixture.environment,
+          platform: "win32",
+          execPath: currentExe,
+          env: { LOCALAPPDATA: localAppData },
+          which: () => "C:\\Windows\\powershell.exe",
+          runCommand: async () => {
+            commandCount += 1;
+            if (commandCount === 1) {
+              return {
+                exitCode: 0,
+                timedOut: false,
+                stdout: JSON.stringify(
+                  `C:\\Before;${dirname(currentExe)};C:\\After;;`,
+                ),
+              };
+            }
+            return {
+              exitCode: ending.exitCode,
+              timedOut: ending.timedOut,
+              stdout: "PLANNOTATOR_PATH_RESTORED\r\n",
+            };
+          },
+          scheduleWindowsSelfDelete: async () => false,
+        },
+      );
+
+      const pathLabel = `Windows user PATH entry ${dirname(currentExe)}`;
+      expect(result.ok).toBe(false);
+      expect(existsSync(currentExe)).toBe(true);
+      expect(result.errors.some((e) => e.includes("Could not restore"))).toBe(false);
+      expect(result.removed).not.toContain(pathLabel);
+      expect(result.preserved).toContain(`${pathLabel} (restored for retry)`);
+      expect(
+        result.warnings.some(
+          (w) => w.startsWith("Restored ") && w.includes(ending.needle),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test("reports a restore that never printed its sentinel as failed", async () => {
+    const fixture = createFixture();
+    const localAppData = join(fixture.homeDir, "AppData", "Local");
+    const currentExe = join(localAppData, "plannotator", "plannotator.exe");
+    writeText(currentExe);
+    let commandCount = 0;
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      {
+        ...fixture.environment,
+        platform: "win32",
+        execPath: currentExe,
+        env: { LOCALAPPDATA: localAppData },
+        which: () => "C:\\Windows\\powershell.exe",
+        runCommand: async () => {
+          commandCount += 1;
+          if (commandCount === 1) {
+            return {
+              exitCode: 0,
+              timedOut: false,
+              stdout: JSON.stringify(
+                `C:\\Before;${dirname(currentExe)};C:\\After;;`,
+              ),
+            };
+          }
+          return { exitCode: 124, timedOut: true, stdout: "" };
+        },
+        scheduleWindowsSelfDelete: async () => false,
+      },
+    );
+
+    const pathLabel = `Windows user PATH entry ${dirname(currentExe)}`;
+    expect(result.ok).toBe(false);
+    expect(result.removed).toContain(pathLabel);
+    expect(result.errors).toContain(
+      `Could not restore ${dirname(currentExe)} to the Windows user PATH after self-delete scheduling failed (command timed out).`,
+    );
   });
 
   test("restores Windows PATH when scheduling self-delete fails", async () => {
@@ -1553,7 +1932,7 @@ describe("host and platform integrations", () => {
     expect(existsSync(currentExe)).toBe(true);
     expect(result.removed).toContain(pathLabel);
     expect(result.errors).toContain(
-      `Could not restore ${dirname(currentExe)} to the Windows user PATH after self-delete scheduling failed.`,
+      `Could not restore ${dirname(currentExe)} to the Windows user PATH after self-delete scheduling failed (exit 1).`,
     );
     expect(result.warnings).toContain(
       `The Plannotator CLI remains at ${currentExe}, but its Windows PATH entry could not be restored. Run that full path to retry, then restore PATH manually if needed.`,

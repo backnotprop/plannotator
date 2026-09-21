@@ -15,8 +15,15 @@ import {
   makeGuideId,
   saveGuide,
   updateGuideReviewed,
+  buildSavedGuideSnapshot,
+  findSavedGuideById,
+  listAllSavedGuides,
+  loadGuidePatch,
+  saveGuidePatch,
+  updateGuideShare,
   type SavedGuideEnvelope,
 } from "./guide-store";
+import type { GuideLaunchReview } from "@plannotator/core/guide-format";
 
 const REPO_KEY = "github.com__acme__widgets";
 
@@ -121,6 +128,18 @@ describe("save / load / list / delete", () => {
     expect(loaded!.title).toBe(GUIDE.title);
     expect(loaded!.guide.sections.length).toBe(2);
     expect(loaded!.reviewed).toEqual([false, false]);
+  });
+
+  test("top-level keys this version does not know survive a rewrite", () => {
+    // Forward compatibility across version skew: a newer binary may add a
+    // top-level record this one cannot read (the way `share` was added, whose
+    // only copy of the delete token would otherwise be destroyed by any
+    // reviewed-state write from an older binary).
+    saveGuide(REPO_KEY, "1000-test", { ...envelope(), futureRecord: { token: "keep-me" } } as never);
+    expect(updateGuideReviewed(REPO_KEY, "1000-test", [true, false])).toBe(true);
+    const raw = JSON.parse(readFileSync(join(dataDir, "guides", REPO_KEY, "1000-test.json"), "utf-8"));
+    expect(raw.futureRecord).toEqual({ token: "keep-me" });
+    expect(raw.reviewed).toEqual([true, false]);
   });
 
   test("atomic write leaves no .tmp file behind", () => {
@@ -403,5 +422,148 @@ describe("createGuideStoreSession", () => {
     const entries = listGuides(REPO_KEY);
     expect(entries.length).toBe(1);
     expect(entries[0].envelope.guide.intent).toBe("Updated intent");
+  });
+});
+
+describe("portable export: the launch review persisted beside the guide", () => {
+  const PATCH = "diff --git a/src/locale.ts b/src/locale.ts\n--- a/src/locale.ts\n+++ b/src/locale.ts\n@@ -1 +1 @@\n-a\n+b\n";
+  const LAUNCH_REVIEW: GuideLaunchReview = {
+    rawPatch: PATCH,
+    gitRef: "origin/main..HEAD",
+    diffType: "since-base",
+    base: "origin/main",
+    source: { kind: "local", repo: "acme/widgets", branch: "feature/locales", headSha: "abc1234" },
+    customInstructions: "Keep it short.",
+  };
+  const session = () =>
+    createGuideStoreSession({
+      runGit: async (args) => (args[0] === "remote" ? "git@github.com:acme/widgets.git\n" : args[0] === "rev-parse" ? "abc1234\n" : null),
+      getGitCwd: () => "/repo",
+      getPRInfo: () => null,
+      getBranchLabel: () => "feature/locales",
+      getFallbackDir: () => "/repo",
+      writesEnabled: () => true,
+    });
+
+  test("saveForJob writes {id}.patch beside the envelope and the envelope references it", async () => {
+    const s = session();
+    await s.saveForJob({ id: "job-1", engine: "claude", model: "sonnet", generatedAt: 5000 }, { ...GUIDE, reviewed: [true, false] }, undefined, LAUNCH_REVIEW);
+    const [entry] = listGuides(REPO_KEY);
+    expect(entry.envelope.review).toEqual({
+      gitRef: "origin/main..HEAD",
+      diffType: "since-base",
+      base: "origin/main",
+      source: LAUNCH_REVIEW.source,
+      patchFile: `${entry.id}.patch`,
+    });
+    expect(entry.envelope.customInstructions).toBe("Keep it short.");
+    expect(entry.envelope.generatedAt).toBe(5000);
+    expect(readdirSync(join(dataDir, "guides", REPO_KEY)).sort()).toEqual([`${entry.id}.json`, `${entry.id}.patch`]);
+    expect(loadGuidePatch(REPO_KEY, entry.envelope)).toBe(PATCH);
+
+    // Snapshot for export: guide + retained diff + provenance, reviewed state included.
+    const snapshot = await s.getSavedGuideSnapshot(entry.id);
+    expect(snapshot?.review.rawPatch).toBe(PATCH);
+    expect(snapshot?.guide.reviewed).toEqual([true, false]);
+    expect(snapshot?.generator).toEqual({ engine: "claude", model: "sonnet", generatedAt: new Date(5000).toISOString(), customInstructions: "Keep it short." });
+    // `exportedAt` is stamped per build, so compare with it normalized.
+    expect({ ...(await s.getJobGuideSnapshot("job-1"))!, exportedAt: snapshot!.exportedAt }).toEqual(snapshot!);
+    expect(await s.getJobGuideSnapshot("job-unknown")).toBeNull();
+  });
+
+  test("a re-save of a live job keeps its recorded share link and review", async () => {
+    const s = session();
+    const share = { id: "AbC", url: "https://guides.show/g/AbC#key=k", createdAt: "2026-08-15T00:00:00.000Z", deleteToken: "tok", serviceUrl: "https://guides.show" };
+    await s.saveForJob({ id: "job-1" }, { ...GUIDE }, undefined, LAUNCH_REVIEW);
+    const [entry] = listGuides(REPO_KEY);
+    expect(updateGuideShare(REPO_KEY, entry.id, share)).toBe(true);
+    await s.saveForJob({ id: "job-1" }, { ...GUIDE, reviewed: [true, true] });
+    const again = loadGuide(REPO_KEY, entry.id)!;
+    expect(again.share).toEqual(share);
+    expect(again.review).toEqual(entry.envelope.review);
+    expect(again.reviewed).toEqual([true, true]);
+  });
+
+  test("a guide saved without a launch review is not exportable", async () => {
+    const s = session();
+    await s.saveForJob({ id: "job-1" }, { ...GUIDE });
+    const [entry] = listGuides(REPO_KEY);
+    expect(entry.envelope.review).toBeUndefined();
+    expect(buildSavedGuideSnapshot(REPO_KEY, entry.envelope)).toBeNull();
+    expect(await s.getSavedGuideSnapshot(entry.id)).toBeNull();
+  });
+
+  test("an envelope whose patch file went missing is not exportable, and delete removes both files", () => {
+    saveGuidePatch(REPO_KEY, "1000-x", PATCH);
+    saveGuide(REPO_KEY, "1000-x", envelope({ review: { gitRef: "r", source: { kind: "local" }, patchFile: "1000-x.patch" } }));
+    expect(buildSavedGuideSnapshot(REPO_KEY, loadGuide(REPO_KEY, "1000-x")!)).not.toBeNull();
+    rmSync(join(dataDir, "guides", REPO_KEY, "1000-x.patch"));
+    expect(buildSavedGuideSnapshot(REPO_KEY, loadGuide(REPO_KEY, "1000-x")!)).toBeNull();
+    saveGuidePatch(REPO_KEY, "1000-x", PATCH);
+    expect(deleteGuide(REPO_KEY, "1000-x")).toBe(true);
+    expect(readdirSync(join(dataDir, "guides", REPO_KEY))).toEqual([]);
+  });
+
+  test("a patchFile that is not a plain sibling name is ignored on load", () => {
+    saveGuide(REPO_KEY, "1000-x", envelope({ review: { gitRef: "r", source: { kind: "local" }, patchFile: "../../etc/passwd" } }));
+    expect(loadGuide(REPO_KEY, "1000-x")!.review).toBeUndefined();
+  });
+
+  test("findSavedGuideById and listAllSavedGuides span every repo shelf (CLI has no session)", () => {
+    saveGuide("github.com__a__one", "1000-one", envelope({ title: "One" }));
+    saveGuide("github.com__b__two", "2000-two", envelope({ title: "Two", savedAt: 2000 }));
+    expect(findSavedGuideById("2000-two")?.repoKey).toBe("github.com__b__two");
+    expect(findSavedGuideById("3000-none")).toBeNull();
+    expect(findSavedGuideById("../escape")).toBeNull();
+    expect(listAllSavedGuides().map((g) => g.id)).toEqual(["2000-two", "1000-one"]);
+  });
+});
+
+describe("share record: a saved guide remembers its link", () => {
+  const SHARE = { id: "AbC123_-xyz", url: "https://guides.show/g/AbC123_-xyz#key=k", createdAt: "2026-08-15T00:00:00.000Z", deleteToken: "tok", serviceUrl: "https://guides.show" };
+
+  test("updateGuideShare records, round-trips, and clears the link; the rest of the envelope is untouched", () => {
+    saveGuide(REPO_KEY, "1000-x", envelope({ reviewed: [true, false] }));
+    expect(updateGuideShare(REPO_KEY, "1000-x", SHARE)).toBe(true);
+    const shared = loadGuide(REPO_KEY, "1000-x")!;
+    expect(shared.share).toEqual(SHARE);
+    expect(shared.reviewed).toEqual([true, false]);
+    expect(shared.title).toBe(GUIDE.title);
+    expect(updateGuideShare(REPO_KEY, "1000-x", null)).toBe(true);
+    const cleared = loadGuide(REPO_KEY, "1000-x")!;
+    expect(cleared.share).toBeUndefined();
+    expect("share" in cleared).toBe(false);
+    expect(updateGuideShare(REPO_KEY, "9999-missing", SHARE)).toBe(false);
+  });
+
+  test("a malformed share record loads as no link instead of a half record", () => {
+    saveGuide(REPO_KEY, "1000-x", envelope({ share: { id: "x", url: "https://guides.show/g/x" } as unknown as SavedGuideEnvelope["share"] }));
+    expect(loadGuide(REPO_KEY, "1000-x")!.share).toBeUndefined();
+    // Removal goes to the host the link was created on, so a record without one is not a usable link.
+    const { serviceUrl: _omitted, ...noHost } = SHARE;
+    saveGuide(REPO_KEY, "1000-y", envelope({ share: noHost as unknown as SavedGuideEnvelope["share"] }));
+    expect(loadGuide(REPO_KEY, "1000-y")!.share).toBeUndefined();
+  });
+
+  test("locateEnvelope resolves saved: ids on this shelf and autosaved live jobs, null otherwise", async () => {
+    const s = createGuideStoreSession({
+      runGit: async (args) => (args[0] === "remote" ? "git@github.com:acme/widgets.git\n" : null),
+      getGitCwd: () => "/repo",
+      getPRInfo: () => null,
+      getBranchLabel: () => "feature/locales",
+      getFallbackDir: () => "/repo",
+      writesEnabled: () => true,
+    });
+    saveGuide(REPO_KEY, "1000-x", envelope());
+    expect(await s.locateEnvelope("saved:1000-x")).toEqual({ repoKey: REPO_KEY, id: "1000-x", envelope: loadGuide(REPO_KEY, "1000-x")! });
+    expect(await s.locateEnvelope("saved:2000-missing")).toBeNull();
+    expect(await s.locateEnvelope("job-1")).toBeNull();
+    await s.saveForJob({ id: "job-1" }, { ...GUIDE });
+    const located = await s.locateEnvelope("job-1");
+    expect(located?.repoKey).toBe(REPO_KEY);
+    expect(loadGuide(REPO_KEY, located!.id)).not.toBeNull();
+    // A job's autosave that was deleted from disk no longer locates.
+    deleteGuide(REPO_KEY, located!.id);
+    expect(await s.locateEnvelope("job-1")).toBeNull();
   });
 });

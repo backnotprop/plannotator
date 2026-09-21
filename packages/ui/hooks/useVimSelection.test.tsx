@@ -11,6 +11,7 @@ interface VimHarnessProps {
   enabled: boolean;
   hudEnabled?: boolean;
   blocked?: boolean;
+  scrollViewport?: HTMLElement | null;
   onRange: (text: string, mode?: EditorMode) => void;
 }
 
@@ -18,12 +19,14 @@ function VimHarness({
   enabled,
   hudEnabled = false,
   blocked = false,
+  scrollViewport,
   onRange,
 }: VimHarnessProps) {
   if (!hookModule) throw new Error('DOM test environment is not registered');
   const articleRef = useRef<HTMLElement | null>(null);
   const vim = hookModule.useVimSelection({
     containerRef: articleRef,
+    scrollViewport,
     enabled,
     hudEnabled,
     blocked,
@@ -286,6 +289,41 @@ describe.if(hasDom)('useVimSelection', () => {
 
     act(() => root.unmount());
     outside.remove();
+  });
+
+  test('preserves the native viewport position when document focus returns', () => {
+    const viewport = document.createElement('main');
+    document.body.appendChild(viewport);
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 400 });
+    viewport.scrollTop = 320;
+    viewport.getBoundingClientRect = () => new DOMRect(0, 0, 800, 400);
+
+    const { article, root, host } = mountHarness({
+      enabled: true,
+      scrollViewport: viewport,
+      onRange: () => {},
+    });
+    article.getBoundingClientRect = () => new DOMRect(0, -320, 800, 2000);
+
+    const intro = host.querySelector<HTMLElement>('[data-block-id="intro"]');
+    const matrix = host.querySelector<HTMLElement>('[data-block-id="matrix"] table');
+    const code = host.querySelector<HTMLElement>('[data-block-id="code"]');
+    if (!intro || !matrix || !code) throw new Error('Missing semantic target fixture');
+    intro.getBoundingClientRect = () => new DOMRect(0, -300, 400, 40);
+    matrix.getBoundingClientRect = () => new DOMRect(0, 180, 400, 40);
+    code.getBoundingClientRect = () => new DOMRect(0, 800, 400, 40);
+
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    act(() => outside.focus());
+    act(() => article.focus());
+
+    expect(article.dataset.targetKey).toBe('matrix:table');
+    expect(viewport.scrollTop).toBe(320);
+
+    act(() => root.unmount());
+    outside.remove();
+    viewport.remove();
   });
 
   test('starts with block focus, refines through inline to text, and preserves controls', () => {

@@ -26,6 +26,8 @@ export type CurrentPiSessionRegistration = {
 };
 
 export type PiSessionIdentity = {
+	/** In-process extension runtime identity; changes on reload even when the Pi session ID does not. */
+	runtimeToken?: symbol;
 	sessionId?: string;
 	sessionFile?: string;
 	sessionName?: string;
@@ -72,8 +74,9 @@ function getErrorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-export function getPiSessionIdentity(ctx: ExtensionContext): PiSessionIdentity {
+export function getPiSessionIdentity(ctx: ExtensionContext, runtimeToken = getStore().current?.token): PiSessionIdentity {
 	return {
+		runtimeToken,
 		sessionId: ctx.sessionManager.getSessionId(),
 		sessionFile: ctx.sessionManager.getSessionFile(),
 		sessionName: ctx.sessionManager.getSessionName(),
@@ -83,6 +86,7 @@ export function getPiSessionIdentity(ctx: ExtensionContext): PiSessionIdentity {
 
 function isDifferentSession(origin: PiSessionIdentity, current: PiSessionIdentity | undefined): boolean {
 	if (!current) return false;
+	if (origin.runtimeToken && current.runtimeToken) return origin.runtimeToken !== current.runtimeToken;
 	if (origin.sessionId && current.sessionId) return origin.sessionId !== current.sessionId;
 	if (origin.sessionFile && current.sessionFile) return origin.sessionFile !== current.sessionFile;
 	return false;
@@ -99,7 +103,7 @@ function setCurrentPiSession(token: symbol, pi: ExtensionAPI, ctx?: ExtensionCon
 		current.notify = (message, type = "info") => {
 			ctx.ui.notify(message, type);
 		};
-		current.identity = getPiSessionIdentity(ctx);
+		current.identity = getPiSessionIdentity(ctx, token);
 	}
 	getStore().current = current;
 }

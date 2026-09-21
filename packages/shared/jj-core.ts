@@ -6,8 +6,11 @@ import {
   type GitContext,
   type GitDiffOptions,
   type JjEvoLogEntry,
+  type JjLineBaseResolution,
+  type JjRevisionInfo,
   JJ_TRUNK_REVSET,
   jjLineBaseRevset,
+  parseRemoteBookmark,
   validateFilePath,
 } from "./review-core";
 
@@ -17,14 +20,37 @@ export {
   jjLineBaseRevset,
   parseRemoteBookmark,
   type JjEvoLogEntry,
+  type JjLineBaseResolution,
+  type JjRevisionInfo,
 } from "./review-core";
 
 export interface ReviewJjRuntime {
   runJj: (
     args: string[],
-    options?: { cwd?: string; timeoutMs?: number },
+    options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
   ) => Promise<GitCommandResult>;
 }
+
+// `reachable(@, mutable())` is JJ's definition of the stack being worked on.
+// Its root parents are where that line diverged from immutable history. A
+// criss-cross history can have several equally valid fork points; requiring
+// exactly one prevents timestamp order from silently choosing review content.
+const JJ_LINE_BASE_CANDIDATES_REVSET = "fork_point(roots(reachable(@, mutable()))-)";
+const JJ_LINE_BASE_REVSET = `exactly(${JJ_LINE_BASE_CANDIDATES_REVSET}, 1)`;
+const JJ_LINE_BASE_TEMPLATE = 'json(bookmarks) ++ "\\t" ++ commit_id ++ "\\t" ++ json(description.first_line()) ++ "\\n"';
+
+// `jj git push --change` mints bookmarks under `git.push-bookmark-prefix`
+// (default `push-`). They name one change, not a line of work, so they are
+// never a useful review base. They reach the fork point in practice: a
+// colleague's pushed change bookmark arrives as an untracked remote bookmark,
+// which makes its commit immutable and therefore a candidate base, and the
+// reviewer would be told they are comparing against `push-vmopwunwxopv@origin`.
+const JJ_GENERATED_PUSH_BOOKMARK_PREFIX = "push-";
+
+// `commit_id` renders in full, so an all-zero id is the virtual root commit.
+// A repo with no immutable history forks there, and a 40-zero hash means
+// nothing to a reviewer, so keep the `trunk()` sentinel for that case.
+const JJ_ROOT_COMMIT_ID = /^0+$/;
 
 export async function detectJjWorkspace(
   runtime: ReviewJjRuntime,
@@ -40,8 +66,28 @@ export async function getJjContext(
 ): Promise<GitContext> {
   const root = await detectJjWorkspace(runtime, cwd);
   const targets = await listJjCompareTargets(runtime, root ?? cwd);
-  const defaultTarget = await selectDefaultJjCompareTarget(runtime, root ?? cwd);
+  const jjLineBase = await resolveJjLineBase(runtime, root ?? cwd);
+  const defaultTarget = jjLineBase.kind === "resolved"
+    ? jjLineBase.revision.commitId
+    : JJ_TRUNK_REVSET;
   const contextCwd = root ?? cwd;
+  const diffAvailability = jjLineBase.kind === "resolved"
+    ? undefined
+    : {
+        "jj-line": {
+          fallbackDiffType: "jj-current",
+          message: jjLineBase.kind === "ambiguous"
+            ? "Jujutsu found multiple possible line-of-work bases. Showing Current change instead."
+            : `${jjLineBase.reason} Showing Current change instead.`,
+          ...(jjLineBase.kind === "ambiguous" && {
+            candidates: jjLineBase.candidates.map((candidate) => ({
+              revision: candidate.commitId,
+              labels: candidate.bookmarks,
+              subject: candidate.subject,
+            })),
+          }),
+        },
+      };
 
   const evologs = await getJjEvoLogEntries(runtime, root ?? cwd);
 
@@ -71,10 +117,106 @@ export async function getJjContext(
       },
     },
     repository: contextCwd ? { displayFallback: basename(contextCwd) } : undefined,
+    diffAvailability,
     cwd: contextCwd,
     vcsType: "jj",
+    jjLineBase,
     jjEvologs: evologs.length >= 2 ? evologs : undefined,
   };
+}
+
+export function isJjSnapshotDiffType(diffType: string): boolean {
+  return diffType === "jj-current"
+    || diffType === "jj-last"
+    || diffType === "jj-line"
+    || diffType === "jj-evolog";
+}
+
+/**
+ * One end of an analysis snapshot, expressed so a merge revision cannot make it
+ * ambiguous.
+ *
+ * `jj diff --from/--to` take exactly ONE revision. The parent shorthands do not
+ * guarantee that: `@-` is `parents(@)`, so on a merge revision both `@-` and
+ * `parents(@-)` resolve to several revisions and jj rejects the command
+ * outright ("resolved to more than one revision") — even though the visible
+ * `jj diff -r @` review still renders. Parent hops are therefore never encoded
+ * as revsets; they are walked first-parent-first against the repository, which
+ * is the same side `getJjFileContentsForDiff` already expands merges on.
+ */
+export interface JjSnapshotEndpoint {
+  /** Revset that must itself resolve to a single revision (`@`, a commit id, …). */
+  revset: string;
+  /** First-parent hops to walk from `revset`. Zero uses `revset` verbatim. */
+  firstParentSteps: number;
+}
+
+export function getJjSnapshotRevsets(
+  diffType: DiffType,
+  compareTarget: string,
+): { from: JjSnapshotEndpoint; to: JjSnapshotEndpoint } | null {
+  switch (diffType) {
+    case "jj-current":
+      return { from: { revset: "@", firstParentSteps: 1 }, to: { revset: "@", firstParentSteps: 0 } };
+    case "jj-last":
+      return { from: { revset: "@", firstParentSteps: 2 }, to: { revset: "@", firstParentSteps: 1 } };
+    case "jj-line":
+      return {
+        from: {
+          revset: jjLineBaseRevset(compareTarget.length > 0 ? compareTarget : JJ_TRUNK_REVSET),
+          firstParentSteps: 0,
+        },
+        to: { revset: "@", firstParentSteps: 0 },
+      };
+    case "jj-evolog":
+      return compareTarget.length > 0
+        ? { from: { revset: compareTarget, firstParentSteps: 0 }, to: { revset: "@", firstParentSteps: 0 } }
+        : null;
+    default:
+      return null;
+  }
+}
+
+/** Resolve one endpoint to a revision `jj diff` accepts as a single argument. */
+export async function resolveJjSnapshotEndpoint(
+  runtime: ReviewJjRuntime,
+  endpoint: JjSnapshotEndpoint,
+  cwd?: string,
+): Promise<string> {
+  let revision = endpoint.revset;
+  for (let step = 0; step < endpoint.firstParentSteps; step += 1) {
+    const parent = await resolveJjFirstParentCommitId(runtime, revision, cwd);
+    if (!parent) {
+      throw new Error("This Jujutsu revision has no parent revision to compare against.");
+    }
+    revision = parent;
+  }
+  return revision;
+}
+
+/**
+ * The FIRST parent's commit id. jj lists a merge's parents in the order they
+ * were given to `jj new`, so index 0 is stable across invocations — unlike
+ * `heads()`/`latest()`, which order by graph shape or timestamp.
+ */
+async function resolveJjFirstParentCommitId(
+  runtime: ReviewJjRuntime,
+  revision: string,
+  cwd?: string,
+): Promise<string | null> {
+  const result = await runtime.runJj([
+    "--ignore-working-copy",
+    "log",
+    "--no-graph",
+    "-r",
+    revision,
+    "-T",
+    'parents.map(|p| p.commit_id()).join("\n")',
+  ], { cwd });
+  if (result.exitCode !== 0) {
+    throw new Error(firstErrorLine(result.stderr) ?? "Jujutsu could not resolve the snapshot revision.");
+  }
+  return result.stdout.split("\n").map((line) => line.trim()).find(Boolean) ?? null;
 }
 
 export async function runJjDiff(
@@ -250,7 +392,9 @@ export function getJjDiffArgs(
     case "jj-line":
       return {
         args: ["diff", "--git", ...whitespaceArgs, "--from", jjLineBaseRevset(compareTarget), "--to", "@"],
-        label: `Line of work vs ${compareTarget}`,
+        // A frozen full commit id would render as 40+ hex chars in the
+        // header label; show the short form like jj itself does.
+        label: `Line of work vs ${/^[0-9a-f]{40,64}$/.test(compareTarget) ? compareTarget.slice(0, 12) : compareTarget}`,
       };
     case "jj-evolog":
       // compareTarget is the short commit ID of an older evolog entry.
@@ -266,21 +410,78 @@ export function getJjDiffArgs(
   }
 }
 
+export async function resolveJjLineBase(
+  runtime: ReviewJjRuntime,
+  cwd?: string,
+): Promise<JjLineBaseResolution> {
+  const result = await queryJjLineBases(runtime, JJ_LINE_BASE_REVSET, cwd);
+  if (result.exitCode === 0) {
+    const [revision] = parseJjLineBaseRecords(result.stdout);
+    if (!revision || JJ_ROOT_COMMIT_ID.test(revision.commitId)) {
+      return { kind: "unavailable", reason: "The line of work starts at the repository root." };
+    }
+    return { kind: "resolved", revision };
+  }
+
+  // `exactly(..., 1)` deliberately rejects both an empty set and a set with
+  // several fork points. Query the candidates only after that rejection so
+  // the normal path remains one repository lookup.
+  const candidatesResult = await queryJjLineBases(runtime, JJ_LINE_BASE_CANDIDATES_REVSET, cwd);
+  if (candidatesResult.exitCode !== 0) {
+    return {
+      kind: "unavailable",
+      reason: firstErrorLine(result.stderr) ?? "Jujutsu could not resolve a line-of-work base.",
+    };
+  }
+
+  const candidates = parseJjLineBaseRecords(candidatesResult.stdout)
+    .filter((revision) => !JJ_ROOT_COMMIT_ID.test(revision.commitId));
+  if (candidates.length > 1) return { kind: "ambiguous", candidates };
+  if (candidates.length === 1) return { kind: "resolved", revision: candidates[0] };
+  return { kind: "unavailable", reason: "Jujutsu could not find a line-of-work base." };
+}
+
 export async function selectDefaultJjCompareTarget(
   runtime: ReviewJjRuntime,
   cwd?: string,
 ): Promise<string> {
-  const result = await runtime.runJj([
+  const resolution = await resolveJjLineBase(runtime, cwd);
+  return resolution.kind === "resolved" ? resolution.revision.commitId : JJ_TRUNK_REVSET;
+}
+
+function queryJjLineBases(runtime: ReviewJjRuntime, revset: string, cwd?: string) {
+  return runtime.runJj([
     "log",
     "--no-graph",
     "-r",
-    JJ_TRUNK_REVSET,
+    revset,
     "-T",
-    "json(bookmarks)",
+    JJ_LINE_BASE_TEMPLATE,
   ], { cwd });
-  if (result.exitCode !== 0) return JJ_TRUNK_REVSET;
+}
 
-  return parseJjResolvedBookmarks(result.stdout)[0] ?? JJ_TRUNK_REVSET;
+function parseJjLineBaseRecords(stdout: string): JjRevisionInfo[] {
+  const revisions: JjRevisionInfo[] = [];
+  for (const record of splitJjTemplateRecords(stdout)) {
+    if (!record) continue;
+    const fields = splitJjTemplateFields(record, 3);
+    if (!fields) continue;
+    const commitId = fields[1]?.trim();
+    if (!commitId) continue;
+    const bookmarks = parseJjResolvedBookmarks(fields[0])
+      .filter((name) => !isGeneratedPushBookmark(name));
+    revisions.push({
+      commitId,
+      bookmarks,
+      subject: parseSerializedJjString(fields[2]) ?? "",
+    });
+  }
+  return revisions;
+}
+
+function isGeneratedPushBookmark(target: string): boolean {
+  const name = parseRemoteBookmark(target)?.name ?? target;
+  return name.startsWith(JJ_GENERATED_PUSH_BOOKMARK_PREFIX);
 }
 
 function parseJjResolvedBookmarks(value: string): string[] {
@@ -402,14 +603,9 @@ function splitJjTemplateRecords(stdout: string): string[] {
   return stdout.split(/\n|\\n/g);
 }
 
-function splitJjTemplateFields(line: string): [string, string] | null {
-  const literalTab = line.indexOf("\t");
-  if (literalTab !== -1) return [line.slice(0, literalTab), line.slice(literalTab + 1)];
-
-  const escapedTab = line.indexOf("\\t");
-  if (escapedTab !== -1) return [line.slice(0, escapedTab), line.slice(escapedTab + 2)];
-
-  return null;
+function splitJjTemplateFields(line: string, expected = 2): string[] | null {
+  const fields = line.includes("\t") ? line.split("\t") : line.split("\\t");
+  return fields.length >= expected ? fields : null;
 }
 
 function parseSerializedJjString(value: string): string | null {

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
@@ -9,10 +9,15 @@ import { ConventionalLabelPicker, type LabelDef } from './ConventionalLabelPicke
 import type { ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { useDraggable } from '@plannotator/ui/hooks/useDraggable';
+import {
+  hasPrimaryCoarsePointer,
+  useVisibleViewportBounds,
+  type VisibleViewportBounds,
+} from '@plannotator/ui/hooks/useViewportEnvironment';
 
 interface AnnotationToolbarProps {
   toolbarState: ToolbarState;
-  toolbarRef: React.RefObject<HTMLDivElement>;
+  toolbarRef: React.RefObject<HTMLDivElement | null>;
   commentText: string;
   setCommentText: (text: string) => void;
   suggestedCode: string;
@@ -42,6 +47,49 @@ interface AnnotationToolbarProps {
   onViewAIResponse?: (questionId?: string) => void;
   /** AI messages that overlap the current line selection */
   aiHistoryMessages?: AIChatEntry[];
+}
+
+// The 338px border box contains the 320px composer, padding, and border.
+const TOOLBAR_MAX_WIDTH = 338;
+// Gap between the anchor and the toolbar's near edge when it flips above.
+const TOOLBAR_ANCHOR_GAP = 10;
+// Stand-in for the first render only, before the real height is measured.
+const TOOLBAR_ESTIMATED_HEIGHT = 200;
+
+interface ToolbarVerticalPlacement {
+  top: number;
+  maxHeight: number;
+}
+
+/**
+ * Keeps the WHOLE toolbar — submit row included — inside the visible viewport.
+ *
+ * `anchorTop` is the toolbar's top when it sits below the anchor. When that
+ * would push its bottom past the viewport (a selection on the last lines of a
+ * file), the toolbar flips above the anchor instead of sliding up, so the
+ * submit button stays on screen without scrolling (#1424). A toolbar taller
+ * than the viewport has nowhere to go: it is pinned to the top edge and scrolls
+ * internally, which is the only case where `maxHeight` actually binds.
+ */
+function computeToolbarVerticalPlacement(
+  anchorTop: number,
+  height: number | null,
+  bounds: VisibleViewportBounds,
+  { flip = false }: { flip?: boolean } = {},
+): ToolbarVerticalPlacement {
+  if (height !== null && height > bounds.height) {
+    return { top: bounds.top, maxHeight: bounds.height };
+  }
+
+  const measured = height ?? TOOLBAR_ESTIMATED_HEIGHT;
+  const preferred = flip && anchorTop + measured > bounds.bottom
+    ? anchorTop - TOOLBAR_ANCHOR_GAP - measured
+    : anchorTop;
+
+  return {
+    top: Math.max(bounds.top, Math.min(preferred, bounds.bottom - measured)),
+    maxHeight: bounds.height,
+  };
 }
 
 /** Floating comment input form that appears after line selection */
@@ -75,9 +123,37 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onViewAIResponse,
   aiHistoryMessages = [],
 }) => {
+  const coarsePointer = hasPrimaryCoarsePointer();
+  const visibleBounds = useVisibleViewportBounds(coarsePointer ? 16 : 0);
+  const toolbarWidth = Math.min(TOOLBAR_MAX_WIDTH, visibleBounds.width);
+  const horizontalInset = toolbarWidth / 2;
   const suggestedCodeRef = useRef<HTMLTextAreaElement>(null);
+  const [toolbarHeight, setToolbarHeight] = useState<number | null>(null);
   const handleTabIndent = useTabIndent(setSuggestedCode);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(toolbarRef);
+
+  // The clamp below needs the real box height, not a guess: a fixed reserve let
+  // the expanded suggested-code section push the submit row past the viewport
+  // bottom. Measured after every commit because the height changes with the
+  // suggested-code toggle, Ask AI history, and a manual textarea resize;
+  // setState bails out whenever the measurement is unchanged.
+  // scrollHeight is the UNCLAMPED content height, so a maxHeight this effect
+  // already applied can never feed back into the next measurement.
+  useLayoutEffect(() => {
+    const element = toolbarRef.current;
+    if (!element) return;
+    const measured = Math.max(element.scrollHeight, element.offsetHeight);
+    setToolbarHeight((previous) => (previous === measured ? previous : measured));
+  });
+
+  // Dragged toolbars keep the user's chosen position (clamped into bounds);
+  // anchored ones also flip above the anchor when they would not fit below.
+  const placement = computeToolbarVerticalPlacement(
+    dragPosition ? dragPosition.top : toolbarState.position.top,
+    toolbarHeight,
+    visibleBounds,
+    { flip: !dragPosition },
+  );
 
   // Reset drag when toolbar reopens for a new selection
   useEffect(() => {
@@ -110,13 +186,32 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       ref={toolbarRef}
       className="review-toolbar"
       style={dragPosition
-        ? { position: 'fixed', top: dragPosition.top, left: dragPosition.left, zIndex: 1000 }
+        ? {
+            position: 'fixed',
+            top: placement.top,
+            left: dragPosition.left,
+            width: toolbarWidth,
+            boxSizing: 'border-box',
+            zIndex: 1000,
+            maxHeight: placement.maxHeight,
+            overflowY: 'auto',
+          }
         : {
             position: 'fixed',
-            top: Math.min(toolbarState.position.top, window.innerHeight - 200),
-            left: Math.max(150, Math.min(toolbarState.position.left, window.innerWidth - 150)),
+            top: placement.top,
+            left: Math.max(
+              visibleBounds.left + horizontalInset,
+              Math.min(
+                toolbarState.position.left,
+                visibleBounds.right - horizontalInset,
+              ),
+            ),
             transform: 'translateX(-50%)',
+            width: toolbarWidth,
+            boxSizing: 'border-box',
             zIndex: 1000,
+            maxHeight: placement.maxHeight,
+            overflowY: 'auto',
           }
       }
     >
@@ -133,7 +228,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           dragHandleProps={dragHandleProps}
         />
       ) : (
-        <div className="w-80 max-w-[calc(100vw-2rem)] flex flex-col">
+        <div
+          className="w-80 max-w-full flex flex-col"
+          style={{ width: Math.min(320, visibleBounds.width) }}
+        >
           <div className="flex items-center justify-between mb-2" {...dragHandleProps}>
             <span className="text-xs text-muted-foreground">
               {isEditing
@@ -174,14 +272,16 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           )}
 
           <textarea
+            data-pn-mobile-editable="true"
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             placeholder="Leave feedback..."
-            className="w-full min-h-[4.5rem] max-h-[calc(100vh-16rem)] px-3 py-2 bg-muted rounded-lg text-xs leading-6 resize-y border-0 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
+            className="w-full min-h-[4.5rem] max-h-[calc(var(--pn-viewport-height,100vh)-16rem)] px-3 py-2 bg-muted rounded-lg text-xs leading-6 resize-y border-0 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground"
             rows={3}
-            autoFocus
+            autoFocus={!coarsePointer}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
+                e.stopPropagation();
                 onDismiss();
               } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
                 onSubmit();
@@ -211,7 +311,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 placeholder="Enter code suggestion..."
                 className="suggested-code-input"
                 rows={4}
-                autoFocus
+                autoFocus={!coarsePointer}
                 spellCheck={false}
                 onKeyDown={(e) => {
                   if (e.key === 'Tab') {

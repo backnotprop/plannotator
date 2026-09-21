@@ -21,6 +21,7 @@ import {
   detectRemoteDefaultInfo,
   getDefaultBranch,
   getFileContentsForDiff,
+  getGitSnapshotMaterializationPatch,
   getGitContext,
   getGitDiffFingerprint,
   getWorkingTreeDiffFromBase,
@@ -411,6 +412,29 @@ describe("review-core", () => {
 
     expect(result.patch).toContain("Binary files");
     expect(isOversizedReviewStubPatch(result.patch)).toBe(false);
+  });
+
+  test("CallDiff gets an applyable binary patch without changing the UI patch", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(join(repoDir, "logo.png"), Buffer.from([0, 1, 2, 0, 3]));
+    git(repoDir, ["add", "logo.png"]);
+    git(repoDir, ["commit", "-m", "add tracked image"]);
+    writeFileSync(join(repoDir, "logo.png"), Buffer.from([0, 1, 9, 0, 3, 4]));
+    writeFileSync(join(repoDir, "new-logo.png"), Buffer.from([0, 5, 6, 0, 7]));
+
+    const visible = await runGitDiff(runtime, "uncommitted", "main");
+    const materialization = await getGitSnapshotMaterializationPatch(
+      runtime,
+      "uncommitted",
+      "main",
+      repoDir,
+    );
+
+    expect(visible.patch).toContain("Binary files");
+    expect(visible.patch).not.toContain("GIT binary patch");
+    expect(materialization?.match(/GIT binary patch/g)).toHaveLength(2);
+    expect(materialization).toMatch(/^index [0-9a-f]{40,64}\.\.[0-9a-f]{40,64}/m);
   });
 
   test("the UI's size-cap label matches the enforced byte cap", () => {
@@ -1258,6 +1282,42 @@ describe("review-core", () => {
     expect(result.patch).toContain("diff --git a/untracked.txt b/untracked.txt");
   });
 
+  test("local-vs-remote includes committed, dirty, and untracked changes since the tracked branch", async () => {
+    const repoDir = initRepo();
+    const remoteDir = makeTempDir("plannotator-review-core-upstream-");
+    git(remoteDir, ["init", "--bare", "--initial-branch=main"]);
+    git(repoDir, ["remote", "add", "origin", remoteDir]);
+    git(repoDir, ["push", "--set-upstream", "origin", "main"]);
+
+    writeFileSync(join(repoDir, "committed.txt"), "committed\n", "utf-8");
+    git(repoDir, ["add", "committed.txt"]);
+    git(repoDir, ["commit", "-m", "local commit"]);
+    writeFileSync(join(repoDir, "tracked.txt"), "dirty\n", "utf-8");
+    writeFileSync(join(repoDir, "untracked.txt"), "new\n", "utf-8");
+
+    const runtime = makeRuntime(repoDir);
+    const context = await getGitContext(runtime, repoDir);
+    const result = await runGitDiff(runtime, "local-vs-remote", context.defaultBranch, repoDir);
+
+    // Intentional copy pins: these labels are the product terminology shown in the diff picker and header.
+    expect(context.diffOptions).toContainEqual({
+      id: "local-vs-remote",
+      label: "Local vs remote branch",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.label).toBe("main: Local vs origin/main");
+    expect(result.patch).toContain("diff --git a/committed.txt b/committed.txt");
+    expect(result.patch).toContain("diff --git a/tracked.txt b/tracked.txt");
+    expect(result.patch).toContain("diff --git a/untracked.txt b/untracked.txt");
+  });
+
+  test("git context hides local-vs-remote when the current branch has no upstream", async () => {
+    const repoDir = initRepo();
+    const context = await getGitContext(makeRuntime(repoDir), repoDir);
+
+    expect(context.diffOptions.map((option) => option.id)).not.toContain("local-vs-remote");
+  });
+
   test("since-base falls back to HEAD when the requested base cannot resolve", async () => {
     const repoDir = initRepo("trunk");
     const runtime = makeRuntime(repoDir);
@@ -1625,6 +1685,7 @@ describe("review-core", () => {
     // which pointed git at a non-existent cwd and silently collapsed the diff mode.
     const subTypes = [
       "since-base",
+      "local-vs-remote",
       "uncommitted",
       "staged",
       "unstaged",
@@ -1650,6 +1711,15 @@ describe("review-core", () => {
       path: "/tmp/my-worktree:commit:not-hex",
       subType: "uncommitted",
     });
+  });
+
+  test("rejects a worktree diff type with no path", () => {
+    // An empty path would resolve to an empty cwd; Bun.spawn({ cwd: "" }) runs
+    // git in the server's OWN directory and leaks an unrelated repo's diff.
+    // Every degenerate form must return null so resolveCwd falls back.
+    expect(parseWorktreeDiffType("worktree:")).toBeNull();
+    expect(parseWorktreeDiffType("worktree::uncommitted")).toBeNull();
+    expect(parseWorktreeDiffType("worktree::commit:abc1234")).toBeNull();
   });
 });
 

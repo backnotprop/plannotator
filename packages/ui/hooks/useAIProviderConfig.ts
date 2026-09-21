@@ -59,14 +59,15 @@ export function useAIProviderConfig({
   // Auto-resolve provider/model once capabilities are known.
   useEffect(() => {
     if (!available || providers.length === 0) return;
+    const saved = getAIProviderSettings();
+    const selection = resolveAIProviderSelection({
+      providers,
+      origin,
+      settings: saved,
+      serverDefaultProvider: defaultProvider,
+    });
+
     setAiConfig(prev => {
-      const saved = getAIProviderSettings();
-      const selection = resolveAIProviderSelection({
-        providers,
-        origin,
-        settings: saved,
-        serverDefaultProvider: defaultProvider,
-      });
       if (prev.providerId === selection.providerId && prev.model === selection.model) return prev;
       return {
         ...prev,

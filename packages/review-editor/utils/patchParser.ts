@@ -56,3 +56,24 @@ export function extractLinesFromPatch(
 
   return result.join('\n');
 }
+
+/** Return true only when the complete source range is represented by one diff hunk. */
+export function isLineRangeInPatch(
+  patch: string,
+  lineStart: number,
+  lineEnd: number,
+  side: 'old' | 'new',
+): boolean {
+  if (!Number.isInteger(lineStart) || !Number.isInteger(lineEnd) || lineStart < 1 || lineEnd < lineStart) {
+    return false;
+  }
+  for (const line of patch.split('\n')) {
+    const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (!match) continue;
+    const start = Number(side === 'old' ? match[1] : match[3]);
+    const count = Number((side === 'old' ? match[2] : match[4]) ?? '1');
+    if (count === 0) continue;
+    if (lineStart >= start && lineEnd <= start + count - 1) return true;
+  }
+  return false;
+}

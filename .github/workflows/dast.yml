@@ -1,0 +1,328 @@
+name: ZAP DAST
+
+on:
+  schedule:
+    - cron: "47 16 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zap-dast-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: 1.3.11
+  TARGET_IMAGE: oven/bun:1.3.11-slim@sha256:478281fdd196871c7e51ba6a820b7803a8ae97042ec86cdbc2e1c6b6626442d9
+  ZAP_VERSION: 2.17.0
+  ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:stable@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef
+  DAST_NETWORK: plannotator-dast-${{ github.run_id }}-${{ github.run_attempt }}
+  DAST_TARGET: plannotator-dast-target-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  passive-baseline:
+    name: Passive baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test DAST evidence validator
+        run: bun test scripts/dast/report.test.ts
+
+      - name: Build disposable target UI
+        run: bun run build:review && bun run build:hook
+
+      - name: Pull and verify pinned runtime images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pull_image() {
+            local image=$1
+            for attempt in 1 2 3; do
+              if docker pull "$image"; then
+                return 0
+              fi
+              if (( attempt == 3 )); then
+                echo "Failed to pull $image after three attempts." >&2
+                return 1
+              fi
+              sleep $((attempt * 5))
+            done
+          }
+
+          pull_image "$TARGET_IMAGE"
+          pull_image "$ZAP_IMAGE"
+
+          target_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$TARGET_IMAGE")
+          zap_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$ZAP_IMAGE")
+          [[ "$target_digest" == *@"${TARGET_IMAGE##*@}" ]]
+          [[ "$zap_digest" == *@"${ZAP_IMAGE##*@}" ]]
+
+          actual_bun=$(docker run --rm --network none "$TARGET_IMAGE" bun --version)
+          [[ "$actual_bun" == "$BUN_VERSION" ]]
+          [[ "$(docker run --rm --network none "$TARGET_IMAGE" id -u bun)" == "1000" ]]
+          [[ "$(docker image inspect --format '{{.Config.User}}' "$ZAP_IMAGE")" == "zap" ]]
+
+          actual_zap=$(
+            docker run --rm --network none --hostname zap "$ZAP_IMAGE" zap.sh -version 2>&1 \
+              | tail -n 1
+          )
+          [[ "$actual_zap" == "$ZAP_VERSION" ]]
+
+          {
+            echo "### Pinned DAST runtimes"
+            echo "- Bun target image: $target_digest (Bun $actual_bun)"
+            echo "- ZAP image: $zap_digest (ZAP $actual_zap)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Start isolated disposable targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p security-results/zap
+          chmod 777 security-results/zap
+
+          # ZAP's stock database template allows only 32 MiB of cached response
+          # data. Plannotator's single-file UI is over 20 MiB, so derive the
+          # exact template from the pinned image and change only that limit.
+          docker run --rm \
+            --network none \
+            --entrypoint cat \
+            "$ZAP_IMAGE" \
+            /zap/db/zapdb.script > security-results/zap/zapdb.script
+          [[ "$(grep -c '^SET FILES CACHE SIZE 32000$' security-results/zap/zapdb.script)" == "1" ]]
+          sed -i 's/^SET FILES CACHE SIZE 32000$/SET FILES CACHE SIZE 131072/' \
+            security-results/zap/zapdb.script
+          grep -qx 'SET FILES CACHE SIZE 131072' security-results/zap/zapdb.script
+          chmod 444 security-results/zap/zapdb.script
+
+          docker network create \
+            --internal \
+            --label plannotator.security-scan=dast \
+            "$DAST_NETWORK"
+          [[ "$(docker network inspect --format '{{.Internal}}' "$DAST_NETWORK")" == "true" ]]
+          docker run --rm \
+            --network "$DAST_NETWORK" \
+            --user 1000:1000 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            "$TARGET_IMAGE" \
+            bun -e '
+              const escaped = await fetch("http://192.0.2.1", {
+                signal: AbortSignal.timeout(2000),
+              }).then(
+                () => true,
+                () => false,
+              );
+              if (escaped) throw new Error("Internal DAST network permits outbound traffic.");
+            '
+
+          docker run --detach \
+            --name "$DAST_TARGET" \
+            --label plannotator.security-scan=dast \
+            --user 1000:1000 \
+            --network "$DAST_NETWORK" \
+            --network-alias plannotator-dast-target \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --memory 1g \
+            --cpus 2 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+            --env HOME=/tmp/home \
+            --env PLANNOTATOR_DATA_DIR=/tmp/plannotator \
+            --env PLANNOTATOR_DAST_ISOLATED=1 \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --workdir /workspace \
+            "$TARGET_IMAGE" \
+            bun run scripts/dast/target.ts
+
+          for _ in {1..60}; do
+            if docker run --rm \
+              --network "$DAST_NETWORK" \
+              --user 1000:1000 \
+              --read-only \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              "$TARGET_IMAGE" \
+              bun -e '
+                const base = "http://plannotator-dast-target";
+                const checks = [
+                  [19432, "/", 200],
+                  [19432, "/api/plan", 200],
+                  [19432, "/api/ai/capabilities", 200],
+                  [19432, "/api/definitely-missing", 404],
+                  [19432, "/robots.txt", 404],
+                  [19433, "/", 200],
+                ];
+                for (const [port, path, expected] of checks) {
+                  const response = await fetch(`${base}:${port}${path}`);
+                  if (response.status !== expected) {
+                    throw new Error(`${path}: expected ${expected}, got ${response.status}`);
+                  }
+                }
+                const blocked = await fetch(`${base}:19432/api/approve`, { method: "POST" });
+                if (blocked.status !== 405) {
+                  throw new Error(`POST guard: expected 405, got ${blocked.status}`);
+                }
+                const upstreamExposed = await fetch(`${base}:19434/`).then(
+                  () => true,
+                  () => false,
+                );
+                if (upstreamExposed) throw new Error("Unprotected upstream port is network-accessible.");
+              ' >/dev/null 2>&1; then
+              exit 0
+            fi
+            if ! docker inspect --format '{{.State.Running}}' "$DAST_TARGET" | grep -qx true; then
+              docker logs "$DAST_TARGET" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker logs "$DAST_TARGET" >&2
+          echo 'Disposable DAST targets did not become healthy.' >&2
+          exit 1
+
+      - name: Verify ZAP detector health
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          docker run --rm \
+            --network "$DAST_NETWORK" \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 512 \
+            --memory 2g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
+            --tmpfs /home/zap/.ZAP:rw,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.cache:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.config:rw,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.mozilla:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700 \
+            --volume "$GITHUB_WORKSPACE/security-results/zap:/zap/wrk:rw" \
+            --volume "$GITHUB_WORKSPACE/security-results/zap/zapdb.script:/zap/db/zapdb.script:ro" \
+            --volume "$GITHUB_WORKSPACE/scripts/dast/zap-hooks.py:/zap/hooks.py:ro" \
+            --workdir /zap/wrk \
+            "$ZAP_IMAGE" \
+            zap-baseline.py \
+              --autooff \
+              -t http://plannotator-dast-target:19433 \
+              -m 0 \
+              -T 5 \
+              -I \
+              -z "-Xmx1024m -silent -config database.response.bodysize=33554432" \
+              --hook /zap/hooks.py \
+              -J sentinel.json \
+              -r sentinel.html \
+              -w sentinel.md \
+              -l WARN \
+              2>&1 | tee security-results/zap/sentinel.log
+          scan_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$scan_status" -eq 3 || "$scan_status" -gt 3 ]]; then
+            echo "ZAP detector-health scan failed with exit $scan_status." >&2
+            exit "$scan_status"
+          fi
+          mv security-results/zap/zap.out security-results/zap/sentinel-zap.log
+
+      - name: Scan disposable Plannotator session
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          docker run --rm \
+            --network "$DAST_NETWORK" \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 512 \
+            --memory 3g \
+            --tmpfs /tmp:rw,nosuid,nodev,size=512m,mode=1777 \
+            --tmpfs /home/zap/.ZAP:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.cache:rw,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.config:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700 \
+            --tmpfs /home/zap/.mozilla:rw,nosuid,nodev,size=256m,uid=1000,gid=1000,mode=0700 \
+            --volume "$GITHUB_WORKSPACE/security-results/zap:/zap/wrk:rw" \
+            --volume "$GITHUB_WORKSPACE/security-results/zap/zapdb.script:/zap/db/zapdb.script:ro" \
+            --volume "$GITHUB_WORKSPACE/scripts/dast/zap-hooks.py:/zap/hooks.py:ro" \
+            --workdir /zap/wrk \
+            "$ZAP_IMAGE" \
+            zap-baseline.py \
+              --autooff \
+              -t http://plannotator-dast-target:19432 \
+              -m 1 \
+              -T 10 \
+              -I \
+              -z "-Xmx2048m -silent -config database.response.bodysize=33554432" \
+              --hook /zap/hooks.py \
+              -J plannotator.json \
+              -r plannotator.html \
+              -w plannotator.md \
+              -l WARN \
+              2>&1 | tee security-results/zap/plannotator.log
+          scan_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$scan_status" -eq 3 || "$scan_status" -gt 3 ]]; then
+            echo "ZAP application scan failed with exit $scan_status." >&2
+            exit "$scan_status"
+          fi
+          mv security-results/zap/zap.out security-results/zap/plannotator-zap.log
+
+      - name: Validate and summarize DAST evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run scripts/dast/report.ts \
+            --report security-results/zap/plannotator.json \
+            --sentinel-report security-results/zap/sentinel.json \
+            --scan-log security-results/zap/plannotator.log \
+            --zap-log security-results/zap/plannotator-zap.log \
+            --sentinel-zap-log security-results/zap/sentinel-zap.log \
+            --minimum-urls 8 \
+            --expected-host plannotator-dast-target \
+            --sentinel-rule 10020 \
+            --summary security-results/zap/summary.md \
+            --evidence security-results/zap/evidence.json
+          cat security-results/zap/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture target diagnostics and tear down
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p security-results/zap
+          if docker inspect "$DAST_TARGET" >/dev/null 2>&1; then
+            docker logs "$DAST_TARGET" > security-results/zap/target.log 2>&1
+            docker rm --force "$DAST_TARGET"
+          fi
+          docker network rm "$DAST_NETWORK"
+          exit 0
+
+      - name: Upload DAST evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zap-dast-${{ github.run_id }}-${{ github.run_attempt }}
+          path: security-results/zap/
+          if-no-files-found: error
+          retention-days: 30

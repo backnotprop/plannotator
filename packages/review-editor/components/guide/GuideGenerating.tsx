@@ -4,7 +4,7 @@ import type { AgentJobInfo } from '@plannotator/ui/types';
 import { ElapsedTime } from '@plannotator/ui/components/AgentsTab';
 import { LiveLogViewer } from '../LiveLogViewer';
 import { useJobLogs } from '../../dock/JobLogsContext';
-import { GuideSectionSkeleton } from './GuideSkeleton';
+import { GuideSectionSkeleton } from '@plannotator/guide-viewer/GuideSkeleton';
 
 const STATUS_LABEL: Record<AgentJobInfo['status'], string> = {
   starting: 'Starting',

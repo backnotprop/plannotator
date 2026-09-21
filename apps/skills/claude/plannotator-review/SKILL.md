@@ -7,6 +7,8 @@ disable-model-invocation: true
 
 # Plannotator Review
 
+Arguments pass through to `plannotator review`: a PR/MR URL, `--git` / `--gitbutler`, and the session-only open-state flags `--base <ref>` / `--diff-type <type>` (git-only; for a stacked branch, `--base <the branch below yours>` reviews just that layer).
+
 ## Code review feedback
 
 !`plannotator review $ARGUMENTS`

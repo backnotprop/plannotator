@@ -1,10 +1,8 @@
 /// <reference path="../globals.d.ts" />
-import React, { useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { TextShimmer } from './TextShimmer';
 import lookGridImg from '../assets/look-grid.png';
 import lookFlatImg from '../assets/look-flat.png';
-import workspacesImg from '../assets/workspaces.webp';
 
 interface LookAndFeelAnnouncementDialogProps {
   isOpen: boolean;
@@ -12,25 +10,9 @@ interface LookAndFeelAnnouncementDialogProps {
   gridEnabled: boolean;
   /** App owns this: it calls configStore.set('gridEnabled', value). */
   onToggleGrid: (value: boolean) => void;
-  /** Marks the announcement seen and closes the dialog. */
+  /** Persists the current choice and closes the dialog. */
   onDismiss: () => void;
 }
-
-const WAITLIST_URL = 'https://plannotator.ai/workspaces';
-
-const FEATURES: { title: string; desc: string }[] = [
-  {
-    title: 'Leaner install',
-    desc: 'Only the core skills ship by default. Extra skills install separately.',
-  },
-  { title: 'A fresh new look', desc: 'Refreshed UI 2.0 with new Simple and Neutral themes.' },
-  { title: 'Semantic code review', desc: 'Diffs grouped by what changed, not just which lines.' },
-  { title: 'Multi-repo reviews', desc: 'Review nested repositories together in one pass.' },
-  {
-    title: 'Full-page HTML',
-    desc: 'Render HTML reports and explainers full-screen, then annotate them in place.',
-  },
-];
 
 const LOOK_OPTIONS: {
   key: string;
@@ -38,7 +20,6 @@ const LOOK_OPTIONS: {
   value: boolean;
   img: string;
   title: string;
-  tag: string;
   desc: string;
 }[] = [
   {
@@ -46,185 +27,173 @@ const LOOK_OPTIONS: {
     value: true,
     img: lookGridImg,
     title: 'Grid',
-    tag: 'Classic',
-    desc: 'Your plan as a floating card on grid paper.',
+    desc: 'A floating plan card on grid paper.',
   },
   {
-    key: 'flat',
+    key: 'clean',
     value: false,
     img: lookFlatImg,
     title: 'Clean',
-    tag: 'New',
-    desc: 'A simpler, edge-to-edge flat card.',
+    desc: 'A simple, edge-to-edge document.',
   },
 ];
 
+/**
+ * First-use plan appearance choice. The version announcement that previously
+ * wrapped this decision is intentionally gone: startup asks only for the
+ * preference Plannotator cannot infer, and Settings remains the long-term home.
+ */
 export const LookAndFeelAnnouncementDialog: React.FC<LookAndFeelAnnouncementDialogProps> = ({
   isOpen,
   gridEnabled,
   onToggleGrid,
   onDismiss,
 }) => {
-  const [page, setPage] = useState<1 | 2>(1);
-  const [hovered, setHovered] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const continueRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onDismissRef = useRef(onDismiss);
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    previousFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    continueRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onDismissRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4">
-      {/* Fixed size across both pages; the dialog never resizes. */}
-      <div className="bg-card border border-border rounded-xl w-full max-w-5xl h-[760px] shadow-2xl flex flex-col">
-        {page === 1 ? (
-          <>
-            {/* Header */}
-            <div className="p-7 border-b border-border">
-              <div className="flex items-start justify-between gap-4">
-                <h3 className="font-semibold text-2xl mb-1.5">Plannotator 0.20.0 is here</h3>
-                <a
-                  href="https://github.com/backnotprop/plannotator/releases/tag/v0.20.0"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 mt-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-background/90 backdrop-blur-sm"
+      style={{
+        paddingTop: 'max(0.75rem, var(--pn-safe-top, 0px))',
+        paddingRight: 'max(0.75rem, var(--pn-safe-right, 0px))',
+        paddingBottom: 'max(0.75rem, var(--pn-safe-bottom, 0px))',
+        paddingLeft: 'max(0.75rem, var(--pn-safe-left, 0px))',
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="plan-look-choice-title"
+        aria-describedby="plan-look-choice-description"
+        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+        style={{
+          maxHeight:
+            'calc(var(--pn-viewport-height, 100vh) - max(0.75rem, var(--pn-safe-top, 0px)) - max(0.75rem, var(--pn-safe-bottom, 0px)))',
+        }}
+      >
+        <header className="border-b border-border px-4 py-4 sm:px-6 sm:py-5">
+          <h2
+            id="plan-look-choice-title"
+            className="text-balance text-xl font-semibold tracking-tight sm:text-2xl"
+          >
+            Choose how plans look
+          </h2>
+          <p
+            id="plan-look-choice-description"
+            className="mt-1 text-sm leading-relaxed text-muted-foreground"
+          >
+            Pick a starting view. You can change it anytime in Settings.
+          </p>
+        </header>
+
+        <div className="min-h-0 overflow-y-auto p-3 sm:p-5">
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-4" role="group" aria-label="Plan appearance">
+            {LOOK_OPTIONS.map((option) => {
+              const selected = gridEnabled === option.value;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => onToggleGrid(option.value)}
+                  aria-pressed={selected}
+                  className={`plan-look-choice-option min-h-11 min-w-0 rounded-xl border p-2 text-left outline-none transition-[background-color,border-color,box-shadow] motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card active:bg-muted/35 sm:p-3 ${
+                    selected
+                      ? 'border-primary bg-primary/[0.06] shadow-sm'
+                      : 'border-border bg-muted/20'
+                  }`}
                 >
-                  Full release notes &#8599;
-                </a>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                A big release. Here&apos;s what&apos;s new, plus a choice of how your plans look.
-              </p>
-            </div>
-
-            {/* What's new */}
-            <div className="px-7 pt-6 grid grid-cols-5 gap-3">
-              {FEATURES.map((f) => (
-                <div key={f.title} className="rounded-lg border border-border bg-muted/40 p-3">
-                  <div className="text-sm font-semibold">{f.title}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5 leading-snug">{f.desc}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Plan-look chooser */}
-            <div className="px-7 pt-6 flex-1 min-h-0">
-              <div className="text-sm font-medium mb-3">Choose your plan look</div>
-              <div className="flex gap-6">
-                {LOOK_OPTIONS.map((opt) => {
-                  const selected = gridEnabled === opt.value;
-                  const isHovered = hovered === opt.key;
-                  return (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      onClick={() => onToggleGrid(opt.value)}
-                      onMouseEnter={() => setHovered(opt.key)}
-                      onMouseLeave={() => setHovered((h) => (h === opt.key ? null : h))}
-                      aria-pressed={selected}
-                      className={`flex-1 min-w-0 flex flex-col items-stretch gap-2 rounded-lg border p-2 text-left transition-colors ${
-                        selected
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-muted-foreground/40'
+                  <img
+                    src={option.img}
+                    alt=""
+                    aria-hidden="true"
+                    className="aspect-[1000/626] w-full rounded-lg border border-border/70 object-cover object-top select-none"
+                    draggable={false}
+                  />
+                  <span className="mt-2.5 flex min-w-0 items-center justify-between gap-2 px-0.5">
+                    <span className="truncate text-sm font-semibold sm:text-base">{option.title}</span>
+                    <span
+                      aria-hidden="true"
+                      className={`h-4 w-4 shrink-0 rounded-full border-2 p-[3px] ${
+                        selected ? 'border-primary' : 'border-muted-foreground/35'
                       }`}
                     >
-                      <div className="relative">
-                        <img
-                          src={opt.img}
-                          alt={`${opt.title} plan look`}
-                          className="w-full rounded-md select-none"
-                          draggable={false}
-                          style={{
-                            border: `2px solid ${
-                              selected
-                                ? 'var(--primary)'
-                                : 'color-mix(in srgb, var(--primary) 25%, transparent)'
-                            }`,
-                            transform: isHovered ? 'scale(1.22)' : 'scale(1)',
-                            transformOrigin: 'center',
-                            zIndex: isHovered ? 50 : 0,
-                            position: 'relative',
-                            boxShadow: isHovered ? '0 14px 36px rgba(0,0,0,0.4)' : 'none',
-                            transition:
-                              'transform 0.25s cubic-bezier(0.34,1.56,0.64,1), border-color 0.2s ease, box-shadow 0.2s ease',
-                          }}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-2 px-0.5 mt-1">
-                        <span className="text-base font-semibold">{opt.title}</span>
-                        <span
-                          className={`text-[11px] leading-none px-2 py-0.5 rounded-full ${
-                            selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                          }`}
-                        >
-                          {selected ? 'Selected' : opt.tag}
-                        </span>
-                      </div>
-                      <p className="text-sm text-muted-foreground px-0.5 leading-snug">{opt.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+                      {selected && <span className="block h-full w-full rounded-full bg-primary" />}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block px-0.5 text-xs leading-snug text-muted-foreground sm:text-sm">
+                    {option.desc}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-            {/* Footer */}
-            <div className="px-7 py-5 border-t border-border flex justify-end items-center gap-4">
-              <button
-                type="button"
-                onClick={() => setPage(2)}
-                className="px-4 py-2 rounded-lg border border-primary/35 hover:opacity-80 transition-opacity"
-              >
-                <TextShimmer className="text-sm font-medium" duration={2.5} spread={1.5}>
-                  {'✨ Workspaces are coming 🎉 →'}
-                </TextShimmer>
-              </button>
-              <button
-                onClick={onDismiss}
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-              >
-                Got it
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            {/* Header */}
-            <div className="p-7 border-b border-border">
-              <h3 className="font-semibold text-2xl mb-1.5">Workspaces are coming 🎉</h3>
-              <p className="text-sm text-muted-foreground">
-                A shared context workspace for specs, reviews, and decisions your agents can build
-                on. Join the waitlist.
-              </p>
-            </div>
-
-            {/* The landscape teaser image, scaled to fit the fixed dialog. */}
-            <div className="flex-1 min-h-0 p-6 flex items-center justify-center">
-              <img
-                src={workspacesImg}
-                alt="Plannotator Workspaces, a shared context workspace across your agents"
-                className="max-h-full max-w-full w-auto object-contain rounded-lg border border-border select-none"
-                draggable={false}
-              />
-            </div>
-
-            {/* Footer */}
-            <div className="px-7 py-5 border-t border-border flex justify-end items-center gap-4">
-              <button
-                type="button"
-                onClick={() => setPage(1)}
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-              >
-                &larr; Back
-              </button>
-              <a
-                href={WAITLIST_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-              >
-                Join the waitlist
-              </a>
-            </div>
-          </>
-        )}
+        <footer className="border-t border-border px-4 py-3 sm:flex sm:justify-end sm:px-6 sm:py-4">
+          <button
+            ref={continueRef}
+            type="button"
+            onClick={onDismiss}
+            className="min-h-11 w-full rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground outline-none transition-opacity motion-reduce:transition-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card sm:w-auto"
+          >
+            Continue
+          </button>
+        </footer>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 };

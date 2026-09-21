@@ -1,5 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { CodeAnnotation, type CodeAnnotationScope, type EditorAnnotation, type Annotation, type CommentAnnotation } from '@plannotator/ui/types';
+import { Button } from '@plannotator/ui/components/ui/button';
+import { DecisionNoteField } from '@plannotator/ui/components/DecisionControl';
+import { useDismissablePopover } from '@plannotator/ui/hooks/useDismissablePopover';
+import { submitHint } from '@plannotator/ui/utils/platform';
 import { CommentMeta } from './CommentMeta';
 import { EditorAnnotationCard } from '@plannotator/ui/components/EditorAnnotationCard';
 import { CommentActions } from './CommentActions';
@@ -12,7 +16,7 @@ import { AITab } from './AITab';
 import { AgentsTab, type AgentLaunchParams, type AgentLaunchResult } from '@plannotator/ui/components/AgentsTab';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
-import type { AIChatEntry } from '../hooks/useAIChat';
+import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
 import type { AgentJobInfo, AgentCapabilities } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
 import type { AIProviderOption } from '@plannotator/ui/utils/aiProvider';
@@ -25,6 +29,7 @@ export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
 interface ReviewSidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  presentation?: 'panel' | 'overlay';
   activeTab: ReviewSidebarTab;
   annotations: CodeAnnotation[];
   files: DiffFile[];
@@ -33,6 +38,11 @@ interface ReviewSidebarProps {
   /** Sidebar row click → select AND scroll the diff to the comment. */
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  /** "+ General comment": commit a durable scope:'general' review-level
+   *  comment to the session (spec §3.3). When present, the affordance renders
+   *  in the General section header AND in the all-empty state — the state it
+   *  is most useful in. */
+  onAddGeneralComment?: (text: string) => void;
   feedbackMarkdown?: string;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
@@ -58,7 +68,7 @@ interface ReviewSidebarProps {
   activeFilePath?: string;
   scrollToQuestionId?: string | null;
   onAskGeneral?: (question: string) => void;
-  aiPermissionRequests?: import('../hooks/useAIChat').PendingPermission[];
+  aiPermissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
   aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
@@ -108,6 +118,101 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
   );
 };
 
+/**
+ * "+ General comment" — the human producer for a durable review-level comment
+ * (the sole producer before this was Call Flow). The SAME button renders in
+ * both placements (General section header, all-empty state); the composer is
+ * the shared `DecisionNoteField` in a small anchored popover — the third
+ * consumer of the note field, which is why it is a separate export from
+ * `DecisionControl`.
+ *
+ * Fully controlled: `open`/`text` live in ReviewSidebar, shared by both
+ * placements, so the draft survives a dismissal (outside click / Escape), a
+ * placement flip (an external annotation arriving over SSE mid-sentence
+ * unmounts the empty-state instance and mounts the section-header one), and a
+ * tab switch. Only a commit clears it; collapsing the sidebar discards it
+ * (accepted). An empty commit never fires the callback — it refocuses the
+ * field, the same contract as the decision composers.
+ */
+const GeneralCommentComposer: React.FC<{
+  onAdd: (text: string) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  text: string;
+  onTextChange: (text: string) => void;
+  /** Popover alignment relative to the button: section header anchors right,
+   *  the centered empty-state button anchors center. */
+  align: 'right' | 'center';
+  /** The sidebar panel's width when it is a fixed-width panel; undefined in
+   *  the full-screen overlay presentation (the 100vw class guard covers it). */
+  panelWidth?: number;
+  touchTarget?: boolean;
+}> = ({ onAdd, open, onOpenChange, text, onTextChange, align, panelWidth, touchTarget }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismissablePopover({ enabled: open, ref, onDismiss: () => onOpenChange(false) });
+
+  const submit = () => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      ref.current?.querySelector<HTMLTextAreaElement>('[data-decision-note-input]')?.focus();
+      return;
+    }
+    onAdd(trimmed);
+    onTextChange('');
+    onOpenChange(false);
+  };
+
+  // Width clamp — the popover lives inside OverlayScrollArea (overflow-x
+  // hidden) in a panel the user can persist anywhere in 200-600px, so an
+  // unclamped w-64 (256px) clips unrecoverably below ~276px. Cap it to the
+  // panel width minus 32px. Geometry at the extremes: the section-header
+  // anchor's right edge sits 24px in from the panel's right (p-2 + p-2 + px-2
+  // nesting), so at 200px the clamped 168px popover's left edge lands at
+  // 200-24-168 = 8px; the empty-state anchor is panel-centered, 100±84 =
+  // 16..184px. At 288px the clamp equals w-64 (256px, left edge 8px); wider
+  // panels keep the 256px cap. Inline style so it tracks live resizes.
+  const clampStyle = panelWidth !== undefined ? { maxWidth: panelWidth - 32 } : undefined;
+
+  return (
+    <div ref={ref} className="relative" data-review-general-composer={open ? 'open' : 'closed'}>
+      <button
+        type="button"
+        data-pn-touch-target={touchTarget || undefined}
+        data-add-general-comment
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        title="Add a review-level comment"
+        className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        + General comment
+      </button>
+      {open && (
+        <div
+          className={`absolute top-full z-30 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover p-2 shadow-xl ${
+            align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'
+          }`}
+          style={clampStyle}
+        >
+          <DecisionNoteField
+            text={text}
+            onTextChange={onTextChange}
+            onSubmit={submit}
+            onCancel={() => onOpenChange(false)}
+            placeholder="Add a general comment..."
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-[10px] leading-snug text-muted-foreground">{submitHint}</span>
+            <Button size="xs" data-general-comment-add onClick={submit} title="Add the comment to this review">
+              Add comment
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SCOPE_ORDER = { general: 0, file: 1, line: 2 } as const;
 
 function getAnnotationScope(annotation: CodeAnnotation): CodeAnnotationScope {
@@ -131,6 +236,7 @@ function compareCodeAnnotations(a: CodeAnnotation, b: CodeAnnotation): number {
 export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   isOpen,
   onClose,
+  presentation = 'panel',
   activeTab,
   annotations,
   files,
@@ -138,6 +244,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onSelectAnnotation,
   onNavigateToAnnotation,
   onDeleteAnnotation,
+  onAddGeneralComment,
   feedbackMarkdown,
   width,
   editorAnnotations,
@@ -179,6 +286,17 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
 }) => {
   const totalCount = annotations.length + (editorAnnotations?.length ?? 0) + (descriptionAnnotations?.length ?? 0) + (commentAnnotations?.length ?? 0);
   const [copied, setCopied] = useState(false);
+  // General-comment composer state lives HERE, not in GeneralCommentComposer:
+  // the two placements (empty state vs section header) are different branches,
+  // so a totalCount 0→1 flip mid-sentence (an external annotation arriving
+  // over SSE) or a tab switch unmounts the instance — parent state keeps the
+  // draft and open popover across both. Collapsing the sidebar unmounts this
+  // component and discards the draft (accepted).
+  const [generalComposerOpen, setGeneralComposerOpen] = useState(false);
+  const [generalDraft, setGeneralDraft] = useState('');
+  // Available panel width for the popover clamp; the overlay presentation is
+  // full-screen, where the 100vw class guard applies instead.
+  const generalComposerPanelWidth = presentation === 'overlay' ? undefined : (width ?? 288);
 
   const handleQuickCopy = async () => {
     if (!feedbackMarkdown) return;
@@ -254,14 +372,30 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       >
         <CommentMeta
           leading={
-            isGeneralScope ? (
+            isGeneralScope && annotation.callFlowTargets?.length ? (
+              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
+              </span>
+            ) : isGeneralScope ? (
               <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 general
               </span>
             ) : isFileScope ? (
-              <FileNameChip path={annotation.filePath} />
+              <span className="inline-flex items-center gap-1.5">
+                <FileNameChip path={annotation.filePath} />
+                {annotation.callFlowTargets?.length ? (
+                  <span className="text-[9px] text-primary/80">
+                    flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
+                  </span>
+                ) : null}
+              </span>
             ) : (
               <span className="text-[10px] font-mono text-muted-foreground">
+                {annotation.callFlowTargets?.length ? (
+                  <span className="mr-1 text-primary/80">
+                    flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'} ·
+                  </span>
+                ) : null}
                 {annotation.lineStart === annotation.lineEnd
                   ? `L${annotation.lineStart}`
                   : `L${annotation.lineStart}-${annotation.lineEnd}`}
@@ -379,9 +513,21 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   });
 
   return (
-    <aside className="border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
+    <aside
+      data-pn-review-transient-overlay={presentation === 'overlay' || undefined}
+      role={presentation === 'overlay' ? 'dialog' : undefined}
+      aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
+      className={presentation === 'overlay'
+        ? 'absolute inset-0 z-40 flex min-w-0 flex-col bg-background'
+        : 'border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0'
+      }
+      style={presentation === 'overlay' ? undefined : { width: width ?? 288 }}
+    >
         {/* Header */}
-        <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
+        <div
+          className={`px-3 flex items-center border-b border-border/50 ${presentation === 'overlay' ? 'min-h-[52px]' : ''}`}
+          style={presentation === 'overlay' ? undefined : { height: 'var(--panel-header-h)' }}
+        >
           <div className="flex items-center gap-2 w-full min-w-0">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
               {activeTab === 'annotations' ? 'Annotations' : activeTab === 'ai' ? 'AI' : 'Review Agents'}
@@ -401,6 +547,21 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {aiMessages.length}
               </span>
             )}
+            {presentation === 'overlay' && (
+              <button
+                data-pn-touch-target
+                data-pn-touch-target-icon
+                autoFocus
+                type="button"
+                onClick={onClose}
+                className="ml-auto inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Close review sidebar"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
@@ -417,19 +578,50 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                     </svg>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Click on lines to add annotations
+                    {presentation === 'overlay' ? 'Tap a line to add an annotation' : 'Click on lines to add annotations'}
                   </p>
+                  {onAddGeneralComment && (
+                    <div className="mt-3">
+                      <GeneralCommentComposer
+                        onAdd={onAddGeneralComment}
+                        open={generalComposerOpen}
+                        onOpenChange={setGeneralComposerOpen}
+                        text={generalDraft}
+                        onTextChange={setGeneralDraft}
+                        align="center"
+                        panelWidth={generalComposerPanelWidth}
+                        touchTarget={presentation === 'overlay'}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="p-2 space-y-4">
-                  {generalAnnotations.length > 0 && (
+                  {(generalAnnotations.length > 0 || onAddGeneralComment) && (
                     <div>
-                      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm px-2 py-1 text-xs font-medium text-muted-foreground">
-                        General
+                      {/* z above the file/PR sticky headers (z-10/z-20) so the
+                          anchored composer popover is never painted under a
+                          later section's header. */}
+                      <div className="sticky top-0 z-[25] bg-background/95 backdrop-blur-sm px-2 py-1 flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-muted-foreground">General</span>
+                        {onAddGeneralComment && (
+                          <GeneralCommentComposer
+                            onAdd={onAddGeneralComment}
+                            open={generalComposerOpen}
+                            onOpenChange={setGeneralComposerOpen}
+                            text={generalDraft}
+                            onTextChange={setGeneralDraft}
+                            align="right"
+                            panelWidth={generalComposerPanelWidth}
+                            touchTarget={presentation === 'overlay'}
+                          />
+                        )}
                       </div>
-                      <div className="space-y-1">
-                        {generalAnnotations.map((annotation) => renderAnnotationCard(annotation))}
-                      </div>
+                      {generalAnnotations.length > 0 && (
+                        <div className="space-y-1">
+                          {generalAnnotations.map((annotation) => renderAnnotationCard(annotation))}
+                        </div>
+                      )}
                     </div>
                   )}
                   {isMultiPR && prGroups ? (
@@ -570,6 +762,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         {activeTab === 'annotations' && feedbackMarkdown && totalCount > 0 && (
           <div className="p-2 border-t border-border/50">
             <button
+              data-pn-touch-target={presentation === 'overlay' || undefined}
               onClick={handleQuickCopy}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs font-medium transition-all text-muted-foreground hover:text-foreground hover:bg-muted/50"
             >

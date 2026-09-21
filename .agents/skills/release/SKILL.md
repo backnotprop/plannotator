@@ -189,9 +189,18 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    - Runs tests
    - Cross-compiles binaries for 6 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64/ARM64)
    - Compiles paste service binaries (same 6 platforms)
+   - Packs the two npm packages in a credential-free job
+   - Downloads pinned, checksum-verified Syft and Grype binaries; generates and schema-validates the release-wide CycloneDX SBOM after all shipped subjects exist
+   - Forces the repository-owned, suppression-free Grype configuration, retries the official database update up to three times, requires a valid/active schema-v6 database no more than 120 hours old with no pending update, and preserves the machine-readable scan/database/policy evidence as a workflow artifact
+   - Rejects every scanner-side ignored match, then blocks before any attestation or publication on CISA KEV or fixable Critical findings classified as shipped/runtime or unknown-applicability. High, development-only, and no-fix Critical findings are report-only but remain in the evidence
    - Generates SLSA build provenance attestations for all 12 binaries via `actions/attest-build-provenance` (signed through Sigstore, recorded in Rekor)
-   - Creates the GitHub Release with all binaries attached
+   - Uses the separate official `actions/attest` SBOM path to bind the CycloneDX predicate to all 12 binaries and both npm tarballs through the same GitHub OIDC/Sigstore service. This is an inventory attestation, not a replacement for SLSA or npm provenance
+   - Creates the GitHub Release with all binaries, SHA256 sidecars, the versioned CycloneDX SBOM, and its SHA256 sidecar attached
    - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance
+
+   **SBOM scope:** the public document is a release-wide Syft inventory of the monorepo's locked build inputs and dependencies. It is deliberately not described as exact binary runtime contents. Coverage testing found that Bun standalone executables hide bundled JavaScript dependency metadata from Syft. The OpenCode tarball is similarly opaque; the Pi tarball exposes only a partial view through nested package-lock files. The scope and limitations are also embedded in the CycloneDX metadata.
+
+   **Exceptions:** there is no active production exception file. If a future release baseline needs one, do not add a loose ignore. Add a repository-reviewed OpenVEX document and explicitly wire it through `PLANNOTATOR_RELEASE_VEX`; each statement must match one exact package URL and vulnerability ID and carry `not_affected` status, an OpenVEX justification, impact statement, HTTPS evidence, owner, created date, and expiration date. The policy tests reject expired, malformed, broad, and nonmatching records.
 
    **Note on immutable releases:** The repo has GitHub Immutable Releases enabled, so once the `v*` tag is pushed and the release is created, the tag→commit and tag→asset bindings are permanent. You cannot delete and re-create a tag to "fix" a bad release — you must ship a new version. Release notes remain editable (see step 5), but everything else is locked.
 
@@ -202,9 +211,36 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    gh run view <run-id> --log
    ```
    Verify:
-   - All jobs pass (test, build, release, npm-publish)
-   - The GitHub Release was created with all binary artifacts
+   - All jobs pass, including `release-security`, `attest`, `release`, and `npm-publish`
+   - `release-security-evidence` records the Syft/Grype versions, active database schema/build/checksum/update status, all Grype matches, and an `ACCEPT` policy decision
+   - The GitHub Release was created with all binary artifacts, SHA256 sidecars, the versioned `plannotator-X.Y.Z-release-sbom.cdx.json`, and its `.sha256` sidecar
    - npm packages published successfully (check with `npm view @plannotator/opencode version` and `npm view @plannotator/pi-extension version`)
+
+   A pull request proves generation, schema/sentinel validation, database policy, Grype evaluation, least-privilege job wiring, and all report artifacts. GitHub OIDC issuance, publication to the artifact-attestation service, and final release-asset publication only run for a real eligible `v*` tag. For the first release after this control lands, complete this bounded tag-only verification before calling the rollout complete:
+
+   Before tagging that first release, update the canonical Mintlify page at `https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release` with the SBOM scope/limitations, Grype policy, download/checksum commands, and both predicate-verification commands from the README. The legacy Astro files under `apps/marketing/src/content/docs/` are redirect-only/deprecated copies and are not the public documentation source. Confirm the live Mintlify page contains the material; do not let its publication lag the shipped control.
+
+   ```bash
+   tag=vX.Y.Z
+   version="${tag#v}"
+   gh release download "$tag" --pattern 'plannotator-linux-x64*' --pattern "plannotator-${version}-release-sbom.cdx.json*" --dir /tmp/plannotator-release-verify
+   (cd /tmp/plannotator-release-verify && sha256sum --check plannotator-linux-x64.sha256)
+   (cd /tmp/plannotator-release-verify && sha256sum --check "plannotator-${version}-release-sbom.cdx.json.sha256")
+
+   gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+     --repo backnotprop/plannotator \
+     --source-ref "refs/tags/$tag" \
+     --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+     --predicate-type https://slsa.dev/provenance/v1
+
+   gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+     --repo backnotprop/plannotator \
+     --source-ref "refs/tags/$tag" \
+     --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+     --predicate-type https://cyclonedx.org/bom
+   ```
+
+   Also extract the attested CycloneDX predicate with `gh attestation verify --format json --jq '.[0].verificationResult.statement.predicate'`, canonicalize both it and the downloaded release SBOM with `jq -S`, and `cmp` them. Verify one npm tarball subject the same way if you download the exact published tarball. Record any tag-only discrepancy as a release blocker and ship a new version rather than mutating an immutable release.
 
    If anything fails, investigate the logs and report to the user before retrying.
 
@@ -228,9 +264,16 @@ Before tagging, verify:
 - [ ] Version bump committed
 - [ ] Pi parity gate passed (imports, vendor.sh, dry-run pack)
 - [ ] No stale build artifacts (clean builds, no cache issues — run `bun install` first if dependencies changed)
+- [ ] The PR-safe `release-security` job generated a schema-valid, sentinel-complete SBOM and accepted the Grype policy with a fresh database
+- [ ] No scanner binary, database, generated SBOM/report, credential, or `DO_NOT_COMMIT` content is staged
+- [ ] For the first SBOM-enabled release, the canonical Mintlify install/verification page contains the README's SBOM scope, policy, checksum, SLSA, and CycloneDX commands (do not edit the deprecated Astro docs instead)
 
 After tagging, verify:
-- [ ] Release workflow completed (all 4 jobs green)
-- [ ] GitHub Release created with all binaries
+- [ ] Release workflow completed with `release-security`, `attest`, `release`, and `npm-publish` green
+- [ ] GitHub Release created with all binaries, sidecars, SBOM, and SBOM sidecar
+- [ ] One native binary passes both the explicit SLSA and CycloneDX predicate checks pinned to the tag and signer workflow
+- [ ] Downloaded SBOM checksum passes and canonical JSON matches the attested predicate
+- [ ] `release-security-evidence` shows a fresh/active database and an accepted policy decision
 - [ ] npm packages published at correct version
+- [ ] npm trusted-publishing provenance remains visible for both packages
 - [ ] Release notes replaced via `gh release edit`

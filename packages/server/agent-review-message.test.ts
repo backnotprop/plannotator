@@ -70,6 +70,18 @@ describe("buildAgentReviewUserMessage", () => {
     expect(message).toContain(patch);
   });
 
+  test("uses the inline patch as Ask AI context for static patch reviews", () => {
+    // given
+    const diffType = "static-patch";
+
+    // when
+    const message = buildAgentReviewUserMessage(patch, diffType, undefined, undefined, true);
+
+    // then
+    expect(message).toContain(patch);
+    expect(message).not.toContain("working tree");
+  });
+
   test("treats the inline GitButler patch as authoritative", () => {
     const message = buildAgentReviewUserMessage(
       patch,
@@ -275,6 +287,14 @@ describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
 });
 
 describe("getLocalDiffInstruction", () => {
+  test("describes local-vs-remote as an upstream-to-working-tree comparison", () => {
+    const instruction = getLocalDiffInstruction("local-vs-remote");
+
+    expect(instruction?.target).toContain("remote-tracking branch");
+    expect(instruction?.inspect).toContain("@{upstream}");
+    expect(instruction?.inspect).toContain("untracked files");
+  });
+
   test("returns null for non-local diff types", () => {
     expect(getLocalDiffInstruction("p4-default")).toBeNull();
   });

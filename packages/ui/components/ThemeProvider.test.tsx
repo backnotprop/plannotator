@@ -97,43 +97,68 @@ function clickButton(target: HTMLButtonElement): void {
   target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 }
 
+/**
+ * One MediaQueryList per media string, because the provider now asks for two
+ * of them (`(prefers-color-scheme: light)` and `print`) and a single shared
+ * stub would report the colour-scheme answer as the print answer.
+ */
 function installMatchMedia(initialMatches: boolean) {
-  let matches = initialMatches;
-  const listeners = new Set<(event: MediaQueryListEvent) => void>();
-  const media = '(prefers-color-scheme: light)';
-  const query = {
-    get matches() {
-      return matches;
-    },
-    media,
-    onchange: null,
-    addListener(listener: (event: MediaQueryListEvent) => void) {
-      listeners.add(listener);
-    },
-    removeListener(listener: (event: MediaQueryListEvent) => void) {
-      listeners.delete(listener);
-    },
-    addEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
-      listeners.add(listener as (event: MediaQueryListEvent) => void);
-    },
-    removeEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
-      listeners.delete(listener as (event: MediaQueryListEvent) => void);
-    },
-    dispatchEvent() {
-      return true;
-    },
-  } as MediaQueryList;
+  const state = new Map<string, boolean>([
+    ['(prefers-color-scheme: light)', initialMatches],
+    ['print', false],
+  ]);
+  const listeners = new Map<string, Set<(event: MediaQueryListEvent) => void>>();
+  const queries = new Map<string, MediaQueryList>();
+
+  function queryFor(media: string): MediaQueryList {
+    const existing = queries.get(media);
+    if (existing) return existing;
+    const own = new Set<(event: MediaQueryListEvent) => void>();
+    listeners.set(media, own);
+    const query = {
+      get matches() {
+        return state.get(media) ?? false;
+      },
+      media,
+      onchange: null,
+      addListener(listener: (event: MediaQueryListEvent) => void) {
+        own.add(listener);
+      },
+      removeListener(listener: (event: MediaQueryListEvent) => void) {
+        own.delete(listener);
+      },
+      addEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
+        own.add(listener as (event: MediaQueryListEvent) => void);
+      },
+      removeEventListener(_type: string, listener: EventListenerOrEventListenerObject) {
+        own.delete(listener as (event: MediaQueryListEvent) => void);
+      },
+      dispatchEvent() {
+        return true;
+      },
+    } as MediaQueryList;
+    queries.set(media, query);
+    return query;
+  }
 
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
-    value: () => query,
+    value: (media: string) => queryFor(media),
   });
+
+  function emit(media: string, matches: boolean) {
+    state.set(media, matches);
+    const event = { matches, media } as MediaQueryListEvent;
+    for (const listener of listeners.get(media) ?? []) listener(event);
+  }
 
   return {
     setMatches(nextMatches: boolean) {
-      matches = nextMatches;
-      const event = { matches, media } as MediaQueryListEvent;
-      for (const listener of listeners) listener(event);
+      emit('(prefers-color-scheme: light)', nextMatches);
+    },
+    /** What `page.emulateMedia({ media: 'print' })` fires. */
+    setPrintMedia(printing: boolean) {
+      emit('print', printing);
     },
   };
 }
@@ -643,5 +668,132 @@ describe('ThemeProvider legacy setColorTheme', () => {
     expect(themeState().lightTheme).toBe('kanagawa-lotus');
     expect(themeState().darkTheme).toBe('nord');
     expect(themeState().mode).toBe('dark');
+  });
+});
+
+/**
+ * Printing renders the LIGHT half of the pair, on every surface at once.
+ *
+ * What regresses if these fail: a dark-palette page prints its own dark tokens
+ * under a print stylesheet that assumes white paper — which is how a Mermaid
+ * label (HTML inside `<foreignObject>`, so the stylesheet's near-black text
+ * applied to it) ended up near-black on a near-black node fill.
+ *
+ * `beforeprint` is asserted separately from the `print` media query because
+ * only the first runs before a real print snapshot, and only the second is
+ * what headless `emulateMedia({ media: 'print' })` fires.
+ */
+describe('ThemeProvider print mode', () => {
+  beforeEach(() => {
+    if (hasDom) {
+      originalMatchMediaDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    }
+    stored = new Map<string, string>();
+    setStorageBackend({
+      getItem: key => stored.get(key) ?? null,
+      setItem: (key, value) => {
+        stored.set(key, value);
+      },
+      removeItem: key => {
+        stored.delete(key);
+      },
+    });
+  });
+
+  afterEach(async () => {
+    if (hasDom) {
+      await unmountTheme();
+      document.documentElement.className = '';
+      if (originalMatchMediaDescriptor) {
+        Object.defineProperty(window, 'matchMedia', originalMatchMediaDescriptor);
+      } else {
+        Reflect.deleteProperty(window, 'matchMedia');
+      }
+      originalMatchMediaDescriptor = undefined;
+    }
+    configStore.resetServerSync();
+    resetStorageBackend();
+  });
+
+  async function mountDarkPair(): Promise<void> {
+    stored.set('plannotator-theme', 'dark');
+    stored.set('plannotator-light-theme', 'one-light');
+    stored.set('plannotator-dark-theme', 'plannotator');
+    installMatchMedia(false);
+    await mountTheme();
+    expect(themeState().resolvedMode).toBe('dark');
+    expect(themeState().colorTheme).toBe('plannotator');
+  }
+
+  test.skipIf(!hasDom)('beforeprint flips to the light half and afterprint restores', async () => {
+    await mountDarkPair();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeprint'));
+    });
+    expect(themeState().resolvedMode).toBe('light');
+    expect(themeState().colorTheme).toBe('one-light');
+    expect(document.documentElement.classList.contains('light')).toBe(true);
+    expect(document.documentElement.classList.contains('theme-one-light')).toBe(true);
+    // The stored preference is untouched: this is a rendering override.
+    expect(themeState().mode).toBe('dark');
+    expect(themeState().darkTheme).toBe('plannotator');
+
+    await act(async () => {
+      window.dispatchEvent(new Event('afterprint'));
+    });
+    expect(themeState().resolvedMode).toBe('dark');
+    expect(themeState().colorTheme).toBe('plannotator');
+    expect(document.documentElement.classList.contains('light')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('the light tokens are on <html> before the print snapshot, not a tick later', async () => {
+    await mountDarkPair();
+
+    // Asserted INSIDE act, before it flushes: exactly what a real Cmd+P gives
+    // the handler — one synchronous event, then the snapshot. A React state
+    // flush would be too late, so the class write cannot depend on one.
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeprint'));
+      expect(document.documentElement.classList.contains('light')).toBe(true);
+      expect(document.documentElement.classList.contains('theme-one-light')).toBe(true);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event('afterprint'));
+    });
+    expect(document.documentElement.classList.contains('light')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('the print media query drives it too (headless print emulation)', async () => {
+    stored.set('plannotator-theme', 'dark');
+    stored.set('plannotator-light-theme', 'one-light');
+    stored.set('plannotator-dark-theme', 'plannotator');
+    const media = installMatchMedia(false);
+    await mountTheme();
+    expect(themeState().resolvedMode).toBe('dark');
+
+    await act(async () => media.setPrintMedia(true));
+    expect(themeState().resolvedMode).toBe('light');
+    expect(themeState().colorTheme).toBe('one-light');
+
+    await act(async () => media.setPrintMedia(false));
+    expect(themeState().resolvedMode).toBe('dark');
+    expect(themeState().colorTheme).toBe('plannotator');
+  });
+
+  test.skipIf(!hasDom)('a light-mode user sees no change at all', async () => {
+    stored.set('plannotator-theme', 'light');
+    stored.set('plannotator-light-theme', 'one-light');
+    stored.set('plannotator-dark-theme', 'plannotator');
+    installMatchMedia(true);
+    await mountTheme();
+    const before = { ...themeState() };
+
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeprint'));
+    });
+    expect(themeState().resolvedMode).toBe(before.resolvedMode);
+    expect(themeState().colorTheme).toBe(before.colorTheme);
   });
 });

@@ -89,7 +89,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
       placeholder="Search pull requests..."
       emptyMessage={loading ? 'Loading...' : 'No pull requests found'}
       align="start"
-      width="w-80"
+      width="w-[min(20rem,calc(100vw-1rem))]"
       onOpenChange={handleOpen}
       headerContent={mergedCount > 0 ? (
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
@@ -97,6 +97,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
             {hideMerged ? `${openCount} open · ${mergedCount} hidden` : `${openCount} open, ${prs.length} total`}
           </span>
           <button
+            data-pn-touch-target
             type="button"
             onClick={toggleHideMerged}
             title={hideMerged ? 'Show merged PRs' : 'Hide merged PRs'}
@@ -110,6 +111,7 @@ export function PRSelector({ mrNumberLabel, prTitle, currentNumber, onSelect, di
       ) : undefined}
       renderTrigger={({ open }) => (
         <button
+          data-pn-touch-target
           type="button"
           disabled={disabled}
           className="h-7 text-xs text-annotation-comment/80 hover:text-annotation-comment inline-flex items-center gap-1 truncate max-w-[340px] rounded px-1 -mx-1 transition-colors hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"

@@ -24,7 +24,7 @@ function handler(event) {
     '/docs/guides/opencode-migration-0-19-1': 'https://docs.plannotator.ai/open-source/agents/opencode',
     '/docs/guides/opencode': 'https://docs.plannotator.ai/open-source/agents/opencode',
     '/docs/guides/remote-and-devcontainers': 'https://docs.plannotator.ai/open-source/troubleshooting#remote-ssh-and-development-containers',
-    '/docs/guides/self-hosting': 'https://docs.plannotator.ai/open-source/workflows/sharing#use-your-own-share-services',
+    '/docs/guides/self-hosting': 'https://docs.plannotator.ai/open-source/self-hosting',
     '/docs/guides/sharing-and-collaboration': 'https://docs.plannotator.ai/open-source/workflows/sharing',
     '/docs/guides/troubleshooting': 'https://docs.plannotator.ai/open-source/troubleshooting',
     '/docs/integrations/external-annotations-api': 'https://docs.plannotator.ai/open-source/reference/external-annotations',

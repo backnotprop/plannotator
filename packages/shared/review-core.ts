@@ -27,6 +27,7 @@ const MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES = 1024 * 1024;
 
 export type DiffType =
   | "since-base"
+  | "local-vs-remote"
   | "uncommitted"
   | "staged"
   | "unstaged"
@@ -42,6 +43,7 @@ export type DiffType =
   | `commit:${string}`
   | `worktree:${string}`
   | `gitbutler:${string}`
+  | "static-patch"
   | "p4-default"
   | `p4-changelist:${string}`;
 
@@ -81,6 +83,39 @@ export interface RepositoryContext {
   displayFallback?: string;
 }
 
+export interface ReviewBaseCandidate {
+  revision: string;
+  labels: string[];
+  subject: string;
+}
+
+export interface ReviewDiffFallback {
+  requestedDiffType: string;
+  effectiveDiffType: string;
+  message: string;
+  candidates?: ReviewBaseCandidate[];
+}
+
+export interface DiffAvailability {
+  fallbackDiffType: string;
+  message: string;
+  candidates?: ReviewBaseCandidate[];
+}
+
+export interface JjRevisionInfo {
+  /** Full immutable commit ID used for every review computation. */
+  commitId: string;
+  /** Names that pointed at this revision when it was resolved. */
+  bookmarks: string[];
+  /** First line of the revision description, for disambiguation in pickers. */
+  subject: string;
+}
+
+export type JjLineBaseResolution =
+  | { kind: "resolved"; revision: JjRevisionInfo }
+  | { kind: "ambiguous"; candidates: JjRevisionInfo[] }
+  | { kind: "unavailable"; reason: string };
+
 export interface JjEvoLogEntry {
   /** Short commit ID (12 hex chars) */
   commitId: string;
@@ -111,10 +146,16 @@ export interface GitContext {
   availableBranches: AvailableBranches;
   compareTarget?: CompareTargetConfig;
   repository?: RepositoryContext;
+  /** Provider-authored fallback for modes that cannot resolve in this repository. */
+  diffAvailability?: Record<string, DiffAvailability>;
+  /** Requested and effective modes when startup used one of those fallbacks. */
+  diffFallback?: ReviewDiffFallback;
   cwd?: string;
   vcsType?: "git" | "gitbutler" | "jj" | "p4";
   /** Hash of the exact GitButler branch/commit topology used for this context. */
   gitButlerRevision?: string;
+  /** Automatic line-of-work base resolution (jj only). */
+  jjLineBase?: JjLineBaseResolution;
   /** Evolution log entries for the current jj change (jj only). */
   jjEvologs?: JjEvoLogEntry[];
   /** HEAD ancestry, newest first. Powers the commit-based baseline picker (#709). */
@@ -139,6 +180,12 @@ export interface GitCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /**
+   * Set when `maxOutputBytes` was reached and the runtime stopped reading. The
+   * command was killed, so `exitCode` reports the signal, not the command's own
+   * verdict, and `stdout` is a prefix — never a usable result.
+   */
+  truncated?: boolean;
 }
 
 /** Per-command execution policy understood by every review Git runtime. */
@@ -149,6 +196,14 @@ export interface GitCommandOptions {
   stdin?: string;
   /** Whether the command may ask the user for credentials. Defaults to `"allow"`. */
   interaction?: "allow" | "forbid";
+  /**
+   * Hard ceiling on buffered stdout. The runtime stops reading and kills the
+   * command once the limit is passed, so a command that can emit an unbounded
+   * tree (a whole-repository diff) bounds real memory growth instead of being
+   * rejected after it has already been held in full. The result is flagged
+   * `truncated`. Omitted means no ceiling.
+   */
+  maxOutputBytes?: number;
   /**
    * Extra Git configuration for this one command, injected through the
    * `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`
@@ -300,11 +355,22 @@ export function parseRemoteBookmark(target: string): { name: string; remote: str
   return { name: target.slice(0, at), remote: target.slice(at + 1) };
 }
 
+// A full `commit_id`: 40 hex digits for a SHA-1 repo, 64 for SHA-256. Matching
+// the full length only is deliberate, so an ordinary bookmark whose name
+// happens to be hex (`cafebabe`) is still treated as a bookmark.
+const JJ_FULL_COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
 export function jjCompareTargetRevset(target: string): string {
   const remoteBookmark = parseRemoteBookmark(target);
   if (remoteBookmark) {
     return `remote_bookmarks(exact:${quoteJjString(remoteBookmark.name)}, exact:${quoteJjString(remoteBookmark.remote)})`;
   }
+
+  // The resolved line base is a bare commit id whenever its fork point carries
+  // no usable bookmark. It has no separators, so it would otherwise read as a
+  // local bookmark name and build `bookmarks(exact:"<sha>")`, which resolves to
+  // no revisions at all and makes the whole Line of work diff fail.
+  if (JJ_FULL_COMMIT_ID.test(target)) return target;
 
   const localBookmark = parseJjBookmarkName(target);
   return localBookmark ? `bookmarks(exact:${quoteJjString(localBookmark)})` : target;
@@ -625,12 +691,13 @@ export async function getGitContext(
       )
     ).exitCode === 0;
     if (baseResolves) {
-      // Dynamic label so it matches the live gitRef header ("All changes
-      // since origin/main" / "... since master") rather than a hardcoded
-      // base name that contradicts it on non-main repos. The product/
-      // first-run copy uses the short form "All changes".
       diffOptions.push({ id: "since-base", label: `All changes since ${displayRef(defaultBranch)}` });
     }
+  }
+
+  const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+  if (upstreamBranch) {
+    diffOptions.push({ id: "local-vs-remote", label: "Local vs remote branch" });
   }
 
   diffOptions.push(
@@ -1128,6 +1195,7 @@ async function getUntrackedFileDiffs(
   cwd?: string,
   options?: GitDiffOptions,
   failurePolicy: UntrackedFailurePolicy = "best-effort",
+  includeBinaryPayloads = false,
 ): Promise<{ diff: string; paths: string[] }> {
   // git ls-files scopes to the CWD subtree and returns CWD-relative paths,
   // unlike git diff HEAD which always covers the full repo with root-relative
@@ -1193,7 +1261,11 @@ async function getUntrackedFileDiffs(
         // Preserve the existing best-effort/strict behavior below: Git reports
         // the authoritative read error for files that disappear mid-snapshot.
       }
-      if (fileInfo?.isFile && fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES) {
+      if (
+        !includeBinaryPayloads
+        && fileInfo?.isFile
+        && fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES
+      ) {
         const mode = fileInfo.isExecutable ? "100755" : "100644";
         const oldToken = formatPatchPathToken("a", file);
         const newToken = formatPatchPathToken("b", file);
@@ -1212,6 +1284,7 @@ async function getUntrackedFileDiffs(
         [
           "diff",
           "--no-ext-diff",
+          ...(includeBinaryPayloads ? ["--binary", "--full-index"] : []),
           ...(options?.hideWhitespace ? ["-w"] : []),
           "--no-index",
           `--src-prefix=${srcPrefix}`,
@@ -1278,6 +1351,98 @@ export async function getWorkingTreeDiffFromBase(
   return removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
 }
 
+/** Resolve the remote-tracking branch configured for the current local branch. */
+export async function getCurrentUpstreamBranch(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+): Promise<string | null> {
+  const result = await runtime.runGit(
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    { cwd },
+  );
+  if (result.exitCode !== 0) return null;
+  const branch = result.stdout.trim();
+  return branch && branch !== "@{upstream}" ? branch : null;
+}
+
+/**
+ * Build the exact, applyable patch used to materialize immutable analysis snapshots.
+ *
+ * The ordinary review patch remains bounded and human-readable. This separate
+ * machine patch includes Git binary payloads and full object ids so a binary
+ * file elsewhere in the review cannot make `git apply --binary` reject the
+ * synthetic snapshot.
+ */
+export async function getGitSnapshotMaterializationPatch(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  defaultBranch: string = "main",
+  externalCwd?: string,
+): Promise<string | null> {
+  let cwd = externalCwd;
+  let effectiveDiffType = diffType as string;
+  const worktree = parseWorktreeDiffType(effectiveDiffType);
+  if (effectiveDiffType.startsWith("worktree:")) {
+    if (!worktree) throw new Error("Could not parse the worktree snapshot.");
+    cwd = worktree.path;
+    effectiveDiffType = worktree.subType;
+  }
+  if (
+    effectiveDiffType !== "since-base"
+    && effectiveDiffType !== "local-vs-remote"
+    && effectiveDiffType !== "uncommitted"
+    && effectiveDiffType !== "staged"
+    && effectiveDiffType !== "unstaged"
+  ) {
+    return null;
+  }
+
+  const binaryDiff = async (args: string[]): Promise<string> =>
+    assertGitSuccess(await runtime.runGit(args, { cwd }), args).stdout;
+  const common = [
+    "diff",
+    "--no-ext-diff",
+    "--binary",
+    "--full-index",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+  ];
+  const untracked = async (): Promise<{ diff: string; paths: string[] }> =>
+    getUntrackedFileDiffs(runtime, "a/", "b/", cwd, undefined, "strict", true);
+
+  if (effectiveDiffType === "staged") {
+    return binaryDiff([...common, "--staged"]);
+  }
+  if (effectiveDiffType === "unstaged") {
+    const files = await untracked();
+    const tracked = await binaryDiff(common);
+    return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
+  }
+
+  const hasHead = (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd })).exitCode === 0;
+  const files = await untracked();
+  if (!hasHead) return files.diff;
+  if (effectiveDiffType === "uncommitted") {
+    const tracked = await binaryDiff([...common, "HEAD"]);
+    return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
+  }
+
+  if (effectiveDiffType === "local-vs-remote") {
+    const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+    if (!upstreamBranch) throw new Error("The current branch does not have a remote tracking branch.");
+    const tracked = await binaryDiff([...common, "--end-of-options", upstreamBranch]);
+    return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
+  }
+
+  const mergeBaseResult = await runtime.runGit(
+    ["merge-base", "--end-of-options", defaultBranch, "HEAD"],
+    { cwd },
+  );
+  const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : "HEAD";
+  const tracked = await binaryDiff([...common, "--end-of-options", mergeBase]);
+  return removeTrackedDeletions(tracked, new Set(files.paths)) + files.diff;
+}
+
 /**
  * If `ref` looks like a full or long hex SHA, return its 7-char prefix for
  * display. Branch names, tags, and `HEAD~N` pass through unchanged.
@@ -1321,6 +1486,7 @@ function assertGitSuccess(
 // extract the pure parser to a browser-safe module.
 const WORKTREE_SUB_TYPES = new Set([
   "since-base",
+  "local-vs-remote",
   "uncommitted",
   "staged",
   "unstaged",
@@ -1375,22 +1541,29 @@ export function parseWorktreeDiffType(
   // it can't be recognized by the single lastIndexOf(':') split below. Split
   // on the LAST ':commit:' occurrence (a path that itself ends in ':commit'
   // followed by a hex segment would be misread — accepted pathological edge).
+  // An empty worktree path is never valid: it would resolve to an empty cwd,
+  // and Bun.spawn({ cwd: "" }) silently runs git in the SERVER's own directory
+  // rather than the target repo — leaking an unrelated checkout's diff. Treat a
+  // missing path as unparseable so callers fall back to their real cwd.
+  const finalize = (path: string, subType: string) =>
+    path === "" ? null : { path, subType };
+
   const commitIdx = rest.lastIndexOf(":commit:");
   if (commitIdx !== -1) {
     const maybeCommit = rest.slice(commitIdx + 1);
     if (parseCommitDiffType(maybeCommit)) {
-      return { path: rest.slice(0, commitIdx), subType: maybeCommit };
+      return finalize(rest.slice(0, commitIdx), maybeCommit);
     }
   }
   const lastColon = rest.lastIndexOf(":");
   if (lastColon !== -1) {
     const maybeSub = rest.slice(lastColon + 1);
     if (WORKTREE_SUB_TYPES.has(maybeSub)) {
-      return { path: rest.slice(0, lastColon), subType: maybeSub };
+      return finalize(rest.slice(0, lastColon), maybeSub);
     }
   }
 
-  return { path: rest, subType: "uncommitted" };
+  return finalize(rest, "uncommitted");
 }
 
 export async function runGitDiff(
@@ -1451,6 +1624,16 @@ export async function runGitDiff(
     } else if (effectiveDiffType.startsWith("commit:")) {
       return { patch: "", label: `Error: ${diffType}`, error: "Invalid commit ref" };
     } else switch (effectiveDiffType) {
+      case "local-vs-remote": {
+        const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+        if (!upstreamBranch) {
+          throw new Error("The current branch does not have a remote tracking branch.");
+        }
+        patch = await getWorkingTreeDiffFromBase(runtime, upstreamBranch, cwd, options);
+        label = `Local vs ${displayRef(upstreamBranch)}`;
+        break;
+      }
+
       case "since-base": {
         // The composite "GitHub view": merge-base(base, HEAD) vs the working
         // tree (note: no right-hand ref on the diff), plus untracked files.
@@ -1838,6 +2021,15 @@ export async function getGitDiffFingerprint(
       appendUntrackedFingerprint(runtime, runReadOnlyGit, parts, cwd);
 
     switch (effectiveDiffType) {
+      case "local-vs-remote": {
+        const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+        if (!upstreamBranch) return null;
+        const upstreamTip = await runReadOnlyGit(["rev-parse", "--end-of-options", upstreamBranch]);
+        parts.push(upstreamBranch, upstreamTip.exitCode === 0 ? upstreamTip.stdout.trim() : "no-upstream");
+        if (!(await hashDiffOutput(["--end-of-options", upstreamBranch]))) return null;
+        if (!(await hashUntracked())) return null;
+        break;
+      }
       case "since-base": {
         // Content hash of the mb→worktree diff catches edits; headSha (always
         // in `parts`) catches commits that only re-partition the sections;
@@ -1952,6 +2144,13 @@ export async function getFileContentsForDiff(
   }
 
   switch (effectiveDiffType) {
+    case "local-vs-remote": {
+      const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+      return {
+        oldContent: upstreamBranch ? await gitShow(upstreamBranch, oldFilePath) : null,
+        newContent: await readWorkingTree(filePath),
+      };
+    }
     case "since-base": {
       const mbResult = await runtime.runGit(["merge-base", "--end-of-options", defaultBranch, "HEAD"], { cwd });
       // Degrade to HEAD (matching runGitDiff), not defaultBranch — when the base
@@ -2277,3 +2476,24 @@ export function isBinaryPatchFile(patch: string, filePath: string): boolean {
   }
   return false;
 }
+
+/**
+ * The `static-patch` diff type: the session's content is caller-supplied
+ * unified-diff bytes (`plannotator review --patch-file`), not something a VCS
+ * computed. Nothing in the session may read the working tree.
+ */
+export const STATIC_PATCH_DIFF_TYPE = "static-patch";
+
+/**
+ * Where the session's diff came from, advertised on every diff payload
+ * (`/api/diff` and the switch/PR endpoints) beside `approvalNotesSupported`.
+ * ABSENT reads as `"vcs"`, so an old server is unchanged and an old client
+ * ignoring the field behaves exactly as it always has.
+ *
+ * `"patch"` means static-patch mode: there is no repository, no working tree
+ * and no VCS behind the diff, so every affordance that would touch one
+ * (staging, hunk-context expansion, open-in-app, code navigation, diff-type /
+ * base switching, commit history, baseline freshness) is unavailable and the
+ * corresponding endpoints answer 400.
+ */
+export type ReviewSourceKind = "vcs" | "patch";

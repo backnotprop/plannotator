@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
@@ -445,15 +445,30 @@ export function filterWorkspaceStatusForDirectory(
 export function getGitMetadataWatchPaths(cwd: string): string[] {
 	const repo = getGitRepositoryInfo(cwd);
 	if (!repo) return [];
+	let currentRefPath: string | null = null;
+	try {
+		const head = readFileSync(resolve(repo.gitDir, "HEAD"), "utf8").trim();
+		if (head.startsWith("ref: ")) {
+			const refsRoot = resolve(repo.gitCommonDir, "refs");
+			const candidate = resolve(repo.gitCommonDir, head.slice("ref: ".length).trim());
+			if (candidate !== refsRoot && isWithinPath(candidate, refsRoot)) currentRefPath = candidate;
+		}
+	} catch {
+		// A detached, missing, or concurrently replaced HEAD has no symbolic ref target.
+	}
 	const candidates = [
 		resolve(repo.gitDir, "HEAD"),
 		resolve(repo.gitDir, "index"),
-		resolve(repo.gitDir, "MERGE_HEAD"),
-		resolve(repo.gitDir, "rebase-merge"),
-		resolve(repo.gitDir, "rebase-apply"),
-		resolve(repo.gitCommonDir, "HEAD"),
+		resolve(repo.gitDir, "logs", "HEAD"),
 		resolve(repo.gitCommonDir, "packed-refs"),
-		resolve(repo.gitCommonDir, "refs"),
+		currentRefPath,
 	];
-	return [...new Set(candidates)].filter((path) => existsSync(path));
+	return [...new Set(candidates)].filter((path): path is string => {
+		if (path === null) return false;
+		try {
+			return !statSync(path).isDirectory();
+		} catch {
+			return true;
+		}
+	});
 }

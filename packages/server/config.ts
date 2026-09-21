@@ -6,7 +6,10 @@ export {
   resolveAIEnabled,
   resolveAnnotateHistory,
   resolveCursorSandbox,
+  resolveFeedbackHistory,
   resolveGuideHistory,
+  parseReviewAnalysisConfig,
+  isAgentTerminalSide,
   type PlannotatorConfig,
   type DiffOptions,
 } from "@plannotator/shared/config";

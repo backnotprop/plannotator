@@ -42,7 +42,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
   };
 
   return (
-    <div className="w-80">
+    <div className="w-80 max-w-full">
       <div className="flex items-center justify-between mb-2" {...dragHandleProps}>
         <span className="text-xs text-muted-foreground flex items-center gap-1.5">
           <SparklesIcon className="w-3 h-3 text-primary" />

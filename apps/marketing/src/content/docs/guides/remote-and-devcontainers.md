@@ -26,6 +26,19 @@ Remote mode changes two behaviors:
 
 Plannotator also detects `SSH_TTY` and `SSH_CONNECTION` environment variables for automatic remote mode when `PLANNOTATOR_REMOTE` is unset. Use `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `PLANNOTATOR_REMOTE=0` / `false` to force local mode.
 
+## Direct-reach hosts (Tailscale, LAN)
+
+When the machine running Plannotator is directly reachable from your other devices — over a Tailscale tailnet, a VPN, or a trusted LAN — port forwarding is unnecessary, but the advertised URL still says `localhost`, which another device cannot open. Set `PLANNOTATOR_URL_HOST` to the hostname or IP those devices can reach:
+
+```bash
+export PLANNOTATOR_REMOTE=1
+export PLANNOTATOR_URL_HOST=my-machine.tailnet.ts.net
+```
+
+Plannotator then advertises `http://my-machine.tailnet.ts.net:<port>` (the port is chosen at runtime and always appended), so you can open review sessions straight from a phone or another computer. The setting is host-only and strictly display-only — it never changes which interface the server binds; remote mode (`PLANNOTATOR_REMOTE=1`) is what makes the server reachable beyond localhost, and a local session ignores the override entirely (localhost is advertised, with a warning). It can also be set persistently via `~/.plannotator/config.json` (`{ "urlHost": "my-machine.tailnet.ts.net" }`); the env var takes precedence.
+
+Note that the session is served over plain `http`, so some in-app features that require a secure context (such as creating short share links from the UI) are unavailable from other devices unless you put the session behind HTTPS (e.g. `tailscale serve`). The core review, annotate, and approve flows work over plain `http`.
+
 ## VS Code Remote / devcontainers
 
 VS Code sets the `BROWSER` environment variable in devcontainers to a helper script that opens URLs on your local machine. Plannotator respects this — in most cases, the browser opens automatically with no extra configuration.

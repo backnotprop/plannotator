@@ -30,38 +30,14 @@ export interface AnnotateApprovalBodyInput {
   feedbackScope?: "message" | "messages";
 }
 
-export interface AnnotateApprovalPolicy {
-  label: string;
-  title: string;
-  confirmation: {
-    title: string;
-    message: string;
-    confirmText: string;
-  } | null;
-}
-
-export function getAnnotateApprovalPolicy(input: {
-  gate: boolean;
-  approvalNotesSupported: boolean;
-  hasFeedback: boolean;
-}): AnnotateApprovalPolicy {
-  if (input.gate && input.approvalNotesSupported && input.hasFeedback) {
-    return {
-      label: "Approve with Notes",
-      title: "Approve with Notes — send notes as non-blocking guidance",
-      confirmation: {
-        title: "Approve with Notes?",
-        message: "This approves the artifact, sends your notes as non-blocking guidance, and closes the gate. Unlike Send Feedback, it does not request changes.",
-        confirmText: "Approve with Notes",
-      },
-    };
-  }
-  return {
-    label: "Approve",
-    title: "Approve — no changes requested",
-    confirmation: null,
-  };
-}
+/**
+ * The zero-feedback payload sentence. Every existing CLI consumer's plain-mode
+ * output and the strict-gate exit codes depend on this exact byte sequence
+ * (spec §5.3/§6.1), and the approval framing below reuses it so "Done with a
+ * note…" can never read as a change request.
+ */
+export const ANNOTATE_NO_FEEDBACK_SENTENCE =
+  "User reviewed the document and has no feedback.";
 
 export function buildAnnotateApprovalBody(
   input: AnnotateApprovalBodyInput,
@@ -100,6 +76,16 @@ export interface CompleteAnnotateFeedbackInput {
   directEditsSection: string;
   savedFileChangesSection: string;
   messageEntries?: MessageAnnotationEntry[];
+  /**
+   * Positive-finish framing. Non-gated annotate has no approve channel —
+   * every outcome is one feedback string — so this prefixes the zero-state
+   * sentence before the annotation sections (idempotent when the text already
+   * is the sentence). Since the empty-menu collapse (the maintainer merged
+   * "Done with a note…" into the single unframed "Send a note…"), the only
+   * caller is the non-gated discard path, which frames its positive finish
+   * over any direct edits that still ride along.
+   */
+  approvalFraming?: boolean;
 }
 
 export function buildCompleteAnnotateFeedback(
@@ -127,7 +113,7 @@ export function buildCompleteAnnotateFeedback(
       !hasEditorAnnotations &&
       !hasCodeAnnotations
     ) {
-      annotationsText = "User reviewed the document and has no feedback.";
+      annotationsText = ANNOTATE_NO_FEEDBACK_SENTENCE;
     } else {
       annotationsText = hasDocumentAnnotations
         ? exportAnnotations(
@@ -165,6 +151,10 @@ export function buildCompleteAnnotateFeedback(
         annotationsText += exportCodeFileAnnotations(input.codeAnnotations);
       }
     }
+  }
+
+  if (input.approvalFraming && annotationsText !== ANNOTATE_NO_FEEDBACK_SENTENCE) {
+    annotationsText = `${ANNOTATE_NO_FEEDBACK_SENTENCE}\n\n${annotationsText}`;
   }
 
   return composeFeedbackWithEditSections(

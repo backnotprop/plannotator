@@ -1567,6 +1567,47 @@ describe("mapPiEvent", () => {
     }]);
   });
 
+  test("completed assistant message maps to text", () => {
+    const result = mapPiEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Hidden reasoning" },
+          { type: "text", text: "Final answer" },
+          { type: "toolCall", id: "tc_1", name: "read", arguments: {} },
+          { type: "text", text: " continued" },
+        ],
+      },
+    }, SESSION_ID);
+    expect(result).toEqual([{ type: "text", text: "Final answer continued" }]);
+  });
+
+  test("completed non-assistant message is ignored", () => {
+    const result = mapPiEvent({
+      type: "message_end",
+      message: { role: "user", content: [{ type: "text", text: "Ignore" }] },
+    }, SESSION_ID);
+    expect(result).toEqual([]);
+  });
+
+  test("completed assistant error maps to an error", () => {
+    const result = mapPiEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "OpenAI API error (429): quota exceeded",
+      },
+    }, SESSION_ID);
+    expect(result).toEqual([{
+      type: "error",
+      error: "OpenAI API error (429): quota exceeded",
+      code: "pi_request_error",
+    }]);
+  });
+
   test("tool_execution_end maps to tool_result", () => {
     const result = mapPiEvent({
       type: "tool_execution_end",

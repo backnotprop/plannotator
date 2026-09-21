@@ -25,7 +25,7 @@
  *   2. Initial view is Current change, even if a saved Git default exists.
  *   3. Current change shows only the working-copy commit (@).
  *   4. Last change shows only the previous committed JJ change (@-).
- *   5. Line of work shows the stack from trunk() to @.
+ *   5. Line of work shows the mutable stack from its immutable base to @.
  *   6. All files shows the whole repository from root() to @.
  *   7. Hide whitespace re-runs JJ diff with -w.
  *   8. Staging controls are unavailable because JJ has no Git-style staging.
@@ -1172,7 +1172,7 @@ console.error("");
 console.error("Expected initial state:");
 console.error("  - VCS type: jj");
 console.error("  - Initial View: Current change");
-console.error("  - Base for Line of work: trunk()");
+console.error("  - Base for Line of work: parent of the current mutable stack");
 if (WITH_EVOLOG) {
   console.error("  - Evolution diff: available (5 evolog entries)");
   console.error("  - EvoLogPicker: should show entries with commit IDs + ages");

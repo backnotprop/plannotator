@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computePlanDiff, computeInlineDiff } from "./planDiffEngine";
+import type { InlineDiffToken } from "./planDiffEngine";
 import { parseMarkdownToBlocks } from "./parser";
 
 describe("computePlanDiff — block-level behavior", () => {
@@ -161,7 +162,7 @@ describe("computeInlineDiff — token content", () => {
 
 // Helper to build a unified <ins>/<del>-wrapped string from a computeInlineDiff
 // result for readable assertions in tests below.
-function unify(result: { tokens: import("./planDiffEngine").InlineDiffToken[] }) {
+function unify(result: { tokens: InlineDiffToken[] }) {
   return result.tokens
     .map((t) => {
       if (t.type === "added") return `<ins>${t.value}</ins>`;

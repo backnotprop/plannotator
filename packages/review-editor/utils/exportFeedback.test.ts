@@ -15,6 +15,16 @@ const ann = (overrides: Partial<CodeAnnotation> = {}): CodeAnnotation => ({
   ...overrides,
 });
 
+const targetWithoutInlineAnchor = (filePath: string, line: number) => ({
+  treePath: 'checkout:0/existing:0',
+  entry: 'checkout()',
+  label: 'existing()',
+  filePath,
+  lineStart: line,
+  lineEnd: line,
+  side: 'new' as const,
+});
+
 const prMeta: PRMetadata = {
   platform: "github",
   host: "github.com",
@@ -31,6 +41,81 @@ const prMeta: PRMetadata = {
 };
 
 describe("exportReviewFeedback", () => {
+  it("keeps every Shift-clicked Call Flow target in one native annotation", () => {
+    const result = exportReviewFeedback([ann({
+      callFlowTargets: [{
+        treePath: 'checkout:0/save:0',
+        entry: 'checkout()',
+        label: 'saveOrder()',
+        filePath: 'src/order.ts',
+        lineStart: 10,
+        lineEnd: 10,
+        side: 'new',
+      }, {
+        treePath: 'checkout:0/publish:1',
+        entry: 'checkout()',
+        label: 'publishReceipt()',
+        filePath: 'src/events.ts',
+        lineStart: 22,
+        lineEnd: 24,
+        side: 'new',
+      }],
+    })]);
+
+    expect(result).toContain('`checkout()` → `saveOrder()` — `src/order.ts:L10`');
+    expect(result).toContain('`checkout()` → `publishReceipt()` — `src/events.ts:L22-L24`');
+    expect(result.match(/This looks wrong/g)).toHaveLength(1);
+  });
+
+  it("exports file-scoped out-of-hunk Call Flow feedback without inventing an inline line", () => {
+    const result = exportReviewFeedback([ann({
+      scope: 'file',
+      lineStart: 1,
+      lineEnd: 1,
+      callFlowTargets: [targetWithoutInlineAnchor('src/index.ts', 200)],
+    })]);
+
+    expect(result).toContain('### File Comment');
+    expect(result).toContain('`src/index.ts:L200`');
+    expect(result).not.toContain('### Line 1');
+  });
+
+  it("exports a source-less structural Call Flow step as general feedback", () => {
+    const result = exportReviewFeedback([ann({
+      scope: 'general',
+      filePath: '',
+      lineStart: 0,
+      lineEnd: 0,
+      callFlowTargets: [{
+        treePath: 'checkout:0/branch:0',
+        entry: 'checkout()',
+        label: 'if (authorized)',
+        side: 'new',
+      }],
+    })]);
+
+    expect(result).toContain('## General');
+    expect(result).toContain('`checkout()` → `if (authorized)` — `inferred step`');
+  });
+
+  it("exports exact raw CallDiff lines as review-scoped feedback", () => {
+    const result = exportReviewFeedback([ann({
+      scope: 'general',
+      filePath: '',
+      lineStart: 0,
+      lineEnd: 0,
+      callFlowTargets: [{
+        treePath: 'raw:11',
+        entry: 'Raw CallDiff output',
+        label: '- existingCall()',
+        rawLine: 12,
+        side: 'old',
+      }],
+    })]);
+
+    expect(result).toContain('`Raw CallDiff output` → `- existingCall()` — `raw CallDiff line 12`');
+  });
+
   it("local mode: uses generic header, no PR content", () => {
     const result = exportReviewFeedback([ann()]);
     expect(result).toStartWith("# Code Review Feedback\n\n");

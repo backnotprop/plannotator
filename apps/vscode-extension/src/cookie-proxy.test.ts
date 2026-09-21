@@ -1,6 +1,84 @@
 import { describe, it, expect, mock, afterEach } from "bun:test";
-import { createCookieProxy } from "./cookie-proxy";
+import {
+  applyPanelCookieDefaults,
+  createCookieProxy,
+  PANEL_SEED_COOKIE,
+  PANEL_SEED_VERSION,
+} from "./cookie-proxy";
 import type { CookieProxy } from "./cookie-proxy";
+
+describe("applyPanelCookieDefaults", () => {
+  it("seeds System mode for a panel that has never stored one", () => {
+    // Plannotator's own default is Dark; inside VS Code the panel should follow
+    // the IDE instead, which is what System resolves to there (issue #1053).
+    expect(applyPanelCookieDefaults({})["plannotator-theme"]).toBe("system");
+  });
+
+  it("never overwrites a mode the user already chose", () => {
+    const seeded = applyPanelCookieDefaults({ "plannotator-theme": "light" });
+    expect(seeded["plannotator-theme"]).toBe("light");
+  });
+
+  it("keeps stored cookies and the auto-close flag", () => {
+    const seeded = applyPanelCookieDefaults({ "plannotator-identity": "tater-42" });
+    expect(seeded["plannotator-identity"]).toBe("tater-42");
+    expect(seeded["plannotator-auto-close"]).toBe("true");
+  });
+});
+
+describe("applyPanelCookieDefaults: legacy auto-seeded mode", () => {
+  /**
+   * What a panel opened before the seeding rules existed carries: the app
+   * persisted the mode it resolved on first mount, and its default is Dark.
+   * The user never chose it, and nothing in the store says so.
+   */
+  const legacyStore = {
+    "plannotator-identity": "tater-42",
+    "plannotator-theme": "dark",
+    "plannotator-dark-theme": "plannotator",
+  };
+
+  it("re-seeds a legacy dark store to System so the panel follows the IDE again", () => {
+    const seeded = applyPanelCookieDefaults(legacyStore);
+    expect(seeded["plannotator-theme"]).toBe("system");
+    // Only the mode is reconsidered; the rest of the store is untouched.
+    expect(seeded["plannotator-identity"]).toBe("tater-42");
+    expect(seeded["plannotator-dark-theme"]).toBe("plannotator");
+  });
+
+  it("marks every store it touches, fresh or legacy", () => {
+    expect(applyPanelCookieDefaults({})[PANEL_SEED_COOKIE]).toBe(PANEL_SEED_VERSION);
+    expect(applyPanelCookieDefaults(legacyStore)[PANEL_SEED_COOKIE]).toBe(PANEL_SEED_VERSION);
+  });
+
+  it("leaves Dark alone once the store has been marked", () => {
+    // The case that must never be clobbered: a Dark the user picked after the
+    // migration already ran. The marker is what tells the two apart.
+    const chosen = applyPanelCookieDefaults({
+      ...legacyStore,
+      [PANEL_SEED_COOKIE]: PANEL_SEED_VERSION,
+    });
+    expect(chosen["plannotator-theme"]).toBe("dark");
+  });
+
+  it("runs at most once: re-seeded, then Dark chosen, then left alone", () => {
+    // The store as it round-trips: seeded jar -> page -> globalState -> jar.
+    const migrated = applyPanelCookieDefaults(legacyStore);
+    expect(migrated["plannotator-theme"]).toBe("system");
+
+    const afterUserPicksDark = { ...migrated, "plannotator-theme": "dark" };
+    expect(applyPanelCookieDefaults(afterUserPicksDark)["plannotator-theme"]).toBe("dark");
+  });
+
+  it("never re-seeds a mode the auto-seed could not have written", () => {
+    // Dark is the app's default and always has been, so Light and System are
+    // choices no matter how old the store is.
+    for (const mode of ["light", "system"]) {
+      const seeded = applyPanelCookieDefaults({ ...legacyStore, "plannotator-theme": mode });
+      expect(seeded["plannotator-theme"]).toBe(mode);
+    }
+  });
+});
 
 describe("createCookieProxy", () => {
   let proxy: CookieProxy | undefined;

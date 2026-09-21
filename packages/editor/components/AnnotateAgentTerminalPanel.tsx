@@ -27,6 +27,8 @@ import {
   resolveAgentTerminalWebSocketUrl,
   resolveAnnotateAgentId,
   saveAnnotateAgentId,
+  type AnnotateAgentTerminalPlacement,
+  type AnnotateAgentTerminalSide,
 } from "@plannotator/ui/utils/annotateAgentTerminal";
 import { getItem, setItem } from "@plannotator/ui/utils/storage";
 import { WebSocketPtyBackend } from "@plannotator/webtui/browser";
@@ -53,7 +55,7 @@ type TerminalStatus = "idle" | "starting" | "running" | "stopping" | "exited";
 type AgentTerminalFontFamily = "theme" | "system" | "geist";
 type AgentTerminalFontWeight = "light" | "regular" | "medium";
 
-type AgentTerminalDisplaySettings = {
+export type AgentTerminalDisplaySettings = {
   fontFamily: AgentTerminalFontFamily;
   fontSize: number;
   fontWeight: AgentTerminalFontWeight;
@@ -63,6 +65,11 @@ type AgentTerminalDisplaySettings = {
 interface AnnotateAgentTerminalPanelProps {
   capability: AgentTerminalCapability;
   width: number | string;
+  /** The durable preference, which the Position control reflects. */
+  side: AnnotateAgentTerminalSide;
+  /** The edge actually docked against ('hidden' opened for a session = left). */
+  placement: AnnotateAgentTerminalPlacement;
+  onSideChange: (side: AnnotateAgentTerminalSide) => void;
   onSessionActiveChange?: (active: boolean) => void;
   onSessionReadyChange?: (ready: boolean) => void;
   onClose: () => void;
@@ -72,7 +79,7 @@ const DISPLAY_STORAGE_KEY = "plannotator-agent-terminal-display";
 const MIN_FONT_SIZE = 10;
 const MAX_FONT_SIZE = 24;
 
-const DEFAULT_DISPLAY_SETTINGS: AgentTerminalDisplaySettings = {
+export const DEFAULT_DISPLAY_SETTINGS: AgentTerminalDisplaySettings = {
   fontFamily: "theme",
   fontSize: 14,
   fontWeight: "regular",
@@ -121,7 +128,16 @@ const AGENT_TERMINAL_FONT_ZOOM = {
 export const AnnotateAgentTerminalPanel = forwardRef<
   AnnotateAgentTerminalPanelHandle,
   AnnotateAgentTerminalPanelProps
->(function AnnotateAgentTerminalPanel({ capability, width, onSessionActiveChange, onSessionReadyChange, onClose }, ref) {
+>(function AnnotateAgentTerminalPanel({
+  capability,
+  width,
+  side,
+  placement,
+  onSideChange,
+  onSessionActiveChange,
+  onSessionReadyChange,
+  onClose,
+}, ref) {
   const agents = capability.enabled ? capability.agents : [];
   const availableAgents = useMemo(
     () => agents.filter((agent) => agent.available),
@@ -219,11 +235,6 @@ export const AnnotateAgentTerminalPanel = forwardRef<
     [],
   );
 
-  const resetDisplaySettings = useCallback(() => {
-    setDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
-    writeDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
-  }, []);
-
   const selectedAgent =
     availableAgents.find((agent) => agent.id === selectedAgentId) ?? null;
   const canStart =
@@ -306,10 +317,14 @@ export const AnnotateAgentTerminalPanel = forwardRef<
     setStatus("exited");
   }, [clearTimers, onClose, onSessionActiveChange, onSessionReadyChange]);
 
+  const sideBorderClass = placement === "left"
+    ? "border-r border-border"
+    : "border-l border-border/50";
+
   return (
     <aside
       data-annotate-agent-terminal="true"
-      className="hidden lg:flex h-full flex-shrink-0 flex-col border-r border-border bg-card"
+      className={`hidden lg:flex h-full flex-shrink-0 flex-col bg-card ${sideBorderClass}`}
       style={{ width }}
     >
       {!capability.enabled ? (
@@ -330,8 +345,9 @@ export const AnnotateAgentTerminalPanel = forwardRef<
             <div className="flex shrink-0 items-center gap-1">
               <AgentTerminalDisplayPopover
                 settings={displaySettings}
+                side={side}
                 onChange={updateDisplaySettings}
-                onReset={resetDisplaySettings}
+                onSideChange={onSideChange}
               />
               <button
                 type="button"
@@ -514,17 +530,23 @@ function formatExit(event: PtyExit): string {
   return `Exited ${event.exitCode}`;
 }
 
-function AgentTerminalDisplayPopover({
+/** Exported for tests (the surrounding panel needs a live WebTUI session to
+ * render this popover). `defaultOpen` is a test seam only. */
+export function AgentTerminalDisplayPopover({
   settings,
+  side,
   onChange,
-  onReset,
+  onSideChange,
+  defaultOpen,
 }: {
   settings: AgentTerminalDisplaySettings;
+  side: AnnotateAgentTerminalSide;
   onChange: (updates: Partial<AgentTerminalDisplaySettings>) => void;
-  onReset: () => void;
+  onSideChange: (side: AnnotateAgentTerminalSide) => void;
+  defaultOpen?: boolean;
 }) {
   return (
-    <Popover>
+    <Popover defaultOpen={defaultOpen}>
       <PopoverTrigger
         render={
           <button
@@ -541,15 +563,34 @@ function AgentTerminalDisplayPopover({
         <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-medium text-foreground">Display</div>
+            {/* Resets DISPLAY settings only, exactly as the label says.
+                Position is deliberately untouched: it is a durable layout
+                preference (config.json via onSideChange), not a display
+                setting, and the segmented control below is its one explicit,
+                disclosed way to change. Resetting it here silently overwrote
+                a chosen right/hidden placement. */}
             <button
               type="button"
               aria-label="Reset terminal display settings"
-              onClick={onReset}
+              onClick={() => onChange(DEFAULT_DISPLAY_SETTINGS)}
               className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
             >
               <RotateCcw className="h-3.5 w-3.5" />
             </button>
           </div>
+
+          {/* Hidden closes the terminal (and this popover with it). The same
+              control lives in Settings, which is how it is reopened. */}
+          <TerminalDisplaySegmented
+            label="Position"
+            value={side}
+            options={[
+              { value: "left", label: "Left" },
+              { value: "right", label: "Right" },
+              { value: "hidden", label: "Hidden" },
+            ]}
+            onChange={onSideChange}
+          />
 
           <TerminalDisplayStepper
             label="Font size"

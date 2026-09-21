@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import type { Agent } from '../hooks/useAgents';
+import { useDismissablePopover } from '../hooks/useDismissablePopover';
 import { getAgentSwitchSettings, saveAgentSwitchSettings, type AgentSwitchSettings } from '../utils/agentSwitch';
 
 interface ApproveDropdownProps {
@@ -40,22 +41,15 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handleClickOutside = (event: PointerEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsOpen(false);
-    };
-    document.addEventListener('pointerdown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('pointerdown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, []);
+  // Shared dismissal (outside pointerdown + Escape), active only while open —
+  // the old always-on listeners were no-ops when closed. The hook consumes the
+  // dismissing Escape so it cannot double as a host-ladder Escape.
+  const dismiss = useCallback(() => setIsOpen(false), []);
+  useDismissablePopover({
+    enabled: isOpen,
+    ref: dropdownRef,
+    onDismiss: dismiss,
+  });
 
   const handleSelect = (newSetting: AgentSwitchSettings) => {
     setSetting(newSetting);
@@ -120,7 +114,10 @@ export const ApproveDropdown: React.FC<ApproveDropdownProps> = ({
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-border bg-popover shadow-xl z-[70] overflow-hidden py-1">
+        <div
+          data-pn-dismissable-popover="true"
+          className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-border bg-popover shadow-xl z-[70] overflow-hidden py-1"
+        >
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
             Switch to agent
           </div>

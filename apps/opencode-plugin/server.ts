@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { stripConflictingPlanModeRules } from "./plan-mode";
+import { composeSystemPrompt, stripConflictingPlanModeRules } from "./plan-mode";
 import {
   isPlanningAgent,
   normalizeWorkflowOptions,
@@ -22,7 +22,14 @@ import {
   type OpenCodeBridgeContext,
   type OpenCodePlanReviewResult,
 } from "./cli-bridge";
-import { resolveTargetAgent } from "./agent-switch";
+import { switchV2SessionAgent } from "./agent-switch";
+import { registerNativeCommands } from "./native-commands";
+import {
+  createV2BridgeClient,
+  formatSessionUrlNotice,
+  normalizeAgentList,
+  type V2ContextLike,
+} from "./v2-client";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
@@ -36,6 +43,13 @@ type V2Client = {
     agents: () => Promise<{ data: OpenCodeBridgeAgent[] }>;
     log: (entry: { level: "info" | "error"; message: string }) => void;
   };
+  /**
+   * Visible delivery for the session URL, present only when the host can post
+   * a transcript notice. `cli-bridge` prefers it over the (absent on V2) toast
+   * for the CLI runtime; `createPlanReadyNotifier` is the embedded runtime's
+   * equivalent. See `createSessionUrlNotifier` in `v2-client.ts`.
+   */
+  notifyUrl?: (input: { url: string; message: string }) => Promise<unknown>;
 };
 
 type EmbeddedRuntimeModule = {
@@ -63,18 +77,37 @@ const serverPlugin = {
     const getAgents = async (): Promise<OpenCodeBridgeAgent[]> => {
       if (cachedAgents) return cachedAgents;
       try {
-        const response = await ctx.agent.list();
-        cachedAgents = response.data.map((agent) => ({
-          name: agent.id,
-          description: agent.description,
-          mode: agent.mode,
-          hidden: agent.hidden,
-        }));
+        // The documented success shape is the `{ location, data }` envelope.
+        // `normalizeAgentList` also accepts a bare array because reading
+        // `.data` off anything else throws into this catch, where the failure
+        // is invisible: an empty agent list silently disables subagent gating
+        // and agent-switch validation rather than reporting anything.
+        cachedAgents = normalizeAgentList(await ctx.agent.list());
       } catch {
         cachedAgents = [];
       }
       return cachedAgents;
     };
+
+    // The pinned `@opencode-ai/plugin` types predate the command-execution API
+    // (PR #44765), so the context is re-viewed through a duck-typed shape. Every
+    // capability behind it is probed before use.
+    const v2 = ctx as unknown as V2ContextLike;
+
+    // Native slash commands are registered before the submit_plan early return
+    // below, so `workflow: "manual"`, which registers no tool, still gets them.
+    // Wrapped because a transform rejection must never fail plugin setup: the
+    // whole Plannotator integration would go down for a slash command that has
+    // a working markdown fallback.
+    try {
+      await registerNativeCommands({
+        ctx: v2,
+        getAgents,
+        getBridgeContext: () => getBridgeContext(getAgents),
+      });
+    } catch (error) {
+      console.error(`[Plannotator] Could not register the OpenCode 2 slash commands: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
     if (shouldModifyPrompts(workflowOptions)) {
       await ctx.session.hook("context", async (event) => {
@@ -129,7 +162,7 @@ const serverPlugin = {
           workflowOptions,
         )) return;
 
-        event.system.push({ type: "text", text: getGenericPlanReminder() });
+        pushComposedSystemReminder(event.system, getGenericPlanReminder());
       });
     }
 
@@ -175,41 +208,52 @@ const serverPlugin = {
           const session = await ctx.session.get({ sessionID: toolContext.sessionID });
           const directory = session.location.directory;
           const bridge = await getBridgeContext(getAgents);
-          const client = createV2Client(getAgents);
-          const result = await executeSubmitPlan({
-            edits: getPlanEdits(input),
-            invokingAgent: toolContext.agent,
-            sessionId: toolContext.sessionID,
-            directory,
-            workflowOptions,
-          }, {
-            reviewPlan: async ({ planContent }) => await runPlanReview({
-              client,
-              runtime: workflowOptions.runtime,
-              planContent,
-              sharingEnabled: bridge.sharingEnabled ?? true,
-              shareBaseUrl: bridge.shareBaseUrl,
-              pasteApiUrl: bridge.pasteApiUrl,
-              timeoutSeconds: getPlanTimeoutSeconds(),
-              directory,
-              bridge,
-            }),
-            resolveTargetAgent: async ({ requestedAgent }) => {
-              const targetAgent = resolveTargetAgent(requestedAgent);
-              if (!targetAgent) return undefined;
-              const available = (await getAgents()).some((agent) => agent.name === targetAgent);
-              if (!available) {
-                console.error(`[Plannotator] Configured OpenCode agent "${targetAgent}" is not available; approving the plan without switching agents.`);
-                return undefined;
-              }
-              // The current OpenCode 2 API exposes no session-agent switch operation to plugins.
-              console.error("[Plannotator] OpenCode 2 does not currently expose agent switching to plugins; approving the plan without switching agents.");
-              return undefined;
-            },
-            sendApprovalHandoff: async () => {},
+          // Same client the native command path uses, and for the same reason:
+          // `sessionID` is what lets the session URL reach a remote reviewer, who
+          // gets no browser opened and cannot see the plugin's console output.
+          const client = createV2BridgeClient({
+            ctx: v2,
+            getAgents,
+            sessionID: toolContext.sessionID,
           });
+          try {
+            const result = await executeSubmitPlan({
+              edits: getPlanEdits(input),
+              invokingAgent: toolContext.agent,
+              sessionId: toolContext.sessionID,
+              directory,
+              workflowOptions,
+            }, {
+              reviewPlan: async ({ planContent }) => await runPlanReview({
+                client,
+                runtime: workflowOptions.runtime,
+                planContent,
+                sharingEnabled: bridge.sharingEnabled ?? true,
+                shareBaseUrl: bridge.shareBaseUrl,
+                pasteApiUrl: bridge.pasteApiUrl,
+                timeoutSeconds: getPlanTimeoutSeconds(),
+                directory,
+                bridge,
+              }),
+              resolveTargetAgent: async ({ requestedAgent }) => await switchV2SessionAgent({
+                ctx: v2,
+                sessionID: toolContext.sessionID,
+                requestedAgent,
+                getAgents,
+              }),
+              // The switch above is the whole handoff on V2. Its session.prompt
+              // has no `noReply` equivalent, so an injected approval note would
+              // start a model turn the reviewer never asked for; the submit_plan
+              // tool result already carries the approval text.
+              sendApprovalHandoff: async () => {},
+            });
 
-          return { content: result };
+            return { content: result };
+          } finally {
+            // Same call as `runNativeCommand`: closes the session-URL notice
+            // watch for a review that delivered no prompt of its own.
+            client.dispose();
+          }
         },
       });
     });
@@ -231,23 +275,6 @@ function getPlanTimeoutSeconds(): number | null {
     return DEFAULT_PLAN_TIMEOUT_SECONDS;
   }
   return parsed === 0 ? null : parsed;
-}
-
-function createV2Client(
-  getAgents: () => Promise<OpenCodeBridgeAgent[]>,
-): V2Client {
-  const loggedUrls = new Set<string>();
-  return {
-    app: {
-      agents: async () => ({ data: await getAgents() }),
-      log: ({ message }) => {
-        const url = /https?:\/\/\S+/.exec(message)?.[0];
-        if (url && loggedUrls.has(url)) return;
-        if (url) loggedUrls.add(url);
-        console.error(message);
-      },
-    },
-  };
 }
 
 function allowSubagents(): boolean {
@@ -291,6 +318,35 @@ function getPlanHtml(): string {
   return planHtml;
 }
 
+/**
+ * The embedded runtime's ready hook: put the session URL where a reviewer can
+ * see it, and nowhere else.
+ *
+ * This still must NOT go to `client.app.log`. That is `console.error`, the same
+ * stderr stream `handleServerReady` has already printed the URL to, so logging
+ * here would duplicate the line in remote mode and add a stray one locally
+ * (which is why this hook used to be empty). The transcript notice is a
+ * different surface entirely, and on OpenCode 2 it is the only one a remote
+ * reviewer can actually see: the host discards a server plugin's stderr unless
+ * it was started with `OPENCODE_PRINT_LOGS=1`.
+ *
+ * Best-effort in both directions: an older host exposes no `session.synthetic`,
+ * so `notifyUrl` is absent and this stays silent, exactly as before.
+ */
+export function createPlanReadyNotifier(client: V2Client): (url: string) => void {
+  return (url: string) => {
+    const notify = client.notifyUrl;
+    if (typeof notify !== "function") return;
+    try {
+      void notify({ url, message: formatSessionUrlNotice(url) }).catch(() => {
+        // A cosmetic notice must never surface as an unhandled rejection.
+      });
+    } catch {
+      // Visible URL delivery is best-effort.
+    }
+  };
+}
+
 async function runPlanReview(input: {
   client: V2Client;
   runtime: RuntimeMode;
@@ -319,14 +375,7 @@ async function runPlanReview(input: {
         htmlContent: getPlanHtml(),
         timeoutSeconds: input.timeoutSeconds,
         abortSignal: input.abortSignal,
-        // Intentionally empty. OpenCode 2's server-plugin context exposes no log or
-        // tui domain, and the V2 client's app.log falls through to console.error,
-        // which is the same stderr stream handleServerReady already prints to.
-        // Wiring this up would duplicate the session URL in remote mode and add a
-        // stray line locally. V1 does target client.app.log and client.tui.showToast,
-        // which are HTTP surfaces separate from stderr, so V1 never repeats itself.
-        // A real toast here needs an upstream OpenCode API that does not exist yet.
-        logReady: () => {},
+        logReady: createPlanReadyNotifier(input.client),
       });
     } catch (error) {
       if (input.runtime === "embedded") throw error;
@@ -344,19 +393,43 @@ async function runPlanReview(input: {
   });
 }
 
-function replacePlanningSystemParts(
-  system: Array<{ type: "text"; text: string; [key: string]: unknown }>,
+type SystemPart = { type: "text"; text: string; [key: string]: unknown };
+
+/**
+ * Replace the system array with ONE composed text part (#1114): multiple
+ * system parts corrupt Qwen3.x Jinja chat templates, which render each part
+ * as its own system message. Mirrors the V1 entry (index.ts) exactly —
+ * stripped existing text first, then the additions, joined by blank lines.
+ *
+ * Order matters: the existing texts are read and composed BEFORE the array is
+ * truncated. Reordering to `system.length = 0` first silently drops the
+ * host's entire system prompt (the bug class flagged in #1114's review).
+ *
+ * Accepted trade-off: consolidation flattens per-part metadata (e.g.
+ * third-party cache hints) — template integrity beats part-level caching.
+ */
+export function replacePlanningSystemParts(
+  system: SystemPart[],
   additions: string[],
 ): void {
-  const existing = system.flatMap((part) => {
-    const text = stripConflictingPlanModeRules([part.text])[0];
-    return text ? [{ ...part, text }] : [];
-  });
+  const stripped = stripConflictingPlanModeRules(system.map((part) => part.text));
+  const composed = composeSystemPrompt([], [...stripped, ...additions.filter(Boolean)]);
   system.length = 0;
-  system.push(
-    ...existing,
-    ...additions.filter(Boolean).map((text) => ({ type: "text" as const, text })),
-  );
+  system.push(...composed.map((text) => ({ type: "text" as const, text })));
+}
+
+/**
+ * Append a reminder by composing it into a single system part (#1114) instead
+ * of pushing a separate part — same Jinja-template rationale as above, and
+ * the same compose-before-truncate ordering requirement.
+ */
+export function pushComposedSystemReminder(
+  system: SystemPart[],
+  reminder: string,
+): void {
+  const composed = composeSystemPrompt(system.map((part) => part.text), [reminder]);
+  system.length = 0;
+  system.push(...composed.map((text) => ({ type: "text" as const, text })));
 }
 
 function replaceStrictPlanReminder(messages: unknown[]): void {

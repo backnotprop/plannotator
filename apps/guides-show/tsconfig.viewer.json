@@ -1,0 +1,21 @@
+{
+  // The browser viewer (viewer/**). Its own files are clean, but it imports
+  // @plannotator/review-editor, which carries pre-existing type errors under
+  // every config in the repo, so this is `typecheck:viewer` for local use and
+  // not a CI gate; the viewer is otherwise checked by the Vite build.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["vite/client", "node"]
+  },
+  "include": ["viewer/**/*.ts", "viewer/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

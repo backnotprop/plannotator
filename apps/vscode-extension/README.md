@@ -37,7 +37,7 @@ Review code changes with a full diff viewer, file tree, inline annotations, and 
 - **In-editor plan review** — approve or deny plans with annotated feedback, directly in a VS Code tab
 - **In-editor code review** — review git diffs and PR changes with inline comments and suggestions
 - **Editor annotations** — select code directly in your editor and annotate it with `Cmd+Shift+.` — annotations appear in the Plannotator review UI alongside inline comments
-- **Theme sync** — Plannotator adapts to your VS Code color theme automatically
+- **Theme sync** — Plannotator adapts to your VS Code color theme automatically, and steps aside as soon as you pick a theme of your own in Plannotator's settings. A palette you chose is always used verbatim, and choosing Light or Dark pins the panel to that mode whatever the IDE is set to. Leave the mode on System to keep following the editor. Panels that predate theme sync stored Dark before the mode was ever a choice, so the first panel you open after upgrading resets that one stored Dark to System. It happens once: pick Dark again and it stays.
 - **Cookie persistence** — your identity, settings, and preferences persist across sessions
 - **Auto-close** — panels close automatically when you approve or send feedback
 

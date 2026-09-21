@@ -165,6 +165,8 @@ Opens a code review UI for uncommitted changes. Also supports reviewing GitHub p
 /plannotator-review https://github.com/owner/repo/pull/123
 ```
 
+The session-only open-state flags work here too — `/plannotator-review --base feature/part-1` opens against a specific base (git-only; nothing is persisted).
+
 Requires the CLI to be installed (the slash command runs `plannotator review` under the hood).
 
 ### `/plannotator-annotate <file.md>`

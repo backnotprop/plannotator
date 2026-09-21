@@ -84,17 +84,27 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   }
 
   try {
-    const { OpenCodeProvider } = await import("@plannotator/ai/providers/opencode-sdk");
+    await import("@plannotator/ai/providers/opencode-sdk");
     const opencodePath = Bun.which("opencode");
     if (opencodePath) {
       const provider = await createProvider({
         type: "opencode-sdk",
         cwd,
       });
-      if (provider instanceof OpenCodeProvider) {
-        modelDiscovery.push(provider.fetchModels().catch(() => {}));
+      const providerId = registry.register(provider);
+      // Deferred like Codex: fetchModels spawns `opencode serve`, so it must
+      // NOT run eagerly at startup — that spawned a server on every session
+      // for every user with opencode installed, and interrupted sessions
+      // orphaned it. The initializer runs on first explicit activation
+      // (?activate= from the model picker) or first opencode session.
+      if ("fetchModels" in provider) {
+        providerInitializers.set(
+          providerId,
+          createBestEffortOnce(
+            () => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
+          ),
+        );
       }
-      registry.register(provider);
     }
   } catch {
     // OpenCode not available.

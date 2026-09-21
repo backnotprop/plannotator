@@ -35,6 +35,7 @@ export const EditSessionHud: React.FC<EditSessionHudProps> = ({
   return (
     <div
       className="flex flex-shrink-0 items-center gap-2 border-b border-warning/20 bg-warning/5 px-3 py-1 text-xs"
+      data-history-owner="edit-session"
       data-testid="edit-session-hud"
       onClick={(e) => e.stopPropagation()}
     >

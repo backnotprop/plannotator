@@ -35,6 +35,10 @@ import {
   retryScrollToSearchMatch,
   swapActiveSearchHighlight,
 } from '../utils/reviewSearchHighlight';
+import {
+  resolveLineSelectionBehavior,
+  type LineSelectionSource,
+} from '../utils/lineSelectionBehavior';
 
 interface PierreDiffContentProps {
   filePath: string;
@@ -50,6 +54,10 @@ interface PierreDiffContentProps {
   mergedAnnotations: DiffLineAnnotation<DiffAnnotationMetadata>[];
   pendingSelection: SelectedLineRange | null;
   onLineSelectionEnd: (range: SelectedLineRange | null) => void;
+  /** In-flight selection deltas. Only wired when Pierre needs the host to
+   *  repaint (see the options block below); undefined leaves the option off
+   *  the object entirely. */
+  onLineSelectionChange?: (range: SelectedLineRange | null) => void;
   onGutterUtilityClick: (range: SelectedLineRange) => void;
   renderAnnotation: (annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => React.ReactNode;
   onTokenClick?: (props: DiffTokenEventBaseProps, event: MouseEvent) => void;
@@ -71,6 +79,7 @@ const PierreDiffContent = React.memo(({
   mergedAnnotations,
   pendingSelection,
   onLineSelectionEnd,
+  onLineSelectionChange,
   onGutterUtilityClick,
   renderAnnotation,
   onTokenClick,
@@ -100,6 +109,13 @@ const PierreDiffContent = React.memo(({
         enableGutterUtility: true,
         onGutterUtilityClick,
         onLineSelectionEnd,
+        // A defined `selectedLines` prop puts Pierre in controlled-selection
+        // mode, where `InteractionManager.updateSelection` only stores a
+        // proposed range and leaves the painted highlight to whatever the host
+        // hands back. Without a change handler a second drag therefore never
+        // repaints. Spread conditionally so surfaces that don't need it keep an
+        // options object with no such key at all.
+        ...(onLineSelectionChange ? { onLineSelectionChange } : {}),
         // Pierre's renderer-options builder drops onToken* before it evaluates
         // shouldUseTokenTransformer, so passing the handlers alone never wraps
         // tokens (no data-char) and code-nav/token events never fire. Enable
@@ -131,6 +147,7 @@ const PierreDiffContent = React.memo(({
   prev.mergedAnnotations === next.mergedAnnotations &&
   prev.pendingSelection === next.pendingSelection &&
   prev.onLineSelectionEnd === next.onLineSelectionEnd &&
+  prev.onLineSelectionChange === next.onLineSelectionChange &&
   prev.onGutterUtilityClick === next.onGutterUtilityClick &&
   prev.renderAnnotation === next.renderAnnotation &&
   prev.onTokenClick === next.onTokenClick &&
@@ -146,6 +163,10 @@ interface DiffViewerProps {
   status?: import('../types').DiffFileStatus;
   /** Base branch override used for file-content lookups (branch / merge-base modes only). */
   reviewBase?: string;
+  /** False when there is no source behind the diff to expand into (static
+   *  patch review): skip the /api/file-content fetch entirely rather than
+   *  firing a request the server answers 400. Absent means available. */
+  contextExpansionAvailable?: boolean;
   /** Opaque diff snapshot used to reject mutable file-content lookups from another view. */
   reviewSnapshotId?: string;
   /** Current PR url + diff scope — used to namespace file-comment drafts so they don't leak across in-place PR switches. */
@@ -165,6 +186,8 @@ interface DiffViewerProps {
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
+  /** Compact coarse-pointer shell. Keeps range selection separate from writing. */
+  compactTouchLayout?: boolean;
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
   onAddFileComment: (text: string) => void;
@@ -173,12 +196,21 @@ interface DiffViewerProps {
   onDeleteAnnotation: (id: string) => void;
   isViewed?: boolean;
   onToggleViewed?: () => void;
+  /** Chrome preference (#1277): false hides the header Viewed button; the `V`
+   *  shortcut and viewed state are unaffected. */
+  showViewedControls?: boolean;
+  /** Marked `linguist-generated` in `.gitattributes` (#1317) — shows the
+   * header "generated" tag. The single-file surface never collapses for it:
+   * opening a file as its own tab is already an explicit request to see it. */
+  isGenerated?: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   isStaged?: boolean;
   isStaging?: boolean;
   onStage?: () => void;
   canStage?: boolean;
+  /** Same preference for the header Git Add button (`A` shortcut still works). */
+  showStageControls?: boolean;
   stageError?: string | null;
   searchQuery?: string;
   searchMatches?: ReviewSearchMatch[];
@@ -195,6 +227,15 @@ interface DiffViewerProps {
   aiHistoryMessages?: AIChatEntry[];
   // Code navigation
   onCodeNavRequest?: (request: import('@plannotator/shared/code-nav').CodeNavRequest) => void;
+  /**
+   * Token hover cards. Absent (the default) means the feature is not wired at
+   * all. Deliberately raw: the view reports the token event and its file, and
+   * the caller decides what a hoverable symbol is. Stitching a fragmented
+   * identifier is app-only work, and this component is also compiled into the
+   * read-only portable guide viewer, which passes neither handler.
+   */
+  onTokenHoverEnter?: (props: DiffTokenEventBaseProps, filePath: string) => void;
+  onTokenHoverLeave?: () => void;
 }
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
@@ -204,6 +245,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   status,
   reviewBase,
   reviewSnapshotId,
+  contextExpansionAvailable = true,
   prUrl,
   prDiffScope,
   isFocused = false,
@@ -220,6 +262,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   selectedAnnotationId,
   scrollTargetAnnotation,
   pendingSelection,
+  compactTouchLayout = false,
   onLineSelection,
   onAddAnnotation,
   onAddFileComment,
@@ -228,12 +271,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onDeleteAnnotation,
   isViewed = false,
   onToggleViewed,
+  showViewedControls = true,
+  isGenerated = false,
   collapsed = false,
   onToggleCollapsed,
   isStaged = false,
   isStaging = false,
   onStage,
   canStage = false,
+  showStageControls = true,
   stageError,
   searchQuery = '',
   searchMatches = [],
@@ -247,8 +293,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onClickAIMarker,
   aiHistoryMessages = [],
   onCodeNavRequest,
+  onTokenHoverEnter,
+  onTokenHoverLeave,
 }) => {
-  const pierreTheme = usePierreTheme({ fontFamily, fontSize });
+  const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
   // Worker-pool highlighting: keep the pool's theme pair in step with the UI
   // theme. (No mount gating here — the single-file panel renders one diff;
   // a main-thread fallback frame at startup is invisible.)
@@ -344,6 +392,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   useEffect(() => {
     const controller = new AbortController();
     setFileContents(null);
+    // Nothing to expand into: the patch is the whole content of the session.
+    if (!contextExpansionAvailable) return;
     const params = new URLSearchParams({ path: filePath });
     if (oldPath) params.set('oldPath', oldPath);
     if (reviewBase) params.set('base', reviewBase);
@@ -357,7 +407,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       })
       .catch(() => {}); // Silent fallback — no expansion in demo mode
     return () => controller.abort();
-  }, [filePath, oldPath, reviewBase, reviewSnapshotId]);
+  }, [filePath, oldPath, reviewBase, reviewSnapshotId, contextExpansionAvailable]);
 
   // Re-parse the patch with full file contents so hunk indices are computed
   // against the complete file (isPartial: false), enabling expansion.
@@ -616,9 +666,38 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onClickAIMarker]);
 
-  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
+  const handleLineSelectionInteraction = useCallback((
+    source: LineSelectionSource,
+    range: SelectedLineRange | null,
+  ) => {
+    // A cleared selection is never something to preserve. AllFilesCodeView
+    // early-returns on a null range; single-file has to route it to the toolbar
+    // host so an open composer (including the Ask AI window) closes with it —
+    // that call also publishes the null selection upwards.
+    if (range == null) {
+      toolbarHostRef.current?.handleLineSelectionEnd(null);
+      return;
+    }
+    if (resolveLineSelectionBehavior({ source, compactTouchLayout }) === 'preserve-selection') {
+      onLineSelection(range);
+      return;
+    }
     toolbarHostRef.current?.handleLineSelectionEnd(range);
-  }, []);
+  }, [compactTouchLayout, onLineSelection]);
+
+  // Compact touch keeps a dragged range on screen instead of opening the
+  // composer, so `pendingSelection` is non-null for the whole time the reviewer
+  // may drag again — and a non-null `selectedLines` is exactly what puts Pierre
+  // in controlled-selection mode. Feed the in-flight range back so the second
+  // drag repaints and the finger stays tracked. Desktop never enters that state
+  // through a preserved range, and gets no handler at all.
+  const handlePierreLineSelectionChange = useCallback((range: SelectedLineRange | null) => {
+    onLineSelection(range);
+  }, [onLineSelection]);
+
+  const handleGutterUtilityClick = useCallback((range: SelectedLineRange) => {
+    handleLineSelectionInteraction('gutter-comment-action', range);
+  }, [handleLineSelectionInteraction]);
 
   useEffect(() => {
     const root = diffContentRef.current;
@@ -645,12 +724,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, []);
 
   const handlePierreLineSelectionEnd = useCallback((range: SelectedLineRange | null) => {
-    toolbarHostRef.current?.handleLineSelectionEnd(range);
-  }, []);
+    handleLineSelectionInteraction('range-gesture', range);
+  }, [handleLineSelectionInteraction]);
 
   // Token interaction handlers (code area clicks)
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
-    if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
+    // Alt is an unadvertised alias for the same References-panel path; the
+    // meta/ctrl branch itself is unchanged.
+    if ((event.metaKey || event.ctrlKey || event.altKey) && onCodeNavRequest) {
       onCodeNavRequest(buildCodeNavRequest(props, filePath));
       return;
     }
@@ -658,16 +739,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [filePath, onCodeNavRequest]);
 
   const handleTokenEnter = useCallback((props: DiffTokenEventBaseProps, event: PointerEvent) => {
-    props.tokenElement.classList.add('pn-token-hover');
+    // Only where a card can actually open. The class carries a pointer cursor
+    // (now !important, so it genuinely wins over Pierre's I-beam), and painting
+    // it unconditionally promised clickability on every token even with hover
+    // cards switched off.
+    if (onTokenHoverEnter) props.tokenElement.classList.add('pn-token-hover');
     if ((event.metaKey || event.ctrlKey) && onCodeNavRequest) {
       props.tokenElement.classList.add('pn-token-nav');
     }
-  }, [onCodeNavRequest]);
+    onTokenHoverEnter?.(props, filePath);
+  }, [filePath, onCodeNavRequest, onTokenHoverEnter]);
 
   const handleTokenLeave = useCallback((props: DiffTokenEventBaseProps) => {
     props.tokenElement.classList.remove('pn-token-hover');
     props.tokenElement.classList.remove('pn-token-nav');
-  }, []);
+    onTokenHoverLeave?.();
+  }, [onTokenHoverLeave]);
 
   const splitGridStyle = useMemo(() => {
     if (!isSplitLayout || diffOverflow === 'wrap') return undefined;
@@ -719,7 +806,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         status={status}
         oldPath={oldPath}
         isViewed={isViewed}
+        isGenerated={isGenerated}
         onToggleViewed={onToggleViewed}
+        showViewedControl={showViewedControls}
         collapseToggle={onToggleCollapsed && (
           <svg
             className={`mr-1.5 h-3.5 w-3.5 flex-none text-muted-foreground transition-transform ${collapsed ? '-rotate-90' : 'rotate-0'}`}
@@ -736,6 +825,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         isStaging={isStaging}
         onStage={onStage}
         canStage={canStage}
+        showStageControl={showStageControls}
         stageError={stageError}
         onFileComment={setFileCommentAnchor}
       />
@@ -747,6 +837,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       {!collapsed && <OverlayScrollArea
         className={`flex-1 min-h-0 relative ${isDraggingSplit ? 'select-none' : ''}`}
         overflowX="scroll"
+        overflowY="auto"
         onViewportReady={onViewportReady}
       >
         {/* Specific first, general second, and never both: whichever applies,
@@ -786,6 +877,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               mergedAnnotations={mergedAnnotations}
               pendingSelection={pendingSelection ?? selectedAnnotationRange}
               onLineSelectionEnd={handlePierreLineSelectionEnd}
+              onLineSelectionChange={compactTouchLayout ? handlePierreLineSelectionChange : undefined}
               onGutterUtilityClick={handleGutterUtilityClick}
               renderAnnotation={renderAnnotation}
               onTokenClick={handleTokenClick}

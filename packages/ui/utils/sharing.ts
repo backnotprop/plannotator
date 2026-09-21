@@ -8,7 +8,8 @@
  * Inspired by textarea.my's approach.
  */
 
-import { AnnotationType, type Annotation, type ImageAttachment } from '../types';
+import { AnnotationType, type Annotation, type DocumentRenderAs, type ImageAttachment } from '../types';
+import { isDiagramRenderKind } from '@plannotator/core/annotatable';
 import { compress, decompress } from '@plannotator/core/compress';
 import { encrypt, decrypt } from '@plannotator/core/crypto';
 
@@ -29,6 +30,32 @@ export interface SharePayload {
   s?: (string | undefined)[];  // source per annotation (external tool identifier), parallel to `a`
   h?: string;  // raw HTML content (direct HTML rendering mode)
   r?: 'html';  // render mode flag (omitted = markdown)
+}
+
+/**
+ * The markdown a document ships as in a share payload's `p`.
+ *
+ * A whole-file diagram source (.mmd/.dot) has no fence of its own — the
+ * annotate session renders it as one diagram because the SERVER said so in
+ * `renderAs`, and a share link carries no server. So it travels as the fenced
+ * form, which the portal's ordinary markdown parse turns back into the same
+ * diagram block. This is deliberately smaller than adding a render-mode flag
+ * (`r: 'html'`'s sibling): the portal needs no change at all.
+ *
+ * Diagram comments themselves still degrade to text comments in a share link,
+ * exactly as they do today — `diagramAnchor` is dropped like `htmlAnchor`
+ * (see sharing.multiTarget.test.ts).
+ */
+export function shareableDocumentMarkdown(
+  markdown: string,
+  renderAs: DocumentRenderAs | undefined,
+): string {
+  if (!isDiagramRenderKind(renderAs) || markdown === '') return markdown;
+  const language = renderAs === 'graphviz' ? 'dot' : 'mermaid';
+  // A diagram source can itself contain a ``` run only in a comment/label;
+  // a four-backtick fence keeps such a body intact.
+  const fence = markdown.includes('```') ? '````' : '```';
+  return `${fence}${language}\n${markdown.replace(/\n+$/, '')}\n${fence}`;
 }
 
 /**

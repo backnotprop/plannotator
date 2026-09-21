@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a>
+  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a>
 </p>
 
 # Plannotator
@@ -84,6 +84,24 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
   <img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="720" />
 </p>
 
+## Herdr Annotate: Plannotator in the Terminal
+
+<p align="center">
+  <a href="https://github.com/plannotator/herdr-annotate">
+    <img src=".github/assets/herdr-annotate-banner.svg" alt="Herdr Annotate" width="300" align="middle" />
+  </a>
+  &nbsp;&nbsp;
+  <img src=".github/assets/herdr-annotate.png" alt="Plannotator TUI annotating a markdown folder in the terminal" width="480" align="middle" />
+</p>
+
+[Herdr Annotate](https://github.com/plannotator/herdr-annotate) brings Plannotator-style review to the terminal: annotate terminal text, review whole Markdown documents and your coding agent's replies inside [Herdr](https://herdr.dev), and send the feedback straight back to the agent as its next message. Works with Claude Code, Codex, Pi, Copilot CLI, and Droid replies. Annotations are saved in the Plannotator data directory, so terminal reviews and app reviews compound.
+
+```
+herdr plugin install plannotator/herdr-annotate
+```
+
+Prefer it standalone? [Plannotator TUI](https://github.com/plannotator/plannotator-tui) powers the document review and runs without Herdr: `brew install plannotator/tap/plannotator-tui`.
+
 ---
 
 ## Commands
@@ -109,6 +127,7 @@ Need a realistic document to try? Copy the [product requirements document templa
 /plannotator-review <github-pr-url>    # Review a GitHub pull request
 /plannotator-review <gitlab-mr-url>    # Review a GitLab merge request
 plannotator review --gitbutler         # Review an active GitButler workspace
+plannotator review --patch-file reading.diff # Review a static caller-supplied unified diff
 ```
 
 GitButler users can review the whole workspace, one stack, or one branch layer. See the [GitButler workflow guide](https://docs.plannotator.ai/open-source/workflows/gitbutler).
@@ -207,13 +226,13 @@ Then finish the step for your agent:
 |---|---|---|
 | **Amp** | Copy [`plannotator.ts`](apps/amp-plugin/plannotator.ts) into `~/.config/amp/plugins/`, then `plugins: reload`. Workflows live in the command palette. | [README](apps/amp-plugin/README.md) |
 | **Claude Code** | `/plugin marketplace add backnotprop/plannotator`, then `/plugin install plannotator@plannotator`. Restart Claude Code. | [README](apps/hook/README.md) |
-| **Codex** | Nothing. Plan review is enabled automatically via Codex's experimental `Stop` hook (macOS/Linux/WSL; Codex hooks are disabled on Windows). `$plannotator-review`, `$plannotator-annotate`, and `$plannotator-last` skills included. | [README](apps/codex/README.md) |
+| **Codex** | Nothing. Plan review is enabled automatically via Codex's experimental `Stop` hook (macOS/Linux/WSL; on native Windows, Codex hooks are experimental and the installer prints manual setup steps). `$plannotator-review`, `$plannotator-annotate`, and `$plannotator-last` skills included. | [README](apps/codex/README.md) |
 | **Copilot CLI** | `/plugin marketplace add backnotprop/plannotator`, then `/plugin install plannotator-copilot@plannotator`. Restart. Plan review activates in plan mode (`Shift+Tab`). | [README](apps/copilot/README.md) |
 | **Droid** | `droid plugin marketplace add https://github.com/backnotprop/plannotator`, then `droid plugin install plannotator@plannotator`. Commands only, no plan interception yet. | [README](apps/droid-plugin/README.md) |
 | **Gemini CLI** | Nothing. The hook, policy, and slash commands are configured automatically. Requires Gemini CLI 0.36.0+. | [README](apps/gemini/README.md) |
 | **Kiro CLI** | Nothing. Skills and an example agent are installed automatically. Try `kiro-cli chat --agent plannotator`. | [README](apps/kiro-cli/README.md) |
 | **OpenCode** | Add `"plugin": ["@plannotator/opencode@latest"]` to `opencode.json`. Restart OpenCode. | [README](apps/opencode-plugin/README.md) |
-| **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator`. | [README](apps/pi-extension/README.md) |
+| **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator-plan-mode`. | [README](apps/pi-extension/README.md) |
 
 Full walkthroughs live in the [installation docs](https://docs.plannotator.ai/open-source/start/installation).
 
@@ -385,7 +404,38 @@ Host your-server
 
 ## Security
 
-Every released binary ships with a SHA256 sidecar. [SLSA provenance](https://slsa.dev/) attestations are available from v0.17.2.
+Every released binary ships with a SHA256 sidecar. [SLSA provenance](https://slsa.dev/) attestations are available from v0.17.2. The current release workflow also attaches a CycloneDX JSON SBOM, evaluates it with a fresh Grype database before anything is attested or published, and creates a GitHub/Sigstore SBOM attestation for the shipped binaries and npm tarballs.
+
+The SBOM is intentionally labeled as a release-wide Syft inventory of the monorepo's locked build inputs and dependencies. It is not an exact per-binary runtime inventory: Bun standalone executables do not expose their bundled JavaScript package metadata to Syft. The canonical [installation and verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) cover the existing installer path; the exact new SBOM commands are included below and must be copied to that Mintlify page before the first SBOM-enabled release.
+
+The release gate rejects scanner-side ignored matches and treats unknown applicability conservatively as runtime when evaluating CISA KEV and fixable Critical findings. Its explicit Grype configuration, complete JSON results, database status, and repository policy decision remain available as workflow evidence.
+
+To verify a released Linux x64 binary, its existing provenance, and the new SBOM evidence directly:
+
+```bash
+tag=vX.Y.Z
+version="${tag#v}"
+mkdir -p /tmp/plannotator-release-verify
+gh release download "$tag" --repo backnotprop/plannotator \
+  --pattern 'plannotator-linux-x64*' \
+  --pattern "plannotator-${version}-release-sbom.cdx.json*" \
+  --dir /tmp/plannotator-release-verify
+
+(cd /tmp/plannotator-release-verify && sha256sum --check plannotator-linux-x64.sha256)
+(cd /tmp/plannotator-release-verify && sha256sum --check "plannotator-${version}-release-sbom.cdx.json.sha256")
+
+gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+  --repo backnotprop/plannotator --source-ref "refs/tags/$tag" \
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+  --predicate-type https://slsa.dev/provenance/v1
+
+gh attestation verify /tmp/plannotator-release-verify/plannotator-linux-x64 \
+  --repo backnotprop/plannotator --source-ref "refs/tags/$tag" \
+  --signer-workflow backnotprop/plannotator/.github/workflows/release.yml \
+  --predicate-type https://cyclonedx.org/bom
+```
+
+These are separate claims over the same artifact digest: provenance identifies its builder/source/workflow, while the CycloneDX predicate describes the release-wide inventory. The release runbook also canonicalizes the downloaded SBOM and attested predicate with `jq -S` and compares them.
 
 To verify on install:
 
@@ -399,7 +449,7 @@ Requires the `gh` CLI, but no login: the installer fetches the attestation bundl
 { "verifyAttestation": true }
 ```
 
-See the [verification docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
+Installer verification remains opt-in and verifies SLSA build provenance; normal installation does not require `gh`. See the [canonical installation docs](https://docs.plannotator.ai/open-source/start/installation#pin-or-verify-a-release) for details.
 
 ---
 

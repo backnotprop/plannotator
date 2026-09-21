@@ -1,0 +1,6 @@
+# Semgrep also honors the repository's normal generated/output exclusions.
+:include .gitignore
+
+# Created by apps/pi-extension/vendor.sh. These files mirror active sources
+# that are scanned at their canonical locations.
+apps/pi-extension/generated/

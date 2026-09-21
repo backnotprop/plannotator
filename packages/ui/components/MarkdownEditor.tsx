@@ -34,6 +34,18 @@ export type { SlashCommandItem, SlashCommandsConfig } from '@plannotator/atomic-
 export { selectionToolbar } from '@plannotator/atomic-editor';
 export type { SelectionToolbarConfig, InlineFormat } from '@plannotator/atomic-editor';
 
+/* Host-configured embed media authoring. The picker is per editor mount so its
+   callbacks can close over live route state; nothing enters configurePlannotatorUI.
+   The package owns paragraph-safe splicing while the host owns embed grammar. */
+export { embedPicker, embedSlashItem } from './MarkdownEditor/embedPicker';
+export type {
+  EmbedKind,
+  EmbedPickerConfig,
+  EmbedTarget,
+} from './MarkdownEditor/embedPicker';
+export { planEmbedInsert } from '@plannotator/core/embed-insert';
+export type { EmbedInsertPlan } from '@plannotator/core/embed-insert';
+
 /* Grid-mode card utilities stay here (not in the package): they're Plannotator
    design-system Tailwind classes, and this file is @source-scanned. */
 const GRID_CARD_CLASSES = 'px-5 md:px-8 lg:px-10 xl:px-12 shadow-xl border border-border/50';

@@ -10,6 +10,22 @@
  * input transformers handle validation and field assignment.
  */
 
+// Reply-threading validation for PATCH ingest, re-exported so both HTTP
+// adapters import it from the module they already use.
+export { validateReplyTarget } from "./annotation-threads";
+
+import {
+  parseDiagramAdditionalTargets,
+  parseDiagramAnchor,
+  type DiagramAnchor,
+} from "./diagram-anchor";
+import {
+  MAX_PAGE_URL_LENGTH,
+  parseHtmlAdditionalTargets,
+  parseHtmlElementAnchor,
+  parseHtmlElementContext,
+} from "./html-anchor";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -109,6 +125,10 @@ interface PlanAnnotation {
   createdA: number;
   author?: string;
   source?: string;
+  /** A comment on a rendered diagram part (see `diagram-anchor.ts`). The
+   *  diagram blocks resolve it against their render; a row that resolves in
+   *  no diagram lists as unanchored. */
+  diagramAnchor?: DiagramAnchor;
 }
 
 const VALID_PLAN_TYPES = ["DELETION", "COMMENT", "GLOBAL_COMMENT"];
@@ -154,6 +174,18 @@ export function transformPlanInput(
       };
     }
 
+    // A diagram anchor is validated by the same fail-closed parser the ui
+    // codec and the feedback archive run; a malformed one is refused rather
+    // than stored as an anchor nothing can restore.
+    let diagramAnchor: DiagramAnchor | undefined;
+    if (obj.diagramAnchor !== undefined) {
+      const parsed = parseDiagramAnchor(obj.diagramAnchor);
+      if (parsed === null) {
+        return { error: `annotations[${i}] invalid "diagramAnchor" (expected { v: 1, family, kind, id | from + to, label, sourceLine })` };
+      }
+      diagramAnchor = parsed;
+    }
+
     annotations.push({
       id: crypto.randomUUID(),
       blockId: "external",
@@ -165,6 +197,7 @@ export function transformPlanInput(
       createdA: Date.now(),
       author: typeof obj.author === "string" ? obj.author : undefined,
       source,
+      ...(diagramAnchor !== undefined && { diagramAnchor }),
     });
   }
 
@@ -383,7 +416,12 @@ export interface AnnotationStore<T extends StorableAnnotation> {
   remove(id: string): boolean;
   /** Remove all annotations from a specific source. Returns count removed. */
   clearBySource(source: string): number;
-  /** Update an annotation by ID. Returns the updated annotation, or null if not found. */
+  /**
+   * Update an annotation by ID. Returns the updated annotation, or null if
+   * not found. The identity fields `id` and `source` are pinned — values for
+   * them in `fields` are ignored (`source` gates verbatim skill-instruction
+   * injection in exported feedback and must not be clearable via PATCH).
+   */
   update(id: string, fields: Partial<T>): T | null;
   /** Remove all annotations. Returns count removed. */
   clearAll(): number;
@@ -441,7 +479,17 @@ export function createAnnotationStore<T extends StorableAnnotation>(): Annotatio
     update(id, fields) {
       const idx = annotations.findIndex((a) => a.id === id);
       if (idx === -1) return null;
-      const merged = { ...annotations[idx], ...fields, id } as T;
+      // Identity fields are pinned and can never be set, cleared, or changed
+      // by an update: `id` addresses the annotation, and `source` is the
+      // security marker the feedback exporters key on — a tool-submitted
+      // annotation (one carrying a `source`) must never receive verbatim
+      // SKILL.md injection (#1229). PATCH is an unauthenticated localhost
+      // surface, so allowing `{"source": ""}` through the merge would let
+      // any local process strip the external marker and re-arm injection.
+      const patch = { ...fields } as Record<string, unknown>;
+      delete patch.id;
+      delete patch.source;
+      const merged = { ...annotations[idx], ...(patch as Partial<T>) } as T;
       annotations[idx] = merged;
       version++;
       emit({ type: "update", id, annotation: merged });
@@ -488,4 +536,248 @@ export function createAnnotationStore<T extends StorableAnnotation>(): Annotatio
       };
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// PATCH validation (shared by both runtimes)
+// ---------------------------------------------------------------------------
+
+/**
+ * `PATCH /api/external-annotations?id=…` used to merge its body into the
+ * stored annotation verbatim: an unauthenticated localhost surface could
+ * write `{"diagramAnchor": null}` — a value POST refuses — and the renderer
+ * then read `.family` off it and took the page down (#1560 follow-up).
+ *
+ * The patch is now allowlisted and field-validated with the SAME validators
+ * POST applies: a structured field goes through its own fail-closed parser
+ * and a bad value is a 400, never a stored one. Unknown keys are dropped
+ * (the wire shape is additive, so an unknown key is a newer or foreign
+ * writer, not a reason to refuse the whole patch); `id` and `source` stay
+ * immutable — the store pins them too, this is the outer layer.
+ *
+ * Empty after filtering is fine: the PATCH is then a no-op that still
+ * answers 200 with the annotation, exactly as a patch of unknown keys did.
+ * `null` on an optional field keeps its established meaning — clear it — and
+ * is normalized to `undefined` so the stored row never holds a nullish value
+ * a consumer could read a property off; a required field refuses it.
+ */
+export type AnnotationPatchMode = "plan" | "review";
+
+type FieldValidator = (value: unknown) => { value: unknown } | ParseError;
+
+/** Cap mirrors the viewer's own diagram multi-select ceiling. */
+const MAX_DIAGRAM_ADDITIONAL_TARGETS = 16;
+const MAX_PATCH_IMAGES = 50;
+const MAX_PATCH_IMAGE_STRING = 4096;
+
+const ok = (value: unknown): { value: unknown } => ({ value });
+
+const str: FieldValidator = (value) =>
+  typeof value === "string" ? ok(value) : { error: "must be a string" };
+
+const bool: FieldValidator = (value) =>
+  typeof value === "boolean" ? ok(value) : { error: "must be a boolean" };
+
+const finiteNumber: FieldValidator = (value) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? ok(value)
+    : { error: "must be a finite number" };
+
+const positiveInt: FieldValidator = (value) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? ok(value)
+    : { error: "must be a positive integer" };
+
+const oneOf =
+  (values: readonly string[]): FieldValidator =>
+  (value) =>
+    typeof value === "string" && values.includes(value)
+      ? ok(value)
+      : { error: `must be one of: ${values.join(", ")}` };
+
+const cappedStr =
+  (max: number): FieldValidator =>
+  (value) =>
+    typeof value === "string" && value.length <= max
+      ? ok(value)
+      : { error: `must be a string of at most ${max} characters` };
+
+/** Attached images: `{ path, name }` pairs. */
+const imageList: FieldValidator = (value) => {
+  if (!Array.isArray(value)) return { error: "must be an array" };
+  if (value.length > MAX_PATCH_IMAGES) {
+    return { error: `must have at most ${MAX_PATCH_IMAGES} entries` };
+  }
+  const out: Array<{ path: string; name: string }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return { error: "entries must be { path, name } objects" };
+    }
+    const { path, name } = entry as Record<string, unknown>;
+    if (typeof path !== "string" || path.length === 0 || path.length > MAX_PATCH_IMAGE_STRING) {
+      return { error: 'entries need a non-empty string "path"' };
+    }
+    if (typeof name !== "string" || name.length > MAX_PATCH_IMAGE_STRING) {
+      return { error: 'entries need a string "name"' };
+    }
+    out.push({ path, name });
+  }
+  return ok(out);
+};
+
+/** Parser-backed validators: the stored value is REPLACED by what the parser
+ *  returns, so a merged field is always one the renderer can read. */
+const viaParser =
+  <T>(parse: (value: unknown) => T | null | undefined, hint: string): FieldValidator =>
+  (value) => {
+    const parsed = parse(value);
+    if (parsed === null || parsed === undefined) return { error: hint };
+    return ok(parsed);
+  };
+
+/** Lenient array parsers (junk entries are dropped, never fatal) still
+ *  require an array: a scalar is a caller error worth reporting. */
+const viaArrayParser =
+  <T>(parse: (value: unknown) => T[]): FieldValidator =>
+  (value) =>
+    Array.isArray(value) ? ok(parse(value)) : { error: "must be an array" };
+
+const PLAN_PATCH_FIELDS: Record<string, FieldValidator> = {
+  type: oneOf(VALID_PLAN_TYPES),
+  text: str,
+  originalText: str,
+  author: str,
+  images: imageList,
+  isQuickLabel: bool,
+  quickLabelTip: str,
+  diffContext: oneOf(["added", "removed", "modified"]),
+  pageUrl: cappedStr(MAX_PAGE_URL_LENGTH),
+  prUrl: str,
+  inReplyTo: str,
+  blockId: str,
+  startOffset: finiteNumber,
+  endOffset: finiteNumber,
+  diagramAnchor: viaParser(
+    parseDiagramAnchor,
+    'expected { v: 1, family, kind, id | from + to, label, sourceLine }',
+  ),
+  diagramAdditionalTargets: viaArrayParser((value) =>
+    parseDiagramAdditionalTargets(value, MAX_DIAGRAM_ADDITIONAL_TARGETS),
+  ),
+  htmlAnchor: viaParser(
+    parseHtmlElementAnchor,
+    'expected { selector, tagName, text?, point? }',
+  ),
+  htmlAdditionalTargets: viaArrayParser((value) => parseHtmlAdditionalTargets(value)),
+  elementContext: viaParser(
+    parseHtmlElementContext,
+    'expected a bounded element description carrying a "tag"',
+  ),
+};
+
+const REVIEW_PATCH_FIELDS: Record<string, FieldValidator> = {
+  type: oneOf(VALID_REVIEW_TYPES),
+  scope: oneOf(VALID_SCOPES),
+  side: oneOf(VALID_SIDES),
+  filePath: str,
+  lineStart: finiteNumber,
+  lineEnd: finiteNumber,
+  charStart: finiteNumber,
+  charEnd: finiteNumber,
+  tokenText: str,
+  selectedText: str,
+  selectedTextFromEdits: bool,
+  text: str,
+  suggestedCode: str,
+  originalCode: str,
+  images: imageList,
+  author: str,
+  severity: oneOf(["important", "nit", "pre_existing"]),
+  reasoning: str,
+  reviewProfileLabel: str,
+  conventionalLabel: str,
+  decorations: (value) => {
+    if (!Array.isArray(value)) return { error: "must be an array" };
+    const allowed = ["blocking", "non-blocking", "if-minor"];
+    for (const entry of value) {
+      if (typeof entry !== "string" || !allowed.includes(entry)) {
+        return { error: `entries must be one of: ${allowed.join(", ")}` };
+      }
+    }
+    return ok([...value]);
+  },
+  inReplyTo: str,
+  prUrl: str,
+  prNumber: positiveInt,
+  prTitle: str,
+  prRepo: str,
+  diffScope: oneOf(["layer", "full-stack"]),
+  commitSha: str,
+  commitSubject: str,
+  gitButlerDiffType: str,
+  gitButlerDiffLabel: str,
+  gitButlerBase: str,
+  gitButlerSnapshotId: str,
+};
+
+/**
+ * Fields that carry the annotation's structure rather than its content: a
+ * PATCH may change them, never clear them. An annotation with no `type`, or a
+ * line comment with no `filePath`, is not a thing the UI can render — and the
+ * anchors are the crash vector this validator exists for, so `null` on one is
+ * the caller error it looks like (400), not a silent un-anchoring.
+ */
+const NON_CLEARABLE_FIELDS = new Set([
+  "type",
+  "originalText",
+  "blockId",
+  "startOffset",
+  "endOffset",
+  "scope",
+  "side",
+  "filePath",
+  "lineStart",
+  "lineEnd",
+  "diagramAnchor",
+  "diagramAdditionalTargets",
+  "htmlAnchor",
+  "htmlAdditionalTargets",
+  "elementContext",
+]);
+
+/**
+ * Validate and narrow a PATCH body for `mode`. Returns the fields that may be
+ * merged into the stored annotation, or a `ParseError` naming the field whose
+ * value failed its validator.
+ */
+export function validateAnnotationPatch(
+  mode: AnnotationPatchMode,
+  body: unknown,
+): { fields: Record<string, unknown> } | ParseError {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: "Request body must be a JSON object" };
+  }
+  const fieldsByName = mode === "plan" ? PLAN_PATCH_FIELDS : REVIEW_PATCH_FIELDS;
+  const fields: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+    // Identity fields are pinned (the store deletes them too).
+    if (key === "id" || key === "source" || key === "__proto__") continue;
+    const validator = fieldsByName[key];
+    // Unknown key: dropped, not fatal — the wire shape is additive.
+    if (!validator) continue;
+    // `undefined` never survives JSON, but a host calling the validator
+    // directly may pass it: treat it as "not provided".
+    if (value === undefined) continue;
+    if (value === null) {
+      if (NON_CLEARABLE_FIELDS.has(key)) {
+        return { error: `invalid "${key}": must not be null` };
+      }
+      fields[key] = undefined;
+      continue;
+    }
+    const result = validator(value);
+    if ("error" in result) return { error: `invalid "${key}": ${result.error}` };
+    fields[key] = result.value;
+  }
+  return { fields };
 }

@@ -14,13 +14,26 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 |-------|---------|--------------|
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
 | Plain-text file | `plannotator annotate config.yaml` | Opens the file directly, rendered as plain text |
+| Diagram file | `plannotator annotate flow.mmd` | Renders the whole file as one diagram in the diagram viewer |
 | HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
 | URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
+| Local app URL | `plannotator annotate http://localhost:5173` | Opens your running dev app live and annotates it in place |
 | Folder | `plannotator annotate ./docs/` | Opens a file browser showing all supported files |
 
 ### Supported file types
 
 Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These render exactly like `.txt` — as plain text you can select and annotate.
+
+### Diagram files
+
+`.mmd` and `.mermaid` (Mermaid) and `.dot` and `.gv` (Graphviz) open in the **diagram viewer** instead of as text: the whole file is the diagram, so no ```` ```mermaid ```` fence is needed. It is the same viewer a diagram fence inside a plan gets — themed to your palette, zoom, pan, fit and a full-size popout — and you comment by clicking a node, an edge, a cluster, or the diagram itself.
+
+```bash
+plannotator annotate architecture.mmd
+plannotator annotate deps.dot
+```
+
+Each comment records the part's own id and its real line in the file, so the exported feedback reads `Diagram node Open .mmd (Start), line 2` — the agent can go straight to that line. Diagram files also join folder sessions and version history like any other document, and they render as the diagram in a share link too.
 
 `.env` is deliberately not supported: it commonly holds secrets, and annotate's version history copies file contents into the data dir (`~/.plannotator/history/`). Use `.env.example` for the secret-free template. Source-code files (`.ts`, `.py`, …) are also excluded — use `plannotator review` for code.
 
@@ -55,7 +68,7 @@ Build output directories like `_site/`, `public/`, `.docusaurus/`, and `node_mod
 
 ## URLs
 
-Fetching a URL converts the page to markdown before opening it in the annotation editor.
+Fetching a URL converts the page to markdown before opening it in the annotation editor. Loopback `http` URLs are the exception: they open your running app live instead, covered in [Local apps](#local-apps) below.
 
 ### Jina Reader (default)
 
@@ -79,6 +92,8 @@ URLs ending in `.md` or `.mdx` are fetched as raw text with no conversion. If th
 
 URLs pointing to `localhost`, `127.x.x.x`, `10.x.x.x`, `192.168.x.x`, and other private or link-local addresses always use direct fetch. Jina is skipped automatically since it can't reach private networks.
 
+Loopback `http` URLs are a special case: they open the running app live instead of converting it. See [Local apps](#local-apps) below.
+
 ### Configuring Jina
 
 Three ways to disable Jina Reader, in priority order:
@@ -88,6 +103,49 @@ Three ways to disable Jina Reader, in priority order:
 3. **Config file:** `~/.plannotator/config.json` with `{ "jina": false }`
 
 If none of these are set, Jina is enabled by default.
+
+## Local apps
+
+Point annotate at a dev server and you annotate the running app itself, not a snapshot of it:
+
+```bash
+plannotator annotate http://localhost:5173
+plannotator annotate http://localhost:3000/admin?tab=2
+```
+
+Plannotator probes the URL first (a 3 second `GET` asking for HTML). If the app answers with an HTML page, the session opens live: your app is served through a local reverse proxy and rendered full-viewport, with hot module reload and WebSockets passed through, so the app keeps working while you annotate it. Client-side navigation is supported within a single session, and each annotation records the page it was made on.
+
+"Loopback" means `localhost`, `::1`, or a literal address in `127.0.0.0/8`. A hostname that merely looks local, such as `127.0.0.1.evil.example`, does not qualify.
+
+### When it falls back
+
+If the probe does not return an HTML page from the same loopback origin, Plannotator quietly falls back to converting the page, exactly as it always did. That covers an unreachable or slow server, a non-HTML response such as a JSON endpoint, a `5xx` status, and a redirect that leaves the app's own origin (an auth portal, or a different local port). A `404` or `401` that still returns HTML is live-eligible, so a login page opens live.
+
+### `--static` and `--app`
+
+| Flag | Effect |
+|------|--------|
+| `--static` | Skip the probe and convert the page, the classic behavior |
+| `--app` | Require a live session, and fail loudly instead of falling back |
+
+`--app` does not skip the probe. It turns each of the quiet fallbacks above into a clear error: a non-URL target, a non-loopback URL, an `https` URL, an unreachable app, an off-origin redirect, or a non-HTML response. These exit `1`, or `2` under a strict gate (`--require-approval` / `--result-file`), like any other annotate startup failure. The two flags are mutually exclusive.
+
+Live app annotation runs on the standalone CLI, the Claude Code slash command, and the Pi extension's `/plannotator-annotate` command, with the same probe, flags, and fallbacks everywhere. On OpenCode, URL targets still convert to markdown.
+
+### Annotating a live app
+
+Live app and HTML sessions share one interaction model:
+
+- The session opens with the pen **armed**, so a click pins the element under the cursor and a drag selects text to comment on.
+- `Esc` steps back one rung at a time: it closes an open draft, then clears the hover outline, then drops you into **Interact** mode, where clicks, forms, links, and navigation reach the page normally.
+- The pen button in the header (or `Cmd/Ctrl+Shift+A`) toggles annotation back on, and off again. Existing comment markers stay visible in both modes, and clicking one still opens it.
+- Selecting text to comment works in **both** modes, so you can leave a note without arming the pen.
+- These surfaces are comment-only: deletions and quick labels are markdown-only features.
+- The page starts with the floating tools **hidden**, so it gets the whole viewport. The eye button beside the pen (or `Cmd/Ctrl+Shift+X`) shows them — the sidebar tabs and the comment/attachments cluster — and hides them again. Your last choice is remembered for the next HTML session.
+
+### Limits
+
+Live sessions have no version history, no URL sharing, no portable HTML export, and no agent terminal, matching URL sessions. Drafts, feedback, approval, and gates all work normally. Live mode is unavailable in remote mode and in `--tailscale` sessions; use `--static` there. Apps that bust out of frames, pin absolute origins, or send you through an off-origin OAuth redirect will not stay inside the proxy.
 
 ## HTML files
 
@@ -100,6 +158,10 @@ plannotator annotate docs/guide.html --markdown
 Markdown conversion uses [Turndown](https://github.com/mixmark-io/turndown) with GFM table support. `<script>`, `<style>`, and `<noscript>` tags are stripped before conversion.
 
 HTML files must be within your current working directory. Files outside the project root return a 403 error.
+
+### Refresh from disk
+
+When an agent edits the HTML file while you are reviewing it, click **Refresh** in the header (next to the eye button) to re-read the file without reloading the tab. Annotations whose elements or text still exist on the new page stay where they were; any that no longer match are listed in a notice and marked **Unanchored** in the annotations panel, where their comments remain and still send. The "Show changes" toggle keeps working after a refresh, comparing the file as it is now against its previous saved version. On a phone or tablet the action is in the Options menu as **Refresh from disk**. Refresh is available for local HTML files only, not for URLs or live app sessions.
 
 ### `--markdown`
 
@@ -118,7 +180,7 @@ The annotation UI in annotate mode works the same as plan review, with a few cha
 - `Cmd/Ctrl+Enter` sends annotations instead of approving
 - The completion screen says "Annotations Sent" instead of "Plan Approved"
 
-All annotation types work identically: deletions, comments, global comments, quick labels, "looks good" approvals, and image attachments.
+All annotation types work identically: deletions, comments, global comments, quick labels, "looks good" approvals, and image attachments. HTML and live app surfaces are the exception: they are comment-only, so deletions and quick labels are unavailable there, though deletions saved earlier still restore.
 
 ## Flags
 

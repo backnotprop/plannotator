@@ -50,7 +50,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium mb-6">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              For Claude Code & OpenCode
+              For Claude Code &amp; OpenCode
             </div>
 
             <div className="flex items-center gap-6 mb-4">

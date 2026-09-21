@@ -34,7 +34,8 @@ function cleanTestHome() {
 
 async function runScript(script: string): Promise<string> {
   const proc = Bun.spawn(["bun", "-e", script], {
-    env: { ...process.env, HOME: TEST_HOME },
+    // Exercise the fake HOME rather than inheriting the parent test sandbox.
+    env: { ...process.env, HOME: TEST_HOME, USERPROFILE: TEST_HOME, PLANNOTATOR_DATA_DIR: "" },
     cwd: PROJECT_ROOT,
     stdout: "pipe",
     stderr: "pipe",

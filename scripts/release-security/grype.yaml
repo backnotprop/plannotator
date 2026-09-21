@@ -1,0 +1,21 @@
+# Release scanning always selects this file explicitly. Keep suppression empty;
+# the repository policy also rejects any ignoredMatches emitted by Grype.
+check-for-app-update: false
+only-fixed: false
+only-notfixed: false
+ignore-states: ""
+ignore: []
+vex-documents: []
+vex-add: []
+match-upstream-kernel-headers: true
+
+db:
+  update-url: https://grype.anchore.io/databases
+  auto-update: false
+  validate-by-hash-on-start: true
+  validate-age: true
+  max-allowed-built-age: 120h
+  require-update-check: true
+  update-available-timeout: 30s
+  update-download-timeout: 300s
+  max-update-check-frequency: 0s

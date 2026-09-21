@@ -43,8 +43,10 @@ import {
   killWindowsProcessTree,
   resolveWindowsCommandShim,
 } from "./command-path.ts";
+import { guardChildStreams, writeChildLine } from "./child-io.ts";
 
 const PROVIDER_NAME = "codex-sdk";
+const CODEX_PROCESS_LABEL = "Codex app-server";
 const DEFAULT_MODEL = "gpt-5.6-sol";
 const CLIENT_NAME = "plannotator";
 /** Kill an idle app-server process after this long with no query. */
@@ -334,6 +336,10 @@ class CodexAppServerProcess {
     }
 
     this.proc = proc;
+    // Cover every pipe BEFORE the spawn handshake: an `error` event on a child
+    // stream with no listener becomes an uncaughtException and kills the host
+    // process, not just this provider (#1378).
+    guardChildStreams(proc, CODEX_PROCESS_LABEL, (error) => this.failProcess(error));
     proc.once("exit", () => {
       this.handleProcessEnd(new Error("Codex app-server exited unexpectedly"));
     });
@@ -375,6 +381,23 @@ class CodexAppServerProcess {
       throw err;
     }
     this.send({ method: "initialized", params: {} });
+  }
+
+  /**
+   * A pipe to the child broke: resolve it as a provider failure and reap the
+   * child, leaving `alive` false so the next query re-spawns (#1378).
+   */
+  private failProcess(error: Error): void {
+    const proc = this.proc;
+    this.startPromise = null;
+    this.handleProcessEnd(error);
+    if (proc) {
+      try {
+        if (!killWindowsProcessTree(proc.pid)) proc.kill();
+      } catch {
+        // Already gone.
+      }
+    }
   }
 
   private handleProcessEnd(error: Error): void {
@@ -438,9 +461,22 @@ class CodexAppServerProcess {
     }
   }
 
+  /**
+   * Send a JSON-RPC message without waiting for a response.
+   *
+   * A closed or broken stdin is a provider failure, never a throw at the
+   * caller and never an unhandled stream error: both the synchronous throw
+   * and the asynchronous `error`/write-callback paths land in failProcess,
+   * which rejects anything in flight.
+   */
   send(message: RpcMessage): void {
-    if (!this.proc?.stdin || this.proc.stdin.destroyed) return;
-    this.proc.stdin.write(`${JSON.stringify(message)}\n`);
+    const error = writeChildLine(
+      this.proc,
+      `${JSON.stringify(message)}\n`,
+      CODEX_PROCESS_LABEL,
+      (err) => this.failProcess(err),
+    );
+    if (error) this.failProcess(error);
   }
 
   sendAndWait(message: RpcMessage, timeoutMs = RPC_TIMEOUT_MS): Promise<RpcMessage> {

@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
+  CLASSIC_FAVICON_DATA_URL,
+  CLASSIC_FAVICON_SVG,
   FAVICON_PNG_BYTES,
   FAVICON_PNG_DATA_URL,
   FAVICON_SVG,
+  faviconDataUrl,
+  isFaviconStyle,
 } from "./favicon";
 
 describe("production favicon", () => {
@@ -31,5 +35,46 @@ describe("production favicon", () => {
     expect(FAVICON_SVG).toContain(FAVICON_PNG_DATA_URL);
     expect(FAVICON_SVG).not.toContain("<text");
     expect(FAVICON_SVG).not.toContain("#070b14");
+  });
+});
+
+describe("favicon style switcher", () => {
+  test("embeds the historical pre-Totman SVG exactly", () => {
+    // Pinned on purpose: the classic style is an archival asset, byte-identical
+    // to the FAVICON_SVG that shipped at 5b91c543^. A "harmless" reformat of the
+    // template literal would silently ship a different icon under the same name.
+    expect(createHash("sha256").update(CLASSIC_FAVICON_SVG).digest("hex")).toBe(
+      "27d33cff3d4515801f48e1cbaceec777ba802a7d341b22b2c0444d82b303cb49",
+    );
+  });
+
+  test("faviconDataUrl('totman') returns exact production PNG data URL", () => {
+    expect(faviconDataUrl("totman")).toBe(FAVICON_PNG_DATA_URL);
+  });
+
+  test("faviconDataUrl('classic') returns base64 SVG data URL matching historical asset", () => {
+    const dataUrl = faviconDataUrl("classic");
+    expect(dataUrl).toBe(CLASSIC_FAVICON_DATA_URL);
+    expect(dataUrl).toStartWith("data:image/svg+xml;base64,");
+
+    const base64Payload = dataUrl.replace("data:image/svg+xml;base64,", "");
+    const decodedSvg = atob(base64Payload);
+
+    expect(decodedSvg).toBe(CLASSIC_FAVICON_SVG);
+    expect(decodedSvg).toContain("#070b14");
+    expect(decodedSvg).toContain("#E0BA55");
+    expect(decodedSvg).toContain("<text");
+    expect(decodedSvg).toContain(">P</text>");
+  });
+
+  test("isFaviconStyle validates only known styles", () => {
+    expect(isFaviconStyle("totman")).toBe(true);
+    expect(isFaviconStyle("classic")).toBe(true);
+    expect(isFaviconStyle("")).toBe(false);
+    expect(isFaviconStyle("unknown")).toBe(false);
+    expect(isFaviconStyle(null)).toBe(false);
+    expect(isFaviconStyle(undefined)).toBe(false);
+    expect(isFaviconStyle(123)).toBe(false);
+    expect(isFaviconStyle({})).toBe(false);
   });
 });

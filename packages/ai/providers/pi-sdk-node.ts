@@ -24,11 +24,13 @@ import {
 	killWindowsProcessTree,
 	resolveWindowsCommandShim,
 } from "./command-path.ts";
+import { guardChildStreams, writeChildLine } from "./child-io.ts";
 
 // Re-export mapPiEvent from shared (runtime-agnostic)
 export { mapPiEvent } from "./pi-events.ts";
 
 const PROVIDER_NAME = "pi-sdk";
+const PI_PROCESS_LABEL = "Pi process";
 
 // ---------------------------------------------------------------------------
 // JSONL subprocess wrapper (Node.js)
@@ -36,7 +38,8 @@ const PROVIDER_NAME = "pi-sdk";
 
 type EventListener = (event: Record<string, unknown>) => void;
 
-class PiProcessNode {
+/** Exported for the stdio-failure regression tests (#1378). */
+export class PiProcessNode {
 	private proc: ChildProcess | null = null;
 	private listeners: EventListener[] = [];
 	private pendingRequests = new Map<
@@ -61,9 +64,12 @@ class PiProcessNode {
 		let proc: ChildProcess;
 		try {
 			const [file, ...args] = command;
+			// stderr is "ignore", not "pipe": we never read it, and an
+			// un-drained stderr pipe deadlocks the child once its buffer fills
+			// (same reasoning as codex-app-server.ts).
 			proc = spawn(file, args, {
 				cwd,
-				stdio: ["pipe", "pipe", "pipe"],
+				stdio: ["pipe", "pipe", "ignore"],
 			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
@@ -72,6 +78,10 @@ class PiProcessNode {
 		}
 
 		this.proc = proc;
+		// Cover every pipe BEFORE the spawn handshake: an `error` event on a
+		// child stream with no listener becomes an uncaughtException and kills
+		// the host agent process, not just this provider (#1378).
+		guardChildStreams(proc, PI_PROCESS_LABEL, (error) => this.failProcess(error));
 		proc.once("exit", () => {
 			this.handleProcessEnd(new Error("Pi process exited unexpectedly"));
 		});
@@ -96,6 +106,24 @@ class PiProcessNode {
 			proc.once("spawn", onSpawn);
 			proc.once("error", onError);
 		});
+	}
+
+	/**
+	 * A pipe to the child broke. Resolve it as a provider failure: reject
+	 * everything in flight, tell listeners the process ended, and reap the
+	 * child so it cannot linger with an unusable RPC channel. `alive` flips
+	 * false, so the next query re-spawns a fresh process.
+	 */
+	private failProcess(error: Error): void {
+		const proc = this.proc;
+		this.handleProcessEnd(error);
+		if (proc) {
+			try {
+				if (!killWindowsProcessTree(proc.pid)) proc.kill();
+			} catch {
+				// Already gone.
+			}
+		}
 	}
 
 	private handleProcessEnd(error: Error): void {
@@ -152,9 +180,23 @@ class PiProcessNode {
 		}
 	}
 
+	/**
+	 * Send a command without waiting for a response.
+	 *
+	 * A closed or broken stdin is a provider failure, never a throw at the
+	 * caller and never an unhandled stream error: both the synchronous throw
+	 * and the asynchronous `error`/write-callback paths land in failProcess,
+	 * which rejects anything in flight (including the `sendAndWait` request
+	 * this call may be carrying).
+	 */
 	send(command: Record<string, unknown>): void {
-		if (!this.proc?.stdin || this.proc.stdin.destroyed) return;
-		this.proc.stdin.write(`${JSON.stringify(command)}\n`);
+		const error = writeChildLine(
+			this.proc,
+			`${JSON.stringify(command)}\n`,
+			PI_PROCESS_LABEL,
+			(err) => this.failProcess(err),
+		);
+		if (error) this.failProcess(error);
 	}
 
 	sendAndWait(

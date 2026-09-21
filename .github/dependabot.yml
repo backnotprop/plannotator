@@ -1,0 +1,28 @@
+version: 2
+
+# Dependabot owns Bun workspace updates. Renovate owns GitHub Actions.
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: America/Los_Angeles
+    # Delay routine releases long enough for ecosystem problems to surface.
+    # Dependabot security updates do not observe this cooldown.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "@types/vscode"          # pinned to engines.vscode ^1.85.0
+      - dependency-name: "@earendil-works/pi-coding-agent"  # security floor >=0.79.1, pinned by startup.test.ts
+      - dependency-name: "katex"
+        versions: [">=0.17.0"]                     # mermaid pins ^0.16; see packages/ui/HANDOFF.md
+    groups:
+      bun-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

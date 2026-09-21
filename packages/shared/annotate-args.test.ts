@@ -12,6 +12,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -25,6 +27,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -38,6 +42,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -51,6 +57,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -64,6 +72,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -77,6 +87,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -96,6 +108,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -109,6 +123,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -122,6 +138,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -135,6 +153,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -148,6 +168,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: true,
+      app: false,
+      static: false,
     });
   });
 
@@ -161,6 +183,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: true,
+      app: false,
+      static: false,
     });
   });
 
@@ -174,6 +198,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -187,6 +213,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -200,6 +228,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -213,6 +243,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -232,6 +264,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -245,6 +279,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -258,6 +294,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -271,6 +309,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -289,6 +329,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -302,6 +344,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -315,6 +359,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -328,6 +374,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -346,6 +394,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -359,6 +409,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -372,6 +424,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -385,6 +439,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -398,6 +454,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: true,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -411,6 +469,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: true,
       renderMarkdown: false,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -424,6 +484,8 @@ describe("parseAnnotateArgs", () => {
       renderHtml: false,
       renderMarkdown: true,
       noJina: false,
+      app: false,
+      static: false,
     });
   });
 
@@ -437,6 +499,32 @@ describe("parseAnnotateArgs", () => {
       renderHtml: true,
       renderMarkdown: true,
       noJina: false,
+      app: false,
+      static: false,
     });
+  });
+});
+
+describe("parseAnnotateArgs: live flags (--app / --static)", () => {
+  test("recognized only when the host opts in via liveFlags", () => {
+    const parsed = parseAnnotateArgs("http://localhost:5173 --app", { liveFlags: true });
+    expect(parsed.filePath).toBe("http://localhost:5173");
+    expect(parsed.app).toBe(true);
+    expect(parsed.static).toBe(false);
+
+    const staticParsed = parseAnnotateArgs("--static http://localhost:5173", { liveFlags: true });
+    expect(staticParsed.filePath).toBe("http://localhost:5173");
+    expect(staticParsed.static).toBe(true);
+    expect(staticParsed.app).toBe(false);
+  });
+
+  test("without liveFlags the tokens stay in the path (honest unsupported-flag error downstream)", () => {
+    // A host that cannot act on --app must not silently strip it: leaving the
+    // token in the path preserves the legacy "File not found: --app ..."
+    // failure instead of quietly ignoring the user's flag.
+    const parsed = parseAnnotateArgs("http://localhost:5173 --app");
+    expect(parsed.filePath).toBe("http://localhost:5173 --app");
+    expect(parsed.app).toBe(false);
+    expect(parsed.static).toBe(false);
   });
 });

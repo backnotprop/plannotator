@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { SemanticTarget } from './blockTargeting';
 
 const hasDom = typeof document !== 'undefined';
 const navigationModule = hasDom ? await import('./vimNavigation') : null;
@@ -31,7 +32,7 @@ function createDocumentFixture(): HTMLElement {
 }
 
 function targetByKey(
-  targets: readonly import('./blockTargeting').SemanticTarget[],
+  targets: readonly SemanticTarget[],
   key: string,
 ) {
   const target = targets.find((candidate) => candidate.key === key);

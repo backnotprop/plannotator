@@ -5,7 +5,12 @@ import {
   getAnnotationCountBySection,
   type TocItem,
 } from '../utils/annotationHelpers';
-import { useScrollViewport } from '../hooks/useScrollViewport';
+import {
+  getScrollViewportRect,
+  getScrollViewportTop,
+  scrollViewportTo,
+  useScrollViewport,
+} from '../hooks/useScrollViewport';
 
 interface TableOfContentsProps {
   blocks: Block[];
@@ -82,17 +87,21 @@ export function TableOfContents({
       if (target && scrollViewport) {
         const scrollContainer = scrollViewport;
         const headerOffset = 80; // sticky header (h-12) + breathing room
-        const containerRect = scrollContainer.getBoundingClientRect();
+        const containerRect = getScrollViewportRect(scrollContainer);
         const targetRect = target.getBoundingClientRect();
         const offsetPosition =
-          scrollContainer.scrollTop + (targetRect.top - containerRect.top) - headerOffset;
-        scrollContainer.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+          getScrollViewportTop(scrollContainer) + (targetRect.top - containerRect.top) - headerOffset;
+        scrollViewportTo(scrollContainer, { top: offsetPosition, behavior: 'smooth' });
       }
     },
     [onNavigate, scrollViewport]
   );
 
-  if (tocItems.length === 0) {
+  // A linked document with no headings of its own — most obviously a raw-HTML
+  // one, which is never parsed into blocks — still needs the "Viewing / Back
+  // to …" header, which lives here. Without it, opening such a document from
+  // a link leaves no visible way back.
+  if (tocItems.length === 0 && !linkedDocFilepath) {
     return null;
   }
 

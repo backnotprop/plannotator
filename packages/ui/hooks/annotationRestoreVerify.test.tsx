@@ -59,8 +59,12 @@ function Harness({
   });
   return (
     <div ref={containerRef}>
+      <div className="annotation-exclude" data-annotation-exclude>
+        <span data-testid="excluded-comment">Comment</span>
+      </div>
       <p data-block-id="b1">hello world</p>
       <p data-block-id="b2">goodbye world</p>
+      <p data-block-id="b3">Comment</p>
     </div>
   );
 }
@@ -135,5 +139,40 @@ describe('content-verifying restore', () => {
     expect(reported).toEqual([{ id: ann.id, restored: 'hello w' }]);
     // Nothing painted for this annotation.
     expect(paintedText(hook.current!, ann.id)).toBe('');
+  });
+
+  test.skipIf(!hasDom)('text fallback ignores explicitly excluded controls', async () => {
+    const hook = await mountHarness(true);
+    const ann: Annotation = {
+      id: 'ann-comment',
+      blockId: 'b3',
+      startOffset: 0,
+      endOffset: 7,
+      type: AnnotationType.COMMENT,
+      originalText: 'Comment',
+      createdA: 1,
+    };
+    await act(async () => {
+      hook.current!.applyAnnotations([ann]);
+    });
+
+    expect(document.querySelector('[data-annotation-exclude] mark')).toBeNull();
+    expect(document.querySelector('[data-block-id="b3"] mark')?.textContent).toBe('Comment');
+  });
+
+  test.skipIf(!hasDom)('web-highlighter rejects direct selection inside excluded controls', async () => {
+    const hook = await mountHarness(true);
+    const text = document.querySelector('[data-testid="excluded-comment"]')?.firstChild;
+    if (!text) throw new Error('Expected excluded control text');
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, text.textContent?.length ?? 0);
+
+    await act(async () => {
+      hook.current!.highlightRange(range);
+    });
+
+    expect(document.querySelector('[data-annotation-exclude] mark')).toBeNull();
+    expect(hook.current?.toolbarState).toBeNull();
   });
 });

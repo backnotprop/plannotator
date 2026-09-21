@@ -8,16 +8,29 @@ import { REVIEW_ALL_FILES_PANEL_ID } from './reviewPanelTypes';
 /**
  * Split/Unified diff toggle + options, pinned to the right of the dock tab strip
  * (dockview's `rightHeaderActionsComponent`). Stays visible while the tabs
- * scroll. Reads/writes the global `configStore` plus the review state context
- * (for the all-files collapse toggle).
+ * scroll. Desktop reads/writes the global `configStore`; compact-touch review
+ * shells provide a session-only style through review state so opening a review
+ * on a phone never changes the user's desktop preference.
  *
  * Rendered per group; for now it shows in every group's tab strip (the diff
  * setting is global). Scoping it to the diff-bearing group is a later refinement
  * if splitting proves it noisy.
  */
 export const ReviewDockRightActions: React.FC<IDockviewHeaderActionsProps> = (props) => {
-  const diffStyle = useConfigValue('diffStyle');
+  const storedDiffStyle = useConfigValue('diffStyle');
   const state = useReviewStateOptional();
+
+  // Dockview's tab strip is intentionally only 33px tall. Compact-touch
+  // controls need a 44px target, so placing them here makes their focus and
+  // hit geometry overlap the first file header below. Keep this dense control
+  // cluster on fine-pointer layouts; compact review exposes display settings
+  // through the ordinary Settings surface instead.
+  if (state?.isCompactTouchLayout) return null;
+
+  const diffStyle = state?.diffStyle ?? storedDiffStyle;
+  const setDiffStyle = state?.onDiffStyleChange ?? ((style: 'split' | 'unified') => {
+    configStore.set('diffStyle', style);
+  });
   // Collapse/expand-all files — only meaningful (and only shown) when this
   // group's active panel is the All files view.
   const showCollapseAll = !!state && props.activePanel?.id === REVIEW_ALL_FILES_PANEL_ID;
@@ -57,7 +70,7 @@ export const ReviewDockRightActions: React.FC<IDockviewHeaderActionsProps> = (pr
       )}
       <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
         <button
-          onClick={() => configStore.set('diffStyle', 'split')}
+          onClick={() => setDiffStyle('split')}
           className={`px-2 py-1 text-xs rounded-md transition-colors ${
             diffStyle === 'split'
               ? 'bg-background text-foreground shadow-sm'
@@ -67,7 +80,7 @@ export const ReviewDockRightActions: React.FC<IDockviewHeaderActionsProps> = (pr
           Split
         </button>
         <button
-          onClick={() => configStore.set('diffStyle', 'unified')}
+          onClick={() => setDiffStyle('unified')}
           className={`px-2 py-1 text-xs rounded-md transition-colors ${
             diffStyle === 'unified'
               ? 'bg-background text-foreground shadow-sm'
@@ -77,7 +90,10 @@ export const ReviewDockRightActions: React.FC<IDockviewHeaderActionsProps> = (pr
           Unified
         </button>
         <div className="w-px h-4 bg-border/60 mx-0.5" />
-        <DiffOptionsPopover />
+        <DiffOptionsPopover
+          diffStyle={diffStyle}
+          onDiffStyleChange={setDiffStyle}
+        />
       </div>
     </div>
   );

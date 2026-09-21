@@ -22,8 +22,8 @@ Stop hooks automatically. The Codex home is `$CODEX_HOME` when set, falling back
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
-Codex hooks are currently disabled on Windows in the official Codex docs. The Windows installer does not enable them
-automatically; it only prints manual guidance for future/manual experimentation.
+Codex hooks on native Windows are experimental. The Windows installer does not enable them automatically; it prints
+the manual setup steps (`[features] hooks = true` plus the `Stop` hook) for users who want to try them.
 
 ## Enable Codex hooks
 

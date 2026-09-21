@@ -37,6 +37,8 @@ export type BunAgentTerminalBridge = {
 export async function createBunAgentTerminalBridge(args: {
   enabled: boolean;
   cwd: string;
+  /** Loopback-bound session published across the tailnet via --tailscale. */
+  tailnetPublished?: boolean;
 }): Promise<BunAgentTerminalBridge> {
   if (!args.enabled) {
     return createDisabledBridge({
@@ -45,11 +47,22 @@ export async function createBunAgentTerminalBridge(args: {
     });
   }
 
+  // Remote mode and --tailscale sessions share one exposure: the PTY is
+  // reachable by network peers, and its token is not an auth boundary
+  // (wsPath ships in the /api/plan capability payload). Both therefore share
+  // the same explicit opt-in.
   if (isRemoteSession() && !isAgentTerminalRemoteEnabled()) {
     return createDisabledBridge({
       enabled: false,
       reason: "remote-disabled",
       message: "Agent terminal is disabled in remote mode. Set PLANNOTATOR_AGENT_TERMINAL_REMOTE=1 to enable it.",
+    });
+  }
+  if (args.tailnetPublished && !isAgentTerminalRemoteEnabled()) {
+    return createDisabledBridge({
+      enabled: false,
+      reason: "remote-disabled",
+      message: "Agent terminal is disabled for --tailscale sessions because the session is reachable across your tailnet. Set PLANNOTATOR_AGENT_TERMINAL_REMOTE=1 to enable it.",
     });
   }
 

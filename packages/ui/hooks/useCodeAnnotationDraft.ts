@@ -16,6 +16,17 @@ interface DraftData {
   descriptionAnnotations?: Annotation[];
   commentAnnotations?: CommentAnnotation[];
   viewedFiles?: string[];
+  /**
+   * Files the reviewer manually un-viewed, which auto-mark-viewed must never
+   * re-check (the "come back to this" contract). Additive and optional: a
+   * draft written before this field restores fine, and a draft carrying it is
+   * ignored gracefully by an older build.
+   *
+   * Deliberately absent from `isEmpty` and from the engagement signal — a
+   * session whose only state is suppression is still an empty draft and is
+   * still cleared, keeping #948's clear-everything semantics untouched.
+   */
+  autoViewSuppressed?: string[];
   draftGeneration?: number;
   ts: number;
 }
@@ -40,13 +51,14 @@ interface UseCodeAnnotationDraftOptions {
   descriptionAnnotations?: Annotation[];
   commentAnnotations?: CommentAnnotation[];
   viewedFiles: Set<string>;
+  autoViewSuppressed?: Set<string>;
   isApiMode: boolean;
   submitted: boolean;
 }
 
 interface UseCodeAnnotationDraftResult {
   draftBanner: { count: number; viewedCount: number; timeAgo: string } | null;
-  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[] };
+  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[] };
   getDraftGeneration: () => number;
   dismissDraft: () => void;
 }
@@ -56,6 +68,7 @@ export function useCodeAnnotationDraft({
   descriptionAnnotations = [],
   commentAnnotations = [],
   viewedFiles,
+  autoViewSuppressed,
   isApiMode,
   submitted,
 }: UseCodeAnnotationDraftOptions): UseCodeAnnotationDraftResult {
@@ -145,6 +158,9 @@ export function useCodeAnnotationDraft({
         descriptionAnnotations,
         commentAnnotations,
         viewedFiles: [...viewedFiles],
+        ...(autoViewSuppressed && autoViewSuppressed.size > 0
+          ? { autoViewSuppressed: [...autoViewSuppressed] }
+          : {}),
         draftGeneration,
         ts: Date.now(),
       };
@@ -155,7 +171,7 @@ export function useCodeAnnotationDraft({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, isApiMode, submitted]);
+  }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, autoViewSuppressed, isApiMode, submitted]);
 
   const restoreDraft = useCallback(() => {
     // Cancel any pending autosave so it can't fire with pre-restore state and
@@ -169,6 +185,7 @@ export function useCodeAnnotationDraft({
       descriptionAnnotations: data?.descriptionAnnotations ?? [],
       commentAnnotations: data?.commentAnnotations ?? [],
       viewedFiles: data?.viewedFiles ?? [],
+      autoViewSuppressed: data?.autoViewSuppressed ?? [],
     };
   }, []);
 

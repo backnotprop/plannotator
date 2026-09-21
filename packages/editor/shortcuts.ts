@@ -1,12 +1,17 @@
 import {
+  annotationModeShortcuts,
   annotationPanelShortcuts,
   annotationToolbarShortcuts,
   annotateSidebarShortcuts,
   commentPopoverShortcuts,
+  decisionControlShortcuts,
   createShortcutRegistry,
   createShortcutScopeHook,
   defineShortcutScope,
+  documentViewShortcuts,
   goalSetupShortcuts,
+  historyShortcuts,
+  htmlAnnotateShortcuts,
   imageAnnotatorShortcuts,
   inputMethodShortcuts,
   viewerShortcuts,
@@ -26,9 +31,10 @@ export const planEditorShortcuts = defineShortcutScope({
       displayOrder: 10,
     },
     submitAnnotations: {
-      description: 'Send annotations',
+      description: 'Done / Send feedback, whichever the header shows',
       bindings: ['Mod+Enter'],
       section: 'Actions',
+      hint: 'Fires the adaptive header primary: Done (or Approve in gate mode) with nothing to send, Send Feedback otherwise.',
       displayOrder: 10,
     },
     quickSave: {
@@ -79,13 +85,17 @@ const annotateEditorSettingsShortcuts = defineShortcutScope({
 });
 
 const sharedPlanSurfaceShortcuts = [
+  documentViewShortcuts,
   inputMethodShortcuts,
+  htmlAnnotateShortcuts,
+  annotationModeShortcuts,
   annotationToolbarShortcuts,
   viewerShortcuts,
   vimSelectionShortcuts,
   commentPopoverShortcuts,
   annotationPanelShortcuts,
   imageAnnotatorShortcuts,
+  historyShortcuts,
 ] as const;
 
 export const planReviewSettingsShortcutRegistry = createShortcutRegistry([
@@ -96,6 +106,7 @@ export const planReviewSettingsShortcutRegistry = createShortcutRegistry([
 export const annotateSettingsShortcutRegistry = createShortcutRegistry([
   annotateEditorSettingsShortcuts,
   annotateSidebarShortcuts,
+  decisionControlShortcuts,
   ...sharedPlanSurfaceShortcuts,
 ] as const);
 

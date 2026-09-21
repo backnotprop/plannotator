@@ -10,8 +10,8 @@ import { EDIT_MODE_DEMO_POSTER_SRC, EDIT_MODE_DEMO_VIDEO_SRC } from './editModeD
  * feature and let the user turn the real setting on now or keep it off.
  * Either action marks the announcement seen; the App owns both callbacks.
  *
- * LAST in the first-run dialog chain (guide intro, then look-and-feel, then
- * review setup, then this). The App gates rendering through
+ * LAST in the first-run dialog chain (guide intro, look-and-feel, review
+ * setup, analysis chooser, then this). The App gates rendering through
  * editModeAnnouncementCanShow so the chain dialogs never stack.
  */
 

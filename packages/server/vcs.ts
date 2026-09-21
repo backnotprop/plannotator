@@ -6,6 +6,7 @@ import {
   createGitProvider,
   createJjProvider,
   createVcsApi,
+  resolveAvailableDiffType,
   resolveInitialDiffType,
 } from "@plannotator/shared/vcs-core";
 import {
@@ -41,7 +42,7 @@ const p4Provider: VcsProvider = {
 };
 
 const api = createVcsApi([
-  createJjProvider(jjRuntime),
+  createJjProvider(jjRuntime, gitRuntime),
   createGitButlerProvider(gitButlerRuntime),
   createGitProvider(gitRuntime),
   p4Provider,
@@ -61,9 +62,11 @@ export const {
   stageFile,
   unstageFile,
   resolveVcsCwd,
+  vcsSupportsSnapshot,
+  materializeVcsSnapshot,
 } = api;
 
-export { resolveInitialDiffType, gitRuntime };
+export { resolveAvailableDiffType, resolveInitialDiffType, gitRuntime };
 
 export type {
   DiffOption,

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { configStore } from '../config/configStore';
 import { readThemePairCookies, writeThemePairCookies } from '../config/settings';
 import { useConfigValue } from '../config/useConfig';
+import { faviconDataUrl } from '@plannotator/core/favicon';
 import { storage } from '../utils/storage';
 import {
   BUILT_IN_THEMES,
@@ -16,6 +17,7 @@ import {
   type ThemePair,
 } from '../utils/themeRegistry';
 import type { Mode } from './themeModes';
+import { usePrintMedia } from '../hooks/usePrintMedia';
 
 // Kept here because published consumers already import Mode from ThemeProvider.
 export type { Mode } from './themeModes';
@@ -36,6 +38,12 @@ type ThemeProviderState = {
   darkTheme: string;
   setHalfTheme: (half: ThemeHalf, theme: string) => void;
   availableThemes: ThemeInfo[];
+  /**
+   * Whether this provider owns the document's favicon. Published so the Settings
+   * UI can hide the favicon control on hosts that did not opt in: a knob that
+   * changes nothing is worse than no knob.
+   */
+  manageFavicon: boolean;
 };
 
 const ThemeProviderContext = createContext<ThemeProviderState>({
@@ -51,6 +59,7 @@ const ThemeProviderContext = createContext<ThemeProviderState>({
   darkTheme: 'plannotator',
   setHalfTheme: () => null,
   availableThemes: BUILT_IN_THEMES,
+  manageFavicon: false,
 });
 
 /** Sync theme classes on <html> without stripping non-theme classes (e.g. transitions-ready). */
@@ -94,6 +103,18 @@ interface ThemeProviderProps {
    * `plannotator-dark-theme`; these props rename only the two legacy values.
    */
   colorThemeStorageKey?: string;
+  /**
+   * Opt in to letting this provider own `<link rel="icon">` on the document.
+   *
+   * OFF by default, and deliberately so: `@plannotator/ui` is installed into
+   * host applications with their own branding, and a mounted provider must not
+   * silently replace a host page's favicon with Plannotator's. Plannotator's own
+   * apps pass `manageFavicon`; hosts opt in only if they want the same feature.
+   *
+   * The value also gates the Settings favicon control (see ThemeTab), so a host
+   * that leaves it off never renders a switch that would do nothing.
+   */
+  manageFavicon?: boolean;
 }
 
 export function ThemeProvider({
@@ -102,6 +123,7 @@ export function ThemeProvider({
   defaultColorTheme = 'plannotator',
   storageKey = 'plannotator-theme',
   colorThemeStorageKey = 'plannotator-color-theme',
+  manageFavicon = false,
 }: ThemeProviderProps) {
   const legacyKeys = useMemo(
     () => ({ mode: storageKey, colorTheme: colorThemeStorageKey }),
@@ -124,6 +146,26 @@ export function ThemeProvider({
   const storePair = useConfigValue('themePair');
   const pair = pendingSeed.current ?? storePair;
   const mode = pair.mode;
+  const faviconStyle = useConfigValue('faviconStyle');
+
+  useEffect(() => {
+    if (!manageFavicon) return;
+    if (typeof document === 'undefined') return;
+    let link = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    if (faviconStyle === 'classic') {
+      link.type = 'image/svg+xml';
+      link.removeAttribute('sizes');
+    } else {
+      link.type = 'image/png';
+      link.setAttribute('sizes', '64x64');
+    }
+    link.href = faviconDataUrl(faviconStyle);
+  }, [faviconStyle, manageFavicon]);
 
   // Hand the resolved pair to the store as a SEED, not a user choice: seeding
   // writes memory + cookies only. Routing it through set() would queue a
@@ -140,11 +182,36 @@ export function ThemeProvider({
 
   const [systemIsLight, setSystemIsLight] = useState(getSystemIsLight);
 
+  // Paper is white: printing renders the LIGHT half of the user's pair, on
+  // every surface at once. That is what the print stylesheet has always
+  // assumed (white ground, near-black text) and what a dark-palette page could
+  // not deliver on its own — a Mermaid label, drawn as HTML inside
+  // `<foreignObject>`, took the stylesheet's near-black text onto a near-black
+  // node fill and printed illegibly. Light-mode users see no change.
+  const printThemeRef = useRef<{ enter: () => void; exit: () => void }>({ enter: () => {}, exit: () => {} });
+  const printing = usePrintMedia({
+    // Applied from inside `beforeprint`, because the print snapshot is taken
+    // before React would flush the state update below. The re-render then
+    // applies the same classes, so the two can never disagree.
+    onEnter: () => printThemeRef.current.enter(),
+    onExit: () => printThemeRef.current.exit(),
+  });
+
   // Keep the OS-resolved preference separate from the half it selects.
-  const preferredMode: 'dark' | 'light' =
+  const screenPreferredMode: 'dark' | 'light' =
     mode === 'system' ? (systemIsLight ? 'light' : 'dark') : mode;
+  const preferredMode: 'dark' | 'light' = printing ? 'light' : screenPreferredMode;
   const colorTheme = resolvePairTheme(pair, preferredMode);
   const resolvedMode = resolveThemeMode(colorTheme, preferredMode);
+
+  const applyHalf = useCallback((half: ThemeHalf) => {
+    const theme = resolvePairTheme(configStore.get('themePair'), half);
+    applyThemeClasses(theme, resolveThemeMode(theme, half));
+  }, []);
+  printThemeRef.current = {
+    enter: () => applyHalf('light'),
+    exit: () => applyHalf(screenPreferredMode),
+  };
 
   // Read by the legacy setColorTheme, which must target the half on screen
   // without re-creating its callback on every mode change.
@@ -243,7 +310,8 @@ export function ThemeProvider({
     darkTheme: pair.dark,
     setHalfTheme,
     availableThemes: BUILT_IN_THEMES,
-  }), [mode, preferredMode, resolvedMode, colorTheme, pair.light, pair.dark, setMode, setColorTheme, setHalfTheme]);
+    manageFavicon,
+  }), [mode, preferredMode, resolvedMode, colorTheme, pair.light, pair.dark, setMode, setColorTheme, setHalfTheme, manageFavicon]);
 
   return (
     <ThemeProviderContext.Provider value={value}>

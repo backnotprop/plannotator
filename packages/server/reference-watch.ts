@@ -1,42 +1,54 @@
-import chokidar, { type FSWatcher as ChokidarWatcher } from "chokidar";
-import { existsSync, statSync, watch, type FSWatcher as NodeWatcher } from "fs";
-import { dirname, isAbsolute, relative, resolve } from "path";
+import { existsSync, statSync } from "fs";
+import { dirname, isAbsolute, relative } from "path";
+import {
+	createExactFileWatchListener,
+	createFileBrowserWatchRegistry,
+	type FileBrowserChangeEvent,
+	type FileBrowserWatchRegistry,
+	type FileBrowserWatchTarget,
+	type WatchEntryHandle,
+} from "@plannotator/shared/file-browser-watch-core";
 import { isFileBrowserExcludedPath } from "@plannotator/shared/reference-common";
 import { resolveUserPath } from "@plannotator/shared/resolve-file";
 import { getGitMetadataWatchPaths } from "@plannotator/shared/workspace-status";
 
-interface FileBrowserChangeEvent {
-	type: "ready" | "changed";
-	dirPath: string;
-	reason: "files" | "git" | "initial";
-	timestamp: number;
-}
-
-interface WatchEntry {
-	key: string;
-	subscribers: Map<ReadableStreamDefaultController, string>;
-	contentWatcher: ChokidarWatcher | NodeWatcher | null;
-	gitWatcher: ChokidarWatcher | null;
-	debounceTimer: ReturnType<typeof setTimeout> | null;
-}
-
-interface WatchTarget {
-	key: string;
-	watchPath: string;
-	clientDirPath: string;
-	watchGit: boolean;
-	exactFilePath?: string;
-	ignored?: (path: string) => boolean;
-}
+// The watcher engine (deferred warmup, reconnect grace, native recursive
+// backend) lives in @plannotator/shared/file-browser-watch-core (#1313).
+// This module keeps only the Bun transport: request parsing, the SSE
+// ReadableStream, and heartbeats.
 
 const HEARTBEAT_MS = 30_000;
-const DEBOUNCE_MS = 180;
-const watchers = new Map<string, WatchEntry>();
 const encoder = new TextEncoder();
 
 function serialize(event: FileBrowserChangeEvent): Uint8Array {
 	return encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
 }
+
+const registry: FileBrowserWatchRegistry<ReadableStreamDefaultController> = createFileBrowserWatchRegistry<ReadableStreamDefaultController>({
+	send: (subscriber, event) => {
+		try {
+			subscriber.enqueue(serialize(event));
+			return true;
+		} catch {
+			return false;
+		}
+	},
+	getGitMetadataWatchPaths,
+});
+
+export { createExactFileWatchListener };
+
+/** Immediate teardown of every live watcher. Server stop and tests. */
+export function closeAllFileBrowserWatchers(): void {
+	registry.closeAll();
+}
+
+/** Tests only. See FileBrowserWatchRegistry.diagnostics/configureForTests. */
+export const __fileBrowserWatchTestHooks = {
+	diagnostics: () => registry.diagnostics(),
+	configure: (overrides: Parameters<FileBrowserWatchRegistry<ReadableStreamDefaultController>["configureForTests"]>[0]) =>
+		registry.configureForTests(overrides),
+};
 
 export function isFileBrowserWatchIgnoredPath(path: string, root: string): boolean {
 	const rel = relative(root, path).replace(/\\/g, "/");
@@ -50,133 +62,6 @@ function isValidDirectory(dirPath: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-function getFileSignature(filePath: string): string {
-	try {
-		const stats = statSync(filePath, { bigint: true });
-		return stats.isDirectory()
-			? "directory"
-			: `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
-	} catch {
-		return "missing";
-	}
-}
-
-export function createExactFileWatchListener(
-	watchPath: string,
-	exactFilePath: string,
-	onChange: () => void,
-): (event: unknown, filename: string | Buffer | null | undefined) => void {
-	let signature = getFileSignature(exactFilePath);
-	return (_event, filename) => {
-		try {
-			const nextSignature = getFileSignature(exactFilePath);
-			// Events on the watched directory itself arrive without a filename, as
-			// null on some platforms and undefined on others (Bun on Linux).
-			const eventMatches = filename == null
-				|| resolve(watchPath, filename.toString()) === exactFilePath;
-			if (eventMatches || nextSignature !== signature) {
-				signature = nextSignature;
-				onChange();
-			}
-		} catch {
-			// A watcher event must never take down the server.
-		}
-	};
-}
-
-function broadcast(entry: WatchEntry, reason: FileBrowserChangeEvent["reason"]): void {
-	for (const [subscriber, clientDirPath] of entry.subscribers) {
-		const payload = serialize({
-			type: "changed",
-			dirPath: clientDirPath,
-			reason,
-			timestamp: Date.now(),
-		});
-		try {
-			subscriber.enqueue(payload);
-		} catch {
-			entry.subscribers.delete(subscriber);
-		}
-	}
-}
-
-function scheduleBroadcast(entry: WatchEntry, reason: "files" | "git"): void {
-	if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
-	entry.debounceTimer = setTimeout(() => {
-		entry.debounceTimer = null;
-		broadcast(entry, reason);
-	}, DEBOUNCE_MS);
-}
-
-function closeWatcher(entry: WatchEntry): void {
-	if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
-	void entry.contentWatcher?.close();
-	void entry.gitWatcher?.close();
-	if (watchers.get(entry.key) === entry) {
-		watchers.delete(entry.key);
-	}
-}
-
-function releaseSubscriber(entry: WatchEntry, controller: ReadableStreamDefaultController): void {
-	entry.subscribers.delete(controller);
-	if (entry.subscribers.size === 0) closeWatcher(entry);
-}
-
-function ensureWatcher(target: WatchTarget): WatchEntry {
-	const existing = watchers.get(target.key);
-	if (existing) return existing;
-
-	const entry: WatchEntry = {
-		key: target.key,
-		subscribers: new Map(),
-		contentWatcher: null,
-		gitWatcher: null,
-		debounceTimer: null,
-	};
-
-	if (target.exactFilePath) {
-		entry.contentWatcher = watch(
-			target.watchPath,
-			{ persistent: true },
-			createExactFileWatchListener(target.watchPath, target.exactFilePath, () => scheduleBroadcast(entry, "files")),
-		);
-		entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
-	} else {
-		entry.contentWatcher = chokidar.watch(target.watchPath, {
-			ignoreInitial: true,
-			persistent: true,
-			ignored: target.ignored,
-			awaitWriteFinish: {
-				stabilityThreshold: 120,
-				pollInterval: 30,
-			},
-		});
-		entry.contentWatcher.on("all", () => {
-			scheduleBroadcast(entry, "files");
-		});
-		entry.contentWatcher.on("error", () => scheduleBroadcast(entry, "files"));
-	}
-
-	const gitWatchPaths = target.watchGit
-		? getGitMetadataWatchPaths(target.watchPath)
-		: [];
-	if (gitWatchPaths.length > 0) {
-		entry.gitWatcher = chokidar.watch(gitWatchPaths, {
-			ignoreInitial: true,
-			persistent: true,
-			awaitWriteFinish: {
-				stabilityThreshold: 80,
-				pollInterval: 30,
-			},
-		});
-		entry.gitWatcher.on("all", () => scheduleBroadcast(entry, "git"));
-		entry.gitWatcher.on("error", () => scheduleBroadcast(entry, "git"));
-	}
-
-	watchers.set(target.key, entry);
-	return entry;
 }
 
 function isValidFileTarget(filePath: string): boolean {
@@ -200,7 +85,7 @@ export function handleFileBrowserFilesStream(
 		return Response.json({ error: "Provide exactly one of dirPath or filePath" }, { status: 400 });
 	}
 
-	const targets = new Map<string, WatchTarget>();
+	const targets = new Map<string, FileBrowserWatchTarget & { clientDirPath: string }>();
 	if (rawDirPaths.length > 0) {
 		for (const rawDirPath of rawDirPaths) {
 			const dirPath = resolveUserPath(rawDirPath);
@@ -239,8 +124,8 @@ export function handleFileBrowserFilesStream(
 	}
 
 	options?.disableIdleTimeout?.();
-	const subscriptions = [...targets.values()].map((target) => ({
-		entry: ensureWatcher(target),
+	const subscriptions: Array<{ handle: WatchEntryHandle; clientDirPath: string }> = [...targets.values()].map((target) => ({
+		handle: registry.ensure(target),
 		clientDirPath: target.clientDirPath,
 	}));
 
@@ -249,8 +134,8 @@ export function handleFileBrowserFilesStream(
 	const stream = new ReadableStream({
 		start(controller) {
 			controllerRef = controller;
-			for (const { entry, clientDirPath } of subscriptions) {
-				entry.subscribers.set(controller, clientDirPath);
+			for (const { handle, clientDirPath } of subscriptions) {
+				registry.attach(handle, controller, clientDirPath);
 				controller.enqueue(serialize({
 					type: "ready",
 					dirPath: clientDirPath,
@@ -262,7 +147,7 @@ export function handleFileBrowserFilesStream(
 				try {
 					controller.enqueue(encoder.encode(": heartbeat\n\n"));
 				} catch {
-					for (const { entry } of subscriptions) releaseSubscriber(entry, controller);
+					for (const { handle } of subscriptions) registry.release(handle, controller);
 					if (heartbeatTimer) clearInterval(heartbeatTimer);
 				}
 			}, HEARTBEAT_MS);
@@ -270,7 +155,7 @@ export function handleFileBrowserFilesStream(
 		cancel() {
 			if (heartbeatTimer) clearInterval(heartbeatTimer);
 			if (controllerRef) {
-				for (const { entry } of subscriptions) releaseSubscriber(entry, controllerRef);
+				for (const { handle } of subscriptions) registry.release(handle, controllerRef);
 			}
 		},
 	});

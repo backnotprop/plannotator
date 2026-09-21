@@ -1,5 +1,8 @@
 import React, { useLayoutEffect, useState, useRef } from 'react';
-import { useScrollViewport } from '../hooks/useScrollViewport';
+import {
+  addScrollViewportListener,
+  useScrollViewport,
+} from '../hooks/useScrollViewport';
 
 interface PinpointOverlayProps {
   target: { element: HTMLElement; label: string } | null;
@@ -49,15 +52,17 @@ export const PinpointOverlay: React.FC<PinpointOverlayProps> = ({ target, contai
     // delivers its viewport.
     window.addEventListener('resize', handleUpdate, { passive: true });
 
-    // The scroll element is the OverlayScrollArea viewport. Falling back to
-    // <main> or window would attach to the wrong node and the overlay
-    // position would drift silently on scroll.
-    scrollViewport?.addEventListener('scroll', handleUpdate, { passive: true });
+    // The shared viewport is the nested main element on desktop and the page
+    // scroller on compact touch layouts. The helper binds the latter to the
+    // window scroll event so the overlay does not drift as Safari chrome moves.
+    const removeScrollListener = scrollViewport
+      ? addScrollViewportListener(scrollViewport, handleUpdate)
+      : undefined;
 
     return () => {
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener('resize', handleUpdate);
-      scrollViewport?.removeEventListener('scroll', handleUpdate);
+      removeScrollListener?.();
     };
   }, [target, containerRef, scrollViewport]);
 

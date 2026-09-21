@@ -1,12 +1,73 @@
 /**
- * Tater name generator — pure function, no storage dependencies.
+ * Tater name generator: pure function, no storage dependencies.
  *
  * Extracted to its own module to avoid circular imports:
  * settings.ts needs this for the default value, and identity.ts
  * needs configStore (which imports settings.ts).
+ *
+ * The full `unique-username-generator` dictionary is NOT imported here. It is
+ * registered into the slot below by `./identity-tater`, which every
+ * Plannotator entry imports eagerly, so Plannotator mints names from the
+ * full dictionary exactly as before. A host that provides its own
+ * `identityProvider` never calls the generator and, with the static import
+ * gone, no longer ships the word lists.
+ *
+ * The slot is SYNCHRONOUS on purpose: `configStore.ensureLoaded()` evaluates
+ * this default during the first settings read (a render-time read) and
+ * persists the result to the identity cookie at once, so a name that arrived
+ * later would be a visible identity change. The built-in fallback below keeps
+ * the same `{adjective}-{noun}-tater` shape from a small inline pool.
  */
 
-import { uniqueUsernameGenerator, adjectives, nouns } from 'unique-username-generator';
+export type IdentityGenerator = () => string;
+
+const FALLBACK_ADJECTIVES = [
+  'swift', 'gentle', 'brave', 'calm', 'clever', 'bright', 'quiet', 'bold',
+  'eager', 'kind', 'lucky', 'merry', 'nimble', 'proud', 'sunny', 'witty',
+] as const;
+
+const FALLBACK_NOUNS = [
+  'falcon', 'crystal', 'river', 'meadow', 'harbor', 'comet', 'maple', 'otter',
+  'summit', 'lantern', 'willow', 'ember', 'pebble', 'breeze', 'orchid', 'canyon',
+] as const;
+
+/** Pool words: exported for tests only. */
+export const FALLBACK_IDENTITY_POOL: {
+  readonly adjectives: readonly string[];
+  readonly nouns: readonly string[];
+} = {
+  adjectives: FALLBACK_ADJECTIVES,
+  nouns: FALLBACK_NOUNS,
+};
+
+function pick<T>(list: readonly T[]): T {
+  return list[Math.floor(Math.random() * list.length)]!;
+}
+
+/** Built-in generator: same shape as the dictionary one, from a 16 x 16 pool. */
+export const fallbackIdentityGenerator: IdentityGenerator = () =>
+  `${pick(FALLBACK_ADJECTIVES)}-${pick(FALLBACK_NOUNS)}-tater`;
+
+let generator: IdentityGenerator = fallbackIdentityGenerator;
+
+/**
+ * Register the generator `generateIdentity()` delegates to. Must return a
+ * string synchronously. `./identity-tater` registers the full dictionary;
+ * a host may register its own via `configurePlannotatorUI({ identityGenerator })`.
+ */
+export function setIdentityGenerator(next: IdentityGenerator): void {
+  generator = next;
+}
+
+/** The active generator. Exported so a test can assert which one is registered. */
+export function getIdentityGenerator(): IdentityGenerator {
+  return generator;
+}
+
+/** Reset to the built-in fallback pool. Mainly for tests. */
+export function resetIdentityGenerator(): void {
+  generator = fallbackIdentityGenerator;
+}
 
 /**
  * Generate a new random tater identity.
@@ -14,16 +75,5 @@ import { uniqueUsernameGenerator, adjectives, nouns } from 'unique-username-gene
  * Examples: "swift-falcon-tater", "gentle-crystal-tater"
  */
 export function generateIdentity(): string {
-  // Use a unique separator to split adjective from noun, avoiding issues
-  // with compound words that contain hyphens (e.g., "behind-the-scenes")
-  const generated = uniqueUsernameGenerator({
-    dictionaries: [adjectives, nouns],
-    separator: '|||',
-    style: 'lowerCase',
-    randomDigits: 0,
-    length: 50, // Prevent word truncation (default is too short)
-  });
-
-  const [adjective, noun] = generated.split('|||');
-  return `${adjective}-${noun}-tater`;
+  return generator();
 }

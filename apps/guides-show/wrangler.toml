@@ -1,0 +1,43 @@
+name = "guides-show"
+main = "worker/index.ts"
+compatibility_date = "2025-06-01"
+
+# Custom domain (top-level: must precede any [table] in TOML).
+routes = [
+  { pattern = "guides.show", custom_domain = true }
+]
+
+# Immutable viewer files (v1/…) live in R2 — never deleted or overwritten
+# (decision record D8). Uploaded add-only by build/deploy-viewer.ts.
+[[r2_buckets]]
+binding = "VIEWER"
+bucket_name = "guides-show-viewer"
+
+# Shared guides (/g/<id>, /api/g*): one body object `g/<id>` plus one metadata
+# object `g/<id>.meta` per guide (share/stores/r2.ts). Deletable, unlike /v1.
+# The bucket must exist before the first deploy: `wrangler r2 bucket create guides-show-guides`.
+[[r2_buckets]]
+binding = "GUIDES"
+bucket_name = "guides-show-guides"
+
+# The brake on anonymous guide creation (POST /api/g only), on top of the
+# handler's 25 MiB size cap. Cloudflare's native rate limiting binding, keyed
+# by CF-Connecting-IP in worker/index.ts. `period` may only be 10 or 60.
+# 20 creates per minute per IP is far above what a person does (a few shares an
+# hour), so a compliant user never meets it; over it the Worker answers 429
+# with Retry-After: 60. The binding is optional in the Env type: delete this
+# block and the Worker simply stops limiting.
+[[ratelimits]]
+name = "GUIDE_CREATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
+# Landing page only. Assets are a per-deploy snapshot, which is why the viewer
+# is NOT served from here.
+[assets]
+directory = "./site"
+binding = "ASSETS"
+run_worker_first = ["/v1/*", "/g/*", "/api/*", "/healthz"]

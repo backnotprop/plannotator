@@ -20,10 +20,14 @@
  */
 
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -46,7 +50,7 @@ export const MAX_SKILL_BODY_LEN = 20_000;
 /** Directories never descended during discovery. */
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "__pycache__"]);
 
-type SkillRoot = "claude" | "codex" | "universal";
+export type SkillRoot = "claude" | "codex" | "universal";
 
 /** A skill discovered on disk — catalog stage, no body read, no frontmatter read. */
 export interface DiscoveredSkill {
@@ -139,7 +143,25 @@ function listSubdirs(dir: string): string[] {
     return [];
   }
   return entries
-    .filter((e) => e.isDirectory() && !SKIP_DIRS.has(e.name))
+    .filter((e) => {
+      if (SKIP_DIRS.has(e.name)) return false;
+      if (e.isDirectory()) return true;
+      // A symlinked skill dir (`~/.claude/skills/foo -> /elsewhere/foo`) has
+      // isDirectory() false on its dirent — follow it with statSync. A broken
+      // symlink (or any stat failure, e.g. an ELOOP symlink cycle) is skipped
+      // silently. No extra cycle detection is needed: statSync resolves to
+      // the final target (throwing on loops), and discovery is a fixed
+      // depth-2 walk with a hard cap, never a recursion that could follow a
+      // symlink back up the tree.
+      if (e.isSymbolicLink()) {
+        try {
+          return statSync(join(dir, e.name)).isDirectory();
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    })
     .map((e) => e.name);
 }
 
@@ -233,6 +255,306 @@ function skillHasExtraFiles(sourcePath: string): boolean {
  */
 function skillFilesPointerLine(skillDir: string): string {
   return `This review skill's files (references, scripts, assets) are at: ${skillDir}\nResolve any relative paths in the instructions below (e.g. references/, scripts/, assets/) against that absolute directory — the working directory is the repository under review, not the skill directory.`;
+}
+
+// ---------------------------------------------------------------------------
+// Reference catalog (skill mentions in plan/annotate comments)
+// ---------------------------------------------------------------------------
+
+/**
+ * Discovery bound for the reference catalog, mirroring the bounded-discovery
+ * precedent of PLANNOTATOR_FILE_BROWSER_MAX_FILES: the picker never grows
+ * past this many skills, however large the roots are.
+ */
+export const MAX_REFERENCE_SKILLS = 500;
+
+/**
+ * Only the head of SKILL.md is read for catalog metadata — frontmatter lives at
+ * the top, and this caps I/O per skill regardless of body size. Frontmatter
+ * that overflows even this generous bound is treated as truncated and FAILS
+ * CLOSED on the invocation flag (see parseSkillFrontmatterMeta) — never open.
+ */
+const SKILL_META_HEAD_BYTES = 65_536;
+
+/** Descriptions are picker subtitles, not documents. */
+const MAX_SKILL_DESCRIPTION_LEN = 200;
+
+/** A skill as served to the comment-composer picker. */
+export interface ReferenceSkill {
+  name: string;
+  root: SkillRoot;
+  description?: string;
+  /**
+   * True when SKILL.md frontmatter carries `disable-model-invocation: true` —
+   * the skill can only be invoked by a human, so a model receiving feedback
+   * that references it cannot run it. The exported feedback injects such a
+   * skill's instructions instead of just naming it (a human referencing a
+   * human-only skill IS the human invocation).
+   */
+  humanOnly: boolean;
+  /**
+   * Absolute path to the skill directory. Lets the exported feedback name a
+   * real location the acting agent can read even when the content endpoint
+   * later fails (skill deleted mid-session, unreadable file). Same exposure
+   * as `sourcePath` on /api/agents/skills.
+   */
+  dir: string;
+}
+
+/**
+ * Read at most `maxBytes` from the start of a file, or null when unreadable.
+ * `truncated` reports whether the file continues past the read (the head may
+ * have cut frontmatter short — the parser must not fail open on that).
+ */
+function readFileHead(
+  path: string,
+  maxBytes: number,
+): { text: string; truncated: boolean } | null {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const bytes = readSync(fd, buf, 0, maxBytes, 0);
+    // Truncation means the file CONTINUES past the read — judged from the
+    // real size (fstat on the already-open fd), not from `bytes === maxBytes`,
+    // which spuriously flagged a file of exactly maxBytes as truncated.
+    const truncated = fstatSync(fd).size > bytes;
+    return { text: buf.subarray(0, bytes).toString("utf-8"), truncated };
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Strip a trailing YAML comment from an unquoted scalar: a `#` preceded by
+ * whitespace starts a comment (`true # note` → `true`). Quoted scalars keep
+ * their content verbatim; a comment after the closing quote is dropped.
+ */
+function stripYamlScalarComment(value: string): string {
+  const quote = value[0];
+  if (quote === '"' || quote === "'") {
+    const close = value.indexOf(quote, 1);
+    if (close > 0) return value.slice(0, close + 1);
+    return value;
+  }
+  return value.replace(/(^|[ \t])#.*$/, "").trim();
+}
+
+/** The truthy spellings accepted for `disable-model-invocation` (YAML 1.1 bools + `1`). */
+function isYamlTruthy(value: string): boolean {
+  const v = stripYamlScalarComment(value).replace(/^["']|["']$/g, "").toLowerCase();
+  return v === "true" || v === "yes" || v === "on" || v === "1";
+}
+
+/**
+ * Extract the two frontmatter fields the reference picker needs: `description`
+ * and `disable-model-invocation`. A deliberate line-scan, not a YAML parser —
+ * the same conservative posture as stripFrontmatter. Handles quoted scalars,
+ * `>` / `|` block scalars (folded to one line), and trailing `# comments` on
+ * the flag value.
+ *
+ * Failure posture is asymmetric on purpose: `description` may silently come
+ * back empty, but the invocation flag guards a safety property (a human-only
+ * skill must never be presented as model-invocable). So whenever frontmatter
+ * OPENED but no closing `---` was seen — whether the head read truncated the
+ * file or the file itself never terminates the block — the scan still honors
+ * a flag line it DID see, and fails closed (`humanOnly: true`) when it saw
+ * none: the flag could sit past the truncation point, and an unterminated
+ * block in a complete file means the frontmatter cannot be trusted at all.
+ * A complete file with no leading `---` yields `{ humanOnly: false }` as
+ * before. (`options.truncated` is kept for callers but no longer gates the
+ * fail-closed path.)
+ */
+export function parseSkillFrontmatterMeta(
+  raw: string,
+  _options: { truncated?: boolean } = {},
+): {
+  description?: string;
+  humanOnly: boolean;
+} {
+  const text = raw.replace(/^﻿/, "");
+  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+  let block: string;
+  let failClosed = false;
+  if (match) {
+    block = match[1];
+  } else if (/^---\r?\n/.test(text)) {
+    // Frontmatter opened but never closed (truncated head read OR a complete
+    // file with an unterminated block): scan what we have, and fail closed on
+    // the flag unless a flag line was seen.
+    block = text.replace(/^---\r?\n/, "");
+    failClosed = true;
+  } else {
+    return { humanOnly: false };
+  }
+
+  const lines = block.split(/\r?\n/);
+  let description: string | undefined;
+  let humanOnly = false;
+  let sawFlag = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const kv = lines[i].match(/^([A-Za-z0-9_-]+):[ \t]*(.*)$/);
+    if (!kv) continue;
+    const key = kv[1].toLowerCase();
+    const value = kv[2].trim();
+
+    if (key === "disable-model-invocation") {
+      sawFlag = true;
+      humanOnly = isYamlTruthy(value);
+    } else if (key === "description") {
+      if (value === "" || /^[>|][+-]?$/.test(value)) {
+        // Block scalar: gather the following indented lines into one line.
+        const parts: string[] = [];
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim() === "") continue;
+          if (!/^[ \t]/.test(lines[j])) break;
+          parts.push(lines[j].trim());
+        }
+        description = parts.join(" ");
+      } else {
+        description = stripYamlScalarComment(value).replace(/^["']|["']$/g, "");
+      }
+    }
+  }
+
+  if (failClosed && !sawFlag) humanOnly = true;
+  if (description) description = description.slice(0, MAX_SKILL_DESCRIPTION_LEN);
+  return { ...(description ? { description } : {}), humanOnly };
+}
+
+/**
+ * The reference catalog: every discovered skill (same roots, dedupe, and
+ * first-seen precedence as discoverSkills — Claude → Codex → universal) with
+ * picker metadata read from the head of its SKILL.md. Read fresh on each call,
+ * never cached or persisted server-side (the catalog is ephemeral by design).
+ * A skill whose SKILL.md cannot be read is skipped; this never throws.
+ */
+export function listReferenceSkills(): ReferenceSkill[] {
+  const skills: ReferenceSkill[] = [];
+  // Sort BEFORE capping: readdir order is filesystem-dependent, so slicing
+  // first would make which 500 survive nondeterministic across machines.
+  const discovered = discoverSkills()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, MAX_REFERENCE_SKILLS);
+  for (const skill of discovered) {
+    const head = readFileHead(skill.skillMdPath, SKILL_META_HEAD_BYTES);
+    if (head === null) continue;
+    const meta = parseSkillFrontmatterMeta(head.text, { truncated: head.truncated });
+    skills.push({ name: skill.name, root: skill.root, ...meta, dir: skill.sourcePath });
+  }
+  return skills;
+}
+
+// ---------------------------------------------------------------------------
+// Reference content (human-only skill injection into exported feedback)
+// ---------------------------------------------------------------------------
+
+/**
+ * Injection bound for a referenced skill's SKILL.md body. Same value as
+ * MAX_SKILL_BODY_LEN (the "a giant SKILL.md would blow up the prompt" bound),
+ * but a separate constant: review profiles DROP an oversized skill, while
+ * reference injection TRUNCATES and says so, pointing the agent at the file.
+ */
+export const MAX_INJECTED_SKILL_CONTENT_LEN = 20_000;
+
+/**
+ * Read bound for the content endpoint. The endpoint is unauthenticated on
+ * localhost and reachable by a no-cors fetch loop from any page, so the read
+ * itself must be bounded — reading a whole multi-GB SKILL.md and then slicing
+ * would let response-unreadable requests balloon process RSS. The bound is the
+ * frontmatter allowance the catalog already uses (SKILL_META_HEAD_BYTES) plus
+ * 4 bytes per capped content char (UTF-8 worst case) and slack, so any file
+ * whose frontmatter fits the catalog bound always yields the full
+ * MAX_INJECTED_SKILL_CONTENT_LEN characters of body — truncation detection is
+ * unchanged for every such file. Exported for the boundary tests only.
+ */
+export const SKILL_CONTENT_HEAD_BYTES =
+  SKILL_META_HEAD_BYTES + MAX_INJECTED_SKILL_CONTENT_LEN * 4 + 4_096;
+
+/** A referenced skill's SKILL.md body, prepared for feedback injection. */
+export interface ReferenceSkillContent {
+  name: string;
+  /** Absolute path to the skill directory. */
+  dir: string;
+  /** Absolute path to SKILL.md. */
+  path: string;
+  /** Frontmatter-stripped SKILL.md body, possibly truncated. */
+  content: string;
+  /** True when the body was cut at MAX_INJECTED_SKILL_CONTENT_LEN. */
+  truncated: boolean;
+  humanOnly: boolean;
+}
+
+/**
+ * Read a referenced skill's SKILL.md body for injection into exported
+ * feedback.
+ *
+ * Security: the client-supplied name is only ever MATCHED against the names
+ * produced by discoverSkills() — it is never used to build a filesystem path,
+ * so traversal sequences, separators, and absolute paths cannot reach outside
+ * the discovered roots (they simply match no skill). Because matching is the
+ * whole defense, the fast-fail guard rejects only names that can never be a
+ * readdir entry (empty, `.`, `..`) — a substring check like `includes("..")`
+ * would 404 legitimately discovered directories such as `v1..2`, and POSIX
+ * directory names may legitimately contain `\`.
+ *
+ * The read is bounded (SKILL_CONTENT_HEAD_BYTES): only the head that can
+ * contribute to the response is read, so a giant SKILL.md costs bounded
+ * memory per request instead of its file size.
+ *
+ * Returns null (never throws) when the name matches no discovered skill, the
+ * file cannot be read, or the body is empty — the client then falls back to
+ * naming the skill plus its directory.
+ */
+export function readReferenceSkillContent(name: string): ReferenceSkillContent | null {
+  if (!name || name === "." || name === "..") return null;
+  const skill = discoverSkills().find((s) => s.name === name);
+  if (!skill) return null;
+
+  const head = readFileHead(skill.skillMdPath, SKILL_CONTENT_HEAD_BYTES);
+  if (head === null) {
+    console.error(`[plannotator] Could not read skill "${name}" for reference injection.`);
+    return null;
+  }
+
+  // Frontmatter is metadata (name, description, invocation flags), not
+  // instruction — strip it, matching how review profiles consume skills.
+  const meta = parseSkillFrontmatterMeta(head.text, { truncated: head.truncated });
+  const raw = head.text.replace(/^﻿/, "");
+  // Frontmatter that OPENED but never closed within the head read: when the
+  // file continues past the read, the metadata alone exceeds the bound — fall
+  // back rather than injecting a screenful of raw YAML as "instructions". (In
+  // a complete file the unterminated block keeps its pre-bound behavior: the
+  // whole text is the body, exactly as readFileSync produced before.)
+  const frontmatterOpened = /^---\r?\n/.test(raw);
+  const frontmatterClosed = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.test(raw);
+  if (head.truncated && frontmatterOpened && !frontmatterClosed) return null;
+
+  const body = stripFrontmatter(head.text).trim();
+  if (!body) return null;
+
+  // `head.truncated` alone marks truncation even when the head yielded fewer
+  // than the cap's worth of characters (multibyte-heavy files): the file
+  // continues past what was read, and the notice must say so.
+  const truncated = head.truncated || body.length > MAX_INJECTED_SKILL_CONTENT_LEN;
+  return {
+    name: skill.name,
+    dir: skill.sourcePath,
+    path: skill.skillMdPath,
+    content:
+      body.length > MAX_INJECTED_SKILL_CONTENT_LEN
+        ? body.slice(0, MAX_INJECTED_SKILL_CONTENT_LEN)
+        : body,
+    truncated,
+    humanOnly: meta.humanOnly,
+  };
 }
 
 // ---------------------------------------------------------------------------

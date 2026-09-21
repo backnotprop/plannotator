@@ -102,35 +102,36 @@ export const StageControl: React.FC<{
     );
   }
   return (
-    <span
-      role="button"
-      // tabIndex + key handling: lives INSIDE the row <button> (a real nested
-      // <button> is invalid HTML), so it needs its own focus stop and
-      // Enter/Space activation to be keyboard-operable.
-      tabIndex={0}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!isStaging) onStage?.();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
+    <Tooltip content="Stage file (git add)" side="bottom" delayDuration={300}>
+      <span
+        role="button"
+        // tabIndex + key handling: lives INSIDE the row <button> (a real nested
+        // <button> is invalid HTML), so it needs its own focus stop and
+        // Enter/Space activation to be keyboard-operable.
+        tabIndex={0}
+        onClick={(e) => {
           e.stopPropagation();
           if (!isStaging) onStage?.();
-        }
-      }}
-      className="stage-plus w-4 h-4 flex-shrink-0 rounded border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-muted-foreground/60 hover:bg-muted/50 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
-      title="Stage file (git add)"
-      aria-label="Stage file"
-    >
-      {isStaging ? (
-        <span className="inline-block w-2 h-2 border border-current border-t-transparent rounded-full animate-spin" />
-      ) : (
-        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
-      )}
-    </span>
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!isStaging) onStage?.();
+          }
+        }}
+        className="stage-plus w-4 h-4 flex-shrink-0 rounded border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-muted-foreground/60 hover:bg-muted/50 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
+        aria-label="Stage file"
+      >
+        {isStaging ? (
+          <span className="inline-block w-2 h-2 border border-current border-t-transparent rounded-full animate-spin" />
+        ) : (
+          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        )}
+      </span>
+    </Tooltip>
   );
 };
 

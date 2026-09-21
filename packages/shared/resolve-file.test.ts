@@ -5,12 +5,18 @@ import { join } from "path";
 import {
 	getFileBrowserMaxFiles,
 	hasMarkdownFiles,
-	isAnnotatableDocPath,
-	isAnnotatableTextPath,
 	resolveCodeFile,
 	resolveMarkdownFile,
 	warmFileListCache,
 } from "./resolve-file";
+// Pure predicates (explicit extras) so this file never reads the real user
+// config through the config-aware re-exports.
+import { isAnnotatableDocPath, isAnnotatableTextPath } from "./annotatable";
+
+// Hermeticity: resolveMarkdownFile falls back to the config-aware extras when
+// no override is passed, which would read the developer's real config.json.
+// Every call in this file pins the extras instead.
+const NO_EXTRAS = { extraMarkdownExtensions: [] as const };
 
 let root: string;
 
@@ -172,7 +178,7 @@ describe("bounded file traversal", () => {
 			}
 			process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = "2";
 
-			const result = resolveMarkdownFile("plan.md", limitedRoot);
+			const result = resolveMarkdownFile("plan.md", limitedRoot, NO_EXTRAS);
 			expect(result.kind).toBe("ambiguous");
 			if (result.kind === "ambiguous") {
 				expect(result.matches).toHaveLength(2);
@@ -229,11 +235,11 @@ describe("bounded file traversal", () => {
 			writeFileSync(join(bareRoot, "notes", "Architecture.MD"), "# Bare\n");
 			process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES = "1";
 
-			expect(resolveMarkdownFile("docs/plan.md", exactRoot)).toEqual({
+			expect(resolveMarkdownFile("docs/plan.md", exactRoot, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(exactRoot, "docs", "plan.md"),
 			});
-			expect(resolveMarkdownFile("architecture.md", bareRoot)).toEqual({
+			expect(resolveMarkdownFile("architecture.md", bareRoot, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(bareRoot, "notes", "Architecture.MD"),
 			});
@@ -258,7 +264,7 @@ describe("explicit parent-relative markdown paths (#1085)", () => {
 			const cwd = join(parent, "work");
 			mkdirSync(cwd);
 
-			expect(resolveMarkdownFile("../docs/radio/plan.md", cwd)).toEqual({
+			expect(resolveMarkdownFile("../docs/radio/plan.md", cwd, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(parent, "docs", "radio", "plan.md"),
 			});
@@ -272,7 +278,7 @@ describe("explicit parent-relative markdown paths (#1085)", () => {
 		try {
 			mkdirSync(join(cwd, "sub"));
 			writeFileSync(join(cwd, "sub", "notes.md"), "# Notes\n");
-			expect(resolveMarkdownFile("./sub/notes.md", cwd)).toEqual({
+			expect(resolveMarkdownFile("./sub/notes.md", cwd, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(cwd, "sub", "notes.md"),
 			});
@@ -287,7 +293,7 @@ describe("explicit parent-relative markdown paths (#1085)", () => {
 			writeFileSync(join(parent, "secret.md"), "# Parent\n");
 			const cwd = join(parent, "work");
 			mkdirSync(cwd);
-			expect(resolveMarkdownFile("secret.md", cwd)).toEqual({
+			expect(resolveMarkdownFile("secret.md", cwd, NO_EXTRAS)).toEqual({
 				kind: "not_found",
 				input: "secret.md",
 			});
@@ -299,7 +305,7 @@ describe("explicit parent-relative markdown paths (#1085)", () => {
 	test("a ../ path to a missing file is still not_found", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "plannotator-md-missing-"));
 		try {
-			expect(resolveMarkdownFile("../nope/absent.md", cwd)).toEqual({
+			expect(resolveMarkdownFile("../nope/absent.md", cwd, NO_EXTRAS)).toEqual({
 				kind: "not_found",
 				input: "../nope/absent.md",
 			});
@@ -315,7 +321,7 @@ describe("annotatable plain-text files (#1029)", () => {
 		try {
 			mkdirSync(join(cwd, "config"));
 			writeFileSync(join(cwd, "config", "app.yaml"), "key: value\n");
-			expect(resolveMarkdownFile("config/app.yaml", cwd)).toEqual({
+			expect(resolveMarkdownFile("config/app.yaml", cwd, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(cwd, "config", "app.yaml"),
 			});
@@ -329,7 +335,7 @@ describe("annotatable plain-text files (#1029)", () => {
 		try {
 			mkdirSync(join(cwd, "nested"));
 			writeFileSync(join(cwd, "nested", "Cargo.toml"), "[package]\n");
-			expect(resolveMarkdownFile("cargo.toml", cwd)).toEqual({
+			expect(resolveMarkdownFile("cargo.toml", cwd, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(cwd, "nested", "Cargo.toml"),
 			});
@@ -350,7 +356,7 @@ describe("annotatable plain-text files (#1029)", () => {
 				writeFileSync(join(cwd, name), "content\n");
 			}
 			for (const name of names) {
-				expect(resolveMarkdownFile(name, cwd)).toEqual({
+				expect(resolveMarkdownFile(name, cwd, NO_EXTRAS)).toEqual({
 					kind: "found",
 					path: join(cwd, name),
 				});
@@ -364,7 +370,7 @@ describe("annotatable plain-text files (#1029)", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "plannotator-annotatable-code-"));
 		try {
 			writeFileSync(join(cwd, "script.py"), "print('hi')\n");
-			expect(resolveMarkdownFile("script.py", cwd)).toEqual({
+			expect(resolveMarkdownFile("script.py", cwd, NO_EXTRAS)).toEqual({
 				kind: "not_found",
 				input: "script.py",
 			});
@@ -378,14 +384,43 @@ describe("annotatable plain-text files (#1029)", () => {
 		try {
 			writeFileSync(join(cwd, ".env"), "SECRET=1\n");
 			writeFileSync(join(cwd, ".env.example"), "SECRET=\n");
-			expect(resolveMarkdownFile(".env", cwd)).toEqual({
+			expect(resolveMarkdownFile(".env", cwd, NO_EXTRAS)).toEqual({
 				kind: "not_found",
 				input: ".env",
 			});
-			expect(resolveMarkdownFile(".env.example", cwd)).toEqual({
+			expect(resolveMarkdownFile(".env.example", cwd, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(cwd, ".env.example"),
 			});
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	// #1307: `markdownExtensions` in config.json must make an extension
+	// resolvable everywhere .md is. The list is threaded in explicitly here so
+	// the test never touches the user's real config.json.
+	test("configured extra extensions resolve like markdown, and only when configured", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "plannotator-livemd-"));
+		try {
+			mkdirSync(join(cwd, "notebooks"), { recursive: true });
+			writeFileSync(join(cwd, "notebooks/tour.livemd"), "# Tour\n");
+			const configured = { extraMarkdownExtensions: [".livemd"] };
+
+			// Exact relative path, and the fuzzy bare-filename walk.
+			expect(resolveMarkdownFile("notebooks/tour.livemd", cwd, configured)).toEqual({
+				kind: "found",
+				path: join(cwd, "notebooks/tour.livemd"),
+			});
+			expect(resolveMarkdownFile("tour.livemd", cwd, configured)).toEqual({
+				kind: "found",
+				path: join(cwd, "notebooks/tour.livemd"),
+			});
+
+			// Default (no configuration): unchanged "unsupported type" behavior.
+			expect(
+				resolveMarkdownFile("notebooks/tour.livemd", cwd, { extraMarkdownExtensions: [] }),
+			).toEqual({ kind: "not_found", input: "notebooks/tour.livemd" });
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

@@ -31,7 +31,7 @@ let dataDir: string;
 const createdDistFiles: string[] = [];
 let createdDistDir = false;
 
-function runAnnotate(args: string[]): {
+function runAnnotate(args: string[], envOverrides: Record<string, string> = {}): {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -44,6 +44,7 @@ function runAnnotate(args: string[]): {
         ...process.env,
         PLANNOTATOR_CWD: fixtureDir,
         PLANNOTATOR_DATA_DIR: dataDir,
+        ...envOverrides,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -75,6 +76,15 @@ beforeAll(() => {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(fixtureDir, "out"));
   writeFileSync(join(fixtureDir, "notes.md"), "# Notes");
+
+  // Failing `tailscale` shim for the --tailscale publish-failure exit-code
+  // tests: shadows any real CLI on PATH so no tailnet state is ever touched.
+  mkdirSync(join(fixtureDir, "bin"));
+  writeFileSync(
+    join(fixtureDir, "bin", "tailscale"),
+    "#!/bin/sh\necho 'Log in to Tailscale first' >&2\nexit 1\n",
+    { mode: 0o755 },
+  );
 });
 
 afterAll(() => {
@@ -134,6 +144,38 @@ describe("annotate CLI strict gate bypasses tolerance", () => {
   });
 });
 
+describe("annotate CLI --tailscale publish failure exit codes", () => {
+  // The tailnet publish happens in onReady, after the loopback server is up,
+  // through the failing shim above. Under a strict gate exit 1 is reserved
+  // for "the reviewer did not approve, decision record published" — a
+  // publish failure must present as a startup failure (exit 2, no record
+  // file), never as a rejection. POSIX shim, so skipped on Windows.
+  const testUnix = test.skipIf(process.platform === "win32");
+  const tailscaleEnv = () => ({
+    PATH: `${join(fixtureDir, "bin")}:${process.env.PATH ?? ""}`,
+    PLANNOTATOR_AI: "disabled",
+  });
+
+  testUnix("strict gate: exits 2 with no result file", () => {
+    const resultFile = join("out", "ts-result.json");
+    const result = runAnnotate(
+      ["notes.md", "--tailscale", "--gate", "--json", "--result-file", resultFile],
+      tailscaleEnv(),
+    );
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("--tailscale");
+    expect(result.stdout).toBe("");
+    expect(existsSync(join(fixtureDir, resultFile))).toBe(false);
+  });
+
+  testUnix("non-strict: keeps the documented exit 1", () => {
+    const result = runAnnotate(["notes.md", "--tailscale"], tailscaleEnv());
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--tailscale");
+    expect(result.stdout).toBe("");
+  });
+});
+
 describe("annotate CLI tolerant tiers", () => {
   test("multiple unresolvable words hand off on stdout with exit 0", () => {
     const result = runAnnotate(["the", "aim", "doc"]);
@@ -168,5 +210,44 @@ describe("annotate CLI tolerant tiers", () => {
     const result = runAnnotate(["please", "annotate", "."]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Could not resolve the arguments below");
+  });
+});
+
+describe("plannotator annotate: live app remote hard-off (CLI layer)", () => {
+  test("a live-resolving loopback URL under PLANNOTATOR_REMOTE exits as a startup failure", async () => {
+    // The fake app lives in THIS process, so the CLI must be spawned
+    // asynchronously (a sync spawn would block the event loop and deadlock
+    // the probe request against our own server).
+    const app = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response("<html><head></head><body>app</body></html>", {
+          headers: { "Content-Type": "text/html" },
+        }),
+    });
+    try {
+      const child = Bun.spawn(
+        [process.execPath, cliEntry, "annotate", `http://127.0.0.1:${app.port}/`],
+        {
+          cwd: fixtureDir,
+          env: {
+            ...process.env,
+            PLANNOTATOR_CWD: fixtureDir,
+            PLANNOTATOR_DATA_DIR: dataDir,
+            PLANNOTATOR_REMOTE: "1",
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const exitCode = await child.exited;
+      const stderr = await new Response(child.stderr).text();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("Live app annotation is unavailable in remote mode");
+      expect(stderr).toContain("--static");
+    } finally {
+      app.stop(true);
+    }
   });
 });

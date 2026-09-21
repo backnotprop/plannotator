@@ -14,6 +14,7 @@ const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Backdrop
     ref={ref}
+    data-slot="dialog-overlay"
     className={cn(
       "fixed inset-0 z-[110] bg-black/55 backdrop-blur-[2px]",
       "transition-opacity duration-200",
@@ -28,34 +29,43 @@ DialogOverlay.displayName = "DialogOverlay";
 const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Popup>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Popup> & {
+    /** Optional visual override for the backdrop rendered with this content. */
+    backdropClassName?: string;
+    /** Removes the default top-right close control. */
     hideClose?: boolean;
   }
->(({ className, children, hideClose, ...props }, ref) => (
+>(({ backdropClassName, className, children, hideClose, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Popup
-      ref={ref}
-      className={cn(
-        "fixed top-[50%] left-[50%] z-[110] w-full translate-x-[-50%] translate-y-[-50%]",
-        "max-w-4xl max-h-[min(640px,85vh)]",
-        "flex flex-col overflow-hidden",
-        "rounded-2xl border border-border bg-popover text-popover-foreground",
-        "shadow-[0_24px_80px_-36px_rgba(15,23,42,0.5)]",
-        "transition-[opacity,scale] duration-200",
-        "data-starting-style:opacity-0 data-starting-style:scale-95",
-        "data-ending-style:opacity-0 data-ending-style:scale-95",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      {!hideClose && (
-        <DialogPrimitive.Close className="absolute top-3.5 right-3.5 rounded-md p-1.5 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50">
-          <X className="size-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      )}
-    </DialogPrimitive.Popup>
+    <DialogOverlay className={backdropClassName} />
+    <div className="pn-visible-viewport-overlay z-[110] pointer-events-none flex items-center justify-center">
+      <DialogPrimitive.Popup
+        ref={ref}
+        className={cn(
+          "relative pointer-events-auto z-[110] w-full min-h-0",
+          "max-w-4xl max-h-[min(640px,85vh,100%)]",
+          "flex flex-col overflow-hidden",
+          "rounded-2xl border border-border bg-popover text-popover-foreground",
+          "shadow-[0_24px_80px_-36px_rgba(15,23,42,0.5)]",
+          "transition-[opacity,scale] duration-200",
+          "data-starting-style:opacity-0 data-starting-style:scale-95",
+          "data-ending-style:opacity-0 data-ending-style:scale-95",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+        {!hideClose && (
+          <DialogPrimitive.Close
+            data-pn-touch-target="true"
+            data-pn-touch-target-icon="true"
+            className="absolute top-3.5 right-3.5 inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </DialogPrimitive.Close>
+        )}
+      </DialogPrimitive.Popup>
+    </div>
   </DialogPortal>
 ));
 DialogContent.displayName = "DialogContent";

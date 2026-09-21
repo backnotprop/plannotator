@@ -24,6 +24,7 @@ import { loadConfig, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
+  composeSystemPrompt,
   stripConflictingPlanModeRules,
 } from "./plan-mode";
 import {
@@ -73,6 +74,16 @@ function resolveBundledHtmlPath(filename: string): string {
 
 function readBundledHtml(filename: string): string {
   return readFileSync(resolveBundledHtmlPath(filename), "utf-8");
+}
+
+/** Best-effort warm of the sync cache. Never throws, on any failure. */
+function preloadBundledHtml(filename: string, assign: (html: string) => void): void {
+  try {
+    readFile(resolveBundledHtmlPath(filename), "utf-8").then(assign).catch(() => {});
+  } catch {
+    // The asset is not on disk. The lazy getters raise a clear error if and
+    // when a code path actually needs it.
+  }
 }
 
 function getPlanHtml(): string {
@@ -233,9 +244,15 @@ async function runPlanReview(input: {
 const PlannotatorPlugin: Plugin = async (ctx, rawOptions?: PlannotatorOpenCodeOptions) => {
   const workflowOptions = normalizeWorkflowOptions(rawOptions);
 
-  // Preload HTML in background — populates the sync cache before first use
-  readFile(resolveBundledHtmlPath("plannotator.html"), "utf-8").then(h => { _planHtml = h; }).catch(() => {});
-  readFile(resolveBundledHtmlPath("review-editor.html"), "utf-8").then(h => { _reviewHtml = h; }).catch(() => {});
+  // Preload HTML in background: populates the sync cache before first use.
+  // `resolveBundledHtmlPath` THROWS when the asset is absent, and it runs
+  // synchronously here, outside the .catch that was meant to absorb exactly
+  // that. An unbuilt checkout (or a partial install) therefore took down plugin
+  // construction itself, before any code path that needs the HTML. A missing
+  // asset must only fail the feature that reads it, which is what the lazy
+  // getters already do.
+  preloadBundledHtml("plannotator.html", (html) => { _planHtml = html; });
+  preloadBundledHtml("review-editor.html", (html) => { _reviewHtml = html; });
 
   let cachedAgents: any[] | null = null;
 
@@ -406,32 +423,32 @@ tools (except writing markdown files), or otherwise make changes to the system.
 
       if (shouldInjectFullPlanningPrompt(lastUserAgent, workflowOptions)) {
         const stripped = stripConflictingPlanModeRules(output.system);
-        output.system.length = 0;
-        output.system.push(...stripped);
-        output.system.push(getPlanningPrompt());
-
         const hook = readImprovementHook("enterplanmode-improve");
         const pfmEnabled = loadConfig().pfmReminder === true;
         const improveContext = composeImproveContext({
           pfmEnabled,
           improvementHookContent: hook?.content ?? null,
         });
-        if (improveContext) {
-          output.system.push(improveContext);
-        }
+        const parts = [...stripped, getPlanningPrompt()];
+        if (improveContext) parts.push(improveContext);
+        output.system.length = 0;
+        output.system.push(...composeSystemPrompt([], parts));
 
         return;
       }
 
       if (!shouldInjectGenericPlanReminder(lastUserAgent, isSubagent, workflowOptions)) return;
 
-      output.system.push(`## Plan Submission
+      const planSubmissionReminder = `## Plan Submission
 
 When you have completed your plan, call the \`submit_plan\` tool to submit it for user review. Pass your full plan as a single edit: \`{ "edits": [{ "start": 1, "content": "..." }] }\`.
 
 The user will review your plan in a visual UI where they can annotate, approve, or request changes. If rejected, the response includes your plan with line numbers; use targeted edits to revise specific sections.
 
-Do NOT proceed with implementation until your plan is approved.`);
+Do NOT proceed with implementation until your plan is approved.`;
+      const composed = composeSystemPrompt(output.system, [planSubmissionReminder]);
+      output.system.length = 0;
+      output.system.push(...composed);
     },
 
     // Intercept plannotator commands before the agent sees them.

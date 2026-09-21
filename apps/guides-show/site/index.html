@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>guides.show · portable Guided Reviews</title>
+<meta name="description" content="guides.show hosts the viewer and share links for Plannotator Guided Reviews: a chaptered walkthrough of a diff as one small HTML file, or as an encrypted link.">
+<link rel="canonical" href="https://guides.show/">
+<meta name="theme-color" content="#0b0d0f">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="guides.show">
+<meta property="og:title" content="guides.show · portable Guided Reviews">
+<meta property="og:description" content="A chaptered walkthrough of a diff as one small HTML file, or as an encrypted link. Made by Plannotator or by an agent skill.">
+<meta property="og:url" content="https://guides.show/">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0d0f'/%3E%3Cpath d='M9 11h14M9 21h14' stroke='%23f85149' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpath d='M16 5v22' stroke='%233fb950' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  @font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url(/v1/fonts/inter-latin-wght-normal.Dx4kXJAl.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+  @font-face{font-family:"Geist Mono";font-style:normal;font-weight:100 900;font-display:swap;src:url(/v1/fonts/geist-mono-latin-wght-normal.Cjtb1TV-.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+
+  :root{
+    color-scheme:dark;
+    --bg:#0b0d0f;--surface:#0f1215;--border:#1e2429;--border-strong:#2b333b;
+    --text:#a9b3bc;--heading:#f1f4f6;--muted:#6b7681;
+    --add:#3fb950;--add-bg:rgba(63,185,80,.09);--del:#f85149;--del-bg:rgba(248,81,73,.09);
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 var(--sans);font-feature-settings:"cv11","ss01"}
+  main{max-width:64ch;margin:0 auto;padding:6vh 1.25rem 12vh}
+  a{color:var(--heading);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}
+  a:hover{text-decoration-color:var(--add)}
+  a:focus-visible{outline:1px solid var(--add);outline-offset:3px;border-radius:2px}
+  h1,h2{color:var(--heading);letter-spacing:-.01em;text-wrap:balance}
+  h1{font-size:1.65rem;font-weight:600;line-height:1.25;margin:2.5rem 0 .75rem}
+  h2{font-size:.8rem;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:3.25rem 0 .75rem}
+  p{margin:.65rem 0}
+  code,pre,kbd{font-family:var(--mono);font-size:.86em}
+  code{color:var(--heading);background:#161b20;border-radius:4px;padding:.08em .35em}
+  pre{margin:1rem 0;padding:.85rem 1rem;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow-x:auto;line-height:1.6}
+  pre code{background:none;border:0;padding:0;color:var(--text)}
+  pre .c{color:var(--muted)}
+  pre .k{color:var(--heading)}
+  ul{padding-left:1.1rem;margin:.65rem 0}
+  li{margin:.35rem 0}
+  li::marker{color:var(--muted)}
+
+  header{display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.85rem}
+  header .name{color:var(--heading)}
+  header .gh{margin-left:auto;display:inline-flex;align-items:center;gap:.4rem;color:var(--text);text-decoration:none;border:1px solid var(--border-strong);border-radius:6px;padding:.25rem .6rem;font-size:.78rem}
+  header .gh:hover{color:var(--heading);border-color:var(--muted)}
+  .add{color:var(--add)}.del{color:var(--del)}
+
+  /* The example guide: a screenshot that opens full size. */
+  .shot{display:block;width:100%;margin:1.75rem 0 0;padding:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);overflow:hidden;cursor:zoom-in;font:inherit;color:inherit;text-align:left}
+  .shot img{display:block;width:100%;height:auto}
+  .shot:focus-visible{outline:2px solid var(--add);outline-offset:2px}
+  .examples{margin:.75rem 0 0;font-size:.9rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:.35rem .5rem;align-items:baseline}
+  .examples a{color:var(--text);text-decoration-color:var(--add)}
+  .examples a:hover{color:var(--heading)}
+  .shot:hover{border-color:var(--border-strong)}
+  .shot figcaption{padding:.55rem .9rem .6rem;border-top:1px solid var(--border);color:var(--muted);font-size:.8rem;display:flex;justify-content:space-between;gap:1rem}
+  .shot figcaption span:last-child{font-family:var(--mono);font-size:.72rem;white-space:nowrap}
+  @media (max-width:480px){.shot figcaption span:last-child{display:none}}
+  dialog.lightbox{max-width:none;max-height:none;width:100vw;height:100vh;height:100dvh;margin:0;padding:0;border:0;background:transparent;overflow:hidden}
+  dialog.lightbox::backdrop{background:rgba(0,0,0,.82)}
+  dialog.lightbox .area{display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:1.5rem;margin:0;border:0;background:none;cursor:zoom-out}
+  dialog.lightbox img{max-width:100%;max-height:100%;width:auto;height:auto;border:1px solid var(--border);border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+  dialog.lightbox .x{position:fixed;top:.75rem;right:.75rem;width:2.5rem;height:2.5rem;padding:0;border-radius:6px;color:#fff;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.2);font-size:1.4rem;line-height:1;cursor:pointer}
+  dialog.lightbox .x:focus-visible{outline:2px solid var(--add);outline-offset:2px}
+  @media (prefers-reduced-motion:no-preference){
+    dialog.lightbox[open] img{animation:zoom .22s cubic-bezier(.2,.8,.2,1)}
+    dialog.lightbox[open]::backdrop{animation:fade .2s ease-out}
+    @keyframes zoom{from{transform:scale(.94);opacity:0}}
+    @keyframes fade{from{opacity:0}}
+  }
+  .cmd{display:flex;align-items:center;gap:.75rem;margin:1rem 0;padding:.55rem .6rem .55rem .9rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);overflow-x:auto}
+  .cmd code{flex:1;background:none;border:0;padding:0;color:var(--heading);white-space:nowrap}
+  .cmd button{flex:none;font:inherit;font-family:var(--mono);font-size:.74rem;color:var(--text);background:none;border:1px solid var(--border-strong);border-radius:4px;padding:.15rem .55rem;cursor:pointer}
+  .cmd button:hover{color:var(--heading);border-color:var(--muted)}
+  .cmd button:focus-visible{outline:1px solid var(--add);outline-offset:2px}
+  .cmd button.done{color:var(--add);border-color:var(--add)}
+  .banner{display:block;width:100%;height:auto;margin:1.5rem 0 0;border:1px solid var(--border);border-radius:8px}
+  footer{margin-top:4rem;padding-top:1.25rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem;display:flex;flex-wrap:wrap;gap:.4rem 1.25rem}
+  footer a{color:var(--text)}
+  footer .credit{margin-left:auto}
+  @media (prefers-reduced-motion:no-preference){a{transition:text-decoration-color .15s}}
+  button,a{touch-action:manipulation}
+  @media (pointer:coarse){
+    header .gh{padding:.55rem .85rem}
+    .cmd{padding:.5rem .5rem .5rem .9rem}
+    .cmd button{padding:.55rem .85rem;font-size:.8rem}
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="name">guides.show</span>
+    <a class="gh" href="https://github.com/plannotator/guides" title="plannotator/guides on GitHub">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </header>
+
+  <img class="banner" src="/banner.webp" alt="guides.show, by Plannotator" width="1774" height="887" decoding="async" fetchpriority="high">
+
+  <h1>A code walkthrough you can send as a file.</h1>
+  <p>A <a href="https://plannotator.ai/docs/commands/code-review#guided-review">Guided Review</a> takes a diff and explains it in order of importance: chapters, a short overview for each, and the files that belong to it, with the changes shown alongside. Exported, it is one HTML file. This site serves what displays it, and hosts guides shared as links.</p>
+
+  <button type="button" class="shot" id="open-shot" aria-haspopup="dialog" aria-controls="shot-dialog">
+    <figure style="margin:0">
+      <img src="/example_guide.webp" alt="A guide with two chapters. Left: the chapter title, a short overview, and the files it covers. Right: the diff for each file." width="1774" height="1101" decoding="async">
+      <figcaption><span>A two-chapter guide, opened in a browser.</span><span>click to enlarge</span></figcaption>
+    </figure>
+  </button>
+  <p class="examples">Open a real one:
+    <a href="https://guides.show/g/gs0M7zgI_zYeuqtLG4j5vQ#key=awkuPrNypYrCLT49XVnrRUyzg3Iqb-YB2h9-QEWQWMM">a bug fix, 5 chapters</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://guides.show/g/Q-ECuRlzn6I2U41wmnyVmA#key=bA52euqWQypYoSC8n9LFXvP9gLsvTMwYtgjvfS0YAQE">a 125-file feature branch, 6 chapters</a>
+  </p>
+
+  <h2>Making one</h2>
+  <p>Ask your coding agent for a guide of a branch, PR, or commit with the <a href="https://github.com/plannotator/guides"><code>plannotator-guide</code></a> skill; it writes the chapters and hands you the file. <a href="https://plannotator.ai">Plannotator</a> users get the same from <em>Download portable guide</em> after a Guided Review.</p>
+  <div class="cmd">
+    <code id="install">npx skills add plannotator/guides</code>
+    <button type="button" data-copy="install" aria-label="Copy install command">Copy</button>
+  </div>
+
+  <h2>Share links</h2>
+  <p>A guide can be uploaded here instead of downloaded. It is encrypted before it leaves your machine, and the key stays in the link after <code>#</code>, which browsers never send to a server. This host only ever holds bytes it cannot read; anyone with the full link can open the guide, nobody else can. Links don't expire unless asked, and the delete token you get at upload removes one.</p>
+
+  <h2>This host</h2>
+  <p>Viewer builds live under <code>/v1/</code> and never change once published, so a guide from last year opens the same way. A downloaded file sends nothing about your code here. It is a small Cloudflare Worker (<a href="https://github.com/backnotprop/plannotator/tree/main/apps/guides-show"><code>apps/guides-show</code></a>) you can run yourself.</p>
+
+  <footer>
+    <a href="https://plannotator.ai/docs/reference/portable-guides/">File format</a>
+    <a href="https://github.com/backnotprop/plannotator">Plannotator</a>
+    <a href="https://github.com/plannotator/guides">Agent skill</a>
+    <span class="credit">Diffs rendered with <a href="https://diffs.com/">diffs.com</a></span>
+  </footer>
+</main>
+<dialog class="lightbox" id="shot-dialog" aria-label="Example guide, enlarged">
+  <button type="button" class="x" id="close-shot" aria-label="Close">&times;</button>
+  <button type="button" class="area" id="close-shot-area" aria-label="Close enlarged view">
+    <img data-src="/example_guide-2x.webp" alt="" width="2600" height="1613" decoding="async">
+  </button>
+</dialog>
+<script>
+for (const b of document.querySelectorAll('button[data-copy]')) {
+  b.addEventListener('click', async () => {
+    const text = document.getElementById(b.dataset.copy).textContent;
+    try { await navigator.clipboard.writeText(text); } catch { return; }
+    b.textContent = 'Copied'; b.classList.add('done');
+    setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1500);
+  });
+}
+const dlg = document.getElementById('shot-dialog');
+const big = dlg.querySelector('img');
+document.getElementById('open-shot').addEventListener('click', () => {
+  if (!big.getAttribute('src')) big.src = big.dataset.src;
+  dlg.showModal();
+});
+for (const id of ['close-shot', 'close-shot-area']) document.getElementById(id).addEventListener('click', () => dlg.close());
+</script>
+</body>
+</html>

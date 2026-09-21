@@ -15,6 +15,15 @@ import React from 'react';
  *
  * Interactivity is opt-in: the Viewer passes `interactive` + `onToggle`
  * for click-to-toggle checkboxes; the diff view leaves both undefined.
+ *
+ * The marker carries `annotation-exclude` because it is `select-none`: the
+ * browser leaves the bullet/numeral out of every selection string, so it is
+ * out of the quote an annotation stores. Without the class the highlighter
+ * still PAINTS it (a selection crossing two list items wraps the second item's
+ * bullet on the way), and the restore verification then compares a painted
+ * "a•b" against a stored "a\nb", rejects a perfectly good restore, and
+ * the annotation comes back from a reload with no highlight at all. Excluding
+ * it makes the two agree by construction.
  */
 interface ListMarkerProps {
   level: number;
@@ -45,7 +54,7 @@ export const ListMarker: React.FC<ListMarkerProps> = ({
 
   return (
     <span
-      className={`select-none shrink-0 self-start flex items-center gap-1${interactive ? ' cursor-pointer' : ''}`}
+      className={`annotation-exclude select-none shrink-0 self-start flex items-center gap-1${interactive ? ' cursor-pointer' : ''}`}
       onClick={handleClick}
       role={interactive ? 'checkbox' : undefined}
       aria-checked={interactive ? checked : undefined}

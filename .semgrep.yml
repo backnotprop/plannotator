@@ -1,0 +1,362 @@
+# Plannotator-owned Semgrep Community Edition rules.
+#
+# Keeping the rules in this Apache-2.0 repository makes scans reviewable and
+# offline. Semgrep Registry configurations are intentionally not used: they
+# are mutable, require network access, and the upstream rules license does not
+# permit redistributing copies. CE is intrafile only; these rules do not claim
+# cross-file, cross-function, reachability, or hosted policy coverage.
+rules:
+  - id: plannotator.node.nonliteral-exec
+    message: A non-literal command reaches child_process exec/execSync. Prefer an argv-based spawn API and validate every argument.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-78
+      technology: [node, bun]
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  import { exec } from "node:child_process";
+                  ...
+              - pattern: exec($COMMAND, ...)
+              - pattern-not: exec("...", ...)
+          - patterns:
+              - pattern-inside: |
+                  import { execSync } from "node:child_process";
+                  ...
+              - pattern: execSync($COMMAND, ...)
+              - pattern-not: execSync("...", ...)
+          - patterns:
+              - pattern-inside: |
+                  import { exec } from "child_process";
+                  ...
+              - pattern: exec($COMMAND, ...)
+              - pattern-not: exec("...", ...)
+          - patterns:
+              - pattern-inside: |
+                  import { execSync } from "child_process";
+                  ...
+              - pattern: execSync($COMMAND, ...)
+              - pattern-not: execSync("...", ...)
+
+  - id: plannotator.node.shell-command-argument
+    message: Data is passed to a shell command string. Prefer a fixed executable and an argv array without `sh -c`.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-78
+      technology: [node, bun]
+    patterns:
+      - pattern-either:
+          - pattern: spawn("sh", ["-c", $COMMAND])
+          - pattern: spawn("sh", ["-c", $COMMAND], ...)
+          - pattern: spawn("bash", ["-c", $COMMAND])
+          - pattern: spawn("bash", ["-c", $COMMAND], ...)
+          - pattern: spawnSync("sh", ["-c", $COMMAND])
+          - pattern: spawnSync("sh", ["-c", $COMMAND], ...)
+          - pattern: spawnSync("bash", ["-c", $COMMAND])
+          - pattern: spawnSync("bash", ["-c", $COMMAND], ...)
+          - pattern: Bun.spawn(["sh", "-c", $COMMAND])
+          - pattern: Bun.spawn(["sh", "-c", $COMMAND], ...)
+          - pattern: Bun.spawn(["bash", "-c", $COMMAND])
+          - pattern: Bun.spawn(["bash", "-c", $COMMAND], ...)
+          - pattern: Bun.spawnSync(["sh", "-c", $COMMAND])
+          - pattern: Bun.spawnSync(["sh", "-c", $COMMAND], ...)
+          - pattern: Bun.spawnSync(["bash", "-c", $COMMAND])
+          - pattern: Bun.spawnSync(["bash", "-c", $COMMAND], ...)
+  - id: plannotator.javascript.dynamic-code-execution
+    message: Non-literal input reaches eval or the Function constructor. Avoid evaluating code assembled at runtime.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-95
+      technology: [browser, node, bun, cloudflare-workers]
+    patterns:
+      - pattern-either:
+          - pattern: eval($CODE)
+          - pattern: new Function($CODE)
+          - pattern: new Function($ARGS, $CODE)
+      - metavariable-pattern:
+          metavariable: $CODE
+          patterns:
+            - pattern-not: "..."
+
+  - id: plannotator.web.request-to-network
+    message: Request-derived data reaches a network sink in the same function. Validate the scheme, host, port, redirects, and resolved IP before use.
+    severity: ERROR
+    languages: [javascript, typescript]
+    mode: taint
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-918
+      technology: [node, bun, cloudflare-workers]
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQUEST.url
+              - pattern: $REQUEST.text()
+              - pattern: $REQUEST.json()
+              - pattern: $REQUEST.formData()
+              - pattern: $REQUEST.headers.get(...)
+          - metavariable-regex:
+              metavariable: $REQUEST
+              regex: (?i)^(req|request|incomingRequest|serverRequest|workerRequest)$
+      - patterns:
+          - pattern: $URL.searchParams.get(...)
+          - metavariable-regex:
+              metavariable: $URL
+              regex: (?i).*(url|uri).*
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: fetch($DESTINATION, ...)
+              - pattern: http.request($DESTINATION, ...)
+              - pattern: https.request($DESTINATION, ...)
+              - pattern: http.get($DESTINATION, ...)
+              - pattern: https.get($DESTINATION, ...)
+
+  - id: plannotator.web.request-to-filesystem
+    message: Request-derived data reaches a filesystem API in the same function. Resolve against an allowed root and reject traversal before access.
+    severity: ERROR
+    languages: [javascript, typescript]
+    mode: taint
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-22
+      technology: [node, bun]
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQUEST.url
+              - pattern: $REQUEST.text()
+              - pattern: $REQUEST.json()
+              - pattern: $REQUEST.formData()
+          - metavariable-regex:
+              metavariable: $REQUEST
+              regex: (?i)^(req|request|incomingRequest|serverRequest|workerRequest)$
+      - patterns:
+          - pattern: $URL.searchParams.get(...)
+          - metavariable-regex:
+              metavariable: $URL
+              regex: (?i).*(url|uri).*
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: Bun.file($PATH, ...)
+              - pattern: Bun.write($PATH, ...)
+              - pattern: readFile($PATH, ...)
+              - pattern: readFileSync($PATH, ...)
+              - pattern: writeFile($PATH, ...)
+              - pattern: writeFileSync($PATH, ...)
+              - pattern: createReadStream($PATH, ...)
+              - pattern: createWriteStream($PATH, ...)
+
+  - id: plannotator.browser.nonliteral-innerhtml
+    message: Non-literal data is assigned to innerHTML/outerHTML. Use textContent or sanitize with the repository's DOMPurify boundary.
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-79
+      technology: [browser, react]
+    patterns:
+      - pattern-either:
+          - pattern: $ELEMENT.innerHTML = $HTML
+          - pattern: $ELEMENT.outerHTML = $HTML
+          - pattern: $ELEMENT.insertAdjacentHTML($POSITION, $HTML)
+      - metavariable-pattern:
+          metavariable: $HTML
+          patterns:
+            - pattern-not: "..."
+
+  - id: plannotator.browser.document-write
+    message: document.write/writeln can create a DOM XSS sink and should not process dynamic content.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-79
+      technology: [browser]
+    pattern-either:
+      - pattern: document.write(...)
+      - pattern: document.writeln(...)
+
+  - id: plannotator.react.dangerously-set-inner-html
+    message: React dangerouslySetInnerHTML bypasses escaping. Ensure the value is sanitized at this boundary.
+    severity: WARNING
+    languages: [typescript, javascript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-79
+      technology: [react]
+    patterns:
+      - pattern: '<$ELEMENT ... dangerouslySetInnerHTML={{__html: $HTML}} ... />'
+
+  - id: plannotator.web.unvalidated-redirect
+    message: Request-derived data reaches a redirect target in the same function. Restrict redirects to approved local paths or origins.
+    severity: WARNING
+    languages: [javascript, typescript]
+    mode: taint
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: MEDIUM
+      likelihood: MEDIUM
+      cwe: CWE-601
+      technology: [node, bun, cloudflare-workers]
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $REQUEST.url
+              - pattern: $REQUEST.headers.get(...)
+          - metavariable-regex:
+              metavariable: $REQUEST
+              regex: (?i)^(req|request|incomingRequest|serverRequest|workerRequest)$
+      - patterns:
+          - pattern: $URL.searchParams.get(...)
+          - metavariable-regex:
+              metavariable: $URL
+              regex: (?i).*(url|uri).*
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: Response.redirect($DESTINATION, ...)
+              - pattern: $RESPONSE.redirect($DESTINATION, ...)
+
+  - id: plannotator.crypto.weak-digest
+    message: MD5 and SHA-1 are not collision resistant. Use a modern digest for security-sensitive integrity or authentication.
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: MEDIUM
+      likelihood: MEDIUM
+      cwe: CWE-328
+      technology: [node, bun]
+    pattern-either:
+      - pattern: createHash("md5")
+      - pattern: createHash("sha1")
+      - pattern: createHash("sha-1")
+      - pattern: crypto.createHash("md5")
+      - pattern: crypto.createHash("sha1")
+      - pattern: crypto.createHash("sha-1")
+
+  - id: plannotator.network.tls-verification-disabled
+    message: TLS certificate verification is disabled. Remove rejectUnauthorized:false.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: HIGH
+      cwe: CWE-295
+      technology: [node, bun]
+    pattern: "{ ..., rejectUnauthorized: false, ... }"
+
+  - id: plannotator.auth.insecure-randomness
+    message: Math.random is not suitable for credentials, tokens, nonces, or session identifiers. Use a cryptographic random source.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-338
+      technology: [browser, node, bun]
+    patterns:
+      - pattern: Math.random()
+      - pattern-inside: |
+          $NAME = ...
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|session|nonce|credential|password|auth).*
+
+  - id: plannotator.web.wildcard-credentials-cors
+    message: A wildcard CORS origin must not be combined with credentials.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-942
+      technology: [browser, node, bun, cloudflare-workers]
+    patterns:
+      - pattern-either:
+          - pattern: "{ ..., 'Access-Control-Allow-Origin': '*', ..., 'Access-Control-Allow-Credentials': 'true', ... }"
+          - pattern: '{ ..., "Access-Control-Allow-Origin": "*", ..., "Access-Control-Allow-Credentials": "true", ... }'
+
+  - id: plannotator.installer.remote-script-pipeline
+    message: A remote response is piped directly to a command interpreter. Download, authenticate, and inspect the artifact before execution.
+    severity: ERROR
+    languages: [generic]
+    paths:
+      include:
+        - "*.sh"
+        - "*.bash"
+        - "*.ps1"
+        - "*.cmd"
+        - "*.bat"
+        - "Dockerfile"
+        - "**/Dockerfile"
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-494
+      technology: [shell, powershell, batch]
+    pattern-either:
+      - pattern-regex: '(?im)^\s*(?:curl|wget)[^\n|]*\|\s*(?:sh|bash)(?:\s|$)'
+      - pattern-regex: '(?im)^\s*(?:iwr|Invoke-WebRequest)[^\n|]*\|\s*(?:iex|Invoke-Expression)(?:\s|$)'
+
+  - id: plannotator.installer.unquoted-shell-expansion
+    message: An unquoted command substitution is used as a shell command. Store and validate data instead of executing expansion output.
+    severity: ERROR
+    languages: [generic]
+    paths:
+      include:
+        - "*.sh"
+        - "*.bash"
+        - "Dockerfile"
+        - "**/Dockerfile"
+    metadata:
+      category: security
+      confidence: MEDIUM
+      impact: HIGH
+      likelihood: MEDIUM
+      cwe: CWE-78
+      technology: [shell]
+    pattern-regex: '(?m)^\s*eval\s+(?:\$\([^\n]*\)|`[^\n]*`)'

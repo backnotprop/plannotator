@@ -167,4 +167,75 @@ describe('DraftTransport seam', () => {
 
     await session.unmount();
   });
+
+  test.skipIf(!hasDom)('multi-target HTML annotations round-trip the draft transport verbatim', async () => {
+    const MULTI_ANNOTATION: Annotation = {
+      id: 'ann-multi-1',
+      blockId: '',
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.COMMENT,
+      text: 'Unify these',
+      originalText: 'Primary chip',
+      createdA: Date.now(),
+      htmlAnchor: { selector: 'p.primary', tagName: 'p', text: 'Primary chip' },
+      htmlAdditionalTargets: [
+        {
+          label: 'Button',
+          text: 'Create',
+          anchor: { selector: 'span.btn', tagName: 'span', text: 'Create' },
+        },
+        { label: 'rowchip', text: 'adopted by 1' }, // fail-closed target, no anchor
+      ],
+    };
+
+    // Save side: the annotation (with its targets) appears in the save body.
+    const { transport, state } = makeFakeTransport();
+    setDraftTransport(transport);
+    const session = await mountHook({
+      annotations: [MULTI_ANNOTATION],
+      globalAttachments: [],
+      isApiMode: true,
+      isSharedSession: false,
+      submitted: false,
+    });
+    await tick(50);
+    await act(async () => {
+      session.result.current!.scheduleDraftSave();
+    });
+    await tick(600);
+    expect(state.saved.length).toBeGreaterThanOrEqual(1);
+    const savedBody = state.saved.at(-1) as { annotations: Annotation[] };
+    expect(savedBody.annotations[0]!.htmlAdditionalTargets)
+      .toEqual(MULTI_ANNOTATION.htmlAdditionalTargets);
+    await session.unmount();
+
+    // Restore side: a stored draft hands the targets back untouched.
+    const restoreTransport: DraftTransport = {
+      load: async () => ({
+        data: {
+          annotations: [MULTI_ANNOTATION],
+          globalAttachments: [],
+          ts: Date.now(),
+        },
+        generation: 1,
+      }),
+      save: async () => {},
+      remove: async () => {},
+    };
+    setDraftTransport(restoreTransport);
+    const restoreSession = await mountHook({
+      annotations: [],
+      globalAttachments: [],
+      isApiMode: true,
+      isSharedSession: false,
+      submitted: false,
+    });
+    await tick(50);
+    expect(restoreSession.result.current!.draftBanner?.count).toBe(1);
+    const restored = restoreSession.result.current!.restoreDraft();
+    expect(restored.annotations[0]!.htmlAdditionalTargets)
+      .toEqual(MULTI_ANNOTATION.htmlAdditionalTargets);
+    await restoreSession.unmount();
+  });
 });

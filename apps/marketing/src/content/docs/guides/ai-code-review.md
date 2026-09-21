@@ -69,7 +69,7 @@ Review-agent permissions depend on the engine:
 
 - **Claude** gets Read, Glob, Grep, Agent, and command patterns intended for inspection through `git`, `gh`, `glab`, `jj`, and `wc`. Direct file-writing tools, WebFetch, WebSearch, general-purpose shells, curl, and wget are denied. Some allowed patterns, including `glab api` and `git -C`, are broader than a strict subcommand-by-subcommand read-only list.
 - **GitHub Copilot CLI** has its write tool denied. Plannotator also denies specific high-risk Git operations and outward-facing GitHub and GitLab writes, allows the `git`, `gh`, `glab`, `jj`, and `wc` command families, and relies on Copilot's non-interactive mode to deny other shell tools.
-- **Codex** runs with `--full-auto`, which uses Codex's workspace-write sandbox. It is not a read-only file sandbox.
+- **Codex** runs with `--approve-for-me`, which uses Codex's workspace-write sandbox and automatic approval review. It is not a read-only file sandbox.
 - **Cursor** runs in ask mode with its sandbox enabled by default. `PLANNOTATOR_CURSOR_SANDBOX=0` removes the explicit sandbox flag and defers to the user's Cursor configuration.
 - **OpenCode** runs its plan agent, but Plannotator does not add a shell restriction flag. Its permissions come from the user's OpenCode configuration.
 - **Pi** excludes the direct edit and write tools, but retains Bash and its other inspection paths under Pi's runtime controls.
@@ -268,7 +268,7 @@ At the end, output an overall correctness verdict.
 codex exec \
   --output-schema ~/.plannotator/codex-review-schema.json \
   -o /tmp/plannotator-codex-<uuid>.json \
-  --full-auto \
+  --approve-for-me \
   --ephemeral \
   -C <working-directory> \
   "<system-prompt>\n\n---\n\n<user-message>"

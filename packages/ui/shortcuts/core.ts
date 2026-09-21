@@ -62,6 +62,7 @@ const NAMED_TOKENS = new Set([
   // whitelist explicitly so typos like `Cmd` instead of `Mod` keep failing
   // validation.
   '.',
+  '/',
   '[',
   ']',
   '{',

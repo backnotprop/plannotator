@@ -21,6 +21,8 @@ import {
 	handleDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleReferenceSkillsRequest,
+	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
 	handleSaveNotesRequest,
 	handleUploadRequest,
@@ -37,9 +39,11 @@ import {
 	saveToObsidian,
 	saveToOctarine,
 } from "./integrations.ts";
-import { listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, listenOnPort } from "./network.ts";
 
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveSharingEnabled } from "../generated/config.ts";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
+import { appendFeedbackRecord, type FeedbackDecision } from "../generated/feedback-archive.ts";
+import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
 import { readImprovementHook, getImprovementHookExpectedPath } from "../generated/improvement-hooks.ts";
 import { composeImproveContext } from "../generated/pfm-reminder.ts";
 import { detectProjectName, getRepoInfo } from "./project.ts";
@@ -51,7 +55,7 @@ import {
 	handleObsidianFilesRequest,
 	handleObsidianVaultsRequest,
 } from "./reference.ts";
-import { handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
+import { closeAllFileBrowserWatchers, handleFileBrowserStreamRequest } from "./file-browser-watch.ts";
 import { warmFileListCache } from "../generated/resolve-file.ts";
 import { isArchiveDocumentMutation } from "../generated/archive-mode.ts";
 
@@ -133,6 +137,39 @@ export async function startPlanReviewServer(options: {
 					project,
 				}
 			: null;
+
+	// Durable feedback archive (Node mirror of packages/server/index.ts).
+	// Appends the decision to feedback/{project}/index.jsonl at settlement
+	// time, independent of the client-side planSave setting, and names the
+	// history version file rather than copying the plan text. Plan policy on
+	// failure: log and proceed — an approval is never blocked on the archive.
+	//
+	// Data-dir asymmetry worth knowing: getPlanVersionPath resolves against the
+	// data directory generated/storage.ts captured at import time, while the
+	// archive resolves it per call. They agree in every real run and can only
+	// disagree if PLANNOTATOR_DATA_DIR changes mid-process, in which case
+	// planVersionFile names where the version file was actually written.
+	const archivePlanDecision = (decision: FeedbackDecision, feedback?: string): void => {
+		if (options.mode === "archive") return;
+		if (!resolveFeedbackHistory(loadConfig())) return;
+		const version = versionInfo?.version ?? 0;
+		appendFeedbackRecord({
+			project,
+			origin: options.origin ?? "pi",
+			surface: "plan",
+			decision,
+			target: {
+				slug,
+				...(version > 0
+					? {
+							planVersion: version,
+							planVersionFile: getPlanVersionPath(project, slug, version) ?? undefined,
+						}
+					: {}),
+			},
+			feedback,
+		});
+	};
 
 	const reviewId = randomUUID();
 	let resolveDecision!: (result: PlanReviewDecision) => void;
@@ -255,11 +292,12 @@ export async function startPlanReviewServer(options: {
 			});
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			try {
-				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
+				const body = (await parseBody(req)) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
 				const toSave: Record<string, unknown> = {};
 				if (body.displayName !== undefined) toSave.displayName = body.displayName;
 				if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
 				if (body.theme !== undefined) toSave.theme = body.theme;
+				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
 				if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
@@ -286,6 +324,10 @@ export async function startPlanReviewServer(options: {
 			await handleDocExistsRequest(res, req);
 		} else if (url.pathname === "/api/obsidian/vaults") {
 			handleObsidianVaultsRequest(res);
+		} else if (url.pathname === "/api/skills" && req.method === "GET") {
+			handleReferenceSkillsRequest(res);
+		} else if (url.pathname === "/api/skills/content" && req.method === "GET") {
+			handleReferenceSkillContentRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/files" && req.method === "GET") {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
@@ -406,6 +448,11 @@ export async function startPlanReviewServer(options: {
 					planSaveCustomPath,
 				);
 			}
+			// Archive before the draft delete (#678 ordering, generalized).
+			archivePlanDecision(
+				typeof feedback === "string" && feedback.trim() ? "approved-with-notes" : "approved",
+				feedback,
+			);
 			deleteDraft(draftKey, draftGeneration);
 			const effectivePermissionMode = requestedPermissionMode || options.permissionMode;
 			publishDecision({
@@ -448,6 +495,7 @@ export async function startPlanReviewServer(options: {
 					planSaveCustomPath,
 				);
 			}
+			archivePlanDecision("denied", feedback);
 			deleteDraft(draftKey, draftGeneration);
 			publishDecision({ approved: false, feedback, savedPath });
 			json(res, { ok: true, savedPath });
@@ -467,7 +515,7 @@ export async function startPlanReviewServer(options: {
 		reviewId,
 		port,
 		portSource,
-		url: `http://localhost:${port}`,
+		url: buildAdvertisedUrl(port),
 		waitForDecision: () => decisionPromise,
 		onDecision: (listener) => {
 			decisionListeners.add(listener);
@@ -479,6 +527,7 @@ export async function startPlanReviewServer(options: {
 		stop: () => {
 			// try/finally: a throwing dispose must never leave the listener bound.
 			try {
+				closeAllFileBrowserWatchers();
 				aiRuntime?.dispose();
 			} finally {
 				server.close();

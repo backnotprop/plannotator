@@ -9,6 +9,8 @@ interface DestinationSpotlightProps {
   platformLabel: string;
   /** "PR" | "MR" — platform-aware merge-request label. */
   mrLabel: string;
+  /** Uses a visible-viewport bottom surface instead of desktop anchor geometry. */
+  compactTouchLayout?: boolean;
   onDismiss: () => void;
 }
 
@@ -21,7 +23,13 @@ const PAD = 6;
  * plus an anchored card explaining the Agent / platform toggle. Clicking
  * anywhere (or "Got it") dismisses; the caller persists the seen-flag.
  */
-export function DestinationSpotlight({ targetRef, platformLabel, mrLabel, onDismiss }: DestinationSpotlightProps) {
+export function DestinationSpotlight({
+  targetRef,
+  platformLabel,
+  mrLabel,
+  compactTouchLayout = false,
+  onDismiss,
+}: DestinationSpotlightProps) {
   const [rect, setRect] = useState<DOMRect | null>(null);
 
   // Measure the target after layout; re-measure on resize AND on a short
@@ -84,36 +92,63 @@ export function DestinationSpotlight({ targetRef, platformLabel, mrLabel, onDism
           boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.55)',
         }}
       />
-      {/* Card, hung below the target and right-aligned with it (the switcher
-          lives in the header's top-right cluster). */}
-      <div
-        className="absolute w-[320px] max-w-[calc(100vw-24px)] rounded-lg border border-border bg-popover p-4 shadow-xl"
-        style={{
-          top: rect.bottom + PAD + 12,
-          right: Math.max(12, window.innerWidth - rect.right - PAD),
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-sm font-semibold text-foreground">Where should your review go?</div>
-        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-          You're reviewing {/^[AEIOUM]/.test(mrLabel) ? 'an' : 'a'} {mrLabel}, so your feedback
-          can go two ways: post review comments straight to {platformLabel}, or send them to your
-          agent session. Use this switcher to change the destination at any point — per review,
-          no setup.
-        </p>
-        <p className="mt-2 text-[11px] text-muted-foreground/70">
-          Tip: double-tap {kbd(altKey)} {kbd(altKey)} to switch quickly.
-        </p>
-        <div className="mt-3 flex justify-end">
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
+      {compactTouchLayout ? (
+        <div className="pn-visible-viewport-overlay pointer-events-none z-[91] flex items-end">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Review destination"
+            className="pointer-events-auto max-h-full w-full overflow-y-auto rounded-xl border border-border bg-popover p-4 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
           >
-            Got it
-          </button>
+            <div className="text-base font-semibold text-foreground">Choose where reviews go</div>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              Post comments to {platformLabel}, or send them to your agent. Tap the highlighted control any time to switch.
+            </p>
+            <div className="mt-3 flex justify-end">
+              <button
+                data-pn-touch-target
+                type="button"
+                onClick={onDismiss}
+                className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        /* Card, hung below the target and right-aligned with it (the switcher
+           lives in the header's top-right cluster). */
+        <div
+          className="absolute w-[320px] max-w-[calc(100vw-24px)] rounded-lg border border-border bg-popover p-4 shadow-xl"
+          style={{
+            top: rect.bottom + PAD + 12,
+            right: Math.max(12, window.innerWidth - rect.right - PAD),
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-sm font-semibold text-foreground">Where should your review go?</div>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            You're reviewing {/^[AEIOUM]/.test(mrLabel) ? 'an' : 'a'} {mrLabel}, so your feedback
+            can go two ways: post review comments straight to {platformLabel}, or send them to your
+            agent session. Use this switcher to change the destination at any point — per review,
+            no setup.
+          </p>
+          <p className="mt-2 text-[11px] text-muted-foreground/70">
+            Tip: double-tap {kbd(altKey)} {kbd(altKey)} to switch quickly.
+          </p>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>,
     document.body,
   );

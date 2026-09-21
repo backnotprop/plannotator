@@ -27,9 +27,17 @@ import nodeAgentTerminalSidecarSource from "./agent-terminal-node-sidecar.mjs" w
 
 export const AGENT_TERMINAL_WEBTUI_VERSION = "0.1.0";
 
+/**
+ * The one native dependency in the WebTUI tree. `@plannotator/webtui` pulls it
+ * in transitively, and it is the only package in that tree with lifecycle
+ * scripts, which is what makes a single-entry `allowScripts` approval enough.
+ */
+const AGENT_TERMINAL_NATIVE_PACKAGE = "node-pty";
+
 const NODE_VERSION_TIMEOUT_MS = 3_000;
 const NODE_IMPORT_TIMEOUT_MS = 5_000;
 const NPM_INSTALL_TIMEOUT_MS = 120_000;
+const NPM_REBUILD_TIMEOUT_MS = 120_000;
 
 export type ResolvedAgentTerminalRuntime = {
   ok: true;
@@ -235,6 +243,21 @@ export async function installAgentTerminalRuntime(): Promise<AgentTerminalRuntim
     return fail(runtimeDir, `Skipping agent terminal runtime install (${summarizeCommandFailure(install)}).`);
   }
 
+  // npm leaves an already-populated node_modules alone ("up to date"), so a
+  // runtime installed before the allowScripts approval existed keeps its
+  // unbuilt node-pty through a plain reinstall. One targeted rebuild is what
+  // turns the approval we just wrote into an actual native binary; if it does
+  // not, the check below still reports the failure with the manual remedy.
+  let native = verifyAgentTerminalNativeBinary(runtimeDir);
+  if (!native.ok) {
+    await runCommand(npmPath, ["rebuild", AGENT_TERMINAL_NATIVE_PACKAGE], {
+      cwd: runtimeDir,
+      timeoutMs: NPM_REBUILD_TIMEOUT_MS,
+    });
+    native = verifyAgentTerminalNativeBinary(runtimeDir);
+  }
+  if (!native.ok) return fail(runtimeDir, `Agent terminal runtime install failed (${native.message}).`);
+
   const preflight = await preflightNodeImports(nodePath, {
     cwd: runtimeDir,
     webtuiCoreUrl: "@plannotator/webtui/core",
@@ -271,16 +294,104 @@ function tryMaterializeAgentTerminalSidecar(
   }
 }
 
-function writeRuntimePackageJson(runtimeDir: string): void {
-  const packageJsonPath = join(runtimeDir, "package.json");
-  const packageJson = {
+/**
+ * The manifest the managed runtime is installed from.
+ *
+ * `allowScripts` exists because npm 12 stopped running dependency lifecycle
+ * scripts (`preinstall` / `install` / `postinstall`, and implicit node-gyp
+ * builds) unless the installing project approves the package by name (#1409).
+ * node-pty ships prebuilds for macOS and Windows only, so on Linux its
+ * `install` script is what compiles `build/Release/pty.node`. Without the
+ * approval npm reports a successful install, and WebTUI then fails to load at
+ * the point the Agent tab is opened.
+ *
+ * Two deliberate choices:
+ *
+ *   - The entry is name-only (`node-pty`), not version-pinned
+ *     (`node-pty@1.1.0`). npm matches these keys as exact strings, so a pinned
+ *     entry stops matching the moment `@plannotator/webtui`'s `^1.1.0` range
+ *     resolves to a newer patch, silently reintroducing this bug in a fresh
+ *     install. The approval is still narrow: exactly one package, never a
+ *     blanket allow.
+ *   - The field is inert on npm releases that predate it: older npm ignores
+ *     unknown top-level manifest keys and preserves them when it rewrites the
+ *     file, and its scripts-run-by-default behavior is unchanged.
+ */
+export function buildAgentTerminalRuntimePackageJson(): Record<string, unknown> {
+  return {
     private: true,
     type: "module",
     dependencies: {
       "@plannotator/webtui": AGENT_TERMINAL_WEBTUI_VERSION,
     },
+    allowScripts: {
+      [AGENT_TERMINAL_NATIVE_PACKAGE]: true,
+    },
   };
+}
+
+function writeRuntimePackageJson(runtimeDir: string): void {
+  const packageJsonPath = join(runtimeDir, "package.json");
+  const packageJson = buildAgentTerminalRuntimePackageJson();
   writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Post-install check that the native PTY addon actually exists.
+ *
+ * npm's script blocking is silent: the tree installs, `npm install` exits 0,
+ * and only a later `import` of WebTUI fails. This mirrors node-pty's own
+ * resolution order (`lib/utils.js`: build/Release, build/Debug, then
+ * prebuilds/<platform>-<arch>) so a runtime that cannot load is reported as a
+ * provisioning failure with the actual remedy instead of as a WebTUI import
+ * error surfaced hours later in the Agent tab.
+ *
+ * When node-pty is not in the tree at all the check passes: nothing to verify,
+ * and refusing to install a tree we do not recognize would be worse than
+ * letting the existing import preflight judge it.
+ */
+export function verifyAgentTerminalNativeBinary(
+  runtimeDir: string,
+): { ok: true } | { ok: false; message: string } {
+  const packageDir = resolveNativePackageDir(runtimeDir);
+  if (!packageDir) return { ok: true };
+
+  const platformDir = `${process.platform}-${process.arch}`;
+  const candidates = [
+    join("build", "Release", "pty.node"),
+    join("build", "Debug", "pty.node"),
+    join("prebuilds", platformDir, "pty.node"),
+  ];
+  if (candidates.some((candidate) => existsSync(join(packageDir, candidate)))) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    message:
+      `${AGENT_TERMINAL_NATIVE_PACKAGE} installed without its native binary (no pty.node under ` +
+      `build/Release, build/Debug, or prebuilds/${platformDir} in ${packageDir}). ` +
+      "npm 12 and newer block dependency install scripts unless the installing project approves " +
+      `them, and ${AGENT_TERMINAL_NATIVE_PACKAGE} needs its install script to compile pty.node on ` +
+      "this platform. Repair it with: cd " +
+      `${runtimeDir} && npm install-scripts approve ${AGENT_TERMINAL_NATIVE_PACKAGE} && npm rebuild ` +
+      `${AGENT_TERMINAL_NATIVE_PACKAGE}`,
+  };
+}
+
+function resolveNativePackageDir(runtimeDir: string): string | null {
+  const candidates = [
+    join(runtimeDir, "node_modules", AGENT_TERMINAL_NATIVE_PACKAGE),
+    join(
+      runtimeDir,
+      "node_modules",
+      "@plannotator",
+      "webtui",
+      "node_modules",
+      AGENT_TERMINAL_NATIVE_PACKAGE,
+    ),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 function readInstalledWebTuiVersion(runtimeDir: string): string | null {

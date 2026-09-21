@@ -15,6 +15,7 @@ import type { AIMessage } from "../types.ts";
  *
  * We extract:
  * - text_delta from message_update.assistantMessageEvent
+ * - text from completed assistant messages when no stream deltas arrived
  * - tool_use from toolcall_end
  * - tool_result from tool_execution_end
  * - result from agent_end
@@ -63,6 +64,27 @@ export function mapPiEvent(
 				default:
 					return [];
 			}
+		}
+
+		case "message_end": {
+			const message = event.message as Record<string, unknown> | undefined;
+			if (message?.role !== "assistant") return [];
+			if (message.stopReason === "error") {
+				return [{
+					type: "error",
+					error: typeof message.errorMessage === "string" ? message.errorMessage : "Pi request failed",
+					code: "pi_request_error",
+				}];
+			}
+			if (!Array.isArray(message.content)) return [];
+
+			const text = message.content
+				.filter((block): block is Record<string, unknown> =>
+					typeof block === "object" && block !== null && block.type === "text",
+				)
+				.map((block) => (typeof block.text === "string" ? block.text : ""))
+				.join("");
+			return text ? [{ type: "text", text }] : [];
 		}
 
 		case "tool_execution_end": {

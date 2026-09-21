@@ -13,8 +13,6 @@ import { sanitizeTag } from "./project";
 import { resolveUserPath } from "./resolve-file";
 import { getPlannotatorDataDir } from "./data-dir";
 
-const DATA_DIR = getPlannotatorDataDir();
-
 /**
  * Get the plan storage directory, creating it if needed.
  * Cross-platform: uses os.homedir() for Windows/macOS/Linux compatibility.
@@ -26,7 +24,7 @@ export function getPlanDir(customPath?: string | null): string {
   if (customPath?.trim()) {
     planDir = resolveUserPath(customPath);
   } else {
-    planDir = join(DATA_DIR, "plans");
+    planDir = join(getPlannotatorDataDir(), "plans");
   }
 
   mkdirSync(planDir, { recursive: true });
@@ -195,7 +193,7 @@ export function readArchivedPlan(filename: string, customPath?: string | null): 
  * Not affected by the customPath setting (that only affects decision saves).
  */
 export function getHistoryDir(project: string, slug: string): string {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(getPlannotatorDataDir(), "history", project, slug);
   mkdirSync(historyDir, { recursive: true });
   return historyDir;
 }
@@ -254,6 +252,38 @@ export function saveToHistory(
 }
 
 /**
+ * Save a durable record of submitted annotate feedback (#678).
+ *
+ * Annotate submissions settle a decision promise whose consumer (the invoking
+ * CLI/agent) may have timed out and stopped listening. The plan flow persists
+ * its decisions via saveFinalSnapshot; annotate had no equivalent, so a submit
+ * whose caller was gone deleted the draft and left the feedback nowhere. This
+ * writes the record next to the file's annotate version history:
+ *
+ *   {DATA_DIR}/history/{project}/{slug}/submissions/{timestamp}.md
+ *
+ * The `submissions/` subdirectory keeps these out of the numeric NNN.md
+ * version scans above (getNextVersionNumber / listVersions / listProjectPlans
+ * all match files directly in the slug directory only). Filenames are
+ * filesystem-safe ISO timestamps (colons/dots replaced) with a collision
+ * counter so rapid successive submits never overwrite each other.
+ *
+ * Returns the full path to the saved file. Throws on write failure — callers
+ * (persistAnnotateSubmission) catch and degrade.
+ */
+export function saveAnnotateSubmission(project: string, slug: string, content: string): string {
+  const submissionsDir = join(getHistoryDir(project, slug), "submissions");
+  mkdirSync(submissionsDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  let filePath = join(submissionsDir, `${stamp}.md`);
+  for (let n = 2; existsSync(filePath); n++) {
+    filePath = join(submissionsDir, `${stamp}-${n}.md`);
+  }
+  writeFileSync(filePath, content, "utf-8");
+  return filePath;
+}
+
+/**
  * Read a specific version's content from history.
  * Returns null if the version doesn't exist or on read error.
  */
@@ -262,7 +292,7 @@ export function getPlanVersion(
   slug: string,
   version: number
 ): string | null {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(getPlannotatorDataDir(), "history", project, slug);
   const fileName = `${String(version).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
 
@@ -282,7 +312,7 @@ export function getPlanVersionPath(
   slug: string,
   version: number
 ): string | null {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(getPlannotatorDataDir(), "history", project, slug);
   const fileName = `${String(version).padStart(3, "0")}.md`;
   const filePath = join(historyDir, fileName);
   return existsSync(filePath) ? filePath : null;
@@ -293,7 +323,7 @@ export function getPlanVersionPath(
  * Returns 0 if the directory doesn't exist.
  */
 export function getVersionCount(project: string, slug: string): number {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(getPlannotatorDataDir(), "history", project, slug);
   try {
     const entries = readdirSync(historyDir);
     return entries.filter((e) => /^\d+\.md$/.test(e)).length;
@@ -310,7 +340,7 @@ export function listVersions(
   project: string,
   slug: string
 ): Array<{ version: number; timestamp: string }> {
-  const historyDir = join(DATA_DIR, "history", project, slug);
+  const historyDir = join(getPlannotatorDataDir(), "history", project, slug);
   try {
     const entries = readdirSync(historyDir);
     const versions: Array<{ version: number; timestamp: string }> = [];
@@ -340,7 +370,7 @@ export function listVersions(
 export function listProjectPlans(
   project: string
 ): Array<{ slug: string; versions: number; lastModified: string }> {
-  const projectDir = join(DATA_DIR, "history", project);
+  const projectDir = join(getPlannotatorDataDir(), "history", project);
   try {
     const entries = readdirSync(projectDir, { withFileTypes: true });
     const plans: Array<{ slug: string; versions: number; lastModified: string }> = [];

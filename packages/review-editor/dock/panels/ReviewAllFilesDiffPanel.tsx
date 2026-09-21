@@ -38,6 +38,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       pendingSelection={state.pendingSelection}
       reviewBase={state.reviewBase}
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
+      contextExpansionAvailable={state.contextExpansionAvailable}
+      compactTouchLayout={state.isCompactTouchLayout}
       onLineSelection={state.onLineSelection}
       onAddAnnotationForFile={state.onAddAnnotationForFile}
       onEditAnnotation={state.onEditAnnotation}
@@ -46,9 +48,14 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       onAddFileCommentForFile={state.onAddFileCommentForFile}
       viewedFiles={state.viewedFiles}
       onToggleViewed={state.onToggleViewed}
+      generatedFiles={state.generatedFiles}
+      expandedGeneratedFiles={state.expandedGeneratedFiles}
+      onGeneratedFileCollapsedChange={state.onGeneratedFileCollapsedChange}
+      showViewedControls={state.showViewedControls}
       stagedFiles={state.stagedFiles}
       onStage={state.onStage}
       canStageFiles={state.canStageFiles}
+      showStageControls={state.showStageControls}
       canStagePath={state.canStagePath}
       stagingFile={state.stagingFile}
       stageError={state.stageError}
@@ -62,7 +69,10 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       activeSearchMatchId={state.activeSearchMatchId}
       activeSearchMatch={state.allFilesActiveSearchMatch}
       onCodeNavRequest={state.onCodeNavRequest}
+      onTokenHoverEnter={state.onTokenHoverEnter}
+      onTokenHoverLeave={state.onTokenHoverLeave}
       onVisibleFileChange={state.onAllFilesVisibleFileChange}
+      onFileScrolledPast={state.onAllFilesFileScrolledPast}
       fileOrder={state.allFilesOrder}
       registerCollapseAllToggle={state.registerAllFilesCollapseToggle}
       onAllCollapsedChange={state.onAllFilesCollapsedChange}

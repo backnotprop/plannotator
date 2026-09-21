@@ -17,18 +17,24 @@ beforeAll(() => {
   writeFileSync(join(root, "notes/dup.md"), "# B");
   writeFileSync(join(root, "script.py"), "print()");
   writeFileSync(join(root, "big.md"), "x".repeat(2 * 1024 * 1024 + 1));
+  mkdirSync(join(root, "notebooks"), { recursive: true });
+  writeFileSync(join(root, "notebooks/tour.livemd"), "# Livebook tour");
 });
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function resolve(rawFilePath: string, overrides: { renderMarkdown?: boolean } = {}) {
+function resolve(
+  rawFilePath: string,
+  overrides: { renderMarkdown?: boolean; extraMarkdownExtensions?: readonly string[] } = {},
+) {
   return resolveAnnotateTarget({
     rawFilePath,
     projectRoot: root,
     noJina: true,
     renderMarkdown: overrides.renderMarkdown ?? false,
+    extraMarkdownExtensions: overrides.extraMarkdownExtensions ?? [],
     log: () => {},
   });
 }
@@ -67,6 +73,37 @@ describe("resolveAnnotateTarget", () => {
       expect(converted.rawHtml).toBeUndefined();
       expect(converted.sourceConverted).toBe(true);
     }
+  });
+
+  // #1307: an extension listed in config.json's `markdownExtensions` must be
+  // accepted everywhere .md is — single file, folder discovery, and reading.
+  test("a configured extra extension opens as a document and its folder is annotatable", async () => {
+    const configured = { extraMarkdownExtensions: [".livemd"] };
+
+    const file = await resolve("notebooks/tour.livemd", configured);
+    expect(file.ok).toBe(true);
+    if (file.ok) {
+      expect(file.absolutePath).toBe(join(root, "notebooks/tour.livemd"));
+      expect(file.markdown).toBe("# Livebook tour");
+      expect(file.annotateMode).toBe("annotate");
+    }
+
+    const folder = await resolve("notebooks", configured);
+    expect(folder.ok).toBe(true);
+    if (folder.ok) expect(folder.annotateMode).toBe("annotate-folder");
+  });
+
+  test("without configuration the same file is an unsupported type and its folder is empty", async () => {
+    const file = await resolve("notebooks/tour.livemd");
+    expect(file.ok).toBe(false);
+    if (!file.ok) {
+      expect(file.notFound).toBe(false);
+      expect(file.message).toContain("File type not supported: .livemd");
+    }
+
+    const folder = await resolve("notebooks");
+    expect(folder.ok).toBe(false);
+    if (!folder.ok) expect(folder.message).toContain("No annotatable files");
   });
 
   test("only the missing-target terminal reports notFound", async () => {

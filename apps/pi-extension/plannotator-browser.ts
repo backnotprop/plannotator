@@ -53,7 +53,7 @@ export {
 	hasReviewBrowserHtml,
 } from "./plannotator-browser-runtime.ts";
 
-export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last";
+export type AnnotateMode = "annotate" | "annotate-folder" | "annotate-last" | "annotate-app";
 export interface PlanReviewDecision {
 	approved: boolean;
 	feedback?: string;
@@ -75,6 +75,21 @@ type CodeReviewOptions = {
 	prUrl?: string;
 	vcsType?: VcsSelection;
 	useLocal?: boolean;
+	/**
+	 * Path to a unified-diff file to review without a repo — the file is read
+	 * once at call time (resolved relative to the caller's cwd, not ctx.cwd).
+	 * Mutually exclusive with `prUrl` and local/VCS modes. The path doubles as
+	 * the display label in the review header.
+	 */
+	patchFile?: string;
+	/**
+	 * `defaultBranch` / `diffType` came from user CLI flags (`--base` /
+	 * `--diff-type` on /plannotator-review): validate strictly (provider
+	 * matrix, PR/workspace refusal, rev-parse base probe), seed the server's
+	 * explicit-base bit, and pin the open state on /api/diff. Programmatic
+	 * callers omit it and keep the legacy forward-and-let-it-upgrade behavior.
+	 */
+	openStateFromFlags?: boolean;
 };
 
 type CodeReviewDecision = {
@@ -180,7 +195,7 @@ export async function startServerWithSelfPreemption<T>(
 
 async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext): Promise<void> {
 	const browserResult = await openBrowser(serverUrl);
-	if (isRemoteSession()) {
+	if (ctx.mode === "rpc" || isRemoteSession()) {
 		ctx.ui.notify(`[Plannotator] ${serverUrl}`, "info");
 	} else if (!browserResult.opened) {
 		ctx.ui.notify(`Open this URL to review: ${serverUrl}`, "info");
@@ -374,6 +389,9 @@ async function createCodeReviewBrowserSession(
 
 	const urlArg = options.prUrl;
 	const isPRMode = urlArg?.startsWith("http://") || urlArg?.startsWith("https://");
+	const openStateFromFlags =
+		options.openStateFromFlags === true &&
+		(options.defaultBranch !== undefined || options.diffType !== undefined);
 
 	let rawPatch: string;
 	let gitRef: string;
@@ -384,6 +402,7 @@ async function createCodeReviewBrowserSession(
 	let diffType: DiffType | WorkspaceDiffType | undefined;
 	let agentCwd: string | undefined;
 	let initialBase: string | undefined;
+	let initialBaseExplicit = false;
 	let initialFingerprint: string | undefined;
 	let worktreeCleanup: (() => void | Promise<void>) | undefined;
 	let worktreePool: WorktreePool | undefined;
@@ -392,6 +411,18 @@ async function createCodeReviewBrowserSession(
 
 	if (isPRMode && urlArg) {
 		// --- PR Review Mode ---
+		// The base comes from the pull request — the open-state flags always
+		// error here, before any auth check or platform fetch.
+		if (openStateFromFlags) {
+			const { resolveReviewOpenState } = await import("./generated/review-open-state.ts");
+			const openState = resolveReviewOpenState({
+				parsed: { base: options.defaultBranch, diffType: options.diffType },
+				isPRMode: true,
+				isWorkspace: false,
+				resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+			});
+			if (openState.error) throw new Error(openState.error);
+		}
 		const prRef = parsePRUrl(urlArg);
 		if (!prRef) {
 			throw new Error(
@@ -559,18 +590,86 @@ async function createCodeReviewBrowserSession(
 				worktreeCleanup = undefined;
 			}
 		}
+	} else if (options.patchFile !== undefined) {
+		// --- Static Patch Mode ---
+		// Caller-supplied unified diff, reviewed without any repository: the
+		// server serves rawPatch as-is, workspace undefined, gitContext undefined,
+		// diffType "static-patch" — identical to the direct CLI's --patch-file
+		// path. No refresh: there is no live tree to recompute against; the
+		// initial patch is the session's whole content.
+		// `-` means stdin, which only the direct CLI has: this host reaches the
+		// review through an extension event with no stdin of its own, so refuse
+		// rather than reading a file literally named "-".
+		if (options.patchFile === "-") {
+			throw new Error(
+				"--patch-file - (stdin) is not available here; pass a file path instead",
+			);
+		}
+		rawPatch = readFileSync(resolve(options.cwd ?? ctx.cwd, options.patchFile), "utf-8");
+		if (!rawPatch.trim()) {
+			throw new Error("Static patch review requires non-empty unified-diff content.");
+		}
+		gitRef = options.patchFile;
+		diffType = "static-patch";
 	} else {
 		// --- Local Review Mode ---
 		const cwd = options.cwd ?? ctx.cwd;
 		const config = loadConfig();
 		const managedVcs = await detectManagedVcs(cwd, options.vcsType);
 		const forcedVcs = !!options.vcsType && options.vcsType !== "auto";
+		// Flag-sourced open state: validate strictly before any diff work, and
+		// resolve the effective requested base/diff type (promotion included).
+		// Programmatic callers keep the verbatim pass-through below.
+		let requestedBase = options.defaultBranch;
+		let requestedDiffType = options.diffType;
+		if (openStateFromFlags) {
+			const { resolveReviewOpenState } = await import("./generated/review-open-state.ts");
+			if (managedVcs || forcedVcs) {
+				const providerId = (managedVcs?.id ?? options.vcsType) as
+					| "git"
+					| "gitbutler"
+					| "jj"
+					| "p4"
+					| undefined;
+				let baseResolves: boolean | undefined;
+				if (requestedBase !== undefined && providerId === "git") {
+					// --end-of-options blocks flag injection through hostile refs;
+					// the probe is what keeps a typo'd base from producing a
+					// confidently-mislabelled merge-base→HEAD diff.
+					const probe = await reviewRuntime.runGit(
+						["rev-parse", "--verify", "--quiet", "--end-of-options", `${requestedBase}^{commit}`],
+						{ cwd },
+					);
+					baseResolves = probe.exitCode === 0;
+				}
+				const openState = resolveReviewOpenState({
+					parsed: { base: requestedBase, diffType: requestedDiffType },
+					isPRMode: false,
+					isWorkspace: false,
+					providerId,
+					resolvedDefaultDiffType: resolveDefaultDiffType(config),
+					baseResolves,
+				});
+				if (openState.error) throw new Error(openState.error);
+				for (const notice of openState.notices) ctx.ui.notify(notice, "info");
+				requestedBase = openState.requestedBase;
+				requestedDiffType = openState.requestedDiffType;
+			} else {
+				const openState = resolveReviewOpenState({
+					parsed: { base: requestedBase, diffType: requestedDiffType },
+					isPRMode: false,
+					isWorkspace: true,
+					resolvedDefaultDiffType: resolveDefaultDiffType(config),
+				});
+				if (openState.error) throw new Error(openState.error);
+			}
+		}
 		if (managedVcs || forcedVcs) {
 			const result = await prepareLocalReviewDiff({
 				cwd,
 				vcsType: options.vcsType,
-				requestedDiffType: options.diffType,
-				requestedBase: options.defaultBranch,
+				requestedDiffType,
+				requestedBase,
 				configuredDiffType: resolveDefaultDiffType(config),
 				hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
 			});
@@ -584,6 +683,9 @@ async function createCodeReviewBrowserSession(
 			// be forwarded to the server below. Only matters when the caller
 			// overrode the detected default; otherwise it matches gitCtx already.
 			initialBase = result.base;
+			// A flag-sourced base is a user-picked base: canonicalization off,
+			// startup upgrade suppressed (server-side explicit bit).
+			initialBaseExplicit = openStateFromFlags && requestedBase !== undefined;
 		} else {
 			workspace = await buildLocalWorkspaceReview(cwd, {
 				requestedDiffType: options.diffType,
@@ -606,9 +708,12 @@ async function createCodeReviewBrowserSession(
 		gitRef,
 		error: diffError,
 		origin: "pi",
+		project: detectProjectName(),
 		diffType,
 		gitContext: gitCtx,
 		initialBase,
+		initialBaseExplicit,
+		openStatePinned: openStateFromFlags,
 		initialFingerprint,
 		prMetadata,
 		prPatchIncomplete,
@@ -617,6 +722,10 @@ async function createCodeReviewBrowserSession(
 		worktreePool,
 		htmlContent: reviewHtmlContent,
 		sharingEnabled: resolveSharingEnabled(loadConfig()),
+		// Pi's review consumer (index.ts) sends approve-time feedback after the
+		// approved prompt, so the advert is unconditional — same shape as the
+		// annotate session's advert below (spec §6.4).
+		approvalNotesSupported: true,
 		shareBaseUrl: process.env.PLANNOTATOR_SHARE_URL || undefined,
 		pasteApiUrl: process.env.PLANNOTATOR_PASTE_URL || undefined,
 		onCleanup: worktreeCleanup,
@@ -661,6 +770,10 @@ export async function startMarkdownAnnotationSession(
 	renderHtml?: boolean,
 	convertHtml?: boolean,
 	recentMessages?: { messageId: string; text: string; timestamp?: string }[],
+	/** Live app session (mode "annotate-app"): the loopback dev-server URL to
+	 * proxy. The bridge sources are loaded here from the vendored
+	 * bridge-script module, mirroring how the Bun CLI supplies them. */
+	liveTargetUrl?: string,
 ): Promise<BrowserDecisionSession<{ feedback: string; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages" }>> {
 	if (!ctx.hasUI) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
@@ -668,6 +781,22 @@ export async function startMarkdownAnnotationSession(
 	const planHtmlContent = getPlanBrowserHtml();
 	if (!planHtmlContent) {
 		throw new Error("Plannotator annotation browser is unavailable in this session.");
+	}
+
+	// Live sessions serve the page through the proxy; the bridge constants are
+	// lazy-imported so plain annotate sessions never pay for the ~large
+	// string module.
+	let liveApp:
+		| { targetUrl: string; bridgeScript: string; bridgeBootstrap: string; annotationCss: string }
+		| undefined;
+	if (mode === "annotate-app" && liveTargetUrl) {
+		const bridge = await import("./generated/bridge-script.ts");
+		liveApp = {
+			targetUrl: liveTargetUrl,
+			bridgeScript: bridge.BRIDGE_SCRIPT,
+			bridgeBootstrap: bridge.LIVE_BRIDGE_BOOTSTRAP,
+			annotationCss: bridge.ANNOTATION_HIGHLIGHT_CSS,
+		};
 	}
 
 	let resolvedMarkdown = markdown;
@@ -687,6 +816,7 @@ export async function startMarkdownAnnotationSession(
 		filePath,
 		origin: "pi",
 		mode,
+		liveApp,
 		folderPath,
 		recentMessages,
 		sourceInfo,

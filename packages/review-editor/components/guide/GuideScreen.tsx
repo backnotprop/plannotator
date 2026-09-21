@@ -10,8 +10,10 @@ import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
 import { useReviewState } from '../../dock/ReviewStateContext';
 import { GuideEmptyState } from './GuideEmptyState';
 import { GuideGenerating } from './GuideGenerating';
-import { GuideSectionSkeleton } from './GuideSkeleton';
-import { GuideView } from './GuideView';
+import { GuideSectionSkeleton } from '@plannotator/guide-viewer/GuideSkeleton';
+import { GuideView } from '@plannotator/guide-viewer/GuideView';
+import { ReviewGuideHost } from './ReviewGuideHost';
+import { GuideExportButton } from './GuideExportButton';
 
 interface GuideScreenProps {
   /** Latest completed guide job id (or the demo guide id in standalone mode).
@@ -368,19 +370,23 @@ function ActiveGuide({
   }
 
   const engine = jobs.find((j) => j.id === jobId)?.engine;
+  const model = jobs.find((j) => j.id === jobId)?.model;
 
   return (
     <div className="w-full">
       {failureStrip}
-      <GuideView
-        guide={guide}
-        reviewed={reviewed}
-        onToggleReviewed={toggleReviewed}
-        engineLabel={engine ? REVIEW_ENGINE_LABEL[engine as ReviewEngine] ?? engine : undefined}
-        focusedFile={focusedFile}
-        onFocusFile={setFocusedFile}
-        onRegenerate={guideLaunch.canLaunch && !regenerating ? handleRegenerate : undefined}
-      />
+      <ReviewGuideHost>
+        <GuideView
+          guide={guide}
+          reviewed={reviewed}
+          onToggleReviewed={toggleReviewed}
+          engineLabel={engine ? `${REVIEW_ENGINE_LABEL[engine as ReviewEngine] ?? engine}${model ? ` · ${model}` : ''}` : undefined}
+          focusedFile={focusedFile}
+          onFocusFile={setFocusedFile}
+          onRegenerate={guideLaunch.canLaunch && !regenerating ? handleRegenerate : undefined}
+          headerActions={<GuideExportButton jobId={jobId} />}
+        />
+      </ReviewGuideHost>
     </div>
   );
 }

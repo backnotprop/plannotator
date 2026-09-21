@@ -8,13 +8,13 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  *   PLANNOTATOR_ORIGIN - Explicit origin override; validated against AGENT_CONFIG
  *                        in packages/shared/agents.ts. Supported values:
- *                        "claude-code", "opencode", "codex", "copilot-cli",
- *                        "gemini-cli", "pi".
+ *                        "claude-code", "amp", "droid", "kiro-cli", "opencode",
+ *                        "codex", "copilot-cli", "gemini-cli", "pi", "oh-my-pi".
  */
 
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -41,13 +41,15 @@ import {
 } from "./storage";
 import { getRepoInfo } from "./repo";
 import { detectProjectName } from "./project";
-import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled } from "./config";
+import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
+import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared/feedback-archive";
+import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
-import { handleFileBrowserFilesStream } from "./reference-watch";
+import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { warmFileListCache } from "@plannotator/shared/resolve-file";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
@@ -201,6 +203,51 @@ export async function startPlannotatorServer(
     decisionPromise = new Promise(() => {});
   }
 
+  // Durable feedback archive: append the decision (and any notes the reviewer
+  // attached) to feedback/{project}/index.jsonl at settlement time.
+  //
+  // Deliberately independent of the client-sent `planSave` setting: that one
+  // is off for some users, writes only while enabled, and keys its snapshot by
+  // slug — so approve → deny → approve on one plan keeps a single file per
+  // status and is not a timeline. The archive appends, so every decision on a
+  // plan survives in order.
+  //
+  // The plan TEXT is not copied into the archive. The record names the exact
+  // `history/{project}/{slug}/NNN.md` version this decision was made on, which
+  // storage.ts already wrote before the UI opened, so an analyzer joins the
+  // record to the plan content already on disk.
+  //
+  // Plan policy on failure (design §3.4): log and proceed. A plan approval is
+  // never blocked on the archive, and the plan draft delete is unchanged.
+  //
+  // Data-dir asymmetry worth knowing: getPlanVersionPath resolves against the
+  // data directory storage.ts captured at import time, while the archive
+  // resolves it per call. They agree in every real run (the env var is fixed
+  // before the process starts); they can disagree only if PLANNOTATOR_DATA_DIR
+  // is changed mid-process, in which case planVersionFile names the original
+  // location. That is the honest answer anyway — it is where the version file
+  // actually was written — so this is documented rather than "fixed".
+  const archivePlanDecision = (decision: FeedbackDecision, feedback?: string): void => {
+    if (mode === "archive") return;
+    if (!resolveFeedbackHistory(loadConfig())) return;
+    appendFeedbackRecord({
+      project,
+      origin,
+      surface: "plan",
+      decision,
+      target: {
+        slug,
+        ...(versionInfo.version > 0
+          ? {
+              planVersion: versionInfo.version,
+              planVersionFile: getPlanVersionPath(project, slug, versionInfo.version) ?? undefined,
+            }
+          : {}),
+      },
+      feedback,
+    });
+  };
+
   const server = await startBunServerOnAvailablePort((port) =>
     Bun.serve({
         hostname: getServerHostname(),
@@ -321,11 +368,12 @@ export async function startPlannotatorServer(
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
             try {
-              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
+              const body = (await req.json()) as { displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; conventionalComments?: boolean; conventionalLabels?: unknown[] | null; pfmReminder?: boolean };
               const toSave: Record<string, unknown> = {};
               if (body.displayName !== undefined) toSave.displayName = body.displayName;
               if (body.diffOptions !== undefined) toSave.diffOptions = body.diffOptions;
               if (body.theme !== undefined) toSave.theme = body.theme;
+              if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
               if (body.pfmReminder !== undefined) toSave.pfmReminder = body.pfmReminder;
@@ -374,6 +422,16 @@ export async function startPlannotatorServer(
           // API: Detect Obsidian vaults
           if (url.pathname === "/api/obsidian/vaults") {
             return handleObsidianVaults();
+          }
+
+          // API: Global skill catalog for comment skill references
+          if (url.pathname === "/api/skills" && req.method === "GET") {
+            return handleReferenceSkills();
+          }
+
+          // API: SKILL.md contents for a referenced human-only skill
+          if (url.pathname === "/api/skills/content" && req.method === "GET") {
+            return handleReferenceSkillContent(req);
           }
 
           // API: List Obsidian vault files as a tree
@@ -522,6 +580,13 @@ export async function startPlannotatorServer(
               savedPath = saveFinalSnapshot(slug, "approved", plan, annotations, planSaveCustomPath);
             }
 
+            // Archive the submission BEFORE the draft (the reviewer's other
+            // copy) is deleted — the #678 ordering, generalized.
+            archivePlanDecision(
+              typeof feedback === "string" && feedback.trim() ? "approved-with-notes" : "approved",
+              feedback,
+            );
+
             // Clean up draft on successful submit
             deleteDraft(draftKey, draftGeneration);
 
@@ -562,6 +627,8 @@ export async function startPlannotatorServer(
               savedPath = saveFinalSnapshot(slug, "denied", plan, feedback, planSaveCustomPath);
             }
 
+            archivePlanDecision("denied", feedback);
+
             deleteDraft(draftKey, draftGeneration);
             resolveDecision({ approved: false, feedback, savedPath });
             return Response.json({ ok: true, savedPath });
@@ -592,11 +659,12 @@ export async function startPlannotatorServer(
   );
 
   const port = server.port!;
-  const serverUrl = `http://localhost:${port}`;
+  const serverUrl = buildAdvertisedUrl(port);
   let stopPromise: Promise<void> | undefined;
   const stop = () => {
     stopPromise ??= (async () => {
       try {
+        closeAllFileBrowserWatchers();
         aiRuntime?.dispose();
       } finally {
         await server.stop(true);

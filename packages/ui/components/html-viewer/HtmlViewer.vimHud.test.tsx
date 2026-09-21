@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AnnotationType } from '../../types';
+import { BRIDGE_PROTOCOL_VERSION } from './bridge-script';
 
 const hasDom = typeof document !== 'undefined';
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
@@ -11,6 +13,70 @@ afterEach(() => {
 });
 
 describe.if(hasDom)('HtmlViewer Vim HUD bridge', () => {
+  // Guards the parent-side plumbing the refresh flow depends on: a bridge
+  // "unanchored" report from the viewer's own iframe reaches
+  // onUnanchoredChange. No reload happens here; the bridge's restore pass is
+  // simulated by dispatching the message it would post.
+  test('forwards the bridge unanchored report to onUnanchoredChange', async () => {
+    if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const reports: string[][] = [];
+
+    await act(async () => {
+      root.render(
+        <htmlViewerModule.HtmlViewer
+          rawHtml="<html><body><p>Updated document</p></body></html>"
+          annotations={[
+            {
+              id: 'still-here',
+              blockId: '',
+              startOffset: 0,
+              endOffset: 10,
+              type: AnnotationType.COMMENT,
+              originalText: 'Updated',
+              createdA: 1,
+            },
+            {
+              id: 'removed-text',
+              blockId: '',
+              startOffset: 0,
+              endOffset: 7,
+              type: AnnotationType.COMMENT,
+              originalText: 'Removed',
+              createdA: 2,
+            },
+          ]}
+          onAddAnnotation={() => {}}
+          onSelectAnnotation={() => {}}
+          selectedAnnotationId={null}
+          mode="selection"
+          inputMethod="drag"
+          onUnanchoredChange={(missingIds) => reports.push(missingIds)}
+        />,
+      );
+    });
+
+    const iframe = host.querySelector<HTMLIFrameElement>('iframe');
+    if (!iframe?.contentWindow) throw new Error('HTML iframe missing');
+    const dispatchBridgeMessage = (data: Record<string, unknown>) => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: iframe.contentWindow,
+        data,
+      }));
+    };
+
+    act(() => dispatchBridgeMessage({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION }));
+    act(() => dispatchBridgeMessage({
+      type: 'plannotator-bridge-unanchored',
+      ids: ['removed-text'],
+    }));
+
+    expect(reports).toEqual([['removed-text']]);
+    act(() => root.unmount());
+  });
+
   test('copies only validated Vim text from the focused sandbox', async () => {
     if (!htmlViewerModule) {
       throw new Error('DOM test environment is not registered');

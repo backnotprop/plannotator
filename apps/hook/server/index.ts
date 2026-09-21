@@ -61,6 +61,11 @@
  *    - Removes recognized installer-owned components across supported hosts
  *    - Preserves local data by default; `--purge` removes known local data
  *
+ * 14. Guide tools (`plannotator guide list|export|share|unshare`):
+ *    - List saved Guided Reviews; export one (or a snapshot JSON) as a portable
+ *      HTML file whose viewer loads from guides.show; share one as a link on
+ *      guides.show (encrypted by default) and remove it again
+ *
  * Global flags:
  *   --help             - Show top-level usage information
  *   --version, -v      - Print version and exit
@@ -79,6 +84,7 @@ import {
   startReviewServer,
   handleReviewServerReady,
 } from "@plannotator/server/review";
+import { runGuideCli } from "@plannotator/server/guide-cli";
 import {
   startAnnotateServer,
   handleAnnotateServerReady,
@@ -90,7 +96,9 @@ import {
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
 import { loadConfig, resolveDefaultDiffType, resolveSharingEnabled } from "@plannotator/shared/config";
-import { parseReviewArgs } from "@plannotator/shared/review-args";
+import { parseReviewArgs, type ParsedReviewArgs } from "@plannotator/shared/review-args";
+import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
+import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
 import {
   normalizeGoalSetupBundle,
   type GoalSetupStage,
@@ -104,20 +112,31 @@ import {
 import { createWorktreePool, type WorktreePool, type PoolEntry } from "@plannotator/shared/worktree-pool";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getCliInstallUrl, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
+import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
+import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
+import { LIVE_APP_REMOTE_MESSAGE } from "@plannotator/shared/live-probe";
+// Bridge sources for live app sessions: the CLI supplies them so
+// @plannotator/server never imports @plannotator/ui (mirrors the existing
+// htmlContent precedent).
+import {
+  ANNOTATION_HIGHLIGHT_CSS,
+  BRIDGE_SCRIPT,
+  LIVE_BRIDGE_BOOTSTRAP,
+} from "@plannotator/ui/components/html-viewer/bridge-script";
 import { rmSync, realpathSync, existsSync } from "fs";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import {
-  getReviewApprovedPrompt,
-  getReviewDeniedSuffix,
   getPlanDeniedPrompt,
   getPlanToolName,
   buildPlanFileRule,
 } from "@plannotator/shared/prompts";
+import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output";
 import { registerSession, unregisterSession, listSessions } from "@plannotator/server/sessions";
 import { openBrowser } from "@plannotator/server/browser";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
+import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
 import {
   createDefaultUninstallEnvironment,
   formatPurgeWarning,
@@ -144,7 +163,13 @@ import {
   resolveSessionLogByCwdScan,
   type RenderedMessage,
 } from "./session-log";
-import { findCodexRolloutByThreadId, getLatestCodexPlan, getRecentCodexMessages } from "./codex-session";
+import {
+  findCodexRolloutsByThreadId,
+  getRecentCodexMessages,
+  logCodexStopSkip,
+  logCodexStopTurnIdFallback,
+  resolveCodexStopPlan,
+} from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
 import {
   formatInteractiveNoArgClarification,
@@ -159,6 +184,7 @@ import {
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
 } from "./cli";
+import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import {
   annotateStartupFailureExitCode,
@@ -215,6 +241,73 @@ if (browserIdx !== -1 && args[browserIdx + 1]) {
   args.splice(browserIdx, 2);
 }
 
+// Transport flag: --tailscale (review / annotate / annotate-last) — publish
+// the session over the user's tailnet via `tailscale serve`. The server stays
+// LOOPBACK-bound: serve provides reachability plus TLS, so remote mode's wide
+// bind is redundant and would only broaden exposure. Forcing local mode here
+// (before any port/bind decision) is the safer resolution of the
+// --tailscale + PLANNOTATOR_REMOTE combination; it also restores the random
+// local port, so simultaneous sessions get distinct serve mappings.
+const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last"]);
+const tailscaleIdx = args.indexOf("--tailscale");
+const tailscaleFlag = tailscaleIdx !== -1;
+if (tailscaleFlag) {
+  args.splice(tailscaleIdx, 1);
+  if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
+    console.error(
+      "--tailscale is only supported with: plannotator review, annotate, annotate-last (last)",
+    );
+    process.exit(1);
+  }
+  if (isRemoteSession()) {
+    process.stderr.write(
+      "[plannotator] --tailscale keeps the server loopback-bound behind `tailscale serve`; ignoring remote mode (PLANNOTATOR_REMOTE/SSH detection) for this session.\n",
+    );
+  }
+  process.env.PLANNOTATOR_REMOTE = "0";
+  // urlHost is irrelevant here — the advertised URL comes from tailscale
+  // serve, and the session is local-bound. An empty-but-set env var also
+  // suppresses a config-file urlHost, avoiding the misleading
+  // "set PLANNOTATOR_REMOTE=1" local-session warning mid --tailscale run.
+  process.env.PLANNOTATOR_URL_HOST = "";
+}
+
+/**
+ * --tailscale ready path: publish the loopback port over the tailnet, print
+ * the HTTPS URL (with a QR for the device hop), and hand the reachable URL to
+ * the ready-file side channel. Never opens a local browser. Publishing
+ * failures resolve HERE with a clean actionable message and a nonzero exit —
+ * under the bang-prefix skill a hanging session blocks the whole Claude Code
+ * prompt, so this path must never leave the loopback server waiting. (The
+ * server APIs also await ready handlers and stop the server on rejection,
+ * which covers any other async onReady user.)
+ *
+ * A publish failure is a STARTUP failure: no reviewer ever saw the session.
+ * Under a strict annotate gate (--require-approval / --result-file) exit 1
+ * is reserved for "the reviewer did not approve, decision record published",
+ * so this exits through annotateStartupFailureExitCode with the strict flags
+ * the invocation parsed — exit 2 for strict gates, the documented exit 1
+ * otherwise (review and non-strict annotate; strict flags only parse on the
+ * annotate subcommand, so review sessions always take the exit-1 leg).
+ */
+async function handleTailscaleReady(port: number): Promise<void> {
+  let url: string;
+  try {
+    ({ url } = enableTailscaleServe(port));
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(
+      annotateStartupFailureExitCode({
+        requireApproval: requireApprovalFlag,
+        resultFile,
+      }),
+    );
+  }
+  process.stderr.write(`\n  Plannotator session ready — served over your tailnet:\n  ${url}\n\n`);
+  writeUrlQr(url);
+  await handleServerReady(url, false, port, { skipBrowserOpen: true });
+}
+
 // Global flag: --no-jina (disables Jina Reader for URL annotation)
 const noJinaIdx = args.indexOf("--no-jina");
 const cliNoJina = noJinaIdx !== -1;
@@ -240,6 +333,15 @@ if (renderHtmlFlag) args.splice(renderHtmlIdx, 1);
 const renderMarkdownIdx = args.indexOf("--markdown");
 const renderMarkdownFlag = renderMarkdownIdx !== -1;
 if (renderMarkdownFlag) args.splice(renderMarkdownIdx, 1);
+// Live app annotation flags (annotate, loopback URLs): --app forces live
+// mode, --static forces the classic conversion pipeline. Transport-shape
+// flags: never echoed in the tolerant handoff's re-run flag list.
+const appFlagIdx = args.indexOf("--app");
+const appFlag = appFlagIdx !== -1;
+if (appFlag) args.splice(appFlagIdx, 1);
+const staticFlagIdx = args.indexOf("--static");
+const staticFlag = staticFlagIdx !== -1;
+if (staticFlag) args.splice(staticFlagIdx, 1);
 
 // Stdout matrix for annotate / annotate-last / copilot annotate-last.
 //
@@ -258,6 +360,67 @@ const emitAnnotateOutcome = createAnnotateOutcomeEmitter({
   hook: hookFlag,
   json: jsonFlag,
 });
+
+/**
+ * Resolve the `--base` / `--diff-type` open-state seed for a review
+ * invocation: probe the requested base ref with git (in `cwd`), validate
+ * against the provider/PR/workspace matrix, print notices on stderr, and exit
+ * 1 on a fatal error (reviews have no strict-gate mode, so every failure here
+ * is exit 1 like the other review startup failures). Returns the seed to
+ * thread into `prepareLocalReviewDiff`. A flagless invocation is a no-op.
+ */
+async function resolveCliReviewOpenState(
+  reviewArgs: ParsedReviewArgs,
+  options: {
+    isPRMode: boolean;
+    isWorkspace: boolean;
+    providerId?: "git" | "gitbutler" | "jj" | "p4";
+    resolvedDefaultDiffType: DiffType;
+    cwd?: string;
+  },
+): Promise<ReviewOpenState> {
+  if (reviewArgs.base === undefined && reviewArgs.diffType === undefined) {
+    return { notices: [] };
+  }
+  let baseResolves: boolean | undefined;
+  let availableBranches: AvailableBranches | undefined;
+  if (
+    reviewArgs.base !== undefined &&
+    !options.isPRMode &&
+    !options.isWorkspace &&
+    options.providerId === "git"
+  ) {
+    // The probe is the whole point of CLI-side resolution: without it a
+    // typo'd base produces a confidently-mislabelled merge-base→HEAD diff
+    // (review-core's since-base degrade). --end-of-options blocks flag
+    // injection through hostile ref names.
+    const probe = await gitRuntime.runGit(
+      ["rev-parse", "--verify", "--quiet", "--end-of-options", `${reviewArgs.base}^{commit}`],
+      { cwd: options.cwd },
+    );
+    baseResolves = probe.exitCode === 0;
+    if (!baseResolves) {
+      // Near-match suggestions: cheap (one for-each-ref) and the single most
+      // useful thing an agent caller can act on.
+      availableBranches = await listBranches(gitRuntime, options.cwd);
+    }
+  }
+  const openState = resolveReviewOpenState({
+    parsed: reviewArgs,
+    isPRMode: options.isPRMode,
+    isWorkspace: options.isWorkspace,
+    providerId: options.providerId,
+    resolvedDefaultDiffType: options.resolvedDefaultDiffType,
+    baseResolves,
+    availableBranches,
+  });
+  if (openState.error) {
+    console.error(openState.error);
+    process.exit(1);
+  }
+  for (const notice of openState.notices) console.error(notice);
+  return openState;
+}
 
 async function loadGoalSetupBundle(
   stage: GoalSetupStage,
@@ -288,6 +451,27 @@ const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   console.log(formatSubcommandHelp(helpSubcommand));
   process.exit(0);
+}
+
+exitOnUnknownSubcommand(args);
+
+// Read a caller-supplied unified diff for static patch mode (`--patch-file`).
+// "-" means stdin; file paths resolve against the given cwd. A read failure
+// is a startup failure: exit 1 like every other review startup failure.
+async function readStaticPatch(patchFile: string, cwd: string): Promise<{ rawPatch: string; gitRef: string }> {
+  try {
+    const rawPatch = patchFile === "-"
+      ? await Bun.stdin.text()
+      : await Bun.file(path.resolve(cwd, patchFile)).text();
+    if (!rawPatch.trim()) {
+      console.error("Static patch review requires non-empty unified-diff content.");
+      process.exit(1);
+    }
+    return { rawPatch, gitRef: patchFile === "-" ? "stdin patch" : patchFile };
+  } catch (err) {
+    console.error(`Failed to read patch file: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
 }
 
 if (args[0] === "uninstall") {
@@ -363,11 +547,13 @@ if (args[0] === "uninstall") {
 
 if (args[0] === "install-runtime") {
   const runtime = args[1];
-  if (runtime !== "agent-terminal") {
-    console.error("Usage: plannotator install-runtime agent-terminal");
+  if (runtime !== "agent-terminal" && runtime !== "call-flow") {
+    console.error("Usage: plannotator install-runtime <agent-terminal|call-flow>");
     process.exit(1);
   }
-  const result = await installAgentTerminalRuntime();
+  const result = runtime === "call-flow"
+    ? await installCallFlowRuntime()
+    : await installAgentTerminalRuntime();
   console.log(result.message);
   process.exit(result.ok ? 0 : 1);
 }
@@ -384,7 +570,14 @@ process.on("exit", () => unregisterSession());
 // default a SIGINT/SIGTERM death skips them, leaking background-warmup
 // children and stale `git worktree` registrations (the --local PR checkout
 // cleanup below is registered on "exit"). `once` keeps a second Ctrl-C as a
-// force-quit escape hatch if cleanup ever hangs.
+// force-quit escape hatch if cleanup ever hangs. SIGHUP is deliberately NOT
+// routed here: installing any SIGHUP listener overrides the ignored
+// disposition `nohup` depends on, so a plain `nohup plannotator review &`
+// must end up with no listener and survive terminal close. The --tailscale
+// path installs its own SIGHUP→exit handler only once a serve mapping
+// actually exists (enableTailscaleServe in
+// packages/server/tailscale-serve.ts), which is the only case where terminal
+// close would otherwise leak tailnet state.
 process.once("SIGINT", () => process.exit(130));
 process.once("SIGTERM", () => process.exit(143));
 
@@ -406,7 +599,10 @@ const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 //   > Copilot CLI (COPILOT_CLI)
 //   > OpenCode (OPENCODE)
 //   > Gemini CLI (GEMINI_CLI)
-//   > Claude Code (default fallback)
+//   > oh-my-pi harness (OMPCODE) — checked last because OMP exports OMPCODE
+//     into every shell it spawns; runtimes launched from an OMP session must
+//     still be detected as themselves. OMPCODE still wins over the terminal
+//     fallback below.
 //
 // To add a new agent, also add an entry to AGENT_CONFIG in
 // packages/shared/agents.ts (see header comment there).
@@ -417,6 +613,7 @@ const detectedOrigin: Origin =
   process.env.COPILOT_CLI ? "copilot-cli" :
   process.env.OPENCODE ? "opencode" :
   process.env.GEMINI_CLI ? "gemini-cli" :
+  process.env.OMPCODE ? "oh-my-pi" :
   "claude-code";
 
 type OpenCodeBridgeAgent = {
@@ -627,9 +824,23 @@ if (args[0] === "sessions") {
   // ============================================
 
   const reviewArgs = parseReviewArgs(args.slice(1));
+  // Argument-shape failures (unknown/typo'd flags) refuse to start a session:
+  // silently dropping them is how `--bse main` used to open a review as if
+  // nothing happened. Review has no strict-gate mode, so this is exit 1 like
+  // every other review startup failure.
+  if (reviewArgs.errors.length > 0) {
+    for (const parseError of reviewArgs.errors) console.error(parseError);
+    console.error("Run 'plannotator review --help' for usage.");
+    process.exit(1);
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
   const useLocal = isPRMode && reviewArgs.useLocal;
+  // Caller-pinned open state: `--base` / `--diff-type` seed this session only
+  // (nothing is persisted). Pinned sessions advertise openStatePinned so the
+  // client's mount effects don't auto-switch the diff away from the flags.
+  const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
+  let initialBaseFromFlags: string | undefined;
 
   let rawPatch: string;
   let gitRef: string;
@@ -644,8 +855,20 @@ if (args[0] === "sessions") {
   let worktreeCleanup: (() => void | Promise<void>) | undefined;
   let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
 
-  if (isPRMode) {
+  if (reviewArgs.patchFile) {
+    const patch = await readStaticPatch(reviewArgs.patchFile, process.env.PLANNOTATOR_CWD || process.cwd());
+    rawPatch = patch.rawPatch;
+    gitRef = patch.gitRef;
+    initialDiffType = "static-patch";
+  } else if (isPRMode) {
     // --- PR Review Mode ---
+    // The base comes from the pull request — the open-state flags always
+    // error here (validated before any auth check or platform fetch).
+    await resolveCliReviewOpenState(reviewArgs, {
+      isPRMode: true,
+      isWorkspace: false,
+      resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+    });
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
       console.error(`Invalid PR/MR URL: ${urlArg}`);
@@ -893,8 +1116,22 @@ if (args[0] === "sessions") {
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
     if (managedVcs || forcedVcs) {
+      const providerId = (managedVcs?.id ?? reviewArgs.vcsType) as
+        | "git"
+        | "gitbutler"
+        | "jj"
+        | "p4"
+        | undefined;
+      const openState = await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: false,
+        providerId,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+      });
       const diffResult = await prepareLocalReviewDiff({
         vcsType: reviewArgs.vcsType,
+        requestedDiffType: openState.requestedDiffType,
+        requestedBase: openState.requestedBase,
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
@@ -904,7 +1141,18 @@ if (args[0] === "sessions") {
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
       initialFingerprint = diffResult.fingerprint;
+      // Forward the base the patch was actually computed against — without it
+      // the server would serve this patch under the detected default: a
+      // mixed-base review (wrong file-content fetches, wrong agent prompts).
+      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
     } else {
+      // Multi-repo workspace review has no base parameter — the open-state
+      // flags always error here.
+      await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: true,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+      });
       workspace = await buildLocalWorkspaceReview(process.cwd(), {
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
@@ -929,8 +1177,12 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: detectedOrigin,
-    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : undefined,
+    project: reviewProject,
+    diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
+    initialBase: initialBaseFromFlags,
+    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    openStatePinned,
     initialFingerprint,
     prMetadata,
     prPatchIncomplete,
@@ -939,9 +1191,16 @@ if (args[0] === "sessions") {
     worktreePool,
     sharingEnabled,
     shareBaseUrl,
+    // The approved branch below prints result.feedback after the prompt, so
+    // this CLI's origins may see approve-carrying menu items (spec §6.4).
+    approvalNotesSupported: supportsReviewApprovalNotes(detectedOrigin),
     htmlContent: reviewHtmlContent,
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleReviewServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled && rawPatch) {
@@ -970,20 +1229,8 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output feedback (captured by slash command)
-  if (result.exit) {
-    console.log("Review session closed without feedback.");
-  } else if (result.approved) {
-    console.log(getReviewApprovedPrompt(detectedOrigin));
-  } else {
-    console.log(result.feedback);
-    // Append the verification-only suffix whenever the reviewer sent annotations to
-    // act on — in PR mode too. Platform PR actions (approve/comment posted to
-    // the host) come back with an empty annotation set and a status message;
-    // those must NOT get the "verify findings and don't change code" instruction.
-    if (result.annotations.length > 0) {
-      console.log(getReviewDeniedSuffix(detectedOrigin));
-    }
-  }
+  const output = buildReviewOutput(result, detectedOrigin);
+  console.log(jsonFlag ? JSON.stringify(output) : output.message);
   process.exit(0);
 
 } else if (args[0] === "annotate") {
@@ -1003,9 +1250,13 @@ if (args[0] === "sessions") {
     );
   }
 
+  if (appFlag && staticFlag) {
+    exitAnnotateStartupFailure("--app and --static are mutually exclusive");
+  }
+
   const rawFilePath = args[1];
   if (!rawFilePath) {
-    exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
+    exitAnnotateStartupFailure("Usage: plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--app] [--static] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]");
   }
 
   // Use PLANNOTATOR_CWD if set (original working directory before script cd'd)
@@ -1056,6 +1307,8 @@ if (args[0] === "sessions") {
           projectRoot,
           noJina: cliNoJina,
           renderMarkdown: renderMarkdownFlag,
+          forceApp: appFlag,
+          forceStatic: staticFlag,
         });
 
   if (tolerantMultiToken) {
@@ -1066,6 +1319,8 @@ if (args[0] === "sessions") {
         projectRoot,
         noJina: cliNoJina,
         renderMarkdown: renderMarkdownFlag,
+        forceApp: appFlag,
+        forceStatic: staticFlag,
       });
     } else if (selection.kind === "multiple") {
       exitAnnotateStartupFailure(buildAmbiguousAnnotateArgsMessage(selection.candidates));
@@ -1105,6 +1360,8 @@ if (args[0] === "sessions") {
       projectRoot,
       noJina: cliNoJina,
       renderMarkdown: renderMarkdownFlag,
+      forceApp: appFlag,
+      forceStatic: staticFlag,
     });
   }
 
@@ -1121,7 +1378,26 @@ if (args[0] === "sessions") {
     sourceInfo,
     sourceConverted,
     isUrl,
+    liveApp: liveAppResolved,
   } = resolution;
+
+  // Remote hard-off (layer 1 of 3; the server throw and the proxy's
+  // unconditional loopback bind are the others). No override env var exists
+  // on purpose: a live proxy relays the user's authenticated dev app.
+  if (liveAppResolved && isRemoteSession()) {
+    exitAnnotateStartupFailure(LIVE_APP_REMOTE_MESSAGE);
+  }
+
+  // --tailscale is the same exposure in different clothes: the annotate
+  // server stays loopback-bound but is published across the tailnet through
+  // the serve proxy, so a live proxy would relay the user's authenticated
+  // dev app to every tailnet peer. Hard-off, matching how the annotate agent
+  // terminal treats tailnet publication; the server throw backstops this.
+  if (liveAppResolved && tailscaleFlag) {
+    exitAnnotateStartupFailure(
+      "Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). Run without --tailscale, or use --static to annotate a converted snapshot of the page.",
+    );
+  }
 
   const annotateProject = (await detectProjectName()) ?? "_unknown";
 
@@ -1130,7 +1406,15 @@ if (args[0] === "sessions") {
     markdown,
     filePath: absolutePath,
     origin: detectedOrigin,
-    mode: annotateMode,
+    mode: liveAppResolved ? "annotate-app" : annotateMode,
+    liveApp: liveAppResolved
+      ? {
+          targetUrl: absolutePath,
+          bridgeScript: BRIDGE_SCRIPT,
+          bridgeBootstrap: LIVE_BRIDGE_BOOTSTRAP,
+          annotationCss: ANNOTATION_HIGHLIGHT_CSS,
+        }
+      : undefined,
     folderPath,
     sourceInfo,
     sourceConverted,
@@ -1155,7 +1439,12 @@ if (args[0] === "sessions") {
     agentCwd: projectRoot,
     project: annotateProject,
     htmlContent: planHtmlContent,
+    tailnetPublished: tailscaleFlag,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
@@ -1238,14 +1527,19 @@ if (args[0] === "sessions") {
     if (process.env.PLANNOTATOR_DEBUG) {
       console.error(`[DEBUG] Codex detected, thread ID: ${codexThreadId}`);
     }
-    const rolloutPath = findCodexRolloutByThreadId(codexThreadId);
-    if (rolloutPath) {
+    // A thread can span multiple rollout files; the newest segment may be
+    // empty or aborted, so fall back until one yields a message (#1367).
+    for (const rolloutPath of findCodexRolloutsByThreadId(codexThreadId)) {
       if (process.env.PLANNOTATOR_DEBUG) {
         console.error(`[DEBUG] Rollout: ${rolloutPath}`);
       }
-      recentMessages = getRecentCodexMessages(rolloutPath, RECENT_MESSAGES_LIMIT, { beforeActiveTurn: true })
+      const recent = getRecentCodexMessages(rolloutPath, RECENT_MESSAGES_LIMIT, { beforeActiveTurn: true })
         .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
-      lastMessage = recentMessages[0] ?? null;
+      if (recent.length > 0) {
+        recentMessages = recent;
+        lastMessage = recent[0];
+        break;
+      }
     }
   } else if (isDroid) {
     // Droid/Factory path: resolve the current repo's session log from
@@ -1393,7 +1687,12 @@ if (args[0] === "sessions") {
     }),
     htmlContent: planHtmlContent,
     recentMessages: pickerMessages,
+    tailnetPublished: tailscaleFlag,
     onReady: async (url, isRemote, port) => {
+      if (tailscaleFlag) {
+        await handleTailscaleReady(port);
+        return;
+      }
       handleAnnotateServerReady(url, isRemote, port);
 
       if (isRemote && sharingEnabled) {
@@ -1420,6 +1719,18 @@ if (args[0] === "sessions") {
 
   emitAnnotateOutcome(result);
   process.exit(0);
+
+} else if (args[0] === "guide") {
+  // ============================================
+  // GUIDE TOOLS: list saved guides, export portable HTML, share links
+  // ============================================
+  // The guide CLI parses its own flags, and `--json` is one of them; `args`
+  // had the annotate gate flags (`--json` included) stripped above, so hand
+  // it everything after "guide" from the raw argv instead.
+  const result = await runGuideCli(rawArgs.slice(rawArgs.indexOf("guide") + 1), process.env, process.env.PLANNOTATOR_CWD || process.cwd());
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exit(result.code);
 
 } else if (args[0] === "archive") {
   // ============================================
@@ -1545,13 +1856,25 @@ if (args[0] === "sessions") {
   // in a host that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ arguments?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown }>(
     "opencode-review",
     inputJson,
   );
   const reviewArgs = parseReviewArgs(typeof input.arguments === "string" ? input.arguments : "");
+  // Same refusal as the direct `review` branch. Errors go to stderr so the
+  // bridge's machine-readable stdout contract stays untouched.
+  if (reviewArgs.errors.length > 0) {
+    for (const parseError of reviewArgs.errors) console.error(parseError);
+    console.error("Run 'plannotator review --help' for usage.");
+    process.exit(1);
+  }
   const urlArg = reviewArgs.prUrl;
   const isPRMode = urlArg !== undefined;
+  // Caller-pinned open state (--base/--diff-type through the plugin's
+  // verbatim rawArgs forward) — session-only seed, mirrors the direct
+  // `review` branch.
+  const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
+  let initialBaseFromFlags: string | undefined;
 
   let rawPatch: string;
   let gitRef: string;
@@ -1564,7 +1887,23 @@ if (args[0] === "sessions") {
   let workspace: Awaited<ReturnType<typeof buildLocalWorkspaceReview>> | undefined;
   let agentCwd: string | undefined;
 
-  if (isPRMode) {
+  if (reviewArgs.patchFile) {
+    if (reviewArgs.patchFile === "-") {
+      // The bridge's stdin carries the input JSON; a stdin patch has no
+      // channel. Direct `plannotator review --patch-file -` remains the way.
+      console.error("--patch-file - (stdin) is not available through the OpenCode bridge; pass a file path");
+      process.exit(1);
+    }
+    const patch = await readStaticPatch(reviewArgs.patchFile, process.env.PLANNOTATOR_CWD || process.cwd());
+    rawPatch = patch.rawPatch;
+    gitRef = patch.gitRef;
+    userDiffType = "static-patch";
+  } else if (isPRMode) {
+    await resolveCliReviewOpenState(reviewArgs, {
+      isPRMode: true,
+      isWorkspace: false,
+      resolvedDefaultDiffType: resolveDefaultDiffType(loadConfig()),
+    });
     const prRef = parsePRUrl(urlArg);
     if (!prRef) {
       console.error(`Invalid PR/MR URL: ${urlArg}`);
@@ -1600,9 +1939,24 @@ if (args[0] === "sessions") {
     const forcedVcs = !!reviewArgs.vcsType && reviewArgs.vcsType !== "auto";
 
     if (managedVcs || forcedVcs) {
+      const providerId = (managedVcs?.id ?? reviewArgs.vcsType) as
+        | "git"
+        | "gitbutler"
+        | "jj"
+        | "p4"
+        | undefined;
+      const openState = await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: false,
+        providerId,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        cwd,
+      });
       const diffResult = await prepareLocalReviewDiff({
         cwd,
         vcsType: reviewArgs.vcsType,
+        requestedDiffType: openState.requestedDiffType,
+        requestedBase: openState.requestedBase,
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
@@ -1612,7 +1966,14 @@ if (args[0] === "sessions") {
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
       initialFingerprint = diffResult.fingerprint;
+      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
     } else {
+      await resolveCliReviewOpenState(reviewArgs, {
+        isPRMode: false,
+        isWorkspace: true,
+        resolvedDefaultDiffType: resolveDefaultDiffType(config),
+        cwd,
+      });
       workspace = await buildLocalWorkspaceReview(cwd, {
         configuredDiffType: resolveDefaultDiffType(config),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
@@ -1638,8 +1999,12 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
+    project: reviewProject,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
+    initialBase: initialBaseFromFlags,
+    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    openStatePinned,
     initialFingerprint,
     prMetadata,
     prPatchIncomplete,
@@ -1647,6 +2012,15 @@ if (args[0] === "sessions") {
     agentCwd,
     sharingEnabled: bridgeSharingEnabled,
     shareBaseUrl: bridgeShareBaseUrl,
+    // Fail-closed approval-notes handshake: this branch's JSON record already
+    // carries feedback on approve, but DELIVERY to the agent lives in the
+    // independently-versioned plugin (buildReviewPromptFromBridgeOutcome,
+    // spec §6.3 #3), so the advert requires the plugin's own stdin
+    // declaration. An old plugin omits `supportsApprovalNotes`, the advert
+    // stays false, and no approve-carrying item renders — a new binary can
+    // never trick an old bridge into dropping a reviewer's note.
+    approvalNotesSupported:
+      supportsReviewApprovalNotes("opencode") && input.supportsApprovalNotes === true,
     htmlContent: reviewHtmlContent,
     opencodeClient: makeOpenCodeBridgeClient(input.agents),
     onReady: (url, isRemote, port) => {
@@ -1998,20 +2372,45 @@ if (args[0] === "sessions") {
   }
 
   if (event.hook_event_name === "Stop") {
-    const rolloutPath =
-      (typeof event.transcript_path === "string" && event.transcript_path) ||
-      (process.env.CODEX_THREAD_ID
-        ? findCodexRolloutByThreadId(process.env.CODEX_THREAD_ID)
-        : null);
+    const transcriptPath = typeof event.transcript_path === "string" && event.transcript_path
+      ? event.transcript_path
+      : null;
+    // A thread can span multiple rollout files, but the Stop hook asks a
+    // TURN-level question and the current turn can only live in the newest
+    // segment. Take the first existing candidate only — never fall back to an
+    // older segment: older segments routinely end with an already-decided
+    // <proposed_plan>, so a fallback file's plan is stale by construction and
+    // would reopen a settled plan review. resolveCodexStopPlan refuses a turn
+    // id it cannot anchor in the file it was given, so this is belt and
+    // braces — but it keeps the hook from even looking. Contrast the
+    // annotate-last leg above, which asks a thread-level question and
+    // correctly falls back across segments (#1367).
+    const rolloutPaths = transcriptPath
+      ? [transcriptPath]
+      : process.env.CODEX_THREAD_ID
+        ? findCodexRolloutsByThreadId(process.env.CODEX_THREAD_ID)
+        : [];
+    const rolloutPath = rolloutPaths.find((path) => existsSync(path)) ?? null;
 
-    if (!rolloutPath || !existsSync(rolloutPath)) {
+    if (!rolloutPath) {
       process.exit(0);
     }
 
-    const latestPlan = getLatestCodexPlan(rolloutPath, {
-      turnId: typeof event.turn_id === "string" ? event.turn_id : undefined,
+    // Absent `turn_id` means an older Codex (the field arrived in rust-v0.117.0)
+    // and hands the lookup its rollout fallback; a PRESENT but unusable value is
+    // a truncated or foreign payload and must still fail closed, so it is passed
+    // through as a blank string rather than collapsed to "absent".
+    const rawTurnId = event.turn_id;
+    const { plan: latestPlan, skipReason, fallbackTurnId } = resolveCodexStopPlan(rolloutPath, {
+      turnId: rawTurnId === undefined ? undefined : typeof rawTurnId === "string" ? rawTurnId : "",
       stopHookActive: !!event.stop_hook_active,
     });
+    if (skipReason) {
+      logCodexStopSkip(skipReason, { debug: process.env.PLANNOTATOR_DEBUG });
+    }
+    if (fallbackTurnId) {
+      logCodexStopTurnIdFallback(fallbackTurnId);
+    }
 
     if (!latestPlan?.text) {
       process.exit(0);

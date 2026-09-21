@@ -9,7 +9,20 @@
  * Add new settings here. Cookie-only settings omit serverKey.
  */
 
+import {
+  isAnnotateAgentTerminalSide,
+  type AnnotateAgentTerminalSide,
+} from '@plannotator/core/agent-terminal';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
+import { isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
+import {
+  DEFAULT_TOKEN_HOVER_DELAY_MS,
+  isTokenHoverDelay,
+  resolveStoredTokenHoverTrigger,
+  type TokenHoverDelay,
+  type TokenHoverTrigger,
+} from '@plannotator/core/token-hover';
+import { DEFAULT_DIAGRAM_SHADOW, isDiagramShadow } from '../utils/diagramShadow';
 import { storage } from '../utils/storage';
 import { generateIdentity } from '../utils/generateIdentity';
 import {
@@ -131,6 +144,20 @@ export const SETTINGS = {
     },
     toServer: (v: ThemePair) => ({ theme: { mode: v.mode, light: v.light, dark: v.dark } }),
   },
+  faviconStyle: {
+    defaultValue: 'totman' as FaviconStyle,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-favicon');
+      return isFaviconStyle(v) ? v : undefined;
+    },
+    toCookie: (v: FaviconStyle) => storage.setItem('plannotator-favicon', v),
+    serverKey: 'favicon',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = sc.favicon;
+      return isFaviconStyle(v) ? v : undefined;
+    },
+    toServer: (v: FaviconStyle) => ({ favicon: v }),
+  },
 
   gridEnabled: {
     // Default ON: plans open in the classic grid / floating-card look. The UI 2.0
@@ -141,6 +168,27 @@ export const SETTINGS = {
       return v === 'true' ? true : v === 'false' ? false : undefined;
     },
     toCookie: (v: boolean) => storage.setItem('plannotator-grid-enabled', String(v)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
+   * How strong the drop shadow under Mermaid diagram nodes is, 0..100, where
+   * 100 is Mermaid 12's own default geometry. Default 70: the shipped neo look
+   * with its halo toned down (the colour is always derived from the palette,
+   * see `utils/mermaidTheme`). Cookie-only, like the other display knobs.
+   */
+  diagramShadow: {
+    defaultValue: DEFAULT_DIAGRAM_SHADOW as number,
+    fromCookie: () => {
+      // `Number(null)` and `Number('')` are 0, which is a VALID amount here
+      // (unlike the token-hover steps), so an absent cookie must be rejected
+      // before the guard sees it — otherwise no cookie reads as "no shadow".
+      const raw = storage.getItem('plannotator-diagram-shadow');
+      if (raw === null || raw.trim() === '') return undefined;
+      const parsed = Number(raw);
+      return isDiagramShadow(parsed) ? parsed : undefined;
+    },
+    toCookie: (value: number) => storage.setItem('plannotator-diagram-shadow', String(value)),
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
@@ -205,19 +253,120 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
+  // The view the user last SELECTED via the in-review header toggle. Layered
+  // between the session state and the persisted reviewPanelView default, so a
+  // new session opens on what the user was actually using. Cookie-only.
+  // null = no last-used recorded (fall through to reviewPanelView).
+  //
+  // 'commits' is never recorded here for the same reason reviewPanelView
+  // rejects it: the Commits view is session-only and never an opening view.
+  reviewPanelViewLastUsed: {
+    defaultValue: null as 'sections' | 'tree' | null,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-review-panel-view-last-used');
+      return v === 'tree' || v === 'sections' ? v : undefined;
+    },
+    toCookie: (v: 'sections' | 'tree' | null) => {
+      // The null default seeds through here on first load — "unrecorded" has
+      // no cookie representation, so write nothing.
+      if (v === 'sections' || v === 'tree') {
+        storage.setItem('plannotator-review-panel-view-last-used', v);
+      }
+    },
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  // Compact left-panel preferences. These are deliberately cookie-only: they
+  // shape the local file-list chrome without changing review semantics or the
+  // repository state, and should follow the reviewer across review sessions.
+  reviewShowViewedControls: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-review-show-viewed-controls');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-review-show-viewed-controls', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  // Mark a file viewed when the reviewer scrolls past it or moves on to
+  // another file. Cookie-only like the other review-chrome preferences: it
+  // shapes how the local file list checks itself off and changes no review
+  // semantics (viewed gates nothing on submit).
+  reviewAutoViewed: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-review-auto-viewed');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-review-auto-viewed', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  // Hovering a token in a code-review diff opens a card with what the search
+  // backend knows about that symbol. Cookie-only like the other review-chrome
+  // preferences: it is presentational, per-browser, and changes no review
+  // semantics — `off` simply means no listeners, no requests and no card.
+  //
+  // This one select REPLACED the original `tokenHoverCards` boolean rather
+  // than sitting beside it: a toggle plus a mode has an unreachable state
+  // (disabled + modifier) and asks one question with two controls. The legacy
+  // cookie is still read — on every load until the user touches this setting,
+  // since a migrating read returns a value and so never triggers the
+  // registry's default-seeding write — so an early adopter who turned cards
+  // off stays off. Resolution is pure and identical every time; see
+  // resolveStoredTokenHoverTrigger.
+  tokenHoverTrigger: {
+    defaultValue: 'hover' as TokenHoverTrigger,
+    fromCookie: () => resolveStoredTokenHoverTrigger(
+      storage.getItem('plannotator-token-hover-trigger'),
+      storage.getItem('plannotator-token-hover-cards'),
+    ),
+    toCookie: (value: TokenHoverTrigger) =>
+      storage.setItem('plannotator-token-hover-trigger', value),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  // How long the pointer rests on a symbol before a card is requested. Three
+  // fixed steps, not a slider: "too eager" is a real complaint that neither
+  // `modifier` nor `off` answers, but nobody can tell 340ms from 360ms.
+  tokenHoverDelay: {
+    defaultValue: DEFAULT_TOKEN_HOVER_DELAY_MS as TokenHoverDelay,
+    fromCookie: () => {
+      const parsed = Number(storage.getItem('plannotator-token-hover-delay'));
+      return isTokenHoverDelay(parsed) ? parsed : undefined;
+    },
+    toCookie: (value: TokenHoverDelay) =>
+      storage.setItem('plannotator-token-hover-delay', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  reviewShowStageControls: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-review-show-stage-controls');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-review-show-stage-controls', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   defaultDiffType: {
-    defaultValue: 'since-base' as 'since-base' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all',
+    defaultValue: 'since-base' as 'since-base' | 'local-vs-remote' | 'uncommitted' | 'unstaged' | 'staged' | 'merge-base' | 'all',
     fromCookie: () => {
       const v = storage.getItem('plannotator-default-diff-type');
       if (v === 'branch') return 'merge-base' as const;
-      return v === 'since-base' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
+      return v === 'since-base' || v === 'local-vs-remote' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toCookie: (v: string) => storage.setItem('plannotator-default-diff-type', v),
     serverKey: 'diffOptions',
     fromServer: (sc: Record<string, unknown>) => {
       const v = (sc.diffOptions as Record<string, unknown> | undefined)?.defaultDiffType;
       if (v === 'branch') return 'merge-base' as const;
-      return v === 'since-base' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
+      return v === 'since-base' || v === 'local-vs-remote' || v === 'uncommitted' || v === 'unstaged' || v === 'staged' || v === 'merge-base' || v === 'all' ? v : undefined;
     },
     toServer: (v: string) => ({ diffOptions: { defaultDiffType: v } }),
   },
@@ -414,6 +563,36 @@ export const SETTINGS = {
     fromServer: undefined,
     toServer: undefined,
   },
+  semanticDiffEnabled: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-semantic-diff-enabled');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-semantic-diff-enabled', String(value)),
+    serverKey: 'reviewAnalysis',
+    fromServer: (serverConfig: Record<string, unknown>) => {
+      const value = (serverConfig.reviewAnalysis as Record<string, unknown> | undefined)?.semanticDiff;
+      return typeof value === 'boolean' ? value : undefined;
+    },
+    toServer: (value: boolean) => ({ reviewAnalysis: { semanticDiff: value } }),
+  },
+  callFlowEnabled: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-call-flow-enabled');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-call-flow-enabled', String(value)),
+    serverKey: 'reviewAnalysis',
+    fromServer: (serverConfig: Record<string, unknown>) => {
+      const value = (serverConfig.reviewAnalysis as Record<string, unknown> | undefined)?.callFlow;
+      return typeof value === 'boolean' ? value : undefined;
+    },
+    toServer: (value: boolean) => ({ reviewAnalysis: { callFlow: value } }),
+  },
   conventionalComments: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -452,6 +631,50 @@ export const SETTINGS = {
         return {};
       }
     },
+  },
+  /**
+   * Where the annotate-mode Agent TUI docks: 'left' (where it always docked),
+   * 'right', or 'hidden' (no slot until the user opens it for the session).
+   *
+   * Server-synced so the placement survives the random port every annotate
+   * session runs on — a cookie alone is per-origin, and each invocation is a
+   * new origin, so a cookie-only preference is effectively per-session.
+   *
+   * The cookie key is the pre-registry one, so a user who already picked a
+   * side keeps it across the upgrade.
+   */
+  agentTerminalSide: {
+    defaultValue: 'left' as AnnotateAgentTerminalSide,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-annotate-agent-terminal-side');
+      return isAnnotateAgentTerminalSide(v) ? v : undefined;
+    },
+    toCookie: (v: AnnotateAgentTerminalSide) =>
+      storage.setItem('plannotator-annotate-agent-terminal-side', v),
+    serverKey: 'agentTerminalSide',
+    fromServer: (sc: Record<string, unknown>) =>
+      isAnnotateAgentTerminalSide(sc.agentTerminalSide) ? sc.agentTerminalSide : undefined,
+    toServer: (v: AnnotateAgentTerminalSide) => ({ agentTerminalSide: v }),
+  },
+  /**
+   * Which agent the annotate-mode Agent TUI preselects. Empty string = no
+   * choice recorded yet, in which case the first available agent wins.
+   * Server-synced for the same reason as the placement above.
+   */
+  agentTerminalDefaultAgent: {
+    defaultValue: '' as string,
+    fromCookie: () =>
+      storage.getItem('plannotator-annotate-agent-terminal-default') || undefined,
+    toCookie: (v: string) => {
+      if (v) storage.setItem('plannotator-annotate-agent-terminal-default', v);
+      else storage.removeItem('plannotator-annotate-agent-terminal-default');
+    },
+    serverKey: 'agentTerminalDefaultAgent',
+    fromServer: (sc: Record<string, unknown>) =>
+      typeof sc.agentTerminalDefaultAgent === 'string' && sc.agentTerminalDefaultAgent
+        ? sc.agentTerminalDefaultAgent
+        : undefined,
+    toServer: (v: string) => ({ agentTerminalDefaultAgent: v }),
   },
   /* SettingDef<any>, not <unknown>: consumers compile this shipped source under
      their own strictFunctionTypes, where a narrow `toCookie: (v: string) => void`

@@ -116,18 +116,24 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
       className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: width ?? 256 }}
     >
-      {/* Header — same slot/layout as the other panel views. */}
+      {/* Header — the view toggle owns the entire top row (full width), same
+          layout as the other panel views. The loaded-commit count moves to its
+          own sub-row since nothing else shares the toggle row. */}
       <div className="px-3 flex items-center border-b border-border/50 flex-shrink-0" style={{ height: 'var(--panel-header-h)' }}>
-        <div className="w-full flex items-center justify-between gap-2">
-          <PanelViewToggle
-            view="commits"
-            onSelect={onSelectPanelView}
-            showSections={showSectionsOption}
-            showCommits
-          />
-          <span className="text-xs text-muted-foreground tabular-nums">{commits.length}</span>
-        </div>
+        <PanelViewToggle
+          view="commits"
+          onSelect={onSelectPanelView}
+          showSections={showSectionsOption}
+          showCommits
+        />
       </div>
+      {commits.length > 0 && (
+        <div className="px-3 py-1 border-b border-border/30 flex items-center justify-end flex-shrink-0">
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {commits.length} {commits.length === 1 ? 'commit' : 'commits'}
+          </span>
+        </div>
+      )}
 
       <OverlayScrollArea className="flex-1 min-h-0">
         <div className="py-1">

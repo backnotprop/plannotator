@@ -63,9 +63,18 @@ Version pinning is fully supported from **v0.17.2 onwards**. v0.17.2 is the firs
 </details>
 
 <details>
+<summary><strong>Optional Call flow runtime (not installed by default)</strong></summary>
+
+Code review's **Call flow** layer uses a pinned, pruned CallDiff runtime and needs Node.js 22 or newer, so it is never installed by default. The normal path is in-app: the Call flow toggle names the changed languages and estimated total, and enabling it consents to one background install of the core (about 5 MB on macOS arm64) plus only the needed grammar packs. There is no second confirmation. If a later review introduces another language, installed languages are still analyzed while that pack installs automatically and a quiet skipped-files notice reports progress. Each target gets one automatic attempt per review session; after a failure, the panel shows a Retry action. The panel's **Languages** list shows cumulative installed size and supports installing a pack ahead of need.
+
+For scripted or headless installs, `--with-call-flow` (PowerShell: `-WithCallFlow`), `PLANNOTATOR_INSTALL_CALLDIFF=1`, `{ "installCallFlow": true }`, and `plannotator install-runtime call-flow` install the core; review-specific packs remain selectable in the UI. `--minimal` always excludes it.
+
+</details>
+
+<details>
 <summary><strong>Binary-only install (nothing but the CLI)</strong></summary>
 
-Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, Gemini, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.
+Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no CallDiff runtime, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, Gemini, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --minimal
@@ -380,7 +389,7 @@ Or try it without installing:
 pi -e npm:@plannotator/pi-extension
 ```
 
-Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator` or `Ctrl+Alt+P`. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
+Start plan mode with `pi --plan`, or toggle mid-session with `/plannotator-plan-mode` or `Ctrl+Alt+P`. The extension provides file-based plan review, code review (`/plannotator-review`), markdown annotation (`/plannotator-annotate`), bash safety gating during planning, and progress tracking during execution.
 
 See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
 

@@ -7,10 +7,12 @@ interface ToolbarProps {
   color: string;
   strokeSize: number;
   canUndo: boolean;
+  canRedo?: boolean;
   onToolChange: (tool: Tool) => void;
   onColorChange: (color: string) => void;
   onStrokeSizeChange: (size: number) => void;
   onUndo: () => void;
+  onRedo?: () => void;
   onClear: () => void;
   onSave: () => void;
 }
@@ -41,6 +43,13 @@ const UndoIcon = () => (
   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
     <path d="M3 7v6h6" />
     <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
+  </svg>
+);
+
+const RedoIcon = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+    <path d="M21 7v6h-6" />
+    <path d="M3 17a9 9 0 019-9 9 9 0 016 2.3L21 13" />
   </svg>
 );
 
@@ -81,10 +90,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   color,
   strokeSize,
   canUndo,
+  canRedo = false,
   onToolChange,
   onColorChange,
   onStrokeSizeChange,
   onUndo,
+  onRedo,
   onClear,
   onSave,
 }) => {
@@ -93,7 +104,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const canIncrease = currentSizeIndex < STROKE_SIZES.length - 1;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl">
+    <div
+      data-pn-image-annotator-toolbar
+      className="flex w-fit max-w-full items-center gap-2 px-3 py-2 bg-popover border border-border rounded-lg shadow-xl"
+    >
+      <div
+        data-pn-image-toolbar-scroll
+        className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain"
+      >
+        <div className="flex w-max items-center gap-2">
       {/* Tools */}
       <div className="flex items-center gap-1">
         {TOOLS.map(({ id, icon: Icon, label }) => (
@@ -192,6 +211,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <UndoIcon />
       </button>
 
+      {onRedo && (
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (Cmd+Shift+Z)"
+          className={`p-1.5 rounded transition-colors ${
+            canRedo
+              ? 'hover:bg-muted text-muted-foreground hover:text-foreground'
+              : 'text-muted-foreground/30 cursor-not-allowed'
+          }`}
+        >
+          <RedoIcon />
+        </button>
+      )}
+
       {/* Clear all */}
       <button
         type="button"
@@ -201,15 +236,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       >
         <ClearIcon />
       </button>
+        </div>
+      </div>
 
-      <div className="w-px h-5 bg-border" />
+      <div className="w-px h-5 shrink-0 bg-border" />
 
       {/* Save */}
       <button
         type="button"
         onClick={onSave}
         title="Save (Esc)"
-        className="p-1.5 rounded transition-colors bg-success text-success-foreground hover:opacity-90"
+        className="shrink-0 p-1.5 rounded transition-colors bg-success text-success-foreground hover:opacity-90"
       >
         <CheckIcon />
       </button>

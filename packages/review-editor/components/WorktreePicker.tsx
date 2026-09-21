@@ -64,7 +64,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
           <button
             type="button"
             disabled={disabled}
-            title={active ? `Worktree: ${active.path}` : 'Main repository'}
+            title={active ? `${activeLabel} — ${active.path}` : mainLabel}
             className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
               isCustom
                 ? 'bg-primary/10 border border-primary/30 text-foreground'
@@ -181,9 +181,9 @@ const WorktreeRow: React.FC<WorktreeRowProps> = ({ label, sublabel, isSelected, 
       )}
     </span>
     <div className="min-w-0 flex-1">
-      <div className="truncate">{label}</div>
+      <div className="truncate" title={label}>{label}</div>
       {sublabel && (
-        <div className="truncate text-[10px] text-muted-foreground">{sublabel}</div>
+        <div className="truncate text-[10px] text-muted-foreground" title={sublabel}>{sublabel}</div>
       )}
     </div>
   </button>

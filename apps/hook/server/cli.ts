@@ -1,3 +1,5 @@
+import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
+
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
 export interface ParsedStrictAnnotateOptions {
@@ -139,13 +141,17 @@ export function formatTopLevelHelp(): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [PR_URL]",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
-    "  plannotator annotate-last [--stdin] [--gate] [--json] [--hook]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [PR_URL]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",
     "  plannotator archive",
+    "  plannotator guide list",
+    "  plannotator guide export --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--out <file.html>]",
+    "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
+    "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
@@ -163,35 +169,59 @@ export function formatTopLevelHelp(): string {
 // These exist so an agent (or human) probing `plannotator <sub> --help` gets
 // usage on stdout instead of accidentally launching the browser UI — running
 // `review --help` used to fall through to local review mode and open a tab.
-const SUBCOMMAND_HELP: Record<string, string> = {
+// Exported so the plannotator knowledge skill's freshness test
+// (plannotator-skill-reference.test.ts) can diff the documented surface
+// against the real one.
+export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--local | --no-local] [PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--tailscale] [--json] [PR_URL]",
     "",
     "Review local VCS changes or a GitHub/GitLab pull request in the browser.",
     "",
     "Options:",
     "  --git         Force git as the VCS (skip auto-detection)",
     "  --gitbutler   Force GitButler as the VCS (requires but 0.21.0+)",
+    "  --base <ref>  Open the session against this compare target (branch, origin/<branch>,",
+    "                tag, or commit). Session-only; never changes your saved defaults. Git only.",
+    "  --diff-type <type>",
+    "                Open the session in this diff mode: since-base, local-vs-remote,",
+    "                uncommitted, staged, unstaged, last-commit, branch, merge-base, all.",
+    "                Session-only; never changes your saved defaults. Git only.",
     "  --local       For PR review, prepare a local checkout for full file access (default)",
     "  --no-local    For PR review, skip the local checkout (diff only)",
+    "  --patch-file  Display a static unified diff from a file, or use - for stdin",
+    "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
+    "  --json        Emit one decision/message JSON record instead of plaintext",
     "  PR_URL        GitHub PR or GitLab MR URL to review",
+    "",
+    "  --patch-file cannot be combined with PR_URL.",
+    "",
+    "JSON output:",
+    '  { "decision": "approved" | "annotated" | "dismissed", "message": string }',
+    "  message is the rendered plaintext output without its final console newline:",
+    "  configured prompts, approval-with-notes framing, and annotation-dependent instructions included.",
+    "  This differs from the raw feedback in annotate/opencode-review JSON.",
+    "  Identify the outcome by decision, not message text.",
     "",
     "Examples:",
     "  plannotator review",
     "  plannotator review --git",
     "  plannotator review --gitbutler",
+    "  plannotator review --base feature/part-1   # review one layer of a stacked branch",
+    "  plannotator review --patch-file reading.diff",
     "  plannotator review https://github.com/owner/repo/pull/123",
   ].join("\n"),
   annotate: [
     "Usage:",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
     "",
     "Options:",
     "  --markdown    Convert HTML input to markdown instead of rendering it raw",
     "  --no-jina     Fetch URLs with fetch+Turndown instead of Jina Reader",
+    "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
     "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",
@@ -203,13 +233,14 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   "annotate-last": [
     "Usage:",
-    "  plannotator annotate-last [--stdin] [--gate] [--json] [--hook]",
-    "  plannotator last [--stdin] [--gate] [--json] [--hook]",
+    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
     "",
     "Annotate the last assistant message from the current agent session.",
     "",
     "Options:",
     "  --stdin       Read the message content from stdin instead of session logs",
+    "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
     "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",
@@ -243,6 +274,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "",
     "Open a read-only browser for saved plan decisions in ~/.plannotator/plans/.",
   ].join("\n"),
+  guide: GUIDE_CLI_USAGE,
   "improve-context": [
     "Usage:",
     "  plannotator improve-context",
@@ -280,7 +312,8 @@ const SUBCOMMAND_HELP: Record<string, string> = {
 };
 
 // Aliases share another subcommand's help text.
-const SUBCOMMAND_HELP_ALIASES: Record<string, string> = {
+// Exported for the same freshness test as SUBCOMMAND_HELP.
+export const SUBCOMMAND_HELP_ALIASES: Record<string, string> = {
   last: "annotate-last",
 };
 

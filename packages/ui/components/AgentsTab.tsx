@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { AgentJobInfo, AgentCapabilities } from '../types';
 import { isTerminalStatus } from '@plannotator/core/agent-jobs';
+import { GUIDE_ENGINE_LABEL } from '@plannotator/core/guide';
 import { cn } from '../lib/utils';
 import { ReviewAgentsIcon } from './ReviewAgentsIcon';
 import { ClaudeIcon, CodexIcon, CopilotIcon, CursorIcon, OpenCodeIcon, PiIcon } from './icons/AgentIcons';
@@ -127,14 +128,7 @@ const ENGINE_ICON: Record<AgentEngine, React.FC<{ className?: string }>> = {
 // review surface offers the wider set (Cursor/OpenCode). Exported so the guide
 // takeover surfaces (GuideScreen, GuideEmptyState in packages/review-editor)
 // share this one source of truth instead of keeping their own copies in sync.
-export const REVIEW_ENGINE_LABEL: Record<ReviewEngine, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  copilot: 'Copilot',
-};
+export const REVIEW_ENGINE_LABEL: Record<ReviewEngine, string> = GUIDE_ENGINE_LABEL;
 
 // Review-only icon map — the wide set. Tour keeps the narrow ENGINE_ICON.
 const REVIEW_ENGINE_ICON: Record<ReviewEngine, React.FC<{ className?: string }>> = {
@@ -872,7 +866,12 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
       ? { effort: tourClaudeEffort }
       : { reasoningEffort: tourCodexReasoning, ...(tourCodexFast && { fastMode: true }) }),
   });
-  const buildGuideLaunch = (): LaunchParams => {
+  // Guide extra instructions (#1265) are server-stored: this surface has no
+  // editor, so it sends none and the server applies the stored standing
+  // instructions itself, keeping sidebar launches identical to launch-page
+  // ones without a second read path.
+  const buildGuideLaunch = (): LaunchParams => buildGuideEngineParams();
+  const buildGuideEngineParams = (): LaunchParams => {
     if (guideEngine === 'cursor') {
       // Same omission rules as buildReviewLaunch: auto/empty ⇒ engine default.
       // Guide-scoped model — deliberately NOT the shared cursorModel (see
