@@ -176,6 +176,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   // Fallback used only until fetchModels() replaces it with the installed
   // `claude`'s own list (the SDK's supportedModels()).
   models: CatalogModel[] = CLAUDE_FALLBACK_MODELS;
+  modelsSource: 'fallback' | 'discovered' = 'fallback';
 
   private config: ClaudeAgentSDKConfig;
 
@@ -259,6 +260,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
       const models = claudeCatalogFromSdk(infos ?? []);
       if (models.length === 0) throw new Error("claude reported no models");
       this.models = models;
+      this.modelsSource = 'discovered';
     } finally {
       if (timer) clearTimeout(timer);
       abortController.abort();

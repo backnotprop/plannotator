@@ -8,6 +8,7 @@ import {
   markOutdatedCodeAnnotations,
   readPatchLines,
   reanchorCodeAnnotations,
+  restorableViewedFiles,
 } from './codeAnnotationAnchor';
 
 function patch(file: string, header: string, body: string[]): string {
@@ -181,20 +182,24 @@ describe('what may be posted inline on a PR', () => {
   const B = 'https://github.com/acme/widgets/pull/2';
   const known = new Map([[A, 'sA'], [B, 'sB']]);
 
-  test('only a comment stamped with the snapshot currently known for its PR', () => {
+  test('not when outdated, or when its PR is known to have moved to another snapshot', () => {
     expect(canPostInline({ ...line({ prUrl: A }), anchorSnapshot: 'sA' }, known, A)).toBe(true);
     expect(canPostInline({ ...line({ prUrl: B }), anchorSnapshot: 'sB' }, known, A)).toBe(true);
     // Anchored on a diff of B we no longer see (B was pushed since).
     expect(canPostInline({ ...line({ prUrl: B }), anchorSnapshot: 'old' }, known, A)).toBe(false);
-    // Restored for a PR never viewed this session.
-    expect(canPostInline({ ...line({ prUrl: 'https://github.com/acme/widgets/pull/9' }), anchorSnapshot: 'x' }, known, A)).toBe(false);
     expect(canPostInline({ ...line({ prUrl: A }), anchorSnapshot: 'sA', outdated: true }, known, A)).toBe(false);
   });
 
-  test('an unstamped (older) comment is trusted only for the PR on screen', () => {
+  test('a PR whose snapshot this page has not seen is trusted (after a reload only the on-screen PR is known)', () => {
+    // Regression (#1592): a valid comment on another PR was posted as Outdated
+    // after a tab reload, though that PR never changed.
+    expect(canPostInline({ ...line({ prUrl: 'https://github.com/acme/widgets/pull/9' }), anchorSnapshot: 'x' }, known, A)).toBe(true);
+  });
+
+  test('an unstamped (older) comment is trusted', () => {
     expect(canPostInline(line({ prUrl: A }), known, A)).toBe(true);
     expect(canPostInline(line({}), known, A)).toBe(true);
-    expect(canPostInline(line({ prUrl: B }), known, A)).toBe(false);
+    expect(canPostInline(line({ prUrl: B }), known, A)).toBe(true);
   });
 });
 
@@ -202,5 +207,19 @@ describe('sidebar navigation', () => {
   test('an outdated comment opens its file without a scroll request; others scroll', () => {
     expect(annotationNavigation(line({ outdated: true }))).toBe('select-file');
     expect(annotationNavigation(line({}))).toBe('scroll');
+  });
+});
+
+describe('viewed marks restored from a draft', () => {
+  const files = parseDiffToFiles(AFTER_PUSH);
+
+  test('after a push, a file still in the diff is not re-marked Viewed', () => {
+    // Regression (#1592): restoring after a push re-marked a.ts Viewed though
+    // the push changed it.
+    expect(restorableViewedFiles(['src/a.ts', 'src/gone.ts'], true, files)).toEqual(['src/gone.ts']);
+  });
+
+  test('on the same patch every mark is restored', () => {
+    expect(restorableViewedFiles(['src/a.ts'], false, files)).toEqual(['src/a.ts']);
   });
 });

@@ -104,26 +104,48 @@ export function claudeModelVersion(resolvedId: string | undefined): string | und
  * model name). The SDK's displayName carries no version ("Opus (1M context)",
  * "Sonnet"), so the resolved id is the source.
  */
-function aliasLabel(id: string, resolvedId?: string): string | undefined {
+function aliasLabel(id: string, resolvedId?: string, fallbackVersion?: string): string | undefined {
   const family = CLAUDE_FAMILIES.find((f) => id === f || id === `${f}${ONE_M}`);
   if (!family) return undefined;
-  const version = claudeModelVersion(resolvedId);
+  const version = claudeModelVersion(resolvedId) ?? fallbackVersion;
   return `${titleCase(family)}${version ? ` ${version}` : ''}${isOneM(id) ? ' 1M' : ''} (latest)`;
+}
+
+/** Aliases the claude CLI always accepts; a discovered catalog always offers them. */
+const CORE_CLAUDE_ALIASES = ['opus', 'sonnet', 'haiku'];
+
+/** The family and version the SDK's `default` row points at: its resolvedModel, else its description. */
+function defaultRowTarget(info: ClaudeSdkModelInfo): { family: string; version?: string } | undefined {
+  const family = info.resolvedModel ? claudeFamily(info.resolvedModel) : undefined;
+  if (family) return { family, version: claudeModelVersion(info.resolvedModel) };
+  // Older CLIs: "Use the default model (currently Opus 4.7 (1M context))", no resolvedModel.
+  const match = /\b(opus|sonnet|fable|haiku)\b(?:\s+(\d+(?:\.\d+)?))?/i.exec(info.description ?? '');
+  return match ? { family: match[1].toLowerCase(), version: match[2] } : undefined;
 }
 
 /**
  * Build the Claude catalog from `supportedModels()`. Labels come from the
  * description's lead ("Opus 5.5 with 1M context · …"). The `default` row is a
- * pointer, not a model, so it is dropped. Every family the tool offers also
+ * pointer, not a model, so it is not listed. Every family the tool offers also
  * gets its bare latest alias (`opus`, `sonnet`, `fable`, `haiku`) — the CLI
  * accepts them and the launchers default to them — derived from the family's
- * first row so it carries the same effort / fast-mode support. `sonnet` is the
- * default pick (Ask AI's historical default).
+ * first row so it carries the same effort / fast-mode support. `opus`,
+ * `sonnet` and `haiku` are always offered: some CLIs name a family only through
+ * the `default` row (Claude Code 2.1.141 lists Opus nowhere else), and without
+ * the alias a saved Opus pick would silently resolve to Sonnet. Such an alias
+ * takes its version from the `default` row when that row points at the family,
+ * and its support from the static fallback. `sonnet` is the default pick (Ask
+ * AI's historical default).
  */
 export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): CatalogModel[] {
   const rows: CatalogModel[] = [];
+  let pointer: ClaudeSdkModelInfo | undefined;
   for (const info of infos) {
-    if (!info || typeof info.value !== 'string' || !info.value || info.value === 'default') continue;
+    if (!info || typeof info.value !== 'string' || !info.value) continue;
+    if (info.value === 'default') {
+      pointer ??= info;
+      continue;
+    }
     const lead = info.description?.split(' · ')[0]?.trim() || info.displayName || info.value;
     const efforts = info.supportsEffort !== false ? (info.supportedEffortLevels ?? []) : [];
     rows.push({
@@ -136,13 +158,20 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
       ...(info.supportsFastMode ? { fastMode: true } : {}),
     });
   }
+  if (rows.length === 0) return [];
+  const target = pointer ? defaultRowTarget(pointer) : undefined;
   const aliases: CatalogModel[] = [];
   for (const family of CLAUDE_FAMILIES) {
     if (rows.some((r) => r.id === family)) continue;
     const source = rows.find((r) => claudeFamily(r.id) === family);
-    if (!source) continue;
-    const { resolvedId: _, ...support } = source;
-    aliases.push({ ...support, id: family, label: aliasLabel(family, source.resolvedId)! });
+    if (source) {
+      const { resolvedId: _, ...support } = source;
+      aliases.push({ ...support, id: family, label: aliasLabel(family, source.resolvedId)! });
+    } else if (CORE_CLAUDE_ALIASES.includes(family) || target?.family === family) {
+      const { default: _, ...fallback } = CLAUDE_FALLBACK_MODELS.find((m) => m.id === family)!;
+      const version = target?.family === family ? target.version : undefined;
+      aliases.push({ ...fallback, label: aliasLabel(family, undefined, version)! });
+    }
   }
   const all = [...aliases, ...rows];
   const def = all.find((m) => m.id === 'sonnet') ?? all[0];

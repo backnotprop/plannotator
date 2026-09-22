@@ -98,6 +98,7 @@ jobs:
           packages/ui/components/Viewer.vimMode.integration.test.tsx
           packages/ui/hooks/useVimSelection.test.tsx
           packages/ui/hooks/useModelCatalogs.dom.test.tsx
+          packages/ui/hooks/useAgentSettings.dom.test.tsx
           packages/ui/utils/codeHighlight.test.ts
           packages/ui/utils/htmlChrome.test.ts
           packages/ui/utils/inputMethod.test.ts

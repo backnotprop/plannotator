@@ -201,6 +201,13 @@ export interface AIProvider {
   readonly models?: ReadonlyArray<CatalogModel>;
 
   /**
+   * Where `models` came from, for providers that start on a static fallback:
+   * `fallback` until discovery succeeds, then `discovered`. Clients use it to
+   * retry a fallback answer on a later load instead of caching it.
+   */
+  readonly modelsSource?: 'fallback' | 'discovered';
+
+  /**
    * Create a fresh session (no parent history).
    * Context is injected via the system prompt.
    */

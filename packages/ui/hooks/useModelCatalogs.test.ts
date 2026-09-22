@@ -39,4 +39,22 @@ describe("loadModelCatalog", () => {
     stubFetch(() => Response.json({ available: true, providers: [{ id: "pi-sdk", models: [{ id: "x", label: "X" }] }] }));
     expect(await loadModelCatalog("codex")).toBe(FALLBACK_MODELS.codex);
   });
+
+  test("a 200 answer the server marks as its fallback is shown but retried on the next load", async () => {
+    const fallback = [{ id: "sonnet", label: "Sonnet (latest)", default: true }];
+    const discovered = [{ id: "opus", label: "Opus 5.5 (latest)" }, ...fallback];
+    let source = "fallback";
+    const urls = stubFetch(() =>
+      Response.json({
+        available: true,
+        providers: [{ id: "claude-agent-sdk", models: source === "fallback" ? fallback : discovered, modelsSource: source }],
+      }),
+    );
+    expect(await loadModelCatalog("claude")).toEqual(fallback);
+    source = "discovered";
+    expect(await loadModelCatalog("claude")).toEqual(discovered);
+    // A discovered answer is kept for the page.
+    await loadModelCatalog("claude");
+    expect(urls).toHaveLength(2);
+  });
 });

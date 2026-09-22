@@ -224,11 +224,29 @@ export function markOutdatedCodeAnnotations(
 }
 
 /**
- * Whether a line comment may be posted INLINE on a PR: not outdated, and its
- * coordinates provably belong to the diff currently known for its PR (its
- * snapshot stamp equals that diff's snapshot). An unstamped comment (older
- * draft) is only trusted for the PR on screen. Everything else goes in the
- * review body.
+ * Viewed marks to restore from a draft. When the draft was saved on a
+ * different patch (a push landed since), the draft cannot tell which files the
+ * push touched, so a mark on any file still in the diff is dropped rather than
+ * claiming the reviewer saw code they have not.
+ */
+export function restorableViewedFiles(
+  viewedFiles: readonly string[],
+  patchChanged: boolean,
+  files: readonly DiffFile[],
+): string[] {
+  if (!patchChanged) return [...viewedFiles];
+  const inDiff = new Set(files.map((f) => f.path));
+  return viewedFiles.filter((path) => !inDiff.has(path));
+}
+
+/**
+ * Whether a line comment may be posted INLINE on a PR. Not when it is
+ * outdated, and not when the session knows a DIFFERENT snapshot for its PR
+ * than the one it was stamped on (its coordinates belong to a diff that has
+ * since been replaced). Absence of evidence is not evidence of a change: an
+ * unstamped comment (older draft), or one for a PR whose snapshot this page
+ * has not seen (after a reload only the PR on screen is known), is trusted
+ * and posted inline, as before #1590.
  */
 export function canPostInline(
   annotation: CodeAnnotation,
@@ -236,12 +254,10 @@ export function canPostInline(
   currentPrUrl: string | undefined,
 ): boolean {
   if (annotation.outdated) return false;
-  if (!knownSnapshots) return true;
+  if (!knownSnapshots || annotation.anchorSnapshot === undefined) return true;
   const prUrl = annotation.prUrl ?? currentPrUrl;
-  if (annotation.anchorSnapshot === undefined) {
-    return annotation.prUrl === undefined || annotation.prUrl === currentPrUrl;
-  }
-  return prUrl !== undefined && knownSnapshots.get(prUrl) === annotation.anchorSnapshot;
+  const known = prUrl === undefined ? undefined : knownSnapshots.get(prUrl);
+  return known === undefined || known === annotation.anchorSnapshot;
 }
 
 /**

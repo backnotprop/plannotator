@@ -98,6 +98,7 @@ export type { SessionEntry, SessionManagerOptions } from "./session-manager.ts";
 export {
   createAIEndpoints,
   createBestEffortOnce,
+  createDeferredModelDiscovery,
   isAIEndpointPath,
 } from "./endpoints.ts";
 export type {

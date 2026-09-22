@@ -151,7 +151,7 @@ import {
 } from './dock/reviewPanelTypes';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
-import { annotationNavigation, reanchorCodeAnnotations } from './utils/codeAnnotationAnchor';
+import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from './utils/codeAnnotationAnchor';
 import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
@@ -1023,7 +1023,9 @@ const ReviewApp: React.FC = () => {
     if (restoredAnnotations.length > 0) setAnnotations(restoredAnnotations);
     if (restored.descriptionAnnotations.length > 0) setDescriptionAnnotations(restored.descriptionAnnotations);
     if (restored.commentAnnotations.length > 0) setCommentAnnotations(restored.commentAnnotations);
-    if (restored.viewedFiles.length > 0) setViewedFiles(new Set(restored.viewedFiles));
+    // After a push, a file the reviewer marked Viewed may have changed since.
+    const restoredViewed = restorableViewedFiles(restored.viewedFiles, restored.patchChanged, files);
+    if (restoredViewed.length > 0) setViewedFiles(new Set(restoredViewed));
     if (restored.autoViewSuppressed.length > 0) setAutoViewSuppressed(new Set(restored.autoViewSuppressed));
   }, [restoreDraft, reviewHistory, files, prMetadata, prDiffScope, snapshotId]);
 
@@ -4141,6 +4143,9 @@ const ReviewApp: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         keepalive: true,
         body: JSON.stringify({
+          // Tombstones the draft (and its PR target key) at this generation,
+          // like the agent-path decisions, so no late autosave revives it.
+          draftGeneration: getDraftGeneration(),
           approved: false,
           feedback: statusMessage,
           annotations: [],
@@ -4152,7 +4157,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       setIsPlatformActioning(false);
     }
-  }, [platformOpenPR, platformLabel, mrLabel, prMetadata]);
+  }, [platformOpenPR, platformLabel, mrLabel, prMetadata, getDraftGeneration]);
 
   const openPlatformDialog = useCallback((action: 'approve' | 'comment') => {
     const diffPaths = new Set(files.map(f => f.path));

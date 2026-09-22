@@ -1,6 +1,6 @@
 import {
   createAIEndpoints,
-  createBestEffortOnce,
+  createDeferredModelDiscovery,
   createProvider,
   ProviderRegistry,
   SessionManager,
@@ -26,15 +26,11 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   const registry = new ProviderRegistry();
   const sessionManager = new SessionManager();
   const modelDiscovery: Promise<void>[] = [];
-  const providerInitializers = new Map<string, () => Promise<void>>();
   // Model discovery spawns the provider's CLI, so it runs on first explicit
   // activation (?activate= from a model picker) or the first session — never
   // at startup.
-  const deferModelDiscovery = (providerId: string, provider: object | null | undefined) => {
-    if (!provider || !("fetchModels" in provider)) return;
-    const fetchModels = provider.fetchModels as () => Promise<void>;
-    providerInitializers.set(providerId, createBestEffortOnce(() => fetchModels.call(provider)));
-  };
+  const discovery = createDeferredModelDiscovery();
+  const deferModelDiscovery = discovery.defer;
 
   try {
     await import("@plannotator/ai/providers/claude-agent-sdk");
@@ -45,7 +41,9 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
       ...(claudePath && { claudeExecutablePath: claudePath }),
     });
     const providerId = registry.register(provider);
-    deferModelDiscovery(providerId, provider);
+    // A Claude session spawns its own `claude`, so it never waits on discovery
+    // (~2s, up to 10s): the first Ask AI answer starts at once.
+    deferModelDiscovery(providerId, provider, { blockSession: false });
   } catch {
     // Claude SDK not available.
   }
@@ -112,9 +110,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     beforeCapabilities: async () => {
       await Promise.allSettled(modelDiscovery);
     },
-    beforeProviderSession: async (providerId) => {
-      await providerInitializers.get(providerId)?.();
-    },
+    beforeProviderSession: discovery.beforeProviderSession,
   });
 
   return {

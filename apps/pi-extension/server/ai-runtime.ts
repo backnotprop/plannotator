@@ -36,15 +36,11 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 		const registry = new ai.ProviderRegistry();
 		const sessionManager = new ai.SessionManager();
 		const modelDiscovery: Promise<void>[] = [];
-		const providerInitializers = new Map<string, () => Promise<void>>();
 		// Model discovery spawns the provider's CLI, so it runs on first explicit
 		// activation (?activate= from a model picker) or the first session — never
 		// at startup.
-		const deferModelDiscovery = (providerId: string, provider: object | null | undefined) => {
-			if (!provider || !("fetchModels" in provider)) return;
-			const fetchModels = provider.fetchModels as () => Promise<void>;
-			providerInitializers.set(providerId, ai.createBestEffortOnce(() => fetchModels.call(provider)));
-		};
+		const discovery = ai.createDeferredModelDiscovery();
+		const deferModelDiscovery = discovery.defer;
 
 		try {
 			await import("../generated/ai/providers/claude-agent-sdk.ts");
@@ -55,7 +51,9 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				...(claudePath && { claudeExecutablePath: claudePath }),
 			});
 			const providerId = registry.register(provider);
-			deferModelDiscovery(providerId, provider);
+			// A Claude session spawns its own `claude`, so it never waits on discovery
+			// (~2s, up to 10s): the first Ask AI answer starts at once.
+			deferModelDiscovery(providerId, provider, { blockSession: false });
 		} catch {
 			// Claude SDK not available.
 		}
@@ -127,9 +125,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				beforeCapabilities: async () => {
 					await Promise.allSettled(modelDiscovery);
 				},
-				beforeProviderSession: async (providerId) => {
-					await providerInitializers.get(providerId)?.();
-				},
+				beforeProviderSession: discovery.beforeProviderSession,
 			}),
 			dispose: () => {
 				sessionManager.disposeAll();

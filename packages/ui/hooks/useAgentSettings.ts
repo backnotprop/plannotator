@@ -414,20 +414,32 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     setState((s) => ({ ...s, copilot: { ...s.copilot, model } }));
   }, []);
 
+  /**
+   * Write a Codex setting for the model the picker SHOWS. When resolution
+   * replaced a stale saved model with a different one, the section is re-keyed
+   * to the shown model (seeded with the values shown for it), since a setting
+   * stored under the stale id would never apply (effectiveFast drops fast
+   * across a replacement). A saved '' ("the tool's default") is kept.
+   */
   const patchCodex = useCallback(
     (
       section: 'codex' | 'tourCodex' | 'guideCodex',
       patch: Partial<{ reasoning: string; fast: boolean }>,
       defaults: { reasoning: string; fast: boolean },
+      shown: { model: string; reasoning: string; fast: boolean },
     ) => {
       setState((s) => {
         const cur = s[section];
-        const prev = cur.perModel[cur.model] ?? defaults;
+        const replaced = !!cur.model && !!shown.model && shown.model !== cur.model;
+        const model = replaced ? shown.model : cur.model;
+        const prev =
+          cur.perModel[model] ?? (replaced ? { reasoning: shown.reasoning, fast: shown.fast } : defaults);
         return {
           ...s,
           [section]: {
             ...cur,
-            perModel: { ...cur.perModel, [cur.model]: { ...prev, ...patch } },
+            model,
+            perModel: { ...cur.perModel, [model]: { ...prev, ...patch } },
           },
         };
       });
@@ -435,13 +447,36 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     [],
   );
 
+  // Effective (launchable) values, resolved against the discovered catalogs.
+  // Pickers and launch payloads both read these, so what is shown is what runs.
+  const claudeCatalog = catalogs?.claude;
+  const codexCatalog = catalogs?.codex;
+  const claudeModel = effectiveModel(claudeCatalog, state.claude.model, DEFAULT_CLAUDE_MODEL);
+  const claudeEffort = effectiveEffort(claudeCatalog, claudeModel, state.claude.perModel[state.claude.model]?.effort ?? DEFAULT_CLAUDE_EFFORT);
+  const codexModel = effectiveModel(codexCatalog, state.codex.model, DEFAULT_CODEX_MODEL);
+  const codexReasoning = effectiveEffort(codexCatalog, codexModel, state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING);
+  const codexFast = effectiveFast(codexCatalog, state.codex.model, codexModel, state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST);
+  const tourClaudeModel = effectiveModel(claudeCatalog, state.tourClaude.model, DEFAULT_TOUR_CLAUDE_MODEL);
+  const tourClaudeEffort = effectiveEffort(claudeCatalog, tourClaudeModel, state.tourClaude.perModel[state.tourClaude.model]?.effort ?? DEFAULT_TOUR_CLAUDE_EFFORT);
+  const tourCodexModel = effectiveModel(codexCatalog, state.tourCodex.model, DEFAULT_TOUR_CODEX_MODEL);
+  const tourCodexReasoning = effectiveEffort(codexCatalog, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING);
+  const tourCodexFast = effectiveFast(codexCatalog, state.tourCodex.model, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST);
+  const guideClaudeModel = effectiveModel(claudeCatalog, state.guideClaude.model, DEFAULT_GUIDE_CLAUDE_MODEL);
+  const guideClaudeEffort = effectiveEffort(claudeCatalog, guideClaudeModel, state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT);
+  const guideCodexModel = effectiveModel(codexCatalog, state.guideCodex.model, DEFAULT_GUIDE_CODEX_MODEL);
+  const guideCodexReasoning = effectiveEffort(codexCatalog, guideCodexModel, state.guideCodex.perModel[state.guideCodex.model]?.reasoning ?? DEFAULT_GUIDE_CODEX_REASONING);
+  // Guide offers no fast toggle; a re-key carries whatever is stored.
+  const guideCodexFast = state.guideCodex.perModel[state.guideCodex.model]?.fast ?? DEFAULT_CODEX_FAST;
+
   const setCodexReasoning = useCallback(
-    (reasoning: string) => patchCodex('codex', { reasoning }, { reasoning: DEFAULT_CODEX_REASONING, fast: DEFAULT_CODEX_FAST }),
-    [patchCodex],
+    (reasoning: string) =>
+      patchCodex('codex', { reasoning }, { reasoning: DEFAULT_CODEX_REASONING, fast: DEFAULT_CODEX_FAST }, { model: codexModel, reasoning: codexReasoning, fast: codexFast }),
+    [patchCodex, codexModel, codexReasoning, codexFast],
   );
   const setCodexFast = useCallback(
-    (fast: boolean) => patchCodex('codex', { fast }, { reasoning: DEFAULT_CODEX_REASONING, fast: DEFAULT_CODEX_FAST }),
-    [patchCodex],
+    (fast: boolean) =>
+      patchCodex('codex', { fast }, { reasoning: DEFAULT_CODEX_REASONING, fast: DEFAULT_CODEX_FAST }, { model: codexModel, reasoning: codexReasoning, fast: codexFast }),
+    [patchCodex, codexModel, codexReasoning, codexFast],
   );
 
   const setTourClaudeModel = useCallback((model: string) => {
@@ -458,12 +493,14 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   }, []);
 
   const setTourCodexReasoning = useCallback(
-    (reasoning: string) => patchCodex('tourCodex', { reasoning }, { reasoning: DEFAULT_TOUR_CODEX_REASONING, fast: DEFAULT_TOUR_CODEX_FAST }),
-    [patchCodex],
+    (reasoning: string) =>
+      patchCodex('tourCodex', { reasoning }, { reasoning: DEFAULT_TOUR_CODEX_REASONING, fast: DEFAULT_TOUR_CODEX_FAST }, { model: tourCodexModel, reasoning: tourCodexReasoning, fast: tourCodexFast }),
+    [patchCodex, tourCodexModel, tourCodexReasoning, tourCodexFast],
   );
   const setTourCodexFast = useCallback(
-    (fast: boolean) => patchCodex('tourCodex', { fast }, { reasoning: DEFAULT_TOUR_CODEX_REASONING, fast: DEFAULT_TOUR_CODEX_FAST }),
-    [patchCodex],
+    (fast: boolean) =>
+      patchCodex('tourCodex', { fast }, { reasoning: DEFAULT_TOUR_CODEX_REASONING, fast: DEFAULT_TOUR_CODEX_FAST }, { model: tourCodexModel, reasoning: tourCodexReasoning, fast: tourCodexFast }),
+    [patchCodex, tourCodexModel, tourCodexReasoning, tourCodexFast],
   );
 
   const setGuideClaudeModel = useCallback((model: string) => {
@@ -480,8 +517,9 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   }, []);
 
   const setGuideCodexReasoning = useCallback(
-    (reasoning: string) => patchCodex('guideCodex', { reasoning }, { reasoning: DEFAULT_GUIDE_CODEX_REASONING, fast: DEFAULT_CODEX_FAST }),
-    [patchCodex],
+    (reasoning: string) =>
+      patchCodex('guideCodex', { reasoning }, { reasoning: DEFAULT_GUIDE_CODEX_REASONING, fast: DEFAULT_CODEX_FAST }, { model: guideCodexModel, reasoning: guideCodexReasoning, fast: guideCodexFast }),
+    [patchCodex, guideCodexModel, guideCodexReasoning, guideCodexFast],
   );
 
   const setGuideCursorModel = useCallback((model: string) => {
@@ -503,25 +541,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   const setGuideCopilotModel = useCallback((model: string) => {
     setState((s) => ({ ...s, guideCopilot: { ...s.guideCopilot, model } }));
   }, []);
-
-  // Effective (launchable) values, resolved against the discovered catalogs.
-  // Pickers and launch payloads both read these, so what is shown is what runs.
-  const claudeCatalog = catalogs?.claude;
-  const codexCatalog = catalogs?.codex;
-  const claudeModel = effectiveModel(claudeCatalog, state.claude.model, DEFAULT_CLAUDE_MODEL);
-  const claudeEffort = effectiveEffort(claudeCatalog, claudeModel, state.claude.perModel[state.claude.model]?.effort ?? DEFAULT_CLAUDE_EFFORT);
-  const codexModel = effectiveModel(codexCatalog, state.codex.model, DEFAULT_CODEX_MODEL);
-  const codexReasoning = effectiveEffort(codexCatalog, codexModel, state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING);
-  const codexFast = effectiveFast(codexCatalog, state.codex.model, codexModel, state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST);
-  const tourClaudeModel = effectiveModel(claudeCatalog, state.tourClaude.model, DEFAULT_TOUR_CLAUDE_MODEL);
-  const tourClaudeEffort = effectiveEffort(claudeCatalog, tourClaudeModel, state.tourClaude.perModel[state.tourClaude.model]?.effort ?? DEFAULT_TOUR_CLAUDE_EFFORT);
-  const tourCodexModel = effectiveModel(codexCatalog, state.tourCodex.model, DEFAULT_TOUR_CODEX_MODEL);
-  const tourCodexReasoning = effectiveEffort(codexCatalog, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING);
-  const tourCodexFast = effectiveFast(codexCatalog, state.tourCodex.model, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST);
-  const guideClaudeModel = effectiveModel(claudeCatalog, state.guideClaude.model, DEFAULT_GUIDE_CLAUDE_MODEL);
-  const guideClaudeEffort = effectiveEffort(claudeCatalog, guideClaudeModel, state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT);
-  const guideCodexModel = effectiveModel(codexCatalog, state.guideCodex.model, DEFAULT_GUIDE_CODEX_MODEL);
-  const guideCodexReasoning = effectiveEffort(codexCatalog, guideCodexModel, state.guideCodex.perModel[state.guideCodex.model]?.reasoning ?? DEFAULT_GUIDE_CODEX_REASONING);
 
   return {
     selectedMode: state.selectedMode,

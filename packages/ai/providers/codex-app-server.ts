@@ -81,7 +81,12 @@ export function codexCatalogFromModelList(data: readonly RpcMessage[]): CatalogM
       const efforts = ((m.supportedReasoningEfforts as RpcMessage[] | undefined) ?? [])
         .map((e) => e.reasoningEffort)
         .filter((e): e is string => typeof e === "string" && !!e);
-      const speedTiers = m.additionalSpeedTiers;
+      // Codex's own ModelPreset::supports_fast_mode: a `serviceTiers` entry whose
+      // id is the fast tier's request value ("priority"; "fast" is its alias),
+      // or the deprecated `additionalSpeedTiers` containing "fast".
+      const serviceTiers = Array.isArray(m.serviceTiers) ? (m.serviceTiers as RpcMessage[]) : [];
+      const speedTiers = Array.isArray(m.additionalSpeedTiers) ? m.additionalSpeedTiers : [];
+      const fast = serviceTiers.some((t) => t?.id === "priority" || t?.id === "fast") || speedTiers.includes("fast");
       return {
         id: m.id as string,
         label: (m.displayName as string) || (m.id as string),
@@ -90,7 +95,7 @@ export function codexCatalogFromModelList(data: readonly RpcMessage[]): CatalogM
         ...(typeof m.defaultReasoningEffort === "string" && m.defaultReasoningEffort
           ? { defaultReasoningEffort: m.defaultReasoningEffort }
           : {}),
-        ...(Array.isArray(speedTiers) && speedTiers.includes("fast") ? { fastMode: true } : {}),
+        ...(fast ? { fastMode: true } : {}),
       };
     });
 }
@@ -564,6 +569,7 @@ export class CodexAppServerProvider implements AIProvider {
   // Fallback used only until fetchModels() replaces it with Codex's real list
   // (model/list).
   models: CatalogModel[] = CODEX_FALLBACK_MODELS;
+  modelsSource: "fallback" | "discovered" = "fallback";
 
   private config: CodexSDKConfig;
   private sessions = new Set<CodexAppServerSession>();
@@ -604,6 +610,7 @@ export class CodexAppServerProvider implements AIProvider {
       const models = codexCatalogFromModelList(data);
       if (models.length === 0) throw new Error("codex reported no models");
       this.models = models;
+      this.modelsSource = "discovered";
     } finally {
       proc.kill();
     }

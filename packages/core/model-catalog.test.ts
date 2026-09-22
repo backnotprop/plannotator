@@ -58,9 +58,9 @@ describe("claudeCatalogFromSdk", () => {
   });
 
   test("an alias whose resolved model is missing or unparseable keeps the plain label", () => {
-    const [row] = claudeCatalogFromSdk([{ value: "sonnet", resolvedModel: "some-future-scheme" }]);
-    expect(row.label).toBe("Sonnet (latest)");
-    expect(claudeCatalogFromSdk([{ value: "haiku" }])[0].label).toBe("Haiku (latest)");
+    const row = claudeCatalogFromSdk([{ value: "sonnet", resolvedModel: "some-future-scheme" }]).find((m) => m.id === "sonnet");
+    expect(row?.label).toBe("Sonnet (latest)");
+    expect(claudeCatalogFromSdk([{ value: "haiku" }]).find((m) => m.id === "haiku")?.label).toBe("Haiku (latest)");
   });
 
   test("effort support is per model: haiku takes none, the rest default to high", () => {
@@ -71,6 +71,30 @@ describe("claudeCatalogFromSdk", () => {
 
   test("sonnet is the single default", () => {
     expect(catalog.filter((m) => m.default).map((m) => m.id)).toEqual(["sonnet"]);
+  });
+
+  test("a CLI that names Opus only through the default row still offers opus (Claude Code 2.1.141)", () => {
+    // Captured from Claude Code 2.1.141: the default row carries no
+    // resolvedModel and is the only place Opus appears. Without the alias a
+    // saved or default `opus` pick resolved to sonnet and ran Sonnet.
+    const old = claudeCatalogFromSdk([
+      { value: "default", displayName: "Default (recommended)", description: "Use the default model (currently Opus 4.7 (1M context))" },
+      { value: "sonnet", resolvedModel: "claude-sonnet-4-6", description: "Sonnet 4.6 · Best for everyday tasks", supportsEffort: true, supportedEffortLevels: ALL },
+      { value: "sonnet[1m]", resolvedModel: "claude-sonnet-4-6[1m]", description: "Sonnet 4.6 with 1M context · For long sessions", supportsEffort: true, supportedEffortLevels: ALL },
+      { value: "haiku", resolvedModel: "claude-haiku-4-5-20251001", description: "Haiku 4.5 · Fastest for quick answers" },
+    ]);
+    expect(old.find((m) => m.id === "opus")?.label).toBe("Opus 4.7 (latest)");
+    expect(resolveModelChoice("opus", old, "opus")).toBe("opus");
+    expect(resolveModelChoice("claude-opus-4-7", old)).toBe("opus");
+    expect(old.filter((m) => m.default).map((m) => m.id)).toEqual(["sonnet"]);
+  });
+
+  test("the core aliases are offered even when nothing names their family", () => {
+    const models = claudeCatalogFromSdk([{ value: "sonnet", resolvedModel: "claude-sonnet-5" }]);
+    expect(models.map((m) => m.id).sort()).toEqual(["haiku", "opus", "sonnet"]);
+    expect(models.find((m) => m.id === "opus")?.label).toBe("Opus (latest)");
+    // The 2.1.280 shape already offers every family; nothing extra is added.
+    expect(catalog.map((m) => m.id).sort()).toEqual(["claude-fable-5-1[1m]", "fable", "haiku", "opus", "opus[1m]", "sonnet"]);
   });
 
   test("tolerates an empty or malformed reply", () => {

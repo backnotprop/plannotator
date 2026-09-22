@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { CLAUDE_FALLBACK_MODELS } from "@plannotator/core/model-catalog";
 import { ClaudeAgentSDKProvider } from "./claude-agent-sdk.ts";
 import { codexCatalogFromModelList } from "./codex-app-server.ts";
+import { createDeferredModelDiscovery } from "../endpoints.ts";
 
 describe("codexCatalogFromModelList", () => {
   // Shape of codex-cli 0.154 `model/list` entries (trimmed to the read fields).
@@ -37,6 +38,18 @@ describe("codexCatalogFromModelList", () => {
     expect(catalog[1].default).toBeUndefined();
     expect(catalog[1].fastMode).toBeUndefined();
   });
+
+  test("fast mode is also read from serviceTiers (the replacement for additionalSpeedTiers)", () => {
+    // Codex's ModelPreset::supports_fast_mode: a service tier whose id is the
+    // fast tier's request value ("priority") or its "fast" alias.
+    const tier = (id: string) => ({ id, name: id, description: "" });
+    const catalog = codexCatalogFromModelList([
+      { id: "a", serviceTiers: [tier("priority")] },
+      { id: "b", serviceTiers: [tier("fast")] },
+      { id: "c", serviceTiers: [tier("flex")], additionalSpeedTiers: [] },
+    ]);
+    expect(catalog.map((m) => m.fastMode ?? false)).toEqual([true, true, false]);
+  });
 });
 
 describe("Claude model discovery", () => {
@@ -62,8 +75,45 @@ describe("Claude model discovery", () => {
       expect(start).toBeGreaterThan(-1);
       expect(end).toBeGreaterThan(start);
       const block = src.slice(start, end);
-      expect(block).toContain("deferModelDiscovery(providerId, provider)");
+      // Claude sessions never wait on discovery (fix: first Ask AI answer
+      // blocked ~2-10s); both runtimes must register it that way.
+      expect(block).toContain("deferModelDiscovery(providerId, provider, { blockSession: false })");
       expect(block).not.toContain("modelDiscovery.push");
     });
   }
+});
+
+describe("createDeferredModelDiscovery", () => {
+  const hanging = () => {
+    let calls = 0;
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => { finish = resolve; });
+    return { provider: { fetchModels: () => { calls++; return done; } }, finish, calls: () => calls };
+  };
+  const settledWithin = async (p: Promise<void>, ms = 50) =>
+    Promise.race([p.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), ms))]);
+
+  test("a non-blocking provider's session starts without waiting, while discovery runs in the background", async () => {
+    const d = createDeferredModelDiscovery();
+    const claude = hanging();
+    d.defer("claude-agent-sdk", claude.provider, { blockSession: false });
+    expect(await settledWithin(d.beforeProviderSession("claude-agent-sdk", "session"))).toBe(true);
+    expect(claude.calls()).toBe(1);
+    // An explicit ?activate= probe still waits: it reports the refreshed list.
+    const activate = d.beforeProviderSession("claude-agent-sdk", "activate");
+    expect(await settledWithin(activate)).toBe(false);
+    claude.finish();
+    expect(await settledWithin(activate)).toBe(true);
+    expect(claude.calls()).toBe(1);
+  });
+
+  test("a blocking provider's session waits for discovery", async () => {
+    const d = createDeferredModelDiscovery();
+    const codex = hanging();
+    d.defer("codex-sdk", codex.provider);
+    const session = d.beforeProviderSession("codex-sdk", "session");
+    expect(await settledWithin(session)).toBe(false);
+    codex.finish();
+    expect(await settledWithin(session)).toBe(true);
+  });
 });

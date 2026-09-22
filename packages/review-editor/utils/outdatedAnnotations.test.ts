@@ -64,13 +64,14 @@ describe('hosted PR review submission', () => {
     expect(target.fileScopedBody).toContain('src/a.ts');
   });
 
-  test('a comment anchored on a diff the session can no longer vouch for goes in the body with the code it was written on', () => {
+  test('a comment on a PR whose snapshot this page never saw is posted inline, not as Outdated', () => {
+    // Regression (#1592): PR 42 comment, switch to 43 and comment, back to 42,
+    // reload, restore, Post. After the reload only 42's snapshot is known, and
+    // 43's untouched comment was posted to its body labelled Outdated.
     const OTHER = 'https://github.com/acme/widgets/pull/43';
     const submission = buildReviewSubmission(
       [
-        // Restored for PR 43, anchored on a snapshot this session never saw.
-        comment({ id: 'other', prUrl: OTHER, text: 'On 43', anchorSnapshot: 'gone', anchorText: 'const legacy = 1;' }),
-        // Current PR, anchored on the diff on screen.
+        comment({ id: 'other', prUrl: OTHER, text: 'On 43', lineStart: 12, lineEnd: 12, anchorSnapshot: 's43', anchorText: 'const x = 1;' }),
         comment({ id: 'here', text: 'On 42', lineStart: 20, lineEnd: 20, anchorSnapshot: 'now' }),
       ],
       [],
@@ -81,9 +82,25 @@ describe('hosted PR review submission', () => {
     );
     const other = submission.targets.find((t) => t.prUrl === OTHER)!;
     const here = submission.targets.find((t) => t.prUrl === PR_URL)!;
+    expect(other.fileComments.map((c) => c.line)).toEqual([12]);
+    expect(other.fileScopedBody).not.toContain(OUTDATED_ANNOTATION_LABEL);
+    expect(here.fileComments.map((c) => c.line)).toEqual([20]);
+  });
+
+  test('a comment stamped on a snapshot its PR has moved past rides the body with its code, but is not labelled Outdated', () => {
+    const OTHER = 'https://github.com/acme/widgets/pull/43';
+    const submission = buildReviewSubmission(
+      [comment({ id: 'other', prUrl: OTHER, text: 'On 43', anchorSnapshot: 'gone', anchorText: 'const legacy = 1;' })],
+      [],
+      PR_URL,
+      new Set(['src/a.ts']),
+      undefined,
+      new Map([[PR_URL, 'now'], [OTHER, 's43-new']]),
+    );
+    const [other] = submission.targets;
     expect(other.fileComments).toEqual([]);
     expect(other.fileScopedBody).toContain('On 43');
     expect(other.fileScopedBody).toContain('const legacy = 1;');
-    expect(here.fileComments.map((c) => c.line)).toEqual([20]);
+    expect(other.fileScopedBody).not.toContain(OUTDATED_ANNOTATION_LABEL);
   });
 });

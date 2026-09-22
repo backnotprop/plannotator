@@ -62,7 +62,12 @@ export function loadModelCatalog(engine: CatalogEngine): Promise<CatalogModel[]>
       .then((data) => {
         const provider = data?.providers?.find((p: { id?: string; name?: string }) => p.id === id || p.name === id);
         const models = provider?.models;
-        return Array.isArray(models) && models.length > 0 ? (models as CatalogModel[]) : failed();
+        if (!Array.isArray(models) || models.length === 0) return failed();
+        // The server answers 200 with its static fallback when discovery
+        // failed; show it, but forget it so the next load retries (the
+        // server's own cooldown bounds how often that spawns the CLI).
+        if (provider.modelsSource === 'fallback') loads.delete(engine);
+        return models as CatalogModel[];
       })
       .catch(failed);
     loads.set(engine, load);
