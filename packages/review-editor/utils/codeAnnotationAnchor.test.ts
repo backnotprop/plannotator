@@ -127,6 +127,19 @@ describe('restoring a PR draft against a changed patch', () => {
     expect(result.outdated).toBe(true);
   });
 
+  test('an identical block that now sits in a different function (hunk header) is outdated', () => {
+    const body = [' if (!x) {', '   return null;', ' }', '-a', '+b'];
+    const onReturn = line({ id: 'ret', lineStart: 21, lineEnd: 21 });
+    const original = parseDiffToFiles(patch('src/a.ts', '@@ -20,4 +20,4 @@ function load() {', body));
+    const stamped = { ...onReturn, ...captureAnchor(onReturn, original), anchorSnapshot: 's1' };
+    expect(stamped.anchorContext?.hunk).toBe('function load() {');
+    // Same lines, same numbers — but the hunk is now inside save().
+    const moved = parseDiffToFiles(patch('src/a.ts', '@@ -20,4 +20,4 @@ function save() {', body));
+    expect(markOutdatedCodeAnnotations([stamped], moved, undefined, 's2')[0].outdated).toBe(true);
+    // Same function: still valid.
+    expect(markOutdatedCodeAnnotations([stamped], original, undefined, 's2')[0].outdated).toBeUndefined();
+  });
+
   test('file- and review-scoped comments carry over unchanged even when their file left the diff', () => {
     const fileComment = line({ id: 'f', scope: 'file', filePath: 'src/gone.ts' });
     const general = line({ id: 'g', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0 });

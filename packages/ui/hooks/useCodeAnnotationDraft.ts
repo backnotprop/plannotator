@@ -107,8 +107,29 @@ export function useCodeAnnotationDraft({
   const hasHadAnnotationsRef = useRef(false);
   // Set when the offered draft came from an in-place target switch.
   const mergeRef = useRef(false);
+  // True from the moment an in-place switch lands on a target holding a
+  // draft until the reviewer answers the merge offer (or it turns out there
+  // is nothing to offer). While held, autosave neither saves nor deletes:
+  // either would overwrite the new target's draft with this session's state
+  // before the reviewer chose, leaving its items only in the banner (#1590).
+  const holdAutosaveRef = useRef(false);
   const latestRef = useRef({ annotations, descriptionAnnotations, commentAnnotations });
   latestRef.current = { annotations, descriptionAnnotations, commentAnnotations };
+  // Ids the reviewer removed during this session, so a later merge offer
+  // (switching back onto a target saved before the removal) never brings a
+  // deleted comment back. Re-adding an id (undo) clears it again.
+  const removedIdsRef = useRef(new Set<string>());
+  const seenIdsRef = useRef(new Set<string>());
+  {
+    const nowIds = new Set<string>([
+      ...annotations.map((a) => a.id),
+      ...descriptionAnnotations.map((a) => a.id),
+      ...commentAnnotations.map((a) => a.id),
+    ]);
+    for (const id of seenIdsRef.current) if (!nowIds.has(id)) removedIdsRef.current.add(id);
+    for (const id of nowIds) removedIdsRef.current.delete(id);
+    seenIdsRef.current = nowIds;
+  }
 
   // Load draft on mount
   useEffect(() => {
@@ -168,6 +189,8 @@ export function useCodeAnnotationDraft({
     if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(() => {
+      // A merge offer is pending (or being fetched): do not touch the target.
+      if (holdAutosaveRef.current) return;
       const draftGeneration = draftGenerationRef.current + 1;
       draftGenerationRef.current = draftGeneration;
 
@@ -207,6 +230,7 @@ export function useCodeAnnotationDraft({
     const data = draftDataRef.current;
     const merge = mergeRef.current;
     mergeRef.current = false;
+    holdAutosaveRef.current = false;
     setDraftBanner(null);
     draftDataRef.current = null;
     return {
@@ -231,6 +255,7 @@ export function useCodeAnnotationDraft({
     setDraftBanner(null);
     draftDataRef.current = null;
     mergeRef.current = false;
+    holdAutosaveRef.current = false;
     getDraftTransport().remove(deletedGeneration, { keepalive: false }).catch(() => {});
   }, []);
 
@@ -239,11 +264,15 @@ export function useCodeAnnotationDraft({
     const floor = readDraftGeneration(state.draftGeneration);
     if (floor !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, floor);
     if (!state.found) return;
+    // Hold synchronously: the switch itself changes viewed files, which arms
+    // an autosave before the load below resolves.
+    holdAutosaveRef.current = true;
+    const release = () => { if (!mergeRef.current) holdAutosaveRef.current = false; };
     getDraftTransport().load()
       .then(({ data, generation }) => {
         if (generation !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
         const draft = data as DraftData | null;
-        if (!draft) return;
+        if (!draft) { release(); return; }
         const loadedGeneration = readDraftGeneration(draft.draftGeneration);
         if (loadedGeneration !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, loadedGeneration);
         // Offer only what the session does not already hold: the target may
@@ -253,6 +282,7 @@ export function useCodeAnnotationDraft({
           ...current.annotations.map((a) => a.id),
           ...current.descriptionAnnotations.map((a) => a.id),
           ...current.commentAnnotations.map((a) => a.id),
+          ...removedIdsRef.current,
         ]);
         const fresh = <T extends { id: string }>(items: T[] | undefined) =>
           (Array.isArray(items) ? items : []).filter((item) => !have.has(item.id));
@@ -260,12 +290,12 @@ export function useCodeAnnotationDraft({
         const descriptionAnnotations = fresh(draft.descriptionAnnotations);
         const commentAnnotations = fresh(draft.commentAnnotations);
         const count = codeAnnotations.length + descriptionAnnotations.length + commentAnnotations.length;
-        if (count === 0) return;
+        if (count === 0) { release(); return; }
         draftDataRef.current = { ...draft, codeAnnotations, descriptionAnnotations, commentAnnotations };
         mergeRef.current = true;
         setDraftBanner({ count, viewedCount: 0, timeAgo: formatTimeAgo(draft.ts || 0) });
       })
-      .catch(() => {});
+      .catch(() => { release(); });
   }, [isApiMode]);
 
   return { draftBanner, restoreDraft, getDraftGeneration, dismissDraft, adoptDraftTarget };

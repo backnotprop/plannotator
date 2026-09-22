@@ -25,19 +25,28 @@ export const MAX_ANCHOR_TEXT_CHARS = 20_000;
 /** Lines of surrounding context recorded on each side of the anchor. */
 export const ANCHOR_CONTEXT_LINES = 2;
 
-const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/;
 
-/** Every line of one side of a single file's patch, keyed by line number. */
-function patchSideLines(filePatch: string, side: 'old' | 'new'): Map<number, string> {
-  const lines = new Map<number, string>();
+/** Every line of one side of a single file's patch, keyed by line number,
+ *  plus the function-context text of the hunk header each line sits under
+ *  (`@@ ... @@ function f() {` → `function f() {`). */
+function patchSideLines(filePatch: string, side: 'old' | 'new'): Map<number, string> & { hunkContext: Map<number, string> } {
+  const lines = new Map<number, string>() as Map<number, string> & { hunkContext: Map<number, string> };
+  lines.hunkContext = new Map<number, string>();
   let oldLine = 0;
   let newLine = 0;
   let inHunk = false;
+  let context = '';
+  const put = (n: number, body: string) => {
+    lines.set(n, body);
+    lines.hunkContext.set(n, context);
+  };
   for (const raw of filePatch.split('\n')) {
     const header = HUNK_HEADER.exec(raw);
     if (header) {
       oldLine = Number(header[1]);
       newLine = Number(header[2]);
+      context = header[3] ?? '';
       inHunk = true;
       continue;
     }
@@ -45,14 +54,14 @@ function patchSideLines(filePatch: string, side: 'old' | 'new'): Map<number, str
     const marker = raw[0];
     const body = raw.slice(1);
     if (marker === ' ') {
-      lines.set(side === 'old' ? oldLine : newLine, body);
+      put(side === 'old' ? oldLine : newLine, body);
       oldLine += 1;
       newLine += 1;
     } else if (marker === '-') {
-      if (side === 'old') lines.set(oldLine, body);
+      if (side === 'old') put(oldLine, body);
       oldLine += 1;
     } else if (marker === '+') {
-      if (side === 'new') lines.set(newLine, body);
+      if (side === 'new') put(newLine, body);
       newLine += 1;
     } else if (marker === '\\') {
       // "\ No newline at end of file" — not a line.
@@ -92,7 +101,7 @@ export function readPatchLines(
 
 interface AnchorReading {
   text: string;
-  context: { before: (string | null)[]; after: (string | null)[] };
+  context: { before: (string | null)[]; after: (string | null)[]; hunk?: string };
 }
 
 function readAnchor(file: DiffFile, annotation: CodeAnnotation): AnchorReading | null {
@@ -109,13 +118,18 @@ function readAnchor(file: DiffFile, annotation: CodeAnnotation): AnchorReading |
   for (let n = start - ANCHOR_CONTEXT_LINES; n < start; n += 1) before.push(n >= 1 ? all.get(n) ?? null : null);
   const after: (string | null)[] = [];
   for (let n = end + 1; n <= end + ANCHOR_CONTEXT_LINES; n += 1) after.push(all.get(n) ?? null);
-  return { text: lines.join('\n'), context: { before, after } };
+  const hunk = all.hunkContext.get(start);
+  return { text: lines.join('\n'), context: { before, after, ...(hunk ? { hunk } : {}) } };
 }
 
 function sameContext(a: AnchorReading['context'], b: CodeAnnotation['anchorContext']): boolean {
   if (!b || !Array.isArray(b.before) || !Array.isArray(b.after)) return false;
   const eq = (x: (string | null)[], y: (string | null)[]) => x.length === y.length && x.every((v, i) => v === y[i]);
-  return eq(a.before, b.before) && eq(a.after, b.after);
+  // The hunk's function-context header (when git printed one) must match
+  // too: it separates repeated blocks (`}` / `return null;` in two
+  // functions). A missing header on either side only matches a missing one,
+  // so the comparison can make a comment outdated, never "valid".
+  return eq(a.before, b.before) && eq(a.after, b.after) && (a.hunk ?? '') === (b.hunk ?? '');
 }
 
 function isLineScoped(annotation: CodeAnnotation): boolean {

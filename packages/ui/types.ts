@@ -360,10 +360,11 @@ export interface CodeAnnotation {
   /**
    * PR reviews only (#1590): the lines around the anchor on the same side
    * (up to two before and two after; `null` where a line is outside the patch
-   * hunks), so a comment on a common line (`}`, `return null;`) only keeps
-   * its position when its surroundings still match too.
+   * hunks) and the hunk header's function context (`hunk`, when git printed
+   * one), so a comment on a common line (`}`, `return null;`) only keeps its
+   * position when its surroundings still match too.
    */
-  anchorContext?: { before: (string | null)[]; after: (string | null)[] };
+  anchorContext?: { before: (string | null)[]; after: (string | null)[]; hunk?: string };
   /**
    * PR reviews only (#1590): the review snapshot id of the diff whose line
    * coordinates this comment uses. Re-stamped when a later diff passes the

@@ -348,6 +348,60 @@ describe('in-place switch onto another draft target (#1590 review, item 2)', () 
     await s.unmount();
   });
 
+  test.skipIf(!hasDom)('while the merge offer is pending, the switch itself (viewed files changing, no edit) does not overwrite the new target\'s draft', async () => {
+    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
+    const theirs = { ...(ANNOTATION as object), id: 'waiting-on-b' } as unknown as CodeAnnotation;
+    const s = await mountSession(options({ annotations: [mine] }));
+    saveDraft(DRAFT_KEY, { codeAnnotations: [theirs], draftGeneration: 12, ts: Date.now() });
+    // The app adopts the target and, in the same switch, replaces viewed files.
+    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 12 }); });
+    await s.rerender(options({ annotations: [mine], viewedFiles: new Set(['src/b.ts']) }));
+    await tick(DEBOUNCE_WAIT_MS);
+    const onDisk = loadDraft(DRAFT_KEY) as { codeAnnotations?: Array<{ id: string }> } | null;
+    expect(onDisk?.codeAnnotations?.map((a) => a.id)).toEqual(['waiting-on-b']);
+    expect(s.result.current!.draftBanner?.count).toBe(1);
+    // Answering the offer releases autosave: restoring merges and saves both.
+    let restored: ReturnType<HookResult['restoreDraft']> | null = null;
+    await act(async () => { restored = s.result.current!.restoreDraft(); });
+    await s.rerender(options({ annotations: [mine, ...restored!.annotations], viewedFiles: new Set(['src/b.ts']) }));
+    await tick(DEBOUNCE_WAIT_MS);
+    const merged = loadDraft(DRAFT_KEY) as { codeAnnotations?: Array<{ id: string }> } | null;
+    expect(merged?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'waiting-on-b']);
+    await s.unmount();
+  });
+
+  test.skipIf(!hasDom)('an emptied session switching onto a target with a draft does not delete that draft before the reviewer answers', async () => {
+    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
+    const theirs = { ...(ANNOTATION as object), id: 'waiting-on-b' } as unknown as CodeAnnotation;
+    const s = await mountSession(options());
+    // The reviewer added a comment and removed it (engaged, now empty).
+    await s.rerender(options({ annotations: [mine] }));
+    await s.rerender(options({ annotations: [] }));
+    await tick(DEBOUNCE_WAIT_MS);
+    saveDraft(DRAFT_KEY, { codeAnnotations: [theirs], draftGeneration: 20, ts: Date.now() });
+    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 20 }); });
+    await s.rerender(options({ annotations: [], viewedFiles: new Set<string>() }));
+    await s.rerender(options({ annotations: [] }));
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(loadDraft(DRAFT_KEY)).not.toBeNull();
+    await s.unmount();
+  });
+
+  test.skipIf(!hasDom)('a comment deleted this session is not offered back when switching onto a target saved before the delete', async () => {
+    const x = { ...(ANNOTATION as object), id: 'x' } as unknown as CodeAnnotation;
+    const y = { ...(ANNOTATION as object), id: 'y' } as unknown as CodeAnnotation;
+    const keep = { ...(ANNOTATION as object), id: 'keep' } as unknown as CodeAnnotation;
+    const s = await mountSession(options({ annotations: [keep, x] }));
+    await s.rerender(options({ annotations: [keep] })); // x deleted
+    saveDraft(DRAFT_KEY, { codeAnnotations: [keep, x, y], draftGeneration: 30, ts: Date.now() });
+    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 30 }); });
+    await tick(0);
+    let restored: ReturnType<HookResult['restoreDraft']> | null = null;
+    await act(async () => { restored = s.result.current!.restoreDraft(); });
+    expect(restored!.annotations.map((a) => a.id)).toEqual(['y']);
+    await s.unmount();
+  });
+
   test.skipIf(!hasDom)('switching back onto a target holding only this session\'s own items offers nothing', async () => {
     const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
     const s = await mountSession(options({ annotations: [mine] }));
