@@ -144,8 +144,14 @@ describe('PR review drafts across a push', () => {
       await withSession(PATCH_AFTER_PUSH, prMetadata, async (fresh) => {
         await fetch(`${fresh}/api/draft?generation=4`, { method: 'DELETE' });
       });
-      // The stale tab's debounced save lands after the delete, same generation.
-      await saveDraft(staleTab, 4);
+      // The stale tab's debounced save lands after the delete, same generation:
+      // refused (409), and nothing is written.
+      const late = await fetch(`${staleTab}/api/draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draftBody(4)),
+      });
+      expect(late.status).toBe(409);
       expect((await fetch(`${staleTab}/api/draft`)).status).toBe(404);
     });
     await withSession(PATCH_AFTER_PUSH, prMetadata, async (url) => {
@@ -165,6 +171,106 @@ describe('local reviews are unchanged', () => {
     expect(files[0]).toMatch(/^[0-9a-f]{16}\.json$/);
     await withSession(PATCH_AFTER_PUSH, undefined, async (url) => {
       expect((await fetch(`${url}/api/draft`)).status).toBe(404);
+    });
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// In-place switches (#1590 review items 1 and 2). /api/pr-switch fetches the
+// target PR through the server's `prFetcher` test seam, so no platform CLI or
+// network is involved; the PRs live on an unresolvable host.
+// ---------------------------------------------------------------------------
+
+const PATCH_PR_43 = 'diff --git a/src/b.ts b/src/b.ts\n--- a/src/b.ts\n+++ b/src/b.ts\n@@ -1 +1 @@\n-x\n+y\n';
+const pr43: PRMetadata = { ...prMetadata, number: 43, url: 'https://github.invalid/acme/widgets/pull/43' };
+const fakeFetcher = async (ref: { number?: number }) => {
+  if (ref.number !== 43) throw new Error('unexpected PR');
+  return { metadata: pr43, rawPatch: PATCH_PR_43 };
+};
+
+async function withSwitchableSession(
+  rawPatch: string,
+  pr: PRMetadata,
+  run: (url: string) => Promise<void>,
+): Promise<void> {
+  const server = await startReviewServer({
+    rawPatch,
+    gitRef: 'PR',
+    htmlContent: '<!doctype html><html><body>review</body></html>',
+    prMetadata: pr,
+    prFetcher: fakeFetcher as never,
+  });
+  try {
+    await run(server.url);
+  } finally {
+    server.stop();
+  }
+}
+
+async function switchTo43(url: string): Promise<{ draftState?: { found: boolean; draftGeneration: number | null } }> {
+  const res = await fetch(`${url}/api/pr-switch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: pr43.url }),
+  });
+  if (res.status !== 200) throw new Error(`pr-switch ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+describe('in-place PR switches', () => {
+  test('submitting after switching A→B clears A too, so its comments do not come back after a push', async () => {
+    sandbox();
+    await withSwitchableSession(PATCH_BEFORE_PUSH, prMetadata, async (url) => {
+      await saveDraft(url, 3); // saved on A (#42)
+      await switchTo43(url);
+      await saveDraft(url, 4); // saved on B (#43)
+      const res = await fetch(`${url}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feedback: 'x', annotations: [], draftGeneration: 5 }),
+      });
+      expect(res.status).toBe(200);
+    });
+    // A teammate pushes to #42; reopening it must not offer the submitted comments.
+    await withSession(PATCH_AFTER_PUSH, prMetadata, async (url) => {
+      expect((await fetch(`${url}/api/draft`)).status).toBe(404);
+    });
+    await withSession(PATCH_PR_43, pr43, async (url) => {
+      expect((await fetch(`${url}/api/draft`)).status).toBe(404);
+    });
+  });
+
+  test('switching onto a PR submitted in an earlier session reports its generation floor, and a stale save is refused, not swallowed', async () => {
+    sandbox();
+    // Earlier session on #43: saved at 39, closed at 40.
+    await withSession(PATCH_PR_43, pr43, async (url) => {
+      await saveDraft(url, 39);
+      await fetch(`${url}/api/exit?draftGeneration=40`, { method: 'POST' });
+    });
+    await withSwitchableSession(PATCH_BEFORE_PUSH, prMetadata, async (url) => {
+      const switched = await switchTo43(url);
+      expect(switched.draftState).toEqual({ found: false, draftGeneration: 40 });
+      const stale = await fetch(`${url}/api/draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draftBody(5)),
+      });
+      expect(stale.status).toBe(409);
+      expect((await stale.json()).ok).toBe(false);
+      // A client that adopted the floor saves normally.
+      await saveDraft(url, 41);
+    });
+  });
+
+  test('switching onto a PR with an unsent draft reports it, so the client can offer it instead of overwriting it', async () => {
+    sandbox();
+    await withSession(PATCH_PR_43, pr43, (url) => saveDraft(url, 12));
+    await withSwitchableSession(PATCH_BEFORE_PUSH, prMetadata, async (url) => {
+      const switched = await switchTo43(url);
+      expect(switched.draftState).toEqual({ found: true, draftGeneration: 12 });
+      const body = await (await fetch(`${url}/api/draft`)).json();
+      expect(body.codeAnnotations[0].text).toBe('unsent');
     });
   });
 });

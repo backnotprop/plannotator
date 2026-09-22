@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contentHash, getDraftDir, loadDraft, saveDraft } from "./draft";
-import { deleteReviewDraft, loadReviewDraft, prDraftTargetKey, saveReviewDraft } from "./review-draft";
+import { createReviewDraftSession, deleteReviewDraft, loadReviewDraft, prDraftTargetKey, reviewDraftState, saveReviewDraft } from "./review-draft";
 import type { PRMetadata } from "./pr-types";
 
 const github: PRMetadata = {
@@ -152,5 +152,94 @@ describe("with a target key (PR mode)", () => {
   test("a pre-existing patch-key-only draft (written before this change) still restores on its unchanged patch", () => {
     saveDraft(P1, draft(2));
     expect(loadReviewDraft({ patchKey: P1, targetKey: T })).toEqual({ found: true, draft: draft(2) });
+  });
+});
+
+describe("older patch copies (#1590 review, item 5)", () => {
+  const T = prDraftTargetKey(github, "layer");
+  const P3 = contentHash("patch three");
+
+  test("a delete WITHOUT a generation still removes the patch copies of every earlier push", () => {
+    // Three pushes, the draft saved on each; then an external caller deletes
+    // with no generation (no tombstone is written).
+    saveReviewDraft({ patchKey: P1, targetKey: T }, draft(1));
+    saveReviewDraft({ patchKey: P2, targetKey: T }, draft(2));
+    saveReviewDraft({ patchKey: P3, targetKey: T }, draft(3));
+    deleteReviewDraft({ patchKey: P3, targetKey: T });
+    for (const patchKey of [P1, P2, P3]) {
+      expect(loadReviewDraft({ patchKey, targetKey: T }).found).toBe(false);
+    }
+    expect(readdirSync(getDraftDir()).filter((f) => f.endsWith(".json") && !f.includes("deleted"))).toEqual([]);
+  });
+
+  test("the remembered patch list never reaches the client", () => {
+    saveReviewDraft({ patchKey: P1, targetKey: T }, draft(1));
+    saveReviewDraft({ patchKey: P2, targetKey: T }, draft(2));
+    const loaded = loadReviewDraft({ patchKey: P3, targetKey: T });
+    expect(loaded.found && "patchKeys" in loaded.draft).toBe(false);
+  });
+});
+
+describe("session bookkeeping across in-place target switches (#1590 review, item 1)", () => {
+  const A = prDraftTargetKey(github, "layer");
+  const B = prDraftTargetKey({ ...github, number: 43 }, "layer");
+  const A_FULL = prDraftTargetKey(github, "full-stack");
+
+  test("a decision clears every PR target this session saved to, not only the one on screen", () => {
+    const session = createReviewDraftSession();
+    session.save({ patchKey: P1, targetKey: A }, draft(1));
+    session.save({ patchKey: P1, targetKey: A_FULL }, draft(2)); // scope switch
+    session.save({ patchKey: P2, targetKey: B }, draft(3)); // PR switch
+    session.settle({ patchKey: P2, targetKey: B }, 4);
+    // Nothing comes back after a later push to any of them.
+    const P9 = contentHash("after push");
+    for (const targetKey of [A, A_FULL, B]) {
+      expect(loadReviewDraft({ patchKey: P9, targetKey }).found).toBe(false);
+    }
+    // And each keeps a tombstone, so a stale tab cannot recreate it.
+    expect(saveReviewDraft({ patchKey: P9, targetKey: A }, draft(4))).toBe(false);
+  });
+
+  test("a target the session only restored from is cleared by the decision too", () => {
+    saveReviewDraft({ patchKey: P1, targetKey: A }, draft(1)); // earlier session
+    const session = createReviewDraftSession();
+    expect(session.load({ patchKey: P2, targetKey: A }).found).toBe(true);
+    session.save({ patchKey: P2, targetKey: B }, draft(2));
+    session.settle({ patchKey: P2, targetKey: B }, 3);
+    expect(loadReviewDraft({ patchKey: P2, targetKey: A }).found).toBe(false);
+  });
+
+  test("a client DELETE (clear-all / dismiss) only touches the draft on screen", () => {
+    const session = createReviewDraftSession();
+    session.save({ patchKey: P1, targetKey: A }, draft(1));
+    session.save({ patchKey: P2, targetKey: B }, draft(2));
+    session.remove({ patchKey: P2, targetKey: B }, 3);
+    expect(loadReviewDraft({ patchKey: P1, targetKey: A }).found).toBe(true);
+  });
+
+  test("outside PR mode the session is the plain draft store (nothing remembered)", () => {
+    const session = createReviewDraftSession();
+    session.save({ patchKey: P1 }, draft(1));
+    session.save({ patchKey: P2 }, draft(2));
+    session.settle({ patchKey: P2 }, 3);
+    expect(loadReviewDraft({ patchKey: P1 }).found).toBe(true);
+  });
+});
+
+describe("reviewDraftState (#1590 review, item 2)", () => {
+  const B = prDraftTargetKey({ ...github, number: 43 }, "layer");
+
+  test("reports the tombstone floor of a target submitted in an earlier session", () => {
+    saveReviewDraft({ patchKey: P1, targetKey: B }, draft(39));
+    deleteReviewDraft({ patchKey: P1, targetKey: B }, 40);
+    expect(reviewDraftState({ patchKey: P2, targetKey: B })).toEqual({ found: false, draftGeneration: 40 });
+    // A client that adopts the floor saves successfully; one that does not is rejected.
+    expect(saveReviewDraft({ patchKey: P2, targetKey: B }, draft(5))).toBe(false);
+    expect(saveReviewDraft({ patchKey: P2, targetKey: B }, draft(41))).toBe(true);
+  });
+
+  test("reports a live draft and its generation", () => {
+    saveReviewDraft({ patchKey: P1, targetKey: B }, draft(7));
+    expect(reviewDraftState({ patchKey: P2, targetKey: B })).toEqual({ found: true, draftGeneration: 7 });
   });
 });

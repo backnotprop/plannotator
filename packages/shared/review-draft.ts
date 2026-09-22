@@ -92,7 +92,7 @@ export function loadReviewDraft(keys: ReviewDraftKeys): ReviewDraftLoadResult {
   }
 
   if (targetDraft) {
-    const { patchKey: savedOn, ...rest } = targetDraft as { patchKey?: unknown } & Record<string, unknown>;
+    const { patchKey: savedOn, patchKeys: _remembered, ...rest } = targetDraft as { patchKey?: unknown; patchKeys?: unknown } & Record<string, unknown>;
     return {
       found: true,
       draft: savedOn === patchKey ? rest : { ...rest, patchChanged: true },
@@ -104,16 +104,34 @@ export function loadReviewDraft(keys: ReviewDraftKeys): ReviewDraftLoadResult {
   return { found: false, draftGeneration: generations.length > 0 ? Math.max(...generations) : null };
 }
 
+/** Most patch keys a target copy remembers (oldest dropped first). */
+const MAX_REMEMBERED_PATCH_KEYS = 64;
+const PATCH_KEY_RE = /^[0-9a-f]{16}$/;
+
+/** Every patch key a stored target copy has been saved under (#1590). */
+function rememberedPatchKeys(stored: Record<string, unknown> | null): string[] {
+  if (!stored) return [];
+  const list = Array.isArray(stored.patchKeys) ? stored.patchKeys : [];
+  const keys = [...list, stored.patchKey].filter(
+    (k): k is string => typeof k === "string" && PATCH_KEY_RE.test(k),
+  );
+  return [...new Set(keys)];
+}
+
 /** Returns false when the save was rejected (stale generation / tombstone). */
 export function saveReviewDraft(keys: ReviewDraftKeys, body: object): boolean {
   const { patchKey, targetKey } = keys;
   if (!targetKey) return saveDraft(patchKey, body);
 
   if (killedByTombstone(generationOf(body), getDraftTombstoneGeneration(targetKey))) return false;
-  // Never let a client-supplied field masquerade as the server's stamp.
-  const { patchChanged: _changed, patchKey: _key, ...clean } = body as Record<string, unknown>;
+  // Never let a client-supplied field masquerade as the server's stamps.
+  const { patchChanged: _changed, patchKey: _key, patchKeys: _keys, ...clean } = body as Record<string, unknown>;
+  // The target copy remembers every patch it was ever saved on, so a delete
+  // can reach the patch-key copies of pushes long past, not only the last one.
+  const patchKeys = [...new Set([...rememberedPatchKeys(loadDraft(targetKey) as Record<string, unknown> | null), patchKey])]
+    .slice(-MAX_REMEMBERED_PATCH_KEYS);
   const savedPatch = saveDraft(patchKey, clean);
-  const savedTarget = saveDraft(targetKey, { ...clean, patchKey });
+  const savedTarget = saveDraft(targetKey, { ...clean, patchKey, patchKeys });
   return savedPatch || savedTarget;
 }
 
@@ -123,13 +141,70 @@ export function deleteReviewDraft(keys: ReviewDraftKeys, draftGeneration?: numbe
     deleteDraft(patchKey, draftGeneration);
     return;
   }
-  // The target copy names the patch it was last saved on; that patch-key
-  // copy is part of the same logical draft, so it goes too.
-  const stored = loadDraft(targetKey) as { patchKey?: unknown } | null;
-  const previousPatchKey = typeof stored?.patchKey === "string" ? stored.patchKey : null;
+  // Every patch-key copy the target copy was saved under is part of the same
+  // logical draft, so they all go, even when no generation (and so no
+  // tombstone) accompanies the delete.
+  const previous = rememberedPatchKeys(loadDraft(targetKey) as Record<string, unknown> | null);
   deleteDraft(patchKey, draftGeneration);
   deleteDraft(targetKey, draftGeneration);
-  if (previousPatchKey && previousPatchKey !== patchKey && /^[0-9a-f]{16}$/.test(previousPatchKey)) {
-    deleteDraft(previousPatchKey, draftGeneration);
-  }
+  for (const key of previous) if (key !== patchKey) deleteDraft(key, draftGeneration);
+}
+
+/** What a client needs after switching onto a draft target in place. */
+export interface ReviewDraftState {
+  /** A live draft exists for the keys now on screen. */
+  found: boolean;
+  /** The highest generation known for those keys (draft or tombstone). The
+   *  client must raise its own counter to at least this, or every save it
+   *  makes is rejected as stale. */
+  draftGeneration: number | null;
+}
+
+export function reviewDraftState(keys: ReviewDraftKeys): ReviewDraftState {
+  const loaded = loadReviewDraft(keys);
+  if (!loaded.found) return { found: false, draftGeneration: loaded.draftGeneration };
+  const gens = [generationOf(loaded.draft), getDraftGeneration(keys.patchKey), keys.targetKey ? getDraftGeneration(keys.targetKey) : null]
+    .filter((g): g is number => g !== null);
+  return { found: true, draftGeneration: gens.length > 0 ? Math.max(...gens) : null };
+}
+
+/**
+ * Per-server-session draft bookkeeping. A PR session can move between draft
+ * targets in place (/api/pr-switch, /api/pr-diff-scope) and saves one blob
+ * under whichever target is on screen, so a decision must clear every PR
+ * target this session wrote or restored from, not only the current one —
+ * otherwise the earlier target's copy survives the submit and comes back
+ * after the next push. Outside PR mode nothing is remembered and every call
+ * is the plain draft.ts call.
+ */
+export function createReviewDraftSession() {
+  const touched = new Map<string, ReviewDraftKeys>();
+  const remember = (keys: ReviewDraftKeys) => {
+    if (keys.targetKey) touched.set(`${keys.patchKey}|${keys.targetKey}`, { ...keys });
+  };
+  return {
+    load(keys: ReviewDraftKeys): ReviewDraftLoadResult {
+      const result = loadReviewDraft(keys);
+      if (result.found) remember(keys);
+      return result;
+    },
+    save(keys: ReviewDraftKeys, body: object): boolean {
+      remember(keys);
+      return saveReviewDraft(keys, body);
+    },
+    /** Remove only the draft on screen (client clear-all / dismiss). */
+    remove(keys: ReviewDraftKeys, draftGeneration?: number): void {
+      deleteReviewDraft(keys, draftGeneration);
+    },
+    /** A decision (feedback / exit): remove every target this session used. */
+    settle(keys: ReviewDraftKeys, draftGeneration?: number): void {
+      deleteReviewDraft(keys, draftGeneration);
+      for (const other of touched.values()) {
+        if (other.patchKey === keys.patchKey && other.targetKey === keys.targetKey) continue;
+        deleteReviewDraft(other, draftGeneration);
+      }
+      touched.clear();
+    },
+    state: reviewDraftState,
+  };
 }

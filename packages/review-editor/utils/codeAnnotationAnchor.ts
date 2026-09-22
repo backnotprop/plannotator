@@ -1,12 +1,18 @@
 /**
- * Anchor text for PR review comments (#1590).
+ * Anchors for PR review comments (#1590).
  *
- * A PR draft can be restored after the PR changed. Line numbers alone can't
- * tell whether a comment still points at the code it was written on, so each
- * line comment records the text of its anchored diff lines at creation, and a
- * restore against a different patch re-checks that text at the SAME side and
- * line numbers. Match → unchanged; anything else → `outdated`. Nothing is ever
- * dropped and nothing is ever moved to a guessed line.
+ * A PR draft can be restored after the PR changed, and a PR session can move
+ * between diffs in place. Line numbers alone can't tell whether a comment
+ * still points at the code it was written on, so each line comment records:
+ *  - `anchorText`: the text of its anchored diff lines,
+ *  - `anchorContext`: up to two lines before and after on the same side, so a
+ *    common line (`}`, `return null;`) is not "still valid" by coincidence,
+ *  - `anchorSnapshot`: the review snapshot whose coordinates it uses.
+ * Against a different diff, the comment keeps its position only when all of
+ * the anchor text and context still read the same at the SAME side and line
+ * numbers; otherwise it is marked `outdated`. Nothing is ever dropped and
+ * nothing is ever moved to a guessed line. A false "outdated" is the safe
+ * side.
  *
  * Pure; reads only the per-file patch text.
  */
@@ -16,22 +22,14 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 
 /** Upper bound on recorded anchor text; larger selections record nothing. */
 export const MAX_ANCHOR_TEXT_CHARS = 20_000;
+/** Lines of surrounding context recorded on each side of the anchor. */
+export const ANCHOR_CONTEXT_LINES = 2;
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-/**
- * The text of lines `start..end` on one side of a single file's patch, joined
- * with "\n", or null when any of those lines is not present in the patch hunks
- * (e.g. a line only visible through context expansion).
- */
-export function readPatchLines(
-  filePatch: string,
-  side: 'old' | 'new',
-  start: number,
-  end: number,
-): string | null {
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) return null;
-  const wanted = new Map<number, string>();
+/** Every line of one side of a single file's patch, keyed by line number. */
+function patchSideLines(filePatch: string, side: 'old' | 'new'): Map<number, string> {
+  const lines = new Map<number, string>();
   let oldLine = 0;
   let newLine = 0;
   let inHunk = false;
@@ -47,15 +45,14 @@ export function readPatchLines(
     const marker = raw[0];
     const body = raw.slice(1);
     if (marker === ' ') {
-      const n = side === 'old' ? oldLine : newLine;
-      if (n >= start && n <= end) wanted.set(n, body);
+      lines.set(side === 'old' ? oldLine : newLine, body);
       oldLine += 1;
       newLine += 1;
     } else if (marker === '-') {
-      if (side === 'old' && oldLine >= start && oldLine <= end) wanted.set(oldLine, body);
+      if (side === 'old') lines.set(oldLine, body);
       oldLine += 1;
     } else if (marker === '+') {
-      if (side === 'new' && newLine >= start && newLine <= end) wanted.set(newLine, body);
+      if (side === 'new') lines.set(newLine, body);
       newLine += 1;
     } else if (marker === '\\') {
       // "\ No newline at end of file" — not a line.
@@ -64,13 +61,61 @@ export function readPatchLines(
       inHunk = false;
     }
   }
+  return lines;
+}
+
+function validRange(start: number, end: number): boolean {
+  return Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end >= start;
+}
+
+/**
+ * The text of lines `start..end` on one side of a single file's patch, joined
+ * with "\n", or null when any of those lines is not present in the patch hunks
+ * (e.g. a line only visible through context expansion).
+ */
+export function readPatchLines(
+  filePatch: string,
+  side: 'old' | 'new',
+  start: number,
+  end: number,
+): string | null {
+  if (!validRange(start, end)) return null;
+  const all = patchSideLines(filePatch, side);
   const lines: string[] = [];
   for (let n = start; n <= end; n += 1) {
-    const line = wanted.get(n);
+    const line = all.get(n);
     if (line === undefined) return null;
     lines.push(line);
   }
   return lines.join('\n');
+}
+
+interface AnchorReading {
+  text: string;
+  context: { before: (string | null)[]; after: (string | null)[] };
+}
+
+function readAnchor(file: DiffFile, annotation: CodeAnnotation): AnchorReading | null {
+  const { side, lineStart: start, lineEnd: end } = annotation;
+  if (!validRange(start, end)) return null;
+  const all = patchSideLines(file.patch, side);
+  const lines: string[] = [];
+  for (let n = start; n <= end; n += 1) {
+    const line = all.get(n);
+    if (line === undefined) return null;
+    lines.push(line);
+  }
+  const before: (string | null)[] = [];
+  for (let n = start - ANCHOR_CONTEXT_LINES; n < start; n += 1) before.push(n >= 1 ? all.get(n) ?? null : null);
+  const after: (string | null)[] = [];
+  for (let n = end + 1; n <= end + ANCHOR_CONTEXT_LINES; n += 1) after.push(all.get(n) ?? null);
+  return { text: lines.join('\n'), context: { before, after } };
+}
+
+function sameContext(a: AnchorReading['context'], b: CodeAnnotation['anchorContext']): boolean {
+  if (!b || !Array.isArray(b.before) || !Array.isArray(b.after)) return false;
+  const eq = (x: (string | null)[], y: (string | null)[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+  return eq(a.before, b.before) && eq(a.after, b.after);
 }
 
 function isLineScoped(annotation: CodeAnnotation): boolean {
@@ -78,47 +123,121 @@ function isLineScoped(annotation: CodeAnnotation): boolean {
 }
 
 /**
- * The anchor text to record for a new line comment, or undefined when it
- * cannot be read from the current patch (file-/review-scoped comments, lines
- * outside the hunks, oversized selections).
+ * The anchor fields to record on a new line comment, or an empty object when
+ * they cannot be read from the current patch (file-/review-scoped comments,
+ * lines outside the hunks, oversized selections).
  */
-export function captureAnchorText(
+export function captureAnchor(
   annotation: CodeAnnotation,
   files: readonly DiffFile[],
-): string | undefined {
-  if (!isLineScoped(annotation)) return undefined;
+): Pick<CodeAnnotation, 'anchorText' | 'anchorContext'> {
+  if (!isLineScoped(annotation)) return {};
   const file = files.find((f) => f.path === annotation.filePath);
-  if (!file) return undefined;
-  const text = readPatchLines(file.patch, annotation.side, annotation.lineStart, annotation.lineEnd);
-  if (text === null || text.length > MAX_ANCHOR_TEXT_CHARS) return undefined;
-  return text;
+  if (!file) return {};
+  const reading = readAnchor(file, annotation);
+  if (!reading || reading.text.length > MAX_ANCHOR_TEXT_CHARS) return {};
+  return { anchorText: reading.text, anchorContext: reading.context };
+}
+
+/** Back-compat helper: just the anchor text. */
+export function captureAnchorText(annotation: CodeAnnotation, files: readonly DiffFile[]): string | undefined {
+  return captureAnchor(annotation, files).anchorText;
+}
+
+/** True when the recorded anchor text AND context still read the same. */
+export function anchorStillMatches(annotation: CodeAnnotation, files: readonly DiffFile[]): boolean {
+  if (annotation.anchorText === undefined) return false;
+  const file = files.find((f) => f.path === annotation.filePath);
+  if (!file) return false;
+  const reading = readAnchor(file, annotation);
+  return reading !== null && reading.text === annotation.anchorText && sameContext(reading.context, annotation.anchorContext);
+}
+
+export interface ReanchorOptions {
+  /** Snapshot id of the diff `files` belong to. */
+  currentSnapshot?: string;
+  /** Comments this rejects (bound to another PR or diff scope) are left alone:
+   *  they were never anchored to the diff being checked. */
+  belongsToCurrentDiff?: (annotation: CodeAnnotation) => boolean;
+  /** The comments come from a draft the server served for a DIFFERENT patch
+   *  than it was saved on: comments without a snapshot stamp (older drafts)
+   *  must be verified too, instead of being trusted as-is. */
+  patchChanged?: boolean;
 }
 
 /**
- * Re-check restored line comments against a patch that differs from the one
- * the draft was saved on. A comment whose file is still in the diff and whose
- * recorded anchor text still reads the same at its side/lines is returned
- * unchanged; every other line comment — including one with no recorded
- * anchor text, since nothing can vouch that its lines still hold the same
- * code — comes back with `outdated: true`. File- and review-scoped comments
- * (and comments already outdated) pass through untouched, as do comments
- * `belongsToCurrentDiff` rejects: a draft can carry comments bound to another
- * PR or diff scope (an earlier in-place switch), and those were never
- * anchored to the diff being checked.
+ * Re-check line comments against the diff now on screen. For each line
+ * comment that belongs to it and is not already outdated:
+ *  - stamped with the current snapshot → unchanged;
+ *  - unstamped, and the patch is not known to have changed → unchanged
+ *    (older drafts on an unchanged patch restore exactly as before);
+ *  - otherwise the anchor text and context must still match at the same
+ *    side/lines: then it is re-stamped with the current snapshot, else it
+ *    gets `outdated: true` and keeps its old line numbers.
+ * File- and review-scoped comments always pass through.
+ */
+export function reanchorCodeAnnotations(
+  annotations: readonly CodeAnnotation[],
+  files: readonly DiffFile[],
+  options: ReanchorOptions = {},
+): CodeAnnotation[] {
+  const { currentSnapshot, belongsToCurrentDiff = () => true, patchChanged = false } = options;
+  let changed = false;
+  const next = annotations.map((annotation) => {
+    if (!isLineScoped(annotation) || annotation.outdated || !belongsToCurrentDiff(annotation)) return annotation;
+    if (annotation.anchorSnapshot !== undefined && annotation.anchorSnapshot === currentSnapshot) return annotation;
+    if (annotation.anchorSnapshot === undefined && !patchChanged) return annotation;
+    changed = true;
+    if (anchorStillMatches(annotation, files)) {
+      return currentSnapshot === undefined ? annotation : { ...annotation, anchorSnapshot: currentSnapshot };
+    }
+    return { ...annotation, outdated: true };
+  });
+  return changed ? next : (annotations as CodeAnnotation[]);
+}
+
+/**
+ * Restore-time wrapper kept for callers and tests: every in-scope line
+ * comment is verified (the draft's patch changed).
  */
 export function markOutdatedCodeAnnotations(
   annotations: readonly CodeAnnotation[],
   files: readonly DiffFile[],
   belongsToCurrentDiff: (annotation: CodeAnnotation) => boolean = () => true,
+  currentSnapshot?: string,
 ): CodeAnnotation[] {
-  return annotations.map((annotation) => {
-    if (!isLineScoped(annotation) || annotation.outdated || !belongsToCurrentDiff(annotation)) return annotation;
-    const file = files.find((f) => f.path === annotation.filePath);
-    const current = file
-      ? readPatchLines(file.patch, annotation.side, annotation.lineStart, annotation.lineEnd)
-      : null;
-    const stillAnchored =
-      annotation.anchorText !== undefined && current !== null && current === annotation.anchorText;
-    return stillAnchored ? annotation : { ...annotation, outdated: true };
-  });
+  return reanchorCodeAnnotations(annotations, files, { currentSnapshot, belongsToCurrentDiff, patchChanged: true });
+}
+
+/**
+ * Whether a line comment may be posted INLINE on a PR: not outdated, and its
+ * coordinates provably belong to the diff currently known for its PR (its
+ * snapshot stamp equals that diff's snapshot). An unstamped comment (older
+ * draft) is only trusted for the PR on screen. Everything else goes in the
+ * review body.
+ */
+export function canPostInline(
+  annotation: CodeAnnotation,
+  knownSnapshots: ReadonlyMap<string, string> | undefined,
+  currentPrUrl: string | undefined,
+): boolean {
+  if (annotation.outdated) return false;
+  if (!knownSnapshots) return true;
+  const prUrl = annotation.prUrl ?? currentPrUrl;
+  if (annotation.anchorSnapshot === undefined) {
+    return annotation.prUrl === undefined || annotation.prUrl === currentPrUrl;
+  }
+  return prUrl !== undefined && knownSnapshots.get(prUrl) === annotation.anchorSnapshot;
+}
+
+/**
+ * What a sidebar click on a comment should do. Call-Flow-native feedback
+ * returns to the analysis surface; an outdated comment is not drawn on the
+ * diff (#1590), so it opens its file and is selected without a scroll request
+ * that could never resolve; everything else scrolls to its inline card.
+ */
+export function annotationNavigation(annotation: CodeAnnotation): 'call-flow' | 'select-file' | 'scroll' {
+  if (annotation.callFlowTargets?.length && (annotation.scope ?? 'line') !== 'line') return 'call-flow';
+  if (annotation.outdated) return 'select-file';
+  return 'scroll';
 }

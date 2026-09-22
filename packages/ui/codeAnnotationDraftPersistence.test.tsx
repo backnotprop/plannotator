@@ -316,3 +316,45 @@ describe('PR draft served for a changed patch (#1590)', () => {
     await s2.unmount();
   });
 });
+
+describe('in-place switch onto another draft target (#1590 review, item 2)', () => {
+  test.skipIf(!hasDom)('adopting the target floor lets the next autosave land past an old tombstone', async () => {
+    const s = await mountSession(options());
+    // The target the session just switched onto was submitted at generation
+    // 40 in an earlier session (the shim's one key stands in for it).
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ANNOTATION], draftGeneration: 39, ts: Date.now() });
+    deleteDraft(DRAFT_KEY, 40);
+    await act(async () => { s.result.current!.adoptDraftTarget({ found: false, draftGeneration: 40 }); });
+    await s.rerender(options({ annotations: [{ ...(ANNOTATION as object), id: 'new-after-switch' } as unknown as CodeAnnotation] }));
+    await tick(DEBOUNCE_WAIT_MS);
+    const saved = loadDraft(DRAFT_KEY) as { codeAnnotations?: Array<{ id: string }>; draftGeneration?: number } | null;
+    expect(saved?.codeAnnotations?.map((a) => a.id)).toEqual(['new-after-switch']);
+    expect(saved!.draftGeneration!).toBeGreaterThan(40);
+    await s.unmount();
+  });
+
+  test.skipIf(!hasDom)('a draft on the new target is offered for MERGE, and only with items the session lacks', async () => {
+    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
+    const theirs = { ...(ANNOTATION as object), id: 'waiting-on-b' } as unknown as CodeAnnotation;
+    const s = await mountSession(options({ annotations: [mine] }));
+    saveDraft(DRAFT_KEY, { codeAnnotations: [mine, theirs], draftGeneration: 12, ts: Date.now() });
+    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 12 }); });
+    await tick(0);
+    expect(s.result.current!.draftBanner?.count).toBe(1);
+    let restored: ReturnType<HookResult['restoreDraft']> | null = null;
+    await act(async () => { restored = s.result.current!.restoreDraft(); });
+    expect(restored!.merge).toBe(true);
+    expect(restored!.annotations.map((a) => a.id)).toEqual(['waiting-on-b']);
+    await s.unmount();
+  });
+
+  test.skipIf(!hasDom)('switching back onto a target holding only this session\'s own items offers nothing', async () => {
+    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
+    const s = await mountSession(options({ annotations: [mine] }));
+    saveDraft(DRAFT_KEY, { codeAnnotations: [mine], draftGeneration: 3, ts: Date.now() });
+    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 3 }); });
+    await tick(0);
+    expect(s.result.current!.draftBanner).toBeNull();
+    await s.unmount();
+  });
+});

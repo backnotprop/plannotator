@@ -50,7 +50,7 @@ import {
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
-import { useCodeAnnotationDraft } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
+import { useCodeAnnotationDraft, type CodeDraftTargetState } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
 import type { SuggestionHunk } from './edit/deriveSuggestions';
@@ -151,7 +151,7 @@ import {
 } from './dock/reviewPanelTypes';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
-import { markOutdatedCodeAnnotations } from './utils/codeAnnotationAnchor';
+import { annotationNavigation, reanchorCodeAnnotations } from './utils/codeAnnotationAnchor';
 import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
@@ -970,7 +970,7 @@ const ReviewApp: React.FC = () => {
   );
 
   // Auto-save code annotation drafts
-  const { draftBanner, restoreDraft, getDraftGeneration, dismissDraft } = useCodeAnnotationDraft({
+  const { draftBanner, restoreDraft, getDraftGeneration, dismissDraft, adoptDraftTarget } = useCodeAnnotationDraft({
     annotations: allAnnotations,
     descriptionAnnotations,
     commentAnnotations,
@@ -983,19 +983,55 @@ const ReviewApp: React.FC = () => {
   const handleRestoreDraft = useCallback(() => {
     reviewHistory.clear();
     const restored = restoreDraft();
-    // A PR draft served for a patch other than the one it was saved on (the
-    // PR changed between sessions, #1590): keep every comment, but mark line
-    // comments whose anchored lines no longer read the same as outdated.
-    const restoredAnnotations = restored.patchChanged
-      ? markOutdatedCodeAnnotations(restored.annotations, files, (a) =>
-          annotationMatchesPrScope(a, prMetadata?.url, prDiffScope))
+    // PR mode (#1590): re-check restored line comments against the diff on
+    // screen. When the server served the draft for a different patch, every
+    // in-scope line comment is verified (unstamped ones included); otherwise
+    // only comments stamped with another snapshot are. Mismatches are marked
+    // outdated, never dropped or moved. Local reviews restore untouched.
+    const restoredAnnotations = prMetadata
+      ? reanchorCodeAnnotations(restored.annotations, files, {
+          currentSnapshot: snapshotId,
+          patchChanged: restored.patchChanged,
+          belongsToCurrentDiff: (a) => annotationMatchesPrScope(a, prMetadata.url, prDiffScope),
+        })
       : restored.annotations;
+    if (restored.merge) {
+      // Offered after an in-place switch: these are only the items this
+      // session does not already hold, so they are ADDED, never replacing the
+      // session's own unsent comments.
+      if (restoredAnnotations.length > 0) {
+        annotationsRef.current = [...annotationsRef.current, ...restoredAnnotations];
+        setAnnotations(annotationsRef.current);
+      }
+      if (restored.descriptionAnnotations.length > 0) setDescriptionAnnotations((prev) => [...prev, ...restored.descriptionAnnotations]);
+      if (restored.commentAnnotations.length > 0) setCommentAnnotations((prev) => [...prev, ...restored.commentAnnotations]);
+      return;
+    }
     if (restoredAnnotations.length > 0) setAnnotations(restoredAnnotations);
     if (restored.descriptionAnnotations.length > 0) setDescriptionAnnotations(restored.descriptionAnnotations);
     if (restored.commentAnnotations.length > 0) setCommentAnnotations(restored.commentAnnotations);
     if (restored.viewedFiles.length > 0) setViewedFiles(new Set(restored.viewedFiles));
     if (restored.autoViewSuppressed.length > 0) setAutoViewSuppressed(new Set(restored.autoViewSuppressed));
-  }, [restoreDraft, reviewHistory, files, prMetadata?.url, prDiffScope]);
+  }, [restoreDraft, reviewHistory, files, prMetadata, prDiffScope, snapshotId]);
+
+  // PR mode (#1590): whenever the diff on screen changes (push picked up,
+  // layer/full-stack switch, in-place PR switch back), re-check line comments
+  // stamped with a different snapshot. Those whose anchor still matches are
+  // re-stamped; the rest become outdated. Also remembers the latest layer
+  // snapshot per PR, which is what may be posted inline on that PR.
+  const knownPrSnapshotsRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (!prMetadata || !snapshotId) return;
+    if (prDiffScope !== 'full-stack') knownPrSnapshotsRef.current.set(prMetadata.url, snapshotId);
+    const next = reanchorCodeAnnotations(annotationsRef.current, files, {
+      currentSnapshot: snapshotId,
+      belongsToCurrentDiff: (a) => annotationMatchesPrScope(a, prMetadata.url, prDiffScope),
+    });
+    if (next !== annotationsRef.current) {
+      annotationsRef.current = next;
+      setAnnotations(next);
+    }
+  }, [snapshotId, files, prMetadata, prDiffScope]);
 
   // Agent Instructions — copy a clipboard payload teaching external agents
   // (Claude Code, Codex, etc.) how to POST review comments into this session
@@ -1620,6 +1656,7 @@ const ReviewApp: React.FC = () => {
     activeCommitContext,
     activeGitButlerContext,
     files,
+    snapshotId,
   );
 
   // Context rule shared by both auto-open effects below (and mirrored by
@@ -2681,9 +2718,13 @@ const ReviewApp: React.FC = () => {
     callFlow?: CallFlowAdvert;
     agentCwd?: string | null;
     approvalNotesSupported?: boolean;
+    draftState?: CodeDraftTargetState;
   }) {
     const isPRSwitch = !!data.prMetadata;
     setSnapshotId(data.snapshotId);
+    // In-place PR / scope switch (#1590): the draft target moved. Adopt the
+    // new target's generation floor and offer any draft it holds.
+    adoptDraftTarget(data.draftState);
     // Keep the approval-notes advert in lockstep with whatever payload the
     // client last applied — the servers echo it on the PR family too.
     if (data.approvalNotesSupported !== undefined) {
@@ -3445,8 +3486,20 @@ const ReviewApp: React.FC = () => {
     // Call-Flow-native feedback has no honest inline diff destination. Return
     // it to the analysis surface instead of opening an unrelated file row and
     // issuing a scroll request that cannot resolve.
-    if (annotation.callFlowTargets?.length && (annotation.scope ?? 'line') !== 'line') {
+    const navigation = annotationNavigation(annotation);
+    if (navigation === 'call-flow') {
       openCallFlowPanel();
+      setSelectedAnnotationId(id);
+      return;
+    }
+    // Outdated comments (#1590) are not drawn on the diff, so a scroll target
+    // could never resolve: open the file when it is still in the diff and
+    // select the card, without a dead scroll request.
+    if (navigation === 'select-file') {
+      if (!guideOpen && !isAllFilesActiveRef.current) {
+        const fileIndex = files.findIndex(f => f.path === annotation.filePath);
+        if (fileIndex !== -1) handleFileSwitch(fileIndex);
+      }
       setSelectedAnnotationId(id);
       return;
     }
@@ -4095,7 +4148,7 @@ const ReviewApp: React.FC = () => {
       title: prMetadata.title,
       repo: getDisplayRepo(prMetadata),
     } : undefined;
-    const plan = buildReviewSubmission(allAnnotations, visibleEditorAnnotations, prMetadata?.url, diffPaths, prMeta);
+    const plan = buildReviewSubmission(allAnnotations, visibleEditorAnnotations, prMetadata?.url, diffPaths, prMeta, knownPrSnapshotsRef.current);
     // PR description/comment notes aren't line-anchored, so they can't post as
     // inline review comments — seed them into the review body instead (quoted),
     // where the user can edit before submitting. Also means a review with only

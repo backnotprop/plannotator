@@ -1,43 +1,50 @@
 import { describe, expect, test } from 'bun:test';
 import { parseDiffToFiles } from './diffParser';
 import type { CodeAnnotation } from '@plannotator/ui/types';
-import { captureAnchorText, markOutdatedCodeAnnotations, readPatchLines } from './codeAnnotationAnchor';
+import {
+  annotationNavigation,
+  canPostInline,
+  captureAnchor,
+  markOutdatedCodeAnnotations,
+  readPatchLines,
+  reanchorCodeAnnotations,
+} from './codeAnnotationAnchor';
+
+function patch(file: string, header: string, body: string[]): string {
+  return [`diff --git a/${file} b/${file}`, `--- a/${file}`, `+++ b/${file}`, header, ...body, ''].join('\n');
+}
 
 const BEFORE_PUSH = [
-  'diff --git a/src/a.ts b/src/a.ts',
-  '--- a/src/a.ts',
-  '+++ b/src/a.ts',
-  '@@ -10,4 +10,5 @@ function f() {',
-  ' const a = 1;',
-  '-const b = 2;',
-  '+const b = 3;',
-  '+const c = 4;',
-  ' return a + b;',
-  ' }',
-  'diff --git a/src/gone.ts b/src/gone.ts',
-  '--- a/src/gone.ts',
-  '+++ b/src/gone.ts',
-  '@@ -1,1 +1,1 @@',
-  '-old',
-  '+new',
-  '',
-].join('\n');
+  patch('src/a.ts', '@@ -10,4 +10,5 @@ function f() {', [
+    ' const a = 1;',
+    '-const b = 2;',
+    '+const b = 3;',
+    '+const c = 4;',
+    ' return a + b;',
+    ' }',
+  ]),
+  patch('src/gone.ts', '@@ -1,1 +1,1 @@', ['-old', '+new']),
+].join('');
 
 // A teammate pushed: a.ts line 12 changed text, lines 10-11 unchanged, and
 // gone.ts left the diff entirely.
-const AFTER_PUSH = [
-  'diff --git a/src/a.ts b/src/a.ts',
-  '--- a/src/a.ts',
-  '+++ b/src/a.ts',
-  '@@ -10,4 +10,5 @@ function f() {',
+const AFTER_PUSH = patch('src/a.ts', '@@ -10,4 +10,5 @@ function f() {', [
   ' const a = 1;',
   '-const b = 2;',
   '+const b = 3;',
   '+const c = 5;',
   ' return a + b;',
   ' }',
-  '',
-].join('\n');
+]);
+
+// Longer hunk for the keep case: only line 16 changes, so a comment on line
+// 11 keeps both its text and its two-line surroundings.
+const LONG_BEFORE = patch('src/long.ts', '@@ -10,7 +10,7 @@', [
+  ' l10', ' l11', ' l12', ' l13', ' l14', ' l15', '-l16', '+l16 v1',
+]);
+const LONG_AFTER = patch('src/long.ts', '@@ -10,7 +10,7 @@', [
+  ' l10', ' l11', ' l12', ' l13', ' l14', ' l15', '-l16', '+l16 v2',
+]);
 
 function line(partial: Partial<CodeAnnotation>): CodeAnnotation {
   return {
@@ -74,23 +81,50 @@ describe('restoring a PR draft against a changed patch', () => {
 
   function created(partial: Partial<CodeAnnotation>): CodeAnnotation {
     const ann = line(partial);
-    const anchorText = captureAnchorText(ann, before);
-    return anchorText === undefined ? ann : { ...ann, anchorText };
+    return { ...ann, ...captureAnchor(ann, before), anchorSnapshot: 'snap-before' };
   }
 
-  test('keeps comments whose lines still read the same, marks changed/removed ones outdated, drops none', () => {
-    const unchanged = created({ id: 'same', lineStart: 10, lineEnd: 11 });
+  test('keeps comments whose lines and surroundings still read the same, marks changed/removed ones outdated, drops none', () => {
+    const longBefore = parseDiffToFiles(LONG_BEFORE);
+    const kept = line({ id: 'same', filePath: 'src/long.ts', lineStart: 11, lineEnd: 11 });
+    const unchanged = { ...kept, ...captureAnchor(kept, longBefore), anchorSnapshot: 'snap-before' };
     const changed = created({ id: 'changed', lineStart: 12, lineEnd: 12 });
     const removedFile = created({ id: 'gone', filePath: 'src/gone.ts', lineStart: 1, lineEnd: 1 });
-    const legacy = line({ id: 'legacy', lineStart: 10, lineEnd: 10 }); // no anchorText (old draft)
+    const legacy = line({ id: 'legacy', lineStart: 10, lineEnd: 10 }); // no anchor fields (old draft)
 
-    const restored = markOutdatedCodeAnnotations([unchanged, changed, removedFile, legacy], after);
+    const restored = markOutdatedCodeAnnotations(
+      [unchanged, changed, removedFile, legacy],
+      [...after, ...parseDiffToFiles(LONG_AFTER)],
+      undefined,
+      'snap-after',
+    );
 
     expect(restored.map((a) => a.id)).toEqual(['same', 'changed', 'gone', 'legacy']);
-    expect(restored[0]).toBe(unchanged); // untouched, same line numbers
+    expect(restored[0].outdated).toBeUndefined();
+    expect(restored[0].anchorSnapshot).toBe('snap-after'); // re-stamped for the new diff
     expect(restored.slice(1).map((a) => a.outdated)).toEqual([true, true, true]);
     // Never moved to a guessed line.
-    expect(restored.map((a) => [a.lineStart, a.lineEnd])).toEqual([[10, 11], [12, 12], [1, 1], [10, 10]]);
+    expect(restored.map((a) => [a.lineStart, a.lineEnd])).toEqual([[11, 11], [12, 12], [1, 1], [10, 10]]);
+  });
+
+  test('a common line whose own text survives but whose surroundings changed is outdated, not "still valid"', () => {
+    // Line 14 is a lone `}` in both diffs; the line above it changed.
+    const onBrace = { ...line({ id: 'brace', lineStart: 14, lineEnd: 14 }) };
+    const stamped = { ...onBrace, ...captureAnchor(onBrace, parseDiffToFiles(patch('src/a.ts', '@@ -12,3 +12,3 @@', [
+      ' const b = 3;',
+      '-  return a;',
+      '+  return b;',
+      ' }',
+    ]))), anchorSnapshot: 's1' };
+    expect(stamped.anchorText).toBe('}');
+    const pushed = parseDiffToFiles(patch('src/a.ts', '@@ -12,3 +12,3 @@', [
+      ' const b = 3;',
+      '-  return a;',
+      '+  return null;',
+      ' }',
+    ]));
+    const [result] = markOutdatedCodeAnnotations([stamped], pushed, undefined, 's2');
+    expect(result.outdated).toBe(true);
   });
 
   test('file- and review-scoped comments carry over unchanged even when their file left the diff', () => {
@@ -105,5 +139,55 @@ describe('restoring a PR draft against a changed patch', () => {
     const otherPr = line({ id: 'other', prUrl: 'https://github.com/o/r/pull/2', filePath: 'src/elsewhere.ts' });
     const restored = markOutdatedCodeAnnotations([otherPr], after, (a) => a.prUrl === undefined);
     expect(restored[0]).toBe(otherPr);
+  });
+});
+
+describe('in-session re-check when the diff on screen changes', () => {
+  const before = parseDiffToFiles(BEFORE_PUSH);
+  const after = parseDiffToFiles(AFTER_PUSH);
+
+  test('only comments stamped with another snapshot are re-checked; unstamped and current ones are left alone', () => {
+    const current = { ...line({ id: 'cur' }), anchorSnapshot: 'snap-after' };
+    const unstamped = line({ id: 'old-draft', lineStart: 12, lineEnd: 12 });
+    const stale = { ...line({ id: 'stale', lineStart: 12, lineEnd: 12 }), ...captureAnchor(line({ lineStart: 12, lineEnd: 12 }), before), anchorSnapshot: 'snap-before' };
+    const input = [current, unstamped, stale];
+    const out = reanchorCodeAnnotations(input, after, { currentSnapshot: 'snap-after' });
+    expect(out[0]).toBe(current);
+    expect(out[1]).toBe(unstamped);
+    expect(out[2].outdated).toBe(true);
+  });
+
+  test('returns the same array when nothing needed checking (no spurious state writes)', () => {
+    const input = [{ ...line({}), anchorSnapshot: 's' }];
+    expect(reanchorCodeAnnotations(input, after, { currentSnapshot: 's' })).toBe(input);
+  });
+});
+
+describe('what may be posted inline on a PR', () => {
+  const A = 'https://github.com/acme/widgets/pull/1';
+  const B = 'https://github.com/acme/widgets/pull/2';
+  const known = new Map([[A, 'sA'], [B, 'sB']]);
+
+  test('only a comment stamped with the snapshot currently known for its PR', () => {
+    expect(canPostInline({ ...line({ prUrl: A }), anchorSnapshot: 'sA' }, known, A)).toBe(true);
+    expect(canPostInline({ ...line({ prUrl: B }), anchorSnapshot: 'sB' }, known, A)).toBe(true);
+    // Anchored on a diff of B we no longer see (B was pushed since).
+    expect(canPostInline({ ...line({ prUrl: B }), anchorSnapshot: 'old' }, known, A)).toBe(false);
+    // Restored for a PR never viewed this session.
+    expect(canPostInline({ ...line({ prUrl: 'https://github.com/acme/widgets/pull/9' }), anchorSnapshot: 'x' }, known, A)).toBe(false);
+    expect(canPostInline({ ...line({ prUrl: A }), anchorSnapshot: 'sA', outdated: true }, known, A)).toBe(false);
+  });
+
+  test('an unstamped (older) comment is trusted only for the PR on screen', () => {
+    expect(canPostInline(line({ prUrl: A }), known, A)).toBe(true);
+    expect(canPostInline(line({}), known, A)).toBe(true);
+    expect(canPostInline(line({ prUrl: B }), known, A)).toBe(false);
+  });
+});
+
+describe('sidebar navigation', () => {
+  test('an outdated comment opens its file without a scroll request; others scroll', () => {
+    expect(annotationNavigation(line({ outdated: true }))).toBe('select-file');
+    expect(annotationNavigation(line({}))).toBe('scroll');
   });
 });

@@ -358,6 +358,20 @@ export interface CodeAnnotation {
    */
   anchorText?: string;
   /**
+   * PR reviews only (#1590): the lines around the anchor on the same side
+   * (up to two before and two after; `null` where a line is outside the patch
+   * hunks), so a comment on a common line (`}`, `return null;`) only keeps
+   * its position when its surroundings still match too.
+   */
+  anchorContext?: { before: (string | null)[]; after: (string | null)[] };
+  /**
+   * PR reviews only (#1590): the review snapshot id of the diff whose line
+   * coordinates this comment uses. Re-stamped when a later diff passes the
+   * anchor check; a line comment is only posted inline when this matches the
+   * diff currently known for its PR.
+   */
+  anchorSnapshot?: string;
+  /**
    * Set when a restored PR draft's comment no longer matches the code it was
    * written on (the PR changed between sessions). Its line numbers refer to
    * the earlier version: it is listed and exported (labelled) but never drawn

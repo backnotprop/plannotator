@@ -63,4 +63,27 @@ describe('hosted PR review submission', () => {
     expect(target.fileScopedBody).toContain(OUTDATED_ANNOTATION_LABEL);
     expect(target.fileScopedBody).toContain('src/a.ts');
   });
+
+  test('a comment anchored on a diff the session can no longer vouch for goes in the body with the code it was written on', () => {
+    const OTHER = 'https://github.com/acme/widgets/pull/43';
+    const submission = buildReviewSubmission(
+      [
+        // Restored for PR 43, anchored on a snapshot this session never saw.
+        comment({ id: 'other', prUrl: OTHER, text: 'On 43', anchorSnapshot: 'gone', anchorText: 'const legacy = 1;' }),
+        // Current PR, anchored on the diff on screen.
+        comment({ id: 'here', text: 'On 42', lineStart: 20, lineEnd: 20, anchorSnapshot: 'now' }),
+      ],
+      [],
+      PR_URL,
+      new Set(['src/a.ts']),
+      undefined,
+      new Map([[PR_URL, 'now']]),
+    );
+    const other = submission.targets.find((t) => t.prUrl === OTHER)!;
+    const here = submission.targets.find((t) => t.prUrl === PR_URL)!;
+    expect(other.fileComments).toEqual([]);
+    expect(other.fileScopedBody).toContain('On 43');
+    expect(other.fileScopedBody).toContain('const legacy = 1;');
+    expect(here.fileComments.map((c) => c.line)).toEqual([20]);
+  });
 });

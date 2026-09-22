@@ -4,7 +4,7 @@ import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '../types';
-import { captureAnchorText } from '../utils/codeAnnotationAnchor';
+import { captureAnchor } from '../utils/codeAnnotationAnchor';
 
 /** The active commit diff, if any — stamped onto annotations created while a
  *  commit:<sha> diff is on screen. Mirrors the PR fields: both exist so an
@@ -31,6 +31,10 @@ export function useAnnotationFactory(
    *  lines they anchor to (#1590), so a draft restored after the PR changed
    *  can tell which comments still point at the same code. */
   files?: readonly DiffFile[],
+  /** Snapshot id of the diff `files` belong to; stamped on PR line comments
+   *  so a later diff (push, scope switch, restore) can tell whether their
+   *  coordinates still apply. */
+  snapshotId?: string,
 ) {
   const prContext = useMemo(() => ({
     ...(prMetadata ? {
@@ -55,11 +59,14 @@ export function useAnnotationFactory(
   const withPRContext = useCallback(
     (annotation: CodeAnnotation): CodeAnnotation => {
       const stamped = { ...annotation, ...prContext };
-      if (!prMetadata || !files) return stamped;
-      const anchorText = captureAnchorText(stamped, files);
-      return anchorText === undefined ? stamped : { ...stamped, anchorText };
+      if (!prMetadata || !files || (stamped.scope ?? 'line') !== 'line') return stamped;
+      return {
+        ...stamped,
+        ...captureAnchor(stamped, files),
+        ...(snapshotId ? { anchorSnapshot: snapshotId } : {}),
+      };
     },
-    [prContext, prMetadata, files],
+    [prContext, prMetadata, files, snapshotId],
   );
 
   return { withPRContext };

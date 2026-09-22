@@ -62,11 +62,28 @@ interface UseCodeAnnotationDraftOptions {
   submitted: boolean;
 }
 
+/** Draft state a review server reports after an in-place target switch
+ *  (PR switch / PR diff-scope switch, #1590). */
+export interface CodeDraftTargetState {
+  found: boolean;
+  draftGeneration: number | null;
+}
+
 interface UseCodeAnnotationDraftResult {
   draftBanner: { count: number; viewedCount: number; timeAgo: string } | null;
-  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[]; patchChanged: boolean };
+  /** `merge` is true when the offered draft came from a target the session
+   *  switched onto: its items are only the ones not already in the session,
+   *  and the host should ADD them rather than replace its state.
+   *  `patchChanged` is true when the server served the draft for a patch other
+   *  than the one it was saved on (the host re-checks line anchors). */
+  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[]; patchChanged: boolean; merge: boolean };
   getDraftGeneration: () => number;
   dismissDraft: () => void;
+  /** Call with the server's `draftState` after an in-place target switch.
+   *  Raises the generation counter to the new target's floor (so saves are
+   *  not rejected against an old tombstone there) and, when that target holds
+   *  items this session does not have yet, offers them through the banner. */
+  adoptDraftTarget: (state: CodeDraftTargetState | undefined) => void;
 }
 
 export function useCodeAnnotationDraft({
@@ -88,6 +105,10 @@ export function useCodeAnnotationDraft({
   // fresh/unengaged session (leave the server alone). Keyed on annotations only —
   // see the autosave effect for why viewedFiles must not count.
   const hasHadAnnotationsRef = useRef(false);
+  // Set when the offered draft came from an in-place target switch.
+  const mergeRef = useRef(false);
+  const latestRef = useRef({ annotations, descriptionAnnotations, commentAnnotations });
+  latestRef.current = { annotations, descriptionAnnotations, commentAnnotations };
 
   // Load draft on mount
   useEffect(() => {
@@ -184,6 +205,8 @@ export function useCodeAnnotationDraft({
     // overwrite what we're about to restore.
     if (timerRef.current) clearTimeout(timerRef.current);
     const data = draftDataRef.current;
+    const merge = mergeRef.current;
+    mergeRef.current = false;
     setDraftBanner(null);
     draftDataRef.current = null;
     return {
@@ -193,6 +216,7 @@ export function useCodeAnnotationDraft({
       viewedFiles: data?.viewedFiles ?? [],
       autoViewSuppressed: data?.autoViewSuppressed ?? [],
       patchChanged: data?.patchChanged === true,
+      merge,
     };
   }, []);
 
@@ -206,8 +230,43 @@ export function useCodeAnnotationDraft({
     draftGenerationRef.current = deletedGeneration;
     setDraftBanner(null);
     draftDataRef.current = null;
+    mergeRef.current = false;
     getDraftTransport().remove(deletedGeneration, { keepalive: false }).catch(() => {});
   }, []);
 
-  return { draftBanner, restoreDraft, getDraftGeneration, dismissDraft };
+  const adoptDraftTarget = useCallback((state: CodeDraftTargetState | undefined) => {
+    if (!isApiMode || !state) return;
+    const floor = readDraftGeneration(state.draftGeneration);
+    if (floor !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, floor);
+    if (!state.found) return;
+    getDraftTransport().load()
+      .then(({ data, generation }) => {
+        if (generation !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
+        const draft = data as DraftData | null;
+        if (!draft) return;
+        const loadedGeneration = readDraftGeneration(draft.draftGeneration);
+        if (loadedGeneration !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, loadedGeneration);
+        // Offer only what the session does not already hold: the target may
+        // carry this session's own blob from before a switch away and back.
+        const current = latestRef.current;
+        const have = new Set<string>([
+          ...current.annotations.map((a) => a.id),
+          ...current.descriptionAnnotations.map((a) => a.id),
+          ...current.commentAnnotations.map((a) => a.id),
+        ]);
+        const fresh = <T extends { id: string }>(items: T[] | undefined) =>
+          (Array.isArray(items) ? items : []).filter((item) => !have.has(item.id));
+        const codeAnnotations = fresh(draft.codeAnnotations);
+        const descriptionAnnotations = fresh(draft.descriptionAnnotations);
+        const commentAnnotations = fresh(draft.commentAnnotations);
+        const count = codeAnnotations.length + descriptionAnnotations.length + commentAnnotations.length;
+        if (count === 0) return;
+        draftDataRef.current = { ...draft, codeAnnotations, descriptionAnnotations, commentAnnotations };
+        mergeRef.current = true;
+        setDraftBanner({ count, viewedCount: 0, timeAgo: formatTimeAgo(draft.ts || 0) });
+      })
+      .catch(() => {});
+  }, [isApiMode]);
+
+  return { draftBanner, restoreDraft, getDraftGeneration, dismissDraft, adoptDraftTarget };
 }

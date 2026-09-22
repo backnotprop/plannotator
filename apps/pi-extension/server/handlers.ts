@@ -9,7 +9,7 @@ import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.ts";
-import { deleteReviewDraft, loadReviewDraft, saveReviewDraft, type ReviewDraftKeys } from "../generated/review-draft.ts";
+import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
@@ -224,11 +224,18 @@ export function handleReviewDraftRequest(
 	req: IncomingMessage,
 	res: Res,
 	keys: ReviewDraftKeys,
+	drafts: ReturnType<typeof createReviewDraftSession>,
 ): Promise<void> | void {
 	if (req.method === "POST") {
 		return parseBody(req)
 			.then((body) => {
-				saveReviewDraft(keys, body);
+				const saved = drafts.save(keys, body);
+				// PR mode reports a rejected (stale-generation) save; local
+				// reviews keep the historical always-ok response.
+				if (!saved && keys.targetKey) {
+					json(res, { ok: false, error: "stale draft generation", ...drafts.state(keys) }, 409);
+					return;
+				}
 				json(res, { ok: true });
 			})
 			.catch((err: unknown) => {
@@ -237,10 +244,10 @@ export function handleReviewDraftRequest(
 				json(res, { error: message }, 500);
 			});
 	} else if (req.method === "DELETE") {
-		deleteReviewDraft(keys, readDraftGenerationFromUrl(req));
+		drafts.remove(keys, readDraftGenerationFromUrl(req));
 		json(res, { ok: true });
 	} else {
-		const loaded = loadReviewDraft(keys);
+		const loaded = drafts.load(keys);
 		if (loaded.found) {
 			json(res, loaded.draft);
 			return;
