@@ -27,6 +27,14 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   const sessionManager = new SessionManager();
   const modelDiscovery: Promise<void>[] = [];
   const providerInitializers = new Map<string, () => Promise<void>>();
+  // Model discovery spawns the provider's CLI, so it runs on first explicit
+  // activation (?activate= from a model picker) or the first session — never
+  // at startup.
+  const deferModelDiscovery = (providerId: string, provider: object | null | undefined) => {
+    if (!provider || !("fetchModels" in provider)) return;
+    const fetchModels = provider.fetchModels as () => Promise<void>;
+    providerInitializers.set(providerId, createBestEffortOnce(() => fetchModels.call(provider)));
+  };
 
   try {
     await import("@plannotator/ai/providers/claude-agent-sdk");
@@ -37,17 +45,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
       ...(claudePath && { claudeExecutablePath: claudePath }),
     });
     const providerId = registry.register(provider);
-    // Deferred like Codex: model discovery spawns `claude`, so it runs on
-    // first explicit activation (a model picker) or first session, never at
-    // startup.
-    if ("fetchModels" in provider) {
-      providerInitializers.set(
-        providerId,
-        createBestEffortOnce(
-          () => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
-        ),
-      );
-    }
+    deferModelDiscovery(providerId, provider);
   } catch {
     // Claude SDK not available.
   }
@@ -62,14 +60,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
         ...(codexPath ? { codexExecutablePath: codexPath } : {}),
       });
       const providerId = registry.register(provider);
-      if ("fetchModels" in provider) {
-        providerInitializers.set(
-          providerId,
-          createBestEffortOnce(
-            () => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
-          ),
-        );
-      }
+      deferModelDiscovery(providerId, provider);
     }
   } catch {
     // Codex not available.
@@ -108,14 +99,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
       // for every user with opencode installed, and interrupted sessions
       // orphaned it. The initializer runs on first explicit activation
       // (?activate= from the model picker) or first opencode session.
-      if ("fetchModels" in provider) {
-        providerInitializers.set(
-          providerId,
-          createBestEffortOnce(
-            () => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
-          ),
-        );
-      }
+      deferModelDiscovery(providerId, provider);
     }
   } catch {
     // OpenCode not available.

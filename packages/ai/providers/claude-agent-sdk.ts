@@ -176,7 +176,6 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   // Fallback used only until fetchModels() replaces it with the installed
   // `claude`'s own list (the SDK's supportedModels()).
   models: CatalogModel[] = CLAUDE_FALLBACK_MODELS;
-  private modelsLoaded = false;
 
   private config: ClaudeAgentSDKConfig;
 
@@ -229,10 +228,10 @@ export class ClaudeAgentSDKProvider implements AIProvider {
    * supportedModels(). Starts a throwaway CLI process with no prompt, no
    * settings sources (so no user hooks or plugins run) and no MCP servers,
    * reads the list from the initialize handshake, and closes it. Bounded by
-   * MODEL_DISCOVERY_TIMEOUT_MS; keeps the static fallback on any failure.
+   * MODEL_DISCOVERY_TIMEOUT_MS. On failure the static fallback stays and the
+   * error propagates, so the runtime's once-wrapper may retry later.
    */
   async fetchModels(): Promise<void> {
-    if (this.modelsLoaded) return;
     const abortController = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let q: { supportedModels: () => Promise<ClaudeSdkModelInfo[]>; close: () => void } | null = null;
@@ -258,10 +257,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
         }),
       ]);
       const models = claudeCatalogFromSdk(infos ?? []);
-      if (models.length) this.models = models;
-      this.modelsLoaded = true;
-    } catch {
-      // Keep the static fallback list.
+      if (models.length === 0) throw new Error("claude reported no models");
+      this.models = models;
     } finally {
       if (timer) clearTimeout(timer);
       abortController.abort();

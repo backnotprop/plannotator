@@ -8,20 +8,14 @@
 
 import { storage } from './storage';
 import { AGENT_CONFIG, getAgentAIProviderTypes, type Origin } from '@plannotator/core/agents';
+import { resolveModelChoice, type CatalogModel } from '@plannotator/core/model-catalog';
 
 const PROVIDER_KEY = 'plannotator-ai-provider';
 const MODELS_KEY = 'plannotator-ai-models';
 const PROVIDER_BY_ORIGIN_KEY = 'plannotator-ai-provider-by-origin';
 
-export interface AIProviderModel {
-  id: string;
-  label: string;
-  default?: boolean;
-  /** Reasoning-effort options this model supports (provider-reported, e.g. Codex). */
-  reasoningEfforts?: { id: string; label: string }[];
-  /** The model's default reasoning effort. */
-  defaultReasoningEffort?: string;
-}
+/** A provider-reported model — the shared catalog shape. */
+export type AIProviderModel = CatalogModel;
 
 export interface AIProviderOption {
   id: string;
@@ -135,13 +129,11 @@ export function resolveAIModelForProvider(
 ): string | null {
   if (!provider) return null;
   const models = provider.models ?? [];
-  const modelIds = new Set(models.map(m => m.id));
-  const preferredModel = preferredModels[provider.id];
-  if (preferredModel && (modelIds.size === 0 || modelIds.has(preferredModel))) {
-    return preferredModel;
-  }
-  const defaultModel = models.find(m => m.default) ?? models[0];
-  return defaultModel?.id ?? null;
+  const preferredModel = preferredModels[provider.id] ?? '';
+  // Providers that report no models take the saved pick verbatim; otherwise
+  // the shared resolver (same one the server and the launchers use).
+  if (models.length === 0) return preferredModel || null;
+  return resolveModelChoice(preferredModel, models) || null;
 }
 
 export function resolveAIProviderSelection(options: {

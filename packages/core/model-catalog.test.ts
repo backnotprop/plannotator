@@ -41,9 +41,11 @@ describe("claudeCatalogFromSdk", () => {
     expect(byId("fable")?.reasoningEfforts?.map((e) => e.id)).toEqual(ALL);
   });
 
-  test("labels name the actual model and version from the description", () => {
-    expect(byId("opus[1m]")?.label).toBe("Opus 5.5 with 1M context");
-    expect(byId("sonnet")?.label).toBe("Sonnet 5");
+  test("aliases read '(latest)'; pinned ids keep the model name and mark 1M context", () => {
+    for (const [id, label] of [["opus", "Opus (latest)"], ["opus[1m]", "Opus 1M (latest)"], ["sonnet", "Sonnet (latest)"], ["haiku", "Haiku (latest)"]]) {
+      expect(byId(id)?.label).toBe(label);
+    }
+    expect(byId("claude-fable-5-1[1m]")?.label).toBe("Fable 5.1 (1M)");
   });
 
   test("effort support is per model: haiku takes none, the rest default to high", () => {
@@ -67,15 +69,34 @@ describe("resolveModelChoice", () => {
 
   test("keeps a pick the catalog offers", () => {
     expect(resolveModelChoice("haiku", catalog, "opus")).toBe("haiku");
+    expect(resolveModelChoice("opus[1m]", catalog, "sonnet")).toBe("opus[1m]");
   });
 
   test("maps a saved canonical id onto the alias that covers it", () => {
     expect(resolveModelChoice("claude-sonnet-5", catalog, "opus")).toBe("sonnet");
   });
 
-  test("a stale pick falls back to the surface default, then the catalog default", () => {
-    expect(resolveModelChoice("claude-opus-4-8", catalog, "opus")).toBe("opus");
-    expect(resolveModelChoice("claude-opus-4-8", catalog, "not-offered")).toBe("sonnet");
+  test("a stale pinned id keeps its family instead of taking the surface default", () => {
+    // Tour/guide default to sonnet, review to opus: neither may win over the
+    // family the user picked.
+    expect(resolveModelChoice("claude-opus-5-5", catalog, "sonnet")).toBe("opus");
+    expect(resolveModelChoice("claude-opus-5", catalog, "sonnet")).toBe("opus");
+    expect(resolveModelChoice("claude-sonnet-4-6", catalog, "opus")).toBe("sonnet");
+    expect(resolveModelChoice("claude-fable-5", catalog, "opus")).toBe("fable");
+  });
+
+  test("never moves a pick across the 1M-context boundary", () => {
+    // claude-fable-5-1 is covered by claude-fable-5-1[1m] via resolvedId, but
+    // that is a different context window (and bill): land on the plain alias.
+    expect(resolveModelChoice("claude-fable-5-1", catalog, "sonnet")).toBe("fable");
+    expect(resolveModelChoice("claude-opus-4-8[1m]", catalog, "sonnet")).toBe("opus[1m]");
+    expect(resolveModelChoice("claude-sonnet-4-6[1m]", catalog, "opus")).toBe("sonnet");
+  });
+
+  test("an unrecognised pick falls back to the surface default, then the catalog default", () => {
+    expect(resolveModelChoice("mystery-model", catalog, "opus")).toBe("opus");
+    expect(resolveModelChoice("mystery-model", catalog, "not-offered")).toBe("sonnet");
+    expect(resolveModelChoice("", catalog)).toBe("sonnet");
   });
 
   test("an empty pick with no surface default uses the tool's default (Codex)", () => {

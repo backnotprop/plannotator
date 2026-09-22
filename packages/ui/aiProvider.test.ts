@@ -112,3 +112,23 @@ describe('AI provider origin defaults', () => {
     expect(next.providerByOrigin['gemini-cli']).toBeUndefined();
   });
 });
+
+describe('Ask AI saved model resolution', () => {
+  it('uses the shared resolver: a stale Claude pin keeps its family', () => {
+    const claude: AIProviderOption[] = [{
+      id: 'claude-agent-sdk',
+      name: 'claude-agent-sdk',
+      models: [
+        { id: 'opus', label: 'Opus (latest)' },
+        { id: 'sonnet', label: 'Sonnet (latest)', default: true, resolvedId: 'claude-sonnet-5' },
+      ],
+    }];
+    const pick = (saved: string) => resolveAIProviderSelection({
+      providers: claude,
+      settings: settings({ preferredModels: { 'claude-agent-sdk': saved } }),
+    }).model;
+    // Previously any id missing from the list fell to the default (sonnet).
+    expect(pick('claude-opus-5')).toBe('opus');
+    expect(pick('claude-sonnet-5')).toBe('sonnet');
+  });
+});

@@ -192,7 +192,7 @@ describe("no eager opencode spawn at runtime startup", () => {
 			const end = src.indexOf("OpenCode not available", start);
 			expect(end).toBeGreaterThan(start);
 			const block = src.slice(start, end);
-			expect(block).toContain("providerInitializers.set");
+			expect(block).toContain("deferModelDiscovery(providerId, provider)");
 			expect(block).not.toContain("modelDiscovery.push");
 		});
 	}

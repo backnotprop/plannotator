@@ -567,7 +567,6 @@ export class CodexAppServerProvider implements AIProvider {
 
   private config: CodexSDKConfig;
   private sessions = new Set<CodexAppServerSession>();
-  private modelsLoaded = false;
 
   constructor(config: CodexSDKConfig) {
     this.config = config;
@@ -576,11 +575,11 @@ export class CodexAppServerProvider implements AIProvider {
   /**
    * Populate `models` from Codex's `model/list` — the real models plus each
    * model's actual supportedReasoningEfforts + defaultReasoningEffort. Spawns a
-   * throwaway app-server (like the Pi/OpenCode providers' fetchModels). Keeps
-   * the static fallback on any failure.
+   * throwaway app-server (like the Pi/OpenCode providers' fetchModels). On
+   * failure the static fallback stays and the error propagates, so the
+   * runtime's once-wrapper may retry later.
    */
   async fetchModels(): Promise<void> {
-    if (this.modelsLoaded) return;
     const proc = new CodexAppServerProcess();
     try {
       await proc.start(
@@ -603,10 +602,8 @@ export class CodexAppServerProvider implements AIProvider {
         if (!cursor) break;
       }
       const models = codexCatalogFromModelList(data);
-      if (models.length) this.models = models;
-      this.modelsLoaded = true;
-    } catch {
-      // Keep the static fallback list.
+      if (models.length === 0) throw new Error("codex reported no models");
+      this.models = models;
     } finally {
       proc.kill();
     }

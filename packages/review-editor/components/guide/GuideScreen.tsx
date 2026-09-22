@@ -224,7 +224,9 @@ function ActiveGuide({
   const state = useReviewState();
   // Shared guide-launch defaults, for the outdated-saved-guide "Regenerate"
   // hint (#1112) — same params GuideEmptyState's Generate button would send.
-  const guideLaunch = useGuideLaunch(capabilities);
+  // Only an outdated guide offers Regenerate, so only then load the model
+  // catalog (which spawns the engine's CLI once per server process).
+  const guideLaunch = useGuideLaunch(capabilities, { loadModels: !!guide?.moved });
   const [regenerating, setRegenerating] = useState(false);
   const handleRegenerate = async () => {
     if (!guideLaunch.canLaunch || regenerating) return;

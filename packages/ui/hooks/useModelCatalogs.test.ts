@@ -30,8 +30,11 @@ describe("loadModelCatalog", () => {
   });
 
   test("falls back to the static list when the request fails or the provider is absent", async () => {
-    stubFetch(() => new Response("nope", { status: 404 }));
+    const urls = stubFetch(() => new Response("nope", { status: 404 }));
     expect(await loadModelCatalog("claude")).toBe(FALLBACK_MODELS.claude);
+    // A failure is not cached: the next surface that asks tries again.
+    await loadModelCatalog("claude");
+    expect(urls).toHaveLength(2);
 
     stubFetch(() => Response.json({ available: true, providers: [{ id: "pi-sdk", models: [{ id: "x", label: "X" }] }] }));
     expect(await loadModelCatalog("codex")).toBe(FALLBACK_MODELS.codex);

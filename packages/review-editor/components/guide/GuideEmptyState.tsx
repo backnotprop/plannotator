@@ -364,11 +364,18 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
   } = launch;
 
   const { catalogs } = launch;
+  // While the engine's catalog settles, show a loading entry instead of an
+  // empty picker (Generate is held until it does).
+  const loadingPicker = { value: '', options: [{ value: '', label: 'Loading models…' }], onChange: () => {} };
   const modelPicker: { value: string; options: Option[]; onChange: (v: string) => void } =
     engine === 'claude'
-      ? { value: guideClaudeModel, options: modelSelectOptions(catalogs.claude.models, guideClaudeModel), onChange: setGuideClaudeModel }
+      ? catalogs.claude.settled
+        ? { value: guideClaudeModel, options: modelSelectOptions(catalogs.claude.models, guideClaudeModel), onChange: setGuideClaudeModel }
+        : loadingPicker
       : engine === 'codex'
-        ? { value: guideCodexModel, options: modelSelectOptions(catalogs.codex.models, guideCodexModel), onChange: setGuideCodexModel }
+        ? catalogs.codex.settled
+          ? { value: guideCodexModel, options: modelSelectOptions(catalogs.codex.models, guideCodexModel), onChange: setGuideCodexModel }
+          : loadingPicker
         : engine === 'cursor'
           ? { value: effectiveCursorModel, options: cursorOptions, onChange: setGuideCursorModel }
           : engine === 'opencode'

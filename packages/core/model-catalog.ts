@@ -77,6 +77,21 @@ export interface ClaudeSdkModelInfo {
 
 const CLAUDE_FAMILIES = ['opus', 'sonnet', 'fable', 'haiku'];
 const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const ONE_M = '[1m]';
+const isOneM = (id: string) => id.endsWith(ONE_M);
+
+/** The Claude family an id names (`opus`, `opus[1m]`, `claude-opus-5-5` → `opus`). */
+function claudeFamily(id: string): string | undefined {
+  const bare = id.startsWith('claude-') ? id.slice('claude-'.length) : id;
+  return CLAUDE_FAMILIES.find((family) => bare === family || bare.startsWith(`${family}-`) || bare === `${family}${ONE_M}`);
+}
+
+/** Aliases read "Opus (latest)" / "Opus 1M (latest)"; pinned ids keep their model name. */
+function aliasLabel(id: string): string | undefined {
+  const family = CLAUDE_FAMILIES.find((f) => id === f || id === `${f}${ONE_M}`);
+  if (!family) return undefined;
+  return `${titleCase(family)}${isOneM(id) ? ' 1M' : ''} (latest)`;
+}
 
 /**
  * Build the Claude catalog from `supportedModels()`. Labels come from the
@@ -91,11 +106,11 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
   const rows: CatalogModel[] = [];
   for (const info of infos) {
     if (!info || typeof info.value !== 'string' || !info.value || info.value === 'default') continue;
-    const lead = info.description?.split(' · ')[0]?.trim();
+    const lead = info.description?.split(' · ')[0]?.trim() || info.displayName || info.value;
     const efforts = info.supportsEffort !== false ? (info.supportedEffortLevels ?? []) : [];
     rows.push({
       id: info.value,
-      label: lead || info.displayName || info.value,
+      label: aliasLabel(info.value) ?? (isOneM(info.value) && !/1M/i.test(lead) ? `${lead} (1M)` : lead),
       ...(info.resolvedModel ? { resolvedId: info.resolvedModel } : {}),
       ...(efforts.length
         ? { reasoningEfforts: effortList(efforts), ...(efforts.includes('high') ? { defaultReasoningEffort: 'high' } : {}) }
@@ -106,10 +121,10 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
   const aliases: CatalogModel[] = [];
   for (const family of CLAUDE_FAMILIES) {
     if (rows.some((r) => r.id === family)) continue;
-    const source = rows.find((r) => r.id.startsWith(family) || (r.resolvedId ?? '').startsWith(`claude-${family}`));
+    const source = rows.find((r) => claudeFamily(r.id) === family);
     if (!source) continue;
     const { resolvedId: _, ...support } = source;
-    aliases.push({ ...support, id: family, label: `${titleCase(family)} (latest)` });
+    aliases.push({ ...support, id: family, label: aliasLabel(family)! });
   }
   const all = [...aliases, ...rows];
   const def = all.find((m) => m.id === 'sonnet') ?? all[0];
@@ -117,17 +132,29 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
 }
 
 /**
- * Resolve a saved model choice against a catalog: keep it when the catalog
- * offers it (directly, or as the model an alias resolves to), otherwise fall
- * back to the surface's preferred default, then the catalog's own default.
+ * THE model resolver — Ask AI (client and server) and every launcher use it.
+ * A saved pick resolves to, in order:
+ *   1. itself, when the catalog offers it;
+ *   2. the alias that covers it (`claude-sonnet-5` → `sonnet`);
+ *   3. its family's alias (`claude-opus-5` → `opus`, `claude-sonnet-4-6` →
+ *      `sonnet`), so a stale pin never silently changes model family;
+ *   4. the surface's preferred default, then the catalog's own default.
+ * Steps 2–3 never move a pick onto a 1M-context id unless the pick itself was
+ * one — the context window (and its billing) is the user's choice.
  */
 export function resolveModelChoice(saved: string, models: readonly CatalogModel[], preferred = ''): string {
+  const offers = (id: string) => models.some((m) => m.id === id);
   if (saved) {
-    if (models.some((m) => m.id === saved)) return saved;
-    const covering = models.find((m) => m.resolvedId === saved);
+    if (offers(saved)) return saved;
+    const covering = models.find((m) => m.resolvedId === saved && isOneM(m.id) === isOneM(saved));
     if (covering) return covering.id;
+    const family = claudeFamily(saved);
+    if (family) {
+      if (isOneM(saved) && offers(`${family}${ONE_M}`)) return `${family}${ONE_M}`;
+      if (offers(family)) return family;
+    }
   }
-  if (preferred && models.some((m) => m.id === preferred)) return preferred;
+  if (preferred && offers(preferred)) return preferred;
   return (models.find((m) => m.default) ?? models[0])?.id ?? saved;
 }
 
@@ -158,7 +185,7 @@ export function effortSelectOptions(models: readonly CatalogModel[], modelId: st
   return (model?.reasoningEfforts ?? []).map((e) => ({ value: e.id, label: e.label }));
 }
 
-/** Label for a model id, or the id itself when the catalog lacks it. */
+/** Label for a model id: the catalog's, else an alias's, else the id itself. */
 export function modelLabel(models: readonly CatalogModel[], id: string): string {
-  return models.find((m) => m.id === id)?.label ?? id;
+  return models.find((m) => m.id === id)?.label ?? aliasLabel(id) ?? id;
 }

@@ -104,16 +104,25 @@ describe("createBestEffortOnce", () => {
     expect(calls).toBe(1);
   });
 
-  test("swallows initialization failure and does not retry", async () => {
+  test("swallows a failure and retries only once the cooldown has passed", async () => {
     let calls = 0;
-    const initialize = createBestEffortOnce(async () => {
+    const failing = async () => {
       calls++;
       throw new Error("discovery failed");
-    });
+    };
 
-    await expect(initialize()).resolves.toBeUndefined();
-    await expect(initialize()).resolves.toBeUndefined();
+    // Within the cooldown a broken tool is not re-spawned on every call…
+    const cooled = createBestEffortOnce(failing, 60_000);
+    await expect(cooled()).resolves.toBeUndefined();
+    await expect(cooled()).resolves.toBeUndefined();
     expect(calls).toBe(1);
+
+    // …but a failure never pins the fallback for the life of the process.
+    calls = 0;
+    const retrying = createBestEffortOnce(failing, 0);
+    await retrying();
+    await retrying();
+    expect(calls).toBe(2);
   });
 });
 

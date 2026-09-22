@@ -13,6 +13,7 @@
  *   GET  /api/ai/capabilities  — Check if AI features are available
  */
 
+import { resolveModelChoice } from "@plannotator/core/model-catalog";
 import type { AIContext, AIMessage, CreateSessionOptions } from "./types.ts";
 import type { ProviderRegistry } from "./provider.ts";
 import type { SessionManager } from "./session-manager.ts";
@@ -90,12 +91,26 @@ export interface AIEndpointDeps {
 const MAX_CLIENT_MAX_TURNS = 99;
 const MAX_CLIENT_BUDGET_USD = 5;
 
+/**
+ * Run a lazy initializer (model discovery) at most once on success. Callers
+ * share one in-flight run and never see its error; a failed run may be retried
+ * by a later call once `retryAfterMs` has passed, so a transient failure does
+ * not pin the fallback for the life of the process while a persistently
+ * broken tool is not re-spawned on every session.
+ */
 export function createBestEffortOnce(
   initialize: () => Promise<void>,
+  retryAfterMs = 60_000,
 ): () => Promise<void> {
   let result: Promise<void> | null = null;
+  let failedAt = 0;
   return () => {
-    result ??= initialize().catch(() => {});
+    if (result === null || (failedAt && Date.now() - failedAt >= retryAfterMs)) {
+      failedAt = 0;
+      result = initialize().catch(() => {
+        failedAt = Date.now();
+      });
+    }
     return result;
   };
 }
@@ -194,16 +209,13 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
 
       try {
         await beforeProviderSession?.(providerEntry.id);
-        // Resolve the model against the post-activation list: a requested
-        // model the (possibly refreshed) provider still offers is honored,
-        // anything else — including a stale pre-discovery fallback id — snaps
-        // to the provider's current default. Providers that report no models
-        // pass the request through verbatim.
+        // Resolve the model against the post-activation list with the shared
+        // resolver (exact id → the model an alias covers → same-family alias →
+        // the provider's default), so a stale pre-discovery pick lands on the
+        // closest current model. Providers that report no models pass the
+        // request through verbatim.
         const models = provider.models ?? [];
-        const effectiveModel =
-          model && models.some((candidate) => candidate.id === model)
-            ? model
-            : models.find((candidate) => candidate.default)?.id ?? models[0]?.id ?? model;
+        const effectiveModel = models.length > 0 ? resolveModelChoice(model ?? "", models) : model;
         // Only forward an effort the resolved model accepts (a model that
         // reports no efforts takes none); unlisted models pass it through.
         const modelInfo = models.find((candidate) => candidate.id === effectiveModel);

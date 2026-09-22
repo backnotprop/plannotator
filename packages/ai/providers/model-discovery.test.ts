@@ -40,13 +40,15 @@ describe("codexCatalogFromModelList", () => {
 });
 
 describe("Claude model discovery", () => {
-  test("a claude that cannot start leaves the fallback in place and never throws", async () => {
+  test("a claude that cannot start leaves the fallback in place and reports the failure", async () => {
     const provider = new ClaudeAgentSDKProvider({
       type: "claude-agent-sdk",
       cwd: process.cwd(),
       claudeExecutablePath: resolve(import.meta.dir, "does-not-exist", "claude"),
     });
-    await provider.fetchModels();
+    // Rejecting (rather than swallowing) is what lets the runtime's
+    // once-wrapper retry discovery later instead of pinning the fallback.
+    await expect(provider.fetchModels()).rejects.toThrow();
     expect(provider.models).toBe(CLAUDE_FALLBACK_MODELS);
   }, 15_000);
 
@@ -60,7 +62,7 @@ describe("Claude model discovery", () => {
       expect(start).toBeGreaterThan(-1);
       expect(end).toBeGreaterThan(start);
       const block = src.slice(start, end);
-      expect(block).toContain("providerInitializers.set");
+      expect(block).toContain("deferModelDiscovery(providerId, provider)");
       expect(block).not.toContain("modelDiscovery.push");
     });
   }

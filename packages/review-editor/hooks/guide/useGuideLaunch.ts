@@ -1,5 +1,6 @@
 import type { AgentCapabilities } from '@plannotator/ui/types';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
+import { useEffect } from 'react';
 import { useAgentSettings } from '@plannotator/ui/hooks/useAgentSettings';
 import { useModelCatalogs, type ModelCatalogs } from '@plannotator/ui/hooks/useModelCatalogs';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
@@ -51,7 +52,13 @@ export interface GuideLaunchState {
  * GuideView's "Regenerate" hint on an outdated saved guide, so both launch
  * surfaces stay in lockstep.
  */
-export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLaunchState {
+export function useGuideLaunch(
+  capabilities: AgentCapabilities | null,
+  /** Fetch the guide engine's model catalog. Off where no launch is offered
+   *  (viewing a guide that is not outdated), so merely reading a saved guide
+   *  never spawns a CLI. */
+  { loadModels = true }: { loadModels?: boolean } = {},
+): GuideLaunchState {
   const catalogs = useModelCatalogs(capabilities);
   const settings = useAgentSettings(catalogs);
   const {
@@ -74,6 +81,10 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
   // A persisted engine can be unavailable on this machine — fall back to the
   // first available one rather than a dead selection.
   const engine: ReviewEngine = providerAvailable(guideEngine) ? guideEngine : (availableEngines[0] ?? guideEngine);
+  const loadCatalog = catalogs.load;
+  useEffect(() => {
+    if (loadModels) loadCatalog(engine);
+  }, [loadModels, loadCatalog, engine]);
 
   // Marker model catalogs are discovered server-side and delivered on the
   // capability entry; fall back to the engine-default option until then.

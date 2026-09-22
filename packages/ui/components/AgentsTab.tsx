@@ -32,7 +32,7 @@ import {
   modelSelectOptions,
   type CatalogModel,
 } from '@plannotator/core/model-catalog';
-import { useModelCatalogs } from '../hooks/useModelCatalogs';
+import { useModelCatalogs, type ModelCatalogs } from '../hooks/useModelCatalogs';
 
 export type { AgentLaunchParams } from '../hooks/useAgentJobs';
 
@@ -203,18 +203,24 @@ function catalogLabel(list: Array<{ value: string; label: string }>, value: stri
   return list.find((o) => o.value === value)?.label ?? value;
 }
 
-function formatModel(provider: string, engine: string | undefined, model: string): string {
+type ModelLabelCatalogs = Pick<ModelCatalogs, 'claude' | 'codex'>;
+
+function formatModel(provider: string, engine: string | undefined, model: string, catalogs: ModelLabelCatalogs): string {
+  // Claude/Codex: the discovered catalog's label (fallback list, then alias
+  // naming, then the raw id for anything neither knows).
+  const claudeLabel = () => modelLabel([...catalogs.claude.models, ...CLAUDE_FALLBACK_MODELS], model);
+  const codexLabel = () => modelLabel([...catalogs.codex.models, ...CODEX_FALLBACK_MODELS], model);
   if (provider === 'cursor') return catalogLabel(CURSOR_MODELS, model);
   if (provider === 'opencode') return model ? model : 'Default';
   if (provider === 'pi') return model || 'Default';
   if (provider === 'copilot') return model || 'Default';
-  if (provider === 'codex' || engine === 'codex') return modelLabel(CODEX_FALLBACK_MODELS, model);
-  if ((provider === 'tour' || provider === 'guide') && engine === 'claude') return modelLabel(CLAUDE_FALLBACK_MODELS, model);
+  if (provider === 'codex' || engine === 'codex') return codexLabel();
+  if ((provider === 'tour' || provider === 'guide') && engine === 'claude') return claudeLabel();
   if (provider === 'tour' || provider === 'guide') {
     if (engine === 'cursor') return catalogLabel(CURSOR_MODELS, model);
     if (engine === 'opencode' || engine === 'pi' || engine === 'copilot') return model || 'Default';
   }
-  return modelLabel(CLAUDE_FALLBACK_MODELS, model);
+  return claudeLabel();
 }
 
 function formatThinking(value: string): string {
@@ -355,8 +361,10 @@ function JobCard({
   onToggle,
   onViewDetails,
   onOpenGuide,
+  catalogs,
 }: {
   job: AgentJobInfo;
+  catalogs: ModelLabelCatalogs;
   annotationCount: number;
   onKill: () => void;
   expanded: boolean;
@@ -384,7 +392,7 @@ function JobCard({
           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-muted-foreground/50">
             <span className="rounded bg-surface-1 px-1 py-px">{job.provider}</span>
             {job.model && (
-              <span className="rounded bg-surface-1 px-1 py-px font-mono">{formatModel(job.provider, job.engine, job.model)}</span>
+              <span className="rounded bg-surface-1 px-1 py-px font-mono">{formatModel(job.provider, job.engine, job.model, catalogs)}</span>
             )}
             {job.effort && <span className="rounded bg-surface-1 px-1 py-px">{formatEffort(job.effort)}</span>}
             {job.reasoningEffort && <span className="rounded bg-surface-1 px-1 py-px">{formatEffort(job.reasoningEffort)}</span>}
@@ -493,8 +501,9 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
   const [pendingLaunch, setPendingLaunch] = useState<{ label: string; provider?: string; startedAt: number } | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const launchingRef = useRef(false);
-  // Claude/Codex catalogs are fetched the first time this panel mounts (never
-  // on page load) and shared with Ask AI; saved picks resolve against them.
+  // Claude/Codex catalogs are shared with Ask AI; only the engine this panel
+  // is set to is fetched (never on page load), and saved picks resolve
+  // against it.
   const catalogs = useModelCatalogs(capabilities);
   const settings = useAgentSettings(catalogs);
   const {
@@ -557,6 +566,9 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     setGuidePiThinking,
     setGuideCopilotModel,
   } = settings;
+  const activeEngine = selectedMode === 'review' ? reviewEngine : selectedMode === 'tour' ? tourEngine : guideEngine;
+  const loadCatalog = catalogs.load;
+  useEffect(() => loadCatalog(activeEngine), [loadCatalog, activeEngine]);
 
   // Review profiles (built-in default plus the user's enabled skills). Loaded
   // from the discovery endpoint and refreshed after a skill is added.
@@ -994,6 +1006,22 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     );
   }
 
+  // Model picker for Claude and Codex, or a quiet loading row while that
+  // engine's catalog is still settling (launch is held until it does).
+  const renderCatalogModelPicker = (
+    engine: 'claude' | 'codex',
+    value: string,
+    onChange: (value: string) => void,
+  ) => (
+    <ConfigRow label="Model" stacked>
+      {catalogs[engine].settled ? (
+        <SelectMenu value={value} options={modelSelectOptions(catalogs[engine].models, value)} onChange={onChange} />
+      ) : (
+        renderStaticChoice('Loading models…', <Loader2 className="animate-spin text-muted-foreground" size={11} />)
+      )}
+    </ConfigRow>
+  );
+
   // Effort / reasoning picker for Claude and Codex: only the levels the
   // selected model accepts, and no picker at all for a model that takes none.
   const renderEffortPicker = (
@@ -1081,17 +1109,13 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                 </ConfigRow>
                 {reviewEngine === 'claude' && (
                   <>
-                    <ConfigRow label="Model" stacked>
-                      <SelectMenu value={claudeModel} options={modelSelectOptions(catalogs.claude.models, claudeModel)} onChange={setClaudeModel} />
-                    </ConfigRow>
+                    {renderCatalogModelPicker('claude', claudeModel, setClaudeModel)}
                     {renderEffortPicker('Effort', catalogs.claude.models, claudeModel, claudeEffort, setClaudeEffort)}
                   </>
                 )}
                 {reviewEngine === 'codex' && (
                   <>
-                    <ConfigRow label="Model" stacked>
-                      <SelectMenu value={codexModel} options={modelSelectOptions(catalogs.codex.models, codexModel)} onChange={setCodexModel} />
-                    </ConfigRow>
+                    {renderCatalogModelPicker('codex', codexModel, setCodexModel)}
                     {renderEffortPicker('Reasoning', catalogs.codex.models, codexModel, codexReasoning, setCodexReasoning)}
                     {modelSupportsFast(catalogs.codex.models, codexModel) && (
                       <ConfigRow label="Fast mode">
@@ -1117,15 +1141,9 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
             {selectedMode === 'tour' && (
               <>
                 {renderEngineSelect(tourEngine, setTourEngine, availableEngines, ENGINE_ICON, ENGINE_LABEL)}
-                <ConfigRow label="Model" stacked>
-                  <SelectMenu
-                    value={tourEngine === 'claude' ? tourClaudeModel : tourCodexModel}
-                    options={tourEngine === 'claude'
-                      ? modelSelectOptions(catalogs.claude.models, tourClaudeModel)
-                      : modelSelectOptions(catalogs.codex.models, tourCodexModel)}
-                    onChange={tourEngine === 'claude' ? setTourClaudeModel : setTourCodexModel}
-                  />
-                </ConfigRow>
+                {tourEngine === 'claude'
+                  ? renderCatalogModelPicker('claude', tourClaudeModel, setTourClaudeModel)
+                  : renderCatalogModelPicker('codex', tourCodexModel, setTourCodexModel)}
 
                 {/* Claude-only: effort level */}
                 {tourEngine === 'claude' &&
@@ -1148,17 +1166,8 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
             {selectedMode === 'guide' && (
               <>
                 {renderEngineSelect(guideEngine, setGuideEngine, availableReviewEngines, REVIEW_ENGINE_ICON, REVIEW_ENGINE_LABEL)}
-                {(guideEngine === 'claude' || guideEngine === 'codex') && (
-                  <ConfigRow label="Model" stacked>
-                    <SelectMenu
-                      value={guideEngine === 'claude' ? guideClaudeModel : guideCodexModel}
-                      options={guideEngine === 'claude'
-                        ? modelSelectOptions(catalogs.claude.models, guideClaudeModel)
-                        : modelSelectOptions(catalogs.codex.models, guideCodexModel)}
-                      onChange={guideEngine === 'claude' ? setGuideClaudeModel : setGuideCodexModel}
-                    />
-                  </ConfigRow>
-                )}
+                {guideEngine === 'claude' && renderCatalogModelPicker('claude', guideClaudeModel, setGuideClaudeModel)}
+                {guideEngine === 'codex' && renderCatalogModelPicker('codex', guideCodexModel, setGuideCodexModel)}
 
                 {/* Claude-only: effort level */}
                 {guideEngine === 'claude' &&
@@ -1227,6 +1236,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
             <JobCard
               key={job.id}
               job={job}
+              catalogs={catalogs}
               annotationCount={annotationCounts.get(job.source) ?? 0}
               onKill={() => onKillJob(job.id)}
               expanded={expandedJobId === job.id}

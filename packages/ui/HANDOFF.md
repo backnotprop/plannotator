@@ -1495,6 +1495,22 @@ Tests (both DOM-gated, both added to the workflow's DOM_TESTS step):
 `components/AnnotationPanel.cardHeader.test.tsx` (6) and
 `components/AnnotationPanel.editMentions.test.tsx` (10).
 
+## Discovered model catalogs (0.46.0, core 0.25.6) — BREAKING for hosts
+
+Claude and Codex model lists are no longer hand-maintained in `@plannotator/ui`. They come from the installed CLIs through the Ask AI provider (`/api/ai/capabilities?activate=<id>`), in the shared `CatalogModel` shape from the new `@plannotator/core/model-catalog` subpath, with one small static fallback per provider (`CLAUDE_FALLBACK_MODELS`, `CODEX_FALLBACK_MODELS`). A host that imported any of the following must switch:
+
+| Removed | Use instead |
+| --- | --- |
+| `@plannotator/ui/utils/codexModels` (the whole module: `CODEX_MODELS`, `CODEX_EFFORT_LABELS`, `codexReasoningOptions`, `clampCodexReasoning`) | `useModelCatalogs(capabilities)` for the live list, `effortSelectOptions` / `resolveEffortChoice` / `EFFORT_LABELS` from `@plannotator/core/model-catalog` |
+| `CLAUDE_MODELS`, `CLAUDE_EFFORT`, `TOUR_CLAUDE_MODELS`, `CODEX_MODELS`, `codexReasoningOptions` exports of `components/AgentsTab` | the same catalog helpers (`modelSelectOptions`, `effortSelectOptions`) |
+| `sanitizeCodexPerModel`, `migrateCodexSection` from `hooks/useAgentSettings` | nothing: saved picks now resolve at read time with `resolveModelChoice` |
+
+Behaviour changes a host may notice:
+
+- `DEFAULT_CODEX_MODEL` (and the tour/guide Codex defaults) are now `''`, meaning "the model the Codex list marks default"; `DEFAULT_CLAUDE_MODEL` is `'opus'` (was `'claude-opus-5'`).
+- `useAgentSettings(catalogs?)` takes the catalogs and returns EFFECTIVE (resolved) model/effort values; called without catalogs it returns the saved values unchanged, as before.
+- `AIProviderModel` is now an alias of `CatalogModel` (adds optional `resolvedId`, `fastMode`); `resolveAIModelForProvider` uses the shared resolver, so a stale pinned id keeps its model family instead of snapping to the provider default.
+
 ## Publishing & versioning
 
 - **ui 0.45.0 (annotation card header slot + mentions on the card's edit box): `@plannotator/ui` only — `@plannotator/core` is UNCHANGED at `0.25.5`, so this publishes alone** (core 0.25.5 must already be published). Purely additive over 0.44.0, both props on `AnnotationPanel`: `renderCardHeader` (the header-row twin of `renderCardFooter`, wrapper `[data-annotation-card-header]`, renders under `readOnly`, open-document cards only in the All-files view) and `mentionSource` (the 0.43.0 type, applied to the card's EDIT box, saving `onEdit(id, { text, mentions })` only when a source was supplied and a pick survived). Nothing is removed, no new supported imports (`components/MentionAutocomplete` is internal glue), no export-, share- or archive-visible change, and Plannotator passes neither — `packages/editor` and `packages/review-editor` have zero source diff, and the panel is byte-identical to 0.44.0. Known difference from `CommentPopover`: no chips in the card's edit box (follow-up named in the section). See "Annotation card header slot and mentions on the edit box (0.45.0)".
