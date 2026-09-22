@@ -89,6 +89,14 @@ describe("claudeCatalogFromSdk", () => {
     expect(old.filter((m) => m.default).map((m) => m.id)).toEqual(["sonnet"]);
   });
 
+  test("a context size in the default row's description is not read as a version", () => {
+    const models = claudeCatalogFromSdk([
+      { value: "default", description: "Use the default model (currently Opus 1M context)" },
+      { value: "sonnet", resolvedModel: "claude-sonnet-5" },
+    ]);
+    expect(models.find((m) => m.id === "opus")?.label).toBe("Opus (latest)");
+  });
+
   test("the core aliases are offered even when nothing names their family", () => {
     const models = claudeCatalogFromSdk([{ value: "sonnet", resolvedModel: "claude-sonnet-5" }]);
     expect(models.map((m) => m.id).sort()).toEqual(["haiku", "opus", "sonnet"]);

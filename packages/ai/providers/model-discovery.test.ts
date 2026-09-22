@@ -88,7 +88,12 @@ describe("createDeferredModelDiscovery", () => {
     let calls = 0;
     let finish!: () => void;
     const done = new Promise<void>((resolve) => { finish = resolve; });
-    return { provider: { fetchModels: () => { calls++; return done; } }, finish, calls: () => calls };
+    const provider = {
+      models: CLAUDE_FALLBACK_MODELS,
+      modelsSource: "fallback" as const,
+      fetchModels: () => { calls++; return done; },
+    };
+    return { provider, finish, calls: () => calls };
   };
   const settledWithin = async (p: Promise<void>, ms = 50) =>
     Promise.race([p.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), ms))]);
@@ -105,6 +110,28 @@ describe("createDeferredModelDiscovery", () => {
     claude.finish();
     expect(await settledWithin(activate)).toBe(true);
     expect(claude.calls()).toBe(1);
+  });
+
+  test("before discovery lands, a pick the fallback offers starts at once", async () => {
+    const d = createDeferredModelDiscovery();
+    const claude = hanging();
+    d.defer("claude-agent-sdk", claude.provider, { blockSession: false });
+    for (const pick of ["opus", "sonnet", "", undefined]) {
+      expect(await settledWithin(d.beforeProviderSession("claude-agent-sdk", "session", pick))).toBe(true);
+    }
+  });
+
+  test("before discovery lands, a pick only the tool offers waits for it (never resolved onto the fallback)", async () => {
+    // opus[1m] is not in the fallback: resolving now would run the first
+    // session on `opus` (another context window and billing) and later ones
+    // on opus[1m].
+    const d = createDeferredModelDiscovery();
+    const claude = hanging();
+    d.defer("claude-agent-sdk", claude.provider, { blockSession: false });
+    const session = d.beforeProviderSession("claude-agent-sdk", "session", "opus[1m]");
+    expect(await settledWithin(session)).toBe(false);
+    claude.finish();
+    expect(await settledWithin(session)).toBe(true);
   });
 
   test("a blocking provider's session waits for discovery", async () => {

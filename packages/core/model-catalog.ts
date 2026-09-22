@@ -119,7 +119,8 @@ function defaultRowTarget(info: ClaudeSdkModelInfo): { family: string; version?:
   const family = info.resolvedModel ? claudeFamily(info.resolvedModel) : undefined;
   if (family) return { family, version: claudeModelVersion(info.resolvedModel) };
   // Older CLIs: "Use the default model (currently Opus 4.7 (1M context))", no resolvedModel.
-  const match = /\b(opus|sonnet|fable|haiku)\b(?:\s+(\d+(?:\.\d+)?))?/i.exec(info.description ?? '');
+  // A number followed by `M` or more digits is a context size ("Opus 1M context"), not a version.
+  const match = /\b(opus|sonnet|fable|haiku)\b(?:\s+(\d+(?:\.\d+)?)(?![\d.]|\s*M\b))?/i.exec(info.description ?? '');
   return match ? { family: match[1].toLowerCase(), version: match[2] } : undefined;
 }
 

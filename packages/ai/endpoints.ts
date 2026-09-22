@@ -14,7 +14,7 @@
  */
 
 import { resolveModelChoice } from "@plannotator/core/model-catalog";
-import type { AIContext, AIMessage, CreateSessionOptions } from "./types.ts";
+import type { AIContext, AIMessage, AIProvider, CreateSessionOptions } from "./types.ts";
 import type { ProviderRegistry } from "./provider.ts";
 import type { SessionManager } from "./session-manager.ts";
 
@@ -89,7 +89,11 @@ export interface AIEndpointDeps {
    * creating a session (`session`) or for an explicit `?activate=` probe
    * (`activate`, which reports the refreshed model list and so must wait).
    */
-  beforeProviderSession?: (providerId: string, reason: "session" | "activate") => Promise<void> | void;
+  beforeProviderSession?: (
+    providerId: string,
+    reason: "session" | "activate",
+    requestedModel?: string,
+  ) => Promise<void> | void;
 }
 
 const MAX_CLIENT_MAX_TURNS = 99;
@@ -125,25 +129,35 @@ export function createBestEffortOnce(
  * model picker) or the first session, never at startup. An `?activate=` probe
  * always waits for it (it reports the refreshed list). A session waits only
  * for providers registered with `blockSession` (the default); the others
- * resolve the model against their current or fallback list and let discovery
- * finish in the background.
+ * resolve the model against their current list and let discovery finish in
+ * the background — unless that list is still the static fallback and does not
+ * offer the requested model (e.g. `opus[1m]`, which the fallback lacks), where
+ * resolving now would silently change the pick for the first session only, so
+ * the session waits for discovery (bounded by the provider's own timeout).
  */
 export function createDeferredModelDiscovery() {
   const initializers = new Map<string, () => Promise<void>>();
-  const background = new Set<string>();
+  const background = new Map<string, Pick<AIProvider, "models" | "modelsSource">>();
   return {
     defer(providerId: string, provider: object | null | undefined, { blockSession = true }: { blockSession?: boolean } = {}) {
       if (!provider || !("fetchModels" in provider)) return;
       const fetchModels = provider.fetchModels as () => Promise<void>;
       initializers.set(providerId, createBestEffortOnce(() => fetchModels.call(provider)));
-      if (!blockSession) background.add(providerId);
+      if (!blockSession) background.set(providerId, provider as Pick<AIProvider, "models" | "modelsSource">);
     },
-    async beforeProviderSession(providerId: string, reason: "session" | "activate"): Promise<void> {
+    async beforeProviderSession(providerId: string, reason: "session" | "activate", requestedModel?: string): Promise<void> {
       const initialize = initializers.get(providerId);
       if (!initialize) return;
-      if (reason === "session" && background.has(providerId)) {
-        void initialize();
-        return;
+      const provider = background.get(providerId);
+      if (reason === "session" && provider) {
+        const pickOnFallbackOnly =
+          !!requestedModel &&
+          provider.modelsSource === "fallback" &&
+          !(provider.models ?? []).some((m) => m.id === requestedModel);
+        if (!pickOnFallbackOnly) {
+          void initialize();
+          return;
+        }
       }
       await initialize();
     },
@@ -244,7 +258,7 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
       }
 
       try {
-        await beforeProviderSession?.(providerEntry.id, "session");
+        await beforeProviderSession?.(providerEntry.id, "session", model);
         // Resolve the model against the post-activation list with the shared
         // resolver (exact id → the model an alias covers → same-family alias →
         // the provider's default), so a stale pre-discovery pick lands on the
