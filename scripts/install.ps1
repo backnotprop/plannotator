@@ -431,6 +431,9 @@ if ($SkipSkills) { $skipSkillsResolved = $true; $skipSkillsSource = "-SkipSkills
 # The private data directory is only a detection signal; plugins live in config.
 $agyBase = if ((Test-Path -LiteralPath "$env:USERPROFILE\.gemini\config" -PathType Container) -or ((-not (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\config")) -and (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\antigravity-cli" -PathType Container))) { "$env:USERPROFILE\.gemini\config" } else { $null }
 
+# Antigravity also owns ~/.gemini; require a Gemini-specific signal there.
+$geminiAvailable = (Get-Command gemini -ErrorAction SilentlyContinue) -or (Test-Path "$env:USERPROFILE\.gemini\settings.json" -PathType Leaf) -or ((Test-Path "$env:USERPROFILE\.gemini" -PathType Container) -and -not $agyBase -and -not (Test-Path "$env:USERPROFILE\.gemini\antigravity-cli" -PathType Container))
+
 # Pre-flight: if verification is requested, reject tags older than the first
 # attested release before we download anything. Uses PowerShell's [version]
 # class for proper numeric comparison (lexicographic string cmp gets
@@ -684,6 +687,17 @@ if ($minimal) {
     Write-Host "No skills, hooks, agent integrations, or config files were written."
     exit 0
 }
+
+# Probe the installed binary before writing any Antigravity files.
+if ($agyBase -and -not $skipAntigravityResolved) {
+    $agyProbe = $null
+    try { $agyProbe = '{"toolCall":{"name":"plannotator_install_probe","args":{}}}' | & "$installDir\plannotator.exe" 2>$null } catch {}
+    if ($LASTEXITCODE -ne 0 -or "$agyProbe".Trim() -ne '{}') {
+        $skipAntigravityResolved = $true
+        $skipAntigravitySource = "installed binary lacks Antigravity support; install a release containing the adapter"
+    }
+}
+# End Antigravity binary probe
 
 Install-SemSidecar
 Install-AgentTerminalRuntime
@@ -1172,7 +1186,7 @@ try {
             # plain-clone fallback (#1238): that git has no sparse-checkout
             # subcommand, and the full checkout needs no narrowing.
             if ($sparseClone) {
-                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>$null }
+                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands apps/antigravity/skills 2>$null }
             }
 
             # Claude Code and Codex consume different skill bodies. Claude Code
@@ -1209,11 +1223,11 @@ try {
             }
 
             # Antigravity CLI plugin skills (only when detected)
-            if ($agyBase -and -not $skipAntigravityResolved -and (Test-Path "apps\skills\core")) {
+            if ($agyBase -and -not $skipAntigravityResolved -and (Test-Path "apps\antigravity\skills")) {
                 $agySkillsDir = "$agyBase\plugins\plannotator\skills"
                 New-Item -ItemType Directory -Force -Path $agySkillsDir | Out-Null
-                Copy-SkillIfPresent "apps\skills\core\plannotator-review" $agySkillsDir
-                Copy-SkillIfPresent "apps\skills\core\plannotator-annotate" $agySkillsDir
+                Copy-SkillIfPresent "apps\antigravity\skills\plannotator-review" $agySkillsDir
+                Copy-SkillIfPresent "apps\antigravity\skills\plannotator-annotate" $agySkillsDir
                 Write-Host "Installed Antigravity skills to $agySkillsDir\"
             }
 
@@ -1257,7 +1271,7 @@ try {
             # Gemini TOML commands -> ~/.gemini/commands (only when ~/.gemini exists).
             # These are Gemini's native command format. A Gemini opt-out
             # (#1178) leaves ~/.gemini entirely untouched.
-            if ((Test-Path "$env:USERPROFILE\.gemini") -and -not $skipGeminiResolved -and (Test-Path "apps\gemini\commands")) {
+            if ($geminiAvailable -and -not $skipGeminiResolved -and (Test-Path "apps\gemini\commands")) {
                 $geminiCommandsDir = "$env:USERPROFILE\.gemini\commands"
                 $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
                 if ($geminiCmds) {
@@ -1381,7 +1395,7 @@ Update-PiExtensionIfPresent
 
 # --- Gemini CLI support (only if Gemini is installed) ---
 $geminiDir = "$env:USERPROFILE\.gemini"
-if ((Test-Path $geminiDir) -and $skipGeminiResolved) {
+if ($geminiAvailable -and $skipGeminiResolved) {
     # HONEST three-state reporting (#1178): detected-but-skipped is its own
     # state. Gemini settings, policy, and commands are left untouched.
     Write-Host ""
@@ -1393,7 +1407,7 @@ if ((Test-Path $geminiDir) -and $skipGeminiResolved) {
             Write-Host "An existing Gemini integration at $geminiSettingsProbe was left untouched."
         }
     }
-} elseif (Test-Path $geminiDir) {
+} elseif ($geminiAvailable) {
     # Install policy file
     $geminiPoliciesDir = "$geminiDir\policies"
     New-Item -ItemType Directory -Force -Path $geminiPoliciesDir | Out-Null
@@ -1474,7 +1488,8 @@ if (-not $agyBase) {
     $agyPluginDir = "$agyBase\plugins\plannotator"
     New-Item -ItemType Directory -Force -Path $agyPluginDir | Out-Null
     '{"name":"plannotator"}' | Set-Content -Path "$agyPluginDir\plugin.json"
-    '{"plannotator":{"PreToolUse":[{"matcher":"^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}' | Set-Content -Path "$agyPluginDir\hooks.json"
+    $agyCommand = ('"' + "$installDir\plannotator.exe" + '"') | ConvertTo-Json -Compress
+    ('{"plannotator":{"PreToolUse":[{"matcher":"^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":' + $agyCommand + ',"timeout":345600}]}]}}') | Set-Content -Path "$agyPluginDir\hooks.json"
     Write-Host "Antigravity: detected, installed plugin to $agyPluginDir"
 }
 

@@ -613,6 +613,13 @@ if exist "%USERPROFILE%\.gemini\config\" (
     set "AGY_BASE=%USERPROFILE%\.gemini\config"
 )
 
+REM Antigravity also owns ~/.gemini; require a Gemini-specific signal there.
+set "GEMINI_AVAILABLE=0"
+where gemini >nul 2>&1
+if !ERRORLEVEL! equ 0 set "GEMINI_AVAILABLE=1"
+if exist "%USERPROFILE%\.gemini\settings.json" set "GEMINI_AVAILABLE=1"
+if exist "%USERPROFILE%\.gemini\" if not defined AGY_BASE if not exist "%USERPROFILE%\.gemini\antigravity-cli\" set "GEMINI_AVAILABLE=1"
+
 REM Pre-flight: reject verification requests for tags older than the first
 REM attested release BEFORE downloading. Critical security point: the version
 REM comparison uses $env:TAG_NUM / $env:MIN_NUM instead of interpolating
@@ -876,6 +883,19 @@ if "!MINIMAL!"=="1" (
     echo No skills, hooks, agent integrations, or config files were written.
     exit /b 0
 )
+
+REM Probe the installed binary before writing any Antigravity files.
+if defined AGY_BASE if "!SKIP_ANTIGRAVITY!"=="0" (
+    set "AGY_SUPPORTED=0"
+    for /f "delims=" %%P in ('echo {"toolCall":{"name":"plannotator_install_probe","args":{}}} ^| "!INSTALL_PATH!" 2^>nul') do (
+        if "%%P"=="{}" set "AGY_SUPPORTED=1"
+    )
+    if "!AGY_SUPPORTED!"=="0" (
+        set "SKIP_ANTIGRAVITY=1"
+        set "SKIP_ANTIGRAVITY_SOURCE=installed binary lacks Antigravity support; install a release containing the adapter"
+    )
+)
+REM End Antigravity binary probe
 
 call :InstallSemSidecar
 call :InstallAgentTerminalRuntime
@@ -1228,7 +1248,7 @@ if "!SPARSE_UNSUPPORTED!"=="1" (
 
 if "!CLONE_OK!"=="1" (
     pushd "!SKILLS_TMP!\repo"
-    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
+    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands apps/antigravity/skills >nul 2>&1
 
     REM Claude Code reads apps\skills\claude\* (injection `!`plannotator ... $ARGUMENTS``
     REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
@@ -1274,20 +1294,20 @@ if "!CLONE_OK!"=="1" (
 
     REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native
     REM format) and not opted out (#1178).
-    if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" if exist "apps\gemini\commands" (
+    if "!GEMINI_AVAILABLE!"=="1" if "!SKIP_GEMINI!"=="0" if exist "apps\gemini\commands" (
         if not exist "!GEMINI_COMMANDS_DIR!" mkdir "!GEMINI_COMMANDS_DIR!"
         xcopy /y /q "apps\gemini\commands\*.toml" "!GEMINI_COMMANDS_DIR!\" >nul 2>&1
         echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
     )
 
     REM Antigravity CLI plugin skills (only when detected)
-    if defined AGY_BASE if "!SKIP_ANTIGRAVITY!"=="0" if exist "apps\skills\core" (
+    if defined AGY_BASE if "!SKIP_ANTIGRAVITY!"=="0" if exist "apps\antigravity\skills" (
         set "AGY_SKILLS_DIR=!AGY_BASE!\plugins\plannotator\skills"
         if not exist "!AGY_SKILLS_DIR!" mkdir "!AGY_SKILLS_DIR!"
         for %%S in (plannotator-review plannotator-annotate) do (
-            if exist "apps\skills\core\%%S" (
+            if exist "apps\antigravity\skills\%%S" (
                 if exist "!AGY_SKILLS_DIR!\%%S" rmdir /s /q "!AGY_SKILLS_DIR!\%%S" >nul 2>&1
-                xcopy /s /i /y /q "apps\skills\core\%%S" "!AGY_SKILLS_DIR!\%%S\" >nul 2>&1
+                xcopy /s /i /y /q "apps\antigravity\skills\%%S" "!AGY_SKILLS_DIR!\%%S\" >nul 2>&1
             )
         )
         echo Installed Antigravity skills to !AGY_SKILLS_DIR!\
@@ -1447,7 +1467,7 @@ if !ERRORLEVEL! equ 0 (
 REM --- Gemini CLI support (only if Gemini is installed) ---
 REM HONEST three-state reporting (#1178): detected-but-skipped is its own
 REM state. A Gemini opt-out leaves ~/.gemini entirely untouched.
-if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="1" (
+if "!GEMINI_AVAILABLE!"=="1" if "!SKIP_GEMINI!"=="1" (
     echo.
     echo Gemini: detected, skipped ^(!SKIP_GEMINI_SOURCE!^).
     if exist "%USERPROFILE%\.gemini\settings.json" (
@@ -1455,7 +1475,7 @@ if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="1" (
         if !ERRORLEVEL! equ 0 echo An existing Gemini integration at %USERPROFILE%\.gemini\settings.json was left untouched.
     )
 )
-if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" (
+if "!GEMINI_AVAILABLE!"=="1" if "!SKIP_GEMINI!"=="0" (
     REM Install policy file
     if not exist "%USERPROFILE%\.gemini\policies" mkdir "%USERPROFILE%\.gemini\policies"
     (
@@ -1529,7 +1549,8 @@ if not defined AGY_BASE (
     set "AGY_PLUGIN_DIR=!AGY_BASE!\plugins\plannotator"
     if not exist "!AGY_PLUGIN_DIR!" mkdir "!AGY_PLUGIN_DIR!"
     >"!AGY_PLUGIN_DIR!\plugin.json" echo {"name":"plannotator"}
-    >"!AGY_PLUGIN_DIR!\hooks.json" echo {"plannotator":{"PreToolUse":[{"matcher":"^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}
+    set "AGY_EXE_PATH=!INSTALL_PATH:\=/!"
+    >"!AGY_PLUGIN_DIR!\hooks.json" echo {"plannotator":{"PreToolUse":[{"matcher":"^^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"\"!AGY_EXE_PATH!\"","timeout":345600}]}]}}
     echo Antigravity: detected, installed plugin to !AGY_PLUGIN_DIR!
 )
 

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { getAntigravityPlan, formatAntigravityDecision } from "./antigravity-plan";
 import { getAgentName } from "../../../packages/core/agents";
 
@@ -40,11 +42,20 @@ describe("Antigravity plan adapter", () => {
   test("returns native allow/deny decisions and preserves review feedback", () => {
     expect(formatAntigravityDecision({ approved: true })).toEqual({ decision: "allow" });
     expect(formatAntigravityDecision({ approved: true, feedback: "Keep compatibility" })).toEqual({ decision: "allow", reason: "Keep compatibility" });
-    const denied = formatAntigravityDecision({ approved: false, feedback: "Add rollback steps" });
-    expect(denied.decision).toBe("deny");
-    expect(denied.reason).toContain("Add rollback steps");
-    expect(denied.reason).toContain("write_to_file");
-    expect(denied.reason).toContain("rejected write did not run");
-    expect(denied.reason).not.toContain("exit_plan_mode");
+    const previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-agy-prompts-"));
+    try {
+      process.env.PLANNOTATOR_DATA_DIR = dataDir;
+      const denied = formatAntigravityDecision({ approved: false, feedback: "Add rollback steps" });
+      expect(denied.decision).toBe("deny");
+      expect(denied.reason).toContain("Add rollback steps");
+      expect(denied.reason).toContain("write_to_file");
+      expect(denied.reason).toContain("rejected write did not run");
+      expect(denied.reason).not.toContain("exit_plan_mode");
+    } finally {
+      if (previousDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });
