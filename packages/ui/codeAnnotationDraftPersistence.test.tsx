@@ -21,6 +21,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { useCodeAnnotationDraft } from './hooks/useCodeAnnotationDraft';
+import { resetDraftTransport, setDraftTransport } from './hooks/useAnnotationDraft';
 import type { CodeAnnotation } from './types';
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from '../shared/draft';
 
@@ -317,98 +318,198 @@ describe('PR draft served for a changed patch (#1590)', () => {
   });
 });
 
-describe('in-place switch onto another draft target (#1590 review, item 2)', () => {
+describe('in-place switch onto another draft target (#1590)', () => {
+  // A host that behaves like the review App: it owns the annotation list,
+  // appends whatever the hook auto-merges after a switch, and can be edited.
+  interface Host {
+    result: { current: HookResult | null };
+    ids: () => string[];
+    setAnnotations: (next: CodeAnnotation[]) => Promise<void>;
+    setViewed: (next: Set<string>) => Promise<void>;
+    adopt: (state: { found: boolean; draftGeneration: number | null }) => Promise<void>;
+    unmount: () => Promise<void>;
+  }
+
+  const ann = (id: string) => ({ ...(ANNOTATION as object), id }) as unknown as CodeAnnotation;
+
+  async function mountHost(initial: CodeAnnotation[]): Promise<Host> {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const resultRef: { current: HookResult | null } = { current: null };
+    const control: {
+      setAnnotations?: React.Dispatch<React.SetStateAction<CodeAnnotation[]>>;
+      setViewed?: React.Dispatch<React.SetStateAction<Set<string>>>;
+      annotations: CodeAnnotation[];
+    } = { annotations: initial };
+    function MergingHost() {
+      const [annotations, setAnnotations] = React.useState<CodeAnnotation[]>(initial);
+      const [viewedFiles, setViewed] = React.useState<Set<string>>(new Set());
+      control.setAnnotations = setAnnotations;
+      control.setViewed = setViewed;
+      control.annotations = annotations;
+      resultRef.current = useCodeAnnotationDraft(options({
+        annotations,
+        viewedFiles,
+        onDraftTargetMerge: (items) => setAnnotations((prev) => [...prev, ...items.annotations]),
+      }));
+      return null;
+    }
+    let root: Root;
+    await act(async () => {
+      root = createRoot(host);
+      root.render(<MergingHost />);
+    });
+    await tick(0);
+    return {
+      result: resultRef,
+      ids: () => control.annotations.map((a) => a.id),
+      setAnnotations: async (next) => { await act(async () => { control.setAnnotations!(next); }); },
+      setViewed: async (next) => { await act(async () => { control.setViewed!(next); }); },
+      adopt: async (state) => { await act(async () => { resultRef.current!.adoptDraftTarget(state); }); },
+      unmount: async () => { await act(async () => { root.unmount(); }); host.remove(); },
+    };
+  }
+
+  const diskIds = () =>
+    ((loadDraft(DRAFT_KEY) as { codeAnnotations?: Array<{ id: string }> } | null)?.codeAnnotations ?? []).map((a) => a.id);
+
   test.skipIf(!hasDom)('adopting the target floor lets the next autosave land past an old tombstone', async () => {
-    const s = await mountSession(options());
-    // The target the session just switched onto was submitted at generation
-    // 40 in an earlier session (the shim's one key stands in for it).
+    const h = await mountHost([]);
+    // The target just switched onto was submitted at generation 40 earlier.
     saveDraft(DRAFT_KEY, { codeAnnotations: [ANNOTATION], draftGeneration: 39, ts: Date.now() });
     deleteDraft(DRAFT_KEY, 40);
-    await act(async () => { s.result.current!.adoptDraftTarget({ found: false, draftGeneration: 40 }); });
-    await s.rerender(options({ annotations: [{ ...(ANNOTATION as object), id: 'new-after-switch' } as unknown as CodeAnnotation] }));
+    await h.adopt({ found: false, draftGeneration: 40 });
+    await h.setAnnotations([ann('new-after-switch')]);
     await tick(DEBOUNCE_WAIT_MS);
-    const saved = loadDraft(DRAFT_KEY) as { codeAnnotations?: Array<{ id: string }>; draftGeneration?: number } | null;
-    expect(saved?.codeAnnotations?.map((a) => a.id)).toEqual(['new-after-switch']);
+    const saved = loadDraft(DRAFT_KEY) as { draftGeneration?: number } | null;
+    expect(diskIds()).toEqual(['new-after-switch']);
     expect(saved!.draftGeneration!).toBeGreaterThan(40);
-    await s.unmount();
+    await h.unmount();
   });
 
-  test.skipIf(!hasDom)('a draft on the new target is offered for MERGE, and only with items the session lacks', async () => {
-    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
-    const theirs = { ...(ANNOTATION as object), id: 'waiting-on-b' } as unknown as CodeAnnotation;
-    const s = await mountSession(options({ annotations: [mine] }));
-    saveDraft(DRAFT_KEY, { codeAnnotations: [mine, theirs], draftGeneration: 12, ts: Date.now() });
-    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 12 }); });
+  test.skipIf(!hasDom)('no edit: the switch merges the target\'s unsent items into the session and saves both, with no blocking banner', async () => {
+    const h = await mountHost([ann('mine')]);
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ann('waiting-on-b')], draftGeneration: 12, ts: Date.now() });
+    await h.adopt({ found: true, draftGeneration: 12 });
+    await h.setViewed(new Set(['src/b.ts'])); // the switch replaces viewed files
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(h.ids()).toEqual(['mine', 'waiting-on-b']);
+    expect(diskIds()).toEqual(['mine', 'waiting-on-b']);
+    expect(h.result.current!.draftBanner).toBeNull();
+    // Nothing is left waiting: later edits keep saving.
+    await h.setAnnotations([ann('mine'), ann('waiting-on-b'), ann('later')]);
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(diskIds()).toEqual(['mine', 'waiting-on-b', 'later']);
+    await h.unmount();
+  });
+
+  test.skipIf(!hasDom)('an emptied session does not delete the target\'s draft; its items are merged in instead', async () => {
+    const h = await mountHost([]);
+    await h.setAnnotations([ann('mine')]);
+    await h.setAnnotations([]); // engaged, then emptied
+    await tick(DEBOUNCE_WAIT_MS);
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ann('waiting-on-b')], draftGeneration: 20, ts: Date.now() });
+    await h.adopt({ found: true, draftGeneration: 20 });
+    await h.setViewed(new Set());
+    await tick(DEBOUNCE_WAIT_MS);
+    expect(h.ids()).toEqual(['waiting-on-b']);
+    expect(diskIds()).toEqual(['waiting-on-b']);
+    await h.unmount();
+  });
+
+  test.skipIf(!hasDom)('a comment deleted this session is not merged back from a target saved before the delete', async () => {
+    const h = await mountHost([ann('keep'), ann('x')]);
+    await h.setAnnotations([ann('keep')]); // x deleted
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ann('keep'), ann('x'), ann('y')], draftGeneration: 30, ts: Date.now() });
+    await h.adopt({ found: true, draftGeneration: 30 });
     await tick(0);
-    expect(s.result.current!.draftBanner?.count).toBe(1);
-    let restored: ReturnType<HookResult['restoreDraft']> | null = null;
-    await act(async () => { restored = s.result.current!.restoreDraft(); });
-    expect(restored!.merge).toBe(true);
-    expect(restored!.annotations.map((a) => a.id)).toEqual(['waiting-on-b']);
-    await s.unmount();
+    expect(h.ids()).toEqual(['keep', 'y']);
+    await h.unmount();
   });
 
-  test.skipIf(!hasDom)('while the merge offer is pending, the switch itself (viewed files changing, no edit) does not overwrite the new target\'s draft', async () => {
-    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
-    const theirs = { ...(ANNOTATION as object), id: 'waiting-on-b' } as unknown as CodeAnnotation;
-    const s = await mountSession(options({ annotations: [mine] }));
-    saveDraft(DRAFT_KEY, { codeAnnotations: [theirs], draftGeneration: 12, ts: Date.now() });
-    // The app adopts the target and, in the same switch, replaces viewed files.
-    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 12 }); });
-    await s.rerender(options({ annotations: [mine], viewedFiles: new Set(['src/b.ts']) }));
-    await tick(DEBOUNCE_WAIT_MS);
-    const onDisk = loadDraft(DRAFT_KEY) as { codeAnnotations?: Array<{ id: string }> } | null;
-    expect(onDisk?.codeAnnotations?.map((a) => a.id)).toEqual(['waiting-on-b']);
-    expect(s.result.current!.draftBanner?.count).toBe(1);
-    // Answering the offer releases autosave: restoring merges and saves both.
-    let restored: ReturnType<HookResult['restoreDraft']> | null = null;
-    await act(async () => { restored = s.result.current!.restoreDraft(); });
-    await s.rerender(options({ annotations: [mine, ...restored!.annotations], viewedFiles: new Set(['src/b.ts']) }));
-    await tick(DEBOUNCE_WAIT_MS);
-    const merged = loadDraft(DRAFT_KEY) as { codeAnnotations?: Array<{ id: string }> } | null;
-    expect(merged?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'waiting-on-b']);
-    await s.unmount();
-  });
-
-  test.skipIf(!hasDom)('an emptied session switching onto a target with a draft does not delete that draft before the reviewer answers', async () => {
-    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
-    const theirs = { ...(ANNOTATION as object), id: 'waiting-on-b' } as unknown as CodeAnnotation;
-    const s = await mountSession(options());
-    // The reviewer added a comment and removed it (engaged, now empty).
-    await s.rerender(options({ annotations: [mine] }));
-    await s.rerender(options({ annotations: [] }));
-    await tick(DEBOUNCE_WAIT_MS);
-    saveDraft(DRAFT_KEY, { codeAnnotations: [theirs], draftGeneration: 20, ts: Date.now() });
-    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 20 }); });
-    await s.rerender(options({ annotations: [], viewedFiles: new Set<string>() }));
-    await s.rerender(options({ annotations: [] }));
-    await tick(DEBOUNCE_WAIT_MS);
-    expect(loadDraft(DRAFT_KEY)).not.toBeNull();
-    await s.unmount();
-  });
-
-  test.skipIf(!hasDom)('a comment deleted this session is not offered back when switching onto a target saved before the delete', async () => {
-    const x = { ...(ANNOTATION as object), id: 'x' } as unknown as CodeAnnotation;
-    const y = { ...(ANNOTATION as object), id: 'y' } as unknown as CodeAnnotation;
-    const keep = { ...(ANNOTATION as object), id: 'keep' } as unknown as CodeAnnotation;
-    const s = await mountSession(options({ annotations: [keep, x] }));
-    await s.rerender(options({ annotations: [keep] })); // x deleted
-    saveDraft(DRAFT_KEY, { codeAnnotations: [keep, x, y], draftGeneration: 30, ts: Date.now() });
-    await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 30 }); });
-    await tick(0);
-    let restored: ReturnType<HookResult['restoreDraft']> | null = null;
-    await act(async () => { restored = s.result.current!.restoreDraft(); });
-    expect(restored!.annotations.map((a) => a.id)).toEqual(['y']);
-    await s.unmount();
-  });
-
-  test.skipIf(!hasDom)('switching back onto a target holding only this session\'s own items offers nothing', async () => {
-    const mine = { ...(ANNOTATION as object), id: 'mine' } as unknown as CodeAnnotation;
-    const s = await mountSession(options({ annotations: [mine] }));
-    saveDraft(DRAFT_KEY, { codeAnnotations: [mine], draftGeneration: 3, ts: Date.now() });
+  test.skipIf(!hasDom)('switching back onto a target holding only this session\'s own items merges nothing', async () => {
+    let merges = 0;
+    const s = await mountSession(options({ annotations: [ann('mine')], onDraftTargetMerge: () => { merges += 1; } }));
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ann('mine')], draftGeneration: 3, ts: Date.now() });
     await act(async () => { s.result.current!.adoptDraftTarget({ found: true, draftGeneration: 3 }); });
     await tick(0);
+    expect(merges).toBe(0);
     expect(s.result.current!.draftBanner).toBeNull();
     await s.unmount();
+  });
+
+  describe('switching again while the previous target\'s load is still in flight', () => {
+    // A transport whose loads resolve only when the test says so, so a slow
+    // B load can be made to land after the switch to C.
+    function deferredTransport() {
+      const loads: Array<(v: { data: unknown; generation: number | null }) => void> = [];
+      const saves: Array<{ codeAnnotations?: Array<{ id: string }> }> = [];
+      setDraftTransport({
+        load: () => new Promise((resolve) => { loads.push(resolve); }),
+        save: async (body) => { saves.push(body as { codeAnnotations?: Array<{ id: string }> }); },
+        remove: async () => {},
+      });
+      return { loads, saves };
+    }
+
+    afterEach(() => { resetDraftTransport(); });
+
+    test.skipIf(!hasDom)('A→B(draft, slow)→C(no draft): nothing stale is merged, and C keeps saving', async () => {
+      const t = deferredTransport();
+      const h = await mountHost([ann('mine')]);
+      t.loads.shift()?.({ data: null, generation: null }); // the page-load GET
+      await tick(0);
+      await h.adopt({ found: true, draftGeneration: 5 }); // B: load in flight
+      await h.setViewed(new Set(['b.ts']));
+      await h.adopt({ found: false, draftGeneration: null }); // C
+      await h.setAnnotations([ann('mine'), ann('on-c')]);
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'on-c']);
+      // B's load finally lands: ignored.
+      await act(async () => { t.loads.shift()?.({ data: { codeAnnotations: [ann('stale-b')], draftGeneration: 5, ts: 1 }, generation: null }); });
+      await tick(0);
+      expect(h.ids()).toEqual(['mine', 'on-c']);
+      expect(h.result.current!.draftBanner).toBeNull();
+      await h.unmount();
+    });
+
+    test.skipIf(!hasDom)('A→B(draft, slow)→C(draft): only C\'s items merge; B resolving late is ignored', async () => {
+      const t = deferredTransport();
+      const h = await mountHost([ann('mine')]);
+      t.loads.shift()?.({ data: null, generation: null });
+      await tick(0);
+      await h.adopt({ found: true, draftGeneration: 5 }); // B
+      await h.adopt({ found: true, draftGeneration: 7 }); // C
+      const [bLoad, cLoad] = [t.loads.shift()!, t.loads.shift()!];
+      await act(async () => { cLoad({ data: { codeAnnotations: [ann('on-c')], draftGeneration: 7, ts: 1 }, generation: null }); });
+      await act(async () => { bLoad({ data: { codeAnnotations: [ann('stale-b')], draftGeneration: 5, ts: 1 }, generation: null }); });
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(h.ids()).toEqual(['mine', 'on-c']);
+      expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'on-c']);
+      await h.unmount();
+    });
+
+    test.skipIf(!hasDom)('a failed target load settles too: saving resumes instead of sticking', async () => {
+      const loads: Array<(v: unknown) => void> = [];
+      const rejects: Array<(e: unknown) => void> = [];
+      const saves: Array<{ codeAnnotations?: Array<{ id: string }> }> = [];
+      setDraftTransport({
+        load: () => new Promise((resolve, reject) => { loads.push(resolve as (v: unknown) => void); rejects.push(reject); }),
+        save: async (body) => { saves.push(body as { codeAnnotations?: Array<{ id: string }> }); },
+        remove: async () => {},
+      });
+      const h = await mountHost([ann('mine')]);
+      loads.shift()?.({ data: null, generation: null });
+      rejects.shift();
+      await tick(0);
+      await h.adopt({ found: true, draftGeneration: 5 });
+      await h.setViewed(new Set(['b.ts']));
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(saves).toEqual([]); // not written over B's unread draft
+      await act(async () => { rejects.shift()?.(new Error('offline')); });
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine']);
+      await h.unmount();
+    });
   });
 });

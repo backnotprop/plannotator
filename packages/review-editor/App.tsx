@@ -50,7 +50,7 @@ import {
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
-import { useCodeAnnotationDraft, type CodeDraftTargetState } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
+import { useCodeAnnotationDraft, type CodeDraftMergeItems, type CodeDraftTargetState } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
 import { generateId } from './utils/generateId';
 import type { SuggestionHunk } from './edit/deriveSuggestions';
@@ -978,7 +978,32 @@ const ReviewApp: React.FC = () => {
     autoViewSuppressed,
     isApiMode: !!origin,
     submitted: !!submitted,
+    onDraftTargetMerge: (items) => draftTargetMergeRef.current(items),
   });
+
+  // In-place PR / scope switch onto a target holding an unsent draft (#1590):
+  // its new items are merged straight into the session (no blocking banner),
+  // re-checked against the diff now on screen, and autosave then saves the
+  // merge under the new target. Reassigned every render so it always sees
+  // the switched-to diff.
+  const draftTargetMergeRef = useRef<(items: CodeDraftMergeItems) => void>(() => {});
+  draftTargetMergeRef.current = (items) => {
+    const merged = prMetadata
+      ? reanchorCodeAnnotations(items.annotations, files, {
+          currentSnapshot: snapshotId,
+          patchChanged: items.patchChanged,
+          belongsToCurrentDiff: (a) => annotationMatchesPrScope(a, prMetadata.url, prDiffScope),
+        })
+      : items.annotations;
+    if (merged.length > 0) {
+      annotationsRef.current = [...annotationsRef.current, ...merged];
+      setAnnotations(annotationsRef.current);
+    }
+    if (items.descriptionAnnotations.length > 0) setDescriptionAnnotations((prev) => [...prev, ...items.descriptionAnnotations]);
+    if (items.commentAnnotations.length > 0) setCommentAnnotations((prev) => [...prev, ...items.commentAnnotations]);
+    const count = merged.length + items.descriptionAnnotations.length + items.commentAnnotations.length;
+    toast.success(`Restored ${count} unsent comment${count === 1 ? '' : 's'} for this ${mrLabel}`);
+  };
 
   const handleRestoreDraft = useCallback(() => {
     reviewHistory.clear();
@@ -995,18 +1020,6 @@ const ReviewApp: React.FC = () => {
           belongsToCurrentDiff: (a) => annotationMatchesPrScope(a, prMetadata.url, prDiffScope),
         })
       : restored.annotations;
-    if (restored.merge) {
-      // Offered after an in-place switch: these are only the items this
-      // session does not already hold, so they are ADDED, never replacing the
-      // session's own unsent comments.
-      if (restoredAnnotations.length > 0) {
-        annotationsRef.current = [...annotationsRef.current, ...restoredAnnotations];
-        setAnnotations(annotationsRef.current);
-      }
-      if (restored.descriptionAnnotations.length > 0) setDescriptionAnnotations((prev) => [...prev, ...restored.descriptionAnnotations]);
-      if (restored.commentAnnotations.length > 0) setCommentAnnotations((prev) => [...prev, ...restored.commentAnnotations]);
-      return;
-    }
     if (restoredAnnotations.length > 0) setAnnotations(restoredAnnotations);
     if (restored.descriptionAnnotations.length > 0) setDescriptionAnnotations(restored.descriptionAnnotations);
     if (restored.commentAnnotations.length > 0) setCommentAnnotations(restored.commentAnnotations);

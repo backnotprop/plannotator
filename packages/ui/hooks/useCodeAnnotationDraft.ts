@@ -60,6 +60,20 @@ interface UseCodeAnnotationDraftOptions {
   autoViewSuppressed?: Set<string>;
   isApiMode: boolean;
   submitted: boolean;
+  /** Receives the unsent items found on a target the session switched onto
+   *  in place (#1590), already filtered to ids the session neither holds nor
+   *  deleted. The host adds them to its state; autosave then saves the merge.
+   *  Called synchronously before autosave resumes. */
+  onDraftTargetMerge?: (items: CodeDraftMergeItems) => void;
+}
+
+/** Items auto-merged from a switched-onto target's draft. */
+export interface CodeDraftMergeItems {
+  annotations: CodeAnnotation[];
+  descriptionAnnotations: Annotation[];
+  commentAnnotations: CommentAnnotation[];
+  /** The server served the draft for a patch other than it was saved on. */
+  patchChanged: boolean;
 }
 
 /** Draft state a review server reports after an in-place target switch
@@ -71,18 +85,18 @@ export interface CodeDraftTargetState {
 
 interface UseCodeAnnotationDraftResult {
   draftBanner: { count: number; viewedCount: number; timeAgo: string } | null;
-  /** `merge` is true when the offered draft came from a target the session
-   *  switched onto: its items are only the ones not already in the session,
-   *  and the host should ADD them rather than replace its state.
-   *  `patchChanged` is true when the server served the draft for a patch other
+  /** `patchChanged` is true when the server served the draft for a patch other
    *  than the one it was saved on (the host re-checks line anchors). */
-  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[]; patchChanged: boolean; merge: boolean };
+  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[]; patchChanged: boolean };
   getDraftGeneration: () => number;
   dismissDraft: () => void;
   /** Call with the server's `draftState` after an in-place target switch.
    *  Raises the generation counter to the new target's floor (so saves are
    *  not rejected against an old tombstone there) and, when that target holds
-   *  items this session does not have yet, offers them through the banner. */
+   *  a draft, loads it and hands its new items to `onDraftTargetMerge`. Until
+   *  that one load settles (success, failure, or a newer switch) autosave does
+   *  not write under the new target, so the switch cannot overwrite a draft
+   *  it has not read yet; nothing else ever waits. */
   adoptDraftTarget: (state: CodeDraftTargetState | undefined) => void;
 }
 
@@ -94,6 +108,7 @@ export function useCodeAnnotationDraft({
   autoViewSuppressed,
   isApiMode,
   submitted,
+  onDraftTargetMerge,
 }: UseCodeAnnotationDraftOptions): UseCodeAnnotationDraftResult {
   const [draftBanner, setDraftBanner] = useState<{ count: number; viewedCount: number; timeAgo: string } | null>(null);
   const draftDataRef = useRef<DraftData | null>(null);
@@ -105,14 +120,17 @@ export function useCodeAnnotationDraft({
   // fresh/unengaged session (leave the server alone). Keyed on annotations only —
   // see the autosave effect for why viewedFiles must not count.
   const hasHadAnnotationsRef = useRef(false);
-  // Set when the offered draft came from an in-place target switch.
-  const mergeRef = useRef(false);
-  // True from the moment an in-place switch lands on a target holding a
-  // draft until the reviewer answers the merge offer (or it turns out there
-  // is nothing to offer). While held, autosave neither saves nor deletes:
-  // either would overwrite the new target's draft with this session's state
-  // before the reviewer chose, leaving its items only in the banner (#1590).
-  const holdAutosaveRef = useRef(false);
+  // In-place switch bookkeeping (#1590). Every adoptDraftTarget call starts a
+  // new switch id; a load that resolves for an older id is ignored. While the
+  // current switch's draft load is in flight, autosave skips writing (it
+  // would overwrite a draft it has not merged yet) and remembers that it did,
+  // so settling — success, failure, or supersede — always resumes saving.
+  const switchSeqRef = useRef(0);
+  const awaitingTargetLoadRef = useRef(false);
+  const skippedWhileAwaitingRef = useRef(false);
+  const [saveNudge, setSaveNudge] = useState(0);
+  const onMergeRef = useRef(onDraftTargetMerge);
+  onMergeRef.current = onDraftTargetMerge;
   const latestRef = useRef({ annotations, descriptionAnnotations, commentAnnotations });
   latestRef.current = { annotations, descriptionAnnotations, commentAnnotations };
   // Ids the reviewer removed during this session, so a later merge offer
@@ -189,8 +207,12 @@ export function useCodeAnnotationDraft({
     if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(() => {
-      // A merge offer is pending (or being fetched): do not touch the target.
-      if (holdAutosaveRef.current) return;
+      // The switched-onto target's draft is still loading: writing now would
+      // overwrite it unread. Settling the load re-runs this effect.
+      if (awaitingTargetLoadRef.current) {
+        skippedWhileAwaitingRef.current = true;
+        return;
+      }
       const draftGeneration = draftGenerationRef.current + 1;
       draftGenerationRef.current = draftGeneration;
 
@@ -221,16 +243,13 @@ export function useCodeAnnotationDraft({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, autoViewSuppressed, isApiMode, submitted]);
+  }, [annotations, descriptionAnnotations, commentAnnotations, viewedFiles, autoViewSuppressed, isApiMode, submitted, saveNudge]);
 
   const restoreDraft = useCallback(() => {
     // Cancel any pending autosave so it can't fire with pre-restore state and
     // overwrite what we're about to restore.
     if (timerRef.current) clearTimeout(timerRef.current);
     const data = draftDataRef.current;
-    const merge = mergeRef.current;
-    mergeRef.current = false;
-    holdAutosaveRef.current = false;
     setDraftBanner(null);
     draftDataRef.current = null;
     return {
@@ -240,7 +259,6 @@ export function useCodeAnnotationDraft({
       viewedFiles: data?.viewedFiles ?? [],
       autoViewSuppressed: data?.autoViewSuppressed ?? [],
       patchChanged: data?.patchChanged === true,
-      merge,
     };
   }, []);
 
@@ -254,48 +272,76 @@ export function useCodeAnnotationDraft({
     draftGenerationRef.current = deletedGeneration;
     setDraftBanner(null);
     draftDataRef.current = null;
-    mergeRef.current = false;
-    holdAutosaveRef.current = false;
     getDraftTransport().remove(deletedGeneration, { keepalive: false }).catch(() => {});
   }, []);
 
   const adoptDraftTarget = useCallback((state: CodeDraftTargetState | undefined) => {
-    if (!isApiMode || !state) return;
+    if (!isApiMode) return;
+    // Every switch starts clean: a previous switch's load (if still in
+    // flight) is superseded, and any write it held back resumes below.
+    const seq = ++switchSeqRef.current;
+    const settle = () => {
+      if (switchSeqRef.current !== seq || !awaitingTargetLoadRef.current) return;
+      awaitingTargetLoadRef.current = false;
+      if (skippedWhileAwaitingRef.current) {
+        skippedWhileAwaitingRef.current = false;
+        setSaveNudge((n) => n + 1);
+      }
+    };
+    const wasAwaiting = awaitingTargetLoadRef.current;
+    awaitingTargetLoadRef.current = false;
+    if (!state) {
+      if (wasAwaiting && skippedWhileAwaitingRef.current) {
+        skippedWhileAwaitingRef.current = false;
+        setSaveNudge((n) => n + 1);
+      }
+      return;
+    }
     const floor = readDraftGeneration(state.draftGeneration);
     if (floor !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, floor);
-    if (!state.found) return;
-    // Hold synchronously: the switch itself changes viewed files, which arms
-    // an autosave before the load below resolves.
-    holdAutosaveRef.current = true;
-    const release = () => { if (!mergeRef.current) holdAutosaveRef.current = false; };
+    if (!state.found) {
+      if (wasAwaiting && skippedWhileAwaitingRef.current) {
+        skippedWhileAwaitingRef.current = false;
+        setSaveNudge((n) => n + 1);
+      }
+      return;
+    }
+    awaitingTargetLoadRef.current = true;
     getDraftTransport().load()
       .then(({ data, generation }) => {
+        if (switchSeqRef.current !== seq) return; // a newer switch owns the keys now
         if (generation !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
         const draft = data as DraftData | null;
-        if (!draft) { release(); return; }
-        const loadedGeneration = readDraftGeneration(draft.draftGeneration);
-        if (loadedGeneration !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, loadedGeneration);
-        // Offer only what the session does not already hold: the target may
-        // carry this session's own blob from before a switch away and back.
-        const current = latestRef.current;
-        const have = new Set<string>([
-          ...current.annotations.map((a) => a.id),
-          ...current.descriptionAnnotations.map((a) => a.id),
-          ...current.commentAnnotations.map((a) => a.id),
-          ...removedIdsRef.current,
-        ]);
-        const fresh = <T extends { id: string }>(items: T[] | undefined) =>
-          (Array.isArray(items) ? items : []).filter((item) => !have.has(item.id));
-        const codeAnnotations = fresh(draft.codeAnnotations);
-        const descriptionAnnotations = fresh(draft.descriptionAnnotations);
-        const commentAnnotations = fresh(draft.commentAnnotations);
-        const count = codeAnnotations.length + descriptionAnnotations.length + commentAnnotations.length;
-        if (count === 0) { release(); return; }
-        draftDataRef.current = { ...draft, codeAnnotations, descriptionAnnotations, commentAnnotations };
-        mergeRef.current = true;
-        setDraftBanner({ count, viewedCount: 0, timeAgo: formatTimeAgo(draft.ts || 0) });
+        if (draft) {
+          const loadedGeneration = readDraftGeneration(draft.draftGeneration);
+          if (loadedGeneration !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, loadedGeneration);
+          // Only what the session neither holds nor deleted: the target may
+          // carry this session's own blob from before a switch away and back.
+          const current = latestRef.current;
+          const skip = new Set<string>([
+            ...current.annotations.map((a) => a.id),
+            ...current.descriptionAnnotations.map((a) => a.id),
+            ...current.commentAnnotations.map((a) => a.id),
+            ...removedIdsRef.current,
+          ]);
+          const fresh = <T extends { id: string }>(items: T[] | undefined) =>
+            (Array.isArray(items) ? items : []).filter((item) => !skip.has(item.id));
+          const items: CodeDraftMergeItems = {
+            annotations: fresh(draft.codeAnnotations),
+            descriptionAnnotations: fresh(draft.descriptionAnnotations),
+            commentAnnotations: fresh(draft.commentAnnotations),
+            patchChanged: draft.patchChanged === true,
+          };
+          if (items.annotations.length + items.descriptionAnnotations.length + items.commentAnnotations.length > 0) {
+            onMergeRef.current?.(items);
+          }
+        }
+        settle();
       })
-      .catch(() => { release(); });
+      .catch(() => {
+        if (switchSeqRef.current !== seq) return;
+        settle();
+      });
   }, [isApiMode]);
 
   return { draftBanner, restoreDraft, getDraftGeneration, dismissDraft, adoptDraftTarget };
