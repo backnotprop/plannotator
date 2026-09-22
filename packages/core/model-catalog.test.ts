@@ -3,6 +3,7 @@ import {
   CLAUDE_FALLBACK_MODELS,
   CODEX_FALLBACK_MODELS,
   claudeCatalogFromSdk,
+  claudeModelVersion,
   modelSelectOptions,
   resolveEffortChoice,
   resolveModelChoice,
@@ -35,17 +36,31 @@ describe("claudeCatalogFromSdk", () => {
     // The launchers default to `opus` / `sonnet`; the CLI resolves them to the
     // latest model, so they must be pickable even when the tool lists only
     // `opus[1m]` or a pinned Fable id.
-    expect(byId("opus")).toMatchObject({ label: "Opus (latest)", fastMode: true });
+    expect(byId("opus")).toMatchObject({ label: "Opus 5.5 (latest)", fastMode: true });
     expect(byId("opus")?.reasoningEfforts?.map((e) => e.id)).toEqual(ALL);
     expect(byId("opus")?.resolvedId).toBeUndefined();
     expect(byId("fable")?.reasoningEfforts?.map((e) => e.id)).toEqual(ALL);
   });
 
-  test("aliases read '(latest)'; pinned ids keep the model name and mark 1M context", () => {
-    for (const [id, label] of [["opus", "Opus (latest)"], ["opus[1m]", "Opus 1M (latest)"], ["sonnet", "Sonnet (latest)"], ["haiku", "Haiku (latest)"]]) {
+  test("aliases name the version they resolve to today, taken from the tool's own data", () => {
+    // Owner requirement: people want to see version numbers. The versions come
+    // from supportedModels()' resolvedModel, never from a hand list.
+    for (const [id, label] of [
+      ["opus", "Opus 5.5 (latest)"],
+      ["opus[1m]", "Opus 5.5 1M (latest)"],
+      ["sonnet", "Sonnet 5 (latest)"],
+      ["fable", "Fable 5.1 (latest)"],
+      ["haiku", "Haiku 4.5 (latest)"],
+    ]) {
       expect(byId(id)?.label).toBe(label);
     }
     expect(byId("claude-fable-5-1[1m]")?.label).toBe("Fable 5.1 (1M)");
+  });
+
+  test("an alias whose resolved model is missing or unparseable keeps the plain label", () => {
+    const [row] = claudeCatalogFromSdk([{ value: "sonnet", resolvedModel: "some-future-scheme" }]);
+    expect(row.label).toBe("Sonnet (latest)");
+    expect(claudeCatalogFromSdk([{ value: "haiku" }])[0].label).toBe("Haiku (latest)");
   });
 
   test("effort support is per model: haiku takes none, the rest default to high", () => {
@@ -137,4 +152,14 @@ test("fallbacks: one default each, and every default effort is one the model lis
   }
   // The launchers' Claude surface defaults must exist even without discovery.
   for (const alias of ["opus", "sonnet"]) expect(CLAUDE_FALLBACK_MODELS.some((m) => m.id === alias)).toBe(true);
+});
+
+test("claudeModelVersion reads major.minor and ignores date and [1m] suffixes", () => {
+  expect(claudeModelVersion("claude-opus-5-5")).toBe("5.5");
+  expect(claudeModelVersion("claude-opus-5-5[1m]")).toBe("5.5");
+  expect(claudeModelVersion("claude-sonnet-5")).toBe("5");
+  expect(claudeModelVersion("claude-haiku-4-5-20251001")).toBe("4.5");
+  expect(claudeModelVersion("claude-sonnet-4-20250514")).toBe("4");
+  expect(claudeModelVersion("gpt-6-sol")).toBeUndefined();
+  expect(claudeModelVersion(undefined)).toBeUndefined();
 });

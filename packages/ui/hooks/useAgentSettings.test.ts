@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { effectiveEffort, effectiveModel, parseReviewProfileByEngine } from "./useAgentSettings";
+import { effectiveEffort, effectiveFast, effectiveModel, parseReviewProfileByEngine } from "./useAgentSettings";
 
 describe("effective launch model", () => {
   const models = [
@@ -15,6 +15,30 @@ describe("effective launch model", () => {
   test("once settled, a stale pick resolves to the surface default and its effort is clamped", () => {
     expect(effectiveModel({ models, settled: true }, "claude-opus-4-8", "opus")).toBe("opus");
     expect(effectiveEffort({ models, settled: true }, "opus", "ultra")).toBe("high");
+  });
+});
+
+describe("effective Codex fast mode", () => {
+  const codex = {
+    settled: true,
+    models: [
+      { id: "gpt-6-sol", label: "GPT-6-Sol", default: true, fastMode: true },
+      { id: "gpt-slow", label: "GPT Slow" },
+    ],
+  };
+
+  test("fast is dropped when a retired pick is replaced by a different model", () => {
+    // A retired model saved with fast on must not launch the replacement with
+    // -c service_tier=fast: the choice was made for the old model.
+    const model = effectiveModel(codex, "gpt-5.3-codex", "");
+    expect(model).toBe("gpt-6-sol");
+    expect(effectiveFast(codex, "gpt-5.3-codex", model, true)).toBe(false);
+  });
+
+  test("fast is kept for the saved model itself and for the tool default", () => {
+    expect(effectiveFast(codex, "gpt-6-sol", "gpt-6-sol", true)).toBe(true);
+    expect(effectiveFast(codex, "", "gpt-6-sol", true)).toBe(true);
+    expect(effectiveFast(codex, "gpt-slow", "gpt-slow", true)).toBe(false);
   });
 });
 

@@ -86,11 +86,29 @@ function claudeFamily(id: string): string | undefined {
   return CLAUDE_FAMILIES.find((family) => bare === family || bare.startsWith(`${family}-`) || bare === `${family}${ONE_M}`);
 }
 
-/** Aliases read "Opus (latest)" / "Opus 1M (latest)"; pinned ids keep their model name. */
-function aliasLabel(id: string): string | undefined {
+/**
+ * The version a canonical Claude model id names: `claude-opus-5-5` → `5.5`,
+ * `claude-sonnet-5` → `5`, `claude-haiku-4-5-20251001` → `4.5` (the date
+ * suffix and any `[1m]` are ignored). Undefined when the id doesn't parse.
+ */
+export function claudeModelVersion(resolvedId: string | undefined): string | undefined {
+  const match = /^claude-(?:opus|sonnet|fable|haiku)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[1m\])?$/.exec(resolvedId ?? '');
+  if (!match) return undefined;
+  return match[2] ? `${match[1]}.${match[2]}` : match[1];
+}
+
+/**
+ * Aliases read "Opus 5.5 (latest)" / "Opus 5.5 1M (latest)", the version taken
+ * from the model the alias currently resolves to; without a parseable version
+ * they read "Opus (latest)". Pinned ids return undefined (they keep their
+ * model name). The SDK's displayName carries no version ("Opus (1M context)",
+ * "Sonnet"), so the resolved id is the source.
+ */
+function aliasLabel(id: string, resolvedId?: string): string | undefined {
   const family = CLAUDE_FAMILIES.find((f) => id === f || id === `${f}${ONE_M}`);
   if (!family) return undefined;
-  return `${titleCase(family)}${isOneM(id) ? ' 1M' : ''} (latest)`;
+  const version = claudeModelVersion(resolvedId);
+  return `${titleCase(family)}${version ? ` ${version}` : ''}${isOneM(id) ? ' 1M' : ''} (latest)`;
 }
 
 /**
@@ -110,7 +128,7 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
     const efforts = info.supportsEffort !== false ? (info.supportedEffortLevels ?? []) : [];
     rows.push({
       id: info.value,
-      label: aliasLabel(info.value) ?? (isOneM(info.value) && !/1M/i.test(lead) ? `${lead} (1M)` : lead),
+      label: aliasLabel(info.value, info.resolvedModel) ?? (isOneM(info.value) && !/1M/i.test(lead) ? `${lead} (1M)` : lead),
       ...(info.resolvedModel ? { resolvedId: info.resolvedModel } : {}),
       ...(efforts.length
         ? { reasoningEfforts: effortList(efforts), ...(efforts.includes('high') ? { defaultReasoningEffort: 'high' } : {}) }
@@ -124,7 +142,7 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
     const source = rows.find((r) => claudeFamily(r.id) === family);
     if (!source) continue;
     const { resolvedId: _, ...support } = source;
-    aliases.push({ ...support, id: family, label: aliasLabel(family)! });
+    aliases.push({ ...support, id: family, label: aliasLabel(family, source.resolvedId)! });
   }
   const all = [...aliases, ...rows];
   const def = all.find((m) => m.id === 'sonnet') ?? all[0];

@@ -285,9 +285,14 @@ export function effectiveEffort(catalog: ModelCatalog | undefined, model: string
   return catalog?.settled ? resolveEffortChoice(effort, catalog.models, model) : effort;
 }
 
-/** Fast mode only for a model that offers it. */
-function effectiveFast(catalog: ModelCatalog | undefined, model: string, fast: boolean): boolean {
+/**
+ * Fast mode only for a model that offers it, and never carried over to a
+ * DIFFERENT model that replaced a stale saved pick (the fast choice was made
+ * for the old model). A saved '' is "the tool's default", not a replacement.
+ */
+export function effectiveFast(catalog: ModelCatalog | undefined, savedModel: string, model: string, fast: boolean): boolean {
   if (!fast || !catalog?.settled) return fast;
+  if (savedModel && savedModel !== model) return false;
   const entry = catalog.models.find((m) => m.id === model);
   return entry ? entry.fastMode === true : fast;
 }
@@ -507,12 +512,12 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   const claudeEffort = effectiveEffort(claudeCatalog, claudeModel, state.claude.perModel[state.claude.model]?.effort ?? DEFAULT_CLAUDE_EFFORT);
   const codexModel = effectiveModel(codexCatalog, state.codex.model, DEFAULT_CODEX_MODEL);
   const codexReasoning = effectiveEffort(codexCatalog, codexModel, state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING);
-  const codexFast = effectiveFast(codexCatalog, codexModel, state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST);
+  const codexFast = effectiveFast(codexCatalog, state.codex.model, codexModel, state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST);
   const tourClaudeModel = effectiveModel(claudeCatalog, state.tourClaude.model, DEFAULT_TOUR_CLAUDE_MODEL);
   const tourClaudeEffort = effectiveEffort(claudeCatalog, tourClaudeModel, state.tourClaude.perModel[state.tourClaude.model]?.effort ?? DEFAULT_TOUR_CLAUDE_EFFORT);
   const tourCodexModel = effectiveModel(codexCatalog, state.tourCodex.model, DEFAULT_TOUR_CODEX_MODEL);
   const tourCodexReasoning = effectiveEffort(codexCatalog, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING);
-  const tourCodexFast = effectiveFast(codexCatalog, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST);
+  const tourCodexFast = effectiveFast(codexCatalog, state.tourCodex.model, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST);
   const guideClaudeModel = effectiveModel(claudeCatalog, state.guideClaude.model, DEFAULT_GUIDE_CLAUDE_MODEL);
   const guideClaudeEffort = effectiveEffort(claudeCatalog, guideClaudeModel, state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT);
   const guideCodexModel = effectiveModel(codexCatalog, state.guideCodex.model, DEFAULT_GUIDE_CODEX_MODEL);
