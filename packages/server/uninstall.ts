@@ -772,8 +772,8 @@ function removeInstalledFiles(
     state,
   );
 
-  // Antigravity has a separate plugin layout. Clean both supported roots so
-  // switching layouts does not leave an older installation behind.
+  // Antigravity scans config/plugins. Also clean the obsolete policy and
+  // private-data paths written by the original, nonfunctional integration.
   for (const layout of ["config", "antigravity-cli"]) {
     const antigravityDir = join(environment.homeDir, ".gemini", layout);
     removePath(join(antigravityDir, "plugins", "plannotator"), request, state);

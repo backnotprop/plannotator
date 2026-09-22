@@ -428,8 +428,8 @@ if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
 if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
 if ($SkipSkills) { $skipSkillsResolved = $true; $skipSkillsSource = "-SkipSkills" }
 
-# Detect Antigravity once; config takes precedence when both layouts exist.
-$agyBase = if (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\config" -PathType Container) { "$env:USERPROFILE\.gemini\config" } elseif (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\antigravity-cli" -PathType Container) { "$env:USERPROFILE\.gemini\antigravity-cli" } else { $null }
+# The private data directory is only a detection signal; plugins live in config.
+$agyBase = if ((Test-Path -LiteralPath "$env:USERPROFILE\.gemini\config" -PathType Container) -or ((-not (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\config")) -and (Test-Path -LiteralPath "$env:USERPROFILE\.gemini\antigravity-cli" -PathType Container))) { "$env:USERPROFILE\.gemini\config" } else { $null }
 
 # Pre-flight: if verification is requested, reject tags older than the first
 # attested release before we download anything. Uses PowerShell's [version]
@@ -1208,15 +1208,13 @@ try {
                 Write-Host "Tag $latestTag predates the core/extra skill layout - skipping shared agent skill install"
             }
 
-            # Antigravity CLI plugin commands (only when detected)
-            if ($agyBase -and -not $skipAntigravityResolved -and (Test-Path "apps\gemini\commands")) {
-                $agyPluginCommandsDir = "$agyBase\plugins\plannotator\commands"
-                $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
-                if ($geminiCmds) {
-                    New-Item -ItemType Directory -Force -Path $agyPluginCommandsDir | Out-Null
-                    Copy-Item -Force "apps\gemini\commands\*.toml" $agyPluginCommandsDir
-                    Write-Host "Installed Antigravity slash commands to $agyPluginCommandsDir\"
-                }
+            # Antigravity CLI plugin skills (only when detected)
+            if ($agyBase -and -not $skipAntigravityResolved -and (Test-Path "apps\skills\core")) {
+                $agySkillsDir = "$agyBase\plugins\plannotator\skills"
+                New-Item -ItemType Directory -Force -Path $agySkillsDir | Out-Null
+                Copy-SkillIfPresent "apps\skills\core\plannotator-review" $agySkillsDir
+                Copy-SkillIfPresent "apps\skills\core\plannotator-annotate" $agySkillsDir
+                Write-Host "Installed Antigravity skills to $agySkillsDir\"
             }
 
             # Kiro: hand-maintained skills (origin baked in) + two extras.
@@ -1474,17 +1472,9 @@ if (-not $agyBase) {
     Write-Host "Antigravity: detected, skipped ($skipAntigravitySource)."
 } else {
     $agyPluginDir = "$agyBase\plugins\plannotator"
-    New-Item -ItemType Directory -Force -Path "$agyBase\policies", $agyPluginDir | Out-Null
-    @'
-# Plannotator policy for Antigravity CLI
-# Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
-[[rule]]
-toolName = "exit_plan_mode"
-decision = "allow"
-priority = 100
-'@ | Set-Content -Path "$agyBase\policies\plannotator.toml"
+    New-Item -ItemType Directory -Force -Path $agyPluginDir | Out-Null
     '{"name":"plannotator"}' | Set-Content -Path "$agyPluginDir\plugin.json"
-    '{"hooks":{"BeforeTool":[{"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}' | Set-Content -Path "$agyPluginDir\hooks.json"
+    '{"plannotator":{"PreToolUse":[{"matcher":"^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}' | Set-Content -Path "$agyPluginDir\hooks.json"
     Write-Host "Antigravity: detected, installed plugin to $agyPluginDir"
 }
 

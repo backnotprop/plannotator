@@ -38,7 +38,7 @@ describe("Antigravity installation", () => {
       expect(script).toContain(extension === "ps1" ? "[switch]$SkipAntigravity" : "--skip-antigravity");
       expect(script).toContain("PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL");
       expect(script).toContain("config skipInstall.antigravity");
-      const copy = script.indexOf("Antigravity CLI plugin commands");
+      const copy = script.indexOf("Antigravity CLI plugin skills");
       const gate = script.indexOf(extension === "sh" ? 'if [ "$skip_skills" -eq 1 ]; then\n        exit 0' : extension === "ps1" ? "if ($skipSkillsResolved)" : 'if "!SKIP_SKILLS!"=="1"');
       expect(copy).toBeGreaterThan(gate);
       expect(gate).toBeGreaterThan(-1);
@@ -58,10 +58,10 @@ describe("Antigravity installation", () => {
         ? section(/^\$skipCodexResolved = [\s\S]*?(?=# Pre-flight:)/m)
         : section(/^set "SKIP_CODEX=0"\n[\s\S]*?(?=REM Pre-flight:)/m);
     const copy = extension === "sh"
-      ? section(/    # Antigravity CLI plugin commands[\s\S]*?\n    fi/)
+      ? section(/    # Antigravity CLI plugin skills[\s\S]*?\n    fi/)
       : extension === "ps1"
-        ? section(/            # Antigravity CLI plugin commands[\s\S]*?\n            }/)
-        : section(/    REM Antigravity CLI plugin commands[\s\S]*?\n    \)/);
+        ? section(/            # Antigravity CLI plugin skills[\s\S]*?\n            }/)
+        : section(/    REM Antigravity CLI plugin skills[\s\S]*?\n    \)/);
     const config = extension === "sh"
       ? section(/# --- Antigravity CLI support[\s\S]*?\nfi/)
       : extension === "ps1"
@@ -73,7 +73,7 @@ describe("Antigravity installation", () => {
       { name: "config layout", layouts: ["config"], installed: true },
       { name: "alternate layout", layouts: ["antigravity-cli"], installed: true },
       { name: "config takes precedence", layouts: ["config", "antigravity-cli"], installed: true },
-      { name: "file is not a directory", layouts: ["antigravity-cli"], configFile: true, installed: true },
+      { name: "config file is not a directory", layouts: ["antigravity-cli"], configFile: true, installed: false },
       { name: "config opt-out preserves existing files", layouts: ["config"], skipConfig: true, installed: false },
       { name: "environment opt-out", layouts: ["config"], skipEnv: "true", installed: false },
       { name: "environment false overrides config", layouts: ["config"], skipConfig: true, skipEnv: "false", installed: true },
@@ -86,9 +86,9 @@ describe("Antigravity installation", () => {
         try {
           for (const layout of scenario.layouts) mkdirSync(join(home, ".gemini", layout), { recursive: true });
           if (scenario.configFile) writeFileSync(join(home, ".gemini", "config"), "not a directory");
-          const base = join(home, ".gemini", scenario.layouts[0] ?? "config");
+          const base = join(home, ".gemini", "config");
           const plugin = join(base, "plugins", "plannotator");
-          if (scenario.layouts.length && !scenario.installed) {
+          if (scenario.layouts.length && !scenario.installed && !scenario.configFile) {
             mkdirSync(plugin, { recursive: true });
             writeFileSync(join(plugin, "hooks.json"), "existing hook");
             mkdirSync(join(plugin, "commands"));
@@ -99,9 +99,11 @@ describe("Antigravity installation", () => {
           const configDir = join(home, ".plannotator");
           mkdirSync(configDir);
           writeFileSync(join(configDir, "config.json"), JSON.stringify({ skipInstall: { antigravity: !!scenario.skipConfig } }));
-          const source = join(root, "apps", "gemini", "commands");
-          mkdirSync(source, { recursive: true });
-          for (const name of ["review", "annotate"]) writeFileSync(join(source, `plannotator-${name}.toml`), `description = "${name}"\n`);
+          const source = join(root, "apps", "skills", "core");
+          for (const name of ["review", "annotate"]) {
+            mkdirSync(join(source, `plannotator-${name}`), { recursive: true });
+            writeFileSync(join(source, `plannotator-${name}`, "SKILL.md"), readFileSync(join(scriptsDir, "..", "apps", "skills", "core", `plannotator-${name}`, "SKILL.md")));
+          }
           const flags = ["CODEX", "GEMINI", "ANTIGRAVITY", "KIRO", "OPENCODE", "SKILLS"];
           const flag = scenario.skipFlag ? 1 : 0;
           let prefix: string;
@@ -109,10 +111,11 @@ describe("Antigravity installation", () => {
           const file = join(root, `integration.${extension}`);
           if (extension === "sh") {
             prefix = `set -e\n_config_dir="$HOME/.plannotator"\n${flags.map(name => `SKIP_${name}_FLAG=${name === "ANTIGRAVITY" ? flag : 0}`).join("\n")}\n`;
-            prefix += section(/^copy_commands_if_present\(\) \{[\s\S]*?\n}/m) + "\n";
+            prefix += section(/^copy_skill_if_present\(\) \{[\s\S]*?\n}/m) + "\n";
             args = [file];
           } else if (extension === "ps1") {
             prefix = `$ErrorActionPreference = 'Stop'\n$cfg = Get-Content "$env:USERPROFILE\\.plannotator\\config.json" -Raw | ConvertFrom-Json\n$SkipAntigravity = $${!!scenario.skipFlag}\n`;
+            prefix += section(/^function Copy-SkillIfPresent \{[\s\S]*?\n}/m) + "\n";
             args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file];
           } else {
             prefix = `@echo off\nsetlocal enabledelayedexpansion\nset "_CONFIG_DIR=%USERPROFILE%\\.plannotator"\n${flags.map(name => `set "SKIP_${name}_FLAG=${name === "ANTIGRAVITY" ? flag : 0}"`).join("\n")}\n`;
@@ -134,11 +137,20 @@ describe("Antigravity installation", () => {
               expect(out).toContain("Antigravity: detected, installed plugin to");
               expect(JSON.parse(readFileSync(join(plugin, "plugin.json"), "utf8").replace(/^\uFEFF/, ""))).toEqual({ name: "plannotator" });
               const hooks = JSON.parse(readFileSync(join(plugin, "hooks.json"), "utf8").replace(/^\uFEFF/, ""));
-              expect(hooks).toEqual({ hooks: { BeforeTool: [{ matcher: "exit_plan_mode", hooks: [{ type: "command", command: "plannotator", timeout: 345600 }] }] } });
-              const policy = Bun.TOML.parse(readFileSync(join(base, "policies", "plannotator.toml"), "utf8").replace(/^\uFEFF/, ""));
-              expect(policy.rule).toEqual([{ toolName: "exit_plan_mode", decision: "allow", priority: 100 }]);
-              for (const name of ["review", "annotate"]) expect(readFileSync(join(plugin, "commands", `plannotator-${name}.toml`), "utf8")).toBe(`description = "${name}"\n`);
-            } else if (scenario.layouts.length) {
+              expect(hooks).toEqual({ plannotator: { PreToolUse: [{ matcher: "^(write_to_file|replace_file_content|multi_replace_file_content)$", hooks: [{ type: "command", command: "plannotator", timeout: 345600 }] }] } });
+              expect(existsSync(join(base, "policies"))).toBe(false);
+              expect(existsSync(join(plugin, "commands"))).toBe(false);
+              for (const name of ["review", "annotate"]) {
+                const skill = `plannotator-${name}`;
+                expect(readFileSync(join(plugin, "skills", skill, "SKILL.md"), "utf8")).toBe(readFileSync(join(source, skill, "SKILL.md"), "utf8"));
+                expect(readdirSync(join(plugin, "skills", skill))).toEqual(["SKILL.md"]);
+              }
+              const agy = Bun.which("agy");
+              if (agy && repeat === 0 && scenario.name === "config layout") {
+                const validation = Bun.spawnSync([agy, "plugin", "validate", plugin], { env, stdout: "pipe", stderr: "pipe" });
+                expect({ code: validation.exitCode, error: validation.stderr.toString() }).toEqual({ code: 0, error: "" });
+              }
+            } else if (scenario.layouts.length && !scenario.configFile) {
               const reason = scenario.skipFlag ? (extension === "ps1" ? "-SkipAntigravity" : "--skip-antigravity") : scenario.skipEnv ? "PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL" : "config skipInstall.antigravity";
               expect(out).toContain(`Antigravity: detected, skipped (${reason}).`);
               expect(readdirSync(plugin).sort()).toEqual(["commands", "hooks.json"]);
@@ -147,10 +159,14 @@ describe("Antigravity installation", () => {
               expect(readFileSync(join(base, "policies", "plannotator.toml"), "utf8")).toBe("existing policy");
             } else {
               expect(out).toContain("Antigravity: not detected.");
-              expect(existsSync(join(home, ".gemini"))).toBe(false);
+              if (scenario.configFile) {
+                expect(readFileSync(join(home, ".gemini", "config"), "utf8")).toBe("not a directory");
+              } else {
+                expect(existsSync(join(home, ".gemini"))).toBe(false);
+              }
             }
           }
-          if (scenario.layouts.length === 2) expect(readdirSync(join(home, ".gemini", "antigravity-cli"))).toEqual([]);
+          if (scenario.layouts.includes("antigravity-cli")) expect(readdirSync(join(home, ".gemini", "antigravity-cli"))).toEqual([]);
         } finally {
           rmSync(root, { recursive: true, force: true });
         }

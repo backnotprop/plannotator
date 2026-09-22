@@ -24,6 +24,7 @@ export const PLAN_TOOL_NAMES: Record<PromptRuntime, string> = {
   pi: "plannotator_submit_plan",
   codex: "ExitPlanMode",
   "gemini-cli": "exit_plan_mode",
+  antigravity: "write_to_file",
   "oh-my-pi": "ExitPlanMode",
 };
 

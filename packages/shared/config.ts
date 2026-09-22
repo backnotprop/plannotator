@@ -46,6 +46,7 @@ export type PromptRuntime =
   | "pi"
   | "codex"
   | "gemini-cli"
+  | "antigravity"
   | "oh-my-pi";
 
 interface PromptSectionConfig {

@@ -605,12 +605,12 @@ if "!SKIP_SKILLS_FLAG!"=="1" (
     set "SKIP_SKILLS_SOURCE=--skip-skills"
 )
 
-REM Detect Antigravity once; config takes precedence when both layouts exist.
+REM The private data directory is only a detection signal; plugins live in config.
 set "AGY_BASE="
 if exist "%USERPROFILE%\.gemini\config\" (
     set "AGY_BASE=%USERPROFILE%\.gemini\config"
-) else if exist "%USERPROFILE%\.gemini\antigravity-cli\" (
-    set "AGY_BASE=%USERPROFILE%\.gemini\antigravity-cli"
+) else if not exist "%USERPROFILE%\.gemini\config" if exist "%USERPROFILE%\.gemini\antigravity-cli\" (
+    set "AGY_BASE=%USERPROFILE%\.gemini\config"
 )
 
 REM Pre-flight: reject verification requests for tags older than the first
@@ -1280,12 +1280,17 @@ if "!CLONE_OK!"=="1" (
         echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
     )
 
-    REM Antigravity CLI plugin commands (only when detected)
-    if defined AGY_BASE if "!SKIP_ANTIGRAVITY!"=="0" if exist "apps\gemini\commands" (
-        set "AGY_PLUGIN_COMMANDS_DIR=!AGY_BASE!\plugins\plannotator\commands"
-        if not exist "!AGY_PLUGIN_COMMANDS_DIR!" mkdir "!AGY_PLUGIN_COMMANDS_DIR!"
-        xcopy /y /q "apps\gemini\commands\*.toml" "!AGY_PLUGIN_COMMANDS_DIR!\" >nul 2>&1
-        echo Installed Antigravity commands to !AGY_PLUGIN_COMMANDS_DIR!\
+    REM Antigravity CLI plugin skills (only when detected)
+    if defined AGY_BASE if "!SKIP_ANTIGRAVITY!"=="0" if exist "apps\skills\core" (
+        set "AGY_SKILLS_DIR=!AGY_BASE!\plugins\plannotator\skills"
+        if not exist "!AGY_SKILLS_DIR!" mkdir "!AGY_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate) do (
+            if exist "apps\skills\core\%%S" (
+                if exist "!AGY_SKILLS_DIR!\%%S" rmdir /s /q "!AGY_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\skills\core\%%S" "!AGY_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        echo Installed Antigravity skills to !AGY_SKILLS_DIR!\
     )
 
     REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected
@@ -1522,19 +1527,9 @@ if not defined AGY_BASE (
     echo Antigravity: detected, skipped ^(!SKIP_ANTIGRAVITY_SOURCE!^).
 ) else (
     set "AGY_PLUGIN_DIR=!AGY_BASE!\plugins\plannotator"
-    set "AGY_POLICIES_DIR=!AGY_BASE!\policies"
-    if not exist "!AGY_POLICIES_DIR!" mkdir "!AGY_POLICIES_DIR!"
     if not exist "!AGY_PLUGIN_DIR!" mkdir "!AGY_PLUGIN_DIR!"
-    (
-        echo # Plannotator policy for Antigravity CLI
-        echo # Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
-        echo [[rule]]
-        echo toolName = "exit_plan_mode"
-        echo decision = "allow"
-        echo priority = 100
-    ) > "!AGY_POLICIES_DIR!\plannotator.toml"
     >"!AGY_PLUGIN_DIR!\plugin.json" echo {"name":"plannotator"}
-    >"!AGY_PLUGIN_DIR!\hooks.json" echo {"hooks":{"BeforeTool":[{"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}
+    >"!AGY_PLUGIN_DIR!\hooks.json" echo {"plannotator":{"PreToolUse":[{"matcher":"^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}
     echo Antigravity: detected, installed plugin to !AGY_PLUGIN_DIR!
 )
 

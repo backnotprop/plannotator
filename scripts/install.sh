@@ -121,8 +121,8 @@ Options:
                          (~/.gemini policy, settings hook, commands). Env var:
                          PLANNOTATOR_SKIP_GEMINI_INSTALL; config key:
                          skipInstall.gemini.
-  --skip-antigravity     Same opt-out for Antigravity CLI plugins, policies,
-                         and commands under ~/.gemini/{config|antigravity-cli}.
+  --skip-antigravity     Same opt-out for Antigravity CLI hooks and skills
+                         under ~/.gemini/config/plugins/plannotator.
                          Env var: PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL;
                          config key: skipInstall.antigravity.
   --skip-kiro            Same opt-out for the Kiro CLI integration
@@ -678,12 +678,10 @@ if [ "$SKIP_SKILLS_FLAG" -eq 1 ]; then
     skip_skills_source="--skip-skills"
 fi
 
-# Detect Antigravity once; config takes precedence when both layouts exist.
+# The private data directory is only a detection signal; plugins live in config.
 AGY_BASE=""
-if [ -d "$HOME/.gemini/config" ]; then
+if [ -d "$HOME/.gemini/config" ] || { [ ! -e "$HOME/.gemini/config" ] && [ -d "$HOME/.gemini/antigravity-cli" ]; }; then
     AGY_BASE="$HOME/.gemini/config"
-elif [ -d "$HOME/.gemini/antigravity-cli" ]; then
-    AGY_BASE="$HOME/.gemini/antigravity-cli"
 fi
 
 # Pre-flight: if verification is requested, reject tags older than the first
@@ -1813,10 +1811,12 @@ checkout_failed=0
         echo "Installed Gemini commands to ${GEMINI_COMMANDS_DIR}/"
     fi
 
-    # Antigravity CLI plugin commands (only when detected)
-    if [ -n "$AGY_BASE" ] && [ "$skip_antigravity" -eq 0 ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
-        copy_commands_if_present apps/gemini/commands "$AGY_BASE/plugins/plannotator/commands"
-        echo "Installed Antigravity commands to ${AGY_BASE}/plugins/plannotator/commands/"
+    # Antigravity CLI plugin skills (only when detected)
+    if [ -n "$AGY_BASE" ] && [ "$skip_antigravity" -eq 0 ] && [ -d "apps/skills/core" ]; then
+        mkdir -p "$AGY_BASE/plugins/plannotator/skills"
+        copy_skill_if_present apps/skills/core/plannotator-review "$AGY_BASE/plugins/plannotator/skills"
+        copy_skill_if_present apps/skills/core/plannotator-annotate "$AGY_BASE/plugins/plannotator/skills"
+        echo "Installed Antigravity skills to ${AGY_BASE}/plugins/plannotator/skills/"
     fi
 
     if [ "$kiro_available" -eq 1 ] && [ "$skip_kiro" -eq 0 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
@@ -2028,20 +2028,12 @@ elif [ "$skip_antigravity" -eq 1 ]; then
     echo "Antigravity: detected, skipped (${skip_antigravity_source})."
 else
     AGY_PLUGIN_DIR="$AGY_BASE/plugins/plannotator"
-    mkdir -p "$AGY_BASE/policies" "$AGY_PLUGIN_DIR"
-    cat > "$AGY_BASE/policies/plannotator.toml" << 'AGY_POLICY_EOF'
-# Plannotator policy for Antigravity CLI
-# Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
-[[rule]]
-toolName = "exit_plan_mode"
-decision = "allow"
-priority = 100
-AGY_POLICY_EOF
+    mkdir -p "$AGY_PLUGIN_DIR"
     cat > "$AGY_PLUGIN_DIR/plugin.json" << 'AGY_PLUGIN_EOF'
 {"name":"plannotator"}
 AGY_PLUGIN_EOF
     cat > "$AGY_PLUGIN_DIR/hooks.json" << 'AGY_HOOKS_EOF'
-{"hooks":{"BeforeTool":[{"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}
+{"plannotator":{"PreToolUse":[{"matcher":"^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}]}}
 AGY_HOOKS_EOF
     echo "Antigravity: detected, installed plugin to ${AGY_PLUGIN_DIR}"
 fi
