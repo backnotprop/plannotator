@@ -46,7 +46,18 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				cwd,
 				...(claudePath && { claudeExecutablePath: claudePath }),
 			});
-			registry.register(provider);
+			const providerId = registry.register(provider);
+			// Deferred like Codex: model discovery spawns `claude`, so it runs
+			// on first explicit activation (a model picker) or first session,
+			// never at startup.
+			if (provider && "fetchModels" in provider) {
+				providerInitializers.set(
+					providerId,
+					ai.createBestEffortOnce(
+						() => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
+					),
+				);
+			}
 		} catch {
 			// Claude SDK not available.
 		}

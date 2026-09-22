@@ -52,8 +52,8 @@ export interface CreateSessionRequest {
   maxTurns?: number;
   /** Max budget in USD. */
   maxBudgetUsd?: number;
-  /** Reasoning effort (Codex only). */
-  reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  /** Reasoning effort — one of the selected model's `reasoningEfforts`. */
+  reasoningEffort?: string;
 }
 
 export interface QueryRequest {
@@ -204,6 +204,13 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           model && models.some((candidate) => candidate.id === model)
             ? model
             : models.find((candidate) => candidate.default)?.id ?? models[0]?.id ?? model;
+        // Only forward an effort the resolved model accepts (a model that
+        // reports no efforts takes none); unlisted models pass it through.
+        const modelInfo = models.find((candidate) => candidate.id === effectiveModel);
+        const effectiveEffort =
+          reasoningEffort && (!modelInfo || modelInfo.reasoningEfforts?.some((e) => e.id === reasoningEffort))
+            ? reasoningEffort
+            : undefined;
         const boundedMaxTurns = clampPositiveInteger(maxTurns, MAX_CLIENT_MAX_TURNS);
         const boundedMaxBudgetUsd = clampPositiveNumber(maxBudgetUsd, MAX_CLIENT_BUDGET_USD);
         const options: CreateSessionOptions = {
@@ -212,7 +219,7 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           model: effectiveModel,
           ...(boundedMaxTurns !== undefined && { maxTurns: boundedMaxTurns }),
           ...(boundedMaxBudgetUsd !== undefined && { maxBudgetUsd: boundedMaxBudgetUsd }),
-          reasoningEffort,
+          reasoningEffort: effectiveEffort,
         };
 
         // Fork if parent session is provided AND provider supports it.

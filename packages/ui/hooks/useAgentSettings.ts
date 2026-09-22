@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { resolveEffortChoice, resolveModelChoice } from '@plannotator/core/model-catalog';
 import { getItem, setItem } from '../utils/storage';
-import { clampCodexReasoning } from '../utils/codexModels';
+import type { ModelCatalog, ModelCatalogs } from './useModelCatalogs';
 
 const COOKIE_KEY = 'plannotator.agents';
 
@@ -16,16 +17,17 @@ const COOKIE_KEY = 'plannotator.agents';
 // would clobber writes exactly like before.
 const settingsListeners = new Set<(s: AgentSettingsState) => void>();
 
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
+// Claude defaults are the CLI's latest-resolving aliases, so they never go
+// stale. Codex defaults are '' — "the model Codex's own list marks default",
+// resolved against the discovered catalog (see useModelCatalogs).
+export const DEFAULT_CLAUDE_MODEL = 'opus';
 export const DEFAULT_CLAUDE_EFFORT = 'high';
-// gpt-5.3-codex is deprecated (ChatGPT-account Codex rejects it outright) —
-// default to the current flagship everywhere.
-export const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+export const DEFAULT_CODEX_MODEL = '';
 export const DEFAULT_CODEX_REASONING = 'high';
 export const DEFAULT_CODEX_FAST = false;
 export const DEFAULT_TOUR_CLAUDE_MODEL = 'sonnet';
 export const DEFAULT_TOUR_CLAUDE_EFFORT = 'medium';
-export const DEFAULT_TOUR_CODEX_MODEL = 'gpt-5.5';
+export const DEFAULT_TOUR_CODEX_MODEL = '';
 export const DEFAULT_TOUR_CODEX_REASONING = 'medium';
 export const DEFAULT_TOUR_CODEX_FAST = false;
 export const DEFAULT_GUIDE_CLAUDE_MODEL = 'sonnet';
@@ -33,7 +35,7 @@ export const DEFAULT_GUIDE_CLAUDE_MODEL = 'sonnet';
 // orientation doc the reviewer is actively waiting on, and newer models at
 // low effort chapter a diff well. Guide-scoped only — tour/review keep medium.
 export const DEFAULT_GUIDE_CLAUDE_EFFORT = 'low';
-export const DEFAULT_GUIDE_CODEX_MODEL = 'gpt-5.5';
+export const DEFAULT_GUIDE_CODEX_MODEL = '';
 export const DEFAULT_GUIDE_CODEX_REASONING = 'low';
 // No DEFAULT_GUIDE_CODEX_FAST: fast mode is deliberately not offered for
 // guide (product decision — see AgentsTab's guide codex config block), so
@@ -175,66 +177,16 @@ const initialState: AgentSettingsState = {
   guideCopilot: { model: DEFAULT_GUIDE_COPILOT_MODEL },
 };
 
-// One-shot migration: drop any cached "none" codex reasoning entries. The
-// dropdown no longer offers "None" (codex-rs rejects it as a config value);
-// fall back to the default instead of shipping an invalid flag. Saved
-// "minimal" entries migrate to "low": no current Codex model supports
-// minimal, and low is the nearest effort that every model does.
-export function sanitizeCodexPerModel(
-  perModel: Record<string, { reasoning: string; fast: boolean }> | undefined,
-): Record<string, { reasoning: string; fast: boolean }> {
-  if (!perModel) return {};
-  const out: Record<string, { reasoning: string; fast: boolean }> = {};
-  for (const [model, entry] of Object.entries(perModel)) {
-    if (!entry || typeof entry !== 'object') continue;
-    if (entry.reasoning === 'none') {
-      if (entry.fast) out[model] = { reasoning: DEFAULT_CODEX_REASONING, fast: true };
-      continue;
-    }
-    if (entry.reasoning === 'minimal') {
-      out[model] = { ...entry, reasoning: 'low' };
-      continue;
-    }
-    out[model] = entry;
-  }
-  return out;
-}
-
-// Saved model IDs that migrate to a direct replacement: the stale gpt-5.6
-// slug (renamed to -sol when the tiered family shipped) and gpt-5.1-codex-mini
-// (API shutdown 2026-07-23; gpt-5.4-mini is OpenAI's recommended replacement).
-const RENAMED_CODEX_MODELS: Record<string, string> = {
-  'gpt-5.6': 'gpt-5.6-sol',
-  'gpt-5.1-codex-mini': 'gpt-5.4-mini',
-};
-
-// Saved model IDs with no direct replacement — migrate to the surface's
-// fallback. gpt-5.3-codex is rejected outright by ChatGPT-account Codex;
-// gpt-5.2-codex and gpt-5.1-codex-max hit the API-level shutdown on
-// 2026-07-23 (OpenAI recommends gpt-5.5, which every fallback already is).
-const RETIRED_CODEX_MODELS = new Set(['gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.1-codex-max']);
-
-// One-shot model migrations for a saved Codex section. Keep its per-model
-// preferences aligned with the canonical model ID while sanitizing them.
-export function migrateCodexSection(
-  section: { model?: unknown; perModel?: Record<string, { reasoning: string; fast: boolean }> } | undefined,
+// A saved Claude/Codex section. Stale model ids are NOT migrated here: they
+// are resolved against the discovered catalog at read time (effectiveModel).
+function parseModelSection<P>(
+  section: { model?: unknown; perModel?: unknown } | undefined,
   fallback: string,
-): CodexSection {
-  const perModel = sanitizeCodexPerModel(section?.perModel);
-  for (const [legacy, replacement] of Object.entries(RENAMED_CODEX_MODELS)) {
-    const legacyPreference = perModel[legacy];
-    if (legacyPreference) {
-      perModel[replacement] ??= legacyPreference;
-      delete perModel[legacy];
-    }
-  }
-
-  const savedModel = section?.model;
-  const model =
-    typeof savedModel !== 'string' || RETIRED_CODEX_MODELS.has(savedModel)
-      ? fallback
-      : (RENAMED_CODEX_MODELS[savedModel] ?? savedModel);
-  return { model, perModel };
+): { model: string; perModel: Record<string, P> } {
+  return {
+    model: typeof section?.model === 'string' ? section.model : fallback,
+    perModel: (section?.perModel as Record<string, P> | undefined) ?? {},
+  };
 }
 
 function parseEngine(value: unknown): AgentEngine {
@@ -280,11 +232,8 @@ function readCookie(): AgentSettingsState {
       reviewProfileByEngine: parseReviewProfileByEngine(parsed),
       tourEngine: parseEngine(parsed.tourEngine),
       guideEngine: parseReviewEngine(parsed.guideEngine),
-      claude: {
-        model: typeof parsed.claude?.model === 'string' ? parsed.claude.model : DEFAULT_CLAUDE_MODEL,
-        perModel: parsed.claude?.perModel ?? {},
-      },
-      codex: migrateCodexSection(parsed.codex, DEFAULT_CODEX_MODEL),
+      claude: parseModelSection(parsed.claude, DEFAULT_CLAUDE_MODEL),
+      codex: parseModelSection(parsed.codex, DEFAULT_CODEX_MODEL),
       cursor: {
         model: typeof parsed.cursor?.model === 'string' ? parsed.cursor.model : DEFAULT_CURSOR_MODEL,
       },
@@ -298,16 +247,10 @@ function readCookie(): AgentSettingsState {
       copilot: {
         model: typeof parsed.copilot?.model === 'string' ? parsed.copilot.model : DEFAULT_COPILOT_MODEL,
       },
-      tourClaude: {
-        model: typeof parsed.tourClaude?.model === 'string' ? parsed.tourClaude.model : DEFAULT_TOUR_CLAUDE_MODEL,
-        perModel: parsed.tourClaude?.perModel ?? {},
-      },
-      tourCodex: migrateCodexSection(parsed.tourCodex, DEFAULT_TOUR_CODEX_MODEL),
-      guideClaude: {
-        model: typeof parsed.guideClaude?.model === 'string' ? parsed.guideClaude.model : DEFAULT_GUIDE_CLAUDE_MODEL,
-        perModel: parsed.guideClaude?.perModel ?? {},
-      },
-      guideCodex: migrateCodexSection(parsed.guideCodex, DEFAULT_GUIDE_CODEX_MODEL),
+      tourClaude: parseModelSection(parsed.tourClaude, DEFAULT_TOUR_CLAUDE_MODEL),
+      tourCodex: parseModelSection(parsed.tourCodex, DEFAULT_TOUR_CODEX_MODEL),
+      guideClaude: parseModelSection(parsed.guideClaude, DEFAULT_GUIDE_CLAUDE_MODEL),
+      guideCodex: parseModelSection(parsed.guideCodex, DEFAULT_GUIDE_CODEX_MODEL),
       guideCursor: {
         model: typeof parsed.guideCursor?.model === 'string' ? parsed.guideCursor.model : DEFAULT_GUIDE_CURSOR_MODEL,
       },
@@ -327,7 +270,29 @@ function readCookie(): AgentSettingsState {
   }
 }
 
-export function useAgentSettings() {
+/**
+ * The model a launch actually uses: the saved pick when the catalog offers it,
+ * else the surface default, else the catalog's own default. Resolved at read
+ * time (the saved cookie is never rewritten), and only once the catalog has
+ * settled — before that the saved pick is used as-is.
+ */
+export function effectiveModel(catalog: ModelCatalog | undefined, saved: string, surfaceDefault: string): string {
+  return catalog?.settled ? resolveModelChoice(saved, catalog.models, surfaceDefault) : saved;
+}
+
+/** The effort a launch uses: clamped to what the effective model accepts ('' = none). */
+export function effectiveEffort(catalog: ModelCatalog | undefined, model: string, effort: string): string {
+  return catalog?.settled ? resolveEffortChoice(effort, catalog.models, model) : effort;
+}
+
+/** Fast mode only for a model that offers it. */
+function effectiveFast(catalog: ModelCatalog | undefined, model: string, fast: boolean): boolean {
+  if (!fast || !catalog?.settled) return fast;
+  const entry = catalog.models.find((m) => m.id === model);
+  return entry ? entry.fastMode === true : fast;
+}
+
+export function useAgentSettings(catalogs?: ModelCatalogs) {
   const [state, setState] = useState<AgentSettingsState>(readCookie);
   // Serialized form of the state this instance knows is already persisted
   // and broadcast. The persist effect compares VALUES against this instead
@@ -534,28 +499,24 @@ export function useAgentSettings() {
     setState((s) => ({ ...s, guideCopilot: { ...s.guideCopilot, model } }));
   }, []);
 
-  const claudeEffort = state.claude.perModel[state.claude.model]?.effort ?? DEFAULT_CLAUDE_EFFORT;
-  // Codex reasoning is clamped through the model's supported-effort set: a
-  // saved (or surface-default) effort the selected model doesn't support
-  // snaps to that model's catalog default. Every consumer — the pickers AND
-  // the launch payloads — reads these derived values, so an unsupported
-  // effort can never reach `-c model_reasoning_effort=`.
-  const codexReasoning = clampCodexReasoning(
-    state.codex.model,
-    state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING,
-  );
-  const codexFast = state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST;
-  const tourClaudeEffort = state.tourClaude.perModel[state.tourClaude.model]?.effort ?? DEFAULT_TOUR_CLAUDE_EFFORT;
-  const tourCodexReasoning = clampCodexReasoning(
-    state.tourCodex.model,
-    state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING,
-  );
-  const tourCodexFast = state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST;
-  const guideClaudeEffort = state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT;
-  const guideCodexReasoning = clampCodexReasoning(
-    state.guideCodex.model,
-    state.guideCodex.perModel[state.guideCodex.model]?.reasoning ?? DEFAULT_GUIDE_CODEX_REASONING,
-  );
+  // Effective (launchable) values, resolved against the discovered catalogs.
+  // Pickers and launch payloads both read these, so what is shown is what runs.
+  const claudeCatalog = catalogs?.claude;
+  const codexCatalog = catalogs?.codex;
+  const claudeModel = effectiveModel(claudeCatalog, state.claude.model, DEFAULT_CLAUDE_MODEL);
+  const claudeEffort = effectiveEffort(claudeCatalog, claudeModel, state.claude.perModel[state.claude.model]?.effort ?? DEFAULT_CLAUDE_EFFORT);
+  const codexModel = effectiveModel(codexCatalog, state.codex.model, DEFAULT_CODEX_MODEL);
+  const codexReasoning = effectiveEffort(codexCatalog, codexModel, state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING);
+  const codexFast = effectiveFast(codexCatalog, codexModel, state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST);
+  const tourClaudeModel = effectiveModel(claudeCatalog, state.tourClaude.model, DEFAULT_TOUR_CLAUDE_MODEL);
+  const tourClaudeEffort = effectiveEffort(claudeCatalog, tourClaudeModel, state.tourClaude.perModel[state.tourClaude.model]?.effort ?? DEFAULT_TOUR_CLAUDE_EFFORT);
+  const tourCodexModel = effectiveModel(codexCatalog, state.tourCodex.model, DEFAULT_TOUR_CODEX_MODEL);
+  const tourCodexReasoning = effectiveEffort(codexCatalog, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING);
+  const tourCodexFast = effectiveFast(codexCatalog, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST);
+  const guideClaudeModel = effectiveModel(claudeCatalog, state.guideClaude.model, DEFAULT_GUIDE_CLAUDE_MODEL);
+  const guideClaudeEffort = effectiveEffort(claudeCatalog, guideClaudeModel, state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT);
+  const guideCodexModel = effectiveModel(codexCatalog, state.guideCodex.model, DEFAULT_GUIDE_CODEX_MODEL);
+  const guideCodexReasoning = effectiveEffort(codexCatalog, guideCodexModel, state.guideCodex.perModel[state.guideCodex.model]?.reasoning ?? DEFAULT_GUIDE_CODEX_REASONING);
 
   return {
     selectedMode: state.selectedMode,
@@ -563,9 +524,9 @@ export function useAgentSettings() {
     reviewProfileId: state.reviewProfileByEngine[state.reviewEngine] ?? BUILTIN_DEFAULT_PROFILE,
     tourEngine: state.tourEngine,
     guideEngine: state.guideEngine,
-    claudeModel: state.claude.model,
+    claudeModel,
     claudeEffort,
-    codexModel: state.codex.model,
+    codexModel,
     codexReasoning,
     codexFast,
     cursorModel: state.cursor.model,
@@ -573,14 +534,14 @@ export function useAgentSettings() {
     piModel: state.pi.model,
     piThinking: state.pi.thinking,
     copilotModel: state.copilot.model,
-    tourClaudeModel: state.tourClaude.model,
+    tourClaudeModel,
     tourClaudeEffort,
-    tourCodexModel: state.tourCodex.model,
+    tourCodexModel,
     tourCodexReasoning,
     tourCodexFast,
-    guideClaudeModel: state.guideClaude.model,
+    guideClaudeModel,
     guideClaudeEffort,
-    guideCodexModel: state.guideCodex.model,
+    guideCodexModel,
     guideCodexReasoning,
     guideCursorModel: state.guideCursor.model,
     guideOpencodeModel: state.guideOpencode.model,

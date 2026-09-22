@@ -1,6 +1,7 @@
 import type { AgentCapabilities } from '@plannotator/ui/types';
 import type { AgentLaunchParams } from '@plannotator/ui/hooks/useAgentJobs';
 import { useAgentSettings } from '@plannotator/ui/hooks/useAgentSettings';
+import { useModelCatalogs, type ModelCatalogs } from '@plannotator/ui/hooks/useModelCatalogs';
 import type { ReviewEngine } from '@plannotator/ui/hooks/useAgentSettings';
 import { REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/AgentsTab';
 
@@ -18,6 +19,8 @@ export type GuideModelOption = { value: string; label: string };
 export interface GuideLaunchState {
   /** The persisted agent settings bundle (pickers read/write through this). */
   settings: ReturnType<typeof useAgentSettings>;
+  /** Claude / Codex model catalogs (discovered from the installed CLIs). */
+  catalogs: ModelCatalogs;
   guideAvailable: boolean;
   availableEngines: ReviewEngine[];
   /** Effective engine: the persisted choice, snapped to an available one. */
@@ -49,7 +52,8 @@ export interface GuideLaunchState {
  * surfaces stay in lockstep.
  */
 export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLaunchState {
-  const settings = useAgentSettings();
+  const catalogs = useModelCatalogs(capabilities);
+  const settings = useAgentSettings(catalogs);
   const {
     guideEngine,
     guideClaudeModel,
@@ -155,8 +159,13 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
                   : { reasoningEffort: guideCodexReasoning }),
               };
 
+  // Claude/Codex launches wait for their catalog to settle so a launch never
+  // uses an unresolved pick (the catalog always settles; fallback on failure).
+  const modelsReady = engine === 'claude' || engine === 'codex' ? catalogs[engine].settled : true;
+
   return {
     settings,
+    catalogs,
     guideAvailable,
     availableEngines,
     engine,
@@ -168,7 +177,7 @@ export function useGuideLaunch(capabilities: AgentCapabilities | null): GuideLau
     effectiveOpencodeModel,
     effectivePiModel,
     effectiveCopilotModel,
-    canLaunch: guideAvailable && availableEngines.length > 0,
+    canLaunch: guideAvailable && availableEngines.length > 0 && modelsReady,
     buildParams,
   };
 }

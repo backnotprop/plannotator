@@ -306,9 +306,9 @@ describe("getLocalDiffInstruction", () => {
 });
 
 describe("buildClaudeCommand", () => {
-  test("defaults to Opus 5 when the caller passes no model", () => {
+  test("defaults to the opus alias (the CLI resolves latest) when the caller passes no model", () => {
     const command = buildClaudeCommand("review").command;
-    expect(command[command.indexOf("--model") + 1]).toBe("claude-opus-5");
+    expect(command[command.indexOf("--model") + 1]).toBe("opus");
   });
 
   test("still honours an explicitly requested model", () => {

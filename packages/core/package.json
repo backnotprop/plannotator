@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.5",
+  "version": "0.25.6",
   "type": "module",
   "exports": {
     "./agents": "./agents.ts",
@@ -32,6 +32,7 @@
     "./storage-types": "./storage-types.ts",
     "./workspace-status-types": "./workspace-status-types.ts",
     "./ai-context": "./ai-context.ts",
+    "./model-catalog": "./model-catalog.ts",
     "./types": "./types.ts",
     ".": "./index.ts",
     "./guide-format-fixtures": "./guide-format-fixtures.ts",

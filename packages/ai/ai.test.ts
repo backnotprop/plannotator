@@ -981,6 +981,44 @@ describe("AI endpoints", () => {
     expect(createdModel).toBe("anything-goes");
   });
 
+  test("session creation forwards only an effort the resolved model accepts", async () => {
+    const reg = new ProviderRegistry();
+    const sm = new SessionManager();
+    const efforts: Array<string | undefined> = [];
+    reg.register({
+      ...mockProvider("claude-agent-sdk"),
+      models: [
+        { id: "sonnet", label: "Sonnet", default: true, reasoningEfforts: [{ id: "high", label: "High" }] },
+        { id: "haiku", label: "Haiku" },
+      ],
+      async createSession(options: CreateSessionOptions) {
+        efforts.push(options.reasoningEffort);
+        return mockSession(`session-${++sessionCounter}`, null);
+      },
+    }, "claude");
+    const endpoints = createAIEndpoints({ registry: reg, sessionManager: sm });
+
+    for (const [model, reasoningEffort] of [["sonnet", "high"], ["sonnet", "ultra"], ["haiku", "high"]]) {
+      const res = await endpoints["/api/ai/session"](
+        new Request("http://localhost/api/ai/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context: { mode: "plan-review", plan: { plan: "# Test" } },
+            providerId: "claude",
+            model,
+            reasoningEffort,
+          }),
+        }),
+      );
+      expect(res.status).toBe(200);
+    }
+
+    // A level the model lists passes; one it does not list, or any level on a
+    // model that takes none, is dropped rather than sent to the CLI.
+    expect(efforts).toEqual(["high", undefined, undefined]);
+  });
+
   test("session creation clamps client-supplied cost controls", async () => {
     const { reg, endpoints } = setup();
     let seenOptions: { maxTurns?: number; maxBudgetUsd?: number } | null = null;

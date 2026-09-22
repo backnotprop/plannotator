@@ -113,20 +113,25 @@ done
 printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/bridge-script.ts\n' \
   | cat - "../../packages/ui/components/html-viewer/bridge-script.ts" > "generated/bridge-script.ts"
 
-# Vendor the moved AI context types from core into generated/ai/.
-printf '// @generated — DO NOT EDIT. Source: packages/core/ai-context.ts\n' \
-  | cat - "../../packages/core/ai-context.ts" > "generated/ai/ai-context.ts"
+# Vendor the moved AI context types and the model catalog from core into generated/ai/.
+for f in ai-context model-catalog; do
+  printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" \
+    | cat - "../../packages/core/$f.ts" > "generated/ai/$f.ts"
+done
 
 for f in index types provider session-manager endpoints context base-session; do
   src="../../packages/ai/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/ai/%s.ts\n' "$f" | cat - "$src" \
-    | sed "s|from ['\"]@plannotator/core/ai-context['\"]|from './ai-context.ts'|g" \
+    | sed -e "s|from ['\"]@plannotator/core/ai-context['\"]|from './ai-context.ts'|g" \
+          -e "s|from ['\"]@plannotator/core/model-catalog['\"]|from './model-catalog.ts'|g" \
     > "generated/ai/$f.ts"
 done
 
 for f in claude-agent-sdk codex-app-server opencode-sdk command-path child-io pi-sdk pi-sdk-node pi-events; do
   src="../../packages/ai/providers/$f.ts"
-  printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" > "generated/ai/providers/$f.ts"
+  printf '// @generated — DO NOT EDIT. Source: packages/ai/providers/%s.ts\n' "$f" | cat - "$src" \
+    | sed "s|from ['\"]@plannotator/core/model-catalog['\"]|from '../model-catalog.ts'|g" \
+    > "generated/ai/providers/$f.ts"
 done
 
 # ---------------------------------------------------------------------------

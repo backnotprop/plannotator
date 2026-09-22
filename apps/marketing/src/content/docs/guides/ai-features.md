@@ -18,33 +18,13 @@ Ask AI is an optional network feature. When you send the first question, Plannot
 
 Requires the `claude` CLI installed and authenticated. Uses Claude Code's full system prompt, so the AI has the same capabilities as a Claude Code session — file reading, search, web access — plus the diff context.
 
-**Models:**
-
-- Sonnet 5 (default)
-- Fable 5
-- Opus 5
-- Opus 4.8
-- Sonnet 4.6
-- Opus 4.7
-- Opus 4.6
-- Haiku 4.5
-
-Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6 are also offered in `(1M)` context
-variants. The 5-series models use their 1M context window by default, so they
-have no separate variant.
+**Models:** whatever your installed `claude` offers (the same list its `/model` picker shows), plus a latest-resolving alias (`opus`, `sonnet`, `fable`, `haiku`) for each family it offers. Sonnet is the default. The effort control lists only the levels the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
 
 ### Codex (via Codex SDK)
 
 Requires the `codex` CLI installed and authenticated. The AI operates in a sandboxed read-only mode with the diff context injected as a system prompt prefix.
 
-**Models:**
-
-- GPT-5.4 (default)
-- GPT-5.4 Mini
-- GPT-5.3 Codex
-- GPT-5.3 Codex Spark
-- GPT-5.2 Codex
-- GPT-5.2
+**Models:** whatever your installed `codex` offers (its `model/list`), with Codex's own default preselected. The reasoning control lists only the efforts the selected model supports. The review agent, Code Tour, and Guided Review pickers show the same list.
 
 ### Pi (via RPC subprocess)
 

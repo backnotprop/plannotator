@@ -36,7 +36,18 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
       cwd,
       ...(claudePath && { claudeExecutablePath: claudePath }),
     });
-    registry.register(provider);
+    const providerId = registry.register(provider);
+    // Deferred like Codex: model discovery spawns `claude`, so it runs on
+    // first explicit activation (a model picker) or first session, never at
+    // startup.
+    if ("fetchModels" in provider) {
+      providerInitializers.set(
+        providerId,
+        createBestEffortOnce(
+          () => (provider as { fetchModels: () => Promise<void> }).fetchModels(),
+        ),
+      );
+    }
   } catch {
     // Claude SDK not available.
   }

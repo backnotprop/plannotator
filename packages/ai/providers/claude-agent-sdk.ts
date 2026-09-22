@@ -21,6 +21,12 @@ import type {
   CreateSessionOptions,
   ClaudeAgentSDKConfig,
 } from "../types.ts";
+import {
+  CLAUDE_FALLBACK_MODELS,
+  claudeCatalogFromSdk,
+  type CatalogModel,
+  type ClaudeSdkModelInfo,
+} from "@plannotator/core/model-catalog";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,7 +61,9 @@ const DEFAULT_ALLOWED_TOOLS = [
 ];
 
 const DEFAULT_MAX_TURNS = 99;
-const DEFAULT_MODEL = "claude-sonnet-5";
+const DEFAULT_MODEL = "sonnet";
+/** Model discovery must never hang a picker: bound the `claude` spawn + reply. */
+const MODEL_DISCOVERY_TIMEOUT_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Bedrock / Vertex model resolution
@@ -149,6 +157,8 @@ interface ClaudeSDKQueryOptions {
   allowDangerouslySkipPermissions?: boolean;
   pathToClaudeCodeExecutable?: string;
   settingSources?: string[];
+  effort?: string;
+  strictMcpConfig?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,20 +173,10 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     streaming: true,
     tools: true,
   };
-  readonly models = [
-    { id: 'claude-fable-5', label: 'Fable 5' },
-    { id: 'claude-opus-5', label: 'Opus 5' },
-    { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-    { id: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M)' },
-    { id: 'claude-sonnet-5', label: 'Sonnet 5', default: true },
-    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-    { id: 'claude-sonnet-4-6[1m]', label: 'Sonnet 4.6 (1M)' },
-    { id: 'claude-opus-4-7', label: 'Opus 4.7' },
-    { id: 'claude-opus-4-7[1m]', label: 'Opus 4.7 (1M)' },
-    { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-    { id: 'claude-opus-4-6[1m]', label: 'Opus 4.6 (1M)' },
-    { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-  ] as const;
+  // Fallback used only until fetchModels() replaces it with the installed
+  // `claude`'s own list (the SDK's supportedModels()).
+  models: CatalogModel[] = CLAUDE_FALLBACK_MODELS;
+  private modelsLoaded = false;
 
   private config: ClaudeAgentSDKConfig;
 
@@ -224,6 +224,51 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     });
   }
 
+  /**
+   * Populate `models` from the installed `claude` via the SDK's
+   * supportedModels(). Starts a throwaway CLI process with no prompt, no
+   * settings sources (so no user hooks or plugins run) and no MCP servers,
+   * reads the list from the initialize handshake, and closes it. Bounded by
+   * MODEL_DISCOVERY_TIMEOUT_MS; keeps the static fallback on any failure.
+   */
+  async fetchModels(): Promise<void> {
+    if (this.modelsLoaded) return;
+    const abortController = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let q: { supportedModels: () => Promise<ClaudeSdkModelInfo[]>; close: () => void } | null = null;
+    try {
+      const queryFn = await getSDKQuery();
+      q = queryFn({
+        prompt: idlePrompt(abortController.signal),
+        options: {
+          cwd: this.config.cwd ?? process.cwd(),
+          abortController,
+          persistSession: false,
+          settingSources: [],
+          strictMcpConfig: true,
+          ...(this.config.claudeExecutablePath && {
+            pathToClaudeCodeExecutable: this.config.claudeExecutablePath,
+          }),
+        },
+      });
+      const infos = await Promise.race([
+        q!.supportedModels(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("model discovery timed out")), MODEL_DISCOVERY_TIMEOUT_MS);
+        }),
+      ]);
+      const models = claudeCatalogFromSdk(infos ?? []);
+      if (models.length) this.models = models;
+      this.modelsLoaded = true;
+    } catch {
+      // Keep the static fallback list.
+    } finally {
+      if (timer) clearTimeout(timer);
+      abortController.abort();
+      try { q?.close(); } catch { /* already closed */ }
+    }
+  }
+
   dispose(): void {
     // No persistent resources to clean up
   }
@@ -231,6 +276,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   private baseConfig(options?: CreateSessionOptions) {
     return {
       model: options?.model ?? this.config.model ?? DEFAULT_MODEL,
+      effort: options?.reasoningEffort,
       maxTurns: options?.maxTurns ?? DEFAULT_MAX_TURNS,
       maxBudgetUsd: options?.maxBudgetUsd,
       allowedTools: this.config.allowedTools ?? DEFAULT_ALLOWED_TOOLS,
@@ -256,6 +302,14 @@ async function getSDKQuery() {
   return sdkQueryFn!;
 }
 
+/** A streaming-input prompt that sends nothing and ends when aborted. */
+async function* idlePrompt(signal: AbortSignal): AsyncGenerator<never> {
+  await new Promise<void>((resolve) => {
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Session
 // ---------------------------------------------------------------------------
@@ -264,6 +318,7 @@ interface SessionConfig {
   systemPrompt: string | null;
   forkPreamble?: string;
   model: string;
+  effort?: string;
   maxTurns: number;
   maxBudgetUsd?: number;
   allowedTools: string[];
@@ -367,6 +422,7 @@ class ClaudeAgentSDKSession extends BaseSession {
     const resolvedModel = resolveSDKModel(this.config.model);
     const opts: ClaudeSDKQueryOptions = {
       ...(resolvedModel !== undefined && { model: resolvedModel }),
+      ...(this.config.effort && { effort: this.config.effort }),
       maxTurns: this.config.maxTurns,
       allowedTools: this.config.allowedTools,
       cwd: this.config.cwd,
