@@ -10,6 +10,18 @@ import type { CodeAnnotation, Annotation, CommentAnnotation } from '../types';
 import { getDraftTransport } from './useAnnotationDraft';
 
 const DEBOUNCE_MS = 500;
+/** Bound on one read of a switched-onto target's draft (#1590). */
+export const TARGET_LOAD_TIMEOUT_MS = 5000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('draft load timed out')), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 interface DraftData {
   codeAnnotations: CodeAnnotation[];
@@ -65,6 +77,9 @@ interface UseCodeAnnotationDraftOptions {
    *  deleted. The host adds them to its state; autosave then saves the merge.
    *  Called synchronously before autosave resumes. */
   onDraftTargetMerge?: (items: CodeDraftMergeItems) => void;
+  /** Bound on one read of a switched-onto target's draft. Default
+   *  `TARGET_LOAD_TIMEOUT_MS`; exposed for tests. */
+  targetLoadTimeoutMs?: number;
 }
 
 /** Items auto-merged from a switched-onto target's draft. */
@@ -109,6 +124,7 @@ export function useCodeAnnotationDraft({
   isApiMode,
   submitted,
   onDraftTargetMerge,
+  targetLoadTimeoutMs = TARGET_LOAD_TIMEOUT_MS,
 }: UseCodeAnnotationDraftOptions): UseCodeAnnotationDraftResult {
   const [draftBanner, setDraftBanner] = useState<{ count: number; viewedCount: number; timeAgo: string } | null>(null);
   const draftDataRef = useRef<DraftData | null>(null);
@@ -128,7 +144,16 @@ export function useCodeAnnotationDraft({
   const switchSeqRef = useRef(0);
   const awaitingTargetLoadRef = useRef(false);
   const skippedWhileAwaitingRef = useRef(false);
+  // The switched-onto target's draft could not be read (both attempts failed
+  // or timed out). Autosave then does not write under that target — it would
+  // overwrite a draft nobody has seen — and instead retries the read on each
+  // save attempt; a successful read (or the next switch) clears it.
+  const targetUnreadableRef = useRef(false);
+  // Kicks a read of the current target's draft; set by adoptDraftTarget.
+  const retryTargetLoadRef = useRef<(() => void) | null>(null);
   const [saveNudge, setSaveNudge] = useState(0);
+  const loadTimeoutRef = useRef(targetLoadTimeoutMs);
+  loadTimeoutRef.current = targetLoadTimeoutMs;
   const onMergeRef = useRef(onDraftTargetMerge);
   onMergeRef.current = onDraftTargetMerge;
   const latestRef = useRef({ annotations, descriptionAnnotations, commentAnnotations });
@@ -213,6 +238,11 @@ export function useCodeAnnotationDraft({
         skippedWhileAwaitingRef.current = true;
         return;
       }
+      if (targetUnreadableRef.current) {
+        skippedWhileAwaitingRef.current = true;
+        retryTargetLoadRef.current?.();
+        return;
+      }
       const draftGeneration = draftGenerationRef.current + 1;
       draftGenerationRef.current = draftGeneration;
 
@@ -275,73 +305,94 @@ export function useCodeAnnotationDraft({
     getDraftTransport().remove(deletedGeneration, { keepalive: false }).catch(() => {});
   }, []);
 
+  // Unmount supersedes any in-flight target read, so a retry never fires
+  // after the page (or a test host) is gone.
+  useEffect(() => () => { switchSeqRef.current += 1; }, []);
+
   const adoptDraftTarget = useCallback((state: CodeDraftTargetState | undefined) => {
     if (!isApiMode) return;
     // Every switch starts clean: a previous switch's load (if still in
-    // flight) is superseded, and any write it held back resumes below.
+    // flight) is superseded, an unreadable-target block is lifted, and any
+    // write either of them held back resumes (under the new target).
     const seq = ++switchSeqRef.current;
-    const settle = () => {
-      if (switchSeqRef.current !== seq || !awaitingTargetLoadRef.current) return;
-      awaitingTargetLoadRef.current = false;
+    const resumeHeldWrite = () => {
       if (skippedWhileAwaitingRef.current) {
         skippedWhileAwaitingRef.current = false;
         setSaveNudge((n) => n + 1);
       }
     };
-    const wasAwaiting = awaitingTargetLoadRef.current;
     awaitingTargetLoadRef.current = false;
-    if (!state) {
-      if (wasAwaiting && skippedWhileAwaitingRef.current) {
-        skippedWhileAwaitingRef.current = false;
-        setSaveNudge((n) => n + 1);
-      }
-      return;
-    }
+    targetUnreadableRef.current = false;
+    retryTargetLoadRef.current = null;
+    if (!state) { resumeHeldWrite(); return; }
     const floor = readDraftGeneration(state.draftGeneration);
     if (floor !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, floor);
-    if (!state.found) {
-      if (wasAwaiting && skippedWhileAwaitingRef.current) {
-        skippedWhileAwaitingRef.current = false;
-        setSaveNudge((n) => n + 1);
+    if (!state.found) { resumeHeldWrite(); return; }
+
+    const applyDraft = (data: unknown, generation: number | null) => {
+      if (generation !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
+      const draft = data as DraftData | null;
+      if (!draft) return;
+      const loadedGeneration = readDraftGeneration(draft.draftGeneration);
+      if (loadedGeneration !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, loadedGeneration);
+      // Only what the session neither holds nor deleted: the target may
+      // carry this session's own blob from before a switch away and back.
+      const current = latestRef.current;
+      const skip = new Set<string>([
+        ...current.annotations.map((a) => a.id),
+        ...current.descriptionAnnotations.map((a) => a.id),
+        ...current.commentAnnotations.map((a) => a.id),
+        ...removedIdsRef.current,
+      ]);
+      const fresh = <T extends { id: string }>(items: T[] | undefined) =>
+        (Array.isArray(items) ? items : []).filter((item) => !skip.has(item.id));
+      const items: CodeDraftMergeItems = {
+        annotations: fresh(draft.codeAnnotations),
+        descriptionAnnotations: fresh(draft.descriptionAnnotations),
+        commentAnnotations: fresh(draft.commentAnnotations),
+        patchChanged: draft.patchChanged === true,
+      };
+      if (items.annotations.length + items.descriptionAnnotations.length + items.commentAnnotations.length > 0) {
+        onMergeRef.current?.(items);
       }
-      return;
-    }
-    awaitingTargetLoadRef.current = true;
-    getDraftTransport().load()
-      .then(({ data, generation }) => {
-        if (switchSeqRef.current !== seq) return; // a newer switch owns the keys now
-        if (generation !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, generation);
-        const draft = data as DraftData | null;
-        if (draft) {
-          const loadedGeneration = readDraftGeneration(draft.draftGeneration);
-          if (loadedGeneration !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, loadedGeneration);
-          // Only what the session neither holds nor deleted: the target may
-          // carry this session's own blob from before a switch away and back.
-          const current = latestRef.current;
-          const skip = new Set<string>([
-            ...current.annotations.map((a) => a.id),
-            ...current.descriptionAnnotations.map((a) => a.id),
-            ...current.commentAnnotations.map((a) => a.id),
-            ...removedIdsRef.current,
-          ]);
-          const fresh = <T extends { id: string }>(items: T[] | undefined) =>
-            (Array.isArray(items) ? items : []).filter((item) => !skip.has(item.id));
-          const items: CodeDraftMergeItems = {
-            annotations: fresh(draft.codeAnnotations),
-            descriptionAnnotations: fresh(draft.descriptionAnnotations),
-            commentAnnotations: fresh(draft.commentAnnotations),
-            patchChanged: draft.patchChanged === true,
-          };
-          if (items.annotations.length + items.descriptionAnnotations.length + items.commentAnnotations.length > 0) {
-            onMergeRef.current?.(items);
-          }
-        }
-        settle();
-      })
-      .catch(() => {
-        if (switchSeqRef.current !== seq) return;
-        settle();
-      });
+    };
+
+    // One read = up to two attempts, each bounded by TARGET_LOAD_TIMEOUT_MS so
+    // a hung GET takes the failure path instead of pausing autosave.
+    const read = () => {
+      if (switchSeqRef.current !== seq || awaitingTargetLoadRef.current) return;
+      awaitingTargetLoadRef.current = true;
+      const attempt = (remaining: number): void => {
+        if (switchSeqRef.current !== seq) return; // superseded or unmounted
+        withTimeout(getDraftTransport().load(), loadTimeoutRef.current)
+          .then(({ data, generation }) => {
+            if (switchSeqRef.current !== seq) return; // a newer switch owns the keys now
+            // A debounced save armed before the read settled captured the
+            // pre-merge state; drop it and save again from the merged render.
+            if (timerRef.current) {
+              clearTimeout(timerRef.current);
+              timerRef.current = null;
+              skippedWhileAwaitingRef.current = true;
+            }
+            applyDraft(data, generation);
+            awaitingTargetLoadRef.current = false;
+            targetUnreadableRef.current = false;
+            resumeHeldWrite();
+          })
+          .catch(() => {
+            if (switchSeqRef.current !== seq) return;
+            if (remaining > 0) { attempt(remaining - 1); return; }
+            // Still unreadable: never overwrite it blind. Autosave keeps
+            // running for the session and retries this read on its next
+            // save attempt; the next switch lifts the block.
+            awaitingTargetLoadRef.current = false;
+            targetUnreadableRef.current = true;
+          });
+      };
+      attempt(1);
+    };
+    retryTargetLoadRef.current = read;
+    read();
   }, [isApiMode]);
 
   return { draftBanner, restoreDraft, getDraftGeneration, dismissDraft, adoptDraftTarget };

@@ -332,7 +332,7 @@ describe('in-place switch onto another draft target (#1590)', () => {
 
   const ann = (id: string) => ({ ...(ANNOTATION as object), id }) as unknown as CodeAnnotation;
 
-  async function mountHost(initial: CodeAnnotation[]): Promise<Host> {
+  async function mountHost(initial: CodeAnnotation[], extra: Partial<HookOptions> = {}): Promise<Host> {
     const host = document.createElement('div');
     document.body.appendChild(host);
     const resultRef: { current: HookResult | null } = { current: null };
@@ -351,6 +351,7 @@ describe('in-place switch onto another draft target (#1590)', () => {
         annotations,
         viewedFiles,
         onDraftTargetMerge: (items) => setAnnotations((prev) => [...prev, ...items.annotations]),
+        ...extra,
       }));
       return null;
     }
@@ -489,26 +490,79 @@ describe('in-place switch onto another draft target (#1590)', () => {
       await h.unmount();
     });
 
-    test.skipIf(!hasDom)('a failed target load settles too: saving resumes instead of sticking', async () => {
-      const loads: Array<(v: unknown) => void> = [];
-      const rejects: Array<(e: unknown) => void> = [];
+    // A transport whose target loads follow a script: each entry answers one
+    // load call ('fail' rejects, 'hang' never settles, otherwise resolves).
+    function scriptedTransport(script: Array<'fail' | 'hang' | { data: unknown }>) {
       const saves: Array<{ codeAnnotations?: Array<{ id: string }> }> = [];
+      let calls = 0;
       setDraftTransport({
-        load: () => new Promise((resolve, reject) => { loads.push(resolve as (v: unknown) => void); rejects.push(reject); }),
+        load: () => {
+          calls += 1;
+          if (calls === 1) return Promise.resolve({ data: null, generation: null }); // page-load GET
+          const step = script.shift() ?? 'fail';
+          if (step === 'fail') return Promise.reject(new Error('offline'));
+          if (step === 'hang') return new Promise(() => {});
+          return Promise.resolve({ data: step.data, generation: null });
+        },
         save: async (body) => { saves.push(body as { codeAnnotations?: Array<{ id: string }> }); },
         remove: async () => {},
       });
+      return { saves, loadCalls: () => calls - 1 };
+    }
+    const bDraft = { data: { codeAnnotations: [{ ...(ANNOTATION as object), id: 'waiting-on-b' }], draftGeneration: 5, ts: 1 } };
+
+    test.skipIf(!hasDom)('a failed read is retried once; when the retry succeeds the draft merges and saving resumes', async () => {
+      const t = scriptedTransport(['fail', bDraft]);
       const h = await mountHost([ann('mine')]);
-      loads.shift()?.({ data: null, generation: null });
-      rejects.shift();
-      await tick(0);
       await h.adopt({ found: true, draftGeneration: 5 });
       await h.setViewed(new Set(['b.ts']));
       await tick(DEBOUNCE_WAIT_MS);
-      expect(saves).toEqual([]); // not written over B's unread draft
-      await act(async () => { rejects.shift()?.(new Error('offline')); });
+      expect(t.loadCalls()).toBe(2);
+      expect(h.ids()).toEqual(['mine', 'waiting-on-b']);
+      expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'waiting-on-b']);
+      await h.unmount();
+    });
+
+    test.skipIf(!hasDom)('a hung read times out into the same retry path instead of pausing autosave', async () => {
+      const t = scriptedTransport(['hang', bDraft]);
+      const h = await mountHost([ann('mine')], { targetLoadTimeoutMs: 50 });
+      await h.adopt({ found: true, draftGeneration: 5 });
+      await h.setViewed(new Set(['b.ts']));
+      await tick(100); // the 50ms timeout fires; the retry reads B and merges
       await tick(DEBOUNCE_WAIT_MS);
-      expect(saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine']);
+      expect(h.ids()).toEqual(['mine', 'waiting-on-b']);
+      expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'waiting-on-b']);
+      await h.unmount();
+    });
+
+    test.skipIf(!hasDom)('when both attempts fail the unread draft is never overwritten; the next change retries the read and saves once it succeeds', async () => {
+      // Initial read: two failures. The switch's own save attempt re-reads:
+      // two more failures. The next edit's save attempt re-reads: success.
+      const t = scriptedTransport(['fail', 'fail', 'fail', 'fail', bDraft]);
+      const h = await mountHost([ann('mine')]);
+      await h.adopt({ found: true, draftGeneration: 5 });
+      await h.setViewed(new Set(['b.ts']));
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(t.saves).toEqual([]); // nothing written over B's unread draft
+      // The reviewer keeps working: the next save attempt re-reads B first.
+      await h.setAnnotations([ann('mine'), ann('later')]);
+      await tick(DEBOUNCE_WAIT_MS); // this save attempt re-reads B and merges
+      await tick(DEBOUNCE_WAIT_MS); // then the merged state is saved
+      expect(h.ids()).toEqual(['mine', 'later', 'waiting-on-b']);
+      expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'later', 'waiting-on-b']);
+      await h.unmount();
+    });
+
+    test.skipIf(!hasDom)('an unreadable target does not block the session: switching on resumes saving under the next target', async () => {
+      const t = scriptedTransport(['fail', 'fail']);
+      const h = await mountHost([ann('mine')]);
+      await h.adopt({ found: true, draftGeneration: 5 });
+      await h.setViewed(new Set(['b.ts']));
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(t.saves).toEqual([]);
+      await h.adopt({ found: false, draftGeneration: null }); // on to C
+      await tick(DEBOUNCE_WAIT_MS);
+      expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine']);
       await h.unmount();
     });
   });
