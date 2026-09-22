@@ -5,7 +5,8 @@ import os from "node:os";
 import { basename, resolve as resolvePath } from "node:path";
 
 import { SingleFlight } from "../generated/single-flight.ts";
-import { contentHash, deleteDraft } from "../generated/draft.ts";
+import { contentHash } from "../generated/draft.ts";
+import { deleteReviewDraft, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck } from "../generated/config.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
 import { isFaviconStyle, type FaviconStyle } from "../generated/favicon.ts";
@@ -87,7 +88,7 @@ import { createAgentJobHandler, whichCmd as commandExists } from "./agent-jobs.t
 import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, markJobReviewFailed } from "../generated/agent-jobs.ts";
 import { createExternalAnnotationHandler } from "./external-annotations.ts";
 import {
-	handleDraftRequest,
+	handleReviewDraftRequest,
 	handleFavicon,
 	handleImageRequest,
 	readDraftGenerationFromBody,
@@ -464,6 +465,13 @@ export async function startReviewServer(options: {
 	let originalPRGitRef = options.gitRef;
 	let originalPRError = options.error;
 	let currentPRDiffScope: PRDiffScope = "layer";
+	// Draft keys for the diff on screen (#1590), mirroring the Bun server:
+	// patch key only outside PR mode (unchanged behavior), plus the PR's stable
+	// target key in PR mode. Read late — a PR switch or scope change moves both.
+	const currentDraftKeys = (): ReviewDraftKeys => ({
+		patchKey: draftKey,
+		targetKey: isPRMode && prMeta ? prDraftTargetKey(prMeta, currentPRDiffScope) : null,
+	});
 	// Monotonic guard for PR scope/switch state writes. Scope requests now park
 	// on long awaits (checkout warmup, full recompute) — a request that resumed
 	// after a NEWER scope select or pr-switch must not overwrite their state.
@@ -3500,7 +3508,7 @@ export async function startReviewServer(options: {
 				);
 			}
 		} else if (url.pathname === "/api/draft") {
-			await handleDraftRequest(req, res, draftKey);
+			await handleReviewDraftRequest(req, res, currentDraftKeys());
 		} else if (url.pathname === "/favicon.png") {
 			handleFavicon(res);
 		} else if (
@@ -3574,7 +3582,7 @@ export async function startReviewServer(options: {
 			// Decision-only line: dismissal rate is behavior data, and a
 			// contentless failure must not change the legacy draft behavior.
 			archiveReviewSubmission("", [], "dismissed");
-			deleteDraft(draftKey, readDraftGenerationFromUrl(req));
+			deleteReviewDraft(currentDraftKeys(), readDraftGenerationFromUrl(req));
 			resolveDecision({ approved: false, feedback: '', annotations: [], exit: true });
 			json(res, { ok: true });
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
@@ -3595,7 +3603,7 @@ export async function startReviewServer(options: {
 					annotationList,
 					approved ? (hasContent ? "approved-with-notes" : "lgtm") : "feedback",
 				);
-				if (durable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
+				if (durable) deleteReviewDraft(currentDraftKeys(), readDraftGenerationFromBody(body));
 				resolveDecision({
 					approved,
 					feedback: feedbackText,

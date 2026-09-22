@@ -3,6 +3,8 @@ import { getDisplayRepo } from '@plannotator/shared/pr-types';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
 import type { CodeAnnotation } from '@plannotator/ui/types';
+import type { DiffFile } from '../types';
+import { captureAnchorText } from '../utils/codeAnnotationAnchor';
 
 /** The active commit diff, if any — stamped onto annotations created while a
  *  commit:<sha> diff is on screen. Mirrors the PR fields: both exist so an
@@ -25,6 +27,10 @@ export function useAnnotationFactory(
   diffScope?: PRDiffScope,
   commitContext?: CommitAnnotationContext | null,
   gitButlerContext?: GitButlerAnnotationContext | null,
+  /** Current diff files. PR mode only: line comments record the text of the
+   *  lines they anchor to (#1590), so a draft restored after the PR changed
+   *  can tell which comments still point at the same code. */
+  files?: readonly DiffFile[],
 ) {
   const prContext = useMemo(() => ({
     ...(prMetadata ? {
@@ -47,8 +53,13 @@ export function useAnnotationFactory(
   }), [prMetadata, diffScope, commitContext, gitButlerContext]);
 
   const withPRContext = useCallback(
-    (annotation: CodeAnnotation): CodeAnnotation => ({ ...annotation, ...prContext }),
-    [prContext],
+    (annotation: CodeAnnotation): CodeAnnotation => {
+      const stamped = { ...annotation, ...prContext };
+      if (!prMetadata || !files) return stamped;
+      const anchorText = captureAnchorText(stamped, files);
+      return anchorText === undefined ? stamped : { ...stamped, anchorText };
+    },
+    [prContext, prMetadata, files],
   );
 
   return { withPRContext };

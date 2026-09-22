@@ -28,6 +28,12 @@ interface DraftData {
    */
   autoViewSuppressed?: string[];
   draftGeneration?: number;
+  /**
+   * Set by the review server (never by the client) when a PR draft is served
+   * through the PR's target key for a patch different from the one it was
+   * saved on (#1590). The host re-checks line comments' anchors on restore.
+   */
+  patchChanged?: boolean;
   ts: number;
 }
 
@@ -58,7 +64,7 @@ interface UseCodeAnnotationDraftOptions {
 
 interface UseCodeAnnotationDraftResult {
   draftBanner: { count: number; viewedCount: number; timeAgo: string } | null;
-  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[] };
+  restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[]; patchChanged: boolean };
   getDraftGeneration: () => number;
   dismissDraft: () => void;
 }
@@ -186,6 +192,7 @@ export function useCodeAnnotationDraft({
       commentAnnotations: data?.commentAnnotations ?? [],
       viewedFiles: data?.viewedFiles ?? [],
       autoViewSuppressed: data?.autoViewSuppressed ?? [],
+      patchChanged: data?.patchChanged === true,
     };
   }, []);
 

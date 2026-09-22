@@ -292,3 +292,27 @@ describe('code-review annotation draft persistence', () => {
     await s.unmount();
   });
 });
+
+describe('PR draft served for a changed patch (#1590)', () => {
+  test.skipIf(!hasDom)('restoreDraft reports the server patchChanged flag so the host re-checks anchors; absent means false', async () => {
+    // The review server adds patchChanged when it serves a PR draft through
+    // the target key for a different patch. Losing it on the way through the
+    // hook would restore stale line comments as if nothing had moved.
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ANNOTATION], draftGeneration: 1, ts: Date.now(), patchChanged: true });
+    const s = await mountSession(options());
+    expect(s.result.current!.draftBanner).not.toBeNull();
+    let restored: ReturnType<HookResult['restoreDraft']> | null = null;
+    await act(async () => { restored = s.result.current!.restoreDraft(); });
+    expect(restored!.patchChanged).toBe(true);
+    expect(restored!.annotations).toHaveLength(1);
+    await s.unmount();
+
+    deleteDraft(DRAFT_KEY);
+    saveDraft(DRAFT_KEY, { codeAnnotations: [ANNOTATION], draftGeneration: 1, ts: Date.now() });
+    const s2 = await mountSession(options());
+    let plain: ReturnType<HookResult['restoreDraft']> | null = null;
+    await act(async () => { plain = s2.result.current!.restoreDraft(); });
+    expect(plain!.patchChanged).toBe(false);
+    await s2.unmount();
+  });
+});

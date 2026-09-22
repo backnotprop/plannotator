@@ -69,8 +69,9 @@ import { type AgentJobInfo, REVIEW_OUTPUT_FAILED, getAgentJobAnnotationContext, 
 import { createCommitAvatarResolver } from "@plannotator/shared/commit-avatars";
 import { detectGeneratedFiles, detectGeneratedFilesByName } from "@plannotator/shared/generated-files";
 import { getRepoInfo } from "./repo";
-import { handleImage, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
-import { contentHash, deleteDraft } from "./draft";
+import { handleImage, handleUpload, handleAgents, handleServerReady, handleApiNotFound, handleFavicon, readDraftGenerationFromBody, readDraftGenerationFromUrl, type OpencodeClient } from "./shared-handlers";
+import { contentHash } from "./draft";
+import { deleteReviewDraft, loadReviewDraft, prDraftTargetKey, saveReviewDraft, type ReviewDraftKeys } from "@plannotator/shared/review-draft";
 import { createEditorAnnotationHandler } from "./editor-annotations";
 import { createExternalAnnotationHandler } from "./external-annotations";
 import { createAgentJobHandler } from "./agent-jobs";
@@ -386,6 +387,14 @@ export async function startReviewServer(
   let originalPRGitRef = options.gitRef;
   let originalPRError = options.error;
   let currentPRDiffScope: PRDiffScope = "layer";
+  // Draft keys for the diff on screen (#1590). Outside PR mode only the patch
+  // key exists and every draft call behaves exactly as before; in PR mode the
+  // draft is also reachable by the PR's stable target identity. Read late:
+  // an in-place PR switch or a scope change moves both keys.
+  const currentDraftKeys = (): ReviewDraftKeys => ({
+    patchKey: draftKey,
+    targetKey: isPRMode && prMetadata ? prDraftTargetKey(prMetadata, currentPRDiffScope) : null,
+  });
   // Monotonic guard for PR scope/switch state writes. Scope requests now park
   // on long awaits (checkout warmup, full recompute) — a request that resumed
   // after a NEWER scope select or pr-switch must not overwrite their state.
@@ -3509,9 +3518,26 @@ export async function startReviewServer(
 
           // API: Annotation draft persistence
           if (url.pathname === "/api/draft") {
-            if (req.method === "POST") return handleDraftSave(req, draftKey);
-            if (req.method === "DELETE") return handleDraftDelete(draftKey, req);
-            return handleDraftLoad(draftKey);
+            if (req.method === "POST") {
+              try {
+                saveReviewDraft(currentDraftKeys(), await req.json());
+                return Response.json({ ok: true });
+              } catch (err) {
+                const message = err instanceof Error ? err.message : "Failed to save draft";
+                console.error(`[draft] save failed: ${message}`);
+                return Response.json({ error: message }, { status: 500 });
+              }
+            }
+            if (req.method === "DELETE") {
+              deleteReviewDraft(currentDraftKeys(), readDraftGenerationFromUrl(req));
+              return Response.json({ ok: true });
+            }
+            const loaded = loadReviewDraft(currentDraftKeys());
+            if (loaded.found) return Response.json(loaded.draft);
+            return Response.json(
+              { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) },
+              { status: 404 },
+            );
           }
 
           // API: Editor annotations (VS Code extension)
@@ -3596,7 +3622,7 @@ export async function startReviewServer(
             // often reviews are closed without feedback is exactly the
             // behavior data the archive exists to answer.
             archiveReviewSubmission("", [], "dismissed");
-            deleteDraft(draftKey, readDraftGenerationFromUrl(req));
+            deleteReviewDraft(currentDraftKeys(), readDraftGenerationFromUrl(req));
             resolveDecision({ approved: false, feedback: "", annotations: [], exit: true });
             return Response.json({ ok: true });
           }
@@ -3627,7 +3653,7 @@ export async function startReviewServer(
                 annotationsValue,
                 approved ? (hasContent ? "approved-with-notes" : "lgtm") : "feedback",
               );
-              if (durable) deleteDraft(draftKey, readDraftGenerationFromBody(body));
+              if (durable) deleteReviewDraft(currentDraftKeys(), readDraftGenerationFromBody(body));
               resolveDecision({
                 approved,
                 feedback: feedbackValue,

@@ -113,6 +113,18 @@ function commitMismatchNote(ann: CodeAnnotation, currentCommitSha?: string): str
   return '';
 }
 
+/**
+ * Outdated label (#1590): a restored PR comment whose anchored lines no
+ * longer read the same. Its line numbers refer to an earlier version of the
+ * PR, so the agent must not read them against the diff above. The label text
+ * is deliberately fixed (maintainer-specified wording).
+ */
+export const OUTDATED_ANNOTATION_LABEL = '[Outdated — the code changed after this comment]';
+
+function outdatedNote(ann: CodeAnnotation): string {
+  return ann.outdated ? `${OUTDATED_ANNOTATION_LABEL}\n` : '';
+}
+
 function gitButlerMismatchNote(ann: CodeAnnotation, current?: FeedbackDiffContext): string {
   if (!ann.gitButlerDiffType) return '';
   const sameSnapshot = !ann.gitButlerSnapshotId || ann.gitButlerSnapshotId === current?.snapshotId;
@@ -190,6 +202,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
       ? ` — \`\`${ann.tokenText.replace(/`/g, '\\`')}\`\`${ann.charStart != null ? ` (chars ${ann.charStart}-${ann.charEnd})` : ''}`
       : '';
     output += `${headingLevel} ${lineRange} (${ann.side})${tokenSuffix}\n`;
+    output += outdatedNote(ann);
     output += commitMismatchNote(ann, commitShaFromMode(currentDiff?.mode));
     output += gitButlerMismatchNote(ann, currentDiff);
 

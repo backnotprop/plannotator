@@ -151,6 +151,7 @@ import {
 } from './dock/reviewPanelTypes';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
+import { markOutdatedCodeAnnotations } from './utils/codeAnnotationAnchor';
 import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
 import { CommitsPanel } from './components/CommitsPanel';
@@ -961,6 +962,12 @@ const ReviewApp: React.FC = () => {
   }, [annotations, externalAnnotations]);
   const allAnnotationsRef = useRef(allAnnotations);
   allAnnotationsRef.current = allAnnotations;
+  // What the diff surfaces draw inline. Same array when nothing is outdated,
+  // so non-PR sessions see no identity change.
+  const diffAnnotations = useMemo(
+    () => (allAnnotations.some((a) => a.outdated) ? allAnnotations.filter((a) => !a.outdated) : allAnnotations),
+    [allAnnotations],
+  );
 
   // Auto-save code annotation drafts
   const { draftBanner, restoreDraft, getDraftGeneration, dismissDraft } = useCodeAnnotationDraft({
@@ -976,12 +983,19 @@ const ReviewApp: React.FC = () => {
   const handleRestoreDraft = useCallback(() => {
     reviewHistory.clear();
     const restored = restoreDraft();
-    if (restored.annotations.length > 0) setAnnotations(restored.annotations);
+    // A PR draft served for a patch other than the one it was saved on (the
+    // PR changed between sessions, #1590): keep every comment, but mark line
+    // comments whose anchored lines no longer read the same as outdated.
+    const restoredAnnotations = restored.patchChanged
+      ? markOutdatedCodeAnnotations(restored.annotations, files, (a) =>
+          annotationMatchesPrScope(a, prMetadata?.url, prDiffScope))
+      : restored.annotations;
+    if (restoredAnnotations.length > 0) setAnnotations(restoredAnnotations);
     if (restored.descriptionAnnotations.length > 0) setDescriptionAnnotations(restored.descriptionAnnotations);
     if (restored.commentAnnotations.length > 0) setCommentAnnotations(restored.commentAnnotations);
     if (restored.viewedFiles.length > 0) setViewedFiles(new Set(restored.viewedFiles));
     if (restored.autoViewSuppressed.length > 0) setAutoViewSuppressed(new Set(restored.autoViewSuppressed));
-  }, [restoreDraft, reviewHistory]);
+  }, [restoreDraft, reviewHistory, files, prMetadata?.url, prDiffScope]);
 
   // Agent Instructions — copy a clipboard payload teaching external agents
   // (Claude Code, Codex, etc.) how to POST review comments into this session
@@ -1605,6 +1619,7 @@ const ReviewApp: React.FC = () => {
     prStackInfo ? prDiffScope : undefined,
     activeCommitContext,
     activeGitButlerContext,
+    files,
   );
 
   // Context rule shared by both auto-open effects below (and mirrored by
@@ -3520,7 +3535,9 @@ const ReviewApp: React.FC = () => {
     agentCwd,
     canUseLiveWorkspaceActions,
     contextExpansionAvailable: !isStaticPatch,
-    allAnnotations,
+    // Outdated comments (#1590) carry line numbers from an earlier version of
+    // the PR: they stay in the sidebar and the export, never on the diff.
+    allAnnotations: diffAnnotations,
     externalAnnotations,
     selectedAnnotationId,
     scrollTargetAnnotation,
@@ -3631,7 +3648,7 @@ const ReviewApp: React.FC = () => {
     files, diffData?.rawPatch, activeFileIndex, guideOpen, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
     diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch,
-    allAnnotations, externalAnnotations,
+    diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
     visibleCommentAnnotations, selectedCommentAnnotationId, handleAddCommentAnnotation,
@@ -5365,6 +5382,7 @@ const ReviewApp: React.FC = () => {
                 onSelectAnnotation={handleSelectAnnotation}
                 onNavigateToAnnotation={handleNavigateToAnnotation}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                onEditAnnotationText={handleEditAnnotation}
                 onAddGeneralComment={handleAddGeneralComment}
                 feedbackMarkdown={feedbackMarkdown}
                 width={isCompactTouchLayout ? undefined : panelResize.width}

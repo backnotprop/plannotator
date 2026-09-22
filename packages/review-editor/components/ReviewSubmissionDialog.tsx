@@ -6,6 +6,7 @@ import {
   exportReviewFeedback,
   formatCallFlowAnnotationTargets,
   formatConventionalPrefix,
+  OUTDATED_ANNOTATION_LABEL,
 } from '../utils/exportFeedback';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import {
@@ -85,7 +86,10 @@ function buildAnnotationFileComments(
   annotations: CodeAnnotation[],
 ): SubmissionTarget['fileComments'] {
   return annotations
-    .filter(a => (a.scope ?? 'line') === 'line')
+    // Outdated comments (#1590) carry line numbers from an earlier version of
+    // the PR; posting them inline would pin them to whatever code sits there
+    // now. They ride the review body instead (buildFileScopedBody).
+    .filter(a => (a.scope ?? 'line') === 'line' && !a.outdated)
     .map(ann => {
       const ccPrefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
       let body = ccPrefix + (ann.text ?? '');
@@ -118,6 +122,12 @@ function buildFileScopedBody(annotations: CodeAnnotation[]): string {
       parts.push(`**${a.filePath}:** ${a.text ?? ''}${callFlowContext}`.trim());
     } else if (scope === 'general' && (a.text || callFlowContext)) {
       parts.push(`${a.text ?? ''}${callFlowContext}`.trim());
+    } else if (scope === 'line' && a.outdated && (a.text || a.suggestedCode || callFlowContext)) {
+      const lines = a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`;
+      const suggestion = a.suggestedCode ? `\n\nSuggested code:\n\`\`\`\n${a.suggestedCode}\n\`\`\`` : '';
+      parts.push(
+        `**${a.filePath} (${lines}, ${a.side}):** ${OUTDATED_ANNOTATION_LABEL} ${a.text ?? ''}${callFlowContext}${suggestion}`.trim(),
+      );
     }
   }
   return parts.join('\n\n');

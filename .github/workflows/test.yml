@@ -184,6 +184,7 @@ jobs:
           packages/ui/components/TerminalToolsAnnouncementDialog.test.tsx
           packages/editor/App.terminalToolsAnnouncement.test.tsx
           packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
+          packages/review-editor/components/ReviewSidebar.outdated.test.tsx
           packages/ui/components/HtmlSurfaceControls.test.tsx
           packages/ui/components/AnnotationPanel.unanchored.test.tsx
           packages/ui/hooks/useHtmlRefresh.test.tsx

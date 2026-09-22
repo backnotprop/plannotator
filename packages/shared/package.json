@@ -28,6 +28,7 @@
     "./project": "./project.ts",
     "./storage": "./storage.ts",
     "./draft": "./draft.ts",
+    "./review-draft": "./review-draft.ts",
     "./annotate-history": "./annotate-history.ts",
     "./feedback-archive": "./feedback-archive.ts",
     "./html-diff": "./html-diff.ts",
