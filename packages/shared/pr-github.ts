@@ -668,8 +668,59 @@ const PENDING_REVIEW_REMAINS =
 /** GitHub requires a body on a COMMENT review; the client uses the same placeholder. */
 const COMMENT_BODY_PLACEHOLDER = "See inline comments.";
 
+const MAX_ERROR_DETAIL = 300;
+
+/**
+ * GitHub's own reason for a refusal, read from the JSON body `gh api` prints
+ * on stdout: REST `errors[]` (strings or `{ message }` objects) and GraphQL
+ * `errors[].message`, else a REST top-level `message`. `gh` itself only puts
+ * the generic status line ("Unprocessable Entity (HTTP 422)") on stderr.
+ * Returns undefined when stdout is not a GitHub error body.
+ */
+export function githubErrorDetail(stdout: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const body = parsed as { message?: unknown; errors?: unknown };
+  const reasons: string[] = [];
+  if (Array.isArray(body.errors)) {
+    for (const item of body.errors) {
+      const text = typeof item === "string"
+        ? item
+        : typeof item === "object" && item !== null && typeof (item as { message?: unknown }).message === "string"
+          ? (item as { message: string }).message
+          : undefined;
+      const trimmed = text?.trim();
+      if (trimmed && !reasons.includes(trimmed)) reasons.push(trimmed);
+    }
+  }
+  if (reasons.length === 0 && typeof body.message === "string" && body.message.trim()) {
+    reasons.push(body.message.trim());
+  }
+  if (reasons.length === 0) return undefined;
+  const detail = reasons.join("; ");
+  return detail.length > MAX_ERROR_DETAIL ? `${detail.slice(0, MAX_ERROR_DETAIL - 1)}…` : detail;
+}
+
+/** Short, human-readable failure text for a `gh` call; never raw JSON. */
 function commandError(result: CommandResult): string {
-  return result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
+  const stderr = result.stderr.trim();
+  const stdout = result.stdout.trim();
+  const detail = githubErrorDetail(stdout);
+  if (detail) {
+    if (!stderr || stderr.includes(detail)) return stderr || detail;
+    return `${stderr}: ${detail}`;
+  }
+  if (stderr) return stderr;
+  // A JSON body without a readable reason is not shown verbatim.
+  if (stdout && !stdout.startsWith("{") && !stdout.startsWith("[")) {
+    return stdout.length > MAX_ERROR_DETAIL ? `${stdout.slice(0, MAX_ERROR_DETAIL - 1)}…` : stdout;
+  }
+  return `exit code ${result.exitCode}`;
 }
 
 /**

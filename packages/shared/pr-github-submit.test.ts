@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { submitGhPRReview } from "./pr-github";
+import { githubErrorDetail, submitGhPRReview } from "./pr-github";
 import { submitPRReview } from "./pr-provider";
 import type { CommandResult, PRReviewFileComment, PRReviewFileLevelComment, PRRuntime } from "./pr-types";
 
@@ -169,6 +169,79 @@ describe("submitGhPRReview file-level edge cases", () => {
     ).rejects.toThrow("Failed to submit PR review: HTTP 422: line must be part of the diff");
     const logged = errorSpy.mock.calls.map((args) => String(args[0])).join("\n");
     expect(logged).not.toContain("review body");
+  });
+});
+
+// The exact shapes `gh api` produces on a GitHub 422: the generic status line
+// on stderr, GitHub's JSON body (with the actual reason) on stdout.
+const DOCS = "https://docs.github.com/rest/pulls/reviews#create-a-review-for-a-pull-request";
+const gh422 = (errors: unknown[], message = "Unprocessable Entity"): CommandResult => ({
+  stdout: JSON.stringify({ message, errors, documentation_url: DOCS, status: "422" }),
+  stderr: message === "Validation Failed" ? "gh: Validation Failed (HTTP 422)" : "gh: Unprocessable Entity (HTTP 422)",
+  exitCode: 1,
+});
+const SELF_APPROVE = gh422(["Can not approve your own pull request"]);
+const ONE_PENDING = gh422(["User can only have one pending review per pull request"]);
+
+describe("GitHub refusal reasons reach the error", () => {
+  test("single-call path: the reason follows gh's status line, with no raw JSON", async () => {
+    const { runtime } = ghRuntime((c) => (isCreate(c) ? SELF_APPROVE : undefined));
+    const error = await submitGhPRReview(runtime, REF, "sha", "approve", "", [LINE]).catch((e: Error) => e);
+    expect((error as Error).message).toBe(
+      "Failed to submit PR review: gh: Unprocessable Entity (HTTP 422): Can not approve your own pull request",
+    );
+  });
+
+  test("pending create refused and fallback refused: the fallback's reason is reported", async () => {
+    const { runtime } = ghRuntime((c) => (isCreate(c) ? ONE_PENDING : undefined));
+    await expect(
+      submitGhPRReview(runtime, REF, "sha", "comment", "Body", [LINE], [FILE_A]),
+    ).rejects.toThrow("User can only have one pending review per pull request");
+  });
+
+  test("a refused final submit reports GitHub's reason", async () => {
+    const { runtime } = ghRuntime((c) => {
+      if (isCreate(c)) return PENDING;
+      if (isGraphql(c)) return THREAD_OK;
+      if (isSubmit(c)) return SELF_APPROVE;
+      if (isGet(c)) return ok(JSON.stringify({ id: 99, state: "PENDING" }));
+      if (isDelete(c)) return ok("{}");
+    });
+    const error = await submitGhPRReview(runtime, REF, "sha", "approve", "", [], [FILE_A]).catch((e: Error) => e);
+    expect((error as Error).message).toContain("Can not approve your own pull request");
+    expect((error as Error).message).not.toContain("documentation_url");
+  });
+
+  test("Validation Failed with object errors surfaces each message", async () => {
+    const { runtime } = ghRuntime((c) => (isCreate(c)
+      ? gh422([{ resource: "PullRequestReview", code: "custom", message: "Line could not be resolved" }], "Validation Failed")
+      : undefined));
+    await expect(submitGhPRReview(runtime, REF, "sha", "comment", "Body", [LINE])).rejects.toThrow(
+      "gh: Validation Failed (HTTP 422): Line could not be resolved",
+    );
+  });
+
+  test("a GraphQL error on a file thread is logged by its message, not as JSON", async () => {
+    const { runtime } = ghRuntime((c) => {
+      if (isCreate(c)) return PENDING;
+      if (isGraphql(c)) {
+        return ok(JSON.stringify({
+          data: { addPullRequestReviewThread: null },
+          errors: [{ type: "UNPROCESSABLE", path: ["addPullRequestReviewThread"], message: "Path could not be resolved" }],
+        }));
+      }
+      if (isSubmit(c)) return ok("{}");
+    });
+    await submitGhPRReview(runtime, REF, "sha", "comment", "Body", [], [FILE_GONE]);
+    const logged = errorSpy.mock.calls.map((args) => String(args[0])).find((line) => line.includes(FILE_GONE.path))!;
+    expect(logged).toContain("(Path could not be resolved)");
+    expect(logged).not.toContain("{");
+  });
+
+  test("githubErrorDetail ignores non-JSON output and caps long reasons", () => {
+    expect(githubErrorDetail("gh: not found")).toBeUndefined();
+    expect(githubErrorDetail(JSON.stringify({ id: 1 }))).toBeUndefined();
+    expect(githubErrorDetail(JSON.stringify({ errors: ["x".repeat(1000)] }))!.length).toBeLessThanOrEqual(300);
   });
 });
 
