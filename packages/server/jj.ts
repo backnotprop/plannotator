@@ -1,6 +1,8 @@
+import { readCappedBytes } from "./git";
 import {
   type DiffResult,
   type DiffType,
+  type GitBytesCommandResult,
   type GitCommandResult,
   type GitContext,
   type GitDiffOptions,
@@ -100,8 +102,35 @@ async function runJj(
   }
 }
 
+async function runJjBytes(
+  args: string[],
+  options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
+): Promise<GitBytesCommandResult> {
+  try {
+    const proc = Bun.spawn(["jj", ...args], {
+      cwd: options?.cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (options?.timeoutMs) timer = setTimeout(() => proc.kill(), options.timeoutMs);
+    const [captured, stderr, exitCode] = await Promise.all([
+      readCappedBytes(proc.stdout as ReadableStream<Uint8Array>, () => proc.kill(), options?.maxOutputBytes),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (timer) clearTimeout(timer);
+    return captured.truncated
+      ? { stdout: captured.bytes, stderr, exitCode, truncated: true }
+      : { stdout: captured.bytes, stderr, exitCode };
+  } catch {
+    return { stdout: new Uint8Array(0), stderr: "jj not found", exitCode: 1 };
+  }
+}
+
 export const runtime: ReviewJjRuntime = {
   runJj,
+  runJjBytes,
 };
 
 export function detectJjWorkspace(cwd?: string): Promise<string | null> {

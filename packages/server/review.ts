@@ -11,7 +11,7 @@
 
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import type { Origin } from "@plannotator/shared/agents";
-import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
+import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsFileBytesForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
 import { SingleFlight } from "@plannotator/shared/single-flight";
@@ -25,6 +25,7 @@ import {
   nextRemoteBaseCheckInterval,
   REMOTE_BASE_CHECK_INTERVAL_MS,
   isBinaryPatchFile,
+  getFileBytesForDiff,
   listPatchFiles,
   STATIC_PATCH_DIFF_TYPE,
   type RemoteDefaultInfo,
@@ -40,6 +41,14 @@ import {
   type CommitDiffInfo,
 } from "@plannotator/shared/commit-history";
 import { resolvePoolCwd } from "@plannotator/shared/worktree-pool";
+import {
+  REVIEW_IMAGE_ENDPOINT,
+  REVIEW_IMAGE_READ_CONCURRENCY,
+  createConcurrencyLimiter,
+  handleReviewImageRequest,
+  readPRImageSide,
+} from "@plannotator/shared/review-image";
+import type { DiffSide, FileBytesRead } from "@plannotator/shared/review-core";
 import {
   createDefaultSemanticDiffRuntime,
   getSemanticDiffAvailability,
@@ -119,7 +128,7 @@ import {
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGitRemoteCheck } from "./config";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
-import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, parseFileLevelComments, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
+import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRFileBytes, fetchPRContext, submitPRReview, parseFileLevelComments, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
 import {
   PR_CONTEXT_HEARTBEAT_COMMENT,
   PR_CONTEXT_HEARTBEAT_INTERVAL_MS,
@@ -297,6 +306,11 @@ export async function startReviewServer(
   // that would otherwise resolve patch paths against whatever cwd the server
   // happens to run in.
   const isStaticPatchMode = options.diffType === STATIC_PATCH_DIFF_TYPE;
+  // Image preview capability advert (#1598), beside approvalNotesSupported on
+  // every diff payload. Off where nothing can be read: a static patch has
+  // no repository, and P4 drops binary files from its patch entirely.
+  const imagePreviewSupported = !isStaticPatchMode && gitContext?.vcsType !== "p4";
+  const runImageRead = createConcurrencyLimiter(REVIEW_IMAGE_READ_CONCURRENCY);
   const sourceKindAdvert = isStaticPatchMode
     ? ({ sourceKind: "patch" } as const)
     : ({} as Record<string, never>);
@@ -2142,6 +2156,7 @@ export async function startReviewServer(
               gitContext: hasLocalAccess ? servedGitContext : undefined,
               sharingEnabled,
               approvalNotesSupported,
+              imagePreviewSupported,
               ...sourceKindAdvert,
               // Mount is the only place the pin matters, so it rides /api/diff
               // alone (not the switch endpoints).
@@ -2537,6 +2552,7 @@ export async function startReviewServer(
                   gitRef: currentGitRef,
                   snapshotId: currentSnapshotId(),
                   approvalNotesSupported,
+                  imagePreviewSupported,
                   ...sourceKindAdvert,
                   diffType: currentDiffType,
                   diffOptions: workspace.diffOptions,
@@ -2698,6 +2714,7 @@ export async function startReviewServer(
                 gitRef: currentGitRef,
                 snapshotId: currentSnapshotId(),
                 approvalNotesSupported,
+                imagePreviewSupported,
                 ...sourceKindAdvert,
                 diffType: currentDiffType,
                 // Echo the base the server actually used. resolveBaseBranch
@@ -2765,6 +2782,7 @@ export async function startReviewServer(
                   snapshotId: currentSnapshotId(),
                   draftState: reviewDrafts.state(currentDraftKeys()),
                   approvalNotesSupported,
+                  imagePreviewSupported,
                   ...sourceKindAdvert,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
@@ -2824,6 +2842,7 @@ export async function startReviewServer(
                   snapshotId: currentSnapshotId(),
                   draftState: reviewDrafts.state(currentDraftKeys()),
                   approvalNotesSupported,
+                  imagePreviewSupported,
                   ...sourceKindAdvert,
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
@@ -2874,6 +2893,7 @@ export async function startReviewServer(
                 snapshotId: currentSnapshotId(),
                 draftState: reviewDrafts.state(currentDraftKeys()),
                 approvalNotesSupported,
+                imagePreviewSupported,
                 ...sourceKindAdvert,
                 prDiffScope: currentPRDiffScope,
                 semanticDiff: await getSemanticDiffAdvert(),
@@ -3005,6 +3025,7 @@ export async function startReviewServer(
                 snapshotId: currentSnapshotId(),
                 draftState: reviewDrafts.state(currentDraftKeys()),
                 approvalNotesSupported,
+                imagePreviewSupported,
                 ...sourceKindAdvert,
                 prMetadata: pr.metadata,
                 // The new PR's checkout (null while warming) so Open-in re-roots
@@ -3119,6 +3140,66 @@ export async function startReviewServer(
               const message = error instanceof Error ? error.message : "Failed to fetch artifact content";
               return Response.json({ error: message }, { status });
             }
+          }
+
+          // API: One side of a changed image, as bytes (#1598). Every decision
+          // (eligibility, caps, sniffing, headers) is in the shared handler;
+          // this closure only says where the current mode reads a side from,
+          // in the same priority order as /api/file-content below.
+          if (url.pathname === REVIEW_IMAGE_ENDPOINT && req.method === "GET") {
+            const readSide = async (
+              side: DiffSide,
+              filePath: string,
+              oldPath: string | undefined,
+              maxBytes: number,
+            ): Promise<FileBytesRead> => {
+              if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
+              const prCwd = resolvePRLocalCwd();
+              if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMetadata?.defaultBranch) {
+                const baseRef = await resolvePRFullStackBaseRef(gitRuntime, prMetadata.defaultBranch, prCwd);
+                if (!baseRef) return { kind: "missing" };
+                return getFileBytesForDiff(gitRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
+              }
+              if (hasLocalAccess) {
+                return getVcsFileBytesForDiff(
+                  currentDiffType as DiffType,
+                  currentBase,
+                  filePath,
+                  oldPath,
+                  side,
+                  maxBytes,
+                  gitContext?.cwd,
+                );
+              }
+              if (isPRMode && prMetadata && prRef) {
+                const ref = prRef;
+                return readPRImageSide({
+                  gitRuntime,
+                  poolCwd: prCwd,
+                  oldSha: prMetadata.mergeBaseSha ?? prMetadata.baseSha,
+                  headSha: prMetadata.headSha,
+                  side,
+                  filePath,
+                  oldPath,
+                  maxBytes,
+                  fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+                });
+              }
+              return { kind: "unavailable" };
+            };
+            const result = await handleReviewImageRequest({
+              params: url.searchParams,
+              ifNoneMatch: req.headers.get("if-none-match"),
+              available: imagePreviewSupported,
+              patch: currentPatch,
+              isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
+              readSide: (side, filePath, oldPath, maxBytes) =>
+                runImageRead(() => readSide(side, filePath, oldPath, maxBytes)),
+            });
+            return new Response(result.body as BodyInit | null, {
+              status: result.status,
+              headers: result.headers,
+            });
           }
 
           // API: Get file content for expandable diff context

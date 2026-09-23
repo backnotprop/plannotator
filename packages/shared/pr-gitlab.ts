@@ -8,7 +8,7 @@
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewSubmissionResult, CommandResult } from "./pr-types";
-import { encodeApiFilePath } from "./pr-types";
+import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
 
 // GitLab-specific MRRef shape (used internally)
@@ -563,6 +563,39 @@ export async function fetchGlFileContent(
 
   // GitLab returns raw file content (no base64 encoding)
   return result.stdout;
+}
+
+/**
+ * One file at one commit as raw bytes (image preview), from the JSON files
+ * API: `content` is base64, so the bytes survive the CLI's text stdout (the
+ * `/raw` endpoint the text path uses would not). The size is checked before
+ * anything is decoded.
+ */
+export async function fetchGlFileBytes(
+  runtime: PRRuntime,
+  ref: GlMRRef,
+  sha: string,
+  filePath: string,
+  maxBytes: number,
+): Promise<PRFileBytesResult> {
+  const encoded = encodeProject(ref.projectPath);
+  const encodedPath = encodeApiFilePath(filePath);
+  const result = await runtime.runCommand(
+    "glab",
+    apiArgs(ref.host, `projects/${encoded}/repository/files/${encodedPath}?ref=${sha}`),
+  );
+  if (result.exitCode !== 0) {
+    if (isNotFoundCommandFailure(result.stderr)) return { kind: "missing" };
+    throw new Error(`GitLab files API failed: ${result.stderr.trim() || `exit ${result.exitCode}`}`);
+  }
+  const body = JSON.parse(result.stdout) as {
+    size?: number; encoding?: string; content?: string; blob_id?: string;
+  };
+  if (typeof body.size !== "number") return { kind: "missing" };
+  if (body.size > maxBytes) return { kind: "too-large", size: body.size };
+  if (body.encoding !== "base64" || typeof body.content !== "string") return { kind: "missing" };
+  const etag = body.blob_id ? `"${body.blob_id}"` : undefined;
+  return { kind: "ok", bytes: decodeBase64Bytes(body.content), ...(etag ? { etag } : {}) };
 }
 
 // --- Submit MR Review ---

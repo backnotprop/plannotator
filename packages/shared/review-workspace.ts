@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve } from "node:path";
 
-import type { DiffOption, DiffResult, DiffType, GitContext, GitDiffOptions } from "./review-core";
+import type { DiffOption, DiffResult, DiffSide, DiffType, FileBytesRead, GitContext, GitDiffOptions } from "./review-core";
 import {
   aggregateWorkspacePatch,
   buildWorkspaceRepoLabels,
@@ -60,6 +60,16 @@ export interface WorkspaceReviewRuntime {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
+  /** Byte reader for image previews; absent means the preview is unavailable. */
+  getVcsFileBytesForDiff?(
+    diffType: DiffType,
+    defaultBranch: string,
+    filePath: string,
+    oldPath: string | undefined,
+    side: DiffSide,
+    maxBytes: number,
+    cwd?: string,
+  ): Promise<FileBytesRead>;
   canStageFiles(diffType: string, cwd?: string): Promise<boolean>;
   stageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
@@ -454,10 +464,8 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     return normalizeAgentPath(this.root, this.repos, filePath);
   }
 
-  async getFileContents(
-    filePath: string,
-    oldPath?: string,
-  ): Promise<{ oldContent: string | null; newContent: string | null }> {
+  /** Map workspace display paths onto one child repository's diff. */
+  private resolveFileTarget(filePath: string, oldPath?: string) {
     const resolved = resolveWorkspaceFilePath(this.repos, filePath);
     if (!resolved) throw new Error("File is not part of this workspace review");
 
@@ -470,12 +478,45 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
       ?? mapWorkspaceModeToRepoDiffType(this.diffType, resolved.repo.vcsType);
     if (!diffType) throw new Error("VCS context is unavailable for this workspace repository");
 
-    return this.runtime.getVcsFileContentsForDiff(
+    return {
       diffType,
-      resolved.repo.gitContext?.defaultBranch ?? "main",
-      resolved.repoRelativePath,
-      resolvedOld?.repoRelativePath,
-      resolved.repo.cwd,
+      defaultBranch: resolved.repo.gitContext?.defaultBranch ?? "main",
+      filePath: resolved.repoRelativePath,
+      oldPath: resolvedOld?.repoRelativePath,
+      cwd: resolved.repo.cwd,
+    };
+  }
+
+  async getFileContents(
+    filePath: string,
+    oldPath?: string,
+  ): Promise<{ oldContent: string | null; newContent: string | null }> {
+    const target = this.resolveFileTarget(filePath, oldPath);
+    return this.runtime.getVcsFileContentsForDiff(
+      target.diffType,
+      target.defaultBranch,
+      target.filePath,
+      target.oldPath,
+      target.cwd,
+    );
+  }
+
+  async getFileBytes(
+    filePath: string,
+    oldPath: string | undefined,
+    side: DiffSide,
+    maxBytes: number,
+  ): Promise<FileBytesRead> {
+    if (!this.runtime.getVcsFileBytesForDiff) return { kind: "unavailable" };
+    const target = this.resolveFileTarget(filePath, oldPath);
+    return this.runtime.getVcsFileBytesForDiff(
+      target.diffType,
+      target.defaultBranch,
+      target.filePath,
+      target.oldPath,
+      side,
+      maxBytes,
+      target.cwd,
     );
   }
 

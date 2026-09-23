@@ -5,7 +5,7 @@
  */
 
 import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
-import { encodeApiFilePath } from "./pr-types";
+import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 
 // GitHub-specific PRRef shape (used internally)
@@ -507,6 +507,54 @@ export async function fetchGhPRFileContent(
   } catch {
     return null;
   }
+}
+
+/**
+ * One file at one commit as raw bytes (image preview). The contents API
+ * inlines base64 up to 1 MB; larger files come back as `encoding: "none"`,
+ * and the blobs API (base64, up to 100 MB) serves them — but only after the
+ * reported size passed the cap, so an oversized file costs no second call.
+ */
+export async function fetchGhPRFileBytes(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+  sha: string,
+  filePath: string,
+  maxBytes: number,
+): Promise<PRFileBytesResult> {
+  const contents = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/contents/${encodeApiFilePath(filePath)}?ref=${sha}`,
+    "--jq", "{type,sha,size,encoding,content}",
+  ]));
+  if (contents.exitCode !== 0) {
+    if (isNotFoundCommandFailure(contents.stderr)) return { kind: "missing" };
+    throw new Error(`GitHub contents API failed: ${contents.stderr.trim() || `exit ${contents.exitCode}`}`);
+  }
+  const meta = JSON.parse(contents.stdout) as {
+    type?: string; sha?: string; size?: number; encoding?: string; content?: string;
+  };
+  if (meta.type !== "file" || typeof meta.size !== "number") return { kind: "missing" };
+  if (meta.size > maxBytes) return { kind: "too-large", size: meta.size };
+  const etag = meta.sha ? `"${meta.sha}"` : undefined;
+  if (meta.encoding === "base64" && typeof meta.content === "string") {
+    return { kind: "ok", bytes: decodeBase64Bytes(meta.content), ...(etag ? { etag } : {}) };
+  }
+  if (!meta.sha || !/^[0-9a-f]{40,64}$/i.test(meta.sha)) return { kind: "missing" };
+
+  const blob = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/git/blobs/${meta.sha}`,
+    "--jq", "{size,encoding,content}",
+  ]));
+  if (blob.exitCode !== 0) {
+    if (isNotFoundCommandFailure(blob.stderr)) return { kind: "missing" };
+    throw new Error(`GitHub blobs API failed: ${blob.stderr.trim() || `exit ${blob.exitCode}`}`);
+  }
+  const body = JSON.parse(blob.stdout) as { size?: number; encoding?: string; content?: string };
+  if (typeof body.size === "number" && body.size > maxBytes) return { kind: "too-large", size: body.size };
+  if (body.encoding !== "base64" || typeof body.content !== "string") return { kind: "missing" };
+  return { kind: "ok", bytes: decodeBase64Bytes(body.content), ...(etag ? { etag } : {}) };
 }
 
 // --- Viewed Files ---

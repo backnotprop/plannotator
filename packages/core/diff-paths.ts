@@ -239,6 +239,46 @@ export function isContentlessBinaryPatch(patch: string): boolean {
   return hasBinaryMarker;
 }
 
+/**
+ * File extensions the code-review image preview (#1598) renders as Before /
+ * After images: the formats every evergreen browser decodes. tiff and heic are
+ * Safari-only, so they keep the plain binary notice.
+ */
+export const REVIEW_IMAGE_PREVIEW_EXTENSIONS: readonly string[] = [
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico", "apng",
+];
+
+/** Per-side byte cap for an image preview. Separate from the 5 MB text cap. */
+export const MAX_REVIEW_IMAGE_PREVIEW_BYTES = 10 * 1024 * 1024;
+/** Human-readable form of the byte cap for UI copy. */
+export const MAX_REVIEW_IMAGE_PREVIEW_LABEL = "10 MB";
+/** Per-side decoded-size cap (width × height), so a small file cannot bomb the decoder. */
+export const MAX_REVIEW_IMAGE_PREVIEW_PIXELS = 50_000_000;
+
+/** Whether a path names a previewable image by its extension (case-insensitive). */
+export function isReviewImagePath(path: string | undefined | null): boolean {
+  if (!path) return false;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return false;
+  return REVIEW_IMAGE_PREVIEW_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * True when a single file's patch chunk has no hunks to draw and either side's
+ * path is a previewable image. "No hunks" rather than "has a binary marker":
+ * the GitHub files-API and GitLab JSON fallbacks emit header-only chunks for
+ * binaries with no marker at all, and those deserve a preview too.
+ */
+export function isImagePreviewCandidate(
+  patch: string,
+  path: string,
+  oldPath?: string,
+): boolean {
+  if (!isReviewImagePath(path) && !isReviewImagePath(oldPath)) return false;
+  return !patch.split("\n").some((line) => line.startsWith("@@ "));
+}
+
 export function parseDiffMetadataPathLines(lines: string[]): DiffPathPair {
   let oldPath: string | undefined;
   let newPath: string | undefined;

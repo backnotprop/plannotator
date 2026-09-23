@@ -22,6 +22,7 @@ import {
 	fetchPRContext as fetchPRContextCore,
 	fetchPR as fetchPRCore,
 	fetchPRFileContent as fetchPRFileContentCore,
+	fetchPRFileBytes as fetchPRFileBytesCore,
 	fetchPRViewedFiles as fetchPRViewedFilesCore,
 	fetchPRStack as fetchPRStackCore,
 	fetchPRList as fetchPRListCore,
@@ -88,6 +89,9 @@ export function fetchPRContext(ref: PRRef) {
 }
 export function fetchPRFileContent(ref: PRRef, sha: string, filePath: string) {
 	return fetchPRFileContentCore(prRuntime, ref, sha, filePath);
+}
+export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
+	return fetchPRFileBytesCore(prRuntime, ref, sha, filePath, maxBytes);
 }
 /** Submit a review through the Pi Node.js command runtime. */
 export function submitPRReview(

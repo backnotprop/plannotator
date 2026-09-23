@@ -57,6 +57,7 @@ export const {
   prepareLocalReviewDiff,
   runVcsDiff,
   getVcsFileContentsForDiff,
+  getVcsFileBytesForDiff,
   getVcsDiffFingerprint,
   canStageFiles,
   stageFile,

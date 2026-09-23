@@ -5,13 +5,14 @@
  * Used by both Claude Code hook and OpenCode plugin.
  */
 
-import { lstat, readlink } from "node:fs/promises";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 
 import {
   type DiffOption,
   type DiffResult,
   type DiffType,
+  type GitBytesCommandResult,
   type GitCommandResult,
   type GitCommandOptions,
   type GitContext,
@@ -140,9 +141,109 @@ async function runGit(
   }
 }
 
+/**
+ * Drain a stream as raw bytes, stopping (and killing the producer) once
+ * `maxBytes` is passed so an oversized blob is never held in full.
+ */
+export async function readCappedBytes(
+  stream: ReadableStream<Uint8Array>,
+  kill: () => void,
+  maxBytes: number | undefined,
+): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let truncated = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (maxBytes !== undefined && total > maxBytes) {
+        truncated = true;
+        break;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    if (truncated) {
+      reader.cancel().catch(() => {});
+      kill();
+    }
+  }
+  if (truncated) return { bytes: new Uint8Array(0), truncated };
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, truncated };
+}
+
+/** The git runner with undecoded stdout and a hard `maxOutputBytes` ceiling (image blobs). */
+async function runGitBytes(
+  args: string[],
+  options?: GitCommandOptions,
+): Promise<GitBytesCommandResult> {
+  const command = prepareGitCommand(args, options, process.env);
+  const proc = Bun.spawn(["git", ...command.args], {
+    cwd: options?.cwd,
+    env: command.env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    windowsHide: true,
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (options?.timeoutMs) timer = setTimeout(() => proc.kill("SIGKILL"), options.timeoutMs);
+  try {
+    const [captured, stderr, exitCode] = await Promise.all([
+      readCappedBytes(proc.stdout, () => proc.kill("SIGKILL"), options?.maxOutputBytes),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return captured.truncated
+      ? { stdout: captured.bytes, stderr, exitCode, truncated: true }
+      : { stdout: captured.bytes, stderr, exitCode };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Read at most `maxBytes + 1` bytes, so a caller can tell "over the cap". */
+export async function readFileBytesCapped(path: string, maxBytes: number): Promise<Uint8Array | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(path, "r");
+    const { size } = await handle.stat();
+    const buffer = new Uint8Array(Math.min(size, maxBytes) + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, null);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    return buffer.subarray(0, offset);
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
 /** Bun-based git runtime. Exported for use with shared utilities (worktree, etc.) */
 export const runtime: ReviewGitRuntime = {
   runGit,
+  runGitBytes,
+  readFileBytes: readFileBytesCapped,
+  async realPath(path: string): Promise<string | null> {
+    try {
+      return await realpath(path);
+    } catch {
+      return null;
+    }
+  },
   async readTextFile(path: string): Promise<string | null> {
     try {
       return await Bun.file(path).text();

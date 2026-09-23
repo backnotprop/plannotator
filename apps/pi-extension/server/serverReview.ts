@@ -48,6 +48,9 @@ import {
 	nextRemoteBaseCheckInterval,
 	REMOTE_BASE_CHECK_INTERVAL_MS,
 	getFileContentsForDiff as getFileContentsForDiffCore,
+	getFileBytesForDiff as getFileBytesForDiffCore,
+	type DiffSide,
+	type FileBytesRead,
 	getSinceBaseSections,
 	isBinaryPatchFile,
 	isSameCwdCommitSwitch,
@@ -58,6 +61,13 @@ import {
 	resolveBaseBranch,
 	validateFilePath,
 } from "../generated/review-core.ts";
+import {
+	REVIEW_IMAGE_ENDPOINT,
+	REVIEW_IMAGE_READ_CONCURRENCY,
+	createConcurrencyLimiter,
+	handleReviewImageRequest,
+	readPRImageSide,
+} from "../generated/review-image.ts";
 import {
 	getGitButlerContextRevision,
 	getGitButlerPatchFingerprint,
@@ -105,6 +115,7 @@ import {
 	fetchPR,
 	fetchPRContext,
 	fetchPRFileContent,
+	fetchPRFileBytes,
 	fetchPRList,
 	fetchPRStack,
 	fetchPRViewedFiles,
@@ -195,6 +206,7 @@ import {
 	getVcsContext,
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
+	getVcsFileBytesForDiff,
 	resolveVcsCwd,
 	resolveAvailableDiffType,
 	reviewRuntime,
@@ -1780,6 +1792,11 @@ export async function startReviewServer(options: {
 	// otherwise resolve the patch's paths against an unrelated cwd. Mirrors
 	// packages/server/review.ts.
 	const isStaticPatchMode = options.diffType === STATIC_PATCH_DIFF_TYPE;
+	// Image preview capability advert (#1598), beside approvalNotesSupported on
+	// every diff payload. Off where nothing can be read: a static patch has
+	// no repository, and P4 drops binary files from its patch entirely.
+	const imagePreviewSupported = !isStaticPatchMode;
+	const runImageRead = createConcurrencyLimiter(REVIEW_IMAGE_READ_CONCURRENCY);
 	const sourceKindAdvert = isStaticPatchMode
 		? ({ sourceKind: "patch" } as const)
 		: ({} as Record<string, never>);
@@ -2154,6 +2171,7 @@ export async function startReviewServer(options: {
 				gitContext: hasLocalAccess ? servedGitContext : undefined,
 				sharingEnabled,
 				approvalNotesSupported,
+				imagePreviewSupported,
 				...sourceKindAdvert,
 				// Mount is the only place the pin matters, so it rides /api/diff
 				// alone (not the switch endpoints).
@@ -2474,6 +2492,7 @@ export async function startReviewServer(options: {
 						gitRef: currentGitRef,
 						snapshotId: currentSnapshotId(),
 						approvalNotesSupported,
+						imagePreviewSupported,
 						...sourceKindAdvert,
 						diffType: currentDiffType,
 						diffOptions: workspace.diffOptions,
@@ -2618,6 +2637,7 @@ export async function startReviewServer(options: {
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
 					approvalNotesSupported,
+					imagePreviewSupported,
 					...sourceKindAdvert,
 					diffType: currentDiffType,
 					// Echo the base the server actually used. resolveBaseBranch
@@ -2682,6 +2702,7 @@ export async function startReviewServer(options: {
 						snapshotId: currentSnapshotId(),
 						draftState: reviewDrafts.state(currentDraftKeys()),
 						approvalNotesSupported,
+						imagePreviewSupported,
 						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
@@ -2750,6 +2771,7 @@ export async function startReviewServer(options: {
 						snapshotId: currentSnapshotId(),
 						draftState: reviewDrafts.state(currentDraftKeys()),
 						approvalNotesSupported,
+						imagePreviewSupported,
 						...sourceKindAdvert,
 						prDiffScope: currentPRDiffScope,
 						...(layerPatchIncomplete ? { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable } : {}),
@@ -2792,6 +2814,7 @@ export async function startReviewServer(options: {
 					snapshotId: currentSnapshotId(),
 					draftState: reviewDrafts.state(currentDraftKeys()),
 					approvalNotesSupported,
+					imagePreviewSupported,
 					...sourceKindAdvert,
 					prDiffScope: currentPRDiffScope,
 					semanticDiff: await getSemanticDiffAdvert(),
@@ -2879,6 +2902,7 @@ export async function startReviewServer(options: {
 					snapshotId: currentSnapshotId(),
 					draftState: reviewDrafts.state(currentDraftKeys()),
 					approvalNotesSupported,
+					imagePreviewSupported,
 					...sourceKindAdvert,
 					prMetadata: pr.metadata,
 					// The new PR's checkout (null while warming) so Open-in re-roots
@@ -3071,6 +3095,61 @@ export async function startReviewServer(options: {
 				console.error("[plannotator] /api/pr-viewed error:", message);
 				json(res, { error: message }, 500);
 			}
+		} else if (url.pathname === REVIEW_IMAGE_ENDPOINT && req.method === "GET") {
+			// One side of a changed image, as bytes (#1598). Mirrors
+			// packages/server/review.ts: every decision is in the shared handler;
+			// this closure only says where the current mode reads a side from.
+			const readSide = async (
+				side: DiffSide,
+				filePath: string,
+				oldPath: string | undefined,
+				maxBytes: number,
+			): Promise<FileBytesRead> => {
+				if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
+				const prCwd = (options.worktreePool && prMeta) ? options.worktreePool.resolve(prMeta.url) : options.agentCwd;
+				if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMeta?.defaultBranch) {
+					const baseRef = await resolvePRFullStackBaseRef(reviewRuntime, prMeta.defaultBranch, prCwd);
+					if (!baseRef) return { kind: "missing" };
+					return getFileBytesForDiffCore(reviewRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
+				}
+				if (hasLocalAccess && !isPRMode) {
+					return getVcsFileBytesForDiff(
+						currentDiffType as DiffType,
+						currentBase,
+						filePath,
+						oldPath,
+						side,
+						maxBytes,
+						options.gitContext?.cwd,
+					);
+				}
+				if (isPRMode && prMeta && prRef) {
+					const ref = prRef;
+					return readPRImageSide({
+						gitRuntime: reviewRuntime,
+						poolCwd: prCwd,
+						oldSha: prMeta.mergeBaseSha ?? prMeta.baseSha,
+						headSha: prMeta.headSha,
+						side,
+						filePath,
+						oldPath,
+						maxBytes,
+						fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+					});
+				}
+				return { kind: "unavailable" };
+			};
+			const result = await handleReviewImageRequest({
+				params: url.searchParams,
+				ifNoneMatch: typeof req.headers["if-none-match"] === "string" ? req.headers["if-none-match"] : null,
+				available: imagePreviewSupported,
+				patch: currentPatch,
+				isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
+				readSide: (side, filePath, oldPath, maxBytes) =>
+					runImageRead(() => readSide(side, filePath, oldPath, maxBytes)),
+			});
+			res.writeHead(result.status, result.headers);
+			res.end(result.body ?? undefined);
 		} else if (url.pathname === "/api/file-content" && req.method === "GET") {
 			// No working tree behind a static patch: the patch IS the whole content
 			// of the session, so there is nothing to expand into.

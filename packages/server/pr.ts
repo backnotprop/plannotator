@@ -33,6 +33,7 @@ import {
   fetchPR as fetchPRCore,
   fetchPRContext as fetchPRContextCore,
   fetchPRFileContent as fetchPRFileContentCore,
+  fetchPRFileBytes as fetchPRFileBytesCore,
   submitPRReview as submitPRReviewCore,
   fetchPRViewedFiles as fetchPRViewedFilesCore,
   markPRFilesViewed as markPRFilesViewedCore,
@@ -112,6 +113,10 @@ export function fetchPRFileContent(
   filePath: string,
 ): Promise<string | null> {
   return fetchPRFileContentCore(runtime, ref, sha, filePath);
+}
+
+export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
+  return fetchPRFileBytesCore(runtime, ref, sha, filePath, maxBytes);
 }
 
 /** Submit a review through the Bun command runtime. */

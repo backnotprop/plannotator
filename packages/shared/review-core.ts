@@ -248,6 +248,58 @@ export interface ReviewGitRuntime {
   ) => Promise<ReviewFileInfo | null>;
   /** Read a symlink payload without following its target. */
   readLink: (path: string) => Promise<string | null>;
+  /**
+   * Run git and return stdout as raw bytes (never UTF-8 decoded), honoring
+   * `maxOutputBytes`. Optional: a runtime without it cannot serve binary file
+   * sides, and the image preview reports itself unavailable.
+   */
+  runGitBytes?: (
+    args: string[],
+    options?: GitCommandOptions,
+  ) => Promise<GitBytesCommandResult>;
+  /** Read at most `maxBytes + 1` bytes of a regular file (null on any error). */
+  readFileBytes?: (path: string, maxBytes: number) => Promise<Uint8Array | null>;
+  /** Canonical path with every symlink resolved (null on any error). */
+  realPath?: (path: string) => Promise<string | null>;
+}
+
+/** `GitCommandResult` with undecoded stdout, for binary blobs. */
+export interface GitBytesCommandResult {
+  stdout: Uint8Array;
+  stderr: string;
+  exitCode: number;
+  /** Same meaning as `GitCommandResult.truncated`. */
+  truncated?: boolean;
+}
+
+/**
+ * One side of a changed file as raw bytes, for the code-review image preview.
+ * `missing` covers an absent object, a vanished worktree file, a symlink, and a
+ * path that escapes the repository; `unavailable` means the runtime or mode
+ * cannot read bytes at all.
+ */
+export type FileBytesRead =
+  | { kind: "ok"; bytes: Uint8Array; etag?: string }
+  | { kind: "missing" }
+  | { kind: "too-large"; size: number }
+  | { kind: "unavailable" };
+
+export type DiffSide = "old" | "new";
+
+/**
+ * Where one side of a changed file lives: a git object (`<rev>:<path>`, read
+ * with `cat-file`, never `show`) or the working tree (path relative to the
+ * repository toplevel).
+ */
+export type DiffSideSource =
+  | { kind: "object"; rev: string; path: string }
+  | { kind: "worktree"; path: string };
+
+export interface DiffSideSources {
+  /** Repository the sources resolve in (a `worktree:` diff overrides it). */
+  cwd?: string;
+  old: DiffSideSource | null;
+  new: DiffSideSource | null;
 }
 
 function quoteGitSshPath(path: string): string {
@@ -2111,26 +2163,90 @@ export async function getGitDiffFingerprint(
   }
 }
 
-export async function getFileContentsForDiff(
+/**
+ * Which object each side of a changed file is, per git diff type. The single
+ * ref table behind both the text reader (`getFileContentsForDiff`, hunk
+ * expansion) and the byte reader (`readDiffSideBytes`, image previews), so the
+ * two can never read different revisions. `null` for a side the diff type has
+ * no old/new content for; `null` overall for an unknown diff type.
+ */
+export async function resolveDiffSideSources(
   runtime: ReviewGitRuntime,
   diffType: DiffType,
   defaultBranch: string,
   filePath: string,
   oldPath?: string,
   cwd?: string,
-): Promise<{ oldContent: string | null; newContent: string | null }> {
+): Promise<DiffSideSources | null> {
   const oldFilePath = oldPath || filePath;
 
   let effectiveDiffType = diffType as string;
   if (diffType.startsWith("worktree:")) {
     const parsed = parseWorktreeDiffType(diffType);
-    if (!parsed) return { oldContent: null, newContent: null };
+    if (!parsed) return null;
     cwd = parsed.path;
     effectiveDiffType = parsed.subType;
   }
 
-  async function gitShow(ref: string, path: string): Promise<string | null> {
-    const object = `${ref}:${path}`;
+  const object = (rev: string, path: string): DiffSideSource => ({ kind: "object", rev, path });
+  const worktree = (path: string): DiffSideSource => ({ kind: "worktree", path });
+
+  // commit:<sha> — old side is the first parent (null on a root commit, which
+  // correctly renders every file as an addition), new side the commit itself.
+  const commitRef = parseCommitDiffType(effectiveDiffType);
+  if (commitRef) {
+    return { cwd, old: object(`${commitRef.sha}^`, oldFilePath), new: object(commitRef.sha, filePath) };
+  }
+
+  switch (effectiveDiffType) {
+    case "local-vs-remote": {
+      const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
+      return {
+        cwd,
+        old: upstreamBranch ? object(upstreamBranch, oldFilePath) : null,
+        new: worktree(filePath),
+      };
+    }
+    case "since-base": {
+      const mbResult = await runtime.runGit(["merge-base", "--end-of-options", defaultBranch, "HEAD"], { cwd });
+      // Degrade to HEAD (matching runGitDiff), not defaultBranch — when the base
+      // doesn't resolve, the patch is computed against HEAD, so the expanded
+      // old-side content must come from HEAD too or it won't match what the
+      // reviewer is reading.
+      const mb = mbResult.exitCode === 0 ? mbResult.stdout.trim() : "HEAD";
+      return { cwd, old: object(mb, oldFilePath), new: worktree(filePath) };
+    }
+    case "uncommitted":
+      return { cwd, old: object("HEAD", oldFilePath), new: worktree(filePath) };
+    case "staged":
+      return { cwd, old: object("HEAD", oldFilePath), new: object(":0", filePath) };
+    case "unstaged":
+      return { cwd, old: object(":0", oldFilePath), new: worktree(filePath) };
+    case "last-commit":
+      return { cwd, old: object("HEAD~1", oldFilePath), new: object("HEAD", filePath) };
+    case "branch":
+      return { cwd, old: object(defaultBranch, oldFilePath), new: object("HEAD", filePath) };
+    case "merge-base": {
+      const mbResult = await runtime.runGit(["merge-base", "--end-of-options", defaultBranch, "HEAD"], { cwd });
+      const mb = mbResult.exitCode === 0 ? mbResult.stdout.trim() : defaultBranch;
+      return { cwd, old: object(mb, oldFilePath), new: object("HEAD", filePath) };
+    }
+    case "all":
+      return { cwd, old: null, new: object("HEAD", filePath) };
+    default:
+      return null;
+  }
+}
+
+/** Read one side as text for hunk expansion (the 5 MB text cap applies). */
+export async function readDiffSideText(
+  runtime: ReviewGitRuntime,
+  source: DiffSideSource | null,
+  cwd?: string,
+): Promise<string | null> {
+  if (!source) return null;
+  if (source.kind === "object") {
+    const object = `${source.rev}:${source.path}`;
     const sizeResult = await runtime.runGit(
       ["cat-file", "-s", "--", object],
       { cwd },
@@ -2143,97 +2259,122 @@ export async function getFileContentsForDiff(
     return result.exitCode === 0 ? result.stdout : null;
   }
 
-  async function readWorkingTree(path: string): Promise<string | null> {
-    // Patch paths are repo-root-relative; resolve against the toplevel, not
-    // cwd — from a subdirectory launch, cwd-resolution double-prefixes the
-    // path and hunk expansion silently returns null. (The `git show ref:path`
-    // sibling is immune: ref paths are root-relative regardless of cwd.)
-    const baseDir = await resolveRepoToplevel(runtime, cwd);
-    try {
-      const fileInfo = await runtime.getFileInfo(baseDir, path);
-      if (!fileInfo) return null;
-      // Git stores the link destination as the blob contents. Reading the link
-      // itself preserves expansion without following an arbitrarily large
-      // target.
-      if (fileInfo.isSymbolicLink) return await runtime.readLink(fileInfo.path);
-      if (!fileInfo.isFile || fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
-      return runtime.readTextFile(fileInfo.path);
-    } catch {
-      return null;
-    }
+  // Patch paths are repo-root-relative; resolve against the toplevel, not
+  // cwd — from a subdirectory launch, cwd-resolution double-prefixes the
+  // path and hunk expansion silently returns null. (The `git show ref:path`
+  // sibling is immune: ref paths are root-relative regardless of cwd.)
+  const baseDir = await resolveRepoToplevel(runtime, cwd);
+  try {
+    const fileInfo = await runtime.getFileInfo(baseDir, source.path);
+    if (!fileInfo) return null;
+    // Git stores the link destination as the blob contents. Reading the link
+    // itself preserves expansion without following an arbitrarily large
+    // target.
+    if (fileInfo.isSymbolicLink) return await runtime.readLink(fileInfo.path);
+    if (!fileInfo.isFile || fileInfo.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
+    return runtime.readTextFile(fileInfo.path);
+  } catch {
+    return null;
+  }
+}
+
+export async function getFileContentsForDiff(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  filePath: string,
+  oldPath?: string,
+  cwd?: string,
+): Promise<{ oldContent: string | null; newContent: string | null }> {
+  const sources = await resolveDiffSideSources(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
+  if (!sources) return { oldContent: null, newContent: null };
+  return {
+    oldContent: await readDiffSideText(runtime, sources.old, sources.cwd),
+    newContent: await readDiffSideText(runtime, sources.new, sources.cwd),
+  };
+}
+
+function isPathInside(root: string, child: string): boolean {
+  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "");
+  const r = normalize(root);
+  const c = normalize(child);
+  return c === r || c.startsWith(`${r}/`);
+}
+
+/**
+ * Read one side as raw bytes for the image preview, capped at `maxBytes`.
+ *
+ * Objects: `cat-file --batch-check` names the blob id, type and size in one
+ * call (the size gate runs before any byte is read), then `cat-file blob <id>`
+ * streams it undecoded. The spec is built by the caller from session state and
+ * is passed on stdin, never argv, so it can never be taken for an option.
+ *
+ * Worktree: the final component must be a regular file (never a symlink, which
+ * git would store as its target text), and its canonical path must stay inside
+ * the canonical repository toplevel, which blocks an intermediate directory
+ * swapped for a symlink after the diff was taken.
+ */
+export async function readDiffSideBytes(
+  runtime: ReviewGitRuntime,
+  source: DiffSideSource,
+  maxBytes: number,
+  cwd?: string,
+): Promise<FileBytesRead> {
+  if (source.kind === "object") {
+    if (!runtime.runGitBytes) return { kind: "unavailable" };
+    const spec = `${source.rev}:${source.path}`;
+    if (/[\r\n]/.test(spec)) return { kind: "missing" };
+    const check = await runtime.runGit(
+      ["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
+      { cwd, stdin: `${spec}\n` },
+    );
+    if (check.exitCode !== 0) return { kind: "missing" };
+    const match = check.stdout.trim().match(/^([0-9a-f]{40,64}) (\S+) (\d+)$/);
+    if (!match || match[2] !== "blob") return { kind: "missing" };
+    const size = Number(match[3]);
+    if (size > maxBytes) return { kind: "too-large", size };
+    const blob = await runtime.runGitBytes(["cat-file", "blob", match[1]], {
+      cwd,
+      maxOutputBytes: maxBytes,
+    });
+    if (blob.truncated) return { kind: "too-large", size };
+    if (blob.exitCode !== 0) return { kind: "missing" };
+    return { kind: "ok", bytes: blob.stdout, etag: `"${match[1]}"` };
   }
 
-  // commit:<sha> — old side is the first parent (null on a root commit, which
-  // correctly renders every file as an addition), new side the commit itself.
-  const commitRef = parseCommitDiffType(effectiveDiffType);
-  if (commitRef) {
-    return {
-      oldContent: await gitShow(`${commitRef.sha}^`, oldFilePath),
-      newContent: await gitShow(commitRef.sha, filePath),
-    };
-  }
+  if (!runtime.readFileBytes || !runtime.realPath) return { kind: "unavailable" };
+  const root = await resolveRepoToplevel(runtime, cwd);
+  if (!root) return { kind: "unavailable" };
+  const info = await runtime.getFileInfo(root, source.path);
+  if (!info || info.isSymbolicLink || !info.isFile) return { kind: "missing" };
+  if (info.size > maxBytes) return { kind: "too-large", size: info.size };
+  const [realRoot, realFile] = await Promise.all([
+    runtime.realPath(root),
+    runtime.realPath(info.path),
+  ]);
+  if (!realRoot || !realFile || !isPathInside(realRoot, realFile)) return { kind: "missing" };
+  const bytes = await runtime.readFileBytes(realFile, maxBytes);
+  if (!bytes) return { kind: "missing" };
+  if (bytes.byteLength > maxBytes) return { kind: "too-large", size: bytes.byteLength };
+  return { kind: "ok", bytes, etag: `W/"${info.size}-${Math.trunc(info.mtimeMs)}"` };
+}
 
-  switch (effectiveDiffType) {
-    case "local-vs-remote": {
-      const upstreamBranch = await getCurrentUpstreamBranch(runtime, cwd);
-      return {
-        oldContent: upstreamBranch ? await gitShow(upstreamBranch, oldFilePath) : null,
-        newContent: await readWorkingTree(filePath),
-      };
-    }
-    case "since-base": {
-      const mbResult = await runtime.runGit(["merge-base", "--end-of-options", defaultBranch, "HEAD"], { cwd });
-      // Degrade to HEAD (matching runGitDiff), not defaultBranch — when the base
-      // doesn't resolve, the patch is computed against HEAD, so the expanded
-      // old-side content must come from HEAD too or it won't match what the
-      // reviewer is reading.
-      const mb = mbResult.exitCode === 0 ? mbResult.stdout.trim() : "HEAD";
-      return {
-        oldContent: await gitShow(mb, oldFilePath),
-        newContent: await readWorkingTree(filePath),
-      };
-    }
-    case "uncommitted":
-      return {
-        oldContent: await gitShow("HEAD", oldFilePath),
-        newContent: await readWorkingTree(filePath),
-      };
-    case "staged":
-      return {
-        oldContent: await gitShow("HEAD", oldFilePath),
-        newContent: await gitShow(":0", filePath),
-      };
-    case "unstaged":
-      return {
-        oldContent: await gitShow(":0", oldFilePath),
-        newContent: await readWorkingTree(filePath),
-      };
-    case "last-commit":
-      return {
-        oldContent: await gitShow("HEAD~1", oldFilePath),
-        newContent: await gitShow("HEAD", filePath),
-      };
-    case "branch":
-      return {
-        oldContent: await gitShow(defaultBranch, oldFilePath),
-        newContent: await gitShow("HEAD", filePath),
-      };
-    case "merge-base": {
-      const mbResult = await runtime.runGit(["merge-base", "--end-of-options", defaultBranch, "HEAD"], { cwd });
-      const mb = mbResult.exitCode === 0 ? mbResult.stdout.trim() : defaultBranch;
-      return {
-        oldContent: await gitShow(mb, oldFilePath),
-        newContent: await gitShow("HEAD", filePath),
-      };
-    }
-    case "all":
-      return {
-        oldContent: null,
-        newContent: await gitShow("HEAD", filePath),
-      };
-    default:
-      return { oldContent: null, newContent: null };
-  }
+/** Resolve and read one side of a git diff as bytes (see `readDiffSideBytes`). */
+export async function getFileBytesForDiff(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  filePath: string,
+  oldPath: string | undefined,
+  side: DiffSide,
+  maxBytes: number,
+  cwd?: string,
+): Promise<FileBytesRead> {
+  const sources = await resolveDiffSideSources(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
+  if (!sources) return { kind: "unavailable" };
+  const source = side === "old" ? sources.old : sources.new;
+  if (!source) return { kind: "missing" };
+  return readDiffSideBytes(runtime, source, maxBytes, sources.cwd);
 }
 
 // --- Since-base sections -----------------------------------------------------
@@ -2481,14 +2622,32 @@ export function listPatchFiles(
   return files;
 }
 
-/** Whether the named file's patch chunk contains a Git binary marker. */
-export function isBinaryPatchFile(patch: string, filePath: string): boolean {
+/** One changed file's chunk in a patch, as the server sees it. */
+export interface PatchFileEntry {
+  /** The display path the chunk is keyed by (new side, else old side). */
+  path: string;
+  /** Old-side path; absent for an added file. */
+  oldPath?: string;
+  /** New-side path; absent for a deleted file. */
+  newPath?: string;
+  status: "added" | "deleted" | "modified" | "renamed";
+  hasHunks: boolean;
+  isBinary: boolean;
+  isOversizedStub: boolean;
+}
+
+/**
+ * Find the chunk for `filePath` in `patch` (matched by its display path, the
+ * same key the client and `isBinaryPatchFile` use). Headers are read only
+ * before the first hunk, so a path that merely appears inside hunk content can
+ * never match. Null when no chunk names the path.
+ */
+export function findPatchFileEntry(patch: string, filePath: string): PatchFileEntry | null {
   const chunkStarts = [...patch.matchAll(/^diff --git /gm)];
   for (let i = 0; i < chunkStarts.length; i++) {
     const start = chunkStarts[i].index ?? 0;
     const end = chunkStarts[i + 1]?.index ?? patch.length;
-    const chunk = patch.slice(start, end);
-    const lines = chunk.split("\n");
+    const lines = patch.slice(start, end).split("\n");
     const header = parseDiffGitHeader(lines[0] ?? "");
     const fileLines = parseDiffFilePathLines(lines);
     const metadata = parseDiffMetadataPathLines(lines);
@@ -2500,11 +2659,43 @@ export function isBinaryPatchFile(patch: string, filePath: string): boolean {
       fileLines.oldPath ??
       header.oldPath;
     if (path !== filePath) continue;
-    return lines.some(
+
+    const hunkIndex = lines.findIndex((line) => line.startsWith("@@ "));
+    const headerLines = hunkIndex === -1 ? lines : lines.slice(0, hunkIndex);
+    const binaryLine = headerLines.find(
       (line) => line === "GIT binary patch" || line.startsWith("Binary files "),
     );
+    const added =
+      headerLines.some((line) => line.startsWith("new file mode ") || line === "--- /dev/null") ||
+      (binaryLine?.startsWith("Binary files /dev/null and ") ?? false);
+    const deleted =
+      headerLines.some((line) => line.startsWith("deleted file mode ") || line === "+++ /dev/null") ||
+      (binaryLine?.endsWith(" and /dev/null differ") ?? false);
+    const oldPath = added ? undefined : metadata.oldPath ?? fileLines.oldPath ?? header.oldPath;
+    const newPath = deleted ? undefined : metadata.newPath ?? fileLines.newPath ?? header.newPath;
+    const status = added
+      ? "added"
+      : deleted
+        ? "deleted"
+        : oldPath && newPath && oldPath !== newPath
+          ? "renamed"
+          : "modified";
+    return {
+      path,
+      ...(oldPath ? { oldPath } : {}),
+      ...(newPath ? { newPath } : {}),
+      status,
+      hasHunks: hunkIndex !== -1,
+      isBinary: binaryLine !== undefined,
+      isOversizedStub: headerLines.includes(OVERSIZED_REVIEW_STUB_MARKER),
+    };
   }
-  return false;
+  return null;
+}
+
+/** Whether the named file's patch chunk contains a Git binary marker. */
+export function isBinaryPatchFile(patch: string, filePath: string): boolean {
+  return findPatchFileEntry(patch, filePath)?.isBinary ?? false;
 }
 
 /**

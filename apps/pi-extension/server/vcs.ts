@@ -1,9 +1,11 @@
 import { spawn, spawnSync } from "node:child_process";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { open, realpath } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import {
 	type DiffResult,
 	type DiffType,
+	type GitBytesCommandResult,
 	type GitCommandResult,
 	type GitCommandOptions,
 	type GitContext,
@@ -66,7 +68,7 @@ function trackIsolatedProcessGroup(pid: number): () => void {
 	return () => isolatedProcessGroups.delete(pid);
 }
 
-function runCommand(
+async function runCommand(
 	command: string,
 	args: string[],
 	notFoundMessage: string,
@@ -75,6 +77,34 @@ function runCommand(
 	commandEnvironment?: NodeJS.ProcessEnv,
 	isolateProcessGroup = preparedGitCommand?.isolateProcessGroup ?? false,
 ): Promise<GitCommandResult> {
+	const result = await runCommandBytes(
+		command,
+		args,
+		notFoundMessage,
+		options,
+		preparedGitCommand,
+		commandEnvironment,
+		isolateProcessGroup,
+	);
+	return {
+		...result,
+		stdout: Buffer.from(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength).toString("utf-8"),
+	};
+}
+
+/**
+ * The shared spawn: stdout comes back undecoded, so binary blobs (image
+ * previews) survive intact; `runCommand` decodes it for every text caller.
+ */
+function runCommandBytes(
+	command: string,
+	args: string[],
+	notFoundMessage: string,
+	options?: GitCommandOptions,
+	preparedGitCommand?: PreparedGitCommand,
+	commandEnvironment?: NodeJS.ProcessEnv,
+	isolateProcessGroup = preparedGitCommand?.isolateProcessGroup ?? false,
+): Promise<GitBytesCommandResult> {
 	return new Promise((resolve) => {
 		const proc = spawn(command, args, {
 			cwd: options?.cwd,
@@ -143,7 +173,7 @@ function runCommand(
 			if (timer) clearTimeout(timer);
 			untrack?.();
 			resolve({
-				stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+				stdout: new Uint8Array(Buffer.concat(stdoutChunks)),
 				stderr: Buffer.concat(stderrChunks).toString("utf-8"),
 				exitCode: code ?? 1,
 				...(truncated ? { truncated: true } : {}),
@@ -153,7 +183,7 @@ function runCommand(
 		proc.on("error", () => {
 			if (timer) clearTimeout(timer);
 			untrack?.();
-			resolve({ stdout: "", stderr: notFoundMessage, exitCode: 1 });
+			resolve({ stdout: new Uint8Array(0), stderr: notFoundMessage, exitCode: 1 });
 		});
 	});
 }
@@ -167,9 +197,45 @@ export const reviewRuntime: ReviewGitRuntime = {
 		return runCommand("git", command.args, "git not found", options, command);
 	},
 
+	runGitBytes(
+		args: string[],
+		options?: GitCommandOptions,
+	): Promise<GitBytesCommandResult> {
+		const command = prepareGitCommand(args, options, process.env);
+		return runCommandBytes("git", command.args, "git not found", options, command);
+	},
+
 	async readTextFile(path: string): Promise<string | null> {
 		try {
 			return readFileSync(path, "utf-8");
+		} catch {
+			return null;
+		}
+	},
+
+	async readFileBytes(path: string, maxBytes: number): Promise<Uint8Array | null> {
+		let handle: Awaited<ReturnType<typeof open>> | undefined;
+		try {
+			handle = await open(path, "r");
+			const { size } = await handle.stat();
+			const buffer = new Uint8Array(Math.min(size, maxBytes) + 1);
+			let offset = 0;
+			while (offset < buffer.byteLength) {
+				const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, null);
+				if (bytesRead === 0) break;
+				offset += bytesRead;
+			}
+			return buffer.subarray(0, offset);
+		} catch {
+			return null;
+		} finally {
+			await handle?.close().catch(() => {});
+		}
+	},
+
+	async realPath(path: string): Promise<string | null> {
+		try {
+			return await realpath(path);
 		} catch {
 			return null;
 		}
@@ -208,6 +274,12 @@ export const jjRuntime: ReviewJjRuntime = {
 	): Promise<GitCommandResult> {
 		return runCommand("jj", args, "jj not found", options);
 	},
+	runJjBytes(
+		args: string[],
+		options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
+	): Promise<GitBytesCommandResult> {
+		return runCommandBytes("jj", args, "jj not found", options);
+	},
 };
 
 /** Node Git + GitButler runtime used by the Pi review server. */
@@ -244,6 +316,7 @@ export const {
 	prepareLocalReviewDiff,
 	runVcsDiff,
 	getVcsFileContentsForDiff,
+	getVcsFileBytesForDiff,
 	getVcsDiffFingerprint,
 	canStageFiles,
 	stageFile,

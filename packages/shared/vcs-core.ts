@@ -1,10 +1,13 @@
 import {
   type DiffResult,
+  type DiffSide,
   type DiffType,
+  type FileBytesRead,
   type GitContext,
   type GitDiffOptions,
   type ReviewGitRuntime,
   detectRemoteDefaultBranch,
+  getFileBytesForDiff as getGitFileBytesForDiff,
   getCurrentUpstreamBranch,
   getFileContentsForDiff as getGitFileContentsForDiff,
   getGitContext,
@@ -25,6 +28,7 @@ import {
   getJjContext,
   getJjSnapshotRevsets,
   getJjDiffFingerprint,
+  getJjFileBytesForDiff,
   getJjFileContentsForDiff,
   isJjSnapshotDiffType,
   resolveJjSnapshotEndpoint,
@@ -35,6 +39,7 @@ import {
   detectGitButlerWorkspace,
   getGitButlerContext,
   getGitButlerDiffFingerprint,
+  getGitButlerFileBytesForDiff,
   getGitButlerFileContentsForDiff,
   parseGitButlerDiffType,
   runGitButlerDiff,
@@ -74,6 +79,17 @@ export interface VcsProvider {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
+  /** One side of a changed file as raw bytes (code-review image preview).
+   * Providers without it (e.g. p4) report the preview unavailable. */
+  getFileBytes?(
+    diffType: DiffType,
+    defaultBranch: string,
+    filePath: string,
+    oldPath: string | undefined,
+    side: DiffSide,
+    maxBytes: number,
+    cwd?: string,
+  ): Promise<FileBytesRead>;
   /** Cheap staleness fingerprint for a diff (see review-core/jj-core). Providers
    * without an implementation (e.g. p4) are treated as always-fresh. */
   getDiffFingerprint?(
@@ -129,6 +145,15 @@ export interface VcsApi {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
+  getVcsFileBytesForDiff(
+    diffType: DiffType,
+    defaultBranch: string,
+    filePath: string,
+    oldPath: string | undefined,
+    side: DiffSide,
+    maxBytes: number,
+    cwd?: string,
+  ): Promise<FileBytesRead>;
   /** Best-effort staleness fingerprint for the given diff parameters. `null`
    * means "cannot fingerprint" and must be treated as always-fresh. */
   getVcsDiffFingerprint(
@@ -253,6 +278,10 @@ export function createGitProvider(runtime: ReviewGitRuntime): VcsProvider {
       return getGitFileContentsForDiff(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
     },
 
+    getFileBytes(diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd?) {
+      return getGitFileBytesForDiff(runtime, diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd);
+    },
+
     getDiffFingerprint(diffType, defaultBranch, cwd?, options?) {
       return getGitDiffFingerprint(runtime, diffType, defaultBranch, cwd, options);
     },
@@ -310,6 +339,10 @@ export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGit
       return getJjFileContentsForDiff(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
     },
 
+    getFileBytes(diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd?) {
+      return getJjFileBytesForDiff(runtime, diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd);
+    },
+
     getDiffFingerprint(diffType, defaultBranch, cwd?) {
       return getJjDiffFingerprint(runtime, diffType, defaultBranch, cwd);
     },
@@ -349,6 +382,10 @@ export function createGitButlerProvider(runtime: ReviewGitButlerRuntime): VcsPro
 
     getFileContents(diffType, _defaultBranch, filePath, oldPath?, cwd?) {
       return getGitButlerFileContentsForDiff(runtime, diffType, filePath, oldPath, cwd);
+    },
+
+    getFileBytes(diffType, _defaultBranch, filePath, oldPath, side, maxBytes, cwd?) {
+      return getGitButlerFileBytesForDiff(runtime, diffType, filePath, oldPath, side, maxBytes, cwd);
     },
 
     getDiffFingerprint(diffType, _defaultBranch, cwd?, options?) {
@@ -573,6 +610,20 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
     ): Promise<{ oldContent: string | null; newContent: string | null }> {
       const provider = await getProviderForOperation(diffType, cwd);
       return provider.getFileContents(diffType, defaultBranch, filePath, oldPath, cwd);
+    },
+
+    async getVcsFileBytesForDiff(
+      diffType: DiffType,
+      defaultBranch: string,
+      filePath: string,
+      oldPath: string | undefined,
+      side: DiffSide,
+      maxBytes: number,
+      cwd?: string,
+    ): Promise<FileBytesRead> {
+      const provider = await getProviderForOperation(diffType, cwd);
+      if (!provider.getFileBytes) return { kind: "unavailable" };
+      return provider.getFileBytes(diffType, defaultBranch, filePath, oldPath, side, maxBytes, cwd);
     },
 
     async getVcsDiffFingerprint(

@@ -350,6 +350,29 @@ export function getCliInstallUrl(ref: PRRef): string {
 }
 
 /** Encode a file path for use in platform API URLs */
+/**
+ * One side of a PR file as raw bytes (code-review image preview). Transport
+ * failures other than "not found" throw, so the endpoint can answer 502.
+ */
+export type PRFileBytesResult =
+  | { kind: "ok"; bytes: Uint8Array; etag?: string }
+  | { kind: "missing" }
+  | { kind: "too-large"; size: number };
+
+/** Decode a platform API base64 payload (GitHub wraps it at 60 columns). */
+export function decodeBase64Bytes(value: string): Uint8Array {
+  const clean = value.replace(/\s+/g, "");
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** True when a gh/glab failure is the API's "no such file at this ref". */
+export function isNotFoundCommandFailure(stderr: string): boolean {
+  return /\b404\b|not found/i.test(stderr);
+}
+
 export function encodeApiFilePath(filePath: string): string {
   return encodeURIComponent(filePath);
 }

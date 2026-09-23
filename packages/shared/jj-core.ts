@@ -2,6 +2,9 @@ import { basename } from "node:path";
 import {
   type DiffResult,
   type DiffType,
+  type DiffSide,
+  type FileBytesRead,
+  type GitBytesCommandResult,
   type GitCommandResult,
   type GitContext,
   type GitDiffOptions,
@@ -29,6 +32,11 @@ export interface ReviewJjRuntime {
     args: string[],
     options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
   ) => Promise<GitCommandResult>;
+  /** `runJj` with undecoded stdout (image previews). Optional: absent means unavailable. */
+  runJjBytes?: (
+    args: string[],
+    options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
+  ) => Promise<GitBytesCommandResult>;
 }
 
 // `reachable(@, mutable())` is JJ's definition of the stack being worked on.
@@ -324,6 +332,60 @@ function hasReviewableGitDiffChunk(chunk: string): boolean {
   return /^(new file mode|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to|GIT binary patch|Binary files |similarity index|dissimilarity index)/m.test(chunk);
 }
 
+interface JjSideRevs {
+  cwd?: string;
+  old: { rev: string; path: string } | null;
+  new: { rev: string; path: string } | null;
+}
+
+/**
+ * Which revision each side of a changed file is, per jj diff type: one table
+ * behind both the text reader (hunk expansion) and the byte reader (image
+ * previews). Null for an unknown diff type.
+ */
+async function resolveJjSideRevs(
+  runtime: ReviewJjRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  filePath: string,
+  oldPath?: string,
+  cwd?: string,
+): Promise<JjSideRevs | null> {
+  validateFilePath(filePath);
+  if (oldPath) validateFilePath(oldPath);
+
+  const oldFilePath = oldPath === undefined || oldPath.length === 0 ? filePath : oldPath;
+  const root = await detectJjWorkspace(runtime, cwd);
+  const fileCwd = root ?? cwd;
+  const side = (rev: string, path: string) => ({ rev, path });
+
+  switch (diffType) {
+    case "jj-current":
+      return { cwd: fileCwd, old: side("@-", oldFilePath), new: side("@", filePath) };
+    case "jj-last": {
+      const parentRev = await resolveJjParent(runtime, "@-", fileCwd);
+      return {
+        cwd: fileCwd,
+        old: parentRev ? side(parentRev, oldFilePath) : null,
+        new: side("@-", filePath),
+      };
+    }
+    case "jj-line": {
+      const compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
+      return { cwd: fileCwd, old: side(jjLineBaseRevset(compareTarget), oldFilePath), new: side("@", filePath) };
+    }
+    case "jj-evolog": {
+      // defaultBranch carries the evolog commit ID of the historical state.
+      const evologRev = defaultBranch.length > 0 ? defaultBranch : "@-";
+      return { cwd: fileCwd, old: side(evologRev, oldFilePath), new: side("@", filePath) };
+    }
+    case "jj-all":
+      return { cwd: fileCwd, old: null, new: side("@", filePath) };
+    default:
+      return null;
+  }
+}
+
 export async function getJjFileContentsForDiff(
   runtime: ReviewJjRuntime,
   diffType: DiffType,
@@ -332,49 +394,40 @@ export async function getJjFileContentsForDiff(
   oldPath?: string,
   cwd?: string,
 ): Promise<{ oldContent: string | null; newContent: string | null }> {
-  validateFilePath(filePath);
-  if (oldPath) validateFilePath(oldPath);
+  const revs = await resolveJjSideRevs(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
+  if (!revs) return { oldContent: null, newContent: null };
+  return {
+    oldContent: revs.old ? await jjFileContent(runtime, revs.old.rev, revs.old.path, revs.cwd) : null,
+    newContent: revs.new ? await jjFileContent(runtime, revs.new.rev, revs.new.path, revs.cwd) : null,
+  };
+}
 
-  const oldFilePath = oldPath === undefined || oldPath.length === 0 ? filePath : oldPath;
-  const root = await detectJjWorkspace(runtime, cwd);
-  const fileCwd = root ?? cwd;
-
-  switch (diffType) {
-    case "jj-current":
-      return {
-        oldContent: await jjFileContent(runtime, "@-", oldFilePath, fileCwd),
-        newContent: await jjFileContent(runtime, "@", filePath, fileCwd),
-      };
-    case "jj-last": {
-      const parentRev = await resolveJjParent(runtime, "@-", fileCwd);
-      return {
-        oldContent: parentRev ? await jjFileContent(runtime, parentRev, oldFilePath, fileCwd) : null,
-        newContent: await jjFileContent(runtime, "@-", filePath, fileCwd),
-      };
-    }
-    case "jj-line": {
-      const compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
-      return {
-        oldContent: await jjFileContent(runtime, jjLineBaseRevset(compareTarget), oldFilePath, fileCwd),
-        newContent: await jjFileContent(runtime, "@", filePath, fileCwd),
-      };
-    }
-    case "jj-evolog": {
-      // defaultBranch carries the evolog commit ID of the historical state.
-      const evologRev = defaultBranch.length > 0 ? defaultBranch : "@-";
-      return {
-        oldContent: await jjFileContent(runtime, evologRev, oldFilePath, fileCwd),
-        newContent: await jjFileContent(runtime, "@", filePath, fileCwd),
-      };
-    }
-    case "jj-all":
-      return {
-        oldContent: null,
-        newContent: await jjFileContent(runtime, "@", filePath, fileCwd),
-      };
-    default:
-      return { oldContent: null, newContent: null };
-  }
+/** One side of a jj diff as raw bytes for the image preview, capped at `maxBytes`. */
+export async function getJjFileBytesForDiff(
+  runtime: ReviewJjRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  filePath: string,
+  oldPath: string | undefined,
+  side: DiffSide,
+  maxBytes: number,
+  cwd?: string,
+): Promise<FileBytesRead> {
+  if (!runtime.runJjBytes) return { kind: "unavailable" };
+  const revs = await resolveJjSideRevs(runtime, diffType, defaultBranch, filePath, oldPath, cwd);
+  if (!revs) return { kind: "unavailable" };
+  const source = side === "old" ? revs.old : revs.new;
+  if (!source) return { kind: "missing" };
+  // jj has no cheap size probe, so the byte cap is the gate: one byte over
+  // the limit truncates the read and reports it as too large.
+  const result = await runtime.runJjBytes(
+    ["file", "show", "-r", source.rev, "--", source.path],
+    { cwd: revs.cwd, maxOutputBytes: maxBytes },
+  );
+  if (result.truncated) return { kind: "too-large", size: maxBytes + 1 };
+  // `jj file show` exits 0 with no output when the fileset matches nothing.
+  if (result.exitCode !== 0 || result.stdout.byteLength === 0) return { kind: "missing" };
+  return { kind: "ok", bytes: result.stdout };
 }
 
 export function getJjDiffArgs(
