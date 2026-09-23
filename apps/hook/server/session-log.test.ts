@@ -1781,12 +1781,11 @@ describe("resolveClaudeSessionLog", () => {
     }
   });
 
-  test("detects a /clear transcript despite unrelated invalid metadata", () => {
+  test("detects a /clear transcript despite unrelated metadata missing fields", () => {
     const { sessionsDir, projectsDir, cleanup } = makeTempDirs("detailed-clear-malformed");
     try {
       const cwd = "/tmp/detailed-clear-malformed";
       writeSessionMeta(sessionsDir, 400, { sessionId: "session-a", cwd });
-      writeFileSync(join(sessionsDir, "malformed.json"), "not json");
       writeFileSync(join(sessionsDir, "600.json"), JSON.stringify({
         pid: 600,
         sessionId: "session-z",
@@ -1804,6 +1803,69 @@ describe("resolveClaudeSessionLog", () => {
         cwd,
         sessionsDir,
         projectsDir,
+      })).toEqual({
+        status: "identified",
+        sessionId: "session-b",
+        logPath: sibling,
+        source: "ancestor-pid",
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("keeps its own transcript when sibling metadata stays truncated", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("detailed-clear-truncated");
+    try {
+      const cwd = "/tmp/detailed-clear-truncated";
+      writeSessionMeta(sessionsDir, 400, { sessionId: "session-a", cwd });
+      writeFileSync(join(sessionsDir, "500.json"), '{"pid":500,"sessionId":"sess');
+      const sessionA = writeSessionLog(projectsDir, cwd, "session-a");
+      const sibling = writeSessionLog(projectsDir, cwd, "session-b");
+      const now = Date.now() / 1000;
+      utimesSync(sessionA, now - 10, now - 10);
+      utimesSync(sibling, now, now);
+
+      expect(resolveClaudeSessionLog({
+        startPid: 400,
+        getParentPid: () => null,
+        cwd,
+        sessionsDir,
+        projectsDir,
+      })).toEqual({
+        status: "identified",
+        sessionId: "session-a",
+        logPath: sessionA,
+        source: "ancestor-pid",
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("detects a /clear transcript when truncated metadata is rewritten before the retry", () => {
+    const { sessionsDir, projectsDir, cleanup } = makeTempDirs("detailed-clear-rewritten");
+    try {
+      const cwd = "/tmp/detailed-clear-rewritten";
+      writeSessionMeta(sessionsDir, 400, { sessionId: "session-a", cwd });
+      writeFileSync(join(sessionsDir, "600.json"), '{"pid":600,"sessionId":"sess');
+      const sessionA = writeSessionLog(projectsDir, cwd, "session-a");
+      const sibling = writeSessionLog(projectsDir, cwd, "session-b");
+      const now = Date.now() / 1000;
+      utimesSync(sessionA, now - 10, now - 10);
+      utimesSync(sibling, now, now);
+
+      expect(resolveClaudeSessionLog({
+        startPid: 400,
+        getParentPid: () => null,
+        cwd,
+        sessionsDir,
+        projectsDir,
+        // The writer finishes while the reader waits to retry.
+        beforeMetadataRetry: () => writeSessionMeta(sessionsDir, 600, {
+          sessionId: "session-z",
+          cwd: "/tmp/elsewhere",
+        }),
       })).toEqual({
         status: "identified",
         sessionId: "session-b",
@@ -2293,7 +2355,7 @@ describe("describeClaudeSessionResolutionFailure", () => {
         projectsDir,
       });
       expect(describeClaudeSessionResolutionFailure(resolution)).toContain(
-        "could not be read",
+        "could not be used",
       );
     } finally {
       cleanup();

@@ -309,6 +309,8 @@ export interface ClaudeSessionLogResolutionOptions {
   projectsDir?: string;
   getParentPid?: (pid: number) => number | null;
   maxHops?: number;
+  /** Called before a metadata read is retried (test seam). */
+  beforeMetadataRetry?: (path: string) => void;
 }
 
 function parseSessionMetadata(value: unknown): SessionMetadata | null {
@@ -349,9 +351,11 @@ function sleepSync(ms: number): void {
 function readSessionMetadataDetailed(
   pid: number,
   sessionsDir: string,
+  beforeRetry?: (path: string) => void,
 ): SessionMetadataReadResult {
   const first = readSessionMetadataOnce(pid, sessionsDir);
   if (first.status !== "invalid") return first;
+  beforeRetry?.(join(sessionsDir, `${pid}.json`));
   sleepSync(SESSION_METADATA_RETRY_MS);
   return readSessionMetadataOnce(pid, sessionsDir);
 }
@@ -508,6 +512,7 @@ type SessionRegistrationStatus = "registered" | "unregistered" | "unknown";
 function resolveSessionRegistration(
   sessionId: string,
   sessionsDir: string,
+  beforeRetry?: (path: string) => void,
 ): SessionRegistrationStatus {
   let files: string[];
   try {
@@ -517,12 +522,28 @@ function resolveSessionRegistration(
   }
 
   for (const f of files) {
+    const path = join(sessionsDir, f);
+    let content: string;
+    try {
+      content = readFileSync(path, "utf-8");
+    } catch {
+      // Unreadable metadata cannot be attributed to a session.
+      continue;
+    }
     let value: unknown;
     try {
-      value = JSON.parse(readFileSync(join(sessionsDir, f), "utf-8"));
+      value = JSON.parse(content);
     } catch {
-      // Unreadable or mid-rewrite metadata cannot be attributed to a session.
-      continue;
+      // Likely caught mid-rewrite. If it stays unparsable it could belong to
+      // the sibling, so keep the session's own transcript rather than risk
+      // returning another live session's conversation.
+      beforeRetry?.(path);
+      sleepSync(SESSION_METADATA_RETRY_MS);
+      try {
+        value = JSON.parse(readFileSync(path, "utf-8"));
+      } catch {
+        return "unknown";
+      }
     }
     // Match on the id alone so a record with other invalid fields still
     // counts as registering its session.
@@ -566,7 +587,11 @@ function resolveSessionLogByAncestorPidsDetailed(
 
   const pids = getAncestorPids(startPid, maxHops, getParent);
   for (const pid of pids) {
-    const metadata = readSessionMetadataDetailed(pid, sessionsDir);
+    const metadata = readSessionMetadataDetailed(
+      pid,
+      sessionsDir,
+      opts.beforeMetadataRetry,
+    );
     if (metadata.status === "absent") continue;
     if (metadata.status === "invalid") {
       // Still unreadable after a retry: let the cwd scan decide rather than
@@ -608,6 +633,7 @@ function resolveSessionLogByAncestorPidsDetailed(
         const registration = resolveSessionRegistration(
           candidateSessionId,
           sessionsDir,
+          opts.beforeMetadataRetry,
         );
         if (registration === "unknown") {
           return preciseMatch;
@@ -715,7 +741,7 @@ export function describeClaudeSessionResolutionFailure(
   resolution: ClaudeSessionLogResolution,
 ): string | null {
   if (resolution.status === "blocked") {
-    return "Claude session metadata for this directory could not be read, so the current session is ambiguous. Try again in a moment.";
+    return "Claude session metadata for this directory could not be used, so the current session is ambiguous. Try again in a moment.";
   }
   if (resolution.status === "identified" && !resolution.logPath) {
     return `No unique readable transcript found for Claude session ${resolution.sessionId} (a new session has none until its first message).`;
