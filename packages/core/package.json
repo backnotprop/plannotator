@@ -20,6 +20,7 @@
     "./external-annotation": "./external-annotation.ts",
     "./extract-code-paths": "./extract-code-paths.ts",
     "./favicon": "./favicon.ts",
+    "./forge-refs": "./forge-refs.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./goal-setup": "./goal-setup.ts",
     "./html-anchor": "./html-anchor.ts",

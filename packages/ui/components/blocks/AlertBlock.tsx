@@ -13,6 +13,7 @@ interface AlertBlockProps {
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
+  repoHost?: string;
   onNavigateAnchor?: (hash: string) => void;
 }
 
@@ -60,9 +61,9 @@ const Icon: React.FC<{ kind: AlertKind }> = ({ kind }) => {
 };
 
 export const AlertBlock: React.FC<AlertBlockProps> = ({
-  blockId, kind, body, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, githubRepo, onNavigateAnchor,
+  blockId, kind, body, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, githubRepo, repoHost, onNavigateAnchor,
 }) => {
-  const proseProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, githubRepo };
+  const proseProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, githubRepo, repoHost };
 
   // A bold-only first line (optionally led by one emoji, optionally trailed by
   // an `<!-- icon: name -->` comment) is the alert's title and rides the icon

@@ -19,9 +19,10 @@ export const BlockRenderer: React.FC<{
   checkboxOverrides?: Map<string, boolean>;
   orderedIndex?: number | null;
   githubRepo?: string;
+  repoHost?: string;
   headingAnchorId?: string;
   onNavigateAnchor?: (hash: string) => void;
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, headingAnchorId, onNavigateAnchor }) => {
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -37,7 +38,7 @@ export const BlockRenderer: React.FC<{
           data-block-id={block.id}
           data-block-type="heading"
         >
-          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} onNavigateAnchor={onNavigateAnchor} />
+          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </Tag>
       );
     }
@@ -54,6 +55,7 @@ export const BlockRenderer: React.FC<{
             imageBaseDir={imageBaseDir}
             onImageClick={onImageClick}
             githubRepo={githubRepo}
+            repoHost={repoHost}
             onNavigateAnchor={onNavigateAnchor}
           />
         );
@@ -68,7 +70,7 @@ export const BlockRenderer: React.FC<{
         >
           {paragraphs.map((para, i) => (
             <p key={i} className={i > 0 ? 'mt-2' : ''}>
-              <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={para} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} onNavigateAnchor={onNavigateAnchor} />
+              <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={para} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
             </p>
           ))}
         </blockquote>
@@ -83,7 +85,7 @@ export const BlockRenderer: React.FC<{
         : block.checked;
       const isInteractive = isCheckbox && !!onToggleCheckbox;
       const textClass = `text-sm leading-relaxed ${isCheckbox && isChecked ? 'text-muted-foreground line-through' : 'text-foreground/90'}`;
-      const inlineProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, onNavigateAnchor };
+      const inlineProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost, onNavigateAnchor };
       return (
         <div
           className="flex items-start gap-3 my-1.5"
@@ -117,6 +119,7 @@ export const BlockRenderer: React.FC<{
           onOpenLinkedDoc={onOpenLinkedDoc}
           onOpenCodeFile={onOpenCodeFile}
           githubRepo={githubRepo}
+          repoHost={repoHost}
           onNavigateAnchor={onNavigateAnchor}
         />
       );
@@ -145,6 +148,7 @@ export const BlockRenderer: React.FC<{
           imageBaseDir={imageBaseDir}
           onImageClick={onImageClick}
           githubRepo={githubRepo}
+          repoHost={repoHost}
           onNavigateAnchor={onNavigateAnchor}
         />
       );
@@ -156,7 +160,7 @@ export const BlockRenderer: React.FC<{
           className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
         >
-          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} onNavigateAnchor={onNavigateAnchor} />
+          <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </p>
       );
   }

@@ -6,7 +6,7 @@
 import { execSync } from "node:child_process";
 import { basename } from "node:path";
 import { sanitizeTag } from "../generated/project.ts";
-import { parseRemoteUrl, getDirName } from "../generated/repo.ts";
+import { parseRemoteUrl, parseRemoteHost, getDirName, type RepoInfo } from "../generated/repo.ts";
 
 /** Run a git command and return stdout (empty string on error). */
 function git(cmd: string): string {
@@ -39,14 +39,14 @@ export function detectProjectName(): string {
 	}
 }
 
-export function getRepoInfo(): { display: string; branch?: string } | null {
+export function getRepoInfo(): RepoInfo | null {
 	const branch = git("rev-parse --abbrev-ref HEAD");
 	const safeBranch = branch && branch !== "HEAD" ? branch : undefined;
 
 	const originUrl = git("remote get-url origin");
 	const orgRepo = parseRemoteUrl(originUrl);
 	if (orgRepo) {
-		return { display: orgRepo, branch: safeBranch };
+		return { display: orgRepo, branch: safeBranch, host: parseRemoteHost(originUrl) ?? undefined };
 	}
 
 	const topLevel = git("rev-parse --show-toplevel");

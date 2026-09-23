@@ -19,6 +19,7 @@ export function renderProseBody(args: {
   onOpenCodeFile?: (path: string) => void;
   onNavigateAnchor?: (hash: string) => void;
   githubRepo?: string;
+  repoHost?: string;
 }): React.ReactNode {
   const {
     body,
@@ -30,6 +31,7 @@ export function renderProseBody(args: {
     onOpenCodeFile,
     onNavigateAnchor,
     githubRepo,
+    repoHost,
   } = args;
 
   const inline = (text: string) => (
@@ -41,6 +43,7 @@ export function renderProseBody(args: {
       onOpenCodeFile={onOpenCodeFile}
       onNavigateAnchor={onNavigateAnchor}
       githubRepo={githubRepo}
+      repoHost={repoHost}
     />
   );
 

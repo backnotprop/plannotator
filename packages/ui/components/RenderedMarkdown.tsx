@@ -18,6 +18,7 @@ export interface RenderedMarkdownProps {
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   githubRepo?: string;
+  repoHost?: string;
 }
 
 export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
@@ -27,9 +28,10 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   onOpenLinkedDoc,
   onOpenCodeFile,
   githubRepo,
+  repoHost,
 }) => {
   const groups = useMemo(() => groupBlocks(parseMarkdownToBlocks(markdown)), [markdown]);
-  const cb = { onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo };
+  const cb = { onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost };
 
   return (
     <div className={className}>

@@ -13,6 +13,7 @@ interface CalloutProps {
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
   githubRepo?: string;
+  repoHost?: string;
   onNavigateAnchor?: (hash: string) => void;
 }
 
@@ -28,6 +29,7 @@ export const Callout: React.FC<CalloutProps> = ({
   imageBaseDir,
   onImageClick,
   githubRepo,
+  repoHost,
   onNavigateAnchor,
 }) => {
   const kindAttr =
@@ -54,6 +56,7 @@ export const Callout: React.FC<CalloutProps> = ({
         onOpenCodeFile,
         onNavigateAnchor,
         githubRepo,
+        repoHost,
       })}
     </div>
   );

@@ -1277,6 +1277,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                       onToggleCheckbox={readOnly ? undefined : onToggleCheckbox}
                       checkboxOverrides={checkboxOverrides}
                       githubRepo={repoInfo?.display}
+                      repoHost={repoInfo?.host}
                       headingAnchorId={headingSlugMap.get(block.id)}
                       onNavigateAnchor={scrollToAnchor}
                     />
@@ -1317,6 +1318,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               githubRepo={repoInfo?.display}
+              repoHost={repoInfo?.host}
               onNavigateAnchor={scrollToAnchor}
               onHover={(element) => {
                 if (tableHoverTimeoutRef.current) {
@@ -1383,7 +1385,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               }
             />
           ) : (
-            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={readOnly ? undefined : onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} headingAnchorId={headingSlugMap.get(group.block.id)} />
+            <BlockRenderer imageBaseDir={imageBaseDir} onImageClick={(src, alt) => setLightbox({ src, alt })} key={group.block.id} block={group.block} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={scrollToAnchor} onToggleCheckbox={readOnly ? undefined : onToggleCheckbox} checkboxOverrides={checkboxOverrides} githubRepo={repoInfo?.display} repoHost={repoInfo?.host} headingAnchorId={headingSlugMap.get(group.block.id)} />
           )
         )}
 
@@ -1493,6 +1495,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             githubRepo={repoInfo?.display}
+            repoHost={repoInfo?.host}
             onNavigateAnchor={scrollToAnchor}
           />
         )}

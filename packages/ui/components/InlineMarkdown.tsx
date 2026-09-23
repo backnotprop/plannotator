@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
+import { forgeRefLinks } from "@plannotator/core/forge-refs";
 import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
 import { useFenceTheme } from "../hooks/useFenceTheme";
 import { transformPlainText } from "../utils/inlineTransforms";
@@ -501,9 +502,13 @@ export const InlineMarkdown: React.FC<{
   onNavigateAnchor?: (hash: string) => void;
   imageBaseDir?: string;
   onImageClick?: (src: string, alt: string) => void;
+  /** Repo path (`owner/repo`, `group/sub/project`) bare `#123` / `@user` refs link into. */
   githubRepo?: string;
-}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo }) => {
+  /** Host of that repo's git remote; picks the forge refs link to. Absent means github.com. */
+  repoHost?: string;
+}> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
   const validation = useCodePathValidation();
+  const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -672,6 +677,7 @@ export const InlineMarkdown: React.FC<{
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
+            repoHost={repoHost}
           />
         </del>,
       );
@@ -695,6 +701,7 @@ export const InlineMarkdown: React.FC<{
               onOpenCodeFile={onOpenCodeFile}
               onNavigateAnchor={onNavigateAnchor}
               githubRepo={githubRepo}
+              repoHost={repoHost}
             />
           </em>
         </strong>,
@@ -718,6 +725,7 @@ export const InlineMarkdown: React.FC<{
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
+            repoHost={repoHost}
           />
         </strong>,
       );
@@ -740,6 +748,7 @@ export const InlineMarkdown: React.FC<{
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
+            repoHost={repoHost}
           />
         </em>,
       );
@@ -763,6 +772,7 @@ export const InlineMarkdown: React.FC<{
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
+            repoHost={repoHost}
           />
         </em>,
       );
@@ -834,9 +844,7 @@ export const InlineMarkdown: React.FC<{
       match = remaining.match(/^#(\d+)(?!\w)/);
       if (match) {
         const num = match[1];
-        const href = githubRepo && githubRepo.includes('/')
-          ? `https://github.com/${githubRepo}/issues/${num}`
-          : null;
+        const href = refLinks?.issue(num) ?? null;
         const label = `#${num}`;
         parts.push(
           href ? (
@@ -864,9 +872,7 @@ export const InlineMarkdown: React.FC<{
       match = remaining.match(/^@([a-zA-Z][a-zA-Z0-9_-]{0,38})(?!\w)/);
       if (match) {
         const handle = match[1];
-        const href = githubRepo && githubRepo.includes('/')
-          ? `https://github.com/${handle}`
-          : null;
+        const href = refLinks?.user(handle) ?? null;
         const label = `@${handle}`;
         parts.push(
           href ? (
@@ -1140,6 +1146,7 @@ export const InlineMarkdown: React.FC<{
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}
             githubRepo={githubRepo}
+            repoHost={repoHost}
             imageBaseDir={imageBaseDir}
             onImageClick={onImageClick}
           />,

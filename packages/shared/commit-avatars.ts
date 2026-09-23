@@ -27,6 +27,7 @@
  * commits endpoint — rows just render the initials fallback.
  */
 
+import { classifyForgeHost, type ForgePlatform } from "@plannotator/core/forge-refs";
 import { parseRemoteUrl, parseRemoteHost } from "./repo";
 
 export interface CommandResult {
@@ -39,7 +40,7 @@ export interface CommandRunner {
   runCommand(cmd: string, args: string[]): Promise<CommandResult>;
 }
 
-export type AvatarPlatform = "github" | "gitlab";
+export type AvatarPlatform = ForgePlatform;
 
 export interface AvatarRemote {
   platform: AvatarPlatform;
@@ -51,23 +52,17 @@ export interface AvatarRemote {
 /**
  * Classify a git remote URL to a forge we can query for avatars. Bare remote
  * URLs have none of the path markers parsePRUrl keys off (`/pull/`,
- * `/-/merge_requests/`), so this goes by hostname: exact/prefix github or a
- * host containing "gitlab". Self-hosted forges with an opaque hostname return
- * null — probing both CLIs blind would be slow and noisy. Accepted edge.
+ * `/-/merge_requests/`), so this goes by hostname (`classifyForgeHost`, the
+ * same rule inline `#123` / `@user` links use). Self-hosted forges with an
+ * opaque hostname return null — probing both CLIs blind would be slow and
+ * noisy. Accepted edge.
  */
 export function classifyAvatarRemote(remoteUrl: string): AvatarRemote | null {
   const host = parseRemoteHost(remoteUrl);
   const path = parseRemoteUrl(remoteUrl);
   if (!host || !path) return null;
-  if (host === "github.com" || host.startsWith("github.")) {
-    return { platform: "github", host, path };
-  }
-  // Structured match, not a bare substring: `gitlab.company.com` and
-  // `sub.gitlab.example.io` qualify, `mygitlabproxy.example.com` doesn't.
-  if (host === "gitlab.com" || host.startsWith("gitlab.") || host.includes(".gitlab.")) {
-    return { platform: "gitlab", host, path };
-  }
-  return null;
+  const platform = classifyForgeHost(host);
+  return platform ? { platform, host, path } : null;
 }
 
 /** Mirrors pr-github's hostnameArgs: `--hostname` only off github.com. */
