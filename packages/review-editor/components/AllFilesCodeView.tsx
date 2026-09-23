@@ -34,7 +34,7 @@ import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
-import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { FileHeader } from './FileHeader';
@@ -190,6 +190,20 @@ export interface AllFilesCodeViewProps {
    *  patch review): the augmentation stage completes as a no-op instead of
    *  firing a /api/file-content request the server answers 400. */
   contextExpansionAvailable?: boolean;
+  /**
+   * Before/After image preview for a hunkless image chunk (#1598), rendered in
+   * place of the binary notice. A render prop rather than a flag so the
+   * preview (and its fetches) never enter hosts that leave it unset: the
+   * guide chain and the read-only guides.show viewer keep the plain notice.
+   */
+  renderImagePreview?: (args: {
+    file: DiffFile;
+    /** The notice to show when the server cannot display the file. */
+    fallback: React.ReactNode;
+    /** The notice to show when every side is over the byte cap. */
+    tooLargeFallback?: React.ReactNode;
+    onHeightChange: () => void;
+  }) => React.ReactNode;
   /** Compact coarse-pointer shell. Adjusts custom-header chrome and Pierre's
    * matching virtualization metric without changing desktop geometry. */
   compactTouchLayout?: boolean;
@@ -567,6 +581,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewBase,
   reviewSnapshotId,
   contextExpansionAvailable = true,
+  renderImagePreview,
   compactTouchLayout,
   onLineSelection,
   onAddAnnotationForFile,
@@ -2370,6 +2385,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
     const collapsed = item.collapsed === true;
     const fileComments = fileCommentsByPath.get(filePath) ?? [];
+    const isOversizedStub = isOversizedReviewStubPatch(file.patch);
+    const isBinaryNotice = !isOversizedStub && isContentlessBinaryPatch(file.patch);
+    const remeasure = () => refreshItem(item.id);
+    const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath)
+      ? renderImagePreview({
+          file,
+          fallback: isOversizedStub
+            ? <OversizedFileNotice onHeightChange={remeasure} />
+            : isBinaryNotice ? <BinaryFileNotice onHeightChange={remeasure} /> : null,
+          tooLargeFallback: isOversizedStub ? <OversizedFileNotice onHeightChange={remeasure} /> : undefined,
+          onHeightChange: remeasure,
+        })
+      : null;
     // Edit-to-suggestion affordance (flag-gated). Slot portals republish on
     // updateItem BEFORE React commits state, so read the session's refs.
     const isEditingThis = editEnabled && editSession.editingItemIdRef.current === item.id;
@@ -2447,18 +2475,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             onHeightChange={() => refreshItem(item.id)}
           />
         )}
+        {/* A hunkless image chunk previews its Before/After images (#1598)
+            when the host opts in; the notices below are its fallback. */}
+        {imagePreview}
         {/* Files over the review size cap arrive as a contents-free stub, so
             Pierre renders nothing below the header. Explain why rather than
             leaving a bare header that reads as a broken diff. */}
-        {!collapsed && isOversizedReviewStubPatch(file.patch) && (
+        {!collapsed && !imagePreview && isOversizedStub && (
           <OversizedFileNotice onHeightChange={() => refreshItem(item.id)} />
         )}
         {/* The general fallback under that specific case: any OTHER hunkless
             binary chunk draws nothing either. Gated on the marker so a
             marker-carrying stub is explained exactly once, by the line above. */}
-        {!collapsed
-          && !isOversizedReviewStubPatch(file.patch)
-          && isContentlessBinaryPatch(file.patch) && (
+        {!collapsed && !imagePreview && isBinaryNotice && (
           <BinaryFileNotice onHeightChange={() => refreshItem(item.id)} />
         )}
         {/* EXPERIMENTAL edit-session HUD: session controls + state in a slim

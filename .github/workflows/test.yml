@@ -78,6 +78,7 @@ jobs:
           packages/review-editor/components/DiffViewer.fullContentSwap.test.tsx
           packages/review-editor/components/DiffViewer.oversizedStub.test.tsx
           packages/review-editor/components/DiffViewer.binaryNotice.test.tsx
+          packages/review-editor/components/DiffViewer.imagePreview.test.tsx
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
 
       # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files

@@ -73,6 +73,8 @@ export const ReviewDiffPanel: React.FC<IDockviewPanelProps> = (props) => {
         status={file.status}
         reviewBase={state.reviewBase}
         reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
+        imagePreviewAvailable={state.imagePreviewAvailable}
+        imageSnapshotId={state.snapshotId}
         contextExpansionAvailable={state.contextExpansionAvailable}
         prUrl={state.prMetadata?.url}
         prDiffScope={state.prDiffScope}

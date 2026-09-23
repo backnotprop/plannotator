@@ -17,7 +17,8 @@ import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffHScrollbar } from './DiffHScrollbar';
 import { OversizedFileNotice } from './OversizedFileNotice';
-import { isContentlessBinaryPatch, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { ImageDiffPreview } from './ImageDiffPreview';
 import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import type { AnnotationScrollTarget } from '../types';
@@ -169,6 +170,12 @@ interface DiffViewerProps {
   contextExpansionAvailable?: boolean;
   /** Opaque diff snapshot used to reject mutable file-content lookups from another view. */
   reviewSnapshotId?: string;
+  /** Server advertised `imagePreviewSupported`: a hunkless image chunk renders
+   *  as a Before/After preview instead of the binary notice. Absent = off. */
+  imagePreviewAvailable?: boolean;
+  /** Snapshot the image preview binds its requests to (set in PR mode too,
+   *  where `reviewSnapshotId` is not). Falls back to `reviewSnapshotId`. */
+  imageSnapshotId?: string;
   /** Current PR url + diff scope — used to namespace file-comment drafts so they don't leak across in-place PR switches. */
   prUrl?: string;
   prDiffScope?: string;
@@ -245,6 +252,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   status,
   reviewBase,
   reviewSnapshotId,
+  imagePreviewAvailable = false,
+  imageSnapshotId,
   contextExpansionAvailable = true,
   prUrl,
   prDiffScope,
@@ -784,6 +793,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     [patch, isOversizedStub],
   );
 
+  // A hunkless chunk for an image path previews the images instead (#1598);
+  // the notices above stay its fallback.
+  const isImagePreview = useMemo(
+    () => imagePreviewAvailable && isImagePreviewCandidate(patch, filePath, oldPath),
+    [imagePreviewAvailable, patch, filePath, oldPath],
+  );
+
   // Replay a selected line/range comment's anchor as the controlled highlight so
   // clicking it (inline card or sidebar) lights up its lines. A live compose
   // selection (pendingSelection) wins while the toolbar is open; file-scoped
@@ -842,8 +858,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       >
         {/* Specific first, general second, and never both: whichever applies,
             a card with no hunks to draw says why instead of reading as empty. */}
-        {isOversizedStub && <OversizedFileNotice />}
-        {isContentlessBinary && <BinaryFileNotice />}
+        {isImagePreview ? (
+          <ImageDiffPreview
+            filePath={filePath}
+            status={status ?? 'modified'}
+            snapshotId={imageSnapshotId ?? reviewSnapshotId}
+            variant="single"
+            compact={compactTouchLayout}
+            fallback={isOversizedStub ? <OversizedFileNotice /> : isContentlessBinary ? <BinaryFileNotice /> : null}
+            tooLargeFallback={isOversizedStub ? <OversizedFileNotice /> : undefined}
+          />
+        ) : (
+          <>
+            {isOversizedStub && <OversizedFileNotice />}
+            {isContentlessBinary && <BinaryFileNotice />}
+          </>
+        )}
         <FileCommentBanner
           comments={fileComments}
           selectedAnnotationId={selectedAnnotationId}
