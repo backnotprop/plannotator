@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyForgeHost, forgeRefLinks } from "./forge-refs";
+import { classifyForgeHost, forgeRefLinks, normalizeForgeHost } from "./forge-refs";
 
 describe("forgeRefLinks", () => {
   const cases: Array<{
@@ -65,6 +65,35 @@ describe("forgeRefLinks", () => {
       expect(links?.user("octocat") ?? null).toBe(c.user);
     });
   }
+});
+
+describe("normalizeForgeHost", () => {
+  const cases: Array<[string | undefined, string | null]> = [
+    ["GitHub.com", "github.com"],
+    ["github.com:22", "github.com"],
+    ["www.github.com", "github.com"],
+    ["ssh.github.com", "github.com"],
+    ["github.com-work", "github.com"],
+    ["altssh.gitlab.com", "gitlab.com"],
+    ["github.acme.com", "github.acme.com"],
+    // not a plausible DNS name → treated as absent (legacy github.com link)
+    ["work-gh", null],
+    ["[::1]", null],
+    ["github.x@evil.com", null],
+    ["", null],
+    [undefined, null],
+  ];
+  for (const [input, expected] of cases) {
+    test(String(input), () => {
+      expect(normalizeForgeHost(input)).toBe(expected);
+    });
+  }
+
+  test("an implausible host falls back to the legacy github.com link", () => {
+    expect(forgeRefLinks({ display: "o/r", host: "work-gh" })?.issue(1)).toBe(
+      "https://github.com/o/r/issues/1",
+    );
+  });
 });
 
 describe("classifyForgeHost", () => {

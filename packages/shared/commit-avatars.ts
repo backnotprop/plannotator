@@ -27,7 +27,7 @@
  * commits endpoint — rows just render the initials fallback.
  */
 
-import { classifyForgeHost, type ForgePlatform } from "@plannotator/core/forge-refs";
+import { classifyForgeHost, normalizeForgeHost, type ForgePlatform } from "@plannotator/core/forge-refs";
 import { parseRemoteUrl, parseRemoteHost } from "./repo";
 
 export interface CommandResult {
@@ -58,7 +58,7 @@ export interface AvatarRemote {
  * noisy. Accepted edge.
  */
 export function classifyAvatarRemote(remoteUrl: string): AvatarRemote | null {
-  const host = parseRemoteHost(remoteUrl);
+  const host = normalizeForgeHost(parseRemoteHost(remoteUrl));
   const path = parseRemoteUrl(remoteUrl);
   if (!host || !path) return null;
   const platform = classifyForgeHost(host);

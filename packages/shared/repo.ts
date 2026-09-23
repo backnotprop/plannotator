@@ -47,15 +47,15 @@ export function parseRemoteUrl(url: string): string | null {
 export function parseRemoteHost(url: string): string | null {
 	if (!url) return null;
 	// ssh://git@host:port/path
-	const sshPort = url.match(/^ssh:\/\/(?:[^@]+@)?([^:/]+)/i);
+	const sshPort = url.match(/^ssh:\/\/(?:[^@/]+@)?([^:/?#]+)/i);
 	if (sshPort) return sshPort[1];
 	// git@host:path
 	if (!url.includes('://')) {
 		const ssh = url.match(/^[^@\s]+@([^:\s]+):/);
 		if (ssh) return ssh[1];
 	}
-	// https://host/path or http://host/path
-	const https = url.match(/^https?:\/\/([^/:]+)/i);
+	// https://[user[:token]@]host/path — userinfo is not part of the host
+	const https = url.match(/^https?:\/\/(?:[^@/]+@)?([^/:?#]+)/i);
 	if (https) return https[1];
 	return null;
 }
