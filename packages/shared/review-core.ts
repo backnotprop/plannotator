@@ -2526,15 +2526,18 @@ export async function getSinceBaseSections(
 }
 
 /**
- * Refuse repo-escaping paths: absolute paths and any `..` path SEGMENT (either
- * separator). A `..` inside a name (`a..b.png`) is an ordinary file name.
+ * Refuse repo-escaping paths: absolute paths and any path SEGMENT made only of
+ * dots (either separator). That covers `..`, and also `...`, which is
+ * Perforce's recursive wildcard (P4 file content runs `p4 print` on the path)
+ * and which Windows trims to nothing. Dots inside a name (`a..b.png`) are an
+ * ordinary file name.
  */
 export function validateFilePath(filePath: string): void {
   if (
     filePath.startsWith("/") ||
     filePath.startsWith("\\") ||
     /^[A-Za-z]:/.test(filePath) ||
-    filePath.split(/[\\/]/).some((segment) => segment === "..")
+    filePath.split(/[\\/]/).some((segment) => /^\.+$/.test(segment))
   ) {
     throw new Error("Invalid file path");
   }

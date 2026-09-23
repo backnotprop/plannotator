@@ -487,6 +487,12 @@ describe("validateFilePath (shared with /api/file-content)", () => {
       expect(() => validateFilePath(path)).toThrow();
     }
   });
+
+  test("dot-only segments are refused: `...` is Perforce's recursive wildcard (p4 print would dump the subtree)", () => {
+    for (const path of ["...", "dir/...", "....", "dir/.../x.png", "dir\\...", "./x.png"]) {
+      expect(() => validateFilePath(path)).toThrow();
+    }
+  });
 });
 
 describe("isNotFoundCommandFailure", () => {

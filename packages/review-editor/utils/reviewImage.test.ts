@@ -78,6 +78,19 @@ describe('review image cache', () => {
     expect(peekReviewImage('new-snap', 'b.png', 'new')).toBeDefined();
   });
 
+  test('overlapping fetches for one side keep the first URL (the one a card may already show)', async () => {
+    serveBytes(8);
+    const [first, second] = await Promise.all([
+      fetchReviewImage('snap', 'a.png', 'new', signal()),
+      fetchReviewImage('snap', 'a.png', 'new', signal()),
+    ]);
+    if (!first.ok || !second.ok) throw new Error('expected ok');
+    expect(second.image.url).toBe(first.image.url);
+    expect(revoked).not.toContain(first.image.url);
+    expect(peekReviewImage('snap', 'a.png', 'new')?.url).toBe(first.image.url);
+    expect(reviewImageCacheStats().entries).toBe(1);
+  });
+
   test('an evicted URL a mounted image still uses is revoked only on release', async () => {
     serveBytes(64 * 1024 * 1024);
     const first = await fetchReviewImage('snap', 'a.png', 'new', signal());

@@ -181,7 +181,13 @@ export async function fetchReviewImage(
     height: numericHeader(response, 'x-image-height'),
   };
   const key = cacheKey(snapshot, path, side);
-  dropEntry(key);
+  // Two fetches for the same side can overlap (a card remounting mid-fetch).
+  // The first one's URL may already be on screen, so keep it and discard ours.
+  const existing = cache.get(key);
+  if (existing) {
+    URL.revokeObjectURL(image.url);
+    return { ok: true, image: existing };
+  }
   cache.set(key, image);
   cachedBytes += image.bytes;
   // Evict least recently used first, by count and by bytes; the entry just
