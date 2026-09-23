@@ -159,6 +159,7 @@ import {
   findSessionLogsForCwd,
   getRecentRenderedMessages,
   resolveDroidSessionLogForCwd,
+  describeClaudeSessionResolutionFailure,
   resolveClaudeSessionLog,
   type RenderedMessage,
 } from "./session-log";
@@ -1630,6 +1631,10 @@ if (args[0] === "sessions") {
     } else if (resolution.status === "unavailable") {
       tryLogCandidates("CWD slug match (mtime)", () => findSessionLogsForCwd(projectRoot));
       tryLogCandidates("Directory ancestor walk", () => findSessionLogsByAncestorWalk(projectRoot));
+    }
+    if (!lastMessage) {
+      const reason = describeClaudeSessionResolutionFailure(resolution);
+      if (reason) console.error(reason);
     }
   }
 

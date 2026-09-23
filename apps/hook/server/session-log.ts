@@ -158,15 +158,16 @@ export function findSessionLogsForCwd(cwd: string, projectsDirOverride?: string)
   return [];
 }
 
-/**
- * Find a Claude session log by its exact session id across project slugs.
- * Returns null unless exactly one first-level project directory contains the
- * corresponding regular file.
- */
-export function findClaudeSessionLogById(
+type ClaudeSessionLogLookup =
+  | { status: "found"; logPath: string }
+  | { status: "missing" }
+  // Invalid id, unreadable file, or the id exists under more than one slug.
+  | { status: "unknown" };
+
+function lookupClaudeSessionLogById(
   sessionId: string,
   projectsDirOverride?: string,
-): string | null {
+): ClaudeSessionLogLookup {
   if (
     typeof sessionId !== "string" ||
     !sessionId ||
@@ -175,7 +176,7 @@ export function findClaudeSessionLogById(
     sessionId.includes("\0") ||
     basename(sessionId) !== sessionId
   ) {
-    return null;
+    return { status: "unknown" };
   }
 
   const projectsDir = projectsDirOverride ?? DEFAULT_PROJECTS_DIR;
@@ -184,8 +185,10 @@ export function findClaudeSessionLogById(
     projectDirs = readdirSync(projectsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
-  } catch {
-    return null;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { status: "missing" }
+      : { status: "unknown" };
   }
 
   const matches: string[] = [];
@@ -198,12 +201,27 @@ export function findClaudeSessionLogById(
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+      if (code !== "ENOENT" && code !== "ENOTDIR") return { status: "unknown" };
     }
-    if (matches.length > 1) return null;
+    if (matches.length > 1) return { status: "unknown" };
   }
 
-  return matches[0] ?? null;
+  return matches[0]
+    ? { status: "found", logPath: matches[0] }
+    : { status: "missing" };
+}
+
+/**
+ * Find a Claude session log by its exact session id across project slugs.
+ * Returns null unless exactly one first-level project directory contains the
+ * corresponding regular file.
+ */
+export function findClaudeSessionLogById(
+  sessionId: string,
+  projectsDirOverride?: string,
+): string | null {
+  const lookup = lookupClaudeSessionLogById(sessionId, projectsDirOverride);
+  return lookup.status === "found" ? lookup.logPath : null;
 }
 
 /**
@@ -276,7 +294,7 @@ export interface SessionMetadata {
 
 export type ClaudeSessionLogResolution =
   | { status: "unavailable" }
-  | { status: "blocked"; source: "ancestor-pid" | "cwd-metadata" }
+  | { status: "blocked"; source: "cwd-metadata" }
   | {
       status: "identified";
       sessionId: string;
@@ -321,7 +339,24 @@ type SessionMetadataReadResult =
   | { status: "invalid" }
   | { status: "valid"; metadata: SessionMetadata };
 
+// Claude rewrites its metadata file in place, so a read can land mid-write.
+const SESSION_METADATA_RETRY_MS = 50;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function readSessionMetadataDetailed(
+  pid: number,
+  sessionsDir: string,
+): SessionMetadataReadResult {
+  const first = readSessionMetadataOnce(pid, sessionsDir);
+  if (first.status !== "invalid") return first;
+  sleepSync(SESSION_METADATA_RETRY_MS);
+  return readSessionMetadataOnce(pid, sessionsDir);
+}
+
+function readSessionMetadataOnce(
   pid: number,
   sessionsDir: string,
 ): SessionMetadataReadResult {
@@ -482,16 +517,20 @@ function resolveSessionRegistration(
   }
 
   for (const f of files) {
-    let meta: SessionMetadata | null;
+    let value: unknown;
     try {
-      meta = parseSessionMetadata(
-        JSON.parse(readFileSync(join(sessionsDir, f), "utf-8")),
-      );
+      value = JSON.parse(readFileSync(join(sessionsDir, f), "utf-8"));
     } catch {
-      return "unknown";
+      // Unreadable or mid-rewrite metadata cannot be attributed to a session.
+      continue;
     }
-    if (!meta) return "unknown";
-    if (meta.sessionId === sessionId) {
+    // Match on the id alone so a record with other invalid fields still
+    // counts as registering its session.
+    if (
+      value &&
+      typeof value === "object" &&
+      (value as Record<string, unknown>).sessionId === sessionId
+    ) {
       return "registered";
     }
   }
@@ -530,7 +569,9 @@ function resolveSessionLogByAncestorPidsDetailed(
     const metadata = readSessionMetadataDetailed(pid, sessionsDir);
     if (metadata.status === "absent") continue;
     if (metadata.status === "invalid") {
-      return { status: "blocked", source: "ancestor-pid" };
+      // Still unreadable after a retry: let the cwd scan decide rather than
+      // continuing up the tree into an unrelated outer session.
+      return { status: "unavailable" };
     }
     const meta = metadata.metadata;
 
@@ -641,19 +682,22 @@ function resolveSessionLogByCwdScanDetailed(
     candidates.push(meta);
   }
 
-  // The newest matching metadata record is authoritative even if its log is
-  // missing. Falling through could select a different concurrent session.
+  // Newest first. A session with no transcript yet (opened, no messages) is
+  // skipped so it cannot shadow the active session in the same directory;
+  // a transcript that cannot be resolved unambiguously stops the scan.
   candidates.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
 
-  const meta = candidates[0];
-  if (!meta) return { status: "unavailable" };
-
-  return {
-    status: "identified",
-    sessionId: meta.sessionId,
-    logPath: findClaudeSessionLogById(meta.sessionId, opts.projectsDir),
-    source: "cwd-metadata",
-  };
+  for (const meta of candidates) {
+    const lookup = lookupClaudeSessionLogById(meta.sessionId, opts.projectsDir);
+    if (lookup.status === "missing") continue;
+    return {
+      status: "identified",
+      sessionId: meta.sessionId,
+      logPath: lookup.status === "found" ? lookup.logPath : null,
+      source: "cwd-metadata",
+    };
+  }
+  return { status: "unavailable" };
 }
 
 export function resolveSessionLogByCwdScan(
@@ -661,6 +705,22 @@ export function resolveSessionLogByCwdScan(
 ): string | null {
   const resolution = resolveSessionLogByCwdScanDetailed(opts);
   return resolution.status === "identified" ? resolution.logPath : null;
+}
+
+/**
+ * Explain why a Claude session resolution produced no transcript, or null
+ * when there is nothing more specific to say than "no message found".
+ */
+export function describeClaudeSessionResolutionFailure(
+  resolution: ClaudeSessionLogResolution,
+): string | null {
+  if (resolution.status === "blocked") {
+    return "Claude session metadata for this directory could not be read, so the current session is ambiguous. Try again in a moment.";
+  }
+  if (resolution.status === "identified" && !resolution.logPath) {
+    return `No unique readable transcript found for Claude session ${resolution.sessionId} (a new session has none until its first message).`;
+  }
+  return null;
 }
 
 export function resolveClaudeSessionLog(
