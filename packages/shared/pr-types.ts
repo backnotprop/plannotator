@@ -349,7 +349,6 @@ export function getCliInstallUrl(ref: PRRef): string {
     : "https://gitlab.com/gitlab-org/cli";
 }
 
-/** Encode a file path for use in platform API URLs */
 /**
  * One side of a PR file as raw bytes (code-review image preview). Transport
  * failures other than "not found" throw, so the endpoint can answer 502.
@@ -368,11 +367,16 @@ export function decodeBase64Bytes(value: string): Uint8Array {
   return bytes;
 }
 
-/** True when a gh/glab failure is the API's "no such file at this ref". */
+/**
+ * True when a gh/glab failure is the API's "no such file at this ref" (HTTP
+ * 404). A missing CLI ("gh: command not found") is a transport failure, not a
+ * missing file, so only the status code counts.
+ */
 export function isNotFoundCommandFailure(stderr: string): boolean {
-  return /\b404\b|not found/i.test(stderr);
+  return /\bHTTP 404\b|\b404 Not Found\b/i.test(stderr);
 }
 
+/** Encode a file path for use in platform API URLs */
 export function encodeApiFilePath(filePath: string): string {
   return encodeURIComponent(filePath);
 }

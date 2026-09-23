@@ -3152,6 +3152,7 @@ export async function startReviewServer(
               filePath: string,
               oldPath: string | undefined,
               maxBytes: number,
+              signal?: AbortSignal,
             ): Promise<FileBytesRead> => {
               if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
               const prCwd = resolvePRLocalCwd();
@@ -3183,6 +3184,7 @@ export async function startReviewServer(
                   oldPath,
                   maxBytes,
                   fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+                  signal,
                 });
               }
               return { kind: "unavailable" };
@@ -3193,8 +3195,9 @@ export async function startReviewServer(
               available: imagePreviewSupported,
               patch: currentPatch,
               isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
-              readSide: (side, filePath, oldPath, maxBytes) =>
-                runImageRead(() => readSide(side, filePath, oldPath, maxBytes)),
+              signal: req.signal,
+              readSide: (side, filePath, oldPath, maxBytes, signal) =>
+                runImageRead(() => readSide(side, filePath, oldPath, maxBytes, signal), signal),
             });
             return new Response(result.body as BodyInit | null, {
               status: result.status,

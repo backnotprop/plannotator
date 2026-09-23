@@ -90,6 +90,8 @@ function buildRepo(): Fixture {
     renamed: png(5, 5, 4),
     added: png(7, 7, 5),
     nested: png(3, 3, 6),
+    "dots-before": png(6, 6, 10),
+    "dots-after": png(6, 6, 11),
   };
   writeFileSync(join(repo, ".gitattributes"), "*.svg binary\n");
   writeFileSync(join(repo, "mod.png"), files["mod-before"]);
@@ -98,6 +100,7 @@ function buildRepo(): Fixture {
   writeFileSync(join(repo, "logo.svg"), SVG_OLD);
   writeFileSync(join(repo, "fake.png"), new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 1, 2]));
   writeFileSync(join(repo, "notes.txt"), "one\n");
+  writeFileSync(join(repo, "logo..v2.png"), files["dots-before"]);
   mkdirSync(join(repo, "sub"));
   writeFileSync(join(repo, "sub", "nested.png"), png(3, 3, 9));
   git(repo, ["add", "-A"]);
@@ -110,6 +113,7 @@ function buildRepo(): Fixture {
   writeFileSync(join(repo, "logo.svg"), SVG_NEW);
   writeFileSync(join(repo, "fake.png"), new Uint8Array([0x50, 0x4b, 0x03, 0x04, 9, 9, 9]));
   writeFileSync(join(repo, "notes.txt"), "two\n");
+  writeFileSync(join(repo, "logo..v2.png"), files["dots-after"]);
   writeFileSync(join(repo, "sub", "nested.png"), files.nested);
   // 20000 x 20000 = 400 MP in a ~100-byte file: the decode-bomb shape.
   writeFileSync(join(repo, "bomb.png"), png(20_000, 20_000, 7));
@@ -221,6 +225,23 @@ for (const [runtime, startServer] of [
         const fake = await image("fake.png", "new");
         expect(fake.status).toBe(415);
         expect(await reason(fake)).toBe("not-image");
+      } finally {
+        server.stop();
+      }
+    }, 20_000);
+
+    test("a `..` inside a file name previews; `..` segments stay refused, here and in /api/file-content", async () => {
+      const fixture = buildRepo();
+      const { server, image } = await start(fixture);
+      try {
+        expect(await bodyBytes(await image("logo..v2.png", "old"))).toEqual(fixture.files["dots-before"]);
+        expect(await bodyBytes(await image("logo..v2.png", "new"))).toEqual(fixture.files["dots-after"]);
+        // The validator is shared with hunk expansion: loosening it for
+        // dotted names must not open traversal there.
+        const traversal = await fetch(`${server.url}/api/file-content?path=${encodeURIComponent("sub/../../outside.txt")}`);
+        expect(traversal.status).toBe(400);
+        const dotted = await fetch(`${server.url}/api/file-content?path=${encodeURIComponent("notes.txt")}`);
+        expect(((await dotted.json()) as { newContent: string }).newContent).toBe("two\n");
       } finally {
         server.stop();
       }

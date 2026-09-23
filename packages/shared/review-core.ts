@@ -2525,8 +2525,17 @@ export async function getSinceBaseSections(
   }
 }
 
+/**
+ * Refuse repo-escaping paths: absolute paths and any `..` path SEGMENT (either
+ * separator). A `..` inside a name (`a..b.png`) is an ordinary file name.
+ */
 export function validateFilePath(filePath: string): void {
-  if (filePath.includes("..") || filePath.startsWith("/")) {
+  if (
+    filePath.startsWith("/") ||
+    filePath.startsWith("\\") ||
+    /^[A-Za-z]:/.test(filePath) ||
+    filePath.split(/[\\/]/).some((segment) => segment === "..")
+  ) {
     throw new Error("Invalid file path");
   }
 }

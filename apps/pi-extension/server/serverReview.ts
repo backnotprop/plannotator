@@ -3104,6 +3104,7 @@ export async function startReviewServer(options: {
 				filePath: string,
 				oldPath: string | undefined,
 				maxBytes: number,
+				signal?: AbortSignal,
 			): Promise<FileBytesRead> => {
 				if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
 				const prCwd = (options.worktreePool && prMeta) ? options.worktreePool.resolve(prMeta.url) : options.agentCwd;
@@ -3135,19 +3136,28 @@ export async function startReviewServer(options: {
 						oldPath,
 						maxBytes,
 						fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+						signal,
 					});
 				}
 				return { kind: "unavailable" };
 			};
+			// node:http has no request signal: abort when the client closes the
+			// socket before the response is written.
+			const requestAbort = new AbortController();
+			res.on("close", () => {
+				if (!res.writableEnded) requestAbort.abort();
+			});
 			const result = await handleReviewImageRequest({
 				params: url.searchParams,
 				ifNoneMatch: typeof req.headers["if-none-match"] === "string" ? req.headers["if-none-match"] : null,
 				available: imagePreviewSupported,
 				patch: currentPatch,
 				isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
-				readSide: (side, filePath, oldPath, maxBytes) =>
-					runImageRead(() => readSide(side, filePath, oldPath, maxBytes)),
+				signal: requestAbort.signal,
+				readSide: (side, filePath, oldPath, maxBytes, signal) =>
+					runImageRead(() => readSide(side, filePath, oldPath, maxBytes, signal), signal),
 			});
+			if (requestAbort.signal.aborted) return;
 			res.writeHead(result.status, result.headers);
 			res.end(result.body ?? undefined);
 		} else if (url.pathname === "/api/file-content" && req.method === "GET") {

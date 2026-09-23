@@ -37,21 +37,67 @@ export type ReviewImageResult =
   | { ok: false; error: ReviewImageError };
 
 const MAX_CACHED_IMAGES = 64;
+/** Byte ceiling for the cache: 64 sides at the 10 MB cap would be 640 MB. */
+export const MAX_CACHED_IMAGE_BYTES = 128 * 1024 * 1024;
 const cache = new Map<string, ReviewImageData>();
+let cachedBytes = 0;
 let cachedSnapshot: string | undefined;
+/**
+ * Object URLs a mounted <img> is using. Eviction never revokes one of these
+ * (the <img> may not have loaded it yet); the revoke waits for the release.
+ */
+const urlUsers = new Map<string, number>();
+const pendingRevoke = new Set<string>();
 
 const cacheKey = (snapshot: string, path: string, side: ReviewImageSide) => `${snapshot}|${side}|${path}`;
 
-function revokeAll(): void {
-  for (const entry of cache.values()) URL.revokeObjectURL(entry.url);
-  cache.clear();
+function revokeWhenUnused(url: string): void {
+  if (urlUsers.has(url)) pendingRevoke.add(url);
+  else URL.revokeObjectURL(url);
 }
 
-/** A new snapshot makes every cached side meaningless: drop and revoke them. */
+function dropEntry(key: string): void {
+  const entry = cache.get(key);
+  if (!entry) return;
+  cache.delete(key);
+  cachedBytes -= entry.bytes;
+  revokeWhenUnused(entry.url);
+}
+
+function revokeAll(): void {
+  for (const key of [...cache.keys()]) dropEntry(key);
+}
+
+/**
+ * Move the cache to `snapshot` when a request for it STARTS (switching back to
+ * an earlier diff reuses its snapshot id, so that must stay allowed). A new
+ * snapshot makes every cached side meaningless, so they are dropped. Responses
+ * never move the cache: see the check in `fetchReviewImage`.
+ */
 function enterSnapshot(snapshot: string): void {
   if (cachedSnapshot === snapshot) return;
   revokeAll();
   cachedSnapshot = snapshot;
+}
+
+/**
+ * Mark an object URL as in use by a mounted <img>. Returns the release
+ * function; the URL is revoked on release if it was evicted meanwhile.
+ */
+export function retainReviewImageUrl(url: string): () => void {
+  urlUsers.set(url, (urlUsers.get(url) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const count = (urlUsers.get(url) ?? 1) - 1;
+    if (count > 0) {
+      urlUsers.set(url, count);
+      return;
+    }
+    urlUsers.delete(url);
+    if (pendingRevoke.delete(url)) URL.revokeObjectURL(url);
+  };
 }
 
 /** Synchronous cache read, so a remounted card paints without a loading frame. */
@@ -89,6 +135,7 @@ export async function fetchReviewImage(
 ): Promise<ReviewImageResult> {
   const cached = peekReviewImage(snapshot, path, side);
   if (cached) return { ok: true, image: cached };
+  enterSnapshot(snapshot);
 
   const params = new URLSearchParams({ path, side, snapshot });
   let response: Response;
@@ -121,8 +168,10 @@ export async function fetchReviewImage(
   const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
   const digest = await sha256Hex(buffer);
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+  // The page moved to a newer snapshot while this was in flight: its card is
+  // gone, and caching it would evict the current snapshot's entries.
+  if (cachedSnapshot !== snapshot) throw new DOMException('Superseded', 'AbortError');
 
-  enterSnapshot(snapshot);
   const image: ReviewImageData = {
     url: URL.createObjectURL(new Blob([buffer], { type: contentType })),
     bytes: buffer.byteLength,
@@ -132,12 +181,13 @@ export async function fetchReviewImage(
     height: numericHeader(response, 'x-image-height'),
   };
   const key = cacheKey(snapshot, path, side);
+  dropEntry(key);
   cache.set(key, image);
-  while (cache.size > MAX_CACHED_IMAGES) {
-    const oldest = cache.keys().next().value as string;
-    const evicted = cache.get(oldest);
-    cache.delete(oldest);
-    if (evicted) URL.revokeObjectURL(evicted.url);
+  cachedBytes += image.bytes;
+  // Evict least recently used first, by count and by bytes; the entry just
+  // added always survives so the caller gets a live URL.
+  while ((cache.size > MAX_CACHED_IMAGES || cachedBytes > MAX_CACHED_IMAGE_BYTES) && cache.size > 1) {
+    dropEntry(cache.keys().next().value as string);
   }
   return { ok: true, image };
 }
@@ -146,6 +196,11 @@ export async function fetchReviewImage(
 export function resetReviewImageCache(): void {
   revokeAll();
   cachedSnapshot = undefined;
+}
+
+/** Test seam: what the cache currently holds. */
+export function reviewImageCacheStats(): { entries: number; bytes: number; snapshot?: string } {
+  return { entries: cache.size, bytes: cachedBytes, snapshot: cachedSnapshot };
 }
 
 /** `12.4 KB`, `3.1 MB`, `512 B`. */

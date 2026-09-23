@@ -39,7 +39,8 @@ export type ReviewImageErrorReason =
   | "too-large"
   | "not-image"
   | "lfs-pointer"
-  | "fetch-failed";
+  | "fetch-failed"
+  | "aborted";
 
 export interface ReviewImageErrorBody {
   reason: ReviewImageErrorReason;
@@ -243,22 +244,69 @@ export function readImageDimensions(bytes: Uint8Array, contentType: string): Ima
 
 // --- Concurrency -----------------------------------------------------------------
 
-/** A small FIFO semaphore: at most `limit` tasks run at once. */
+/** Thrown for work whose request went away before it ran. */
+export class ReviewImageAbortError extends Error {
+  constructor() {
+    super("The image request was aborted");
+    this.name = "AbortError";
+  }
+}
+
+/** Throw when the request that asked for this work is already gone. */
+export function throwIfReviewImageAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new ReviewImageAbortError();
+}
+
+/**
+ * A FIFO semaphore: at most `limit` tasks run at once. A task whose `signal`
+ * aborts while it is still queued leaves the queue without ever running, so a
+ * burst of cards scrolled past cannot hold the slots (and the `gh api` quota)
+ * that the card now on screen is waiting for.
+ */
 export function createConcurrencyLimiter(limit: number) {
   let active = 0;
-  const queue: Array<() => void> = [];
-  const release = () => {
-    active--;
-    queue.shift()?.();
-  };
-  return async function run<T>(task: () => Promise<T>): Promise<T> {
-    if (active >= limit) await new Promise<void>((resolve) => queue.push(resolve));
-    active++;
-    try {
-      return await task();
-    } finally {
-      release();
+  const queue: Array<{ start: () => void; cancel: () => void; signal?: AbortSignal }> = [];
+  const pump = () => {
+    while (active < limit && queue.length > 0) {
+      const entry = queue.shift()!;
+      if (entry.signal?.aborted) entry.cancel();
+      else entry.start();
     }
+  };
+  return function run<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new ReviewImageAbortError());
+        return;
+      }
+      const onAbort = () => {
+        const index = queue.indexOf(entry);
+        if (index !== -1) {
+          queue.splice(index, 1);
+          reject(new ReviewImageAbortError());
+        }
+      };
+      const entry = {
+        signal,
+        cancel: () => {
+          signal?.removeEventListener("abort", onAbort);
+          reject(new ReviewImageAbortError());
+        },
+        start: () => {
+          signal?.removeEventListener("abort", onAbort);
+          active++;
+          task()
+            .then(resolve, reject)
+            .finally(() => {
+              active--;
+              pump();
+            });
+        },
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      queue.push(entry);
+      pump();
+    });
   };
 }
 
@@ -280,6 +328,8 @@ export async function readPRImageSide(options: {
   oldPath?: string;
   maxBytes: number;
   fetchBytes: (sha: string, path: string, maxBytes: number) => Promise<FileBytesRead>;
+  /** The request's abort signal: no platform call is made for a request that is gone. */
+  signal?: AbortSignal;
 }): Promise<FileBytesRead> {
   const sha = options.side === "old" ? options.oldSha : options.headSha;
   const path = options.side === "old" ? options.oldPath ?? options.filePath : options.filePath;
@@ -292,6 +342,7 @@ export async function readPRImageSide(options: {
     );
     if (local.kind === "ok" || local.kind === "too-large") return local;
   }
+  throwIfReviewImageAborted(options.signal);
   return options.fetchBytes(sha, path, options.maxBytes);
 }
 
@@ -308,6 +359,8 @@ export interface ReviewImageRequest {
   patch: string;
   /** Whether `snapshot` names the snapshot the server is serving right now. */
   isCurrentSnapshot: (snapshot: string) => boolean;
+  /** Aborts when the client goes away; queued and not-yet-started reads are dropped. */
+  signal?: AbortSignal;
   /**
    * Read one side in the server's current mode. `filePath` / `oldPath` are the
    * chunk's own display paths (the client never supplies the old path).
@@ -317,6 +370,7 @@ export interface ReviewImageRequest {
     filePath: string,
     oldPath: string | undefined,
     maxBytes: number,
+    signal?: AbortSignal,
   ) => Promise<FileBytesRead>;
 }
 
@@ -380,8 +434,13 @@ export async function handleReviewImageRequest(request: ReviewImageRequest): Pro
       entry.newPath ?? sidePath,
       entry.oldPath,
       MAX_REVIEW_IMAGE_PREVIEW_BYTES,
+      request.signal,
     );
   } catch (error) {
+    if (error instanceof ReviewImageAbortError || request.signal?.aborted) {
+      // Nobody is listening; the status only matters to logs.
+      return errorResponse(499, { reason: "aborted", error: "The request was aborted" });
+    }
     return errorResponse(502, {
       reason: "fetch-failed",
       error: error instanceof Error ? error.message : "Failed to read the image",

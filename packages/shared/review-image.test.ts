@@ -9,8 +9,10 @@ import {
   type ReviewGitRuntime,
   findPatchFileEntry,
   resolveDiffSideSources,
+  validateFilePath,
 } from "./review-core";
 import {
+  ReviewImageAbortError,
   createConcurrencyLimiter,
   handleReviewImageRequest,
   readImageDimensions,
@@ -394,6 +396,106 @@ describe("getJjFileBytesForDiff (jj-current through runJjBytes)", () => {
     expect(calls[1]).toEqual(["file", "show", "-r", "@", "--", "new.png"]);
     const big = await getJjFileBytesForDiff(runtime, "jj-current", "", "new.png", undefined, "new", 3, "/repo");
     expect(big.kind).toBe("too-large");
+  });
+});
+
+describe("request aborts (scrolling past cards must not hold the read slots)", () => {
+  test("a queued read whose request aborted never runs, and its slot goes to the next read", async () => {
+    const run = createConcurrencyLimiter(1);
+    let releaseFirst!: () => void;
+    const started: string[] = [];
+    const first = run(() => {
+      started.push("first");
+      return new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+    });
+    const gone = new AbortController();
+    const abandoned = run(async () => {
+      started.push("abandoned");
+    }, gone.signal);
+    const visible = run(async () => {
+      started.push("visible");
+    });
+    gone.abort();
+    await expect(abandoned).rejects.toBeInstanceOf(ReviewImageAbortError);
+    releaseFirst();
+    await first;
+    await visible;
+    expect(started).toEqual(["first", "visible"]);
+  });
+
+  test("an already-aborted request is refused without queueing", async () => {
+    const run = createConcurrencyLimiter(4);
+    const controller = new AbortController();
+    controller.abort();
+    let ran = false;
+    await expect(run(async () => { ran = true; }, controller.signal)).rejects.toBeInstanceOf(ReviewImageAbortError);
+    expect(ran).toBe(false);
+  });
+
+  test("no platform API call is made for a request that went away", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    await expect(readPRImageSide({
+      gitRuntime: {
+        runGit: async () => ({ stdout: "", stderr: "", exitCode: 128 }),
+        readTextFile: async () => null,
+        getFileInfo: async () => null,
+        readLink: async () => null,
+      },
+      oldSha: "a",
+      headSha: "b",
+      side: "new",
+      filePath: "x.png",
+      maxBytes: 10,
+      signal: controller.signal,
+      fetchBytes: async () => {
+        calls++;
+        return { kind: "missing" };
+      },
+    })).rejects.toBeInstanceOf(ReviewImageAbortError);
+    expect(calls).toBe(0);
+  });
+
+  test("the handler answers an aborted read as aborted, not as a platform failure", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const response = await handleReviewImageRequest({
+      available: true,
+      patch: "diff --git a/a.png b/a.png\nBinary files a/a.png and b/a.png differ\n",
+      isCurrentSnapshot: () => true,
+      params: new URLSearchParams("path=a.png&side=new&snapshot=s"),
+      signal: controller.signal,
+      readSide: async () => {
+        throw new ReviewImageAbortError();
+      },
+    });
+    expect(response.status).toBe(499);
+  });
+});
+
+describe("validateFilePath (shared with /api/file-content)", () => {
+  test("a `..` inside a file name is an ordinary name", () => {
+    expect(() => validateFilePath("assets/logo..v2.png")).not.toThrow();
+    expect(() => validateFilePath("a..b/c...d.png")).not.toThrow();
+  });
+
+  test("traversal and absolute paths are still refused", () => {
+    for (const path of ["../x.png", "a/../../x.png", "a/..", "..", "a\\..\\x.png", "/etc/passwd", "C:/x.png", "\\\\server\\x.png"]) {
+      expect(() => validateFilePath(path)).toThrow();
+    }
+  });
+});
+
+describe("isNotFoundCommandFailure", () => {
+  test("only an HTTP 404 means the file is missing; a missing CLI is a transport failure", async () => {
+    const ghRef = { platform: "github" as const, host: "github.com", owner: "o", repo: "r", number: 1 };
+    const runtime: PRRuntime = {
+      runCommand: async () => ({ stdout: "", stderr: "zsh: command not found: gh", exitCode: 127 }),
+    };
+    await expect(fetchGhPRFileBytes(runtime, ghRef, "sha", "a.png", 10)).rejects.toThrow();
   });
 });
 

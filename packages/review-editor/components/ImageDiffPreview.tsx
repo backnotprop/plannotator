@@ -5,6 +5,7 @@ import {
   fetchReviewImage,
   formatImageBytes,
   peekReviewImage,
+  retainReviewImageUrl,
   type ReviewImageData,
   type ReviewImageError,
   type ReviewImageSide,
@@ -124,6 +125,13 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     return () => observer.disconnect();
   }, [visible]);
 
+  // Keep every URL this card shows alive until it unmounts, even if the cache
+  // evicts it meanwhile (an <img> may not have loaded it yet).
+  const oldUrl = states.old.state === 'ok' ? states.old.image.url : undefined;
+  const newUrl = states.new.state === 'ok' ? states.new.image.url : undefined;
+  useEffect(() => (oldUrl ? retainReviewImageUrl(oldUrl) : undefined), [oldUrl]);
+  useEffect(() => (newUrl ? retainReviewImageUrl(newUrl) : undefined), [newUrl]);
+
   const sidesKey = sides.join(',');
   useEffect(() => {
     if (!snapshotId || !visible) return;
@@ -166,7 +174,18 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   });
   const shownSides = unchanged ? (['new'] as ReviewImageSide[]) : sides;
   const stacked = compact || (tall && shownSides.length === 2);
-  const paneHeight = variant === 'all-files' ? (stacked && tall ? 480 : 360) : (stacked && tall ? 640 : 480);
+  const maxPaneHeight = variant === 'all-files' ? (stacked && tall ? 480 : 360) : (stacked && tall ? 640 : 480);
+  // All-files: a fixed box (the virtualized item is measured without waiting
+  // on decode), sized to the tallest image once its header dimensions are
+  // known so a 16px icon does not sit in a 360px pane. Until then a modest
+  // reservation; the ResizeObserver below re-measures the one change.
+  const tallestImage = Math.max(0, ...loaded.map(({ side, image }) => dimsOf(side, image)?.height ?? 0));
+  const allFilesPaneHeight = loaded.length === 0
+    ? Math.min(maxPaneHeight, 200)
+    : tallestImage > 0
+      ? Math.max(96, Math.min(maxPaneHeight, tallestImage + 18))
+      : maxPaneHeight;
+  const paneHeight = variant === 'all-files' ? allFilesPaneHeight : maxPaneHeight;
 
   // Nothing displayable on any side: the plain notice explains it better than
   // a row of error lines would (a `.png` that is really a zip, say).
