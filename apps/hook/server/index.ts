@@ -115,6 +115,7 @@ import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { resolveAnnotateTarget } from "./annotate-resolution";
+import { getAntigravityPlan, formatAntigravityDecision } from "./antigravity-plan";
 import { LIVE_APP_REMOTE_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
 // @plannotator/server never imports @plannotator/ui (mirrors the existing
@@ -2474,13 +2475,27 @@ if (args[0] === "sessions") {
   let planContent = "";
   let permissionMode = "default";
   let isGemini = false;
+  const isAntigravity = event !== null && typeof event === "object" && "toolCall" in event;
   let planFilename = "";
 
   // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
   planFilename = event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
-  isGemini = !!planFilename;
+  isGemini = !isAntigravity && !!planFilename;
 
-  if (isGemini) {
+  if (isAntigravity) {
+    try {
+      const plan = getAntigravityPlan(event);
+      if (plan === null) {
+        // Empty output abstains; never auto-approve unrelated file operations.
+        console.log("{}");
+        process.exit(0);
+      }
+      planContent = plan;
+    } catch (error) {
+      console.log(JSON.stringify({ decision: "deny", reason: error instanceof Error ? error.message : String(error) }));
+      process.exit(0);
+    }
+  } else if (isGemini) {
     // Reconstruct full plan path from transcript_path and session_id:
     // transcript_path = <projectTempDir>/chats/session-...json
     // plan lives at   = <projectTempDir>/<session_id>/plans/<plan_filename>
@@ -2503,7 +2518,7 @@ if (args[0] === "sessions") {
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
-    origin: isGemini ? "gemini-cli" : detectedOrigin,
+    origin: isAntigravity ? "antigravity" : isGemini ? "gemini-cli" : detectedOrigin,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
@@ -2538,7 +2553,9 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output decision in the appropriate format for the harness
-  if (isGemini) {
+  if (isAntigravity) {
+    console.log(JSON.stringify(formatAntigravityDecision(result)));
+  } else if (isGemini) {
     if (result.approved) {
       console.log(result.feedback ? JSON.stringify({ systemMessage: result.feedback }) : "{}");
     } else {

@@ -33,6 +33,7 @@ REM is reported honestly. Resolution (flag > env var > config skipInstall.<agent
 REM > default off) happens after _CONFIG_DIR is known.
 set "SKIP_CODEX_FLAG=0"
 set "SKIP_GEMINI_FLAG=0"
+set "SKIP_ANTIGRAVITY_FLAG=0"
 set "SKIP_KIRO_FLAG=0"
 set "SKIP_OPENCODE_FLAG=0"
 REM Same shape, but scoped to the skills/slash-command sparse checkout rather
@@ -156,6 +157,11 @@ if /i "%~1"=="--skip-gemini" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--skip-antigravity" (
+    set "SKIP_ANTIGRAVITY_FLAG=1"
+    shift
+    goto parse_args
+)
 if /i "%~1"=="--skip-kiro" (
     set "SKIP_KIRO_FLAG=1"
     shift
@@ -185,7 +191,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-antigravity] [--skip-kiro] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -486,6 +492,8 @@ set "SKIP_CODEX=0"
 set "SKIP_CODEX_SOURCE="
 set "SKIP_GEMINI=0"
 set "SKIP_GEMINI_SOURCE="
+set "SKIP_ANTIGRAVITY=0"
+set "SKIP_ANTIGRAVITY_SOURCE="
 set "SKIP_KIRO=0"
 set "SKIP_KIRO_SOURCE="
 set "SKIP_OPENCODE=0"
@@ -496,7 +504,7 @@ set "SKIP_SKILLS=0"
 set "SKIP_SKILLS_SOURCE="
 if exist "!_CONFIG_DIR!\config.json" (
     set "PLN_CONFIG_JSON=!_CONFIG_DIR!\config.json"
-    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','opencode','skills')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','antigravity','kiro','opencode','skills')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
         if /i "%%K"=="codex" (
             set "SKIP_CODEX=1"
             set "SKIP_CODEX_SOURCE=config skipInstall.codex"
@@ -504,6 +512,10 @@ if exist "!_CONFIG_DIR!\config.json" (
         if /i "%%K"=="gemini" (
             set "SKIP_GEMINI=1"
             set "SKIP_GEMINI_SOURCE=config skipInstall.gemini"
+        )
+        if /i "%%K"=="antigravity" (
+            set "SKIP_ANTIGRAVITY=1"
+            set "SKIP_ANTIGRAVITY_SOURCE=config skipInstall.antigravity"
         )
         if /i "%%K"=="kiro" (
             set "SKIP_KIRO=1"
@@ -532,9 +544,17 @@ for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_GEMINI_INSTALL!"=="%%V" (
     set "SKIP_GEMINI=1"
     set "SKIP_GEMINI_SOURCE=PLANNOTATOR_SKIP_GEMINI_INSTALL"
 )
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL!"=="%%V" (
+    set "SKIP_ANTIGRAVITY=1"
+    set "SKIP_ANTIGRAVITY_SOURCE=PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL"
+)
 for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_GEMINI_INSTALL!"=="%%V" (
     set "SKIP_GEMINI=0"
     set "SKIP_GEMINI_SOURCE="
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL!"=="%%V" (
+    set "SKIP_ANTIGRAVITY=0"
+    set "SKIP_ANTIGRAVITY_SOURCE="
 )
 for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_KIRO_INSTALL!"=="%%V" (
     set "SKIP_KIRO=1"
@@ -568,6 +588,10 @@ if "!SKIP_GEMINI_FLAG!"=="1" (
     set "SKIP_GEMINI=1"
     set "SKIP_GEMINI_SOURCE=--skip-gemini"
 )
+if "!SKIP_ANTIGRAVITY_FLAG!"=="1" (
+    set "SKIP_ANTIGRAVITY=1"
+    set "SKIP_ANTIGRAVITY_SOURCE=--skip-antigravity"
+)
 if "!SKIP_KIRO_FLAG!"=="1" (
     set "SKIP_KIRO=1"
     set "SKIP_KIRO_SOURCE=--skip-kiro"
@@ -580,6 +604,21 @@ if "!SKIP_SKILLS_FLAG!"=="1" (
     set "SKIP_SKILLS=1"
     set "SKIP_SKILLS_SOURCE=--skip-skills"
 )
+
+REM The private data directory is only a detection signal; plugins live in config.
+set "AGY_BASE="
+if exist "%USERPROFILE%\.gemini\config\" (
+    set "AGY_BASE=%USERPROFILE%\.gemini\config"
+) else if not exist "%USERPROFILE%\.gemini\config" if exist "%USERPROFILE%\.gemini\antigravity-cli\" (
+    set "AGY_BASE=%USERPROFILE%\.gemini\config"
+)
+
+REM Antigravity also owns ~/.gemini; require a Gemini-specific signal there.
+set "GEMINI_AVAILABLE=0"
+where gemini >nul 2>&1
+if !ERRORLEVEL! equ 0 set "GEMINI_AVAILABLE=1"
+if exist "%USERPROFILE%\.gemini\settings.json" set "GEMINI_AVAILABLE=1"
+if exist "%USERPROFILE%\.gemini\" if not defined AGY_BASE if not exist "%USERPROFILE%\.gemini\antigravity-cli\" set "GEMINI_AVAILABLE=1"
 
 REM Pre-flight: reject verification requests for tags older than the first
 REM attested release BEFORE downloading. Critical security point: the version
@@ -844,6 +883,19 @@ if "!MINIMAL!"=="1" (
     echo No skills, hooks, agent integrations, or config files were written.
     exit /b 0
 )
+
+REM Probe the installed binary before writing any Antigravity files.
+if defined AGY_BASE if "!SKIP_ANTIGRAVITY!"=="0" (
+    set "AGY_SUPPORTED=0"
+    for /f "delims=" %%P in ('echo {"toolCall":{"name":"plannotator_install_probe","args":{}}} ^| "!INSTALL_PATH!" 2^>nul') do (
+        if "%%P"=="{}" set "AGY_SUPPORTED=1"
+    )
+    if "!AGY_SUPPORTED!"=="0" (
+        set "SKIP_ANTIGRAVITY=1"
+        set "SKIP_ANTIGRAVITY_SOURCE=installed binary lacks Antigravity support; install a release containing the adapter"
+    )
+)
+REM End Antigravity binary probe
 
 call :InstallSemSidecar
 call :InstallAgentTerminalRuntime
@@ -1196,7 +1248,7 @@ if "!SPARSE_UNSUPPORTED!"=="1" (
 
 if "!CLONE_OK!"=="1" (
     pushd "!SKILLS_TMP!\repo"
-    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
+    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands apps/antigravity/skills >nul 2>&1
 
     REM Claude Code reads apps\skills\claude\* (injection `!`plannotator ... $ARGUMENTS``
     REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
@@ -1242,10 +1294,23 @@ if "!CLONE_OK!"=="1" (
 
     REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native
     REM format) and not opted out (#1178).
-    if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" if exist "apps\gemini\commands" (
+    if "!GEMINI_AVAILABLE!"=="1" if "!SKIP_GEMINI!"=="0" if exist "apps\gemini\commands" (
         if not exist "!GEMINI_COMMANDS_DIR!" mkdir "!GEMINI_COMMANDS_DIR!"
         xcopy /y /q "apps\gemini\commands\*.toml" "!GEMINI_COMMANDS_DIR!\" >nul 2>&1
         echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
+    )
+
+    REM Antigravity CLI plugin skills (only when detected)
+    if defined AGY_BASE if "!SKIP_ANTIGRAVITY!"=="0" if exist "apps\antigravity\skills" (
+        set "AGY_SKILLS_DIR=!AGY_BASE!\plugins\plannotator\skills"
+        if not exist "!AGY_SKILLS_DIR!" mkdir "!AGY_SKILLS_DIR!"
+        for %%S in (plannotator-review plannotator-annotate) do (
+            if exist "apps\antigravity\skills\%%S" (
+                if exist "!AGY_SKILLS_DIR!\%%S" rmdir /s /q "!AGY_SKILLS_DIR!\%%S" >nul 2>&1
+                xcopy /s /i /y /q "apps\antigravity\skills\%%S" "!AGY_SKILLS_DIR!\%%S\" >nul 2>&1
+            )
+        )
+        echo Installed Antigravity skills to !AGY_SKILLS_DIR!\
     )
 
     REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected
@@ -1402,7 +1467,7 @@ if !ERRORLEVEL! equ 0 (
 REM --- Gemini CLI support (only if Gemini is installed) ---
 REM HONEST three-state reporting (#1178): detected-but-skipped is its own
 REM state. A Gemini opt-out leaves ~/.gemini entirely untouched.
-if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="1" (
+if "!GEMINI_AVAILABLE!"=="1" if "!SKIP_GEMINI!"=="1" (
     echo.
     echo Gemini: detected, skipped ^(!SKIP_GEMINI_SOURCE!^).
     if exist "%USERPROFILE%\.gemini\settings.json" (
@@ -1410,7 +1475,7 @@ if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="1" (
         if !ERRORLEVEL! equ 0 echo An existing Gemini integration at %USERPROFILE%\.gemini\settings.json was left untouched.
     )
 )
-if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" (
+if "!GEMINI_AVAILABLE!"=="1" if "!SKIP_GEMINI!"=="0" (
     REM Install policy file
     if not exist "%USERPROFILE%\.gemini\policies" mkdir "%USERPROFILE%\.gemini\policies"
     (
@@ -1473,6 +1538,20 @@ echo }
 
     REM Gemini slash commands (plannotator-*.toml) are copied from the sparse
     REM checkout in the git-gated skills/commands block above, not written here.
+)
+
+REM --- Antigravity CLI support (only when detected) ---
+if not defined AGY_BASE (
+    echo Antigravity: not detected.
+) else if "!SKIP_ANTIGRAVITY!"=="1" (
+    echo Antigravity: detected, skipped ^(!SKIP_ANTIGRAVITY_SOURCE!^).
+) else (
+    set "AGY_PLUGIN_DIR=!AGY_BASE!\plugins\plannotator"
+    if not exist "!AGY_PLUGIN_DIR!" mkdir "!AGY_PLUGIN_DIR!"
+    >"!AGY_PLUGIN_DIR!\plugin.json" echo {"name":"plannotator"}
+    set "AGY_EXE_PATH=!INSTALL_PATH:\=/!"
+    >"!AGY_PLUGIN_DIR!\hooks.json" echo {"plannotator":{"PreToolUse":[{"matcher":"^^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"\"!AGY_EXE_PATH!\"","timeout":345600}]}]}}
+    echo Antigravity: detected, installed plugin to !AGY_PLUGIN_DIR!
 )
 
 if "!SKIP_OPENCODE!"=="1" (

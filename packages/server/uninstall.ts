@@ -772,6 +772,14 @@ function removeInstalledFiles(
     state,
   );
 
+  // Antigravity scans config/plugins. Also clean the obsolete policy and
+  // private-data paths written by the original, nonfunctional integration.
+  for (const layout of ["config", "antigravity-cli"]) {
+    const antigravityDir = join(environment.homeDir, ".gemini", layout);
+    removePath(join(antigravityDir, "plugins", "plannotator"), request, state);
+    removePath(join(antigravityDir, "policies", "plannotator.toml"), request, state);
+  }
+
   cleanupRecognizableKiroAgent(
     join(environment.homeDir, ".kiro", "agents", "plannotator.json"),
     request,

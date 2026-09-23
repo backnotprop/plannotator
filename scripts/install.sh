@@ -60,6 +60,7 @@ MINIMAL_FLAG=-1
 # config skipInstall.<agent> > default off) happens after _config_dir is known.
 SKIP_CODEX_FLAG=0
 SKIP_GEMINI_FLAG=0
+SKIP_ANTIGRAVITY_FLAG=0
 SKIP_KIRO_FLAG=0
 SKIP_OPENCODE_FLAG=0
 # Same shape, but scoped to the skills/slash-command sparse checkout rather
@@ -75,7 +76,7 @@ usage() {
 Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
                   [--minimal | --no-minimal] [--skip-codex] [--skip-gemini]
-                  [--skip-kiro] [--skip-opencode] [--skip-skills]
+                  [--skip-antigravity] [--skip-kiro] [--skip-opencode] [--skip-skills]
                   [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
@@ -120,6 +121,10 @@ Options:
                          (~/.gemini policy, settings hook, commands). Env var:
                          PLANNOTATOR_SKIP_GEMINI_INSTALL; config key:
                          skipInstall.gemini.
+  --skip-antigravity     Same opt-out for Antigravity CLI hooks and skills
+                         under ~/.gemini/config/plugins/plannotator.
+                         Env var: PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL;
+                         config key: skipInstall.antigravity.
   --skip-kiro            Same opt-out for the Kiro CLI integration
                          (~/.kiro skills and agent). Env var:
                          PLANNOTATOR_SKIP_KIRO_INSTALL; config key:
@@ -299,6 +304,10 @@ while [ $# -gt 0 ]; do
             ;;
         --skip-gemini)
             SKIP_GEMINI_FLAG=1
+            shift
+            ;;
+        --skip-antigravity)
+            SKIP_ANTIGRAVITY_FLAG=1
             shift
             ;;
         --skip-kiro)
@@ -510,6 +519,8 @@ skip_codex=0
 skip_codex_source=""
 skip_gemini=0
 skip_gemini_source=""
+skip_antigravity=0
+skip_antigravity_source=""
 skip_kiro=0
 skip_kiro_source=""
 skip_opencode=0
@@ -546,7 +557,7 @@ if [ -f "$_config_dir/config.json" ]; then
         }' "$_config_dir/config.json" 2>/dev/null) || _skip_install_block=""
 fi
 if [ -n "$_skip_install_block" ]; then
-    for _agent in codex gemini kiro opencode skills; do
+    for _agent in codex gemini antigravity kiro opencode skills; do
         if printf '%s' "$_skip_install_block" | grep -q "\"$_agent\"[[:space:]]*:[[:space:]]*false"; then
             continue # explicit false is a veto, never a skip
         fi
@@ -559,6 +570,10 @@ if [ -n "$_skip_install_block" ]; then
                 gemini)
                     skip_gemini=1
                     skip_gemini_source="config skipInstall.gemini"
+                    ;;
+                antigravity)
+                    skip_antigravity=1
+                    skip_antigravity_source="config skipInstall.antigravity"
                     ;;
                 kiro)
                     skip_kiro=1
@@ -596,6 +611,16 @@ case "${PLANNOTATOR_SKIP_GEMINI_INSTALL:-}" in
     0|false|no|FALSE|NO|False|No)
         skip_gemini=0
         skip_gemini_source=""
+        ;;
+esac
+case "${PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_antigravity=1
+        skip_antigravity_source="PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_antigravity=0
+        skip_antigravity_source=""
         ;;
 esac
 case "${PLANNOTATOR_SKIP_KIRO_INSTALL:-}" in
@@ -636,6 +661,10 @@ if [ "$SKIP_GEMINI_FLAG" -eq 1 ]; then
     skip_gemini=1
     skip_gemini_source="--skip-gemini"
 fi
+if [ "$SKIP_ANTIGRAVITY_FLAG" -eq 1 ]; then
+    skip_antigravity=1
+    skip_antigravity_source="--skip-antigravity"
+fi
 if [ "$SKIP_KIRO_FLAG" -eq 1 ]; then
     skip_kiro=1
     skip_kiro_source="--skip-kiro"
@@ -647,6 +676,19 @@ fi
 if [ "$SKIP_SKILLS_FLAG" -eq 1 ]; then
     skip_skills=1
     skip_skills_source="--skip-skills"
+fi
+
+# The private data directory is only a detection signal; plugins live in config.
+AGY_BASE=""
+if [ -d "$HOME/.gemini/config" ] || { [ ! -e "$HOME/.gemini/config" ] && [ -d "$HOME/.gemini/antigravity-cli" ]; }; then
+    AGY_BASE="$HOME/.gemini/config"
+fi
+
+# Antigravity also owns ~/.gemini. Require a Gemini-specific signal when
+# both products could share that root; preserve legacy detection otherwise.
+gemini_available=0
+if command -v gemini >/dev/null 2>&1 || [ -f "$HOME/.gemini/settings.json" ] || { [ -d "$HOME/.gemini" ] && [ -z "$AGY_BASE" ] && [ ! -d "$HOME/.gemini/antigravity-cli" ]; }; then
+    gemini_available=1
 fi
 
 # Pre-flight: if verification is requested, reject tags older than the first
@@ -920,6 +962,16 @@ if [ "$minimal" -eq 1 ]; then
     echo "No skills, hooks, agent integrations, or config files were written."
     exit 0
 fi
+
+# Probe the installed binary, not a guessed future release number. Older
+# binaries reject this payload; supported binaries abstain without opening UI.
+if [ -n "$AGY_BASE" ] && [ "$skip_antigravity" -eq 0 ]; then
+    if [ "$(printf '%s\n' '{"toolCall":{"name":"plannotator_install_probe","args":{}}}' | "$INSTALL_DIR/plannotator" 2>/dev/null)" != '{}' ]; then
+        skip_antigravity=1
+        skip_antigravity_source="installed binary lacks Antigravity support; install a release containing the adapter"
+    fi
+fi
+# End Antigravity binary probe
 
 sem_asset_for_platform() {
     case "$platform" in
@@ -1717,7 +1769,7 @@ checkout_failed=0
     fi
     cd repo || exit 1
     if [ "$sparse_clone" -eq 1 ]; then
-        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands 2>"$git_err"; then
+        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands apps/antigravity/skills 2>"$git_err"; then
             surface_git_error
             exit 1
         fi
@@ -1771,9 +1823,17 @@ checkout_failed=0
 
     # Gemini native TOML commands — only when Gemini is present and not
     # opted out (#1178; skip_gemini is inherited by this subshell).
-    if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 0 ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
+    if [ "$gemini_available" -eq 1 ] && [ "$skip_gemini" -eq 0 ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
         copy_commands_if_present apps/gemini/commands "$GEMINI_COMMANDS_DIR"
         echo "Installed Gemini commands to ${GEMINI_COMMANDS_DIR}/"
+    fi
+
+    # Antigravity CLI plugin skills (only when detected)
+    if [ -n "$AGY_BASE" ] && [ "$skip_antigravity" -eq 0 ] && [ -d "apps/antigravity/skills" ]; then
+        mkdir -p "$AGY_BASE/plugins/plannotator/skills"
+        copy_skill_if_present apps/antigravity/skills/plannotator-review "$AGY_BASE/plugins/plannotator/skills"
+        copy_skill_if_present apps/antigravity/skills/plannotator-annotate "$AGY_BASE/plugins/plannotator/skills"
+        echo "Installed Antigravity skills to ${AGY_BASE}/plugins/plannotator/skills/"
     fi
 
     if [ "$kiro_available" -eq 1 ] && [ "$skip_kiro" -eq 0 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
@@ -1898,15 +1958,15 @@ fi
 update_pi_extension_if_present
 
 # --- Gemini CLI support (only if Gemini is installed) ---
-if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 1 ]; then
+if [ "$gemini_available" -eq 1 ] && [ "$skip_gemini" -eq 1 ]; then
     # HONEST three-state reporting (#1178): detected-but-skipped is its own
-    # state. Nothing under ~/.gemini is created, updated, or removed.
+    # state. Gemini settings, policy, and commands are left untouched.
     echo ""
     echo "Gemini: detected, skipped (${skip_gemini_source})."
     if [ -f "$HOME/.gemini/settings.json" ] && grep -q '"plannotator"' "$HOME/.gemini/settings.json" 2>/dev/null; then
         echo "An existing Gemini integration at ~/.gemini/settings.json was left untouched."
     fi
-elif [ -d "$HOME/.gemini" ]; then
+elif [ "$gemini_available" -eq 1 ]; then
     # Install policy file
     GEMINI_POLICIES_DIR="$HOME/.gemini/policies"
     mkdir -p "$GEMINI_POLICIES_DIR"
@@ -1930,12 +1990,12 @@ GEMINI_POLICY_EOF
             if command -v node &>/dev/null; then
                 node -e "
                   const fs = require('fs');
-                  const settings = JSON.parse(fs.readFileSync('$GEMINI_SETTINGS', 'utf8'));
+                  const settings = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
                   if (!settings.hooks) settings.hooks = {};
                   if (!settings.hooks.BeforeTool) settings.hooks.BeforeTool = [];
                   settings.hooks.BeforeTool.push($PLANNOTATOR_HOOK);
-                  fs.writeFileSync('$GEMINI_SETTINGS', JSON.stringify(settings, null, 2) + '\n');
-                "
+                  fs.writeFileSync(process.argv[1], JSON.stringify(settings, null, 2) + '\n');
+                " "$GEMINI_SETTINGS"
                 echo "Added plannotator hook to ${GEMINI_SETTINGS}"
             else
                 echo ""
@@ -1978,6 +2038,25 @@ GEMINI_SETTINGS_EOF
     # the skills/commands install block above (apps/gemini/commands).
 fi
 
+# --- Antigravity CLI support (only when detected) ---
+if [ -z "$AGY_BASE" ]; then
+    echo "Antigravity: not detected."
+elif [ "$skip_antigravity" -eq 1 ]; then
+    echo "Antigravity: detected, skipped (${skip_antigravity_source})."
+else
+    AGY_PLUGIN_DIR="$AGY_BASE/plugins/plannotator"
+    mkdir -p "$AGY_PLUGIN_DIR"
+    cat > "$AGY_PLUGIN_DIR/plugin.json" << 'AGY_PLUGIN_EOF'
+{"name":"plannotator"}
+AGY_PLUGIN_EOF
+    # Bind to the binary we probed, even if PATH still points to an older copy.
+    AGY_COMMAND="\"$INSTALL_DIR/plannotator\""
+    AGY_COMMAND="${AGY_COMMAND//\\/\\\\}"
+    AGY_COMMAND="${AGY_COMMAND//\"/\\\"}"
+    printf '{"plannotator":{"PreToolUse":[{"matcher":"^(write_to_file|replace_file_content|multi_replace_file_content)$","hooks":[{"type":"command","command":"%s","timeout":345600}]}]}}\n' "$AGY_COMMAND" > "$AGY_PLUGIN_DIR/hooks.json"
+    echo "Antigravity: detected, installed plugin to ${AGY_PLUGIN_DIR}"
+fi
+
 echo ""
 echo "=========================================="
 echo "  OPENCODE USERS"
@@ -2015,11 +2094,11 @@ echo "=========================================="
 echo "  GEMINI CLI USERS"
 echo "=========================================="
 echo ""
-if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 1 ]; then
+if [ "$gemini_available" -eq 1 ] && [ "$skip_gemini" -eq 1 ]; then
     echo "Gemini was detected, but the integration was skipped (${skip_gemini_source})."
-    echo "No files under ~/.gemini were written or removed. Re-run without the"
+    echo "Gemini settings, policy, and commands were left untouched. Re-run without the"
     echo "opt-out to configure plan mode."
-elif [ -d "$HOME/.gemini" ]; then
+elif [ "$gemini_available" -eq 1 ]; then
     echo "Enable plan mode in Gemini settings, then run:"
     echo ""
     echo "  gemini"

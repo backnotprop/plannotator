@@ -46,6 +46,7 @@ export type PromptRuntime =
   | "pi"
   | "codex"
   | "gemini-cli"
+  | "antigravity"
   | "oh-my-pi";
 
 interface PromptSectionConfig {
@@ -155,14 +156,16 @@ export interface PlannotatorConfig {
    * honestly ("detected, skipped"), and never removes an integration a
    * previous install already wired. Overridden by the
    * PLANNOTATOR_SKIP_CODEX_INSTALL / PLANNOTATOR_SKIP_GEMINI_INSTALL /
+   * PLANNOTATOR_SKIP_ANTIGRAVITY_INSTALL /
    * PLANNOTATOR_SKIP_KIRO_INSTALL / PLANNOTATOR_SKIP_OPENCODE_INSTALL env
    * vars, which are in turn overridden by the --skip-codex / --skip-gemini /
-   * --skip-kiro / --skip-opencode flags. OpenCode has no detection leg, so
-   * its entry is a plain do-not-write switch. Default: all off.
+   * --skip-antigravity / --skip-kiro / --skip-opencode flags. OpenCode has no
+   * detection leg, so its entry is a plain do-not-write switch. Default: all off.
    */
   skipInstall?: {
     codex?: boolean;
     gemini?: boolean;
+    antigravity?: boolean;
     kiro?: boolean;
     opencode?: boolean;
   };
