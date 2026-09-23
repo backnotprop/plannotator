@@ -4089,7 +4089,7 @@ const ReviewApp: React.FC = () => {
           prNumber: prMetadata ? (prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid) : 0,
           prTitle: prMetadata?.title ?? '',
           prRepo: prMetadata ? getDisplayRepo(prMetadata) : '',
-          fileComments: [], fileScopedBody: '',
+          fileComments: [], fileLevelComments: [], fileScopedBody: '',
           fileCount: 0, annotationCount: 0, status: 'pending' as const,
         }];
       }
@@ -4166,7 +4166,7 @@ const ReviewApp: React.FC = () => {
       title: prMetadata.title,
       repo: getDisplayRepo(prMetadata),
     } : undefined;
-    const plan = buildReviewSubmission(allAnnotations, visibleEditorAnnotations, prMetadata?.url, diffPaths, prMeta, knownPrSnapshotsRef.current);
+    const plan = buildReviewSubmission(allAnnotations, visibleEditorAnnotations, prMetadata?.url, diffPaths, prMeta, knownPrSnapshotsRef.current, prMetadata?.platform);
     // PR description/comment notes aren't line-anchored, so they can't post as
     // inline review comments — seed them into the review body instead (quoted),
     // where the user can edit before submitting. Also means a review with only

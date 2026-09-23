@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
-import type { PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
+import type { PRReviewFileLevelComment, PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
 import { CopyButton } from './CopyButton';
 import {
   exportReviewFeedback,
@@ -34,6 +34,9 @@ export interface SubmissionTarget {
     start_line?: number;
     start_side?: 'LEFT' | 'RIGHT';
   }>;
+  /** GitHub only (#1599): file-scoped comments posted as file-level threads.
+   *  On any other platform they stay in `fileScopedBody`. */
+  fileLevelComments: PRReviewFileLevelComment[];
   fileScopedBody: string;
   fileCount: number;
   annotationCount: number;
@@ -58,6 +61,7 @@ export interface PRActionRequest {
   action: 'approve' | 'comment';
   body: string;
   fileComments: SubmissionTarget['fileComments'];
+  fileLevelComments?: PRReviewFileLevelComment[];
   targetPrUrl?: string;
 }
 
@@ -116,15 +120,25 @@ function buildAnnotationFileComments(
     .filter(c => c.body.length > 0);
 }
 
+// File-scoped comments posted as GitHub file-level review threads (#1599). The
+// body is the same text the review body fold uses, minus the path prefix.
+function buildFileLevelComments(annotations: CodeAnnotation[]): PRReviewFileLevelComment[] {
+  return annotations
+    .filter(a => a.scope === 'file')
+    .map(a => ({ path: a.filePath, body: `${a.text ?? ''}${formatCallFlowAnnotationTargets(a)}`.trim() }))
+    .filter(c => c.path.length > 0 && c.body.length > 0);
+}
+
 // The review-level body: file-scoped comments (prefixed with their path) plus
 // general (review-wide) comments, which belong to no file. Both ride here so
-// neither is dropped from a PR submission.
-function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySet<string>): string {
+// neither is dropped from a PR submission. With `fileLevel` (GitHub), file-scoped
+// comments post as file-level threads instead and are left out of the body.
+function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySet<string>, fileLevel: boolean): string {
   const parts: string[] = [];
   for (const a of annotations) {
     const scope = a.scope ?? 'line';
     const callFlowContext = formatCallFlowAnnotationTargets(a);
-    if (scope === 'file' && (a.text || callFlowContext)) {
+    if (scope === 'file' && !fileLevel && (a.text || callFlowContext)) {
       parts.push(`**${a.filePath}:** ${a.text ?? ''}${callFlowContext}`.trim());
     } else if (scope === 'general' && (a.text || callFlowContext)) {
       parts.push(`${a.text ?? ''}${callFlowContext}`.trim());
@@ -166,14 +180,15 @@ export function buildPlatformReviewBody(
   action: 'approve' | 'comment',
   platform: ReviewPlatform,
   generalComment: string | undefined,
-  target: Pick<SubmissionTarget, 'fileComments' | 'fileScopedBody'>,
+  target: Pick<SubmissionTarget, 'fileComments' | 'fileScopedBody'> & Partial<Pick<SubmissionTarget, 'fileLevelComments'>>,
 ): string {
   const parts: string[] = [];
   if (generalComment?.trim()) parts.push(generalComment);
   if (target.fileScopedBody.trim()) parts.push(target.fileScopedBody);
 
   if (parts.length > 0) return parts.join('\n\n');
-  if (action === 'comment' && platform === 'github' && target.fileComments.length > 0) {
+  const threadCount = target.fileComments.length + (target.fileLevelComments?.length ?? 0);
+  if (action === 'comment' && platform === 'github' && threadCount > 0) {
     return 'See inline comments.';
   }
   return '';
@@ -192,10 +207,13 @@ export function buildPRActionRequest(
     throw new Error('Partial review target is missing its server-authorized retry');
   }
   const retry = target.partial?.retry;
+  // A narrowed retry (GitLab partial) resends only its own inline comments.
+  const fileLevelComments = retry ? [] : target.fileLevelComments;
   return {
     action: retry?.action ?? action,
     body: retry ? '' : body,
     fileComments: retry?.fileComments ?? target.fileComments,
+    ...(fileLevelComments.length > 0 ? { fileLevelComments } : {}),
     ...(target.prUrl ? { targetPrUrl: target.prUrl } : {}),
   };
 }
@@ -211,7 +229,11 @@ export function buildReviewSubmission(
    *  `anchorSnapshot` equals that snapshot; anything else (outdated, or
    *  coordinates from a diff we cannot vouch for) goes in the review body. */
   knownSnapshots?: ReadonlyMap<string, string>,
+  /** Target platform. Only GitHub posts file-scoped comments as file-level
+   *  threads (#1599); anything else folds them into the review body. */
+  platform?: ReviewPlatform,
 ): ReviewSubmission {
+  const fileLevel = platform === 'github';
   const targets: SubmissionTarget[] = [];
   const orphanAnnotations: { reason: 'full-stack' | 'unmapped'; ann: CodeAnnotation }[] = [];
 
@@ -274,7 +296,8 @@ export function buildReviewSubmission(
     );
     const sample = annotations[0];
     const fileComments = buildAnnotationFileComments(annotations, withheld);
-    const fileScopedBody = buildFileScopedBody(annotations, withheld);
+    const fileLevelComments = fileLevel ? buildFileLevelComments(annotations) : [];
+    const fileScopedBody = buildFileScopedBody(annotations, withheld, fileLevel);
     // Exclude the "" sentinel path of general (review-level) comments so they
     // don't inflate the file count.
     const uniqueFiles = new Set(annotations.map(a => a.filePath).filter(p => p.length > 0));
@@ -291,6 +314,7 @@ export function buildReviewSubmission(
       prTitle: sample.prTitle ?? '',
       prRepo: sample.prRepo ?? '',
       fileComments,
+      fileLevelComments,
       fileScopedBody,
       fileCount: uniqueFiles.size,
       annotationCount: annotations.length,
@@ -306,6 +330,7 @@ export function buildReviewSubmission(
       prTitle: currentPrMeta?.title ?? '',
       prRepo: currentPrMeta?.repo ?? '',
       fileComments: editorFileComments,
+      fileLevelComments: [],
       fileScopedBody: '',
       fileCount: editorFiles.size,
       annotationCount: 0,

@@ -240,6 +240,7 @@ function restoreTarget(
     fileComments: retained.status === 'partial'
       ? retained.partial.retry.fileComments
       : [],
+    fileLevelComments: [],
     fileScopedBody: '',
     fileCount: retained.fileCount,
     annotationCount: retained.annotationCount,

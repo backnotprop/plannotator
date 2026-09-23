@@ -28,6 +28,7 @@ const baseTarget: SubmissionTarget = {
   prTitle: 'Reliable retry',
   prRepo: 'acme/widgets',
   fileComments: comments,
+  fileLevelComments: [],
   fileScopedBody: '',
   fileCount: 3,
   annotationCount: 3,

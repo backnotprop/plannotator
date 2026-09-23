@@ -51,6 +51,7 @@ describe('buildPRActionRequest', () => {
     prTitle: 'Reliable comments',
     prRepo: 'acme/widgets',
     fileComments: [inlineComment, { ...inlineComment, path: 'src/posted.ts', line: 30 }],
+    fileLevelComments: [],
     fileScopedBody: '',
     fileCount: 2,
     annotationCount: 2,
@@ -212,5 +213,70 @@ describe('Call Flow platform comments', () => {
     expect(submission.targets[0].fileComments).toHaveLength(0);
     expect(submission.targets[0].fileScopedBody).toContain('This branch is the important part.');
     expect(submission.targets[0].fileScopedBody).toContain('inferred step');
+  });
+});
+
+describe('file-scoped comments on GitHub (#1599)', () => {
+  const PR_URL = 'https://github.com/acme/widgets/pull/42';
+  const meta = { number: 42, title: 'Files', repo: 'acme/widgets' };
+  const base = { type: 'comment' as const, side: 'new' as const, createdAt: 1, prUrl: PR_URL };
+  const annotations: CodeAnnotation[] = [
+    { ...base, id: 'f1', scope: 'file', filePath: 'src/a.ts', lineStart: 1, lineEnd: 1, text: 'Split this file.' },
+    { ...base, id: 'f2', scope: 'file', filePath: 'src/a.ts', lineStart: 1, lineEnd: 1, text: 'Wrong directory.' },
+    { ...base, id: 'g', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, text: 'Overall fine.' },
+    { ...base, id: 'old', scope: 'line', filePath: 'src/b.ts', lineStart: 3, lineEnd: 3, text: 'Stale remark', outdated: true },
+  ];
+  const paths = new Set(['src/a.ts', 'src/b.ts']);
+
+  test('GitHub posts each file comment as a file-level thread and leaves it out of the body', () => {
+    const [target] = buildReviewSubmission(annotations, [], PR_URL, paths, meta, undefined, 'github').targets;
+    expect(target.fileLevelComments).toEqual([
+      { path: 'src/a.ts', body: 'Split this file.' },
+      { path: 'src/a.ts', body: 'Wrong directory.' },
+    ]);
+    expect(target.fileScopedBody).not.toContain('Split this file.');
+    expect(target.fileScopedBody).not.toContain('Wrong directory.');
+    // General and outdated line comments still ride the body, as before.
+    expect(target.fileScopedBody).toContain('Overall fine.');
+    expect(target.fileScopedBody).toContain('Stale remark');
+    expect(target.fileComments).toHaveLength(0);
+  });
+
+  test('GitLab and an unknown platform keep folding file comments into the body', () => {
+    for (const platform of ['gitlab', undefined] as const) {
+      const [target] = buildReviewSubmission(annotations, [], PR_URL, paths, meta, undefined, platform).targets;
+      expect(target.fileLevelComments).toEqual([]);
+      expect(target.fileScopedBody).toContain('**src/a.ts:** Split this file.');
+      expect(target.fileScopedBody).toContain('**src/a.ts:** Wrong directory.');
+    }
+  });
+
+  test('a GitHub COMMENT with only file-level comments still carries a body', () => {
+    expect(buildPlatformReviewBody('comment', 'github', '', {
+      fileComments: [],
+      fileLevelComments: [{ path: 'src/a.ts', body: 'Split this file.' }],
+      fileScopedBody: '',
+    })).toBe('See inline comments.');
+  });
+
+  test('the request carries file-level comments; a narrowed retry never resends them', () => {
+    const target: SubmissionTarget = {
+      prUrl: PR_URL, prNumber: 42, prTitle: 'Files', prRepo: 'acme/widgets',
+      fileComments: [inlineComment],
+      fileLevelComments: [{ path: 'src/a.ts', body: 'Split this file.' }],
+      fileScopedBody: '', fileCount: 1, annotationCount: 2, status: 'pending',
+    };
+    expect(buildPRActionRequest('comment', 'Body', target).fileLevelComments).toEqual(target.fileLevelComments);
+    const retried = buildPRActionRequest('comment', 'Body', {
+      ...target,
+      status: 'partial',
+      partial: {
+        status: 'partial', postedFileCommentCount: 0,
+        failedFileComments: [{ comment: inlineComment, error: 'rejected' }],
+        reviewBodyPosted: true, approval: 'not-requested',
+        retry: { action: 'comment', fileComments: [inlineComment] },
+      },
+    });
+    expect(retried.fileLevelComments).toBeUndefined();
   });
 });

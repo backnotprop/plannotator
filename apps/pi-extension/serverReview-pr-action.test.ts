@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 async function withReviewServer(
-  submit: () => Promise<PRReviewSubmissionResult>,
+  submit: (...args: unknown[]) => Promise<PRReviewSubmissionResult>,
   run: (url: string) => Promise<void>,
 ): Promise<void> {
   process.env.PLANNOTATOR_AI = 'disabled';
@@ -69,7 +69,7 @@ async function withReviewServer(
     gitRef: 'MR !7',
     htmlContent: '<!doctype html><html><body>review</body></html>',
     prMetadata,
-    prReviewSubmitter: async () => submit(),
+    prReviewSubmitter: async (...args) => submit(...args),
   });
   try {
     await run(server.url);
@@ -148,5 +148,34 @@ describe('Pi /api/pr-action submission contract', () => {
         });
       },
     );
+  });
+
+  test('forwards well-formed file-level comments to the submitter (#1599)', async () => {
+    let received: unknown;
+    await withReviewServer(
+      async (...args) => {
+        received = args[5];
+        return { status: 'complete' };
+      },
+      async (url) => {
+        const response = await fetch(`${url}/api/pr-action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'comment',
+            body: 'Overall review',
+            fileComments: [],
+            fileLevelComments: [
+              { path: 'src/failing.ts', body: 'Split this file.' },
+              { path: '', body: 'no path' },
+              { path: 'src/x.ts', body: '   ' },
+              'garbage',
+            ],
+          }),
+        });
+        expect(response.status).toBe(200);
+      },
+    );
+    expect(received).toEqual([{ path: 'src/failing.ts', body: 'Split this file.' }]);
   });
 });

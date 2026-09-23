@@ -11,9 +11,9 @@
  * browser-safe.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, submitGlMRReview } from "./pr-gitlab";
-import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "./pr-types";
+import type { PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
 // pr-provider as a single facade. Browser code imports from pr-types
@@ -66,9 +66,13 @@ export async function submitPRReview(
   action: "approve" | "comment",
   body: string,
   fileComments: PRReviewFileComment[],
+  fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
-  if (ref.platform === "github") return submitGhPRReview(runtime, ref, headSha, action, body, fileComments);
-  return submitGlMRReview(runtime, ref, headSha, action, body, fileComments);
+  if (ref.platform === "github") {
+    return submitGhPRReview(runtime, ref, headSha, action, body, fileComments, fileLevelComments);
+  }
+  // GitLab has no file-level discussion: file comments ride the body (#1599).
+  return submitGlMRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments);
 }
 
 /**

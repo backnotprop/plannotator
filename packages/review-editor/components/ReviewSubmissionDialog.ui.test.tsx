@@ -22,6 +22,7 @@ const baseTarget: SubmissionTarget = {
   prTitle: 'Make reviews reliable',
   prRepo: 'acme/widgets',
   fileComments: [failedComment],
+  fileLevelComments: [],
   fileScopedBody: '',
   fileCount: 1,
   annotationCount: 1,

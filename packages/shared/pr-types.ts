@@ -185,6 +185,30 @@ export interface PRReviewFileComment {
   start_side?: "LEFT" | "RIGHT";
 }
 
+/**
+ * A comment on a whole file rather than a line (#1599). GitHub posts it as a
+ * file-level review thread; GitLab has no equivalent and folds it into the body.
+ */
+export interface PRReviewFileLevelComment {
+  path: string;
+  body: string;
+}
+
+/**
+ * Read the untrusted `fileLevelComments` field of a review request. Keeps only
+ * entries with a non-empty string path and body; anything else is dropped.
+ */
+export function parseFileLevelComments(value: unknown): PRReviewFileLevelComment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): PRReviewFileLevelComment[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const { path, body } = item as Record<string, unknown>;
+    return typeof path === "string" && path.length > 0 && typeof body === "string" && body.trim().length > 0
+      ? [{ path, body }]
+      : [];
+  });
+}
+
 /** One inline comment that GitLab did not accept, paired with its safe error text. */
 export interface PRReviewCommentFailure {
   comment: PRReviewFileComment;

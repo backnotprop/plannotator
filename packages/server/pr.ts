@@ -11,12 +11,14 @@ import type {
   PRContext,
   PRRuntime,
   PRReviewFileComment,
+  PRReviewFileLevelComment,
   PRReviewSubmissionResult,
   PRStackTree,
   PRListItem,
 } from "@plannotator/shared/pr-types";
 import {
   parsePRUrl as parsePRUrlCore,
+  parseFileLevelComments as parseFileLevelCommentsCore,
   prRefFromMetadata,
   getPlatformLabel,
   getMRLabel,
@@ -38,7 +40,7 @@ import {
   fetchPRList as fetchPRListCore,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
+export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
 export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl } from "@plannotator/shared/pr-types";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
@@ -82,6 +84,7 @@ const runtime: PRRuntime = {
 export const prCommandRuntime: PRRuntime = runtime;
 
 export const parsePRUrl = parsePRUrlCore;
+export const parseFileLevelComments = parseFileLevelCommentsCore;
 
 export function checkPRAuth(ref: PRRef): Promise<void> {
   return checkAuthCore(runtime, ref);
@@ -118,8 +121,9 @@ export function submitPRReview(
   action: "approve" | "comment",
   body: string,
   fileComments: PRReviewFileComment[],
+  fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
-  return submitPRReviewCore(runtime, ref, headSha, action, body, fileComments);
+  return submitPRReviewCore(runtime, ref, headSha, action, body, fileComments, fileLevelComments);
 }
 
 export function fetchPRViewedFiles(

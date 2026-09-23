@@ -119,7 +119,7 @@ import {
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGitRemoteCheck } from "./config";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
-import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
+import { type PRMetadata, type PRRef, type PRReviewFileComment, type PRStackTree, type PRListItem, fetchPR, fetchPRFileContent, fetchPRContext, submitPRReview, parseFileLevelComments, fetchPRViewedFiles, markPRFilesViewed, fetchPRStack, fetchPRList, getPRUser, parsePRUrl, prRefFromMetadata, isSameProject, getDisplayRepo, getMRLabel, getMRNumberLabel, prCommandRuntime } from "./pr";
 import {
   PR_CONTEXT_HEARTBEAT_COMMENT,
   PR_CONTEXT_HEARTBEAT_INTERVAL_MS,
@@ -3695,8 +3695,10 @@ export async function startReviewServer(
                 action: "approve" | "comment";
                 body: string;
                 fileComments: PRReviewFileComment[];
+                fileLevelComments?: unknown;
                 targetPrUrl?: string;
               };
+              const fileLevelComments = parseFileLevelComments(body.fileLevelComments);
 
               // Resolve target PR — either explicit target or current.
               // When targetPrUrl is provided, the client has already filtered
@@ -3720,7 +3722,7 @@ export async function startReviewServer(
                 );
               }
 
-              console.error(`[pr-action] ${body.action} with ${body.fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+              console.error(`[pr-action] ${body.action} with ${body.fileComments.length} line comment(s) and ${fileLevelComments.length} file-level comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
 
               const submission = await submitPlatformReview(
                 targetRef,
@@ -3728,6 +3730,7 @@ export async function startReviewServer(
                 body.action,
                 body.body,
                 body.fileComments,
+                fileLevelComments,
               );
 
               console.error(`[pr-action] ${submission.status === "complete" ? "Success" : "Partial success"}`);

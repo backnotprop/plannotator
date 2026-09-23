@@ -110,6 +110,7 @@ import {
 	fetchPRViewedFiles,
 	getPRUser,
 	markPRFilesViewed,
+	parseFileLevelComments,
 	parsePRUrl,
 	prCommandRuntime,
 	submitPRReview,
@@ -3004,6 +3005,7 @@ export async function startReviewServer(options: {
 			try {
 				const body = await parseBody(req);
 				const fileComments = (body.fileComments as PRReviewFileComment[]) || [];
+				const fileLevelComments = parseFileLevelComments(body.fileLevelComments);
 				const targetPrUrl = body.targetPrUrl as string | undefined;
 
 				let targetRef = prRef;
@@ -3024,13 +3026,14 @@ export async function startReviewServer(options: {
 					return;
 				}
 
-				console.error(`[pr-action] ${body.action} with ${fileComments.length} file comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+				console.error(`[pr-action] ${body.action} with ${fileComments.length} line comment(s) and ${fileLevelComments.length} file-level comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
 				const submission = await submitPlatformReview(
 					targetRef,
 					targetHeadSha,
 					body.action as "approve" | "comment",
 					body.body as string,
 					fileComments,
+					fileLevelComments,
 				);
 				console.error(`[pr-action] ${submission.status === "complete" ? "Success" : "Partial success"}`);
 				prContextLive.refreshAfterWrite(targetUrl, targetRef);

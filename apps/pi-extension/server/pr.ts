@@ -9,11 +9,13 @@ import {
 	type PRMetadata,
 	type PRRef,
 	type PRReviewFileComment,
+	type PRReviewFileLevelComment,
 	type PRReviewSubmissionResult,
 	type PRRuntime,
 	type PRStackTree,
 	type PRListItem,
 	parsePRUrl as parsePRUrlCore,
+	parseFileLevelComments as parseFileLevelCommentsCore,
 } from "../generated/pr-types.ts";
 import {
 	checkAuth as checkAuthCore,
@@ -71,6 +73,7 @@ const prRuntime: PRRuntime = {
 export const prCommandRuntime: PRRuntime = prRuntime;
 
 export const parsePRUrl = parsePRUrlCore;
+export const parseFileLevelComments = parseFileLevelCommentsCore;
 export function checkPRAuth(ref: PRRef) {
 	return checkAuthCore(prRuntime, ref);
 }
@@ -93,6 +96,7 @@ export function submitPRReview(
 	action: "approve" | "comment",
 	body: string,
 	fileComments: PRReviewFileComment[],
+	fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
 	return submitPRReviewCore(
 		prRuntime,
@@ -101,6 +105,7 @@ export function submitPRReview(
 		action,
 		body,
 		fileComments,
+		fileLevelComments,
 	);
 }
 
