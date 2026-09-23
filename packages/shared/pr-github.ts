@@ -662,6 +662,12 @@ const ADD_FILE_THREAD_MUTATION = `mutation($reviewId: ID!, $path: String!, $body
   }
 }`;
 
+const PENDING_REVIEW_REMAINS =
+  "A pending review remains on the pull request; submit or discard it on GitHub before retrying.";
+
+/** GitHub requires a body on a COMMENT review; the client uses the same placeholder. */
+const COMMENT_BODY_PLACEHOLDER = "See inline comments.";
+
 function commandError(result: CommandResult): string {
   return result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
 }
@@ -734,10 +740,13 @@ export async function submitGhPRReview(
     if (created.exitCode === 0) {
       // A pending review may exist but we cannot address it; do not post a
       // second review on top of it.
-      throw new Error("Failed to submit PR review: GitHub returned an unreadable pending review");
+      throw new Error(`Failed to submit PR review: GitHub's reply to creating the review could not be read. ${PENDING_REVIEW_REMAINS}`);
     }
-    console.error(`[plannotator] pending review could not be created (${commandError(created)}); posting file comments in the review body`);
-    return submitAtomic(foldFileLevelComments(body, fileLevelComments));
+    // Throws with the pre-#1599 error when the single call fails too (e.g. an
+    // invalid line comment), so only a successful fallback is logged.
+    const result = await submitAtomic(foldFileLevelComments(body, fileLevelComments));
+    console.error(`[plannotator] pending review could not be created (${commandError(created)}); file comments were posted in the review body`);
+    return result;
   }
 
   // 2. One file-level thread per comment, attached to the pending review.
@@ -769,20 +778,31 @@ export async function submitGhPRReview(
   }
 
   // 3. Submit. On failure discard the pending review so a retry starts clean.
+  let submitBody = foldFileLevelComments(body, folded);
+  if (event === "COMMENT" && submitBody.trim().length === 0) submitBody = COMMENT_BODY_PLACEHOLDER;
   const submitted = await api(`${reviewsEndpoint}/${reviewId}/events`, "POST", {
     event,
-    body: foldFileLevelComments(body, folded),
+    body: submitBody,
   });
   if (submitted.exitCode !== 0) {
     const message = commandError(submitted);
+    // The submit may have landed with only its response lost; never delete or
+    // report a failure for a review GitHub already shows as submitted.
+    const current = await runtime.runCommand("gh", hostnameArgs(ref.host, ["api", `${reviewsEndpoint}/${reviewId}`]));
+    if (current.exitCode === 0) {
+      try {
+        const state = JSON.parse(current.stdout)?.state;
+        if (typeof state === "string" && state !== "PENDING") return { status: "complete" };
+      } catch {
+        // unknown state: treat as still pending
+      }
+    }
     const deleted = await runtime.runCommand(
       "gh",
       hostnameArgs(ref.host, ["api", `${reviewsEndpoint}/${reviewId}`, "--method", "DELETE"]),
     );
     if (deleted.exitCode !== 0) {
-      throw new Error(
-        `Failed to submit PR review: ${message}. A pending review remains on the pull request; submit or discard it on GitHub before retrying.`,
-      );
+      throw new Error(`Failed to submit PR review: ${message}. ${PENDING_REVIEW_REMAINS}`);
     }
     throw new Error(`Failed to submit PR review: ${message}`);
   }

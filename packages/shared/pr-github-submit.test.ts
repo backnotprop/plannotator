@@ -35,6 +35,7 @@ const isGraphql = (c: Call) => c.args[1] === "graphql";
 const isCreate = (c: Call) => c.args[1] === REVIEWS;
 const isSubmit = (c: Call) => c.args[1] === `${REVIEWS}/99/events`;
 const isDelete = (c: Call) => c.args[1] === `${REVIEWS}/99` && c.args.includes("DELETE");
+const isGet = (c: Call) => c.args[1] === `${REVIEWS}/99` && c.args.length === 2;
 
 const PENDING = ok(JSON.stringify({ id: 99, node_id: "PRR_99" }));
 const THREAD_OK = ok(JSON.stringify({ data: { addPullRequestReviewThread: { thread: { id: "PRRT_1" } } } }));
@@ -126,6 +127,48 @@ describe("submitGhPRReview file-level comments (#1599)", () => {
     await expect(
       submitGhPRReview(runtime, REF, "sha", "comment", "Body", [], [FILE_A]),
     ).rejects.toThrow("pending review remains");
+  });
+});
+
+describe("submitGhPRReview file-level edge cases", () => {
+  test("an unreadable pending-review reply is reported as a possibly remaining pending review", async () => {
+    const { runtime, calls } = ghRuntime((c) => (isCreate(c) ? ok("not json") : undefined));
+    await expect(
+      submitGhPRReview(runtime, REF, "sha", "comment", "Body", [LINE], [FILE_A]),
+    ).rejects.toThrow("A pending review remains on the pull request; submit or discard it on GitHub");
+    expect(calls).toHaveLength(1); // no second review posted on top of it
+  });
+
+  test("a COMMENT with an empty body gets the placeholder body GitHub requires", async () => {
+    const { runtime, calls } = ghRuntime((c) => {
+      if (isCreate(c)) return PENDING;
+      if (isGraphql(c)) return THREAD_OK;
+      if (isSubmit(c)) return ok("{}");
+    });
+    await submitGhPRReview(runtime, REF, "sha", "comment", "  ", [], [FILE_A]);
+    expect(calls.find(isSubmit)!.input).toEqual({ event: "COMMENT", body: "See inline comments." });
+  });
+
+  test("a submit whose response was lost but which GitHub shows as submitted is a success", async () => {
+    const { runtime, calls } = ghRuntime((c) => {
+      if (isCreate(c)) return PENDING;
+      if (isGraphql(c)) return THREAD_OK;
+      if (isSubmit(c)) return fail("connection reset");
+      if (isGet(c)) return ok(JSON.stringify({ id: 99, state: "COMMENTED" }));
+    });
+    await expect(
+      submitGhPRReview(runtime, REF, "sha", "comment", "Body", [], [FILE_A]),
+    ).resolves.toEqual({ status: "complete" });
+    expect(calls.some(isDelete)).toBe(false);
+  });
+
+  test("when the fallback single call also fails, it reports that failure and claims no body fallback", async () => {
+    const { runtime } = ghRuntime((c) => (isCreate(c) ? fail("HTTP 422: line must be part of the diff") : undefined));
+    await expect(
+      submitGhPRReview(runtime, REF, "sha", "comment", "Body", [LINE], [FILE_A]),
+    ).rejects.toThrow("Failed to submit PR review: HTTP 422: line must be part of the diff");
+    const logged = errorSpy.mock.calls.map((args) => String(args[0])).join("\n");
+    expect(logged).not.toContain("review body");
   });
 });
 
