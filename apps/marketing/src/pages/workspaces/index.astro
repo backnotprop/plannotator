@@ -110,11 +110,12 @@ const teamSizes = [
       <div class="ws-col-left">
         <header class="ws-hero">
           <p class="ws-eyebrow">Plannotator Workspaces · Private beta</p>
-          <h1 class="ws-page-title">The shared coordination layer for building software with agents.</h1>
+          <h1 class="ws-page-title">The coordination layer for agent planning and review.</h1>
           <p class="ws-hero-copy">
             In the agentic software factory era, agents do more of the
-            building. Workspaces is where your team plans the work, reviews
-            it, shapes it and decides, so people stay in the loop.
+            building. Workspaces is the shared place where your team plans
+            the work, reviews it, shapes it and decides, so people stay in
+            the loop.
           </p>
           <div class="ws-link-row" aria-label="Related Plannotator surfaces">
             <a href="/" class="ws-text-link">Plan review</a>
@@ -123,32 +124,6 @@ const teamSizes = [
         </header>
 
         <section class="ws-info">
-        <div class="ws-preview-panel" aria-label="Workspaces preview">
-          <div class="ws-preview-top">
-            <span>Private beta</span>
-            <span>people and agents</span>
-          </div>
-          <div class="ws-preview-flow">
-            <div class="ws-preview-node">
-              <span class="ws-node-k">01</span>
-              <strong>Plan</strong>
-              <span>In shared documents</span>
-            </div>
-            <div class="ws-preview-rail" aria-hidden="true"></div>
-            <div class="ws-preview-node">
-              <span class="ws-node-k">02</span>
-              <strong>Shape</strong>
-              <span>Review and decide</span>
-            </div>
-            <div class="ws-preview-rail" aria-hidden="true"></div>
-            <div class="ws-preview-node">
-              <span class="ws-node-k">03</span>
-              <strong>Build</strong>
-              <span>Agents take the approved plan</span>
-            </div>
-          </div>
-        </div>
-
         <ul class="ws-points">
           <li>
             <strong>Plan in shared documents.</strong>
@@ -633,9 +608,7 @@ const teamSizes = [
       min-width: 0;
       display: flex;
       flex-direction: column;
-      /* Breathing room between the hero (eyebrow + h1) and the first
-         "Today" row of the phases list — without this the title's
-         descenders run into the dashed grid above "Today". */
+      /* Breathing room between the hero and the sections list below it. */
       gap: 32px;
     }
     .ws-col-right {
@@ -693,9 +666,9 @@ const teamSizes = [
     }
     .ws-page-title {
       font-family: 'Instrument Sans', system-ui, sans-serif;
-      font-size: 3.5rem;
+      font-size: 2.75rem;
       font-weight: 600;
-      line-height: 1.02;
+      line-height: 1.08;
       letter-spacing: 0;
       color: var(--foreground);
       margin: 0;
@@ -731,108 +704,18 @@ const teamSizes = [
       background: oklch(from var(--primary) l c h / 0.08);
     }
     @media (max-width: 980px) {
-      .ws-page-title { font-size: 2.875rem; }
+      .ws-page-title { font-size: 2.5rem; }
     }
     @media (max-width: 600px) {
-      .ws-page-title { font-size: 2.35rem; }
+      .ws-page-title { font-size: 2.125rem; }
       .ws-hero-copy { font-size: 1rem; }
-    }
-
-    /* ── High-level preview, intentionally non-specific ── */
-    .ws-preview-panel {
-      max-width: 620px;
-      margin: 0;
-      padding: 18px;
-      background:
-        linear-gradient(135deg, oklch(from var(--card) l c h / 0.96), oklch(from var(--muted) l c h / 0.72));
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: 0 1px 0 oklch(from var(--border) l c h / 0.4);
-    }
-    .ws-preview-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
-      font-family: var(--font-mono);
-      font-size: 0.6875rem;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--muted-foreground);
-    }
-    .ws-preview-flow {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr) 34px minmax(0, 1fr);
-      align-items: center;
-      gap: 8px;
-    }
-    .ws-preview-node {
-      min-height: 116px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 14px;
-      background: var(--background);
-      border: 1px solid oklch(from var(--border) l c h / 0.8);
-      border-radius: 6px;
-    }
-    .ws-node-k {
-      font-family: var(--font-mono);
-      font-size: 0.6875rem;
-      color: var(--primary);
-    }
-    .ws-preview-node strong {
-      font-family: 'Instrument Sans', system-ui, sans-serif;
-      font-size: 1rem;
-      font-weight: 600;
-      letter-spacing: 0;
-      color: var(--foreground);
-    }
-    .ws-preview-node span:last-child {
-      color: var(--muted-foreground);
-      font-size: 0.8125rem;
-      line-height: 1.35;
-    }
-    .ws-preview-rail {
-      height: 1px;
-      background: linear-gradient(90deg, var(--border), var(--primary), var(--border));
-      position: relative;
-    }
-    .ws-preview-rail::after {
-      content: "";
-      position: absolute;
-      right: -1px;
-      top: 50%;
-      width: 7px;
-      height: 7px;
-      border-top: 1px solid var(--primary);
-      border-right: 1px solid var(--primary);
-      transform: translateY(-50%) rotate(45deg);
-    }
-    @media (max-width: 700px) {
-      .ws-preview-flow {
-        grid-template-columns: 1fr;
-      }
-      .ws-preview-rail {
-        width: 1px;
-        height: 20px;
-        margin: 0 auto;
-        background: linear-gradient(180deg, var(--border), var(--primary), var(--border));
-      }
-      .ws-preview-rail::after {
-        right: 50%;
-        top: auto;
-        bottom: -1px;
-        transform: translateX(50%) rotate(135deg);
-      }
-      .ws-preview-node { min-height: 96px; }
     }
 
     /* ── Offering points ── */
     .ws-points {
       list-style: none;
       padding: 0;
-      margin: 24px 0 0;
+      margin: 0;
       max-width: 560px;
       border-top: 1px solid var(--border);
     }
