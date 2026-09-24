@@ -110,6 +110,7 @@ import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotat
 import { useExternalAnnotationHighlights } from '@plannotator/ui/hooks/useExternalAnnotationHighlights';
 import { useUndoHistory } from '@plannotator/ui/hooks/useUndoHistory';
 import { buildPlanAgentInstructions } from '@plannotator/ui/utils/planAgentInstructions';
+import { buildAnnotateAgentInstructions, resolveAnnotateInstructionsSurface } from '@plannotator/ui/utils/annotateAgentInstructions';
 import { useFileBrowser } from '@plannotator/ui/hooks/useFileBrowser';
 import { getFileEditStatus } from '@plannotator/ui/components/sidebar/FileBrowser';
 import { isVaultBrowserEnabled } from '@plannotator/ui/utils/obsidian';
@@ -438,6 +439,10 @@ const App: React.FC = () => {
   const editableDocuments = useEditableDocuments();
   const activeEditableDocument = editableDocuments.activeDocument;
   const displayedMarkdown = activeEditableDocument?.currentText ?? markdown;
+  // Save-to-notes writes the document text; sessions without any (live app,
+  // a folder before a file is opened) hide those actions instead of saving
+  // an empty note. Always true in plan review.
+  const notesSaveAvailable = displayedMarkdown.trim().length > 0;
   const [sourceFilePath, setSourceFilePath] = useState<string | undefined>();
   // Mirrors linkedDocHook.filepath (declared later) so the parse memos below
   // can key frontmatter behavior off the ACTIVE document's path. Kept in sync
@@ -5018,6 +5023,13 @@ const App: React.FC = () => {
 
   const handleQuickSaveToNotes = async (target: 'obsidian' | 'bear' | 'octarine') => {
     if (documentReadOnly) return;
+    // A live-app session (or a folder session with no file open) has no
+    // document text; saving would write an empty note. Plan review always
+    // has text, so this never fires there.
+    if (!notesSaveAvailable) {
+      toast.error('No document text to save in this session');
+      return;
+    }
 
     const body: { obsidian?: object; bear?: object; octarine?: object } = {};
     // Mid-edit saves describe the live buffer, matching handleApprove.
@@ -5257,7 +5269,14 @@ const App: React.FC = () => {
   // /api/external-annotations. The instruction body lives in a separate module
   // (utils/agentInstructions.ts) so it's easy to edit independently of UI code.
   const handleCopyAgentInstructions = async () => {
-    const payload = buildPlanAgentInstructions(window.location.origin);
+    // Annotate sessions get the document twin: same endpoint and validator,
+    // no deny/resubmit loop, plus the surface-specific targeting rules.
+    const payload = annotateMode
+      ? buildAnnotateAgentInstructions(
+          window.location.origin,
+          resolveAnnotateInstructionsSurface({ liveApp: !!liveApp, annotateSource, renderAs }),
+        )
+      : buildPlanAgentInstructions(window.location.origin);
     if (await copyTextToClipboard(payload)) {
       toast.success('Agent instructions copied');
     } else {
@@ -6278,10 +6297,10 @@ const App: React.FC = () => {
           appVersion={typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
           updateInfo={updateInfo}
           isWSL={isWSL}
-          agentInstructionsEnabled={isApiMode && !archive.archiveMode && !annotateMode && !goalSetupMode}
-          obsidianConfigured={isObsidianConfigured()}
-          bearConfigured={getBearSettings().enabled}
-          octarineConfigured={isOctarineConfigured()}
+          agentInstructionsEnabled={isApiMode && !archive.archiveMode && !goalSetupMode}
+          obsidianConfigured={notesSaveAvailable && isObsidianConfigured()}
+          bearConfigured={notesSaveAvailable && getBearSettings().enabled}
+          octarineConfigured={notesSaveAvailable && isOctarineConfigured()}
         />
 
         {/* The provider is render-transparent (context only, no DOM), so it can

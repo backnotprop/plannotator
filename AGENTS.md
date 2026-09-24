@@ -83,7 +83,7 @@ plannotator/
 │   │   │   ├── plan-review/      # Scopes for plan-editor surfaces (annotationMode, annotationPanel, annotationToolbar, commentPopover, documentView, goalSetup, htmlAnnotate, imageAnnotator, inputMethod, sidebar, viewer, vimSelection)
 │   │   │   └── code-review/      # Scopes for review-editor surfaces (ai, allFilesDiff, annotationToolbar, fileTree, prComments, suggestionModal, tourDialog)
 │   │   ├── shortcuts.test.ts     # Registry unit tests (parser, dispatcher, validator)
-│   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts, planAgentInstructions.ts
+│   │   ├── utils/                # parser.ts, sharing.ts, storage.ts, planSave.ts, agentSwitch.ts, planDiffEngine.ts, planAgentInstructions.ts, annotateAgentInstructions.ts
 │   │   ├── hooks/                # useAnnotationHighlighter.ts, useSharing.ts, usePlanDiff.ts, useSidebar.ts, useLinkedDoc.ts, useAnnotationDraft.ts, useCodeAnnotationDraft.ts, useArchive.ts
 │   │   └── types.ts
 │   ├── ai/                       # Provider-agnostic AI backbone (providers, sessions, endpoints)
@@ -533,6 +533,41 @@ close-with-content warning). Compact/touch rows are generated from the same spec
 positive decision exists in every state; composer rows open `DecisionNoteDialog`. The header flip
 predicate is `hasFeedbackToSend`, so feedback already delivered through the agent terminal shows
 the positive primary rather than a stale Send Feedback.
+
+### Annotate Options menu and Settings parity
+
+Annotate renders the same document app as plan review, so its Options menu and
+Settings dialog match plan review item for item; only rows that describe a PLAN
+decision stay plan-only. Settings `mode="annotate"` shows General, Theme,
+Display (width reads "Document Width"), Saving, Labels, Vim, Shortcuts, Files,
+Obsidian, Bear and Octarine. Plan-only, and hidden in annotate: the **Hooks**
+tab (plan-time hooks; `/api/hooks/status` exists only on the plan server),
+**Save Plans** (decision snapshots in `plans/` are written on approve/deny),
+the three **Auto-save on Plan Arrival** switches (the arrival auto-save effect
+is gated `!annotateMode`), **Permission Mode**, and OpenCode **Agent
+Switching** (annotate decisions never send `agentSwitch`). The Archive sidebar
+tab stays plan-only too (the annotate server has no `/api/archive/*`).
+
+**Agent Instructions** (Options menu) is offered in every annotate session.
+`buildAnnotateAgentInstructions(origin, surface)`
+(`packages/ui/utils/annotateAgentInstructions.ts`) is the annotate twin of
+`buildPlanAgentInstructions` (plan text is unchanged): same endpoint and
+plan-mode validator, "document" not "plan", no deny/resubmit loop, and one
+section per surface picked by `resolveAnnotateInstructionsSurface` — its own
+read command (`.plan`; `.rawHtml` for raw HTML; `.targetUrl` for a live app;
+`/api/doc?path=` for a folder) plus the targeting rules the validator actually
+supports: `diagramAnchor` on POST for diagram files, `htmlAnchor` by PATCH
+only (POST drops it), `pageUrl` by PATCH for live-app routes. Folder sessions
+are stated plainly: an external comment cannot target a document; it lists in
+the panel whichever document is open, is not highlighted inline, and rides the
+submitted feedback. `packages/server/annotate-agent-instructions.test.ts`
+executes every curl/JSON example in the text against a real annotate server,
+so an instruction that drifts from the server fails there.
+
+Save to Obsidian / Bear / Octarine menu items are hidden (a `Mod+S` quick save
+toasts instead) when the session has no document text (`notesSaveAvailable`: raw-HTML, live-app, a
+folder with no file open) — the server skips an empty `plan`, so those items
+were silent no-ops.
 
 ### Tolerant argument resolution
 

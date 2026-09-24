@@ -1001,7 +1001,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const mainTabs = useMemo(() => {
     const t: { id: SettingsTab; label: string }[] = [{ id: 'general', label: 'General' }];
     t.push({ id: 'theme', label: 'Theme' });
-    if (mode === 'plan') {
+    // Annotate renders the same document viewer as plan review, so the
+    // document-level tabs apply there too. Only rows that describe a plan
+    // decision (plan snapshots, plan-arrival auto-save, plan-time hooks,
+    // post-approval permission mode / agent switch) stay plan-only.
+    if (mode === 'plan' || mode === 'annotate') {
       t.push({ id: 'display', label: 'Display' });
       t.push({ id: 'saving', label: 'Saving' });
       t.push({ id: 'labels', label: 'Labels' });
@@ -1027,7 +1031,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
   const integrationTabs: { id: SettingsTab; label: string }[] = [
     { id: 'files', label: 'Files' },
-    ...(mode === 'plan'
+    ...(mode === 'plan' || mode === 'annotate'
       ? [{ id: 'obsidian' as SettingsTab, label: 'Obsidian' }, { id: 'bear' as SettingsTab, label: 'Bear' }, { id: 'octarine' as SettingsTab, label: 'Octarine' }]
       : []),
   ];
@@ -1428,8 +1432,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       </>
                     )}
 
-                    {/* Agent Switching (OpenCode only) */}
-                    {origin === 'opencode' && (
+                    {/* Agent Switching (OpenCode only). Applied on plan
+                        approval only; annotate decisions never switch agents. */}
+                    {origin === 'opencode' && mode !== 'annotate' && (
                       <>
                         <div className="border-t border-border" />
                         <div className="space-y-2">
@@ -1689,9 +1694,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     {/* Plan Width */}
                     <div className="space-y-3">
                       <div>
-                        <div className="text-sm font-medium flex items-center gap-2">Plan Width</div>
+                        <div className="text-sm font-medium flex items-center gap-2">{mode === 'annotate' ? 'Document Width' : 'Plan Width'}</div>
                         <div className="text-xs text-muted-foreground">
-                          Maximum width of the plan card
+                          {mode === 'annotate' ? 'Maximum width of the document card' : 'Maximum width of the plan card'}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
@@ -1815,7 +1820,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 {/* === SAVING TAB === */}
                 {activeTab === 'saving' && (
                   <>
-                    {/* Plan Saving */}
+                    {/* Plan Saving — decision snapshots in plans/ are written
+                        on plan approve/deny only. */}
+                    {mode === 'plan' && (<>
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
@@ -1858,6 +1865,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     </div>
 
                     <div className="border-t border-border" />
+                    </>)}
 
                     {/* Default Notes App */}
                     <div className="space-y-2">
@@ -2256,7 +2264,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       <div>
                         <div className="text-sm font-medium">Obsidian Integration</div>
                         <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to your vault
+                          {mode === 'annotate' ? 'Save documents to your vault from the Options menu' : 'Auto-save approved plans to your vault'}
                         </div>
                       </div>
                       <button
@@ -2403,6 +2411,7 @@ tags: [plan, ...]
 
                           <div className="border-t border-border/30" />
 
+                          {mode === 'plan' && (<>
                           <div className="flex items-center justify-between">
                             <div>
                               <div className="text-xs font-medium">Auto-save on Plan Arrival</div>
@@ -2423,6 +2432,7 @@ tags: [plan, ...]
                               }`} />
                             </button>
                           </div>
+                          </>)}
 
                           <div className="flex items-center justify-between">
                             <div>
@@ -2457,7 +2467,7 @@ tags: [plan, ...]
                       <div>
                         <div className="text-sm font-medium">Bear Notes</div>
                         <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to Bear
+                          {mode === 'annotate' ? 'Save documents to Bear from the Options menu' : 'Auto-save approved plans to Bear'}
                         </div>
                       </div>
                       <button
@@ -2503,6 +2513,7 @@ tags: [plan, ...]
                           </select>
                         </div>
 
+                        {mode === 'plan' && (<>
                         <div className="border-t border-border/30" />
 
                         <div className="flex items-center justify-between">
@@ -2525,6 +2536,7 @@ tags: [plan, ...]
                             }`} />
                           </button>
                         </div>
+                        </>)}
                       </div>
                     )}
                   </>
@@ -2537,7 +2549,7 @@ tags: [plan, ...]
                       <div>
                         <div className="text-sm font-medium">Octarine</div>
                         <div className="text-xs text-muted-foreground">
-                          Auto-save approved plans to Octarine
+                          {mode === 'annotate' ? 'Save documents to Octarine from the Options menu' : 'Auto-save approved plans to Octarine'}
                         </div>
                       </div>
                       <button
@@ -2588,6 +2600,7 @@ tags: [plan, ...]
                           Plans saved to: {octarine.workspace || '...'} / {octarine.folder || 'plannotator'}/
                         </div>
 
+                        {mode === 'plan' && (<>
                         <div className="border-t border-border/30" />
 
                         <div className="flex items-center justify-between">
@@ -2610,6 +2623,7 @@ tags: [plan, ...]
                             }`} />
                           </button>
                         </div>
+                        </>)}
                       </div>
                     )}
                   </>
