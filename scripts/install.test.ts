@@ -416,9 +416,11 @@ describe("install.sh", () => {
 
   test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
     // Three distinct Codex states, never conflated: detected-skipped vs not
-    // detected vs installed.
+    // detected vs installed. "Not detected" is now conveyed by omitting the
+    // CODEX USERS closing section entirely (see the functional closing-summary
+    // tests below), never by a skip message.
     expect(script).toContain('Codex: detected, skipped (${skip_codex_source}).');
-    expect(script).toContain("Codex was not detected.");
+    expect(script).not.toContain("Codex was not detected.");
     expect(script).toContain("Codex was detected, but the integration was skipped");
     // When a previous install wired Codex, the skip run says it left the
     // existing integration alone.
@@ -2379,6 +2381,107 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
 );
 
 // ---------------------------------------------------------------------------
+// Closing summary: agent-specific sections print only for agents the run
+// detected (existing detection legs: `pi` on PATH, ~/.gemini, Codex home or
+// CLI, ~/.kiro or kiro-cli). OpenCode (no detection leg) and Claude Code stay
+// universal. Every run is a full install into a temp HOME with a stubbed PATH;
+// the git shim supplies a local checkout, so nothing reaches the network.
+// ---------------------------------------------------------------------------
+type SummaryAgent = "pi" | "gemini" | "codex" | "kiro";
+
+const SUMMARY_HEADERS: Record<SummaryAgent, string> = {
+  pi: "  PI USERS",
+  gemini: "  GEMINI CLI USERS",
+  codex: "  CODEX USERS",
+  kiro: "  KIRO CLI USERS",
+};
+
+function runSummaryInstall(detected: SummaryAgent[], extraArgs: string[] = []) {
+  const sandbox = setupInstallSandbox({
+    gh: "pass-all",
+    git: "sparse-unsupported",
+    codexHome: detected.includes("codex"),
+  });
+  if (detected.includes("gemini")) mkdirSync(join(sandbox.home, ".gemini"), { recursive: true });
+  if (detected.includes("kiro")) mkdirSync(join(sandbox.home, ".kiro"), { recursive: true });
+  // A no-op `pi` on PATH is exactly what the Pi detection leg checks; the
+  // installer's `pi install` call against it succeeds without doing anything.
+  if (detected.includes("pi")) writeFileSync(join(sandbox.stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  const r = runInstallSh(sandbox, ["--version", "v99.9.9", "--non-interactive", "--no-extras", ...extraArgs]);
+  return { ...r, home: sandbox.home };
+}
+
+function expectOnlySections(out: string, detected: SummaryAgent[]) {
+  for (const agent of Object.keys(SUMMARY_HEADERS) as SummaryAgent[]) {
+    const lines = out.split("\n");
+    const present = lines.includes(SUMMARY_HEADERS[agent]);
+    expect({ agent, present }).toEqual({ agent, present: detected.includes(agent) });
+  }
+  // Universal sections are unaffected by detection.
+  expect(out).toContain("  OPENCODE USERS");
+  expect(out).toContain("CLAUDE CODE USERS:");
+  expect(out).toContain("/plugin marketplace add backnotprop/plannotator");
+  // An undetected agent is represented by absence, never by a nag.
+  expect(out).not.toContain("was not detected");
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh closing summary shows only detected agents",
+  () => {
+    test("nothing detected: only the universal OpenCode and Claude Code sections", () => {
+      const { code, out } = runSummaryInstall([]);
+      expect(code).toBe(0);
+      expectOnlySections(out, []);
+      expect(out).toContain("The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!");
+    });
+
+    for (const agent of Object.keys(SUMMARY_HEADERS) as SummaryAgent[]) {
+      test(`only ${agent} detected: only its section is added`, () => {
+        const { code, out } = runSummaryInstall([agent]);
+        expect(code).toBe(0);
+        expectOnlySections(out, [agent]);
+      });
+    }
+
+    test("all detected: every agent section prints, in the original order", () => {
+      const all: SummaryAgent[] = ["pi", "gemini", "codex", "kiro"];
+      const { code, out } = runSummaryInstall(all);
+      expect(code).toBe(0);
+      expectOnlySections(out, all);
+      const order = ["  OPENCODE USERS", ...all.map((a) => SUMMARY_HEADERS[a]), "CLAUDE CODE USERS:"].map((h) =>
+        out.indexOf(h),
+      );
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
+      expect(out).toContain("Plan review is configured through the Codex Stop hook.");
+    });
+
+    test("a detected-but-skipped agent keeps its honest skipped section", () => {
+      const { code, out } = runSummaryInstall(["codex", "gemini"], ["--skip-codex", "--skip-gemini"]);
+      expect(code).toBe(0);
+      expectOnlySections(out, ["codex", "gemini"]);
+      expect(out).toContain("Codex was detected, but the integration was skipped (--skip-codex).");
+      expect(out).toContain("Gemini was detected, but the integration was skipped (--skip-gemini).");
+    });
+
+    test("--skip-skills: detected sections report the skip, undetected ones stay hidden", () => {
+      const { code, out } = runSummaryInstall(["kiro"], ["--skip-skills"]);
+      expect(code).toBe(0);
+      expectOnlySections(out, ["kiro"]);
+      expect(out).toContain("Kiro was detected, but skills were skipped (--skip-skills)");
+      expect(out).toContain("  CLAUDE CODE USERS: BINARY INSTALLED");
+    });
+
+    test("--minimal prints no agent sections at all, detected or not", () => {
+      const { code, out } = runSummaryInstall(["pi", "gemini", "codex", "kiro"], ["--minimal"]);
+      expect(code).toBe(0);
+      expect(out).toContain("Minimal install complete");
+      expect(out).not.toContain(" USERS");
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
 // M7: the Windows installers' bundle extraction, exercised under PowerShell
 // against the captured REAL attestations response (scripts/fixtures/). The
 // scanner must emit each attestations[].bundle as a byte-exact substring of
@@ -2619,6 +2722,121 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
       expect(out).toContain("network or git error");
       expect(out).not.toContain("falling back to a plain shallow clone");
       expect(code).toBe(1);
+    }, PWSH_SCANNER_TIMEOUT_MS);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Closing summary on Windows: install.ps1 prints PI USERS / KIRO CLI USERS
+// only for a detected agent (install.ps1 has no Gemini or Codex closing
+// section), and install.cmd prints KIRO CLI USERS only when KIRO_AVAILABLE.
+// The ps1 region is driven under pwsh when available; both are source-scanned.
+// ---------------------------------------------------------------------------
+
+function extractPs1ClosingSummaryRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf('Write-Host "  OPENCODE USERS"');
+  const end = ps.indexOf("# Warn if plannotator is configured in both settings.json hooks");
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the closing summary region in install.ps1");
+  }
+  return ps.slice(start, end);
+}
+
+describe("closing summary sections are gated on detection (Windows installers)", () => {
+  test("install.ps1 gates PI USERS on the Pi detection leg and KIRO CLI USERS on $kiroAvailable", () => {
+    const region = extractPs1ClosingSummaryRegion();
+    const piGate = region.indexOf("if ($piDetected) {");
+    const kiroGate = region.indexOf("if ($kiroAvailable) {");
+    expect(region).toContain("$piDetected = [bool](Get-Command pi -ErrorAction SilentlyContinue)");
+    expect(piGate).toBeGreaterThan(0);
+    expect(kiroGate).toBeGreaterThan(piGate);
+    // Each header sits inside its gate, not before it.
+    expect(region.indexOf('Write-Host "  PI USERS"')).toBeGreaterThan(piGate);
+    expect(region.indexOf('Write-Host "  KIRO CLI USERS"')).toBeGreaterThan(kiroGate);
+    expect(region).not.toContain("Kiro was not detected");
+    // The Claude Code block stays universal.
+    expect(region).toContain('Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"');
+  });
+
+  test("install.cmd prints the KIRO CLI USERS header only inside the KIRO_AVAILABLE gate", () => {
+    const script = readScript("install.cmd");
+    const header = script.indexOf("echo   KIRO CLI USERS");
+    const gate = script.lastIndexOf('if "!KIRO_AVAILABLE!"=="1" (', header);
+    expect(header).toBeGreaterThan(0);
+    expect(gate).toBeGreaterThan(0);
+    // Nothing but the separator lines between the gate and the header.
+    expect(script.slice(gate, header)).toBe(
+      'if "!KIRO_AVAILABLE!"=="1" (\n    echo.\n    echo ==========================================\n    ',
+    );
+    expect(script).not.toContain("Kiro was not detected");
+  });
+});
+
+function runPs1ClosingSummary(opts: { pi: boolean; kiro: boolean; skipKiro?: boolean; skipSkills?: boolean }) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps1-summary-test-"));
+  const home = join(root, "home");
+  const stub = join(root, "stub-bin");
+  mkdirSync(home, { recursive: true });
+  mkdirSync(stub, { recursive: true });
+  if (opts.pi) writeFileSync(join(stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  const driver = [
+    `$ErrorActionPreference = "Stop"`,
+    `$skipOpencodeResolved = $false`,
+    `$skipSkillsResolved = $${opts.skipSkills ? "true" : "false"}`,
+    `$skipSkillsSource = "-SkipSkills"`,
+    `$kiroAvailable = $${opts.kiro ? "true" : "false"}`,
+    `$skipKiroResolved = $${opts.skipKiro ? "true" : "false"}`,
+    `$skipKiroSource = "-SkipKiro"`,
+    `$extrasChoice = "no"`,
+    `Write-Host ""`,
+    `Write-Host "=========================================="`,
+    extractPs1ClosingSummaryRegion(),
+    `exit 0`,
+  ].join("\n");
+  const driverPath = join(root, "driver.ps1");
+  writeFileSync(driverPath, driver);
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: { PATH: `${stub}:/usr/bin:/bin`, HOME: home, USERPROFILE: home, TMPDIR: root },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "install.ps1 closing summary under PowerShell",
+  () => {
+    test("nothing detected: no PI or KIRO section, universal sections intact", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: false });
+      expect(code).toBe(0);
+      expect(out).not.toContain("PI USERS");
+      expect(out).not.toContain("KIRO CLI USERS");
+      expect(out).not.toContain("was not detected");
+      expect(out).toContain("OPENCODE USERS");
+      expect(out).toContain("CLAUDE CODE USERS: YOU ARE ALL SET!");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("pi and kiro detected: both sections print", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: true, kiro: true });
+      expect(code).toBe(0);
+      expect(out).toContain("  PI USERS");
+      expect(out).toContain("  KIRO CLI USERS");
+      expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("detected-but-skipped Kiro keeps its honest skipped section", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: true, skipKiro: true });
+      expect(code).toBe(0);
+      expect(out).toContain("Kiro was detected, but the integration was skipped (-SkipKiro).");
+      expect(out).not.toContain("PI USERS");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("-SkipSkills with Kiro detected reports the skills skip", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: true, skipSkills: true });
+      expect(code).toBe(0);
+      expect(out).toContain("Kiro was detected, but skills were skipped (-SkipSkills)");
+      expect(out).toContain("CLAUDE CODE USERS: BINARY INSTALLED");
     }, PWSH_SCANNER_TIMEOUT_MS);
   },
 );

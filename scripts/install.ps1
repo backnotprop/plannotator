@@ -1466,32 +1466,42 @@ if ($skipOpencodeResolved) {
     Write-Host ""
     Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 }
-Write-Host ""
-Write-Host "=========================================="
-Write-Host "  PI USERS"
-Write-Host "=========================================="
-Write-Host ""
-Write-Host "Install or update the extension:"
-Write-Host ""
-Write-Host "  pi install npm:@plannotator/pi-extension"
-Write-Host ""
-Write-Host "=========================================="
-Write-Host "  KIRO CLI USERS"
-Write-Host "=========================================="
-Write-Host ""
-if ($kiroAvailable -and $skipKiroResolved) {
-    Write-Host "Kiro was detected, but the integration was skipped ($skipKiroSource)."
-    Write-Host "No files under $env:USERPROFILE\.kiro were written or removed. Re-run"
-    Write-Host "without the opt-out to add Kiro skills."
-} elseif ($kiroAvailable -and $skipSkillsResolved) {
-    Write-Host "Kiro was detected, but skills were skipped ($skipSkillsSource), so no"
-    Write-Host "Kiro skills or agent were installed. Re-run without the opt-out to add them."
-} elseif ($kiroAvailable) {
-    Write-Host "Kiro skills are installed to $env:USERPROFILE\.kiro\skills\"
-    Write-Host "The Plannotator agent is installed to $env:USERPROFILE\.kiro\agents\plannotator.json"
-    Write-Host "Launch it: kiro-cli chat --agent plannotator"
-} else {
-    Write-Host "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
+# Agent-specific closing sections print only for agents this run detected,
+# reusing the detection the integration steps above already ran (Pi: `pi` on
+# PATH, as Update-PiExtensionIfPresent checks; Kiro: $kiroAvailable). A
+# detected-but-skipped agent keeps its honest "detected, skipped" section.
+# OpenCode has no detection leg and its command stubs are written for everyone,
+# so its section stays universal, as does the Claude Code block. Output only:
+# nothing here decides what installs.
+$piDetected = [bool](Get-Command pi -ErrorAction SilentlyContinue)
+if ($piDetected) {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  PI USERS"
+    Write-Host "=========================================="
+    Write-Host ""
+    Write-Host "Install or update the extension:"
+    Write-Host ""
+    Write-Host "  pi install npm:@plannotator/pi-extension"
+}
+if ($kiroAvailable) {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  KIRO CLI USERS"
+    Write-Host "=========================================="
+    Write-Host ""
+    if ($skipKiroResolved) {
+        Write-Host "Kiro was detected, but the integration was skipped ($skipKiroSource)."
+        Write-Host "No files under $env:USERPROFILE\.kiro were written or removed. Re-run"
+        Write-Host "without the opt-out to add Kiro skills."
+    } elseif ($skipSkillsResolved) {
+        Write-Host "Kiro was detected, but skills were skipped ($skipSkillsSource), so no"
+        Write-Host "Kiro skills or agent were installed. Re-run without the opt-out to add them."
+    } else {
+        Write-Host "Kiro skills are installed to $env:USERPROFILE\.kiro\skills\"
+        Write-Host "The Plannotator agent is installed to $env:USERPROFILE\.kiro\agents\plannotator.json"
+        Write-Host "Launch it: kiro-cli chat --agent plannotator"
+    }
 }
 Write-Host ""
 Write-Host "=========================================="

@@ -2002,82 +2002,93 @@ else
     echo ""
     echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 fi
-echo ""
-echo "=========================================="
-echo "  PI USERS"
-echo "=========================================="
-echo ""
-echo "Install or update the extension:"
-echo ""
-echo "  pi install npm:@plannotator/pi-extension"
-echo ""
-echo "=========================================="
-echo "  GEMINI CLI USERS"
-echo "=========================================="
-echo ""
-if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 1 ]; then
-    echo "Gemini was detected, but the integration was skipped (${skip_gemini_source})."
-    echo "No files under ~/.gemini were written or removed. Re-run without the"
-    echo "opt-out to configure plan mode."
-elif [ -d "$HOME/.gemini" ]; then
-    echo "Enable plan mode in Gemini settings, then run:"
-    echo ""
-    echo "  gemini"
-    echo "  /plan"
-    echo ""
-    echo "Plans will open in your browser for review."
-    echo "If settings.json was not auto-configured, see:"
-    echo "  ~/.gemini/settings.json (add BeforeTool hook)"
-else
-    echo "Gemini was not detected. After installing the Gemini CLI, rerun this"
-    echo "installer to configure plan mode."
+# Agent-specific closing sections print only for agents this run detected,
+# reusing the detection each integration block above already ran (Pi: `pi` on
+# PATH, as update_pi_extension_if_present checks; Gemini: ~/.gemini; Codex:
+# codex_available; Kiro: kiro_available). A detected-but-skipped agent keeps its
+# honest "detected, skipped" section. OpenCode has no detection leg and its
+# command stubs are written for everyone, so its section stays universal, as
+# does the Claude Code block. Output only: nothing here decides what installs.
+pi_detected=0
+if command -v pi >/dev/null 2>&1; then
+    pi_detected=1
 fi
-echo ""
-echo "=========================================="
-echo "  CODEX USERS"
-echo "=========================================="
-echo ""
-if [ "$codex_available" -eq 1 ] && [ "$skip_codex" -eq 1 ]; then
-    echo "Codex was detected, but the integration was skipped (${skip_codex_source})."
-    echo "No files under ${CODEX_DIR} were written or removed. The shared agent"
-    echo "skills in ~/.agents/skills serve multiple agents and are still installed."
-    echo "Re-run without the opt-out to add the Stop hook."
-elif [ "$codex_available" -eq 1 ]; then
-    echo "Restart Codex Desktop or CLI after installing."
-    echo "Plan review is configured through the Codex Stop hook."
+if [ "$pi_detected" -eq 1 ]; then
     echo ""
-    if [ "$skip_skills" -eq 1 ]; then
-        echo "Skills were skipped (${skip_skills_source}), so no core skills were"
-        echo "installed to ~/.agents/skills/. The Stop hook works without them;"
-        echo "re-run without the opt-out to add \$plannotator-review and friends."
+    echo "=========================================="
+    echo "  PI USERS"
+    echo "=========================================="
+    echo ""
+    echo "Install or update the extension:"
+    echo ""
+    echo "  pi install npm:@plannotator/pi-extension"
+fi
+if [ -d "$HOME/.gemini" ]; then
+    echo ""
+    echo "=========================================="
+    echo "  GEMINI CLI USERS"
+    echo "=========================================="
+    echo ""
+    if [ "$skip_gemini" -eq 1 ]; then
+        echo "Gemini was detected, but the integration was skipped (${skip_gemini_source})."
+        echo "No files under ~/.gemini were written or removed. Re-run without the"
+        echo "opt-out to configure plan mode."
     else
-        echo "Core skills are installed to ~/.agents/skills/:"
-        echo "  \$plannotator-review"
-        echo "  \$plannotator-annotate <file|url|folder>"
-        echo "  \$plannotator-last"
+        echo "Enable plan mode in Gemini settings, then run:"
+        echo ""
+        echo "  gemini"
+        echo "  /plan"
+        echo ""
+        echo "Plans will open in your browser for review."
+        echo "If settings.json was not auto-configured, see:"
+        echo "  ~/.gemini/settings.json (add BeforeTool hook)"
     fi
-else
-    echo "Codex was not detected. After installing Codex, rerun this installer to add"
-    echo "the Stop hook."
 fi
-echo ""
-echo "=========================================="
-echo "  KIRO CLI USERS"
-echo "=========================================="
-echo ""
-if [ "$kiro_available" -eq 1 ] && [ "$skip_kiro" -eq 1 ]; then
-    echo "Kiro was detected, but the integration was skipped (${skip_kiro_source})."
-    echo "No files under ~/.kiro were written or removed. Re-run without the"
-    echo "opt-out to add Kiro skills."
-elif [ "$kiro_available" -eq 1 ] && [ "$skip_skills" -eq 1 ]; then
-    echo "Kiro was detected, but skills were skipped (${skip_skills_source}), so no"
-    echo "Kiro skills or agent were installed. Re-run without the opt-out to add them."
-elif [ "$kiro_available" -eq 1 ]; then
-    echo "Kiro skills are installed to ~/.kiro/skills/"
-    echo "The Plannotator agent is installed to ~/.kiro/agents/plannotator.json"
-    echo "Launch it: kiro-cli chat --agent plannotator"
-else
-    echo "Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills."
+if [ "$codex_available" -eq 1 ]; then
+    echo ""
+    echo "=========================================="
+    echo "  CODEX USERS"
+    echo "=========================================="
+    echo ""
+    if [ "$skip_codex" -eq 1 ]; then
+        echo "Codex was detected, but the integration was skipped (${skip_codex_source})."
+        echo "No files under ${CODEX_DIR} were written or removed. The shared agent"
+        echo "skills in ~/.agents/skills serve multiple agents and are still installed."
+        echo "Re-run without the opt-out to add the Stop hook."
+    else
+        echo "Restart Codex Desktop or CLI after installing."
+        echo "Plan review is configured through the Codex Stop hook."
+        echo ""
+        if [ "$skip_skills" -eq 1 ]; then
+            echo "Skills were skipped (${skip_skills_source}), so no core skills were"
+            echo "installed to ~/.agents/skills/. The Stop hook works without them;"
+            echo "re-run without the opt-out to add \$plannotator-review and friends."
+        else
+            echo "Core skills are installed to ~/.agents/skills/:"
+            echo "  \$plannotator-review"
+            echo "  \$plannotator-annotate <file|url|folder>"
+            echo "  \$plannotator-last"
+        fi
+    fi
+fi
+if [ "$kiro_available" -eq 1 ]; then
+    echo ""
+    echo "=========================================="
+    echo "  KIRO CLI USERS"
+    echo "=========================================="
+    echo ""
+    if [ "$skip_kiro" -eq 1 ]; then
+        echo "Kiro was detected, but the integration was skipped (${skip_kiro_source})."
+        echo "No files under ~/.kiro were written or removed. Re-run without the"
+        echo "opt-out to add Kiro skills."
+    elif [ "$skip_skills" -eq 1 ]; then
+        echo "Kiro was detected, but skills were skipped (${skip_skills_source}), so no"
+        echo "Kiro skills or agent were installed. Re-run without the opt-out to add them."
+    else
+        echo "Kiro skills are installed to ~/.kiro/skills/"
+        echo "The Plannotator agent is installed to ~/.kiro/agents/plannotator.json"
+        echo "Launch it: kiro-cli chat --agent plannotator"
+    fi
 fi
 echo ""
 echo "=========================================="

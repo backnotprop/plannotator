@@ -1482,12 +1482,16 @@ if "!SKIP_OPENCODE!"=="1" (
     echo Re-run without the opt-out to install the command stubs.
 )
 
-echo.
-echo ==========================================
-echo   KIRO CLI USERS
-echo ==========================================
-echo.
+REM The KIRO CLI USERS section prints only when this run detected Kiro
+REM (KIRO_AVAILABLE, computed above); a detected-but-skipped Kiro keeps its
+REM honest "detected, skipped" lines. Output only: nothing here decides what
+REM installs.
 if "!KIRO_AVAILABLE!"=="1" (
+    echo.
+    echo ==========================================
+    echo   KIRO CLI USERS
+    echo ==========================================
+    echo.
     if "!SKIP_KIRO!"=="1" (
         echo Kiro was detected, but the integration was skipped ^(!SKIP_KIRO_SOURCE!^).
         echo No files under %USERPROFILE%\.kiro were written or removed. Re-run
@@ -1500,8 +1504,6 @@ if "!KIRO_AVAILABLE!"=="1" (
         echo The Plannotator agent is installed to %USERPROFILE%\.kiro\agents\plannotator.json
         echo Launch it: kiro-cli chat --agent plannotator
     )
-) else (
-    echo Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills.
 )
 
 echo.
