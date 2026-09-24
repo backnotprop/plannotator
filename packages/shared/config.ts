@@ -46,7 +46,8 @@ export type PromptRuntime =
   | "pi"
   | "codex"
   | "gemini-cli"
-  | "oh-my-pi";
+  | "oh-my-pi"
+  | "mistral-vibe";
 
 interface PromptSectionConfig {
   [key: string]: string | Partial<Record<PromptRuntime, PromptSectionOverrides>> | undefined;
@@ -155,15 +156,17 @@ export interface PlannotatorConfig {
    * honestly ("detected, skipped"), and never removes an integration a
    * previous install already wired. Overridden by the
    * PLANNOTATOR_SKIP_CODEX_INSTALL / PLANNOTATOR_SKIP_GEMINI_INSTALL /
-   * PLANNOTATOR_SKIP_KIRO_INSTALL / PLANNOTATOR_SKIP_OPENCODE_INSTALL env
-   * vars, which are in turn overridden by the --skip-codex / --skip-gemini /
-   * --skip-kiro / --skip-opencode flags. OpenCode has no detection leg, so
-   * its entry is a plain do-not-write switch. Default: all off.
+   * PLANNOTATOR_SKIP_KIRO_INSTALL / PLANNOTATOR_SKIP_VIBE_INSTALL /
+   * PLANNOTATOR_SKIP_OPENCODE_INSTALL env vars, which are in turn overridden
+   * by the --skip-codex / --skip-gemini / --skip-kiro / --skip-vibe /
+   * --skip-opencode flags. OpenCode has no detection leg, so its entry is a
+   * plain do-not-write switch. Default: all off.
    */
   skipInstall?: {
     codex?: boolean;
     gemini?: boolean;
     kiro?: boolean;
+    vibe?: boolean;
     opencode?: boolean;
   };
   /**

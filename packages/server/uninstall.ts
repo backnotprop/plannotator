@@ -75,6 +75,16 @@ const KIRO_SKILLS = [
   "plannotator-archive",
 ] as const;
 
+// Installed by scripts/install.sh to $VIBE_HOME/skills (same names as the
+// core skills plus the knowledge skill; the dirs are installer-created, so
+// removing them by name cannot touch a user's own skill).
+const VIBE_SKILLS = [
+  "plannotator-review",
+  "plannotator-annotate",
+  "plannotator-last",
+  "plannotator",
+] as const;
+
 const STALE_CODEX_SKILLS = [
   ...CORE_SKILLS,
   "plannotator-compound",
@@ -467,6 +477,7 @@ function resolveOwnedPaths(environment: UninstallEnvironment) {
   const codexDir = env.CODEX_HOME || join(homeDir, ".codex");
   const factoryDir = env.FACTORY_CONFIG_DIR || join(homeDir, ".factory");
   const copilotDir = env.COPILOT_HOME || join(homeDir, ".copilot");
+  const vibeDir = env.VIBE_HOME || join(homeDir, ".vibe");
   const xdgConfigDir = env.XDG_CONFIG_HOME || join(homeDir, ".config");
   const xdgCacheDir = env.XDG_CACHE_HOME || join(homeDir, ".cache");
   const configDirs = uniquePaths([
@@ -489,6 +500,7 @@ function resolveOwnedPaths(environment: UninstallEnvironment) {
     codexDir,
     factoryDir,
     copilotDir,
+    vibeDir,
     configDirs,
     xdgCacheDir,
     windowsInstallDir,
@@ -660,6 +672,8 @@ function removeHostConfigEntries(
     state,
   );
 
+  cleanupVibeHooks(join(paths.vibeDir, "hooks.toml"), request, state);
+
   for (const configDir of paths.configDirs) {
     for (const name of ["opencode.json", "opencode.jsonc"]) {
       cleanupOpenCodeConfig(
@@ -719,6 +733,14 @@ function removeInstalledFiles(
   for (const skill of KIRO_SKILLS) {
     removePath(
       join(environment.homeDir, ".kiro", "skills", skill),
+      request,
+      state,
+    );
+  }
+
+  for (const skill of VIBE_SKILLS) {
+    removePath(
+      join(paths.vibeDir, "skills", skill),
       request,
       state,
     );
@@ -1229,6 +1251,95 @@ function cleanupCodexConfig(
 
   if (!isInstallerTemplate) return;
   removePath(filePath, request, state, recovery);
+}
+
+const VIBE_MANAGED_START = "# >>> plannotator-managed-vibe-hooks";
+const VIBE_MANAGED_END = "# <<< plannotator-managed-vibe-hooks";
+
+/**
+ * Strip the installer's managed hook block from $VIBE_HOME/hooks.toml.
+ *
+ * The block is delimited by the plannotator-managed-vibe-hooks markers; only
+ * lines between them (markers included) are ours, so everything else stays.
+ * When nothing recognizable remains, the file is deleted; when a managed
+ * start marker exists with no end marker, the whole tail from the marker is
+ * treated as ours (the installer always writes both markers, so this is
+ * corrupt-input handling) and the file is kept only if content survives.
+ */
+function cleanupVibeHooks(
+  filePath: string,
+  request: UninstallRequest,
+  state: MutableUninstallResult,
+): void {
+  if (!existsSync(filePath)) return;
+  const recovery = {
+    manualCleanup: `Make ${filePath} readable and writable. Remove the lines between and including the "${VIBE_MANAGED_START}" and "${VIBE_MANAGED_END}" markers; keep every other hook. Delete the file only if nothing remains.`,
+  };
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch (error) {
+    reportHostCleanupFailure(
+      `Could not inspect ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
+    return;
+  }
+
+  const lines = content.split(/\r?\n/);
+  const nextLines: string[] = [];
+  let skipping = false;
+  let sawStart = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!skipping && trimmed.startsWith(VIBE_MANAGED_START)) {
+      skipping = true;
+      sawStart = true;
+      continue;
+    }
+    if (skipping) {
+      if (trimmed.startsWith(VIBE_MANAGED_END)) {
+        skipping = false;
+      }
+      continue;
+    }
+    nextLines.push(line);
+  }
+
+  if (!sawStart) return;
+
+  const remaining = nextLines.filter((line) => line.trim().length > 0);
+  if (remaining.length === 0) {
+    removePath(filePath, request, state, recovery);
+    return;
+  }
+
+  const label = "Plannotator Vibe plan-review hook";
+  if (request.dryRun) {
+    state.planned.push(`${label} in ${filePath}`);
+    return;
+  }
+
+  const lineEnding = content.includes("\r\n") ? "\r\n" : "\n";
+  try {
+    writeFileSync(
+      filePath,
+      nextLines.join(lineEnding).replace(/\s+$/, lineEnding),
+      "utf8",
+    );
+    state.removed.push(`${label} in ${filePath}`);
+  } catch (error) {
+    reportHostCleanupFailure(
+      `Could not rewrite ${filePath}`,
+      formatError(error),
+      recovery,
+      request,
+      state,
+    );
+  }
 }
 
 function cleanupGeminiSettings(

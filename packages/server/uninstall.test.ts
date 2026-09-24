@@ -309,6 +309,38 @@ describe("default uninstall", () => {
     writeText(
       join(homeDir, ".kiro", "skills", "plannotator-setup-goal", "SKILL.md"),
     );
+
+    // Vibe: a hooks.toml holding both a user hook and the installer's
+    // managed block, plus installed skills. The managed block must be
+    // stripped and the user hook preserved.
+    const vibeHooks = join(homeDir, ".vibe", "hooks.toml");
+    writeText(
+      vibeHooks,
+      [
+        '[[hooks]]',
+        'name = "my-own-hook"',
+        'type = "pre_tool"',
+        'match = "write_file"',
+        'command = "/usr/local/bin/notify"',
+        "",
+        "# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>",
+        "[[hooks]]",
+        'name = "plannotator-exit-plan-mode"',
+        'type = "pre_tool"',
+        'match = "exit_plan_mode"',
+        `command = "${join(homeDir, ".local", "bin", "plannotator")}"`,
+        "timeout = 345600",
+        'description = "Plannotator plan review (managed)"',
+        "# <<< plannotator-managed-vibe-hooks <<<",
+      ].join("\n"),
+    );
+    writeText(
+      join(homeDir, ".vibe", "skills", "plannotator-review", "SKILL.md"),
+    );
+    writeText(
+      join(homeDir, ".vibe", "skills", "my-custom-skill", "SKILL.md"),
+      "user's own",
+    );
     const openCodePackageCache = join(
       homeDir,
       ".cache",
@@ -477,6 +509,12 @@ describe("default uninstall", () => {
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-compound"))).toBe(true);
     expect(existsSync(join(homeDir, ".agents", "skills", "plannotator-archive"))).toBe(false);
     expect(existsSync(join(homeDir, ".kiro", "skills", "plannotator-setup-goal"))).toBe(false);
+    expect(existsSync(join(homeDir, ".vibe", "skills", "plannotator-review"))).toBe(false);
+    expect(existsSync(join(homeDir, ".vibe", "skills", "my-custom-skill"))).toBe(true);
+    const vibeHooksAfter = readFileSync(vibeHooks, "utf8");
+    expect(vibeHooksAfter).toContain("my-own-hook");
+    expect(vibeHooksAfter).not.toContain("plannotator-managed-vibe-hooks");
+    expect(vibeHooksAfter).not.toContain("exit_plan_mode");
     expect(existsSync(customStaleLayoutEntry)).toBe(true);
     expect(existsSync(openCodePackageCache)).toBe(false);
     expect(existsSync(unrelatedScopedCache)).toBe(true);
@@ -621,6 +659,26 @@ describe("default uninstall", () => {
     writeJson(join(fixture.homeDir, ".claude", "settings.json"), {
       enabledPlugins: { "plannotator@plannotator": true },
     });
+    // Vibe: a user hook beside the managed block, so the real run would
+    // REWRITE the file rather than delete it (the dry-run must not).
+    const vibeHooks = join(fixture.homeDir, ".vibe", "hooks.toml");
+    writeText(
+      vibeHooks,
+      [
+        "[[hooks]]",
+        'name = "my-own-hook"',
+        'type = "pre_tool"',
+        'match = "write_file"',
+        'command = "/usr/local/bin/notify"',
+        "",
+        "# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>",
+        "[[hooks]]",
+        'name = "plannotator-exit-plan-mode"',
+        `command = "${binary}"`,
+        "# <<< plannotator-managed-vibe-hooks <<<",
+        "",
+      ].join("\n"),
+    );
     const before = snapshotTree(fixture.root);
 
     const result = await runPlannotatorUninstall(
@@ -636,9 +694,44 @@ describe("default uninstall", () => {
     expect(result.planned).toContain(
       "Claude Code plugin plannotator@plannotator",
     );
+    expect(result.planned).toContain(
+      `Plannotator Vibe plan-review hook in ${vibeHooks}`,
+    );
     expect(existsSync(binary)).toBe(true);
     expect(fixture.commandCalls).toEqual([]);
     expect(snapshotTree(fixture.root)).toEqual(before);
+  });
+
+  test("strips the managed Vibe block, reports it, and keeps CRLF line endings", async () => {
+    const fixture = createFixture();
+    const vibeHooks = join(fixture.homeDir, ".vibe", "hooks.toml");
+    writeText(
+      vibeHooks,
+      [
+        "[[hooks]]",
+        'name = "my-own-hook"',
+        'command = "/usr/local/bin/notify"',
+        "",
+        "# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>",
+        "[[hooks]]",
+        'name = "plannotator-exit-plan-mode"',
+        "# <<< plannotator-managed-vibe-hooks <<<",
+        "",
+      ].join("\r\n"),
+    );
+
+    const result = await runPlannotatorUninstall(
+      { purge: false, dryRun: false },
+      fixture.environment,
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.removed).toContain(
+      `Plannotator Vibe plan-review hook in ${vibeHooks}`,
+    );
+    expect(readFileSync(vibeHooks, "utf8")).toBe(
+      '[[hooks]]\r\nname = "my-own-hook"\r\ncommand = "/usr/local/bin/notify"\r\n',
+    );
   });
 
   test("removes OpenCode from JSONC while preserving comments and unrelated plugins", async () => {
