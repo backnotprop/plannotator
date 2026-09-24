@@ -9,6 +9,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { spawn, execFileSync, execFile, type ChildProcess } from "node:child_process";
+import { resolve as resolvePath } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -64,7 +65,9 @@ const SERVER_BUILT_PROVIDERS: ReadonlySet<string> = new Set([
 export function whichCmd(cmd: string): boolean {
 	try {
 		const bin = process.platform === "win32" ? "where" : "which";
-		execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+		// Pass the live env explicitly: under Bun, execFileSync without `env` looks
+		// the binary up on the STARTUP PATH, not the current process.env.PATH.
+		execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], env: process.env });
 		return true;
 	} catch {
 		return false;
@@ -275,6 +278,12 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 				],
 				env: {
 					...process.env,
+					// PWD must name the spawn cwd, not the server's own directory (#1609):
+					// OpenCode 1.x resolves its session directory as `process.env.PWD ??
+					// process.cwd()`, so an inherited PWD would silently run the agent in
+					// the server's directory instead of the review's (PR pool checkouts,
+					// worktrees, workspace roots). A shell sets PWD to its cwd; so do we.
+					PWD: resolvePath(spawnCwd),
 					PLANNOTATOR_AGENT_SOURCE: source,
 					PLANNOTATOR_API_URL: getServerUrl(),
 				},

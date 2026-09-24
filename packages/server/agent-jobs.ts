@@ -8,6 +8,7 @@
  * Server-agnostic: takes a mode, server URL getter, and cwd getter.
  */
 
+import { resolve as resolvePath } from "node:path";
 import { formatClaudeLogEvent } from "./claude-review";
 import {
   MARKER_ENGINES,
@@ -301,6 +302,12 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
         stderr: "pipe",
         env: {
           ...process.env,
+          // PWD must name the spawn cwd, not the server's own directory (#1609):
+          // OpenCode 1.x resolves its session directory as `process.env.PWD ??
+          // process.cwd()`, so an inherited PWD would silently run the agent in
+          // the server's directory instead of the review's (PR pool checkouts,
+          // worktrees, workspace roots). A shell sets PWD to its cwd; so do we.
+          PWD: resolvePath(spawnCwd),
           PLANNOTATOR_AGENT_SOURCE: source,
           PLANNOTATOR_API_URL: getServerUrl(),
         },

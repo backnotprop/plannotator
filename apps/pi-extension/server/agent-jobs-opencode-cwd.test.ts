@@ -18,7 +18,7 @@ import { requestUrl } from "./helpers.ts";
 
 describe("pi agent jobs: OpenCode runs in the review's cwd (#1609)", () => {
 	test("the opencode job spawns with the build result's cwd and no --dir", async () => {
-		if (process.platform === "win32") return; // the fake binary is a POSIX shell script
+		if (process.platform === "win32") return; // the fake binary relies on a shebang
 
 		const root = mkdtempSync(join(tmpdir(), "plannotator-pi-opencode-cwd-"));
 		const binDir = join(root, "bin");
@@ -26,13 +26,28 @@ describe("pi agent jobs: OpenCode runs in the review's cwd (#1609)", () => {
 		const serverCwd = join(root, "server-cwd");
 		for (const dir of [binDir, reviewCwd, serverCwd]) mkdirSync(dir);
 		const fake = join(binDir, "opencode");
-		writeFileSync(fake, '#!/bin/sh\necho "CWD:$(pwd -P)"\nfor a in "$@"; do echo "ARG:$a"; done\n');
+		// A bun script, not /bin/sh: a POSIX shell rewrites an inherited PWD that does
+		// not name its real directory, which would hide exactly the leak this guards.
+		writeFileSync(
+			fake,
+			[
+				`#!${process.execPath}`,
+				'console.log("CWD:" + require("node:fs").realpathSync(process.cwd()));',
+				'console.log("PWD:" + process.env.PWD);',
+				'for (const a of process.argv.slice(2)) console.log("ARG:" + a);',
+			].join("\n"),
+		);
 		chmodSync(fake, 0o755);
 
 		const realPath = process.env.PATH;
+
+		const realPwd = process.env.PWD;
 		// Capability detection (`which opencode`) runs when the handler is
 		// created, so PATH must already carry the fake binary.
 		process.env.PATH = `${binDir}:${realPath ?? ""}`;
+		// The server's own PWD deliberately differs from the review cwd: OpenCode 1.x
+		// reads PWD before process.cwd(), so an inherited PWD would win.
+		process.env.PWD = serverCwd;
 		const server = createServer();
 		try {
 			let stdout: string | undefined;
@@ -73,13 +88,16 @@ describe("pi agent jobs: OpenCode runs in the review's cwd (#1609)", () => {
 			await completed;
 			const lines = (stdout ?? "").trim().split("\n");
 			expect(lines[0]).toBe(`CWD:${realpathSync(reviewCwd)}`);
-			const args = lines.slice(1).map((line) => line.replace(/^ARG:/, ""));
+			expect(lines[1]).toBe(`PWD:${reviewCwd}`);
+			const args = lines.slice(2).map((line) => line.replace(/^ARG:/, ""));
 			expect(args[0]).toBe("run");
 			expect(args).not.toContain("--dir");
 			expect(args[args.length - 1]).toBe("review this");
 			handler.killAll();
 		} finally {
 			process.env.PATH = realPath;
+			if (realPwd === undefined) delete process.env.PWD;
+			else process.env.PWD = realPwd;
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			rmSync(root, { recursive: true, force: true });
 		}

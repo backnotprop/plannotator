@@ -186,17 +186,33 @@ describe("POST /api/agents/jobs — OpenCode runs in the review's cwd (#1609)", 
   // prints its physical working directory and argv; the job must run in the
   // review cwd (not the server's) and receive no `--dir`.
   test("the opencode job spawns with the build result's cwd and no --dir", async () => {
+    if (process.platform === "win32") return; // the fake binary relies on a shebang
     const root = mkdtempSync(join(tmpdir(), "plannotator-opencode-cwd-"));
     const binDir = join(root, "bin");
     const reviewCwd = join(root, "review-checkout");
     const serverCwd = join(root, "server-cwd");
     for (const dir of [binDir, reviewCwd, serverCwd]) mkdirSync(dir);
     const fake = join(binDir, "opencode");
-    writeFileSync(fake, '#!/bin/sh\necho "CWD:$(pwd -P)"\nfor a in "$@"; do echo "ARG:$a"; done\n');
+    // A bun script, not /bin/sh: a POSIX shell rewrites an inherited PWD that does
+    // not name its real directory, which would hide exactly the leak this guards.
+    writeFileSync(
+      fake,
+      [
+        `#!${process.execPath}`,
+        'console.log("CWD:" + require("node:fs").realpathSync(process.cwd()));',
+        'console.log("PWD:" + process.env.PWD);',
+        'for (const a of process.argv.slice(2)) console.log("ARG:" + a);',
+      ].join("\n"),
+    );
     chmodSync(fake, 0o755);
 
     const realPath = process.env.PATH;
+
+    const realPwd = process.env.PWD;
     process.env.PATH = `${binDir}:${realPath ?? ""}`;
+    // The server's own PWD deliberately differs from the review cwd: OpenCode 1.x
+    // reads PWD before process.cwd(), so an inherited PWD would win.
+    process.env.PWD = serverCwd;
     try {
       let stdout: string | undefined;
       let done: (() => void) | undefined;
@@ -221,13 +237,16 @@ describe("POST /api/agents/jobs — OpenCode runs in the review's cwd (#1609)", 
       await completed;
       const lines = (stdout ?? "").trim().split("\n");
       expect(lines[0]).toBe(`CWD:${realpathSync(reviewCwd)}`);
-      const args = lines.slice(1).map((line) => line.replace(/^ARG:/, ""));
+      expect(lines[1]).toBe(`PWD:${reviewCwd}`);
+      const args = lines.slice(2).map((line) => line.replace(/^ARG:/, ""));
       expect(args[0]).toBe("run");
       expect(args).not.toContain("--dir");
       expect(args[args.length - 1]).toBe("review this");
       handler.killAll();
     } finally {
       process.env.PATH = realPath;
+      if (realPwd === undefined) delete process.env.PWD;
+      else process.env.PWD = realPwd;
       rmSync(root, { recursive: true, force: true });
     }
   });
