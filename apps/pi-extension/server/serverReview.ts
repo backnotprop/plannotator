@@ -53,10 +53,12 @@ import {
 	type FileBytesRead,
 	getSinceBaseSections,
 	isBinaryPatchFile,
+	commitFamilyId,
 	isSameCwdCommitSwitch,
 	listPatchFiles,
 	STATIC_PATCH_DIFF_TYPE,
 	parseCommitDiffType,
+	parseJjCommitDiffType,
 	parseWorktreeDiffType,
 	resolveBaseBranch,
 	validateFilePath,
@@ -72,9 +74,13 @@ import {
 	getGitButlerContextRevision,
 	getGitButlerPatchFingerprint,
 } from "../generated/gitbutler-core.ts";
+import { canonicalizeJjCommitDiffType } from "../generated/jj-core.ts";
 import {
 	getCommitDiffInfo,
+	getJjCommitDiffInfo,
 	listCommitHistory,
+	listJjCommitHistory,
+	resolveJjCommitRailBase,
 	type CommitDiffInfo,
 } from "../generated/commit-history.ts";
 import {
@@ -207,6 +213,7 @@ import {
 	getVcsDiffFingerprint,
 	getVcsFileContentsForDiff,
 	getVcsFileBytesForDiff,
+	jjRuntime,
 	resolveVcsCwd,
 	resolveAvailableDiffType,
 	reviewRuntime,
@@ -751,9 +758,12 @@ export async function startReviewServer(options: {
 		if (isPRMode || workspace || !options.gitContext) return undefined;
 		const effective = parseWorktreeDiffType(diffType)?.subType ?? diffType;
 		const sha = parseCommitDiffType(effective as string)?.sha;
-		if (!sha) return undefined;
+		const jjCommitId = parseJjCommitDiffType(effective as string)?.commitId;
+		if (!sha && !jjCommitId) return undefined;
 		const cwd = resolveVcsCwd(diffType as DiffType, options.gitContext.cwd);
-		const info = await getCommitDiffInfo(reviewRuntime, sha, cwd);
+		const info = jjCommitId
+			? await getJjCommitDiffInfo(jjRuntime, jjCommitId, cwd)
+			: await getCommitDiffInfo(reviewRuntime, sha!, cwd);
 		if (!info) return undefined;
 		const avatars = await commitAvatars.resolve(cwd, [info.authorEmail]);
 		const avatarUrl = avatars.get(info.authorEmail);
@@ -1486,7 +1496,7 @@ export async function startReviewServer(options: {
 					?? await guideStore.captureLaunchContext();
 				// The review this guide describes, for portable export (decision
 				// record D6). Mirrors packages/server/review.ts.
-				const commitSha = parseCommitDiffType(String(worktreeParts?.subType ?? launchDiffType))?.sha;
+				const commitSha = commitFamilyId(String(launchDiffType)) ?? undefined;
 				const launchSource: GuideSnapshotSource = workspacePrompt
 					? { kind: "workspace", ...(repoInfo?.display && { repo: repoInfo.display }) }
 					: launchPrMeta
@@ -2411,20 +2421,37 @@ export async function startReviewServer(options: {
 			}
 		} else if (url.pathname === "/api/commits" && req.method === "GET") {
 			// Linear commit history for the Commits panel (mirrors Bun review.ts).
-			// Git-local sessions only — PR/workspace/jj/p4 don't offer the view.
-			// Computed against the active diff's cwd (worktree-aware) and the
-			// active base so the divider matches the review baseline.
-			if (!options.gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
-				json(res, { error: "Commit history is only available for local git reviews" }, 400);
+			// Local git and jj sessions only — PR/workspace/GitButler/p4 don't
+			// offer the view. Computed against the active diff's cwd
+			// (worktree-aware) and the active base so the divider matches the
+			// review baseline (jj: the compare target, resolveJjCommitRailBase).
+			const commitsVcs = sessionVcsType ?? "git";
+			if (!options.gitContext || isPRMode || workspace || (commitsVcs !== "git" && commitsVcs !== "jj")) {
+				json(res, { error: "Commit history is only available for local git and jj reviews" }, 400);
 				return;
 			}
 			const limitParam = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
 			const before = url.searchParams.get("before") ?? undefined;
 			const commitsCwd = resolveVcsCwd(currentDiffType as DiffType, options.gitContext.cwd);
-			const page = await listCommitHistory(reviewRuntime, currentBase, commitsCwd, {
+			const pageOptions = {
 				...(Number.isFinite(limitParam) && { limit: limitParam }),
 				...(before !== undefined && { before }),
-			});
+			};
+			let page;
+			try {
+				if (commitsVcs === "jj") {
+					const railBase = resolveJjCommitRailBase(currentBase, clientGitContext ?? options.gitContext);
+					page = await listJjCommitHistory(jjRuntime, railBase.target, commitsCwd, {
+						...pageOptions,
+						baseLabel: railBase.label,
+					});
+				} else {
+					page = await listCommitHistory(reviewRuntime, currentBase, commitsCwd, pageOptions);
+				}
+			} catch (err) {
+				json(res, { error: err instanceof Error ? err.message : "Could not read commit history" }, 500);
+				return;
+			}
 			if (!page) {
 				json(res, { error: "Could not read commit history" }, 500);
 				return;
@@ -2519,6 +2546,11 @@ export async function startReviewServer(options: {
 					? resolveAvailableDiffType(clientGitContext, requestedDiffType, nextBaseExplicitlyChosen)
 					: { diffType: requestedDiffType };
 				newType = availability.diffType;
+				// Mirrors Bun review.ts: a rewritten jj revision resolves to its
+				// change's current version (Refresh after editing `@`).
+				if (sessionVcsType === "jj") {
+					newType = await canonicalizeJjCommitDiffType(jjRuntime, newType as string, options.gitContext?.cwd) as DiffType;
+				}
 				const base = resolveReviewBase(
 					typeof body.base === "string" ? body.base : undefined,
 					nextBaseExplicitlyChosen,

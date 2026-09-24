@@ -9,8 +9,10 @@
 
 import {
   JJ_TRUNK_REVSET,
+  jjCommitRevset,
   jjLineBaseRevset,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseWorktreeDiffType,
   type DiffType,
 } from "./diff-type";
@@ -92,6 +94,17 @@ export function getLocalDiffInstruction(
       // presentation renders a different (often empty) changeset — the agent
       // must inspect exactly what the reviewer is looking at.
       inspect: `This is a historical commit, not the working tree. Run \`git diff ${commitRef.sha}^ ${commitRef.sha}\` — the commit against its first parent — to inspect exactly the changeset under review (do not use \`git show\`; its merge-commit presentation differs). For a root commit with no parent, use \`git show ${commitRef.sha}\` instead.`,
+    };
+  }
+
+  // jj-commit:<commit id> — one jj revision against its FIRST parent, the
+  // same changeset the Commits rail opened.
+  const jjCommit = parseJjCommitDiffType(effectiveDiffType);
+  if (jjCommit) {
+    const revset = jjCommitRevset(jjCommit.commitId);
+    return {
+      target: `the changes introduced by JJ revision ${jjCommit.commitId.slice(0, 12)}`,
+      inspect: `This is a historical revision, not the working copy. Run \`jj diff --git --from ${shellQuote(`first_parent(${revset})`)} --to ${shellQuote(revset)}\` — the revision against its first parent — to inspect exactly the changeset under review (for a merge, \`jj diff -r\` would compare against all parents instead).`,
     };
   }
 

@@ -19,9 +19,12 @@ import {
 import {
   BARE_HEX_SHA_RE,
   JJ_TRUNK_REVSET,
+  commitFamilyId,
+  jjCommitRevset,
   jjCompareTargetRevset,
   jjLineBaseRevset,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseRemoteBookmark,
   parseWorktreeDiffType,
   type DiffType,
@@ -32,9 +35,12 @@ import {
 export {
   BARE_HEX_SHA_RE,
   JJ_TRUNK_REVSET,
+  commitFamilyId,
+  jjCommitRevset,
   jjCompareTargetRevset,
   jjLineBaseRevset,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseRemoteBookmark,
   parseWorktreeDiffType,
 };
@@ -1533,7 +1539,7 @@ export function isSameCwdCommitSwitch(
   nextDiffType: string,
 ): boolean {
   const next = parseWorktreeDiffType(nextDiffType);
-  if (!parseCommitDiffType(next?.subType ?? nextDiffType)) return false;
+  if (!commitFamilyId(nextDiffType)) return false;
   return (next?.path ?? null) === (parseWorktreeDiffType(previousDiffType)?.path ?? null);
 }
 

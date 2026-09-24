@@ -24,6 +24,7 @@ export type DiffType =
   | "merge-base"
   | "all"
   | `commit:${string}`
+  | `jj-commit:${string}`
   | `worktree:${string}`
   | `gitbutler:${string}`
   | "static-patch"
@@ -105,6 +106,37 @@ export function parseCommitDiffType(diffType: string): { sha: string } | null {
   if (!diffType.startsWith("commit:")) return null;
   const sha = diffType.slice("commit:".length);
   return BARE_HEX_SHA_RE.test(sha) ? { sha } : null;
+}
+
+/**
+ * Parse a `jj-commit:<commit id>` diff type — the Jujutsu counterpart of
+ * `commit:<sha>`, opened from the Commits panel in a jj session: one revision
+ * against its first parent. A separate family (not `commit:`) because
+ * providers claim diff types by prefix and the git provider owns `commit:`; a
+ * pure jj repo has no git work tree that provider could run in. Same bare-hex
+ * rule as the git family, and the id only ever reaches jj wrapped in
+ * `commit_id(...)` (jjCommitRevset), so a bookmark whose name happens to be
+ * hex can never shadow the revision.
+ */
+export function parseJjCommitDiffType(diffType: string): { commitId: string } | null {
+  if (!diffType.startsWith("jj-commit:")) return null;
+  const commitId = diffType.slice("jj-commit:".length);
+  return BARE_HEX_SHA_RE.test(commitId) ? { commitId } : null;
+}
+
+/** The revset naming exactly one jj revision by commit id (see parseJjCommitDiffType). */
+export function jjCommitRevset(commitId: string): string {
+  return `commit_id(${commitId})`;
+}
+
+/**
+ * The commit a commit-family diff type (`commit:<sha>` or
+ * `jj-commit:<commit id>`, optionally worktree-composed) shows, else null —
+ * the one place server code asks "is this a single-commit detour?".
+ */
+export function commitFamilyId(diffType: string): string | null {
+  const effective = parseWorktreeDiffType(diffType)?.subType ?? diffType;
+  return parseCommitDiffType(effective)?.sha ?? parseJjCommitDiffType(effective)?.commitId ?? null;
 }
 
 export function parseWorktreeDiffType(

@@ -16,8 +16,10 @@ import { basename } from "node:path";
 import { existsSync } from "node:fs";
 import { SingleFlight } from "@plannotator/shared/single-flight";
 import {
+  commitFamilyId,
   isSameCwdCommitSwitch,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseWorktreeDiffType,
   resolveBaseBranch,
   getSinceBaseSections,
@@ -37,9 +39,14 @@ import {
 } from "@plannotator/shared/gitbutler-core";
 import {
   getCommitDiffInfo,
+  getJjCommitDiffInfo,
   listCommitHistory,
+  listJjCommitHistory,
+  resolveJjCommitRailBase,
   type CommitDiffInfo,
 } from "@plannotator/shared/commit-history";
+import { runtime as jjRuntime } from "./jj";
+import { canonicalizeJjCommitDiffType } from "@plannotator/shared/jj-core";
 import { resolvePoolCwd } from "@plannotator/shared/worktree-pool";
 import {
   REVIEW_IMAGE_ENDPOINT,
@@ -847,9 +854,12 @@ export async function startReviewServer(
     if (isPRMode || workspace || !gitContext) return undefined;
     const effective = parseWorktreeDiffType(diffType)?.subType ?? diffType;
     const sha = parseCommitDiffType(effective as string)?.sha;
-    if (!sha) return undefined;
+    const jjCommitId = parseJjCommitDiffType(effective as string)?.commitId;
+    if (!sha && !jjCommitId) return undefined;
     const cwd = resolveVcsCwd(diffType as DiffType, gitContext.cwd);
-    const info = await getCommitDiffInfo(gitRuntime, sha, cwd);
+    const info = jjCommitId
+      ? await getJjCommitDiffInfo(jjRuntime, jjCommitId, cwd)
+      : await getCommitDiffInfo(gitRuntime, sha!, cwd);
     if (!info) return undefined;
     const avatars = await commitAvatars.resolve(cwd, [info.authorEmail]);
     const avatarUrl = avatars.get(info.authorEmail);
@@ -1466,7 +1476,7 @@ export async function startReviewServer(
         // record D6): captured from the SAME launch-time snapshot as the
         // patch the model is given, never re-read at export time. Repairs
         // reuse the FAILED job's own review, like changedFilesSnapshot.
-        const commitSha = parseCommitDiffType(String(worktreeParts?.subType ?? launchDiffType))?.sha;
+        const commitSha = commitFamilyId(String(launchDiffType)) ?? undefined;
         const launchSource: GuideSnapshotSource = workspacePrompt
           ? { kind: "workspace", ...(repoInfo?.display && { repo: repoInfo.display }) }
           : launchMetadata
@@ -2453,26 +2463,45 @@ export async function startReviewServer(
             }
           }
 
-          // API: Linear commit history for the Commits panel. Git-local
-          // sessions only — PR/workspace/jj/p4 don't offer the view (same
-          // gate the client's commitsCapable applies). Computed against the
-          // same cwd as the active diff so worktree sessions list the
+          // API: Linear commit history for the Commits panel. Local git and
+          // jj sessions only — PR/workspace/GitButler/p4 don't offer the view
+          // (same gate the client's commitsCapable applies). Computed against
+          // the same cwd as the active diff so worktree sessions list the
           // worktree's history, and against the active base so the divider
-          // matches the review baseline.
+          // matches the review baseline (jj: the compare target, see
+          // resolveJjCommitRailBase).
           if (url.pathname === "/api/commits" && req.method === "GET") {
-            if (!gitContext || isPRMode || workspace || (sessionVcsType && sessionVcsType !== "git")) {
+            const commitsVcs = sessionVcsType ?? "git";
+            if (!gitContext || isPRMode || workspace || (commitsVcs !== "git" && commitsVcs !== "jj")) {
               return Response.json(
-                { error: "Commit history is only available for local git reviews" },
+                { error: "Commit history is only available for local git and jj reviews" },
                 { status: 400 },
               );
             }
             const limitParam = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
             const before = url.searchParams.get("before") ?? undefined;
             const commitsCwd = resolveVcsCwd(currentDiffType as DiffType, gitContext.cwd);
-            const page = await listCommitHistory(gitRuntime, currentBase, commitsCwd, {
+            const pageOptions = {
               ...(Number.isFinite(limitParam) && { limit: limitParam }),
               ...(before !== undefined && { before }),
-            });
+            };
+            let page;
+            try {
+              if (commitsVcs === "jj") {
+                const railBase = resolveJjCommitRailBase(currentBase, clientGitContext ?? gitContext);
+                page = await listJjCommitHistory(jjRuntime, railBase.target, commitsCwd, {
+                  ...pageOptions,
+                  baseLabel: railBase.label,
+                });
+              } else {
+                page = await listCommitHistory(gitRuntime, currentBase, commitsCwd, pageOptions);
+              }
+            } catch (err) {
+              return Response.json(
+                { error: err instanceof Error ? err.message : "Could not read commit history" },
+                { status: 500 },
+              );
+            }
             if (!page) {
               return Response.json({ error: "Could not read commit history" }, { status: 500 });
             }
@@ -2586,6 +2615,12 @@ export async function startReviewServer(
                 ? resolveAvailableDiffType(clientGitContext, requestedDiffType, nextBaseExplicitlyChosen)
                 : { diffType: requestedDiffType };
               newDiffType = availability.diffType;
+              // A jj revision rewritten since it was opened (the working copy
+              // on every save) resolves to its change's current version, so
+              // Refresh and rail clicks never serve a frozen snapshot.
+              if (sessionVcsType === "jj") {
+                newDiffType = await canonicalizeJjCommitDiffType(jjRuntime, newDiffType as string, gitContext?.cwd) as DiffType;
+              }
               const base = resolveReviewBase(
                 requestedBase,
                 nextBaseExplicitlyChosen,

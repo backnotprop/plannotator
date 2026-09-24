@@ -32,6 +32,8 @@ describe("buildAgentReviewUserMessage", () => {
       ["jj-last", "jj diff --git -r @-"],
       ["jj-line", "jj diff --git --from 'heads(::@ & ::(trunk()))' --to @"],
       ["jj-all", "jj diff --git --from 'root()' --to @"],
+      // Commits rail: first parent, never `jj diff -r` (all parents on a merge).
+      ["jj-commit:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "jj diff --git --from 'first_parent(commit_id(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa))' --to 'commit_id(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)'"],
     ] as const;
 
     for (const [diffType, command] of cases) {

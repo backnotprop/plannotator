@@ -31,11 +31,13 @@ import {
   gitAddFile,
   gitResetFile,
   isBinaryPatchFile,
+  commitFamilyId,
   isSameCwdCommitSwitch,
   listPatchFiles,
   listRecentCommits,
   MAX_REVIEW_FILE_CONTENT_BYTES,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseWorktreeDiffType,
   prepareGitCommand,
   runGitDiff,
@@ -1740,6 +1742,20 @@ describe("isSameCwdCommitSwitch", () => {
     expect(
       isSameCwdCommitSwitch("worktree:/tmp/a:commit:abc1234", "worktree:/tmp/b:commit:abc1234"),
     ).toBe(false);
+  });
+});
+
+describe("jj-commit family", () => {
+  test("parses bare hex commit ids only, and reads as a commit detour", () => {
+    expect(parseJjCommitDiffType(`jj-commit:${"a".repeat(40)}`)).toEqual({ commitId: "a".repeat(40) });
+    expect(parseJjCommitDiffType("jj-commit:main")).toBeNull();
+    expect(parseJjCommitDiffType("jj-commit:@-")).toBeNull();
+    expect(parseJjCommitDiffType("commit:abc1234")).toBeNull();
+    expect(commitFamilyId("jj-commit:abc1234")).toBe("abc1234");
+    expect(commitFamilyId("worktree:/tmp/wt:commit:abc1234")).toBe("abc1234");
+    expect(commitFamilyId("jj-current")).toBeNull();
+    // The rail's hot path skips the jj context recompute too.
+    expect(isSameCwdCommitSwitch("jj-current", "jj-commit:abc1234")).toBe(true);
   });
 });
 
