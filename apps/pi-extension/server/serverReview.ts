@@ -1576,8 +1576,8 @@ export async function startReviewServer(options: {
 			// appends the marker-block output contract (even for a custom profile —
 			// it's the only thing that makes their prose output parseable). The
 			// engine's buildArgv passes the prompt as the trailing positional arg and
-			// threads the spawn cwd (--workspace for Cursor, --dir for OpenCode; Pi has
-			// no cwd flag — it always uses the process's actual cwd, which spawnJob
+			// threads the spawn cwd (--workspace for Cursor; OpenCode (#1609) and Pi have
+			// no cwd flag — they use the process's actual cwd, which spawnJob
 			// already sets from this same cwd).
 			// captureStdout is required: the marker block comes back on stdout NDJSON.
 			const markerEngine = MARKER_ENGINES[provider as MarkerEngineId];
