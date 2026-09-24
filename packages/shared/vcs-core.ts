@@ -14,6 +14,7 @@ import {
   getGitDiffFingerprint,
   getGitSnapshotMaterializationPatch,
   gitAddFile,
+  parseJjCommitDiffType,
   gitResetFile,
   parseWorktreeDiffType,
   runGitDiff,
@@ -56,9 +57,11 @@ export type {
 
 export {
   JJ_TRUNK_REVSET,
+  jjCommitRevset,
   jjCompareTargetRevset,
   jjLineBaseRevset,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseRemoteBookmark,
   parseWorktreeDiffType,
   validateFilePath,
@@ -324,7 +327,7 @@ export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGit
     },
 
     ownsDiffType(diffType: string): boolean {
-      return JJ_DIFF_TYPES.has(diffType);
+      return JJ_DIFF_TYPES.has(diffType) || parseJjCommitDiffType(diffType) !== null;
     },
 
     getContext(cwd?: string): Promise<GitContext> {

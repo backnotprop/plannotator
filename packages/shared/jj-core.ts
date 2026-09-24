@@ -12,7 +12,9 @@ import {
   type JjLineBaseResolution,
   type JjRevisionInfo,
   JJ_TRUNK_REVSET,
+  jjCommitRevset,
   jjLineBaseRevset,
+  parseJjCommitDiffType,
   parseRemoteBookmark,
   validateFilePath,
 } from "./review-core";
@@ -137,7 +139,8 @@ export function isJjSnapshotDiffType(diffType: string): boolean {
   return diffType === "jj-current"
     || diffType === "jj-last"
     || diffType === "jj-line"
-    || diffType === "jj-evolog";
+    || diffType === "jj-evolog"
+    || parseJjCommitDiffType(diffType) !== null;
 }
 
 /**
@@ -180,8 +183,12 @@ export function getJjSnapshotRevsets(
       return compareTarget.length > 0
         ? { from: { revset: compareTarget, firstParentSteps: 0 }, to: { revset: "@", firstParentSteps: 0 } }
         : null;
-    default:
-      return null;
+    default: {
+      const commit = parseJjCommitDiffType(diffType);
+      if (!commit) return null;
+      const revset = jjCommitRevset(commit.commitId);
+      return { from: { revset, firstParentSteps: 1 }, to: { revset, firstParentSteps: 0 } };
+    }
   }
 }
 
@@ -234,6 +241,9 @@ export async function runJjDiff(
   cwd?: string,
   options?: GitDiffOptions,
 ): Promise<DiffResult> {
+  const commit = parseJjCommitDiffType(diffType);
+  if (commit) return runJjCommitDiff(runtime, commit.commitId, cwd, options);
+
   let compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
 
   // For evolog diffs, when no explicit base is provided, default to the
@@ -256,6 +266,54 @@ export async function runJjDiff(
 
   const patch = options?.hideWhitespace ? dropHunklessGitDiffChunks(result.stdout) : result.stdout;
   return { patch, label: args.label };
+}
+
+/**
+ * `jj-commit:<commit id>` — one revision against its FIRST parent, the same
+ * shape as git's `commit:<sha>`. Not `jj diff -r`: on a merge that renders the
+ * revision against the auto-merge of all its parents, a different changeset
+ * from the first-parent one the Commits rail walks. A revision whose only
+ * parent is the virtual root diffs against root's empty tree.
+ */
+async function runJjCommitDiff(
+  runtime: ReviewJjRuntime,
+  commitId: string,
+  cwd?: string,
+  options?: GitDiffOptions,
+): Promise<DiffResult> {
+  const revset = jjCommitRevset(commitId);
+  const header = await runtime.runJj([
+    "log",
+    "--no-graph",
+    "-r",
+    revset,
+    "-T",
+    'change_id.short(8) ++ "\t" ++ json(description.first_line()) ++ "\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\n"',
+  ], { cwd });
+  const fields = header.exitCode === 0 ? header.stdout.trim().split("\t") : null;
+  if (!fields || fields.length < 3) {
+    return {
+      patch: "",
+      label: `Commit ${commitId.slice(0, 12)}`,
+      error: firstErrorLine(header.stderr) ?? "Jujutsu could not resolve this revision.",
+    };
+  }
+  const [changeId, subjectField, parentIds] = fields;
+  const subject = parseSerializedJjString(subjectField) ?? "";
+  const label = subject ? `Commit ${changeId} — ${subject}` : `Commit ${changeId}`;
+  const parent = parentIds.split(",").map((id) => id.trim()).find(Boolean);
+  const from = parent && !JJ_ROOT_COMMIT_ID.test(parent) ? jjCommitRevset(parent) : "root()";
+
+  const whitespaceArgs = options?.hideWhitespace ? ["-w"] : [];
+  const result = await runtime.runJj(
+    ["diff", "--git", ...whitespaceArgs, "--from", from, "--to", revset],
+    { cwd },
+  );
+  if (result.exitCode !== 0) {
+    return { patch: "", label, error: firstErrorLine(result.stderr) };
+  }
+  const patch = options?.hideWhitespace ? dropHunklessGitDiffChunks(result.stdout) : result.stdout;
+  return { patch, label };
 }
 
 // --- Diff staleness fingerprint ---------------------------------------------
@@ -306,8 +364,14 @@ export async function getJjDiffFingerprint(
           ? `jj:${diffType}:auto:${evologs[1].commitId}:${current}`
           : null;
       }
-      default:
-        return null;
+      default: {
+        // jj-commit: a revision is immutable content, so the fingerprint only
+        // has to notice the id disappearing (abandoned and garbage-collected).
+        const commit = parseJjCommitDiffType(diffType);
+        if (!commit) return null;
+        const id = await idOf(jjCommitRevset(commit.commitId));
+        return `jj:jj-commit:${commit.commitId}:${id ? "present" : "gone"}`;
+      }
     }
   } catch {
     return null;
@@ -381,8 +445,19 @@ async function resolveJjSideRevs(
     }
     case "jj-all":
       return { cwd: fileCwd, old: null, new: side("@", filePath) };
-    default:
-      return null;
+    default: {
+      const commit = parseJjCommitDiffType(diffType);
+      if (!commit) return null;
+      const revset = jjCommitRevset(commit.commitId);
+      // First parent, matching runJjCommitDiff. The virtual root's empty tree
+      // (a revision with no real parent) reads as an absent old side.
+      const parent = await resolveJjFirstParentCommitId(runtime, revset, fileCwd).catch(() => null);
+      return {
+        cwd: fileCwd,
+        old: parent && !JJ_ROOT_COMMIT_ID.test(parent) ? side(jjCommitRevset(parent), oldFilePath) : null,
+        new: side(revset, filePath),
+      };
+    }
   }
 }
 

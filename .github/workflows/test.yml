@@ -127,6 +127,7 @@ jobs:
           packages/editor/editableDocumentsHook.test.tsx
           packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
           packages/review-editor/App.panelView.test.tsx
+          packages/review-editor/App.commitsJj.test.tsx
           packages/review-editor/components/AnnotationToolbar.placement.test.tsx
           packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
           packages/review-editor/components/FileHeader.edit.test.tsx
