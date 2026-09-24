@@ -54,6 +54,7 @@ pre code.pn-code {
   background: var(--code-bg) !important;
   font-size: 0.8125rem;
   line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 /* The code-file hover preview is not a <pre><code>, so the rule above misses
