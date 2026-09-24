@@ -540,7 +540,13 @@ Annotate renders the same document app as plan review, so its Options menu and
 Settings dialog match plan review item for item; only rows that describe a PLAN
 decision stay plan-only. Settings `mode="annotate"` shows General, Theme,
 Display (width reads "Document Width"), Saving, Labels, Vim, Shortcuts, Files,
-Obsidian, Bear and Octarine. Plan-only, and hidden in annotate: the **Hooks**
+Obsidian, Bear and Octarine — gated on the optional `annotateParity` prop,
+which `AppHeader` passes and a `@plannotator/ui` host that omits it does not
+(hosts keep the pre-parity annotate tab set; see `packages/ui/HANDOFF.md`).
+The notes-app enable switches are the SAME cookies plan review's approve reads
+(`body.obsidian`/`bear`/`octarine`), so enabling one from annotate also makes
+plan review save every approved plan there; the annotate description says so
+explicitly. Plan-only, and hidden in annotate: the **Hooks**
 tab (plan-time hooks; `/api/hooks/status` exists only on the plan server),
 **Save Plans** (decision snapshots in `plans/` are written on approve/deny),
 the three **Auto-save on Plan Arrival** switches (the arrival auto-save effect
@@ -555,12 +561,15 @@ tab stays plan-only too (the annotate server has no `/api/archive/*`).
 plan-mode validator, "document" not "plan", no deny/resubmit loop, and one
 section per surface picked by `resolveAnnotateInstructionsSurface` — its own
 read command (`.plan`; `.rawHtml` for raw HTML; `.targetUrl` for a live app;
-`/api/doc?path=` for a folder) plus the targeting rules the validator actually
+`/api/doc?path=<p>&doc=1 | jq -r '.markdown // .rawHtml'` for a folder, so
+HTML and data files print too) plus the targeting rules the validator actually
 supports: `diagramAnchor` on POST for diagram files, `htmlAnchor` by PATCH
 only (POST drops it), `pageUrl` by PATCH for live-app routes. Folder sessions
 are stated plainly: an external comment cannot target a document; it lists in
 the panel whichever document is open, is not highlighted inline, and rides the
-submitted feedback. `packages/server/annotate-agent-instructions.test.ts`
+submitted feedback. Not done yet: POST accepting `htmlAnchor`, and a `path`
+field so a folder-session external comment targets one document.
+`packages/server/annotate-agent-instructions.test.ts`
 executes every curl/JSON example in the text against a real annotate server,
 so an instruction that drifts from the server fails there.
 

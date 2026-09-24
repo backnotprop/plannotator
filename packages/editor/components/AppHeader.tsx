@@ -465,6 +465,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             onIdentityChange={onIdentityChange}
             origin={origin}
             mode={annotateMode ? 'annotate' : 'plan'}
+            annotateParity
             onUIPreferencesChange={onUIPreferencesChange}
             externalOpen={mobileSettingsOpen}
             onExternalClose={onCloseSettings}

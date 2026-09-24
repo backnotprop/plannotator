@@ -43,7 +43,18 @@ interface CurlCall {
   method: string;
   url: string;
   body?: string;
-  jqField?: string;
+  /** Fields of a `jq -r .a` or `jq -r '.a // .b'` filter, in fallback order. */
+  jqFields?: string[];
+}
+
+/** What the agent's `jq -r` filter prints for a response: the first
+ *  non-null field of the `//` chain, or "null" like jq itself. */
+function jqOutput(call: CurlCall, json: any): string {
+  for (const field of call.jqFields ?? []) {
+    const value = json?.[field];
+    if (value !== null && value !== undefined) return String(value);
+  }
+  return "null";
 }
 
 /** Every `curl` command in the text, parsed the way a shell would see it
@@ -55,8 +66,11 @@ function curlCalls(text: string): CurlCall[] {
     const method = /-X (\w+)/.exec(chunk)?.[1];
     const url = /(?:^curl -s (?:-X \w+ )?)"?(http[^\s"']+)"?/.exec(chunk)?.[1] ?? "";
     const body = /-d '([\s\S]*?)'/.exec(chunk)?.[1];
-    const jqField = /\| jq -r \.(\w+)/.exec(chunk.split("\n")[0])?.[1];
-    return { method: method ?? (body ? "POST" : "GET"), url, body, jqField };
+    const filter = /\| jq -r (?:'([^']+)'|(\.\w+))/.exec(chunk.split("\n")[0]);
+    const jqFields = filter
+      ? (filter[1] ?? filter[2]).split("//").map((part) => part.trim().replace(/^\./, ""))
+      : undefined;
+    return { method: method ?? (body ? "POST" : "GET"), url, body, jqFields };
   });
 }
 
@@ -102,8 +116,8 @@ describe("annotate agent instructions, executed against a live annotate server",
     const server = await startAnnotateServer({ markdown: "# Notes\n\nadoption doubled last year\n", filePath: file, htmlContent: SHELL });
     try {
       const { results } = await runInstructions(server.url, "markdown");
-      const read = results.find((r) => r.call.jqField);
-      expect(read?.json[read.call.jqField!]).toContain("adoption doubled last year");
+      const read = results.find((r) => r.call.jqFields);
+      expect(jqOutput(read!.call, read!.json)).toContain("adoption doubled last year");
       for (const r of results) expect(r.status).toBeLessThan(300);
       const list = await (await fetch(`${server.url}/api/external-annotations`)).json();
       expect(list.annotations.map((a: any) => a.type).sort()).toEqual(["COMMENT", "GLOBAL_COMMENT"]);
@@ -119,8 +133,8 @@ describe("annotate agent instructions, executed against a live annotate server",
     const server = await startAnnotateServer({ markdown: "", filePath: file, htmlContent: SHELL, rawHtml: html, renderHtml: true });
     try {
       const { results } = await runInstructions(server.url, "html");
-      const read = results.find((r) => r.call.jqField);
-      expect(read?.json[read.call.jqField!]).toContain('id="pricing"');
+      const read = results.find((r) => r.call.jqFields);
+      expect(jqOutput(read!.call, read!.json)).toContain('id="pricing"');
       for (const r of results) expect(r.status).toBeLessThan(300);
       const patch = results.find((r) => r.call.method === "PATCH" && r.call.body?.includes("htmlAnchor"));
       expect(patch?.json.annotation.htmlAnchor).toMatchObject({ selector: "#pricing > h2", tagName: "h2" });
@@ -160,16 +174,26 @@ describe("annotate agent instructions, executed against a live annotate server",
     }
   });
 
-  test("folder: the document read command resolves a file relative to the folder", async () => {
+  test("folder: the document read command prints markdown, HTML and data files", async () => {
     const folder = join(dir, "notes");
     mkdirSync(folder);
     writeFileSync(join(folder, "beta.md"), "# Beta\n\nrollout windows\n");
+    writeFileSync(join(folder, "page.html"), "<html><body><h1>Embedded pricing page</h1></body></html>");
+    writeFileSync(join(folder, "config.yaml"), "retries: 3\n");
     const server = await startAnnotateServer({ markdown: "", filePath: folder, folderPath: folder, mode: "annotate-folder", htmlContent: SHELL });
     try {
-      const { results } = await runInstructions(server.url, "folder", { "<path-relative-to-folder>": "beta.md" });
-      const read = results.find((r) => r.call.url.includes("/api/doc"));
-      expect(read?.json[read.call.jqField!]).toContain("rollout windows");
-      for (const r of results) expect(r.status).toBeLessThan(300);
+      const cases: Array<[string, string]> = [
+        ["beta.md", "rollout windows"],
+        ["page.html", "Embedded pricing page"],
+        ["config.yaml", "retries: 3"],
+      ];
+      for (const [file, expected] of cases) {
+        const { results } = await runInstructions(server.url, "folder", { "<path-relative-to-folder>": file });
+        const read = results.find((r) => r.call.url.includes("/api/doc"));
+        expect(read?.status).toBe(200);
+        expect(jqOutput(read!.call, read!.json)).toContain(expected);
+        for (const r of results) expect(r.status).toBeLessThan(300);
+      }
     } finally {
       server.stop();
     }

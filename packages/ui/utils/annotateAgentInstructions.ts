@@ -77,7 +77,7 @@ curl -s -X PATCH "${origin}/api/external-annotations?id=<uuid>" \\
   },
 
   folder: {
-    read: (origin) => `curl -s "${origin}/api/doc?path=<path-relative-to-folder>" | jq -r .markdown`,
+    read: (origin) => `curl -s "${origin}/api/doc?path=<path-relative-to-folder>&doc=1" | jq -r '.markdown // .rawHtml'`,
     notes: (origin) => `The user browses a folder (\`curl -s ${origin}/api/plan | jq -r .filePath\`) and opens one document at a time. No API tells you which document is open.
 
 External comments cannot target a specific document. Every comment you post is a session-level entry: it lists in the annotations panel whichever document is open (or none), is **not** highlighted inline in folder documents, and is included in the feedback the user sends. Name the file in \`text\` and prefer \`GLOBAL_COMMENT\`.`,

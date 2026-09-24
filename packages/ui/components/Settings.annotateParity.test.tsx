@@ -34,13 +34,18 @@ async function openTab(label: string) {
   await act(async () => tab.click());
 }
 
-async function mountSettings(mode: 'plan' | 'annotate', origin: 'claude-code' | 'opencode' = 'claude-code') {
+async function mountSettings(
+  mode: 'plan' | 'annotate',
+  origin: 'claude-code' | 'opencode' = 'claude-code',
+  // Plannotator's annotate app always passes annotateParity; a host omits it.
+  annotateParity = mode === 'annotate',
+) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
     root?.render(
-      <Settings taterMode={false} onTaterModeChange={() => {}} mode={mode} origin={origin} externalOpen />,
+      <Settings taterMode={false} onTaterModeChange={() => {}} mode={mode} origin={origin} annotateParity={annotateParity} externalOpen />,
     );
   });
 }
@@ -62,6 +67,16 @@ describe('Settings annotate/plan parity', () => {
       expect(tabs).toContain(tab);
     }
     expect(tabs).not.toContain('Hooks');
+  });
+
+  test.skipIf(!hasDom)('a host that omits annotateParity keeps the pre-parity annotate tabs', async () => {
+    await mountSettings('annotate', 'opencode', false);
+    const tabs = sidebarTabs();
+    for (const tab of ['Display', 'Saving', 'Labels', 'Obsidian', 'Bear', 'Octarine']) {
+      expect(tabs).not.toContain(tab);
+    }
+    // ...and the agent-switch row it always showed.
+    expect(Array.from(document.querySelectorAll('option')).some((o) => o.value === 'disabled')).toBe(true);
   });
 
   test.skipIf(!hasDom)('plan keeps every tab it had, Hooks included', async () => {
@@ -96,6 +111,11 @@ describe('Settings annotate/plan parity', () => {
     await openTab('Obsidian');
     await setObsidianEnabled(true);
     const annotateSwitches = Array.from(document.querySelectorAll('button[role="switch"]'));
+    // Deliberately pinned (owner decision): the switch is shared with plan
+    // review, whose approve auto-saves to the same app, so annotate must say so.
+    const annotateCopy = document.body.textContent ?? '';
+    expect(annotateCopy).toContain('approved plan');
+    expect(annotateCopy).not.toContain('Plans saved to');
     await act(async () => root?.unmount());
     root = null;
     host?.remove();
