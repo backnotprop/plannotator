@@ -16,7 +16,14 @@ export type WorkspaceDiffType =
   | "workspace-unstaged"
   | "workspace-last";
 
-export type WorkspaceChildVcsType = "git" | "gitbutler" | "jj";
+// The prompt-context types moved to @plannotator/core/review-prompt
+// (browser-safe); re-exported so existing importers keep working unchanged.
+import type {
+  WorkspaceChildVcsType,
+  WorkspacePromptRepoContext,
+  WorkspaceReviewPromptContext,
+} from "@plannotator/core/review-prompt";
+export type { WorkspaceChildVcsType, WorkspacePromptRepoContext, WorkspaceReviewPromptContext };
 
 export interface WorkspaceRepoState {
   id: string;
@@ -87,20 +94,6 @@ export interface WorkspaceReviewBuildOptions {
   requestedDiffType?: DiffType | WorkspaceDiffType;
   configuredDiffType?: DiffType;
   hideWhitespace?: boolean;
-}
-
-export interface WorkspacePromptRepoContext {
-  label: string;
-  cwd: string;
-  changed: boolean;
-  vcsType?: WorkspaceChildVcsType;
-  gitRef?: string;
-  error?: string;
-}
-
-export interface WorkspaceReviewPromptContext {
-  root: string;
-  repos: WorkspacePromptRepoContext[];
 }
 
 export interface WorkspaceDiffSnapshot {
