@@ -228,6 +228,27 @@ function applyVisualBlockSelection(
 }
 
 /**
+ * Clear the page selection only when it touches the viewer's own document.
+ *
+ * A page has ONE selection, so an unconditional `removeAllRanges()` also kills
+ * a selection the user just made somewhere else (another panel of a host app,
+ * the annotation sidebar). A selection belongs to the viewer when its anchor or
+ * focus lies inside the container; with no container nothing is cleared.
+ */
+function clearSelectionWithin(container: HTMLElement | null | undefined): void {
+  if (!container) return;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+  const { anchorNode, focusNode } = selection;
+  if (
+    (anchorNode && container.contains(anchorNode))
+    || (focusNode && container.contains(focusNode))
+  ) {
+    selection.removeAllRanges();
+  }
+}
+
+/**
  * Own semantic block navigation and precise text selection while the rendered
  * document has focus.
  *
@@ -291,7 +312,7 @@ export function useVimSelection({
     if (!initial) return null;
     const next: VimBlockState = { phase: 'block', targetKey: initial.key };
     setState(next);
-    window.getSelection()?.removeAllRanges();
+    clearSelectionWithin(container);
     scrollVimTargetIntoView(initial.element, scrollViewportRef.current);
     return next;
   }, [containerRef, setState]);
@@ -302,7 +323,7 @@ export function useVimSelection({
       setFocused(false);
       setHelpOpen(false);
       setHudCommand(null);
-      window.getSelection()?.removeAllRanges();
+      clearSelectionWithin(containerRef.current);
       return;
     }
     if (!focused) return;
@@ -366,9 +387,9 @@ export function useVimSelection({
 
   const setSemanticTarget = useCallback((target: SemanticTarget) => {
     setState(semanticStateForTarget(target));
-    window.getSelection()?.removeAllRanges();
+    clearSelectionWithin(containerRef.current);
     scrollVimTargetIntoView(target.element, scrollViewportRef.current);
-  }, [setState]);
+  }, [containerRef, setState]);
 
   const updateTextState = useCallback((
     graph: SemanticTargetGraph,
@@ -816,13 +837,13 @@ export function useVimSelection({
           setSemanticTarget(parent);
         } else {
           setState(createInitialVimSelectionState());
-          window.getSelection()?.removeAllRanges();
+          clearSelectionWithin(graph.container);
         }
         return;
       }
       case 'block':
         setState(createInitialVimSelectionState());
-        window.getSelection()?.removeAllRanges();
+        clearSelectionWithin(graph.container);
     }
   }, [setSemanticTarget, setState, updateTextState]);
 
@@ -1041,7 +1062,7 @@ export function useVimSelection({
   const onMouseDown = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     if (!enabled || isDocumentKeyboardControl(event.target)) return;
     setState(createInitialVimSelectionState());
-    window.getSelection()?.removeAllRanges();
+    clearSelectionWithin(event.currentTarget);
     if (document.activeElement !== event.currentTarget) {
       pointerFocusRef.current = true;
       event.currentTarget.focus({ preventScroll: true });
