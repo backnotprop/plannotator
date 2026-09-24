@@ -81,9 +81,11 @@ export type {
 
 export {
   JJ_TRUNK_REVSET,
+  jjCommitRevset,
   jjCompareTargetRevset,
   jjLineBaseRevset,
   parseCommitDiffType,
+  parseJjCommitDiffType,
   parseRemoteBookmark,
   parseWorktreeDiffType,
   validateFilePath,

@@ -705,12 +705,13 @@ const ReviewApp: React.FC = () => {
     if (submitted) reviewHistory.clear();
   }, [reviewHistory, submitted]);
 
-  // The Commits view (linear history rail) exists for plain local git
-  // sessions only — PR/workspace/jj/p4 keep their existing panels. Unlike
+  // The Commits view (linear history rail) exists for plain local git and jj
+  // sessions — PR/workspace/GitButler/p4 keep their existing panels. Unlike
   // sections it has NO coupled diff: the review opens on the user's normal
   // default until a commit is clicked, and the clicked sha is never persisted.
   // Declared this early because the global keyboard handler consults it.
-  const commitsCapable = !prMetadata && reviewMode !== 'workspace' && gitContext?.vcsType === 'git';
+  const commitsVcs = gitContext?.vcsType === 'git' || gitContext?.vcsType === 'jj' ? gitContext.vcsType : null;
+  const commitsCapable = !prMetadata && reviewMode !== 'workspace' && commitsVcs !== null;
   const showCommitsPanel = commitsCapable && panelView === 'commits';
   // The diff the session was reviewing before the Commits view's commit
   // clicks (or its HEAD auto-select) took over the single session-global
@@ -1555,7 +1556,8 @@ const ReviewApp: React.FC = () => {
   const activeCommitContext = useMemo(() => {
     const sha = commitShaFromMode(activeDiffBase);
     if (!sha) return null;
-    return { sha, subject: commitInfo?.sha === sha ? commitInfo.subject : undefined };
+    const info = commitInfo?.sha === sha ? commitInfo : null;
+    return { sha, subject: info?.subject, shortId: info?.shortSha };
   }, [activeDiffBase, commitInfo]);
   const activeGitButlerContext = useMemo(() => {
     if (!activeDiffBase.startsWith('gitbutler:')) return null;
@@ -2607,7 +2609,7 @@ const ReviewApp: React.FC = () => {
     // Rule 4 — only the review target. The guide takeover CSS-hides the dock
     // (so its files are not what the reviewer is reading), and a commit diff
     // is a documented session-only detour, not the change under review.
-    suspended: guideOpen || activeDiffBase.startsWith('commit:'),
+    suspended: guideOpen || !!commitShaFromMode(activeDiffBase),
     viewedFiles,
     suppressedFiles: autoViewSuppressed,
     onMark: markFilesViewed,
@@ -2634,9 +2636,7 @@ const ReviewApp: React.FC = () => {
   // toggling back to Sections switches the diff back to since-base.
   const sectionsCapable = !prMetadata && reviewMode !== 'workspace'
     && !!gitContext?.diffOptions?.some(option => option.id === 'since-base');
-  const activeCommitSha = activeDiffBase.startsWith('commit:')
-    ? activeDiffBase.slice('commit:'.length)
-    : null;
+  const activeCommitSha = commitShaFromMode(activeDiffBase) ?? null;
 
   // The view actually RENDERED for the current selection — a latent
   // 'sections'/'commits' selection the session can't offer resolves to the
@@ -2925,6 +2925,13 @@ const ReviewApp: React.FC = () => {
         // If the current file was removed (whitespace-only), retarget the
         // dock panel to the first remaining file.
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, aiReviewContext: data.aiReviewContext } : prev);
+        // A jj revision rewritten since it was opened (editing `@`) comes back
+        // as its successor's jj-commit id: adopt it, or the next refresh would
+        // ask for the frozen id again and the rail could not mark the row.
+        if (isCommitDiffType(data.diffType) && data.diffType !== fullDiffType) {
+          setDiffType(data.diffType);
+          setDiffData(prev => prev ? { ...prev, diffType: data.diffType } : prev);
+        }
         if (data.diffOptions) setWorkspaceDiffOptions(data.diffOptions);
         // Adopt the server's base even on in-place refreshes: the staleness
         // Refresh and post-Fetch paths both preserveFile, and they're exactly
@@ -3109,9 +3116,13 @@ const ReviewApp: React.FC = () => {
     // and the switch itself (going through handleDiffSwitch would compose it
     // a second time in a second place — fragile duplication for no benefit;
     // its evolog base handling never applies to commit diffs).
-    const fullDiffType = activeWorktreePath
-      ? `worktree:${activeWorktreePath}:commit:${sha}`
-      : `commit:${sha}`;
+    // A jj session opens the jj family (the git provider owns `commit:`, and
+    // a pure jj repo has no git work tree to run it in); jj has no worktrees.
+    const fullDiffType = commitsVcs === 'jj'
+      ? `jj-commit:${sha}`
+      : activeWorktreePath
+        ? `worktree:${activeWorktreePath}:commit:${sha}`
+        : `commit:${sha}`;
     if (fullDiffType === diffType) {
       openAllFilesPanel();
       return;
@@ -3128,7 +3139,7 @@ const ReviewApp: React.FC = () => {
       preCommitDiffRef.current = { diffType, base: selectedBase };
     }
     void fetchDiffSwitch(fullDiffType);
-  }, [activeWorktreePath, diffType, selectedBase, fetchDiffSwitch, openAllFilesPanel]);
+  }, [activeWorktreePath, commitsVcs, diffType, selectedBase, fetchDiffSwitch, openAllFilesPanel]);
 
   // The Commits-view session machine (log + poll + HEAD auto-select + center
   // veil) lives in the hook so its invariants stay in one file; App supplies
@@ -3222,7 +3233,7 @@ const ReviewApp: React.FC = () => {
   const handleWorktreeSwitch = useCallback(async (worktreePath: string | null) => {
     if (worktreePath === activeWorktreePath) return;
     let carriedBase = activeDiffBase;
-    if (activeDiffBase.startsWith('commit:')) {
+    if (commitShaFromMode(activeDiffBase)) {
       const preferred = configStore.get('defaultDiffType');
       const options = gitContext?.diffOptions ?? [];
       carriedBase = options.some((o) => o.id === preferred)
@@ -3563,6 +3574,7 @@ const ReviewApp: React.FC = () => {
             base: committedBase ?? undefined,
             worktreePath: activeWorktreePath,
             commitSubject: activeCommitContext?.subject,
+            commitShortId: activeCommitContext?.shortId,
             snapshotId,
           },
     [prMetadata, activeDiffBase, committedBase, activeWorktreePath, activeCommitContext, snapshotId],
@@ -5223,6 +5235,7 @@ const ReviewApp: React.FC = () => {
                 onRetry={commitsView.refresh}
                 onSelectPanelView={handlePanelViewSelect}
                 showSectionsOption={sectionsCapable}
+                headLabel={commitsVcs === 'jj' ? '@' : 'HEAD'}
               />
             </ReviewNavigatorContainer>
           )}
@@ -5411,7 +5424,7 @@ const ReviewApp: React.FC = () => {
                         <p className="text-xs text-muted-foreground mt-1">
                           {activeDiffBase === 'since-base' && `No changes since ${selectedBase || gitContext?.defaultBranch || 'main'}${activeWorktreePath ? ' in this worktree' : ''} — committed, uncommitted, or untracked.`}
                           {showsLocalVsRemoteEmptyState && `Your local branch matches its remote-tracking branch${activeWorktreePath ? ' in this worktree' : ''}.`}
-                          {activeDiffBase.startsWith('commit:') && 'This commit has no changes.'}
+                          {commitShaFromMode(activeDiffBase) && 'This commit has no changes.'}
                           {activeDiffBase === 'uncommitted' && `No uncommitted changes${activeWorktreePath ? ' in this worktree' : ' to review'}.`}
                           {activeDiffBase === 'staged' && "No staged changes. Stage some files with git add."}
                           {activeDiffBase === 'unstaged' && "No unstaged changes. All changes are staged."}

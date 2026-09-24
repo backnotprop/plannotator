@@ -8,7 +8,7 @@ rm -rf generated
 mkdir -p generated generated/ai/providers
 
 # Modules that MOVED to @plannotator/core — vendor the real impl from core.
-for f in feedback-templates project favicon forge-refs code-file annotatable annotation-threads diagram-anchor html-anchor external-annotation agent-jobs agent-terminal source-save open-in-apps diff-paths diff-files guide guide-format guide-viewer-manifest compress crypto; do
+for f in feedback-templates project diff-type review-prompt guide-prompt favicon forge-refs code-file annotatable annotation-threads diagram-anchor html-anchor external-annotation agent-jobs agent-terminal source-save open-in-apps diff-paths diff-files guide guide-format guide-viewer-manifest compress crypto; do
   src="../../packages/core/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done
@@ -60,6 +60,7 @@ for f in agent-review-message codex-review claude-review review-findings marker-
     | sed 's|from "@plannotator/shared/review-profiles"|from "./review-profiles.ts"|' \
     | sed 's|from "@plannotator/shared/external-annotation"|from "./external-annotation.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
+    | sed 's|from "@plannotator/shared/review-prompt"|from "./review-prompt.ts"|' \
     > "generated/$f.ts"
 done
 
@@ -91,6 +92,7 @@ for f in guide-review; do
     | sed 's|from "@plannotator/shared/guide"|from "./guide.ts"|' \
     | sed 's|from "@plannotator/shared/guide-format"|from "./guide-format.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
+    | sed 's|from "@plannotator/shared/guide-prompt"|from "./guide-prompt.ts"|' \
     > "generated/$f.ts"
 done
 

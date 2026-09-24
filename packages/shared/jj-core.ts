@@ -12,7 +12,9 @@ import {
   type JjLineBaseResolution,
   type JjRevisionInfo,
   JJ_TRUNK_REVSET,
+  jjCommitRevset,
   jjLineBaseRevset,
+  parseJjCommitDiffType,
   parseRemoteBookmark,
   validateFilePath,
 } from "./review-core";
@@ -137,7 +139,8 @@ export function isJjSnapshotDiffType(diffType: string): boolean {
   return diffType === "jj-current"
     || diffType === "jj-last"
     || diffType === "jj-line"
-    || diffType === "jj-evolog";
+    || diffType === "jj-evolog"
+    || parseJjCommitDiffType(diffType) !== null;
 }
 
 /**
@@ -180,8 +183,12 @@ export function getJjSnapshotRevsets(
       return compareTarget.length > 0
         ? { from: { revset: compareTarget, firstParentSteps: 0 }, to: { revset: "@", firstParentSteps: 0 } }
         : null;
-    default:
-      return null;
+    default: {
+      const commit = parseJjCommitDiffType(diffType);
+      if (!commit) return null;
+      const revset = jjCommitRevset(commit.commitId);
+      return { from: { revset, firstParentSteps: 1 }, to: { revset, firstParentSteps: 0 } };
+    }
   }
 }
 
@@ -200,6 +207,54 @@ export async function resolveJjSnapshotEndpoint(
     revision = parent;
   }
   return revision;
+}
+
+/**
+ * Whether a jj-commit id is still the CURRENT version of its change:
+ * `visible`, `hidden` (rewritten or abandoned; the id still resolves), or
+ * `gone` (no longer resolves at all).
+ */
+async function getJjCommitVisibility(
+  runtime: ReviewJjRuntime,
+  commitId: string,
+  cwd?: string,
+): Promise<"visible" | "hidden" | "gone"> {
+  const result = await runtime.runJj(
+    ["log", "--no-graph", "-r", `${jjCommitRevset(commitId)} & ::visible_heads()`, "-T", 'commit_id ++ "\n"'],
+    { cwd },
+  );
+  if (result.exitCode !== 0) return "gone";
+  return result.stdout.trim() ? "visible" : "hidden";
+}
+
+/**
+ * Point a `jj-commit:<id>` whose revision was rewritten at the change's
+ * current version. jj rewrites a mutable revision on every edit — the
+ * working copy on every save — so a reviewer who opened `@` from the Commits
+ * rail would otherwise keep reading the frozen pre-edit snapshot. Visible,
+ * abandoned, and divergent revisions (no single successor) are returned
+ * unchanged; any other diff type passes through.
+ */
+export async function canonicalizeJjCommitDiffType(
+  runtime: ReviewJjRuntime,
+  diffType: string,
+  cwd?: string,
+): Promise<string> {
+  const commit = parseJjCommitDiffType(diffType);
+  if (!commit) return diffType;
+  if (await getJjCommitVisibility(runtime, commit.commitId, cwd) !== "hidden") return diffType;
+  const change = await runtime.runJj(
+    ["log", "--no-graph", "-r", jjCommitRevset(commit.commitId), "-T", "change_id"],
+    { cwd },
+  );
+  const changeId = change.exitCode === 0 ? change.stdout.trim() : "";
+  if (!/^[k-z]+$/.test(changeId)) return diffType;
+  const current = await runtime.runJj(
+    ["log", "--no-graph", "-r", `change_id(${changeId})`, "-T", 'commit_id ++ "\n"'],
+    { cwd },
+  );
+  const ids = current.exitCode === 0 ? current.stdout.split("\n").map((id) => id.trim()).filter(Boolean) : [];
+  return ids.length === 1 && /^[0-9a-f]+$/.test(ids[0]) ? `jj-commit:${ids[0]}` : diffType;
 }
 
 /**
@@ -234,6 +289,9 @@ export async function runJjDiff(
   cwd?: string,
   options?: GitDiffOptions,
 ): Promise<DiffResult> {
+  const commit = parseJjCommitDiffType(diffType);
+  if (commit) return runJjCommitDiff(runtime, commit.commitId, cwd, options);
+
   let compareTarget = defaultBranch.length > 0 ? defaultBranch : JJ_TRUNK_REVSET;
 
   // For evolog diffs, when no explicit base is provided, default to the
@@ -256,6 +314,54 @@ export async function runJjDiff(
 
   const patch = options?.hideWhitespace ? dropHunklessGitDiffChunks(result.stdout) : result.stdout;
   return { patch, label: args.label };
+}
+
+/**
+ * `jj-commit:<commit id>` — one revision against its FIRST parent, the same
+ * shape as git's `commit:<sha>`. Not `jj diff -r`: on a merge that renders the
+ * revision against the auto-merge of all its parents, a different changeset
+ * from the first-parent one the Commits rail walks. A revision whose only
+ * parent is the virtual root diffs against root's empty tree.
+ */
+async function runJjCommitDiff(
+  runtime: ReviewJjRuntime,
+  commitId: string,
+  cwd?: string,
+  options?: GitDiffOptions,
+): Promise<DiffResult> {
+  const revset = jjCommitRevset(commitId);
+  const header = await runtime.runJj([
+    "log",
+    "--no-graph",
+    "-r",
+    revset,
+    "-T",
+    'change_id.short(8) ++ "\t" ++ json(description.first_line()) ++ "\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\n"',
+  ], { cwd });
+  const fields = header.exitCode === 0 ? header.stdout.trim().split("\t") : null;
+  if (!fields || fields.length < 3) {
+    return {
+      patch: "",
+      label: `Commit ${commitId.slice(0, 12)}`,
+      error: firstErrorLine(header.stderr) ?? "Jujutsu could not resolve this revision.",
+    };
+  }
+  const [changeId, subjectField, parentIds] = fields;
+  const subject = parseSerializedJjString(subjectField) ?? "";
+  const label = subject ? `Commit ${changeId} — ${subject}` : `Commit ${changeId}`;
+  const parent = parentIds.split(",").map((id) => id.trim()).find(Boolean);
+  const from = parent && !JJ_ROOT_COMMIT_ID.test(parent) ? jjCommitRevset(parent) : "root()";
+
+  const whitespaceArgs = options?.hideWhitespace ? ["-w"] : [];
+  const result = await runtime.runJj(
+    ["diff", "--git", ...whitespaceArgs, "--from", from, "--to", revset],
+    { cwd },
+  );
+  if (result.exitCode !== 0) {
+    return { patch: "", label, error: firstErrorLine(result.stderr) };
+  }
+  const patch = options?.hideWhitespace ? dropHunklessGitDiffChunks(result.stdout) : result.stdout;
+  return { patch, label };
 }
 
 // --- Diff staleness fingerprint ---------------------------------------------
@@ -306,8 +412,18 @@ export async function getJjDiffFingerprint(
           ? `jj:${diffType}:auto:${evologs[1].commitId}:${current}`
           : null;
       }
-      default:
-        return null;
+      default: {
+        // jj-commit: the id's content never changes, but jj REWRITES a
+        // mutable revision on every edit (the working copy on every snapshot,
+        // which this very query triggers) and the old id keeps resolving as a
+        // hidden commit. So the fingerprint tracks visibility: a rewritten
+        // revision reads stale, and Refresh lands on its successor
+        // (canonicalizeJjCommitDiffType).
+        const commit = parseJjCommitDiffType(diffType);
+        if (!commit) return null;
+        const state = await getJjCommitVisibility(runtime, commit.commitId, cwd);
+        return `jj:jj-commit:${commit.commitId}:${state}`;
+      }
     }
   } catch {
     return null;
@@ -381,8 +497,19 @@ async function resolveJjSideRevs(
     }
     case "jj-all":
       return { cwd: fileCwd, old: null, new: side("@", filePath) };
-    default:
-      return null;
+    default: {
+      const commit = parseJjCommitDiffType(diffType);
+      if (!commit) return null;
+      const revset = jjCommitRevset(commit.commitId);
+      // First parent, matching runJjCommitDiff. The virtual root's empty tree
+      // (a revision with no real parent) reads as an absent old side.
+      const parent = await resolveJjFirstParentCommitId(runtime, revset, fileCwd).catch(() => null);
+      return {
+        cwd: fileCwd,
+        old: parent && !JJ_ROOT_COMMIT_ID.test(parent) ? side(jjCommitRevset(parent), oldFilePath) : null,
+        new: side(revset, filePath),
+      };
+    }
   }
 }
 

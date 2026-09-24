@@ -85,7 +85,7 @@ describe("install.sh", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     // Sparse set extended to also fetch the command stubs from the checkout.
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -197,12 +197,47 @@ describe("install.sh", () => {
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-setup-goal "$KIRO_SKILLS_DIR"');
     expect(script).toContain('copy_skill_if_present apps/skills/extra/plannotator-visual-explainer "$KIRO_SKILLS_DIR"');
     // sparse-checkout fetches apps/kiro-cli (skills + agent example).
-    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli");
+    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli apps/vibe");
     // The installer also writes the example custom agent to ~/.kiro/agents.
     expect(script).toContain('cp apps/kiro-cli/agents/plannotator.json "$HOME/.kiro/agents/plannotator.json"');
     // Parity: no bespoke flag, like every other agent.
     expect(script).not.toContain("--kiro");
     expect(script).not.toContain("INSTALL_KIRO");
+  });
+
+  test("auto-installs Vibe skills + managed hook when ~/.vibe is detected (no flag)", () => {
+    // Vibe (Mistral's TUI coding agent) is auto-detected like Kiro/Codex:
+    // PATH executable or an existing ~/.vibe, never gated behind a bespoke flag.
+    expect(script).toContain("vibe_available=0");
+    expect(script).toContain('[ -d "$VIBE_HOME" ]');
+    expect(script).toContain('VIBE_HOME="${VIBE_HOME:-$HOME/.vibe}"');
+    expect(script).toContain("VIBE_SKILLS_DIR");
+    expect(script).toContain('$VIBE_HOME/skills');
+    expect(script).toContain('if [ "$vibe_available" -eq 1 ]');
+    // Vibe-specific skills (origin baked in) come from apps/vibe/skills.
+    for (const skill of ["plannotator-review", "plannotator-annotate", "plannotator-last"]) {
+      expect(script).toContain(`copy_skill_if_present apps/vibe/skills/${skill} "$VIBE_SKILLS_DIR"`);
+    }
+    // The knowledge skill is agent-agnostic and single-sourced in apps/skills/core.
+    expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator "$VIBE_SKILLS_DIR"');
+    // sparse-checkout fetches apps/vibe (skills + hook templates).
+    expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli apps/vibe");
+    // Managed marker block so the hook coexists with the user's own hooks.toml.
+    expect(script).toContain('VIBE_MANAGED_START="# >>> plannotator-managed-vibe-hooks (managed; do not edit) >>>"');
+    expect(script).toContain('VIBE_MANAGED_END="# <<< plannotator-managed-vibe-hooks <<<"');
+    // The hook command is argv-only with the absolute binary path (no env
+    // prefix) so it survives both shell and shell-free hook executors, and
+    // origin detection happens in the binary from the hook payload.
+    expect(script).toContain('command = "${PLANNOTATOR_BIN}"');
+    expect(script).toContain("PLANNOTATOR_BIN=\"${INSTALL_DIR}/plannotator\"");
+    expect(script).toContain('match = "exit_plan_mode"');
+    // Hooks are stable in Vibe 2.25+; no config.toml flag is written, and the
+    // installer must not touch $VIBE_HOME/config.toml at all.
+    expect(script).not.toContain("enable_experimental_hooks");
+    expect(script).not.toContain('VIBE_CONFIG="$VIBE_HOME/config.toml"');
+    // Parity: no bespoke flag, like every other agent.
+    expect(script).not.toContain("--vibe-only");
+    expect(script).not.toContain("INSTALL_VIBE");
   });
 
   test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
@@ -225,7 +260,7 @@ describe("install.sh", () => {
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
-      'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR"; do',
+      'for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$KIRO_SKILLS_DIR" "$VIBE_SKILLS_DIR"; do',
     );
     expect(script).toContain('rm -rf "$scope/plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
@@ -375,13 +410,14 @@ describe("install.sh", () => {
     // Flags exist for Codex plus the two integrations where the mechanism
     // generalizes identically (detect -> write): Gemini and Kiro. OpenCode
     // gets a plain do-not-write switch (no detection leg).
-    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-opencode)"]) {
+    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-vibe)", "--skip-opencode)"]) {
       expect(script).toContain(flag);
     }
     // Env vars follow the existing PLANNOTATOR_SKIP_*_INSTALL naming.
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer (M2): the skipInstall OBJECT is extracted first (awk,
     // character-indexed so single-line JSON works too) and per-agent keys
@@ -399,7 +435,7 @@ describe("install.sh", () => {
     expect(script).toContain("continue # explicit false is a veto, never a skip");
     // skills rides the same loop: not an agent, but the same three layers
     // and the same skipInstall key region.
-    expect(script).toContain("for _agent in codex gemini kiro opencode skills; do");
+    expect(script).toContain("for _agent in codex gemini kiro vibe opencode skills; do");
     // The old whole-file grep form is gone.
     expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
@@ -416,9 +452,11 @@ describe("install.sh", () => {
 
   test("skip states are reported honestly and never remove existing integrations (#1178)", () => {
     // Three distinct Codex states, never conflated: detected-skipped vs not
-    // detected vs installed.
+    // detected vs installed. "Not detected" is now conveyed by omitting the
+    // CODEX USERS closing section entirely (see the functional closing-summary
+    // tests below), never by a skip message.
     expect(script).toContain('Codex: detected, skipped (${skip_codex_source}).');
-    expect(script).toContain("Codex was not detected.");
+    expect(script).not.toContain("Codex was not detected.");
     expect(script).toContain("Codex was detected, but the integration was skipped");
     // When a previous install wired Codex, the skip run says it left the
     // existing integration alone.
@@ -463,7 +501,7 @@ describe("install.sh", () => {
     expect(envIdx).toBeGreaterThan(configIdx);
     expect(flagIdx).toBeGreaterThan(envIdx);
     // Advertised in the usage text alongside the per-agent opt-outs.
-    expect(script).toContain("[--skip-kiro] [--skip-opencode] [--skip-skills]");
+    expect(script).toContain("[--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]");
     expect(script).toContain("PLANNOTATOR_SKIP_SKILLS_INSTALL; config key:");
   });
 
@@ -591,7 +629,7 @@ describe("install.ps1", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("claudeSkillsDir");
     expect(script).toContain("agentsSkillsDir");
@@ -646,6 +684,18 @@ describe("install.ps1", () => {
     expect(script).toContain('Join-Path $scope "plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
     expect(script).toContain('Removing stale plannotator-archive command');
+  });
+
+  test("detects Vibe only by its home and writes nothing under it", () => {
+    // A `vibe` binary on PATH alone must not count as Vibe detected
+    // (install.sh parity).
+    expect(script).toContain("$vibeAvailable = [bool](Test-Path $vibeHome)");
+    expect(script).not.toContain("Get-Command vibe");
+    // The apps/vibe skills use a POSIX env-prefix that Vibe's PowerShell
+    // fallback cannot run, so Windows never copies them (or anything else)
+    // into the Vibe home.
+    expect(script).not.toContain("apps\\vibe\\skills\\");
+    expect(script).not.toContain('Join-Path $vibeHome "skills"');
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -708,16 +758,19 @@ describe("install.ps1", () => {
     expect(script).toContain("[switch]$SkipCodex");
     expect(script).toContain("[switch]$SkipGemini");
     expect(script).toContain("[switch]$SkipKiro");
+    expect(script).toContain("[switch]$SkipVibe");
     expect(script).toContain("[switch]$SkipOpencode");
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer parses the real nested JSON (strict boolean check, like
     // verifyAttestation).
     expect(script).toContain("$cfg.skipInstall.codex -is [bool]");
     expect(script).toContain("$cfg.skipInstall.gemini -is [bool]");
     expect(script).toContain("$cfg.skipInstall.kiro -is [bool]");
+    expect(script).toContain("$cfg.skipInstall.vibe -is [bool]");
     expect(script).toContain("$cfg.skipInstall.opencode -is [bool]");
     // Precedence by textual layering (later assignment wins): config, then
     // env var, then switch.
@@ -865,7 +918,7 @@ describe("install.cmd", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -913,6 +966,16 @@ describe("install.cmd", () => {
     expect(script).toContain('rmdir /s /q "%%~D\\plannotator-archive"');
     // The removed /plannotator-archive OpenCode command stub is swept too.
     expect(script).toContain('del /q "!OPENCODE_COMMANDS_DIR!\\plannotator-archive.md"');
+  });
+
+  test("detects Vibe only by its home and writes nothing under it", () => {
+    // A vibe executable on PATH alone must not count as Vibe detected
+    // (install.sh parity).
+    expect(script).toContain('if exist "!VIBE_HOME!" set "VIBE_AVAILABLE=1"');
+    expect(script).not.toContain("where vibe");
+    // Windows never copies the POSIX-only apps/vibe skills into the Vibe home.
+    expect(script).not.toContain("apps\\vibe\\skills\\");
+    expect(script).not.toContain("VIBE_SKILLS_DIR");
   });
 
   test("does not treat a skills-only Codex home as configured", () => {
@@ -1005,22 +1068,25 @@ describe("install.cmd", () => {
     expect(script).toContain('if /i "%~1"=="--skip-codex"');
     expect(script).toContain('if /i "%~1"=="--skip-gemini"');
     expect(script).toContain('if /i "%~1"=="--skip-kiro"');
+    expect(script).toContain('if /i "%~1"=="--skip-vibe"');
     expect(script).toContain('if /i "%~1"=="--skip-opencode"');
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
+    expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer (M2): the REAL JSON is parsed by PowerShell (strict
     // boolean check, matching install.ps1) instead of a line-oblivious
     // findstr - so a "codex": true under some OTHER key can never opt
     // anyone out and an explicit false inside skipInstall is honored.
     expect(script).toContain("$c.skipInstall.$k");
-    expect(script).toContain("@('codex','gemini','kiro','opencode','skills')");
+    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','skills')");
     expect(script).toContain("$v -is [bool] -and $v");
     expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
     expect(script).toContain("skipInstall.gemini");
     expect(script).toContain("skipInstall.kiro");
+    expect(script).toContain("skipInstall.vibe");
     expect(script).toContain("skipInstall.opencode");
     // The old whole-file findstr form is gone.
     expect(script).not.toContain('findstr /r /c:"\\"codex\\"');
@@ -2379,6 +2445,107 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
 );
 
 // ---------------------------------------------------------------------------
+// Closing summary: agent-specific sections print only for agents the run
+// detected (existing detection legs: `pi` on PATH, ~/.gemini, Codex home or
+// CLI, ~/.kiro or kiro-cli). OpenCode (no detection leg) and Claude Code stay
+// universal. Every run is a full install into a temp HOME with a stubbed PATH;
+// the git shim supplies a local checkout, so nothing reaches the network.
+// ---------------------------------------------------------------------------
+type SummaryAgent = "pi" | "gemini" | "codex" | "kiro";
+
+const SUMMARY_HEADERS: Record<SummaryAgent, string> = {
+  pi: "  PI USERS",
+  gemini: "  GEMINI CLI USERS",
+  codex: "  CODEX USERS",
+  kiro: "  KIRO CLI USERS",
+};
+
+function runSummaryInstall(detected: SummaryAgent[], extraArgs: string[] = []) {
+  const sandbox = setupInstallSandbox({
+    gh: "pass-all",
+    git: "sparse-unsupported",
+    codexHome: detected.includes("codex"),
+  });
+  if (detected.includes("gemini")) mkdirSync(join(sandbox.home, ".gemini"), { recursive: true });
+  if (detected.includes("kiro")) mkdirSync(join(sandbox.home, ".kiro"), { recursive: true });
+  // A no-op `pi` on PATH is exactly what the Pi detection leg checks; the
+  // installer's `pi install` call against it succeeds without doing anything.
+  if (detected.includes("pi")) writeFileSync(join(sandbox.stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  const r = runInstallSh(sandbox, ["--version", "v99.9.9", "--non-interactive", "--no-extras", ...extraArgs]);
+  return { ...r, home: sandbox.home };
+}
+
+function expectOnlySections(out: string, detected: SummaryAgent[]) {
+  for (const agent of Object.keys(SUMMARY_HEADERS) as SummaryAgent[]) {
+    const lines = out.split("\n");
+    const present = lines.includes(SUMMARY_HEADERS[agent]);
+    expect({ agent, present }).toEqual({ agent, present: detected.includes(agent) });
+  }
+  // Universal sections are unaffected by detection.
+  expect(out).toContain("  OPENCODE USERS");
+  expect(out).toContain("CLAUDE CODE USERS:");
+  expect(out).toContain("/plugin marketplace add backnotprop/plannotator");
+  // An undetected agent is represented by absence, never by a nag.
+  expect(out).not.toContain("was not detected");
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh closing summary shows only detected agents",
+  () => {
+    test("nothing detected: only the universal OpenCode and Claude Code sections", () => {
+      const { code, out } = runSummaryInstall([]);
+      expect(code).toBe(0);
+      expectOnlySections(out, []);
+      expect(out).toContain("The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready to use after you restart Claude Code!");
+    });
+
+    for (const agent of Object.keys(SUMMARY_HEADERS) as SummaryAgent[]) {
+      test(`only ${agent} detected: only its section is added`, () => {
+        const { code, out } = runSummaryInstall([agent]);
+        expect(code).toBe(0);
+        expectOnlySections(out, [agent]);
+      });
+    }
+
+    test("all detected: every agent section prints, in the original order", () => {
+      const all: SummaryAgent[] = ["pi", "gemini", "codex", "kiro"];
+      const { code, out } = runSummaryInstall(all);
+      expect(code).toBe(0);
+      expectOnlySections(out, all);
+      const order = ["  OPENCODE USERS", ...all.map((a) => SUMMARY_HEADERS[a]), "CLAUDE CODE USERS:"].map((h) =>
+        out.indexOf(h),
+      );
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
+      expect(out).toContain("Plan review is configured through the Codex Stop hook.");
+    });
+
+    test("a detected-but-skipped agent keeps its honest skipped section", () => {
+      const { code, out } = runSummaryInstall(["codex", "gemini"], ["--skip-codex", "--skip-gemini"]);
+      expect(code).toBe(0);
+      expectOnlySections(out, ["codex", "gemini"]);
+      expect(out).toContain("Codex was detected, but the integration was skipped (--skip-codex).");
+      expect(out).toContain("Gemini was detected, but the integration was skipped (--skip-gemini).");
+    });
+
+    test("--skip-skills: detected sections report the skip, undetected ones stay hidden", () => {
+      const { code, out } = runSummaryInstall(["kiro"], ["--skip-skills"]);
+      expect(code).toBe(0);
+      expectOnlySections(out, ["kiro"]);
+      expect(out).toContain("Kiro was detected, but skills were skipped (--skip-skills)");
+      expect(out).toContain("  CLAUDE CODE USERS: BINARY INSTALLED");
+    });
+
+    test("--minimal prints no agent sections at all, detected or not", () => {
+      const { code, out } = runSummaryInstall(["pi", "gemini", "codex", "kiro"], ["--minimal"]);
+      expect(code).toBe(0);
+      expect(out).toContain("Minimal install complete");
+      expect(out).not.toContain(" USERS");
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
 // M7: the Windows installers' bundle extraction, exercised under PowerShell
 // against the captured REAL attestations response (scripts/fixtures/). The
 // scanner must emit each attestations[].bundle as a byte-exact substring of
@@ -2619,6 +2786,121 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
       expect(out).toContain("network or git error");
       expect(out).not.toContain("falling back to a plain shallow clone");
       expect(code).toBe(1);
+    }, PWSH_SCANNER_TIMEOUT_MS);
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Closing summary on Windows: install.ps1 prints PI USERS / KIRO CLI USERS
+// only for a detected agent (install.ps1 has no Gemini or Codex closing
+// section), and install.cmd prints KIRO CLI USERS only when KIRO_AVAILABLE.
+// The ps1 region is driven under pwsh when available; both are source-scanned.
+// ---------------------------------------------------------------------------
+
+function extractPs1ClosingSummaryRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf('Write-Host "  OPENCODE USERS"');
+  const end = ps.indexOf("# Warn if plannotator is configured in both settings.json hooks");
+  if (start < 0 || end < 0 || end <= start) {
+    throw new Error("could not locate the closing summary region in install.ps1");
+  }
+  return ps.slice(start, end);
+}
+
+describe("closing summary sections are gated on detection (Windows installers)", () => {
+  test("install.ps1 gates PI USERS on the Pi detection leg and KIRO CLI USERS on $kiroAvailable", () => {
+    const region = extractPs1ClosingSummaryRegion();
+    const piGate = region.indexOf("if ($piDetected) {");
+    const kiroGate = region.indexOf("if ($kiroAvailable) {");
+    expect(region).toContain("$piDetected = [bool](Get-Command pi -ErrorAction SilentlyContinue)");
+    expect(piGate).toBeGreaterThan(0);
+    expect(kiroGate).toBeGreaterThan(piGate);
+    // Each header sits inside its gate, not before it.
+    expect(region.indexOf('Write-Host "  PI USERS"')).toBeGreaterThan(piGate);
+    expect(region.indexOf('Write-Host "  KIRO CLI USERS"')).toBeGreaterThan(kiroGate);
+    expect(region).not.toContain("Kiro was not detected");
+    // The Claude Code block stays universal.
+    expect(region).toContain('Write-Host "  CLAUDE CODE USERS: YOU ARE ALL SET!"');
+  });
+
+  test("install.cmd prints the KIRO CLI USERS header only inside the KIRO_AVAILABLE gate", () => {
+    const script = readScript("install.cmd");
+    const header = script.indexOf("echo   KIRO CLI USERS");
+    const gate = script.lastIndexOf('if "!KIRO_AVAILABLE!"=="1" (', header);
+    expect(header).toBeGreaterThan(0);
+    expect(gate).toBeGreaterThan(0);
+    // Nothing but the separator lines between the gate and the header.
+    expect(script.slice(gate, header)).toBe(
+      'if "!KIRO_AVAILABLE!"=="1" (\n    echo.\n    echo ==========================================\n    ',
+    );
+    expect(script).not.toContain("Kiro was not detected");
+  });
+});
+
+function runPs1ClosingSummary(opts: { pi: boolean; kiro: boolean; skipKiro?: boolean; skipSkills?: boolean }) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps1-summary-test-"));
+  const home = join(root, "home");
+  const stub = join(root, "stub-bin");
+  mkdirSync(home, { recursive: true });
+  mkdirSync(stub, { recursive: true });
+  if (opts.pi) writeFileSync(join(stub, "pi"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
+  const driver = [
+    `$ErrorActionPreference = "Stop"`,
+    `$skipOpencodeResolved = $false`,
+    `$skipSkillsResolved = $${opts.skipSkills ? "true" : "false"}`,
+    `$skipSkillsSource = "-SkipSkills"`,
+    `$kiroAvailable = $${opts.kiro ? "true" : "false"}`,
+    `$skipKiroResolved = $${opts.skipKiro ? "true" : "false"}`,
+    `$skipKiroSource = "-SkipKiro"`,
+    `$extrasChoice = "no"`,
+    `Write-Host ""`,
+    `Write-Host "=========================================="`,
+    extractPs1ClosingSummaryRegion(),
+    `exit 0`,
+  ].join("\n");
+  const driverPath = join(root, "driver.ps1");
+  writeFileSync(driverPath, driver);
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: { PATH: `${stub}:/usr/bin:/bin`, HOME: home, USERPROFILE: home, TMPDIR: root },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "install.ps1 closing summary under PowerShell",
+  () => {
+    test("nothing detected: no PI or KIRO section, universal sections intact", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: false });
+      expect(code).toBe(0);
+      expect(out).not.toContain("PI USERS");
+      expect(out).not.toContain("KIRO CLI USERS");
+      expect(out).not.toContain("was not detected");
+      expect(out).toContain("OPENCODE USERS");
+      expect(out).toContain("CLAUDE CODE USERS: YOU ARE ALL SET!");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("pi and kiro detected: both sections print", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: true, kiro: true });
+      expect(code).toBe(0);
+      expect(out).toContain("  PI USERS");
+      expect(out).toContain("  KIRO CLI USERS");
+      expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("detected-but-skipped Kiro keeps its honest skipped section", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: true, skipKiro: true });
+      expect(code).toBe(0);
+      expect(out).toContain("Kiro was detected, but the integration was skipped (-SkipKiro).");
+      expect(out).not.toContain("PI USERS");
+    }, PWSH_SCANNER_TIMEOUT_MS);
+
+    test("-SkipSkills with Kiro detected reports the skills skip", () => {
+      const { code, out } = runPs1ClosingSummary({ pi: false, kiro: true, skipSkills: true });
+      expect(code).toBe(0);
+      expect(out).toContain("Kiro was detected, but skills were skipped (-SkipSkills)");
+      expect(out).toContain("CLAUDE CODE USERS: BINARY INSTALLED");
     }, PWSH_SCANNER_TIMEOUT_MS);
   },
 );

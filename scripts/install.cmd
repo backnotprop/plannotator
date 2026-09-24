@@ -34,6 +34,7 @@ REM > default off) happens after _CONFIG_DIR is known.
 set "SKIP_CODEX_FLAG=0"
 set "SKIP_GEMINI_FLAG=0"
 set "SKIP_KIRO_FLAG=0"
+set "SKIP_VIBE_FLAG=0"
 set "SKIP_OPENCODE_FLAG=0"
 REM Same shape, but scoped to the skills/slash-command sparse checkout rather
 REM than one agent's home: --skip-skills turns the whole fetch into a no-op for
@@ -161,6 +162,11 @@ if /i "%~1"=="--skip-kiro" (
     shift
     goto parse_args
 )
+if /i "%~1"=="--skip-vibe" (
+    set "SKIP_VIBE_FLAG=1"
+    shift
+    goto parse_args
+)
 if /i "%~1"=="--skip-opencode" (
     set "SKIP_OPENCODE_FLAG=1"
     shift
@@ -185,7 +191,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -488,6 +494,8 @@ set "SKIP_GEMINI=0"
 set "SKIP_GEMINI_SOURCE="
 set "SKIP_KIRO=0"
 set "SKIP_KIRO_SOURCE="
+set "SKIP_VIBE=0"
+set "SKIP_VIBE_SOURCE="
 set "SKIP_OPENCODE=0"
 set "SKIP_OPENCODE_SOURCE="
 REM skipInstall.skills is not an agent - it opts out of the skills/slash-command
@@ -496,7 +504,7 @@ set "SKIP_SKILLS=0"
 set "SKIP_SKILLS_SOURCE="
 if exist "!_CONFIG_DIR!\config.json" (
     set "PLN_CONFIG_JSON=!_CONFIG_DIR!\config.json"
-    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','opencode','skills')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','vibe','opencode','skills')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
         if /i "%%K"=="codex" (
             set "SKIP_CODEX=1"
             set "SKIP_CODEX_SOURCE=config skipInstall.codex"
@@ -508,6 +516,10 @@ if exist "!_CONFIG_DIR!\config.json" (
         if /i "%%K"=="kiro" (
             set "SKIP_KIRO=1"
             set "SKIP_KIRO_SOURCE=config skipInstall.kiro"
+        )
+        if /i "%%K"=="vibe" (
+            set "SKIP_VIBE=1"
+            set "SKIP_VIBE_SOURCE=config skipInstall.vibe"
         )
         if /i "%%K"=="opencode" (
             set "SKIP_OPENCODE=1"
@@ -544,6 +556,14 @@ for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_KIRO_INSTALL!"=="%%V" (
     set "SKIP_KIRO=0"
     set "SKIP_KIRO_SOURCE="
 )
+for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_VIBE_INSTALL!"=="%%V" (
+    set "SKIP_VIBE=1"
+    set "SKIP_VIBE_SOURCE=PLANNOTATOR_SKIP_VIBE_INSTALL"
+)
+for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_VIBE_INSTALL!"=="%%V" (
+    set "SKIP_VIBE=0"
+    set "SKIP_VIBE_SOURCE="
+)
 for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_OPENCODE_INSTALL!"=="%%V" (
     set "SKIP_OPENCODE=1"
     set "SKIP_OPENCODE_SOURCE=PLANNOTATOR_SKIP_OPENCODE_INSTALL"
@@ -571,6 +591,10 @@ if "!SKIP_GEMINI_FLAG!"=="1" (
 if "!SKIP_KIRO_FLAG!"=="1" (
     set "SKIP_KIRO=1"
     set "SKIP_KIRO_SOURCE=--skip-kiro"
+)
+if "!SKIP_VIBE_FLAG!"=="1" (
+    set "SKIP_VIBE=1"
+    set "SKIP_VIBE_SOURCE=--skip-vibe"
 )
 if "!SKIP_OPENCODE_FLAG!"=="1" (
     set "SKIP_OPENCODE=1"
@@ -913,6 +937,24 @@ set "KIRO_AVAILABLE=0"
 where kiro-cli >nul 2>&1
 if !ERRORLEVEL! equ 0 set "KIRO_AVAILABLE=1"
 if exist "%USERPROFILE%\.kiro" set "KIRO_AVAILABLE=1"
+
+REM Vibe (Mistral's TUI coding agent) stores everything under VIBE_HOME when
+REM set, falling back to %USERPROFILE%\.vibe. Detected only when that home
+REM exists, matching install.sh: a vibe executable on PATH alone is not enough.
+REM The Windows installer writes NOTHING under the Vibe home. The plan-review
+REM hook is macOS/Linux-only, so only manual hook instructions are printed; and
+REM the Vibe-specific skills are not installed either, because they run
+REM "PLANNOTATOR_ORIGIN=mistral-vibe plannotator ...", a POSIX env-prefix that
+REM Vibe's Windows shell tool only understands when it resolved Git Bash (it
+REM falls back to PowerShell otherwise). Vibe also reads ~/.agents/skills, which
+REM this installer fills with the shell-neutral core skills, so
+REM /plannotator-review and /plannotator-annotate work there with no Vibe origin
+REM label. /plannotator-last is NOT supported for Vibe on Windows yet: without
+REM PLANNOTATOR_ORIGIN it takes the Claude Code transcript path, so it fails or
+REM reads the wrong session.
+if not defined VIBE_HOME set "VIBE_HOME=%USERPROFILE%\.vibe"
+set "VIBE_AVAILABLE=0"
+if exist "!VIBE_HOME!" set "VIBE_AVAILABLE=1"
 REM HONEST three-state reporting (#1178): detected-but-skipped is its own
 REM state, never conflated with "not detected". A Codex opt-out leaves the
 REM Codex home entirely untouched (no writes, no cleanup, no removal).
@@ -945,6 +987,45 @@ if "!CODEX_AVAILABLE!"=="1" if "!SKIP_CODEX!"=="0" (
     echo.
     echo      !INSTALL_PATH!
     echo.
+)
+
+REM Vibe plan-review hooks run on macOS/Linux only (Vibe spawns hooks via /bin/sh;
+REM Windows uses cmd.exe and a .sh launcher is not executable). The Windows
+REM installer never writes hooks.toml automatically - it prints manual setup
+REM instructions, mirroring Codex-on-Windows. A Vibe opt-out (#1178) suppresses
+REM the manual instructions and this run neither creates, updates, nor removes
+REM anything under the Vibe home (nothing is written there on Windows anyway).
+if "!VIBE_AVAILABLE!"=="1" if "!SKIP_VIBE!"=="1" (
+    echo.
+    echo Vibe: detected, skipped ^(!SKIP_VIBE_SOURCE!^).
+    echo The Windows installer only prints manual Vibe setup instructions; they
+    echo were suppressed.
+    if exist "!VIBE_HOME!\hooks.toml" (
+        findstr /c:"plannotator" "!VIBE_HOME!\hooks.toml" >nul 2>&1
+        if !ERRORLEVEL! equ 0 echo Your existing Vibe plan-review hook at !VIBE_HOME!\hooks.toml is unaffected.
+    )
+)
+if "!VIBE_AVAILABLE!"=="1" if "!SKIP_VIBE!"=="0" (
+    echo.
+    echo Vibe detected.
+    echo Vibe plan-review hooks run on macOS/Linux only ^(Vibe spawns hooks via
+    echo /bin/sh; on Windows a .sh launcher is not executable^). To set up plan
+    echo review manually on a macOS/Linux box with Vibe, add to ~/.vibe/hooks.toml:
+    echo.
+    echo   [[hooks]]
+    echo   name = "plannotator-exit-plan-mode"
+    echo   type = "pre_tool"
+    echo   match = "exit_plan_mode"
+    echo   command = "/full/path/to/plannotator"
+    echo   timeout = 345600
+    echo.
+    echo The command must be argv-only ^(no env-prefix^): plannotator detects
+    echo the Vibe origin from the hook payload. Hooks are stable in Vibe
+    echo 2.25+, so no config.toml flag is needed.
+    echo.
+    echo The Vibe-specific skills are not installed on Windows. Vibe picks up the
+    echo shared review and annotate skills from %USERPROFILE%\.agents\skills instead;
+    echo /plannotator-last is not supported for Vibe on Windows yet.
 )
 
 REM Clear any cached OpenCode plugin to force fresh download on next run.
@@ -1196,7 +1277,7 @@ if "!SPARSE_UNSUPPORTED!"=="1" (
 
 if "!CLONE_OK!"=="1" (
     pushd "!SKILLS_TMP!\repo"
-    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
+    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands >nul 2>&1
 
     REM Claude Code reads apps\skills\claude\* (injection `!`plannotator ... $ARGUMENTS``
     REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
@@ -1281,6 +1362,10 @@ if "!CLONE_OK!"=="1" (
         )
         echo Installed Kiro skills to !KIRO_SKILLS_DIR!\ and agent to !KIRO_AGENTS_DIR!\plannotator.json
     )
+
+    REM Vibe - no skills are copied to !VIBE_HOME! on Windows. The apps\vibe
+    REM skills use a POSIX env-prefix that Vibe's PowerShell fallback cannot
+    REM run; Vibe reads the shell-neutral core skills from ~/.agents/skills.
 
     popd
 ) else (
@@ -1482,12 +1567,16 @@ if "!SKIP_OPENCODE!"=="1" (
     echo Re-run without the opt-out to install the command stubs.
 )
 
-echo.
-echo ==========================================
-echo   KIRO CLI USERS
-echo ==========================================
-echo.
+REM The KIRO CLI USERS section prints only when this run detected Kiro
+REM (KIRO_AVAILABLE, computed above); a detected-but-skipped Kiro keeps its
+REM honest "detected, skipped" lines. Output only: nothing here decides what
+REM installs.
 if "!KIRO_AVAILABLE!"=="1" (
+    echo.
+    echo ==========================================
+    echo   KIRO CLI USERS
+    echo ==========================================
+    echo.
     if "!SKIP_KIRO!"=="1" (
         echo Kiro was detected, but the integration was skipped ^(!SKIP_KIRO_SOURCE!^).
         echo No files under %USERPROFILE%\.kiro were written or removed. Re-run
@@ -1500,8 +1589,27 @@ if "!KIRO_AVAILABLE!"=="1" (
         echo The Plannotator agent is installed to %USERPROFILE%\.kiro\agents\plannotator.json
         echo Launch it: kiro-cli chat --agent plannotator
     )
-) else (
-    echo Kiro was not detected. After installing Kiro, rerun this installer to add Kiro skills.
+)
+
+REM The Vibe section prints only when Vibe was detected; without a Vibe home
+REM the installer says nothing about Vibe at all.
+if "!VIBE_AVAILABLE!"=="1" (
+    echo.
+    echo ==========================================
+    echo   VIBE USERS
+    echo ==========================================
+    echo.
+    if "!SKIP_VIBE!"=="1" (
+        echo Vibe was detected, but the integration was skipped ^(!SKIP_VIBE_SOURCE!^).
+        echo No files under !VIBE_HOME! were written or removed.
+    ) else (
+        echo Vibe detected. The Windows installer writes nothing under !VIBE_HOME!.
+        echo Vibe uses the shared review and annotate skills from ~/.agents/skills
+        echo ^(/plannotator-last is not supported for Vibe on Windows yet^). The
+        echo plan-review hook is macOS/Linux-only; see the manual setup instructions
+        echo printed above to wire plan review on a macOS/Linux box.
+        echo Note: improve-context ^(plan-mode enrichment^) is not wired for Vibe.
+    )
 )
 
 echo.
