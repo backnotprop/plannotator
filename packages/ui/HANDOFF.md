@@ -1549,7 +1549,7 @@ The guide chain's engine plumbing (Claude/Codex/marker commands, output parsing,
 
 ---
 
-## `Settings` `annotateParity` (unreleased, after 0.46.0)
+## `Settings` `annotateParity` (shipped in 0.46.0)
 
 `<Settings mode="annotate">` takes a new optional `annotateParity?: boolean`,
 default `false`. **A host that omits it sees exactly the annotate Settings it
