@@ -8,7 +8,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { parseMarkdownToBlocks, computeListIndices } from "../../utils/parser";
-import { applyHighlight, codeBlockClassName } from "../../utils/codeHighlight";
+import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout } from "../../utils/codeHighlight";
 import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
@@ -711,7 +711,11 @@ const SimpleCodeBlock: React.FC<{ block: Block }> = ({ block }) => {
   return (
     <div className="relative group my-5">
       <pre className="bg-muted/50 border border-border/30 rounded-lg overflow-x-auto">
-        <code ref={codeRef} className={codeBlockClassName(block.language)}>
+        <code
+          ref={codeRef}
+          className={codeBlockClassName(block.language)}
+          data-keep-layout={codeBlockKeepsLayout(block.content) ? "" : undefined}
+        >
           {block.content}
         </code>
       </pre>

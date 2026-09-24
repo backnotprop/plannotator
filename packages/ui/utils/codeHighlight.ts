@@ -41,6 +41,24 @@ export function codeBlockClassName(language?: string): string {
   return `${CODE_BLOCK_CLASS} font-mono${language ? ` language-${language}` : ''}`;
 }
 
+/**
+ * Plan fences soft-wrap long lines (`white-space: pre-wrap`), but a fence laid
+ * out as a grid — box-drawing diagrams, `+---+` boxes, space-aligned columns —
+ * is unreadable once a row wraps. Those keep the old unwrapped, horizontally
+ * scrolling layout: the renderers mark them with `data-keep-layout`, which the
+ * editor stylesheet turns back into `white-space: pre`.
+ *
+ * Signals: any box-drawing or block-element character, a tab between two
+ * words, or a run of two or more spaces between two words (column alignment).
+ * A double space after sentence punctuation is prose, not alignment, and
+ * leading indentation is never interior, so ordinary code still wraps.
+ */
+const ALIGNED_LAYOUT = /[\u2500-\u259F]|\S\t+\S|[^\s.!?] {2,}\S/;
+
+export function codeBlockKeepsLayout(content: string): boolean {
+  return ALIGNED_LAYOUT.test(content);
+}
+
 /** Shiki's `FontStyle` bitmask. Inlined so this module needs no shiki types. */
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
