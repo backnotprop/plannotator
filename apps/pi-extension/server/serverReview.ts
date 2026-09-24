@@ -74,6 +74,7 @@ import {
 	getGitButlerContextRevision,
 	getGitButlerPatchFingerprint,
 } from "../generated/gitbutler-core.ts";
+import { canonicalizeJjCommitDiffType } from "../generated/jj-core.ts";
 import {
 	getCommitDiffInfo,
 	getJjCommitDiffInfo,
@@ -2545,6 +2546,11 @@ export async function startReviewServer(options: {
 					? resolveAvailableDiffType(clientGitContext, requestedDiffType, nextBaseExplicitlyChosen)
 					: { diffType: requestedDiffType };
 				newType = availability.diffType;
+				// Mirrors Bun review.ts: a rewritten jj revision resolves to its
+				// change's current version (Refresh after editing `@`).
+				if (sessionVcsType === "jj") {
+					newType = await canonicalizeJjCommitDiffType(jjRuntime, newType as string, options.gitContext?.cwd) as DiffType;
+				}
 				const base = resolveReviewBase(
 					typeof body.base === "string" ? body.base : undefined,
 					nextBaseExplicitlyChosen,

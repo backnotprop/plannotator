@@ -244,7 +244,7 @@ const JJ_COMMIT_ROW_TEMPLATE = [
   'committer.timestamp().format("%s")',
   "json(author.name())",
   "json(stringify(author.email()))",
-  'if(current_working_copy, "1", "0") ++ if(empty, "1", "0") ++ if(description, "1", "0")',
+  'if(current_working_copy, "1", "0") ++ if(empty, "1", "0") ++ if(description, "1", "0") ++ if(parents.len() > 1, "1", "0")',
 ].join(JJ_FIELD_JOIN) + ' ++ "\\n"';
 
 const JJ_COMMIT_ID_TEMPLATE = 'commit_id ++ "\\n"';
@@ -275,6 +275,9 @@ function parseJjRailRows(stdout: string): JjRailRow[] {
     const [sha, shortSha, subjectField, seconds, authorField, emailField, flags] = fields;
     if (!BARE_HEX_SHA_RE.test(sha)) continue;
     const isHead = flags[0] === "1";
+    // Blank = the usual fresh `jj new`: no changes, no description, ONE
+    // parent. A merge working copy (`jj new A B`) is "empty" against the
+    // auto-merge of its parents yet has a real first-parent diff, so it stays.
     rows.push({
       entry: {
         sha,
@@ -285,7 +288,7 @@ function parseJjRailRows(stdout: string): JjRailRow[] {
         authorEmail: parseJjJsonString(emailField),
         isHead,
       },
-      blankWorkingCopy: isHead && flags[1] === "1" && flags[2] === "0",
+      blankWorkingCopy: isHead && flags[1] === "1" && flags[2] === "0" && flags[3] === "0",
     });
   }
   return rows;
@@ -356,7 +359,8 @@ export async function listJjCommitHistory(
   // page drops.
   const result = await log(rail, JJ_COMMIT_ROW_TEMPLATE, limit + 2);
   if (result.exitCode !== 0) {
-    if (/first_ancestors|first_parent/.test(result.stderr)) {
+    // jj < 0.33 has no first_ancestors(); anything else is a real failure.
+    if (/Function `?first_ancestors`? doesn't exist/.test(result.stderr)) {
       throw new Error("The Commits view needs Jujutsu 0.33 or newer.");
     }
     return before ? emptyPage : null;

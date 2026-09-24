@@ -30,6 +30,8 @@ export interface FeedbackDiffContext {
   worktreePath?: string | null;
   /** Subject of the active commit when mode is `commit:<sha>` — header readability only. */
   commitSubject?: string;
+  /** Display id of the active commit (the short CHANGE id in a jj session). */
+  commitShortId?: string;
   /** Exact server snapshot for providers whose line anchors can outlive a refresh. */
   snapshotId?: string;
 }
@@ -52,7 +54,9 @@ function describeDiff(ctx: FeedbackDiffContext): string {
   const commitSha = commitShaFromMode(mode);
   if (commitSha) {
     const subject = ctx.commitSubject ? ` — ${ctx.commitSubject}` : '';
-    return `Commit \`${commitSha.slice(0, 7)}\`${subject} (diff vs its parent)${worktreePath ? ` _(worktree: ${worktreePath})_` : ''}`;
+    // jj users read change ids; git keeps its 7-char sha.
+    const shown = mode.startsWith('jj-commit:') && ctx.commitShortId ? ctx.commitShortId : commitSha.slice(0, 7);
+    return `Commit \`${shown}\`${subject} (diff vs its parent)${worktreePath ? ` _(worktree: ${worktreePath})_` : ''}`;
   }
   if (mode === 'gitbutler:workspace') {
     label = 'GitButler workspace (all applied changes)';

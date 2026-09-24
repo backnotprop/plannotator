@@ -137,6 +137,39 @@ describe("Commits panel in a jj review session", () => {
         };
         expect(expanded).toEqual({ oldContent: null, newContent: "one\n" });
 
+        // The auto-opened working copy must not freeze: open `@` (it has
+        // changes now), edit, and the diff reads stale; Refresh (the same
+        // switch the client's banner sends) lands on the rewritten `@`.
+        writeFileSync(join(repoDir, "wip.txt"), "first\n");
+        const atBefore = jj(repoDir, ["log", "--no-graph", "-r", "@", "-T", "commit_id"]);
+        const openedAt = await fetch(`${server.url}/api/diff/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diffType: `jj-commit:${atBefore}` }),
+        }).then((r) => r.json()) as { diffType: string; snapshotId: string };
+        expect(openedAt.diffType).toBe(`jj-commit:${atBefore}`);
+        const freshBefore = await fetch(`${server.url}/api/diff/fresh?snapshot=${openedAt.snapshotId}`)
+          .then((r) => r.json()) as { fresh: boolean };
+        expect(freshBefore.fresh).toBe(true);
+        // The baseline is captured fire-and-forget after the switch; let it land
+        // before editing, or it would record the already-rewritten state.
+        await Bun.sleep(750);
+
+        writeFileSync(join(repoDir, "wip.txt"), "second\n");
+        const freshAfter = await fetch(`${server.url}/api/diff/fresh?snapshot=${openedAt.snapshotId}`)
+          .then((r) => r.json()) as { fresh: boolean };
+        expect(freshAfter.fresh).toBe(false);
+
+        const refreshed = await fetch(`${server.url}/api/diff/switch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ diffType: `jj-commit:${atBefore}` }),
+        }).then((r) => r.json()) as { diffType: string; rawPatch: string };
+        const atAfter = jj(repoDir, ["log", "--no-graph", "-r", "@", "-T", "commit_id"]);
+        expect(atAfter).not.toBe(atBefore);
+        expect(refreshed.diffType).toBe(`jj-commit:${atAfter}`);
+        expect(refreshed.rawPatch).toContain("+second");
+
         // Leaving the detour: a normal jj diff type still switches.
         const back = await fetch(`${server.url}/api/diff/switch`, {
           method: "POST",

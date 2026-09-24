@@ -1556,7 +1556,8 @@ const ReviewApp: React.FC = () => {
   const activeCommitContext = useMemo(() => {
     const sha = commitShaFromMode(activeDiffBase);
     if (!sha) return null;
-    return { sha, subject: commitInfo?.sha === sha ? commitInfo.subject : undefined };
+    const info = commitInfo?.sha === sha ? commitInfo : null;
+    return { sha, subject: info?.subject, shortId: info?.shortSha };
   }, [activeDiffBase, commitInfo]);
   const activeGitButlerContext = useMemo(() => {
     if (!activeDiffBase.startsWith('gitbutler:')) return null;
@@ -2924,6 +2925,13 @@ const ReviewApp: React.FC = () => {
         // If the current file was removed (whitespace-only), retarget the
         // dock panel to the first remaining file.
         setDiffData(prev => prev ? { ...prev, rawPatch: data.rawPatch, gitRef: data.gitRef, aiReviewContext: data.aiReviewContext } : prev);
+        // A jj revision rewritten since it was opened (editing `@`) comes back
+        // as its successor's jj-commit id: adopt it, or the next refresh would
+        // ask for the frozen id again and the rail could not mark the row.
+        if (isCommitDiffType(data.diffType) && data.diffType !== fullDiffType) {
+          setDiffType(data.diffType);
+          setDiffData(prev => prev ? { ...prev, diffType: data.diffType } : prev);
+        }
         if (data.diffOptions) setWorkspaceDiffOptions(data.diffOptions);
         // Adopt the server's base even on in-place refreshes: the staleness
         // Refresh and post-Fetch paths both preserveFile, and they're exactly
@@ -3566,6 +3574,7 @@ const ReviewApp: React.FC = () => {
             base: committedBase ?? undefined,
             worktreePath: activeWorktreePath,
             commitSubject: activeCommitContext?.subject,
+            commitShortId: activeCommitContext?.shortId,
             snapshotId,
           },
     [prMetadata, activeDiffBase, committedBase, activeWorktreePath, activeCommitContext, snapshotId],

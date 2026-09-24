@@ -17,6 +17,7 @@ import type { GitCommandResult, ReviewGitRuntime } from "./review-core";
 import type { ReviewJjRuntime } from "./jj-core";
 import { createGitProvider, createJjProvider, createVcsApi } from "./vcs-core";
 import { getJjCommitDiffInfo, listJjCommitHistory, resolveJjCommitRailBase } from "./commit-history";
+import { canonicalizeJjCommitDiffType } from "./jj-core";
 
 function hasJj(): boolean {
   try {
@@ -128,6 +129,39 @@ describe("jj Commits rail against a real repository", () => {
     expect(page!.commits[1].sha).toBe(ids.merge);
   });
 
+  testIfJj("keeps a blank MERGE working copy: its first-parent diff is not empty", async () => {
+    const ids = initWorkspace();
+    // A fresh `jj new A B`: no changes against the auto-merge, no description,
+    // yet diffed against its first parent it carries the other side.
+    jj(["new", ids.two, ids.side]);
+    const page = await listJjCommitHistory(jjRuntime, "main", workspace);
+    expect(page!.commits[0].isHead).toBe(true);
+    expect(page!.commits[0].sha).toBe(idOf("@"));
+    expect(page!.commits[1].sha).toBe(ids.two);
+  });
+
+  testIfJj("an opened working copy goes stale on edit, and refresh lands on the new @", async () => {
+    initWorkspace();
+    writeFileSync(join(workspace, "wip.txt"), "first\n");
+    const opened = `jj-commit:${idOf("@")}`;
+    const before = await vcs.getVcsDiffFingerprint(opened, "main", workspace);
+    expect(before).toEndWith(":visible");
+    expect((await vcs.runVcsDiff(opened, "main", workspace)).patch).toContain("+first");
+
+    // jj rewrites @ on the next snapshot; the old id still resolves (hidden).
+    writeFileSync(join(workspace, "wip.txt"), "second\n");
+    const after = await vcs.getVcsDiffFingerprint(opened, "main", workspace);
+    expect(after).not.toBe(before);
+
+    const refreshed = await canonicalizeJjCommitDiffType(jjRuntime, opened, workspace);
+    expect(refreshed).toBe(`jj-commit:${idOf("@")}`);
+    expect(refreshed).not.toBe(opened);
+    expect((await vcs.runVcsDiff(refreshed, "main", workspace)).patch).toContain("+second");
+    // A current revision and any other diff type pass through untouched.
+    expect(await canonicalizeJjCommitDiffType(jjRuntime, refreshed, workspace)).toBe(refreshed);
+    expect(await canonicalizeJjCommitDiffType(jjRuntime, "jj-current", workspace)).toBe("jj-current");
+  });
+
   testIfJj("pages with a before cursor and ends on a cursor that left the rail", async () => {
     const ids = initWorkspace();
     const first = await listJjCommitHistory(jjRuntime, "main", workspace, { limit: 2 });
@@ -191,7 +225,7 @@ describe("jj Commits rail against a real repository", () => {
     expect(root).toEqual({ oldContent: null, newContent: "base\n" });
 
     const fingerprint = await vcs.getVcsDiffFingerprint(`jj-commit:${ids.two}`, "main", workspace);
-    expect(fingerprint).toBe(`jj:jj-commit:${ids.two}:present`);
+    expect(fingerprint).toBe(`jj:jj-commit:${ids.two}:visible`);
   });
 });
 

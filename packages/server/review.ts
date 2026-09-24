@@ -46,6 +46,7 @@ import {
   type CommitDiffInfo,
 } from "@plannotator/shared/commit-history";
 import { runtime as jjRuntime } from "./jj";
+import { canonicalizeJjCommitDiffType } from "@plannotator/shared/jj-core";
 import { resolvePoolCwd } from "@plannotator/shared/worktree-pool";
 import {
   REVIEW_IMAGE_ENDPOINT,
@@ -2614,6 +2615,12 @@ export async function startReviewServer(
                 ? resolveAvailableDiffType(clientGitContext, requestedDiffType, nextBaseExplicitlyChosen)
                 : { diffType: requestedDiffType };
               newDiffType = availability.diffType;
+              // A jj revision rewritten since it was opened (the working copy
+              // on every save) resolves to its change's current version, so
+              // Refresh and rail clicks never serve a frozen snapshot.
+              if (sessionVcsType === "jj") {
+                newDiffType = await canonicalizeJjCommitDiffType(jjRuntime, newDiffType as string, gitContext?.cwd) as DiffType;
+              }
               const base = resolveReviewBase(
                 requestedBase,
                 nextBaseExplicitlyChosen,

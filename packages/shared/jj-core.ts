@@ -210,6 +210,54 @@ export async function resolveJjSnapshotEndpoint(
 }
 
 /**
+ * Whether a jj-commit id is still the CURRENT version of its change:
+ * `visible`, `hidden` (rewritten or abandoned; the id still resolves), or
+ * `gone` (no longer resolves at all).
+ */
+async function getJjCommitVisibility(
+  runtime: ReviewJjRuntime,
+  commitId: string,
+  cwd?: string,
+): Promise<"visible" | "hidden" | "gone"> {
+  const result = await runtime.runJj(
+    ["log", "--no-graph", "-r", `${jjCommitRevset(commitId)} & ::visible_heads()`, "-T", 'commit_id ++ "\n"'],
+    { cwd },
+  );
+  if (result.exitCode !== 0) return "gone";
+  return result.stdout.trim() ? "visible" : "hidden";
+}
+
+/**
+ * Point a `jj-commit:<id>` whose revision was rewritten at the change's
+ * current version. jj rewrites a mutable revision on every edit — the
+ * working copy on every save — so a reviewer who opened `@` from the Commits
+ * rail would otherwise keep reading the frozen pre-edit snapshot. Visible,
+ * abandoned, and divergent revisions (no single successor) are returned
+ * unchanged; any other diff type passes through.
+ */
+export async function canonicalizeJjCommitDiffType(
+  runtime: ReviewJjRuntime,
+  diffType: string,
+  cwd?: string,
+): Promise<string> {
+  const commit = parseJjCommitDiffType(diffType);
+  if (!commit) return diffType;
+  if (await getJjCommitVisibility(runtime, commit.commitId, cwd) !== "hidden") return diffType;
+  const change = await runtime.runJj(
+    ["log", "--no-graph", "-r", jjCommitRevset(commit.commitId), "-T", "change_id"],
+    { cwd },
+  );
+  const changeId = change.exitCode === 0 ? change.stdout.trim() : "";
+  if (!/^[k-z]+$/.test(changeId)) return diffType;
+  const current = await runtime.runJj(
+    ["log", "--no-graph", "-r", `change_id(${changeId})`, "-T", 'commit_id ++ "\n"'],
+    { cwd },
+  );
+  const ids = current.exitCode === 0 ? current.stdout.split("\n").map((id) => id.trim()).filter(Boolean) : [];
+  return ids.length === 1 && /^[0-9a-f]+$/.test(ids[0]) ? `jj-commit:${ids[0]}` : diffType;
+}
+
+/**
  * The FIRST parent's commit id. jj lists a merge's parents in the order they
  * were given to `jj new`, so index 0 is stable across invocations — unlike
  * `heads()`/`latest()`, which order by graph shape or timestamp.
@@ -365,12 +413,16 @@ export async function getJjDiffFingerprint(
           : null;
       }
       default: {
-        // jj-commit: a revision is immutable content, so the fingerprint only
-        // has to notice the id disappearing (abandoned and garbage-collected).
+        // jj-commit: the id's content never changes, but jj REWRITES a
+        // mutable revision on every edit (the working copy on every snapshot,
+        // which this very query triggers) and the old id keeps resolving as a
+        // hidden commit. So the fingerprint tracks visibility: a rewritten
+        // revision reads stale, and Refresh lands on its successor
+        // (canonicalizeJjCommitDiffType).
         const commit = parseJjCommitDiffType(diffType);
         if (!commit) return null;
-        const id = await idOf(jjCommitRevset(commit.commitId));
-        return `jj:jj-commit:${commit.commitId}:${id ? "present" : "gone"}`;
+        const state = await getJjCommitVisibility(runtime, commit.commitId, cwd);
+        return `jj:jj-commit:${commit.commitId}:${state}`;
       }
     }
   } catch {

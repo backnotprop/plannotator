@@ -493,6 +493,22 @@ describe("exportReviewFeedback", () => {
     expect(result).not.toContain("anchored");
   });
 
+  it("labels a jj revision by its short change id; git keeps the 7-char sha", () => {
+    const id = "0123456789abcdef0123456789abcdef01234567";
+    const jj = exportReviewFeedback([ann({ commitSha: id })], undefined, {
+      mode: `jj-commit:${id}`,
+      commitSubject: "trim fields",
+      commitShortId: "kmqzsnwp",
+    });
+    expect(jj).toContain("**Diff:** Commit `kmqzsnwp` — trim fields");
+    // The same short id on a git commit is ignored: git labels stay unchanged.
+    const git = exportReviewFeedback([ann({ commitSha: id })], undefined, {
+      mode: `commit:${id}`,
+      commitShortId: "kmqzsnwp",
+    });
+    expect(git).toContain("**Diff:** Commit `0123456`");
+  });
+
   it("labels commit-anchored annotations exported under a different diff", () => {
     const sha = "0123456789abcdef0123456789abcdef01234567";
     const result = exportReviewFeedback(
