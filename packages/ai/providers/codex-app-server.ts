@@ -592,6 +592,10 @@ export class CodexAppServerProvider implements AIProvider {
    */
   async fetchModels(): Promise<void> {
     const proc = new CodexAppServerProcess();
+    // Published together with the outcome (in `finally`), never before
+    // model/list returns: a capabilities answer in between would pair the
+    // version with the still-fallback list and the picker would say so.
+    let version: string | undefined;
     try {
       await proc.start(
         this.config.codexExecutablePath ?? "codex",
@@ -599,7 +603,7 @@ export class CodexAppServerProvider implements AIProvider {
         MODEL_DISCOVERY_TIMEOUT_MS,
       );
       // Kept even if model/list fails: the version explains a fallback list.
-      this.toolVersion = cliVersionFrom(proc.userAgent) ?? this.toolVersion;
+      version = cliVersionFrom(proc.userAgent);
       // model/list is paginated (nextCursor); aggregate every page into one list
       // so larger model catalogs aren't silently truncated. The page guard is a
       // safety stop against a misbehaving cursor, not an expected limit.
@@ -619,6 +623,7 @@ export class CodexAppServerProvider implements AIProvider {
       this.models = models;
       this.modelsSource = "discovered";
     } finally {
+      if (version) this.toolVersion = version;
       proc.kill();
     }
   }

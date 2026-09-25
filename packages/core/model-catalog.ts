@@ -86,10 +86,14 @@ export type ModelsSource = 'fallback' | 'discovered';
 /**
  * The version in a CLI's own output: `claude --version` ("2.1.282 (Claude
  * Code)") or the codex app-server initialize `userAgent` ("plannotator/0.155.1
- * (Mac OS 26.3.0; arm64) …", where the first version is codex's).
+ * (Mac OS 26.3.0; arm64) …", where the first version is codex's). Reads the
+ * line `toolLine` matches when one does (so a stray `node 18.2.0` line cannot
+ * win), else the first non-empty line; the prerelease suffix is capped.
  */
-export function cliVersionFrom(text: string | null | undefined): string | undefined {
-  return /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/.exec(text ?? '')?.[1];
+export function cliVersionFrom(text: string | null | undefined, toolLine?: RegExp): string | undefined {
+  const lines = (text ?? '').split(/\r?\n/).filter((l) => l.trim());
+  const line = (toolLine && lines.find((l) => toolLine.test(l))) ?? lines[0] ?? '';
+  return /\b(\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.]{1,24})?)(?![0-9A-Za-z.-])/.exec(line)?.[1];
 }
 
 /** The subset of the Agent SDK's `ModelInfo` the catalog reads. */

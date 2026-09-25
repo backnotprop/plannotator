@@ -225,3 +225,16 @@ test("cliVersionFrom reads the version from claude --version and the codex userA
   expect(cliVersionFrom("")).toBeUndefined();
   expect(cliVersionFrom(undefined)).toBeUndefined();
 });
+
+test("cliVersionFrom prefers the line naming the tool, else the first line", () => {
+  const noisy = "node 18.2.0 warning: something\n2.1.282 (Claude Code)\n";
+  expect(cliVersionFrom(noisy, /claude code/i)).toBe("2.1.282");
+  // No line names the tool: the first line's version, never a later line's.
+  expect(cliVersionFrom("2.1.282\nnode 18.2.0", /claude code/i)).toBe("2.1.282");
+  expect(cliVersionFrom("no version here\n1.2.3")).toBeUndefined();
+});
+
+test("cliVersionFrom refuses an unbounded prerelease suffix", () => {
+  expect(cliVersionFrom(`0.156.0-${"a".repeat(200)}`)).toBeUndefined();
+  expect(cliVersionFrom("0.156.0-alpha.2")).toBe("0.156.0-alpha.2");
+});

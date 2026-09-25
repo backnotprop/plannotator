@@ -106,6 +106,42 @@ process.stdin.on("data", (d) => {
       cli.cleanup();
     }
   }, 15_000);
+
+  test.skipIf(process.platform === "win32")("codex: the version is not published while model/list is still pending", async () => {
+    // Publishing it early would pair the version with the still-fallback list,
+    // and the picker would claim "Using the built-in list" for a discovery
+    // that is about to succeed.
+    const cli = fakeCli(
+      "codex",
+      `#!/usr/bin/env node
+let buf = "";
+process.stdin.on("data", (d) => {
+  buf += d;
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const msg = JSON.parse(buf.slice(0, i));
+    buf = buf.slice(i + 1);
+    if (msg.id === undefined) continue;
+    const send = (r) => process.stdout.write(JSON.stringify({ id: msg.id, result: r }) + "\\n");
+    if (msg.method === "initialize") send({ userAgent: "plannotator/0.155.1 (Linux)" });
+    else setTimeout(() => send({ data: [{ id: "gpt-6-sol", displayName: "GPT-6-Sol", isDefault: true }] }), 600);
+  }
+});
+`,
+    );
+    try {
+      const provider = new CodexAppServerProvider({ type: "codex-sdk", codexExecutablePath: cli.path });
+      const discovery = provider.fetchModels();
+      await new Promise((r) => setTimeout(r, 350));
+      expect(provider.modelsSource).toBe("fallback");
+      expect(provider.toolVersion).toBeUndefined();
+      await discovery;
+      expect(provider.modelsSource).toBe("discovered");
+      expect(provider.toolVersion).toBe("0.155.1");
+    } finally {
+      cli.cleanup();
+    }
+  }, 15_000);
 });
 
 describe("Claude model discovery", () => {

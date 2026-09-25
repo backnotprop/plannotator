@@ -255,7 +255,7 @@ export class ClaudeAgentSDKProvider implements AIProvider {
     return new Promise((resolve) => {
       try {
         execFile(path, ["--version"], { timeout: MODEL_DISCOVERY_TIMEOUT_MS, windowsHide: true }, (err, stdout) => {
-          resolve(err ? undefined : cliVersionFrom(String(stdout)));
+          resolve(err ? undefined : cliVersionFrom(String(stdout), /claude code/i));
         });
       } catch {
         resolve(undefined);
