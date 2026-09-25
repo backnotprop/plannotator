@@ -36,6 +36,14 @@ describe('buildPlatformReviewBody', () => {
     })).toBe('');
   });
 
+  // #1611: GitHub requires a body on REQUEST_CHANGES exactly like COMMENT.
+  test('uses the same neutral GitHub body for an inline-only request-changes review', () => {
+    expect(buildPlatformReviewBody('request_changes', 'github', '', {
+      fileComments: [inlineComment],
+      fileScopedBody: '',
+    })).toBe('See inline comments.');
+  });
+
   test('does not manufacture an approval body', () => {
     expect(buildPlatformReviewBody('approve', 'github', undefined, {
       fileComments: [inlineComment],

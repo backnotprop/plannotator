@@ -313,7 +313,29 @@ same ghost-X + `DecisionControl` shape from `buildDecisionSpec`'s platform arm, 
 composer items ever**: every menu action opens the existing `ReviewSubmissionDialog` (per-target
 state, retry, "leave PR open" toggle — whose general-comment textarea is the only note field on
 that side), and the self-approval mute is preserved — muted primary/items with the "You can't
-approve your own {PR/MR}" reason, `Request changes…` / `Post comments, then…` always live.
+approve your own {PR/MR}" reason.
+
+**Request changes is a real review event (#1611).** `PRReviewAction` (`packages/shared/pr-types.ts`)
+is `'approve' | 'comment' | 'request_changes'`, carried end to end: `resolvePlatformDecisionAction`
+returns `{ action, chooseEvent }`; `Post comments, then…` opens the dialog with a Comment /
+Request changes choice (Comment selected) and the empty-state `Request changes…` preselects
+Request changes, while the primary `Post Comments` keeps the plain comment flow with no choice.
+`POST /api/pr-action` validates `action` with `parsePRReviewAction` in BOTH runtimes (anything
+else is `400`, never a silent COMMENT), and `submitGhPRReview` maps it to `REQUEST_CHANGES` on the
+single create-review call AND on the pending-review → `/events` submit path (#1600), with the
+same `See inline comments.` placeholder COMMENT gets when the body is empty (GitHub requires a
+body on both). GitLab has no request-changes review: `request_changes` posts exactly what
+`comment` posts, the menu subtitles say so (`requestChangesSupported: false` on the spec's
+platform input), and the dialog's Request changes option is disabled with that reason. GitHub
+refuses REQUEST_CHANGES on your own PR like APPROVE, so with `requestChangesSupported: true` and
+`selfAuthored` the empty-state `Request changes…` mutes with its own reason and a live
+`Comment…` row (`note-with-feedback`, compact id `comment`) keeps the state from being a dead
+end; `Post comments, then…` stays live with the dialog option disabled. The spec field is
+optional and absent keeps the pre-#1611 copy for hosts. In a stacked multi-PR submission every
+target posts the same event; the choice locks once any target may have been posted
+(success/partial/blocked) so retries and the tab-scoped recovery (which stores `action`) keep
+that event, while after a plain failure (nothing posted) it can still change. A refusal GitHub
+answers anyway surfaces its own reason through the #1600 `githubErrorDetail` path.
 
 Interaction-model changes worth knowing (F8 and siblings): the agent-mode `Approve` primary
 follows the `FeedbackButton` responsive pattern and is **icon-only below the `lg` breakpoint**,

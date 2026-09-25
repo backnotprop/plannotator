@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
-import type { PRReviewFileLevelComment, PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
+import type { PRReviewAction, PRReviewFileLevelComment, PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
 import { CopyButton } from './CopyButton';
 import {
   exportReviewFeedback,
@@ -58,7 +58,7 @@ export interface ReviewSubmission {
 
 /** Request body accepted by the review server's platform submission endpoint. */
 export interface PRActionRequest {
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
   body: string;
   fileComments: SubmissionTarget['fileComments'];
   fileLevelComments?: PRReviewFileLevelComment[];
@@ -69,7 +69,19 @@ type ReviewPlatform = 'github' | 'gitlab';
 
 interface ReviewSubmissionDialogProps {
   isOpen: boolean;
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
+  /**
+   * #1611: when given (and the dialog is not approving), the dialog offers a
+   * Comment / Request changes choice and reports the pick here. The primary
+   * "Post Comments" opens without it, so that flow is unchanged.
+   */
+  onActionChange?: (action: 'comment' | 'request_changes') => void;
+  /**
+   * Why Request changes cannot be chosen (GitLab has no such review; GitHub
+   * refuses it on your own PR). Set ⇒ the option renders disabled with this
+   * reason under it.
+   */
+  requestChangesUnavailableReason?: string;
   submission: ReviewSubmission;
   generalComment: string;
   onGeneralCommentChange: (value: string) => void;
@@ -173,11 +185,11 @@ function buildFailedCommentsMarkdown(
 
 /**
  * Build the top-level review body without adding product attribution.
- * GitHub requires a body for COMMENT reviews, so an inline-only review gets a
+ * GitHub requires a body for COMMENT and REQUEST_CHANGES reviews, so an inline-only review gets a
  * neutral pointer. Approvals and GitLab discussions can remain bodyless.
  */
 export function buildPlatformReviewBody(
-  action: 'approve' | 'comment',
+  action: PRReviewAction,
   platform: ReviewPlatform,
   generalComment: string | undefined,
   target: Pick<SubmissionTarget, 'fileComments' | 'fileScopedBody'> & Partial<Pick<SubmissionTarget, 'fileLevelComments'>>,
@@ -188,7 +200,8 @@ export function buildPlatformReviewBody(
 
   if (parts.length > 0) return parts.join('\n\n');
   const threadCount = target.fileComments.length + (target.fileLevelComments?.length ?? 0);
-  if (action === 'comment' && platform === 'github' && threadCount > 0) {
+  // GitHub requires a body on COMMENT and REQUEST_CHANGES reviews alike.
+  if (action !== 'approve' && platform === 'github' && threadCount > 0) {
     return 'See inline comments.';
   }
   return '';
@@ -199,7 +212,7 @@ export function buildPlatformReviewBody(
  * returned by the server after a partial GitLab submission.
  */
 export function buildPRActionRequest(
-  action: 'approve' | 'comment',
+  action: PRReviewAction,
   body: string,
   target: SubmissionTarget,
 ): PRActionRequest {
@@ -368,6 +381,8 @@ export function buildReviewSubmission(
 export function ReviewSubmissionDialog({
   isOpen,
   action,
+  onActionChange,
+  requestChangesUnavailableReason,
   submission,
   generalComment,
   onGeneralCommentChange,
@@ -392,6 +407,23 @@ export function ReviewSubmissionDialog({
   const hasPartial = submission.targets.some(t => t.status === 'partial');
   const hasBlocked = submission.targets.some(t => t.status === 'blocked');
   const bodyLocked = hasPartial || hasBlocked;
+  const isRequestChanges = action === 'request_changes';
+  // #1611: the Comment / Request changes choice. It locks once any target may
+  // have been posted, so a retry (or the rest of a stacked submission) always
+  // carries the event the first attempt used; after a plain failure nothing
+  // was posted, so the reviewer can still switch (e.g. to Comment after
+  // GitHub refused Request changes).
+  const showEventChoice = !isApprove && onActionChange !== undefined;
+  const eventChoiceLocked = isSubmitting ||
+    submission.targets.some(t => t.status === 'success' || t.status === 'partial' || t.status === 'blocked');
+  const eventOptions: Array<{ value: 'comment' | 'request_changes'; label: string; disabled: boolean }> = [
+    { value: 'comment', label: 'Comment', disabled: eventChoiceLocked },
+    {
+      value: 'request_changes',
+      label: 'Request changes',
+      disabled: eventChoiceLocked || requestChangesUnavailableReason !== undefined,
+    },
+  ];
 
   return (
     <Dialog
@@ -409,13 +441,50 @@ export function ReviewSubmissionDialog({
       >
         <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
         <DialogTitle className="font-semibold mb-1">
-          {isApprove ? `Approve ${mrLabel}` : 'Post Review Comments'}
+          {isApprove ? `Approve ${mrLabel}` : isRequestChanges ? 'Request Changes' : 'Post Review Comments'}
         </DialogTitle>
         <DialogDescription className="text-sm text-muted-foreground mb-3">
           {isApprove
             ? 'Add a general comment to the approval (optional).'
             : 'Review what will be posted.'}
         </DialogDescription>
+
+        {showEventChoice && (
+          <fieldset data-review-event-choice className="mb-3">
+            <legend className="sr-only">Review type</legend>
+            <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+              {eventOptions.map(option => {
+                const checked = action === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    data-pn-touch-target
+                    className={`flex items-center justify-center rounded px-2 py-1.5 text-sm font-medium select-none has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-primary ${
+                      checked ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+                    } ${option.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:text-foreground'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="review-event"
+                      value={option.value}
+                      checked={checked}
+                      disabled={option.disabled}
+                      aria-describedby={option.value === 'request_changes' && requestChangesUnavailableReason ? 'review-request-changes-reason' : undefined}
+                      onChange={() => onActionChange?.(option.value)}
+                      className="sr-only"
+                    />
+                    {option.label}
+                  </label>
+                );
+              })}
+            </div>
+            {requestChangesUnavailableReason && (
+              <p id="review-request-changes-reason" className="mt-1 text-xs text-muted-foreground">
+                {requestChangesUnavailableReason}
+              </p>
+            )}
+          </fieldset>
+        )}
 
         {/* General comment */}
         <textarea
@@ -641,7 +710,9 @@ export function ReviewSubmissionDialog({
                   ? 'Retry Failed'
                   : isApprove
                     ? 'Approve'
-                    : 'Post Comments'}
+                    : isRequestChanges
+                      ? 'Request Changes'
+                      : 'Post Comments'}
           </button>
         </div>
       </DialogContent>

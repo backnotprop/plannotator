@@ -4,7 +4,7 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 
@@ -713,7 +713,7 @@ const ADD_FILE_THREAD_MUTATION = `mutation($reviewId: ID!, $path: String!, $body
 const PENDING_REVIEW_REMAINS =
   "A pending review remains on the pull request; submit or discard it on GitHub before retrying.";
 
-/** GitHub requires a body on a COMMENT review; the client uses the same placeholder. */
+/** GitHub requires a body on a COMMENT or REQUEST_CHANGES review; the client uses the same placeholder. */
 const COMMENT_BODY_PLACEHOLDER = "See inline comments.";
 
 const MAX_ERROR_DETAIL = 300;
@@ -789,7 +789,7 @@ export async function submitGhPRReview(
   runtime: PRRuntime,
   ref: GhPRRef,
   headSha: string,
-  action: "approve" | "comment",
+  action: PRReviewAction,
   body: string,
   fileComments: PRReviewFileComment[],
   fileLevelComments: PRReviewFileLevelComment[] = [],
@@ -798,7 +798,7 @@ export async function submitGhPRReview(
     throw new Error("Runtime does not support stdin input; cannot submit PR review");
   }
   const run = runtime.runCommandWithInput.bind(runtime);
-  const event = action === "approve" ? "APPROVE" : "COMMENT";
+  const event = action === "approve" ? "APPROVE" : action === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
   const reviewsEndpoint = `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`;
   const api = (endpoint: string, method: string, input: unknown) =>
     run("gh", hostnameArgs(ref.host, ["api", endpoint, "--method", method, "--input", "-"]), JSON.stringify(input));
@@ -878,7 +878,7 @@ export async function submitGhPRReview(
 
   // 3. Submit. On failure discard the pending review so a retry starts clean.
   let submitBody = foldFileLevelComments(body, folded);
-  if (event === "COMMENT" && submitBody.trim().length === 0) submitBody = COMMENT_BODY_PLACEHOLDER;
+  if (event !== "APPROVE" && submitBody.trim().length === 0) submitBody = COMMENT_BODY_PLACEHOLDER;
   const submitted = await api(`${reviewsEndpoint}/${reviewId}/events`, "POST", {
     event,
     body: submitBody,

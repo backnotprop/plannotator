@@ -16,6 +16,7 @@ import {
   buildReviewApprovalBody,
   compactPrimaryIdForReviewDecision,
   compactRowIdForReviewDecisionItem,
+  compactRowIdForPlatformDecisionItem,
   createGeneralReviewComment,
   readApprovalNotesAdvert,
   resolvePlatformDecisionAction,
@@ -44,16 +45,17 @@ function reviewInputs(): DecisionSpecInput[] {
  *  self-authorship swept both ways (PR6, §3.4). */
 function platformInputs(): DecisionSpecInput[] {
   const inputs: DecisionSpecInput[] = [];
-  for (const selfAuthored of [false, true])
-    for (const count of [0, 1, 3])
-      inputs.push({
-        app: "review",
-        gate: true,
-        count,
-        hasFeedback: count > 0,
-        approvalNotesSupported: false, // ignored by the platform arm
-        platform: { label: "GitHub", mrLabel: "PR", selfAuthored },
-      });
+  for (const [label, requestChangesSupported] of [["GitHub", true], ["GitLab", false]] as const)
+    for (const selfAuthored of [false, true])
+      for (const count of [0, 1, 3])
+        inputs.push({
+          app: "review",
+          gate: true,
+          count,
+          hasFeedback: count > 0,
+          approvalNotesSupported: false, // ignored by the platform arm
+          platform: { label, mrLabel: label === "GitHub" ? "PR" : "MR", selfAuthored, requestChangesSupported },
+        });
   return inputs;
 }
 
@@ -195,11 +197,15 @@ describe("review decision handler exhaustiveness", () => {
   // hides a decision row on touch — the silent-data-loss class the #1436
   // review flagged (E16-review).
   test("compact row ids are unique per spec and never collide with the primary row", () => {
-    for (const input of [...reviewInputs(), ...platformInputs()]) {
+    const cases = [
+      ...reviewInputs().map((input) => ({ input, rowId: compactRowIdForReviewDecisionItem })),
+      ...platformInputs().map((input) => ({ input, rowId: compactRowIdForPlatformDecisionItem })),
+    ];
+    for (const { input, rowId } of cases) {
       const spec = buildDecisionSpec(input);
       const ids = [
         compactPrimaryIdForReviewDecision(spec.primary),
-        ...spec.items.map((item) => compactRowIdForReviewDecisionItem(item.id)),
+        ...spec.items.map((item) => rowId(item.id)),
       ];
       for (const id of ids) expect(id).toBeDefined();
       expect(new Set(ids).size).toBe(ids.length);
@@ -213,15 +219,27 @@ describe("review decision handler exhaustiveness", () => {
   // would post a review where the reviewer asked to approve.
   test("every id the platform arm emits resolves to the matching dialog mode", () => {
     for (const input of platformInputs()) {
+      const supported = input.platform!.requestChangesSupported === true;
       const spec = buildDecisionSpec(input);
-      expect(resolvePlatformDecisionAction("primary", input.count > 0))
-        .toBe(input.count > 0 ? "comment" : "approve");
+      expect(resolvePlatformDecisionAction("primary", input.count > 0, supported))
+        .toEqual({ action: input.count > 0 ? "comment" : "approve", chooseEvent: false });
       for (const item of spec.items) {
-        const mode = resolvePlatformDecisionAction(item.id, input.count > 0);
-        expect(mode).toBe(item.tone === "success" ? "approve" : "comment");
+        const mode = resolvePlatformDecisionAction(item.id, input.count > 0, supported);
+        if (item.tone === "success") {
+          expect(mode).toEqual({ action: "approve", chooseEvent: false });
+        } else if (item.id === "request-changes") {
+          // #1611: "Request changes…" preselects a real REQUEST_CHANGES review
+          // where the platform has one, and never where it does not.
+          expect(mode).toEqual({ action: supported ? "request_changes" : "comment", chooseEvent: true });
+        } else {
+          // "Post comments, then…" / "Comment…": the dialog offers the choice,
+          // starting on the neutral comment.
+          expect(mode).toEqual({ action: "comment", chooseEvent: true });
+        }
       }
     }
   });
+
 });
 
 describe("createGeneralReviewComment — the one review-level comment shape", () => {

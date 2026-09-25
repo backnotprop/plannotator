@@ -261,3 +261,57 @@ describe('platform review retry safety', () => {
     });
   });
 });
+
+// #1611: a stacked submission posts ONE review event to every target, and a
+// retry (or a reload of the retained progress) keeps posting that event.
+describe('request_changes across a multi-PR submission', () => {
+  test('every target and the retry of a failed one carry request_changes', async () => {
+    const second: SubmissionTarget = {
+      ...baseTarget,
+      prUrl: 'https://github.com/acme/widgets/pull/8',
+      prNumber: 8,
+    };
+    const actions: Array<[string | undefined, string | undefined]> = [];
+    let failSecond = true;
+    const fetchReview = async (_input: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { action?: string; targetPrUrl?: string };
+      actions.push([body.targetPrUrl, body.action]);
+      if (body.targetPrUrl === second.prUrl && failSecond) {
+        return Response.json({ error: 'Review Can not request changes on your own pull request' }, { status: 500 });
+      }
+      return successResponse({ status: 'complete' });
+    };
+
+    const first = await submitPlatformReviewTargets({
+      targets: [baseTarget, second],
+      action: 'request_changes',
+      generalComment: 'Please fix',
+      bodyForTarget: () => 'Please fix',
+      fetchReview,
+    });
+    expect(actions.map(([, action]) => action)).toEqual(['request_changes', 'request_changes']);
+    expect(first.targets.map((t) => t.status)).toEqual(['success', 'failed']);
+    // GitHub's own reason reaches the target (#1600 surfacing).
+    expect(first.targets[1].error).toContain('Can not request changes on your own pull request');
+
+    // The retained progress remembers the event, so a reload retries with it.
+    const storage = new MemoryStorage();
+    saveReviewSubmissionRecovery(storage, baseTarget.prUrl, first.recovery);
+    const reloaded = loadReviewSubmissionRecovery(storage, baseTarget.prUrl);
+    expect(reloaded?.action).toBe('request_changes');
+
+    failSecond = false;
+    actions.length = 0;
+    const restored = restoreReviewSubmission({ targets: [baseTarget, second], orphans: [] }, reloaded!);
+    const retried = await submitPlatformReviewTargets({
+      targets: restored.targets,
+      action: reloaded!.action,
+      generalComment: 'Please fix',
+      bodyForTarget: () => 'Please fix',
+      fetchReview,
+    });
+    // The succeeded target is never re-posted; the failed one retries as request_changes.
+    expect(actions).toEqual([[second.prUrl, 'request_changes']]);
+    expect(retried.allComplete).toBe(true);
+  });
+});

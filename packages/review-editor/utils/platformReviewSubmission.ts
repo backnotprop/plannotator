@@ -1,3 +1,4 @@
+import type { PRReviewAction } from '@plannotator/shared/pr-types';
 import type { SubmissionTarget } from '../components/ReviewSubmissionDialog';
 import { buildPRActionRequest } from '../components/ReviewSubmissionDialog';
 import { parsePRActionSuccess, readPRActionError } from './prActionResponse';
@@ -57,7 +58,7 @@ export function markPlatformReviewAmbiguous(
  */
 export async function submitPlatformReviewTarget(options: {
   target: SubmissionTarget;
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
   body: string;
   fetchReview?: PlatformReviewFetch;
 }): Promise<PlatformReviewTargetResult> {
@@ -129,7 +130,7 @@ export async function submitPlatformReviewTarget(options: {
  */
 export async function submitPlatformReviewTargets(options: {
   targets: SubmissionTarget[];
-  action: 'approve' | 'comment';
+  action: PRReviewAction;
   generalComment: string;
   bodyForTarget: (target: SubmissionTarget) => string;
   fetchReview?: PlatformReviewFetch;

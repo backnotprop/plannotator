@@ -7,7 +7,7 @@
 
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewSubmissionResult, CommandResult } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
 
@@ -611,7 +611,7 @@ export async function submitGlMRReview(
   runtime: PRRuntime,
   ref: GlMRRef,
   headSha: string,
-  action: "approve" | "comment",
+  action: PRReviewAction,
   body: string,
   fileComments: PRReviewFileComment[],
 ): Promise<PRReviewSubmissionResult> {
@@ -773,7 +773,8 @@ export async function submitGlMRReview(
     }
   }
 
-  // 3. Approve if requested
+  // 3. Approve if requested. GitLab has no request-changes review, so a
+  //    `request_changes` action posts exactly what `comment` posts (#1611).
   let approval: "not-requested" | "succeeded" | "failed" = "not-requested";
   let approvalError: string | undefined;
   if (action === "approve") {

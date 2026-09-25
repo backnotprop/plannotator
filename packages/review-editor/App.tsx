@@ -19,6 +19,7 @@ import {
   buildReviewApprovalBody,
   compactPrimaryIdForReviewDecision,
   compactRowIdForReviewDecisionItem,
+  compactRowIdForPlatformDecisionItem,
   createGeneralReviewComment,
   readApprovalNotesAdvert,
   resolvePlatformDecisionAction,
@@ -179,7 +180,7 @@ import { ExternalLineAnnotationComposer } from './components/ExternalLineAnnotat
 import { DestinationSpotlight } from './components/DestinationSpotlight';
 import { needsDestinationSpotlight, markDestinationSpotlightSeen } from './utils/destinationSpotlight';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
-import type { PRMetadata } from '@plannotator/shared/pr-types';
+import type { PRMetadata, PRReviewAction } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey } from '@plannotator/ui/utils/platform';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -745,7 +746,8 @@ const ReviewApp: React.FC = () => {
   const [isPlatformActioning, setIsPlatformActioning] = useState(false);
   const [platformActionError, setPlatformActionError] = useState<string | null>(null);
   const [platformUser, setPlatformUser] = useState<string | null>(null);
-  const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: 'approve' | 'comment'; plan: ReviewSubmission } | null>(null);
+  // `chooseEvent` (#1611): the dialog offers Comment / Request changes.
+  const [platformCommentDialog, setPlatformCommentDialog] = useState<{ action: PRReviewAction; plan: ReviewSubmission; chooseEvent: boolean } | null>(null);
   const [platformGeneralComment, setPlatformGeneralComment] = useState('');
   const [platformReviewRecovery, setPlatformReviewRecovery] = useState<{
     rootPrUrl: string;
@@ -776,6 +778,14 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
+  // #1611: GitHub has a REQUEST_CHANGES review (refused on your own PR, like
+  // approve); GitLab has none, so Request changes posts as a comment there.
+  const requestChangesSupported = prMetadata?.platform === 'github';
+  const requestChangesUnavailableReason = !requestChangesSupported
+    ? `${platformLabel} has no request-changes review; this posts as a comment.`
+    : isOwnPR
+      ? `You can't request changes on your own pull request on ${platformLabel}.`
+      : undefined;
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
   const updateInfo = useUpdateCheck();
   const updateToastShown = useRef(false);
@@ -4086,7 +4096,7 @@ const ReviewApp: React.FC = () => {
   }, [compactComposerItem, compactConfirmItem, compactDecisionComposer, compactDecisionConfirm]);
 
   // Submit reviews to one or more PRs via /api/pr-action
-  const handlePlatformAction = useCallback(async (action: 'approve' | 'comment', plan: ReviewSubmission, generalComment?: string) => {
+  const handlePlatformAction = useCallback(async (action: PRReviewAction, plan: ReviewSubmission, generalComment?: string) => {
     setIsPlatformActioning(true);
     setPlatformActionError(null);
 
@@ -4161,7 +4171,9 @@ const ReviewApp: React.FC = () => {
       const prLinks = openUrls.join(', ');
       const statusMessage = action === 'approve'
         ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
-        : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
+        : action === 'request_changes' && prMetadata.platform === 'github'
+          ? `Changes requested on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
+          : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
       fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4183,7 +4195,7 @@ const ReviewApp: React.FC = () => {
     }
   }, [platformOpenPR, platformLabel, mrLabel, prMetadata, getDraftGeneration]);
 
-  const openPlatformDialog = useCallback((action: 'approve' | 'comment') => {
+  const openPlatformDialog = useCallback((action: PRReviewAction, chooseEvent = false) => {
     const diffPaths = new Set(files.map(f => f.path));
     const prMeta = prMetadata ? {
       number: prMetadata.platform === 'github' ? prMetadata.number : prMetadata.iid,
@@ -4218,11 +4230,15 @@ const ReviewApp: React.FC = () => {
       setPlatformCommentDialog({
         action: recovery.action,
         plan: restoreReviewSubmission(plan, recovery),
+        // A retained Request changes submission shows its (locked) event
+        // choice, so the reviewer sees which event the retry carries; the
+        // comment and approve recoveries render exactly as before.
+        chooseEvent: recovery.action === 'request_changes',
       });
       return;
     }
     setPlatformGeneralComment(seededGeneralComment);
-    setPlatformCommentDialog({ action, plan });
+    setPlatformCommentDialog({ action, plan, chooseEvent });
   }, [allAnnotations, visibleEditorAnnotations, files, prMetadata, visibleDescriptionAnnotations, visibleCommentAnnotations, prContext?.body, platformReviewRecovery]);
 
   // --- PR6 (§3.4): platform mode adopts the control's SHAPE ----------------
@@ -4231,8 +4247,9 @@ const ReviewApp: React.FC = () => {
   // open" toggle — untouched), whose general-comment textarea stays the only
   // note field on this side. `approvalNotesSupported` is irrelevant here —
   // the platform posts to the forge API natively — so approve items gate
-  // only on self-authorship, muted rather than removed (Request changes… /
-  // Post comments, then… stay live; no state is a dead end).
+  // only on self-authorship, muted rather than removed. On GitHub, Request
+  // changes… mutes on your own PR too (#1611) and a live "Comment…" row takes
+  // its place, so no state is a dead end.
   const busyWithPlatformDecision = busyWithDecision || isPlatformActioning;
 
   const platformDecisionSpec = useMemo(() => buildDecisionSpec({
@@ -4241,8 +4258,8 @@ const ReviewApp: React.FC = () => {
     count: totalAnnotationCount,
     hasFeedback: totalAnnotationCount > 0,
     approvalNotesSupported: false, // ignored by the platform arm
-    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR },
-  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR]);
+    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported },
+  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported]);
 
   const runPlatformDecisionAction = useCallback((id: DecisionActionId) => {
     if (submitted || busyWithPlatformDecision) return;
@@ -4255,9 +4272,9 @@ const ReviewApp: React.FC = () => {
     // any future caller included) — resolve the mute from the live spec, not
     // from whichever surface fired.
     if (platformDecisionSpec.items.some((item) => item.id === id && item.muted)) return;
-    const mode = resolvePlatformDecisionAction(id, totalAnnotationCount > 0);
-    if (mode) openPlatformDialog(mode);
-  }, [busyWithPlatformDecision, openPlatformDialog, platformDecisionSpec, submitted, totalAnnotationCount]);
+    const mode = resolvePlatformDecisionAction(id, totalAnnotationCount > 0, requestChangesSupported);
+    if (mode) openPlatformDialog(mode.action, mode.chooseEvent);
+  }, [busyWithPlatformDecision, openPlatformDialog, platformDecisionSpec, submitted, totalAnnotationCount, requestChangesSupported]);
 
   const platformDecisionHandlers = useMemo<Record<DecisionActionId, DecisionHandler>>(() => ({
     'primary': () => runPlatformDecisionAction('primary'),
@@ -4515,7 +4532,7 @@ const ReviewApp: React.FC = () => {
               disabled: compactActionBusy || !!platformDecisionSpec.primary.muted,
             },
             ...platformDecisionSpec.items.map((item) => ({
-              id: compactRowIdForReviewDecisionItem(item.id),
+              id: compactRowIdForPlatformDecisionItem(item.id),
               label: item.label,
               subtitle: item.subtitle,
               onSelect: () => runPlatformDecisionAction(item.id),
@@ -5767,6 +5784,10 @@ const ReviewApp: React.FC = () => {
         <ReviewSubmissionDialog
           isOpen={!!platformCommentDialog}
           action={platformCommentDialog?.action ?? 'comment'}
+          onActionChange={platformCommentDialog?.chooseEvent
+            ? (next) => setPlatformCommentDialog(prev => prev ? { ...prev, action: next } : prev)
+            : undefined}
+          requestChangesUnavailableReason={requestChangesUnavailableReason}
           submission={platformCommentDialog?.plan ?? { targets: [], orphans: [] }}
           generalComment={platformGeneralComment}
           onGeneralCommentChange={setPlatformGeneralComment}

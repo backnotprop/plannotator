@@ -174,4 +174,46 @@ describe('Bun /api/pr-action submission contract', () => {
     );
     expect(received).toEqual([{ path: 'src/failing.ts', body: 'Split this file.' }]);
   });
+
+  // #1611: the review event reaches the submitter, and a malformed one is
+  // refused instead of silently posting a neutral comment.
+  test('passes request_changes through to the submitter', async () => {
+    let received: unknown;
+    await withReviewServer(
+      async (...args) => {
+        received = args[2];
+        return { status: 'complete' };
+      },
+      async (url) => {
+        const response = await fetch(`${url}/api/pr-action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'request_changes', body: 'Please fix', fileComments: [fileComment] }),
+        });
+        expect(response.status).toBe(200);
+      },
+    );
+    expect(received).toBe('request_changes');
+  });
+
+  test('refuses an unknown action with 400 and never submits', async () => {
+    let calls = 0;
+    await withReviewServer(
+      async () => {
+        calls += 1;
+        return { status: 'complete' };
+      },
+      async (url) => {
+        for (const action of ['REQUEST_CHANGES', 'reject', undefined]) {
+          const response = await fetch(`${url}/api/pr-action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, body: 'x', fileComments: [] }),
+          });
+          expect(response.status).toBe(400);
+        }
+      },
+    );
+    expect(calls).toBe(0);
+  });
 });

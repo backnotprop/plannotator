@@ -112,6 +112,9 @@ class StubEventSource {
 
 interface SubmittedBody {
   endpoint: "feedback" | "exit" | "pr-action";
+  /** /api/pr-action only: the review event the dialog posted (#1611). */
+  action?: string;
+  body?: string;
   approved?: boolean;
   feedback?: string;
   annotations?: Array<{
@@ -210,7 +213,8 @@ function makeFetch(): typeof fetch {
       });
     }
     if (url.pathname === "/api/pr-action") {
-      submissions.push({ endpoint: "pr-action" });
+      const posted = JSON.parse(String(init?.body ?? "{}")) as { action?: string; body?: string };
+      submissions.push({ endpoint: "pr-action", action: posted.action, body: posted.body });
       return Response.json({ ok: true, submission: { status: "complete" } });
     }
     if (url.pathname === "/api/diff/fresh") return Response.json({ fresh: true });
@@ -695,8 +699,25 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
 // the self-approval mute regressing into a dead end or a live approve, and
 // Mod+Enter double-firing while the dialog is open.
 describe.if(hasDom)("review decision control (platform mode)", () => {
-  const submissionDialogOpen = (title: "Post Review Comments" | `Approve ${string}`) =>
+  const submissionDialogOpen = (title: "Post Review Comments" | "Request Changes" | `Approve ${string}`) =>
     Array.from(document.querySelectorAll("h2")).some((el) => el.textContent === title);
+
+  const eventRadio = (value: "comment" | "request_changes") =>
+    document.querySelector<HTMLInputElement>(`[data-review-event-choice] input[value="${value}"]`);
+
+  const dialogConfirm = (label: string) =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find((el) => el.textContent?.trim() === label);
+
+  async function typeGeneralComment(text: string): Promise<void> {
+    const input = document.querySelector<HTMLTextAreaElement>('textarea[placeholder="Leave a comment..."]');
+    if (!input) throw new Error("general comment field is not open");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(input, text);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
 
   async function pressModEnter(): Promise<void> {
     await act(async () => {
@@ -720,6 +741,64 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(submissionDialogOpen("Post Review Comments")).toBe(true);
     // The dialog owns submission: opening it must post NOTHING.
     expect(submissions).toHaveLength(0);
+    // #1611: the primary keeps the plain comment flow, no event choice.
+    expect(document.querySelector("[data-review-event-choice]")).toBeNull();
+  });
+
+  // #1611: the menu promised a request-changes choice that did not exist and
+  // every review posted as COMMENT. These guard the choice reaching the wire.
+  test("Post comments, then… offers Comment / Request changes and posts the chosen event", async () => {
+    seedPlatformSession();
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    await openMenu();
+    const thenItem = menuItem("Post comments, then");
+    if (!thenItem) throw new Error("Post comments, then… did not render");
+    await act(async () => thenItem.click());
+    await settle();
+
+    expect(eventRadio("comment")?.checked).toBe(true);
+    const requestChanges = eventRadio("request_changes");
+    if (!requestChanges) throw new Error("Request changes choice did not render");
+    expect(requestChanges.disabled).toBe(false);
+    await act(async () => requestChanges.click());
+    await settle();
+    expect(submissionDialogOpen("Request Changes")).toBe(true);
+
+    const confirm = dialogConfirm("Request Changes");
+    if (!confirm) throw new Error("Request Changes confirm did not render");
+    await act(async () => confirm.click());
+    await settle();
+    const posted = submissions.filter((s) => s.endpoint === "pr-action");
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.action).toBe("request_changes");
+    // GitHub refuses an empty REQUEST_CHANGES body; inline-only gets the placeholder.
+    expect(posted[0]!.body?.trim()).toBeTruthy();
+  });
+
+  test("empty-state Request changes… preselects Request changes and posts it", async () => {
+    seedPlatformSession();
+    await mountReview();
+
+    await openMenu();
+    const requestItem = menuItem("Request changes");
+    if (!requestItem) throw new Error("Request changes… did not render");
+    expect(requestItem.disabled).toBe(false);
+    await act(async () => requestItem.click());
+    await settle();
+
+    expect(submissionDialogOpen("Request Changes")).toBe(true);
+    expect(eventRadio("request_changes")?.checked).toBe(true);
+    await typeGeneralComment("Please split the parser change.");
+    await act(async () => dialogConfirm("Request Changes")!.click());
+    await settle();
+    const posted = submissions.filter((s) => s.endpoint === "pr-action");
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.action).toBe("request_changes");
+    expect(posted[0]!.body).toBe("Please split the parser change.");
   });
 
   test("Approve with comments… opens the dialog in approve mode, still posting nothing", async () => {
@@ -790,7 +869,7 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(statuses[0]!.feedback).toContain("approved on GitHub");
   });
 
-  test("self-authored empty state: muted primary is a no-op (click and Mod+Enter); Request changes… stays live", async () => {
+  test("self-authored empty state: muted primary is a no-op (click and Mod+Enter); Request changes… mutes, Comment… stays live", async () => {
     seedPlatformSession({ selfAuthored: true });
     await mountReview();
 
@@ -811,20 +890,33 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(submissionDialogOpen("Approve PR")).toBe(false);
     expect(submissions).toHaveLength(0);
 
-    // No dead end: the menu's Request changes… still opens the comment dialog.
+    // GitHub refuses REQUEST_CHANGES on your own PR like APPROVE (#1611), so
+    // Request changes… mutes with the reason; Comment… is the live path.
     await openMenu();
     const approveItem = menuItem("Approve with a comment");
     if (!approveItem) throw new Error("muted approve item must render, not disappear");
     expect(approveItem.disabled).toBe(true);
     const requestItem = menuItem("Request changes");
-    if (!requestItem) throw new Error("Request changes… did not render");
-    expect(requestItem.disabled).toBe(false);
-    // Roving focus skips the dead row: initial focus lands on the first
+    if (!requestItem) throw new Error("Request changes… must render muted, not disappear");
+    expect(requestItem.disabled).toBe(true);
+    expect(requestItem.textContent).toContain("You can't request changes on your own PR");
+    const commentItem = menuItem("Comment…");
+    if (!commentItem) throw new Error("Comment… did not render");
+    expect(commentItem.disabled).toBe(false);
+    // Roving focus skips the dead rows: initial focus lands on the first
     // NON-disabled row, so keyboard users are never stranded on the mute.
-    expect(document.activeElement).toBe(requestItem);
+    expect(document.activeElement).toBe(commentItem);
     await act(async () => requestItem.click());
     await settle();
+    expect(submissionDialogOpen("Request Changes")).toBe(false);
+    await act(async () => commentItem.click());
+    await settle();
     expect(submissionDialogOpen("Post Review Comments")).toBe(true);
+    // The dialog's Request changes option is disabled with the reason.
+    expect(eventRadio("comment")?.checked).toBe(true);
+    expect(eventRadio("request_changes")?.disabled).toBe(true);
+    expect(document.getElementById("review-request-changes-reason")?.textContent)
+      .toContain("own pull request");
     expect(submissions).toHaveLength(0);
   });
 

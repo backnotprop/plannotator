@@ -186,6 +186,19 @@ export interface PRReviewFileComment {
 }
 
 /**
+ * The review event a platform submission carries (#1611). GitHub maps these
+ * to `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab has no request-changes
+ * review, so it posts `request_changes` exactly like `comment` (a note plus
+ * discussions); only `approve` adds a mutation there.
+ */
+export type PRReviewAction = "approve" | "comment" | "request_changes";
+
+/** Read the untrusted `action` field of a review request; null when invalid. */
+export function parsePRReviewAction(value: unknown): PRReviewAction | null {
+  return value === "approve" || value === "comment" || value === "request_changes" ? value : null;
+}
+
+/**
  * A comment on a whole file rather than a line (#1599). GitHub posts it as a
  * file-level review thread; GitLab has no equivalent and folds it into the body.
  */

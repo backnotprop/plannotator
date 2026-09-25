@@ -1,6 +1,7 @@
 import { generateId } from '@plannotator/ui/utils/generateId';
 import type { DecisionActionId, DecisionMenuItem, DecisionPrimary } from '@plannotator/ui/utils/decisionSpec';
 import type { CodeAnnotation } from '@plannotator/ui/types';
+import type { PRReviewAction } from '@plannotator/shared/pr-types';
 import type { CompactReviewAction } from './components/ReviewHeaderMenu';
 
 /**
@@ -64,16 +65,28 @@ export function resolveReviewDecisionAction(id: DecisionActionId): ReviewDecisio
 }
 
 /**
+ * The mode the ReviewSubmissionDialog opens in: the review event it posts
+ * (#1611: `request_changes` is a real GitHub REQUEST_CHANGES review; GitLab
+ * posts it as a comment) and whether the dialog offers the Comment / Request
+ * changes choice.
+ */
+export interface PlatformDialogMode {
+  action: PRReviewAction;
+  chooseEvent: boolean;
+}
+
+/**
  * PR6 (§3.4): platform-mode routing. Platform decisions never touch
  * `/api/feedback` — every id opens the EXISTING ReviewSubmissionDialog
  * (per-target state, retry, the "open PR" toggle, and the only
- * general-comment field on this side) in one of its two modes:
+ * general-comment field on this side) in one of these modes:
  *
- *   primary            → comment with annotations, approve when empty
+ *   primary            → comment with annotations, approve when empty (no choice)
  *   approve-with-notes → "Approve with comments…"  (approve mode)
  *   note-with-approval → "Approve with a comment…" (approve mode)
- *   note-with-feedback → "Post comments, then…"    (comment mode)
- *   request-changes    → "Request changes…"        (comment mode)
+ *   note-with-feedback → "Post comments, then…" / "Comment…" (choice, Comment selected)
+ *   request-changes    → "Request changes…" (choice, Request changes selected
+ *                        where the platform has it; Comment otherwise)
  *
  * Returns null for `discard-and-finish`, which the platform spec arm never
  * emits — the dialog owns what happens to unsent annotations.
@@ -81,16 +94,18 @@ export function resolveReviewDecisionAction(id: DecisionActionId): ReviewDecisio
 export function resolvePlatformDecisionAction(
   id: DecisionActionId,
   hasAnnotations: boolean,
-): 'approve' | 'comment' | null {
+  requestChangesSupported: boolean,
+): PlatformDialogMode | null {
   switch (id) {
     case 'primary':
-      return hasAnnotations ? 'comment' : 'approve';
+      return { action: hasAnnotations ? 'comment' : 'approve', chooseEvent: false };
     case 'note-with-approval':
     case 'approve-with-notes':
-      return 'approve';
+      return { action: 'approve', chooseEvent: false };
     case 'request-changes':
+      return { action: requestChangesSupported ? 'request_changes' : 'comment', chooseEvent: true };
     case 'note-with-feedback':
-      return 'comment';
+      return { action: 'comment', chooseEvent: true };
     case 'discard-and-finish':
       return null;
   }
@@ -166,6 +181,18 @@ export function compactRowIdForReviewDecisionItem(
     case 'discard-and-finish':
       return 'discard-finish';
   }
+}
+
+/**
+ * Platform-arm compact row ids. Same as the agent mapping except
+ * `note-with-feedback`, which becomes `comment`: on your own GitHub PR the
+ * empty state carries "Approve with a comment…" AND "Comment…" (#1611), and
+ * both would otherwise be `note` and collide as React keys.
+ */
+export function compactRowIdForPlatformDecisionItem(
+  id: DecisionMenuItem['id'],
+): Extract<CompactReviewAction['id'], 'note' | 'comment' | 'feedback' | 'approve' | 'discard-finish'> {
+  return id === 'note-with-feedback' ? 'comment' : compactRowIdForReviewDecisionItem(id);
 }
 
 /** The compact primary row id for the spec's primary (data, not copy: the

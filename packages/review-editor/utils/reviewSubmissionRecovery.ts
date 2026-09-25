@@ -1,4 +1,5 @@
-import type { PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
+import type { PRReviewAction, PRReviewSubmissionPartial } from '@plannotator/shared/pr-types';
+import { parsePRReviewAction } from '@plannotator/shared/pr-types';
 import type {
   ReviewSubmission,
   SubmissionTarget,
@@ -38,7 +39,9 @@ type RetainedSubmissionTarget =
 
 /** Retry-safe progress retained for one root PR review within a browser tab. */
 export interface ReviewSubmissionRecovery {
-  action: 'approve' | 'comment';
+  /** The event every target of this submission posts (#1611: a stacked
+   *  review never mixes Comment and Request changes across its targets). */
+  action: PRReviewAction;
   generalComment: string;
   targets: RetainedSubmissionTarget[];
 }
@@ -102,9 +105,10 @@ function parseRetainedTarget(value: unknown): RetainedSubmissionTarget | null {
 }
 
 function parseRecovery(value: unknown): ReviewSubmissionRecovery | null {
+  const action = isRecord(value) ? parsePRReviewAction(value.action) : null;
   if (
     !isRecord(value) ||
-    (value.action !== 'approve' && value.action !== 'comment') ||
+    action === null ||
     typeof value.generalComment !== 'string' ||
     !Array.isArray(value.targets)
   ) {
@@ -113,7 +117,7 @@ function parseRecovery(value: unknown): ReviewSubmissionRecovery | null {
   const targets = value.targets.map(parseRetainedTarget);
   if (targets.some((target) => target === null)) return null;
   return {
-    action: value.action,
+    action,
     generalComment: value.generalComment,
     targets: targets.filter(
       (target): target is RetainedSubmissionTarget => target !== null,
@@ -191,7 +195,7 @@ export function saveReviewSubmissionRecovery(
  * Plain failures are omitted because the original request is safe to retry.
  */
 export function buildReviewSubmissionRecovery(
-  action: 'approve' | 'comment',
+  action: PRReviewAction,
   generalComment: string,
   targets: SubmissionTarget[],
 ): ReviewSubmissionRecovery | null {

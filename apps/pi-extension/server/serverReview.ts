@@ -128,6 +128,7 @@ import {
 	getPRUser,
 	markPRFilesViewed,
 	parseFileLevelComments,
+	parsePRReviewAction,
 	parsePRUrl,
 	prCommandRuntime,
 	submitPRReview,
@@ -3060,6 +3061,11 @@ export async function startReviewServer(options: {
 			}
 			try {
 				const body = await parseBody(req);
+				const action = parsePRReviewAction(body.action);
+				if (!action) {
+					json(res, { error: "action must be one of approve, comment, request_changes" }, 400);
+					return;
+				}
 				const fileComments = (body.fileComments as PRReviewFileComment[]) || [];
 				const fileLevelComments = parseFileLevelComments(body.fileLevelComments);
 				const targetPrUrl = body.targetPrUrl as string | undefined;
@@ -3082,11 +3088,11 @@ export async function startReviewServer(options: {
 					return;
 				}
 
-				console.error(`[pr-action] ${body.action} with ${fileComments.length} line comment(s) and ${fileLevelComments.length} file-level comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
+				console.error(`[pr-action] ${action} with ${fileComments.length} line comment(s) and ${fileLevelComments.length} file-level comment(s), target=${targetUrl}, headSha=${targetHeadSha}`);
 				const submission = await submitPlatformReview(
 					targetRef,
 					targetHeadSha,
-					body.action as "approve" | "comment",
+					action,
 					body.body as string,
 					fileComments,
 					fileLevelComments,

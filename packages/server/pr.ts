@@ -12,6 +12,7 @@ import type {
   PRRuntime,
   PRReviewFileComment,
   PRReviewFileLevelComment,
+  PRReviewAction,
   PRReviewSubmissionResult,
   PRStackTree,
   PRListItem,
@@ -19,6 +20,7 @@ import type {
 import {
   parsePRUrl as parsePRUrlCore,
   parseFileLevelComments as parseFileLevelCommentsCore,
+  parsePRReviewAction as parsePRReviewActionCore,
   prRefFromMetadata,
   getPlatformLabel,
   getMRLabel,
@@ -86,6 +88,7 @@ export const prCommandRuntime: PRRuntime = runtime;
 
 export const parsePRUrl = parsePRUrlCore;
 export const parseFileLevelComments = parseFileLevelCommentsCore;
+export const parsePRReviewAction = parsePRReviewActionCore;
 
 export function checkPRAuth(ref: PRRef): Promise<void> {
   return checkAuthCore(runtime, ref);
@@ -123,7 +126,7 @@ export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxB
 export function submitPRReview(
   ref: PRRef,
   headSha: string,
-  action: "approve" | "comment",
+  action: PRReviewAction,
   body: string,
   fileComments: PRReviewFileComment[],
   fileLevelComments: PRReviewFileLevelComment[] = [],

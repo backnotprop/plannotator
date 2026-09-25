@@ -253,3 +253,55 @@ describe("submitPRReview on GitLab", () => {
     expect(calls[0].input.body).toBe("Body\n\n**src/a.ts:** Split this file.");
   });
 });
+
+// #1611: every non-approve review used to post as COMMENT, so "Request
+// changes" in the UI never requested changes.
+describe("request_changes review event (#1611)", () => {
+  test("single call: posts event REQUEST_CHANGES", async () => {
+    const { runtime, calls } = ghRuntime((c) => (isCreate(c) ? ok("{}") : undefined));
+    await submitGhPRReview(runtime, REF, "sha", "request_changes", "Please fix", [LINE]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].input).toEqual({ commit_id: "sha", body: "Please fix", event: "REQUEST_CHANGES", comments: [LINE] });
+  });
+
+  test("pending review path: submits REQUEST_CHANGES, with the placeholder body GitHub requires when empty", async () => {
+    const { runtime, calls } = ghRuntime((c) => {
+      if (isCreate(c)) return PENDING;
+      if (isGraphql(c)) return THREAD_OK;
+      if (isSubmit(c)) return ok("{}");
+    });
+    await submitGhPRReview(runtime, REF, "sha", "request_changes", "", [LINE], [FILE_A]);
+    expect(calls.find(isCreate)!.input.event).toBeUndefined(); // still pending until submit
+    expect(calls.find(isSubmit)!.input).toEqual({ event: "REQUEST_CHANGES", body: "See inline comments." });
+  });
+
+  test("the pending-create fallback keeps REQUEST_CHANGES", async () => {
+    const { runtime, calls } = ghRuntime((c) => {
+      if (isCreate(c) && c.input.event === undefined) return ONE_PENDING;
+      if (isCreate(c)) return ok("{}");
+    });
+    await submitGhPRReview(runtime, REF, "sha", "request_changes", "Body", [LINE], [FILE_A]);
+    expect(calls[1].input.event).toBe("REQUEST_CHANGES");
+  });
+
+  test("GitHub's refusal on your own pull request reaches the error", async () => {
+    const { runtime } = ghRuntime((c) => (isCreate(c) ? gh422(["Review Can not request changes on your own pull request"]) : undefined));
+    await expect(submitGhPRReview(runtime, REF, "sha", "request_changes", "Body", [LINE])).rejects.toThrow(
+      "Can not request changes on your own pull request",
+    );
+  });
+
+  test("GitLab has no request-changes review: it posts exactly what a comment posts", async () => {
+    const GL_REF = { platform: "gitlab" as const, host: "gitlab.com", projectPath: "o/r", iid: 7 };
+    const respond = (c: Call) => (c.args.some((a) => a.endsWith("/notes") || a.endsWith("/discussions") || a.endsWith("merge_requests/7"))
+      ? ok("{}")
+      : undefined);
+    const asComment = ghRuntime(respond);
+    const asRequest = ghRuntime(respond);
+    await submitPRReview(asComment.runtime, GL_REF, "sha", "comment", "Body", [LINE]);
+    await submitPRReview(asRequest.runtime, GL_REF, "sha", "request_changes", "Body", [LINE]);
+    expect(asRequest.calls.length).toBeGreaterThanOrEqual(3); // note, diff refs, discussion
+    expect(asRequest.calls).toEqual(asComment.calls);
+    expect(asRequest.calls.some((c) => c.args.some((a) => a.endsWith("/approve")))).toBe(false);
+  });
+});
