@@ -42,6 +42,7 @@ import { statSync } from "fs";
 import path from "path";
 import { resolveValidatedTargetAgent } from "./agent-switch";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import { registerEmbeddedSession, unregisterEmbeddedSession } from "./session-registry";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -229,12 +230,13 @@ export async function handleReviewCommand(
   const sessionId = event.properties?.sessionID;
 
   const startServer = deps.startReviewServer ?? startReviewServer;
+  const reviewProject = (await detectProjectName()) ?? undefined;
   const server = await startServer({
     rawPatch,
     gitRef,
     error: diffError,
     origin: "opencode",
-    project: (await detectProjectName()) ?? undefined,
+    project: reviewProject,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
@@ -259,10 +261,12 @@ export async function handleReviewCommand(
       client.app.log({ level: "info", message: `[Plannotator] Open code review: ${url}` });
     },
   });
+  const sessionKey = await registerEmbeddedSession(server, "review", "review", reviewProject);
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+  unregisterEmbeddedSession(sessionKey);
 
   if (result.exit) {
     return;
@@ -484,10 +488,12 @@ export async function handleAnnotateCommand(
       client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });
+  const sessionKey = await registerEmbeddedSession(server, "annotate", "annotate", annotateProject);
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+  unregisterEmbeddedSession(sessionKey);
 
   if (result.exit || (result.approved && !result.feedback)) {
     return;
@@ -601,10 +607,12 @@ export async function handleAnnotateLastCommand(
       client.app.log({ level: "info", message: `[Plannotator] Open annotation UI: ${url}` });
     },
   });
+  const sessionKey = await registerEmbeddedSession(server, "annotate", "annotate", lastProject);
 
   const result = await server.waitForDecision();
   await Bun.sleep(1500);
   server.stop();
+  unregisterEmbeddedSession(sessionKey);
 
   if (result.exit || (result.approved && !result.feedback)) {
     return null;
