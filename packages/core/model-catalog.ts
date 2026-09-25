@@ -147,7 +147,12 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
       pointer ??= info;
       continue;
     }
-    const lead = info.description?.split(' · ')[0]?.trim() || info.displayName || info.value;
+    // Older Claude Code put the model name before ' · ' in `description`
+    // ("Fable 5.1 · Most capable…"); 2.1.282+ puts it in `displayName` and
+    // leaves `description` as a tagline only, so a description with no ' · '
+    // must never become the label.
+    const desc = info.description ?? '';
+    const lead = (desc.includes(' · ') ? desc.split(' · ')[0].trim() : '') || info.displayName || info.value;
     const efforts = info.supportsEffort !== false ? (info.supportedEffortLevels ?? []) : [];
     rows.push({
       id: info.value,

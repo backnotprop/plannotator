@@ -105,6 +105,23 @@ describe("claudeCatalogFromSdk", () => {
     expect(catalog.map((m) => m.id).sort()).toEqual(["claude-fable-5-1[1m]", "fable", "haiku", "opus", "opus[1m]", "sonnet"]);
   });
 
+  test("names pinned models from displayName when the description is only a tagline (Claude Code 2.1.282)", () => {
+    // 2.1.282 moved the model name from `description` ("Fable 5.1 · …") into
+    // `displayName` and left `description` as a tagline; the tagline must not
+    // become the label, or several rows read identically.
+    const rows = claudeCatalogFromSdk([
+      { value: "claude-fable-5-1", displayName: "Fable 5.1", description: "For your toughest challenges" },
+      { value: "claude-opus-4-8", displayName: "Opus 4.8", description: "Best for everyday, complex tasks" },
+      { value: "claude-opus-4-7", displayName: "Opus 4.7", description: "Best for everyday, complex tasks" },
+      { value: "claude-opus-4-6[1m]", displayName: "Opus 4.6", description: "Best for everyday, complex tasks" },
+    ]);
+    const label = (id: string) => rows.find((m) => m.id === id)?.label;
+    expect(label("claude-fable-5-1")).toBe("Fable 5.1");
+    expect(label("claude-opus-4-8")).toBe("Opus 4.8");
+    expect(label("claude-opus-4-7")).toBe("Opus 4.7");
+    expect(label("claude-opus-4-6[1m]")).toBe("Opus 4.6 (1M)");
+  });
+
   test("tolerates an empty or malformed reply", () => {
     expect(claudeCatalogFromSdk([])).toEqual([]);
     expect(claudeCatalogFromSdk([{ value: "" }, null as unknown as ClaudeSdkModelInfo])).toEqual([]);
