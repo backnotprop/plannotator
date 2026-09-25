@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { CLAUDE_FALLBACK_MODELS } from "@plannotator/core/model-catalog";
 import { ClaudeAgentSDKProvider } from "./claude-agent-sdk.ts";
-import { codexCatalogFromModelList } from "./codex-app-server.ts";
+import { CodexAppServerProvider, codexCatalogFromModelList } from "./codex-app-server.ts";
 import { createDeferredModelDiscovery } from "../endpoints.ts";
 
 describe("codexCatalogFromModelList", () => {
@@ -50,6 +51,61 @@ describe("codexCatalogFromModelList", () => {
     ]);
     expect(catalog.map((m) => m.fastMode ?? false)).toEqual([true, true, false]);
   });
+});
+
+describe("tool version capture during discovery", () => {
+  // Fake CLIs: each reports a version but cannot list models, so the version
+  // must survive a failed discovery (it is what explains a fallback list).
+  const fakeCli = (name: string, body: string) => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-fake-cli-"));
+    const path = join(dir, name);
+    writeFileSync(path, body);
+    chmodSync(path, 0o755);
+    return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+
+  test.skipIf(process.platform === "win32")("claude: `--version` is read even when discovery fails", async () => {
+    const cli = fakeCli("claude", '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.999 (Claude Code)"; exit 0; fi\nexit 1\n');
+    try {
+      const provider = new ClaudeAgentSDKProvider({ type: "claude-agent-sdk", claudeExecutablePath: cli.path });
+      expect(provider.toolVersion).toBeUndefined();
+      await expect(provider.fetchModels()).rejects.toThrow();
+      expect(provider.modelsSource).toBe("fallback");
+      expect(provider.toolVersion).toBe("2.1.999");
+    } finally {
+      cli.cleanup();
+    }
+  }, 15_000);
+
+  test.skipIf(process.platform === "win32")("codex: the initialize userAgent carries the version even when model/list fails", async () => {
+    const cli = fakeCli(
+      "codex",
+      `#!/usr/bin/env node
+let buf = "";
+process.stdin.on("data", (d) => {
+  buf += d;
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const msg = JSON.parse(buf.slice(0, i));
+    buf = buf.slice(i + 1);
+    if (msg.id === undefined) continue;
+    const reply = msg.method === "initialize"
+      ? { id: msg.id, result: { userAgent: "plannotator/0.150.0 (Linux; x86_64)" } }
+      : { id: msg.id, error: { code: -1, message: "not signed in" } };
+    process.stdout.write(JSON.stringify(reply) + "\\n");
+  }
+});
+`,
+    );
+    try {
+      const provider = new CodexAppServerProvider({ type: "codex-sdk", codexExecutablePath: cli.path });
+      await expect(provider.fetchModels()).rejects.toThrow();
+      expect(provider.modelsSource).toBe("fallback");
+      expect(provider.toolVersion).toBe("0.150.0");
+    } finally {
+      cli.cleanup();
+    }
+  }, 15_000);
 });
 
 describe("Claude model discovery", () => {

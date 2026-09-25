@@ -100,6 +100,7 @@ jobs:
           packages/ui/hooks/useVimSelection.test.tsx
           packages/ui/hooks/useVimSelection.selectionScope.test.tsx
           packages/ui/hooks/useModelCatalogs.dom.test.tsx
+          packages/ui/components/ModelSourceHint.dom.test.tsx
           packages/ui/hooks/useAgentSettings.dom.test.tsx
           packages/ui/utils/codeHighlight.test.ts
           packages/ui/utils/htmlChrome.test.ts

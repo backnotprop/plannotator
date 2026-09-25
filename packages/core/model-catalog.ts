@@ -58,11 +58,39 @@ export const CLAUDE_FALLBACK_MODELS: CatalogModel[] = [
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
 ];
 
-const CODEX_EFFORTS = effortList(['low', 'medium', 'high', 'xhigh']);
+const codex = (id: string, label: string, efforts: readonly string[], defaultReasoningEffort: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
+  id,
+  label,
+  reasoningEfforts: effortList(efforts),
+  defaultReasoningEffort,
+  fastMode: true,
+  ...extra,
+});
+const CODEX_TO_ULTRA = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const CODEX_TO_MAX = ['low', 'medium', 'high', 'xhigh', 'max'];
+// What codex 0.155.1's `model/list` reports (GPT-6 is listed only to codex
+// >= 0.155); every model offers the fast (`priority`) tier.
 export const CODEX_FALLBACK_MODELS: CatalogModel[] = [
-  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', default: true, reasoningEfforts: CODEX_EFFORTS, defaultReasoningEffort: 'medium', fastMode: true },
-  { id: 'gpt-5.5', label: 'GPT-5.5', reasoningEfforts: CODEX_EFFORTS, defaultReasoningEffort: 'medium', fastMode: true },
+  codex('gpt-6-sol', 'GPT-6-Sol', CODEX_TO_ULTRA, 'medium', { default: true }),
+  codex('gpt-6-astra', 'GPT-6-Astra', CODEX_TO_ULTRA, 'medium'),
+  codex('gpt-6-luna', 'GPT-6-Luna', CODEX_TO_MAX, 'medium'),
+  codex('gpt-5.6-sol', 'GPT-5.6-Sol', CODEX_TO_ULTRA, 'low'),
+  codex('gpt-5.6-terra', 'GPT-5.6-Terra', CODEX_TO_ULTRA, 'medium'),
+  codex('gpt-5.6-luna', 'GPT-5.6-Luna', CODEX_TO_MAX, 'medium'),
+  codex('gpt-5.5', 'GPT-5.5', ['low', 'medium', 'high', 'xhigh'], 'medium'),
 ];
+
+/** Where a provider's model list came from: the installed tool, or the static fallback. */
+export type ModelsSource = 'fallback' | 'discovered';
+
+/**
+ * The version in a CLI's own output: `claude --version` ("2.1.282 (Claude
+ * Code)") or the codex app-server initialize `userAgent` ("plannotator/0.155.1
+ * (Mac OS 26.3.0; arm64) …", where the first version is codex's).
+ */
+export function cliVersionFrom(text: string | null | undefined): string | undefined {
+  return /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/.exec(text ?? '')?.[1];
+}
 
 /** The subset of the Agent SDK's `ModelInfo` the catalog reads. */
 export interface ClaudeSdkModelInfo {

@@ -11,6 +11,7 @@
  * to keep inline chat safe and cost-bounded.
  */
 
+import { execFile } from "node:child_process";
 import { buildSystemPrompt, buildForkPreamble, buildEffectivePrompt } from "../context.ts";
 import { BaseSession } from "../base-session.ts";
 import type {
@@ -24,6 +25,7 @@ import type {
 import {
   CLAUDE_FALLBACK_MODELS,
   claudeCatalogFromSdk,
+  cliVersionFrom,
   type CatalogModel,
   type ClaudeSdkModelInfo,
 } from "@plannotator/core/model-catalog";
@@ -177,6 +179,8 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   // `claude`'s own list (the SDK's supportedModels()).
   models: CatalogModel[] = CLAUDE_FALLBACK_MODELS;
   modelsSource: 'fallback' | 'discovered' = 'fallback';
+  /** The installed `claude`'s version, from `claude --version` during discovery. */
+  toolVersion: string | undefined;
 
   private config: ClaudeAgentSDKConfig;
 
@@ -233,6 +237,33 @@ export class ClaudeAgentSDKProvider implements AIProvider {
    * error propagates, so the runtime's once-wrapper may retry later.
    */
   async fetchModels(): Promise<void> {
+    // `claude --version` runs alongside discovery (once, since a success is
+    // kept for the process) and is kept even if discovery fails.
+    const versionProbe = this.toolVersion ? undefined : this.probeToolVersion();
+    try {
+      await this.discoverModels();
+    } finally {
+      const version = await versionProbe;
+      if (version) this.toolVersion = version;
+    }
+  }
+
+  /** The installed `claude`'s version; undefined without a path or on any failure. */
+  private probeToolVersion(): Promise<string | undefined> {
+    const path = this.config.claudeExecutablePath;
+    if (!path) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      try {
+        execFile(path, ["--version"], { timeout: MODEL_DISCOVERY_TIMEOUT_MS, windowsHide: true }, (err, stdout) => {
+          resolve(err ? undefined : cliVersionFrom(String(stdout)));
+        });
+      } catch {
+        resolve(undefined);
+      }
+    });
+  }
+
+  private async discoverModels(): Promise<void> {
     const abortController = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let q: { supportedModels: () => Promise<ClaudeSdkModelInfo[]>; close: () => void } | null = null;

@@ -21,6 +21,10 @@ export interface AIProviderOption {
   id: string;
   name: string;
   models?: AIProviderModel[];
+  /** Where `models` came from, when the server says (`/api/ai/capabilities`). */
+  modelsSource?: 'fallback' | 'discovered';
+  /** The installed CLI's version, when the server reports it. */
+  toolVersion?: string;
 }
 
 export interface AIProviderSettings {

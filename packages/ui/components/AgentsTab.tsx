@@ -23,6 +23,7 @@ import { useAgentSettings } from '../hooks/useAgentSettings';
 import type { AgentEngine, AgentMode, ReviewEngine } from '../hooks/useAgentSettings';
 import type { AgentLaunchParams } from '../hooks/useAgentJobs';
 import { ConfigRow, SegmentedPicker, Toggle, SelectMenu } from './AgentControls';
+import { ModelSourceHint } from './ModelSourceHint';
 import {
   CLAUDE_FALLBACK_MODELS,
   CODEX_FALLBACK_MODELS,
@@ -1015,7 +1016,10 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
   ) => (
     <ConfigRow label="Model" stacked>
       {catalogs[engine].settled ? (
-        <SelectMenu value={value} options={modelSelectOptions(catalogs[engine].models, value)} onChange={onChange} />
+        <>
+          <SelectMenu value={value} options={modelSelectOptions(catalogs[engine].models, value)} onChange={onChange} />
+          <ModelSourceHint tool={engine} info={catalogs[engine]} className="text-[10px] text-muted-foreground/50" />
+        </>
       ) : (
         renderStaticChoice('Loading models…', <Loader2 className="animate-spin text-muted-foreground" size={11} />)
       )}

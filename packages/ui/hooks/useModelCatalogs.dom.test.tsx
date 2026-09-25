@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AgentCapabilities } from '../types';
+import type { ModelCatalogs } from './useModelCatalogs';
 
 const hasDom = typeof document !== 'undefined';
 const hookModule = hasDom ? await import('./useModelCatalogs') : null;
@@ -45,5 +46,29 @@ describe.if(hasDom)('useModelCatalogs', () => {
     await act(async () => root!.render(<Harness engine="claude" />));
     await act(async () => root!.render(<Harness engine="cursor" />));
     expect(urls).toEqual(['/api/ai/capabilities?activate=claude-agent-sdk']);
+  });
+
+  test("carries the server's list source and tool version to the launchers' hint", async () => {
+    const seen: ModelCatalogs[] = [];
+    function Probe() {
+      const catalogs = hookModule!.useModelCatalogs(capabilities);
+      seen.push(catalogs);
+      useEffect(() => catalogs.load('codex'), [catalogs.load]);
+      return null;
+    }
+    globalThis.fetch = (async () =>
+      Response.json({
+        available: true,
+        providers: [{ id: 'codex-sdk', models: [{ id: 'gpt-6-sol', label: 'GPT-6-Sol' }], modelsSource: 'discovered', toolVersion: '0.155.1' }],
+      })) as unknown as typeof fetch;
+
+    root = createRoot(document.createElement('div'));
+    await act(async () => root!.render(<Probe />));
+    const codex = seen[seen.length - 1].codex;
+    expect(codex.settled).toBe(true);
+    expect(codex.modelsSource).toBe('discovered');
+    expect(codex.toolVersion).toBe('0.155.1');
+    // Claude was never loaded: no source claimed for it.
+    expect(seen[seen.length - 1].claude.toolVersion).toBeUndefined();
   });
 });

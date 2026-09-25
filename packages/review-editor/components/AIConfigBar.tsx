@@ -2,6 +2,7 @@ import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { getProviderMeta } from '@plannotator/ui/components/ProviderIcons';
 import { type AIProviderOption } from '@plannotator/ui/utils/aiProvider';
+import { ModelSourceHint, modelSourceToolForProvider } from '@plannotator/ui/components/ModelSourceHint';
 
 interface AIConfigBarProps {
   providers: AIProviderOption[];
@@ -100,6 +101,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   );
 
   return (
+    <>
     <div ref={barRef} className="relative border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
       {/* Provider selector */}
       {providers.length > 1 ? (
@@ -257,5 +259,11 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
         <span className="text-[10px] text-amber-500 animate-pulse">New chat session</span>
       )}
     </div>
+    <ModelSourceHint
+      tool={modelSourceToolForProvider(currentProvider.name)}
+      info={currentProvider}
+      className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
+    />
+    </>
   );
 };
