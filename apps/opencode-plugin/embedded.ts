@@ -43,6 +43,8 @@ export async function deliverEmbeddedAnnotateMessagePrompt(input: {
   sessionId: string;
   approved: boolean;
   feedback: string;
+  /** The agent that wrote the annotated message, when known and addressable (#1612). */
+  agent?: string;
 }): Promise<void> {
   const text = input.approved
     ? getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
@@ -57,6 +59,7 @@ export async function deliverEmbeddedAnnotateMessagePrompt(input: {
     prompt: {
       path: { id: input.sessionId },
       body: {
+        ...(input.agent && { agent: input.agent }),
         parts: [{ type: "text", text }],
       },
     },
@@ -116,7 +119,7 @@ export async function handleEmbeddedCommand(
     getPasteApiUrl: () => string | undefined;
     directory?: string;
   },
-): Promise<{ approved?: boolean; feedback?: string | null }> {
+): Promise<{ approved?: boolean; feedback?: string | null; agent?: string }> {
   const {
     handleReviewCommand,
     handleAnnotateCommand,

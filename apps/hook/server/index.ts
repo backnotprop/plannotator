@@ -704,6 +704,10 @@ function emitOpenCodeAnnotateOutcome(result: {
     console.log(JSON.stringify({
       decision: "approved",
       ...(result.feedback ? { feedback: result.feedback } : {}),
+      // Approve-with-notes is about a message too: the plugin reads which one
+      // to route the notes to the agent that wrote it (#1612).
+      ...(result.selectedMessageId && { selectedMessageId: result.selectedMessageId }),
+      ...(result.feedbackScope && { feedbackScope: result.feedbackScope }),
     }));
     return;
   }

@@ -377,3 +377,63 @@ describe("handleAnnotateLastCommand", () => {
     expect(options.markdown).toBe("Latest assistant message");
   });
 });
+
+// #1612, embedded runtime: feedback is answered by the agent that wrote the
+// annotated message (or, for a file, the agent the user is talking to), not by
+// OpenCode's default agent.
+describe("annotate feedback agent routing (embedded runtime)", () => {
+  const MESSAGES = [
+    { info: { role: "user", id: "u1", agent: "agent-engineer" }, parts: [{ type: "text", text: "q" }] },
+    { info: { role: "assistant", id: "a1", agent: "agent-engineer" }, parts: [{ type: "text", text: "Engineer answer" }] },
+    { info: { role: "user", id: "u2", agent: "build" }, parts: [{ type: "text", text: "q2" }] },
+    { info: { role: "assistant", id: "a2", agent: "build" }, parts: [{ type: "text", text: "Build answer" }] },
+  ];
+
+  function routingDeps(messages: unknown[], decision: Record<string, unknown>) {
+    const deps: any = makeDeps();
+    deps.client.session.messages = mock(async (_input: unknown) => ({ data: messages }));
+    deps.client.app.agents = mock(async (_input?: unknown) => ({
+      data: [{ name: "build", mode: "primary" }, { name: "agent-engineer", mode: "primary" }],
+    }));
+    deps.startAnnotateServer = mock(async (options: any) => ({
+      port: 0,
+      url: "http://localhost",
+      isRemote: false,
+      options,
+      waitForDecision: async () => ({ annotations: [{ id: "x" }], ...decision }),
+      stop: () => {},
+    }));
+    return deps;
+  }
+
+  test("/plannotator-last returns the picked message's agent", async () => {
+    const deps = routingDeps(MESSAGES, { feedback: "Tighten this.", selectedMessageId: "a1" });
+
+    const outcome = await handleAnnotateLastCommand({ properties: { sessionID: "session-123" } }, deps);
+
+    expect(outcome?.agent).toBe("agent-engineer");
+  });
+
+  test("/plannotator-last with no recorded writer returns no agent", async () => {
+    const deps = routingDeps(
+      MESSAGES.map((m) => ({ ...m, info: { ...m.info, agent: undefined } })),
+      { feedback: "Tighten this.", selectedMessageId: "a1" },
+    );
+
+    const outcome = await handleAnnotateLastCommand({ properties: { sessionID: "session-123" } }, deps);
+
+    expect(outcome).not.toBeNull();
+    expect("agent" in outcome!).toBe(false);
+  });
+
+  test("/plannotator-annotate names the session's current agent", async () => {
+    const projectRoot = makeTempDir();
+    writeFileSync(path.join(projectRoot, "plan.md"), "# Plan\n");
+    const deps = routingDeps(MESSAGES.slice(0, 2), { feedback: "Rename section 2." });
+    deps.directory = projectRoot;
+
+    await handleAnnotateCommand({ properties: { arguments: "plan.md", sessionID: "session-123" } }, deps);
+
+    expect(deps.client.session.prompt.mock.calls[0]?.[0].body.agent).toBe("agent-engineer");
+  });
+});

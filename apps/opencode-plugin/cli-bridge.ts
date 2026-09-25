@@ -20,6 +20,12 @@ import {
   deliverOpenCodePrompt,
   isOpenCodePromptDeliveryError,
 } from "./prompt-delivery-error";
+import {
+  readLastUserAgent,
+  readMessageAgent,
+  resolveAddressableAgent,
+  resolveAnnotatedMessageAgent,
+} from "./message-agent";
 
 type LogLevel = "info" | "error";
 
@@ -109,6 +115,11 @@ export interface RecentAssistantMessage {
   messageId: string;
   text: string;
   timestamp?: string;
+  /**
+   * The agent that wrote the message (#1612). Plugin-side only: it decides who
+   * answers the feedback and is never sent to the CLI.
+   */
+  agent?: string;
 }
 
 function log(client: OpenCodeClient, level: LogLevel, message: string): void {
@@ -562,14 +573,29 @@ export async function getRecentAssistantMessages(
       .filter((part: any) => part.type === "text" && part.text?.trim())
       .map((part: any) => part.text);
     if (textParts.length === 0) continue;
+    const agent = readMessageAgent(msg.info);
     recentMessages.push({
       messageId: msg.info?.id ?? `opencode-${i}`,
       text: textParts.join("\n"),
       timestamp: msg.info?.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
+      ...(agent && { agent }),
     });
   }
 
   return recentMessages;
+}
+
+/** The agent of the session's latest user message, or undefined on any failure. */
+async function readSessionUserAgent(
+  client: OpenCodeClient,
+  sessionId: string,
+): Promise<string | undefined> {
+  try {
+    const response = await client.session?.messages?.({ path: { id: sessionId } });
+    return readLastUserAgent(response?.data);
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildReviewPromptFromBridgeOutcome(outcome: CliReviewOutcome): {
@@ -732,11 +758,19 @@ export async function handleCliCommand(input: {
         fileHeader: getAnnotateFileHeader(parsed.filePath, input.cwd),
         filePath: parsed.filePath,
       });
-      if (prompt) {
+      if (prompt && input.sessionId) {
+        // No annotated message here: the agent the user is talking to reads
+        // the feedback, not OpenCode's default agent (#1612).
+        const agent = await resolveAddressableAgent({
+          client: input.client,
+          agent: await readSessionUserAgent(input.client, input.sessionId),
+          directory: cwd,
+        });
         await injectSessionPrompt(
           input.client,
           input.sessionId,
           prompt,
+          { agent },
         );
       }
       return;
@@ -761,7 +795,7 @@ export async function handleCliCommand(input: {
         cwd,
         input: JSON.stringify({
           gate: parsed.gate,
-          recentMessages,
+          recentMessages: recentMessages.map(({ agent: _agent, ...message }) => message),
           ...buildBridgePayload(input.bridge),
         }),
         readyLabel: "annotation UI",
@@ -778,10 +812,18 @@ export async function handleCliCommand(input: {
         kind: "message",
       });
       if (prompt) {
+        // The agent that wrote the annotated message answers the feedback
+        // (#1612); unknown or unavailable leaves the prompt unnamed as before.
+        const agent = await resolveAddressableAgent({
+          client: input.client,
+          agent: resolveAnnotatedMessageAgent(recentMessages, outcome),
+          directory: cwd,
+        });
         await injectSessionPrompt(
           input.client,
           input.sessionId,
           prompt,
+          { agent },
         );
       }
       return;

@@ -42,6 +42,12 @@ import { statSync } from "fs";
 import path from "path";
 import { resolveValidatedTargetAgent } from "./agent-switch";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import {
+  readLastUserAgent,
+  readMessageAgent,
+  resolveAddressableAgent,
+  resolveAnnotatedMessageAgent,
+} from "./message-agent";
 
 /** Shared dependencies injected by the plugin */
 export interface CommandDeps {
@@ -495,6 +501,16 @@ export async function handleAnnotateCommand(
 
   if (result.feedback) {
     if (sessionId) {
+      // The agent the user is talking to reads the feedback, not OpenCode's
+      // default agent (#1612). Unknown leaves the prompt unnamed as before.
+      let sessionAgent: string | undefined;
+      try {
+        const response = await client.session?.messages?.({ path: { id: sessionId } });
+        sessionAgent = readLastUserAgent(response?.data);
+      } catch {
+        sessionAgent = undefined;
+      }
+      const agent = await resolveAddressableAgent({ client, agent: sessionAgent, directory });
       const text = result.approved
         ? getAnnotateApprovedWithNotesPrompt("opencode", undefined, {
             context: `${isFolder ? "Folder" : "File"}: ${absolutePath}`,
@@ -510,6 +526,7 @@ export async function handleAnnotateCommand(
         prompt: {
           path: { id: sessionId },
           body: {
+            ...(agent && { agent }),
             parts: [{
               type: "text",
               text,
@@ -532,8 +549,8 @@ export async function handleAnnotateCommand(
 export async function handleAnnotateLastCommand(
   event: any,
   deps: CommandDeps
-): Promise<{ approved: boolean; feedback: string } | null> {
-  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl } = deps;
+): Promise<{ approved: boolean; feedback: string; agent?: string } | null> {
+  const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
 
   // @ts-ignore - Event properties contain arguments
@@ -556,6 +573,9 @@ export async function handleAnnotateLastCommand(
 
   const RECENT_LIMIT = 25;
   const recentMessages: { messageId: string; text: string; timestamp?: string }[] = [];
+  // Who wrote each candidate message (#1612), kept beside the payload rather
+  // than in it: the annotate server has no use for it.
+  const messageAgents: { messageId: string; agent?: string }[] = [];
   if (messages) {
     for (let i = messages.length - 1; i >= 0 && recentMessages.length < RECENT_LIMIT; i--) {
       const msg = messages[i];
@@ -564,11 +584,13 @@ export async function handleAnnotateLastCommand(
         .filter((p: any) => p.type === "text" && p.text?.trim())
         .map((p: any) => p.text);
       if (textParts.length === 0) continue;
+      const messageId = msg.info.id ?? `opencode-${i}`;
       recentMessages.push({
-        messageId: msg.info.id ?? `opencode-${i}`,
+        messageId,
         text: textParts.join("\n"),
         timestamp: msg.info.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
       });
+      messageAgents.push({ messageId, agent: readMessageAgent(msg.info) });
     }
   }
 
@@ -610,7 +632,18 @@ export async function handleAnnotateLastCommand(
     return null;
   }
 
-  return result.feedback
-    ? { approved: Boolean(result.approved), feedback: result.feedback }
-    : null;
+  if (!result.feedback) return null;
+
+  // The agent that wrote the annotated message answers the feedback (#1612);
+  // unknown or no longer addressable leaves the prompt unnamed as before.
+  const agent = await resolveAddressableAgent({
+    client,
+    agent: resolveAnnotatedMessageAgent(messageAgents, result),
+    directory,
+  });
+  return {
+    approved: Boolean(result.approved),
+    feedback: result.feedback,
+    ...(agent && { agent }),
+  };
 }

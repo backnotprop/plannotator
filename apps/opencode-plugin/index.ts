@@ -496,6 +496,7 @@ Do NOT proceed with implementation until your plan is approved.`;
               sessionId: input.sessionID,
               approved: Boolean(result.approved),
               feedback: result.feedback,
+              agent: result.agent,
             });
           }
           return;

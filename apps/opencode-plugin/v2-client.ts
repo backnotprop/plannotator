@@ -224,6 +224,9 @@ export function toBridgeMessages(context: unknown): unknown[] {
       id: typeof message.id === "string" ? message.id : undefined,
       role: typeof message.type === "string" ? message.type : undefined,
       time: isRecord(message.time) ? { created: message.time.created } : undefined,
+      // V2 assistant messages record their writer (`Session.Message.Assistant`
+      // carries `agent: Agent.ID`); /plannotator-last routes feedback to it.
+      ...(typeof message.agent === "string" && message.agent ? { agent: message.agent } : {}),
     },
     parts: Array.isArray(message.content) ? message.content : [],
   }));
@@ -235,6 +238,16 @@ function joinTextParts(parts: unknown[]): string {
       isRecord(part) && part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("\n");
+}
+
+/** The session's current agent, or undefined when the host cannot say. */
+async function readSessionAgent(ctx: V2ContextLike, sessionID: string): Promise<string | undefined> {
+  try {
+    const session: unknown = await ctx.session?.get?.({ sessionID });
+    return isRecord(session) && typeof session.agent === "string" ? session.agent : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Read the session id out of the V1-shaped `{ path: { id } }` request. */
@@ -669,7 +682,13 @@ export function createV2BridgeClient(input: {
           // A failed switch must never cost the reviewer their feedback: the
           // same guarantee `switchV2SessionAgent` gives the approval path.
           try {
-            await input.ctx.session.switchAgent({ sessionID, agent });
+            // `Session.switchAgent` publishes an `agent-switched` transcript
+            // row unconditionally, so skip it when the session is already on
+            // that agent — upstream's own command plugin guards the same way
+            // (`packages/core/src/config/plugin/command.ts`).
+            if (await readSessionAgent(input.ctx, sessionID) !== agent) {
+              await input.ctx.session.switchAgent({ sessionID, agent });
+            }
           } catch (error) {
             warn(`[Plannotator] Could not switch the OpenCode session to "${agent}": ${error instanceof Error ? error.message : String(error)}`);
           }
