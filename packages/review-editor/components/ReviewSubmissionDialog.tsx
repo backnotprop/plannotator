@@ -449,6 +449,9 @@ export function ReviewSubmissionDialog({
             : 'Review what will be posted.'}
         </DialogDescription>
 
+        {/* The native radios stay visible, so keyboard focus keeps the
+            browser's own focus ring. No new utility classes here: the
+            guides.show viewer scans this file and pins its CSS. */}
         {showEventChoice && (
           <fieldset data-review-event-choice className="mb-3">
             <legend className="sr-only">Review type</legend>
@@ -459,7 +462,7 @@ export function ReviewSubmissionDialog({
                   <label
                     key={option.value}
                     data-pn-touch-target
-                    className={`flex items-center justify-center rounded px-2 py-1.5 text-sm font-medium select-none has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-primary ${
+                    className={`flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-sm font-medium select-none ${
                       checked ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
                     } ${option.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:text-foreground'}`}
                   >
@@ -471,7 +474,7 @@ export function ReviewSubmissionDialog({
                       disabled={option.disabled}
                       aria-describedby={option.value === 'request_changes' && requestChangesUnavailableReason ? 'review-request-changes-reason' : undefined}
                       onChange={() => onActionChange?.(option.value)}
-                      className="sr-only"
+                      className="shrink-0"
                     />
                     {option.label}
                   </label>
