@@ -44,7 +44,7 @@ import {
 	handleSaveNotesRequest,
 	handleUploadRequest,
 } from "./handlers.ts";
-import { handleApiNotFound, html, json, parseBody, requestUrl } from "./helpers.ts";
+import { createAppHandler, handleApiNotFound, json, parseBody, requestUrl } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
@@ -707,6 +707,7 @@ export async function startAnnotateServer(options: {
 	let liveSessionToken = "";
 	let liveAppUrl = "";
 
+	const serveApp = createAppHandler(options.htmlContent);
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
 
@@ -1188,7 +1189,7 @@ export async function startAnnotateServer(options: {
 			res.writeHead(404, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
 			res.end(buildHtmlAssetErrorDocument(404, "Not found", name));
 		} else {
-			html(res, options.htmlContent);
+			serveApp(req, res, url);
 		}
 	});
 	const agentTerminal = await createNodeAgentTerminalBridge({

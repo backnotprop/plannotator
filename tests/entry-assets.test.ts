@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { openPackedApp } from '../packages/shared/packed-app';
 
 const root = resolve(import.meta.dir, '..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
@@ -144,10 +145,10 @@ describe('review entry assets', () => {
   //   chunk. The review bundle carries no Mermaid at all.
   // - Presence markers (a KaTeX class name, a Mermaid diagram id, an
   //   Emscripten symbol from Graphviz, the bridge global), which only say the
-  //   runtime is still inlined by inlineDynamicImports. KaTeX is inlined
+  //   runtime is still packed into the bundle. KaTeX is packed
   //   through utils/math-default-loader.ts's import('katex') whether or not it is registered,
   //   so `katex-display` cannot prove registration and is not asked to; the
-  //   Mermaid diagram id in the plan bundle likewise proves inlining only.
+  //   Mermaid diagram id in the plan bundle likewise proves packing only.
   //
   // dist/ is gitignored, so this is skipped on an unbuilt checkout; the CI job
   // that builds the bundles runs it right after.
@@ -213,6 +214,29 @@ describe('review entry assets', () => {
       // `toContain` failure would print all of it.
       const inlinedWasm = readFileSync(resolve(root, path), 'utf8').includes('AGFzbQ');
       expect({ path, inlinedWasm }).toEqual({ path, inlinedWasm: false });
+    });
+  }
+
+  // The bundles are packed (build/pack-app.ts) so a session's first load moves
+  // only the page and its entry chunk; the lazy chunks (Shiki grammars,
+  // Mermaid, ELK, Graphviz, KaTeX) stay in the pack until something imports
+  // them. Re-inlining them (`inlineDynamicImports`, vite-plugin-singlefile)
+  // builds and passes everything else while quietly restoring the ~25 MB
+  // first load over a tailnet or tunnel, so this reads the ARTIFACT.
+  for (const path of bundles) {
+    test.skipIf(!existsSync(resolve(root, path)))(`${path} loads only its entry chunk up front`, () => {
+      const bundle = readFileSync(resolve(root, path), 'utf8');
+      const app = openPackedApp(bundle);
+      const entry = app.html.match(/<script type="module" crossorigin src="([^"]+)"/)?.[1] ?? '';
+      const entryBytes = app.asset(entry, undefined)?.body.length ?? bundle.length;
+      expect(entryBytes / bundle.length).toBeLessThan(1 / 3);
+    });
+
+    // Packing before vite:build-import-analysis has rewritten the chunks ships
+    // its placeholder, and the app then throws on its first dynamic import.
+    test.skipIf(!existsSync(resolve(root, path)))(`${path} packs finished chunks`, () => {
+      const preloadPlaceholder = readFileSync(resolve(root, path), 'utf8').includes('__VITE_PRELOAD__');
+      expect({ path, preloadPlaceholder }).toEqual({ path, preloadPlaceholder: false });
     });
   }
 });

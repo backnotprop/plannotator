@@ -14,7 +14,7 @@
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
-import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
+import { handleImage, handleUpload, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, createAppHandler, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
@@ -252,6 +252,7 @@ export async function startAnnotateServer(
     liveApp,
     onReady,
   } = options;
+  const serveApp = createAppHandler(htmlContent);
 
   // Effective client-lease capability. A --tailscale session forces local
   // mode, so the CLI-side supportsAnnotateClientLease predicate reads it as
@@ -1280,10 +1281,8 @@ export async function startAnnotateServer(
           const framedMiss = framedDocumentNotFound(req, url);
           if (framedMiss) return framedMiss;
 
-          // Serve embedded HTML for all other routes (SPA)
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          // Serve the app for all other routes (SPA): the page or a packed asset
+          return serveApp(req, url);
         },
         websocket: agentTerminal.websocket,
 

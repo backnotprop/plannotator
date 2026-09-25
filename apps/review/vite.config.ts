@@ -1,9 +1,9 @@
 import path from 'path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { viteSingleFile } from 'vite-plugin-singlefile';
 import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
+import { packedApp } from '../../build/pack-app';
 import { DEMO_FILE_CONTENTS } from '../../packages/review-editor/demoData';
 
 function demoFileContentPlugin(): Plugin {
@@ -30,7 +30,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  plugins: [demoFileContentPlugin(), react(), tailwindcss(), viteSingleFile()],
+  plugins: [demoFileContentPlugin(), react(), tailwindcss(), packedApp()],
   resolve: {
     alias: {
       // Drop the dead Oniguruma WASM (~622 KB base64, inlined twice here: main
@@ -60,13 +60,7 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    assetsInlineLimit: 100000000,
     chunkSizeWarningLimit: 100000000,
     cssCodeSplit: false,
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-      },
-    },
   },
 });

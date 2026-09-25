@@ -18,6 +18,7 @@ import {
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import {
+  createAppHandler,
   handleFavicon,
   handleImage,
   handleServerReady,
@@ -77,6 +78,7 @@ export async function startGoalSetupServer(
   options: GoalSetupServerOptions
 ): Promise<GoalSetupServerResult> {
   const { bundle, htmlContent, origin = "claude-code", onReady } = options;
+  const serveApp = createAppHandler(htmlContent);
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
   const repoInfo = await getRepoInfo();
@@ -197,9 +199,7 @@ export async function startGoalSetupServer(
 
           if (url.pathname === "/favicon.png") return handleFavicon();
 
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return serveApp(req, url);
         },
 
         error(err) {

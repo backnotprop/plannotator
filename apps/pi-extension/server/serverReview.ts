@@ -111,7 +111,7 @@ import {
 	readDraftGenerationFromUrl,
 	handleUploadRequest,
 } from "./handlers.ts";
-import { handleApiNotFound, html, json, parseBody, parseJsonBody, readBody, requestUrl, send } from "./helpers.ts";
+import { createAppHandler, handleApiNotFound, json, parseBody, parseJsonBody, readBody, requestUrl, send } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
@@ -1834,6 +1834,7 @@ export async function startReviewServer(options: {
 
 	const aiRuntime = aiEnabled ? await createPiAIRuntime({ getCwd: resolveAgentCwd }) : null;
 
+	const serveApp = createAppHandler(options.htmlContent);
 	const server = createServer(async (req, res) => {
 		const url = requestUrl(req);
 
@@ -3755,7 +3756,7 @@ export async function startReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
 		} else {
-			html(res, options.htmlContent);
+			serveApp(req, res, url);
 		}
 	});
 
