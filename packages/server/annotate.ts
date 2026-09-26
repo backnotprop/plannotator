@@ -11,7 +11,7 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
-import { appHtmlResponse, prewarmAppHtml } from "@plannotator/shared/app-html";
+import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
@@ -1353,8 +1353,11 @@ export async function startAnnotateServer(
     );
   };
 
-  // Start the brotli pass now so the first remote load does not wait for it.
-  if (compressAppHtml) prewarmAppHtml(htmlContent);
+  // Start the likely encoding now (gzip for plain-http remote mode, brotli
+  // behind tailscale serve) so the first load does not wait for it.
+  if (compressAppHtml) {
+    prewarmAppHtml(htmlContent, likelyAppHtmlEncoding(options.tailnetPublished === true));
+  }
 
   // Notify caller that server is ready. An async ready handler that rejects
   // (e.g. --tailscale publishing failed) must stop the server and propagate:

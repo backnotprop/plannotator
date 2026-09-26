@@ -1,5 +1,5 @@
 import { annotateDiagramRenderKind } from "../generated/annotatable.ts";
-import { prewarmAppHtml } from "../generated/app-html.ts";
+import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { createServer } from "node:http";
 import type { IncomingMessage } from "node:http";
 import { dirname, resolve as resolvePath } from "node:path";
@@ -1200,9 +1200,9 @@ export async function startAnnotateServer(options: {
 	agentTerminalCapability = agentTerminal.capability;
 
 	const { port, portSource } = await listenOnPort(server);
-	// Remote sessions serve the app page compressed (#1617); start the brotli
-	// pass now so the first load does not wait for it.
-	if (isRemoteSession()) prewarmAppHtml(options.htmlContent);
+	// Remote sessions serve the app page compressed (#1617); start gzip (what
+	// browsers ask for over plain http) now so the first load does not wait.
+	if (isRemoteSession()) prewarmAppHtml(options.htmlContent, likelyAppHtmlEncoding(false));
 
 	if (options.liveApp) {
 		// Compose the proxy-served bridge body via the shared assembly (config

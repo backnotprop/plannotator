@@ -16,14 +16,24 @@
  * i.e. exactly the sessions whose browser can be on another device. A plain
  * local session never compresses and its response is unchanged, headers
  * included: on loopback the transfer is free, and measured cold loads were
- * ~0.17 s SLOWER with compression, because the first request waits on the
- * one-time ~0.2 s brotli pass. The decision deliberately ignores the client
+ * slower with compression, because the first request waits on the one-time
+ * ~0.2 s compression pass. The decision deliberately ignores the client
  * address: `tailscale serve` connects from 127.0.0.1 too.
  *
- * Compressing sessions start the brotli pass at server start
- * (`prewarmAppHtml`), off the event loop, so the page is usually ready before
- * the first request. Gzip, which only browsers without br use (WebKit over
- * plain http advertises no br), is compressed lazily on its first request.
+ * Which encoding a client asks for depends on the ORIGIN, not the browser
+ * alone: browsers advertise `br` only to secure contexts (HTTPS, and Chromium
+ * also to http://localhost / 127.0.0.1). Measured with Playwright: Chromium to
+ * http://<LAN IP> sends `gzip, deflate`; WebKit sends `gzip, deflate` to every
+ * plain-http origin. So:
+ * - direct remote mode (http://<host>:19432, PLANNOTATOR_URL_HOST) is served
+ *   GZIP in practice, from every browser;
+ * - `--tailscale` (HTTPS through `tailscale serve`) is served brotli;
+ * - remote mode reached through an SSH port forward on localhost is served
+ *   brotli by Chromium, gzip by Safari.
+ * Each server prewarms the ONE encoding its session will most likely use
+ * (`prewarmAppHtml`: gzip for remote mode, brotli for --tailscale) at server
+ * start, off the event loop, so the page is usually ready before the first
+ * request; the other encoding is compressed lazily if a client ever asks.
  *
  * Invariants:
  * - Identity (no `Accept-Encoding`, `identity`, `br;q=0, gzip;q=0`, the VS Code
@@ -101,6 +111,13 @@ interface CacheEntry {
   encoded: Partial<Record<"br" | "gzip", Promise<Buffer>>>;
 }
 
+/**
+ * Module-level on purpose: one compression per body per process. In
+ * long-lived hosts (the Pi extension, the OpenCode plugin) a module outlives
+ * any one session, so the compressed bodies persist for the host process's
+ * lifetime; the cache is bounded to MAX_CACHED_BODIES (4) distinct bodies,
+ * oldest evicted first, and in practice holds the plan and review pages.
+ */
 const cache: CacheEntry[] = [];
 
 function compress(html: string, encoding: "br" | "gzip"): Promise<Buffer> {
@@ -147,12 +164,21 @@ export function encodeAppHtml(html: string, encoding: "br" | "gzip"): Promise<Bu
 }
 
 /**
- * Start the brotli compression of `html` now, in the background, so the first
+ * The encoding a compressing session's clients will most likely ask for:
+ * brotli behind `tailscale serve` (HTTPS), gzip for direct remote mode (plain
+ * http, where browsers do not advertise br).
+ */
+export function likelyAppHtmlEncoding(tailnetPublished: boolean): "br" | "gzip" {
+  return tailnetPublished ? "br" : "gzip";
+}
+
+/**
+ * Start compressing `html` in `encoding` now, in the background, so the first
  * page load does not wait for it. Never throws; a failure is retried lazily by
  * the request that needs it.
  */
-export function prewarmAppHtml(html: string): void {
-  encodeAppHtml(html, "br").catch(() => {});
+export function prewarmAppHtml(html: string, encoding: "br" | "gzip"): void {
+  encodeAppHtml(html, encoding).catch(() => {});
 }
 
 export interface PreparedAppHtml {

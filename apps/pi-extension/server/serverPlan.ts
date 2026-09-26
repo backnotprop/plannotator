@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { prewarmAppHtml } from "../generated/app-html.ts";
+import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { createServer } from "node:http";
 
 import { contentHash, deleteDraft } from "../generated/draft.ts";
@@ -508,9 +508,9 @@ export async function startPlanReviewServer(options: {
 	});
 
 	const { port, portSource } = await listenOnPort(server);
-	// Remote sessions serve the app page compressed (#1617); start the brotli
-	// pass now so the first load does not wait for it.
-	if (isRemoteSession()) prewarmAppHtml(options.htmlContent);
+	// Remote sessions serve the app page compressed (#1617); start gzip (what
+	// browsers ask for over plain http) now so the first load does not wait.
+	if (isRemoteSession()) prewarmAppHtml(options.htmlContent, likelyAppHtmlEncoding(false));
 
 	// Mirror the Bun server: bind first, then warm through the async shared walk.
 	void warmFileListCache(process.cwd(), "code");

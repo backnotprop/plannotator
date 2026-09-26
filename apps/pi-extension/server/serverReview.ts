@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { prewarmAppHtml } from "../generated/app-html.ts";
+import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -3761,9 +3761,9 @@ export async function startReviewServer(options: {
 	});
 
 	const { port, portSource } = await listenOnPort(server);
-	// Remote sessions serve the app page compressed (#1617); start the brotli
-	// pass now so the first load does not wait for it.
-	if (isRemoteSession()) prewarmAppHtml(options.htmlContent);
+	// Remote sessions serve the app page compressed (#1617); start gzip (what
+	// browsers ask for over plain http) now so the first load does not wait.
+	if (isRemoteSession()) prewarmAppHtml(options.htmlContent, likelyAppHtmlEncoding(false));
 	serverUrl = buildAdvertisedUrl(port);
 	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();
