@@ -472,7 +472,7 @@ export async function startAnnotateServer(
   };
   const externalAnnotations = createExternalAnnotationHandler("plan");
   const aiRuntime = resolveAIEnabled() ? await createAIRuntime() : null;
-  const htmlAssets = createHtmlAssetRegistry();
+  const htmlAssets = createHtmlAssetRegistry(mode === "annotate-folder" ? folderPath : undefined);
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),
     cwd: agentCwd ?? process.cwd(),

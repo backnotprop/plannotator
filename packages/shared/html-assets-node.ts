@@ -8,11 +8,21 @@ import {
 
 export const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
 
-export function inlineHtmlLocalAssets(html: string, htmlFilePath: string): string {
+export function htmlAssetContext(htmlFilePath: string, folderPath?: string): { root: string; basePath: string } {
+  const directory = dirname(resolvePath(htmlFilePath));
+  if (!folderPath || !isWithinDirectory(htmlFilePath, folderPath)) {
+    return { root: directory, basePath: "" };
+  }
+  const root = realpathSync(folderPath);
+  const documentDirectory = dirname(realpathSync(htmlFilePath));
+  return { root, basePath: relative(root, documentDirectory).split("\\").join("/") };
+}
+
+export function inlineHtmlLocalAssets(html: string, htmlFilePath: string, folderPath?: string): string {
   if (/^https?:\/\//i.test(htmlFilePath)) return html;
 
   try {
-    const root = dirname(resolvePath(htmlFilePath));
+    const { root, basePath } = htmlAssetContext(htmlFilePath, folderPath);
     const activeCss = new Set<string>();
 
     const dataUrlFor = (assetPath: string): string | null => {
@@ -55,7 +65,7 @@ export function inlineHtmlLocalAssets(html: string, htmlFilePath: string): strin
     // a base nothing resolves against, so an embed renders EMPTY on the share
     // portal instead of resolving onto the portal's own catch-all and rendering
     // the app inside the frame (which is exactly the bug this fixes locally).
-    return rewriteHtmlAssetReferences(html, dataUrlFor, { inertBase: true });
+    return rewriteHtmlAssetReferences(html, dataUrlFor, { inertBase: true, assetBasePath: basePath });
   } catch {
     return html;
   }

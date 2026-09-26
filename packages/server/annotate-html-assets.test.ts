@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHtmlAssetRegistry, framedDocumentNotFound, inlineHtmlLocalAssets } from "./html-assets";
 import { startAnnotateServer } from "./annotate";
+import { startAnnotateServer as startPiAnnotateServer } from "../../apps/pi-extension/server/serverAnnotate";
 
 describe("annotate raw HTML assets", () => {
   test("rewrites raw HTML support assets and serves them from the source directory", async () => {
@@ -38,6 +39,56 @@ describe("annotate raw HTML assets", () => {
     expect(imageResponse?.status).toBe(200);
     expect(imageResponse?.headers.get("content-type")).toBe("image/png");
     expect(await imageResponse?.text()).toBe("png-bytes");
+  });
+
+  test("folder HTML loads parent-relative CSS and scripts and shares their bytes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-folder-assets-"));
+    mkdirSync(join(dir, "lessons"));
+    mkdirSync(join(dir, "assets"));
+    const htmlPath = join(dir, "lessons", "lesson.html");
+    const html = '<html><head><link rel="stylesheet" href="../assets/lesson.css"></head><body><script src="../assets/quiz.js"></script></body></html>';
+    writeFileSync(htmlPath, html);
+    writeFileSync(join(dir, "assets", "lesson.css"), "body { color: red; }");
+    writeFileSync(join(dir, "assets", "quiz.js"), "window.quiz = true;");
+    const assets = createHtmlAssetRegistry(dir);
+    const rewritten = assets.rewriteHtml(html, htmlPath);
+    for (const [name, expected] of [["lesson.css", "body { color: red; }"], ["quiz.js", "window.quiz = true;"]]) {
+      const urlPath = rewritten.match(new RegExp('(?:href|src)="([^" ]+' + name.replace(".", "\\.") + ')"'))?.[1];
+      expect(urlPath).toStartWith("/api/html-assets/");
+      const url = new URL(urlPath!, "http://localhost");
+      const response = await assets.handle(new Request(url), url);
+      expect(response?.status).toBe(200);
+      expect(await response?.text()).toBe(expected);
+    }
+    expect(rewritten).toMatch(/<base href="\/api\/html-assets\/[^/]+\/lessons\/"/);
+    const shared = assets.inlineHtml(html, htmlPath);
+    expect(shared).toContain("data:text/css;charset=utf-8;base64,");
+    expect(shared).toContain(Buffer.from("window.quiz = true;").toString("base64"));
+  });
+
+  test("folder assets preserve literal percent characters in document directories", async () => {
+    const root = mkdtempSync(join(tmpdir(), "plannotator-percent-assets-"));
+    try {
+      for (const name of ["100%", "a%20b"]) {
+        const directory = join(root, name);
+        mkdirSync(directory);
+        const path = join(directory, "lesson.html");
+        const html = '<link rel="stylesheet" href="./lesson.css">';
+        writeFileSync(path, html);
+        writeFileSync(join(directory, "lesson.css"), "body { color: red; }");
+        const assets = createHtmlAssetRegistry(root);
+        const rewritten = assets.rewriteHtml(html, path);
+        const cssPath = rewritten.match(/href="([^"]+lesson.css)"/)?.[1];
+        const url = new URL(cssPath!, "http://localhost");
+        const response = await assets.handle(new Request(url), url);
+        expect(response?.status).toBe(200);
+        expect(await response?.text()).toBe("body { color: red; }");
+        const shared = assets.inlineHtml(html, path);
+        expect(shared).toContain(Buffer.from("body { color: red; }").toString("base64"));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("inlines raw HTML support assets for portable share payloads", () => {
@@ -334,3 +385,43 @@ describe("annotate catch-all: framed requests", () => {
     });
   });
 });
+
+for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", startPiAnnotateServer]] as const) {
+  test(`${runtime} folder API resolves shared assets within the selected folder`, async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-folder-api-")));
+    const root = join(parent, "course");
+    mkdirSync(join(root, "lessons"), { recursive: true });
+    mkdirSync(join(root, "assets"));
+    const filePath = join(root, "lessons", "lesson.html");
+    writeFileSync(filePath, '<html><head><link rel="stylesheet" href="../assets/lesson.css"></head><body><script src="../assets/quiz.js"></script></body></html>');
+    writeFileSync(join(root, "assets", "lesson.css"), "body { color: red; }");
+    writeFileSync(join(root, "assets", "quiz.js"), "window.quiz = true;");
+    writeFileSync(join(parent, "outside.css"), "SECRET");
+    symlinkSync(join(parent, "outside.css"), join(root, "assets", "escape.css"));
+    const alias = join(parent, "alias");
+    symlinkSync(root, alias);
+    const server = await startServer({ markdown: "", filePath: alias, folderPath: alias, mode: "annotate-folder", htmlContent: "<html></html>" });
+    try {
+      const response = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(filePath)}`);
+      expect(response.status).toBe(200);
+      const doc = await response.json() as { rawHtml: string };
+      const cssPath = doc.rawHtml.match(/href="([^"]+lesson.css)"/)?.[1];
+      expect(cssPath).toStartWith("/api/html-assets/");
+      const cssResponse = await fetch(new URL(cssPath!, server.url));
+      expect(cssResponse.status).toBe(200);
+      expect(await cssResponse.text()).toBe("body { color: red; }");
+      const jsPath = doc.rawHtml.match(/src="([^"]+quiz.js)"/)?.[1];
+      expect(await (await fetch(new URL(jsPath!, server.url))).text()).toBe("window.quiz = true;");
+      const escape = await fetch(new URL(cssPath!.replace("lesson.css", "escape.css"), server.url));
+      expect(escape.status).toBe(403);
+      const share = await fetch(`${server.url}/api/share-html?path=${encodeURIComponent(filePath)}`);
+      expect(share.status).toBe(200);
+      const shared = await share.json() as { shareHtml: string };
+      expect(shared.shareHtml).toContain(Buffer.from("body { color: red; }").toString("base64"));
+      expect(shared.shareHtml).not.toContain("SECRET");
+    } finally {
+      server.stop();
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+}

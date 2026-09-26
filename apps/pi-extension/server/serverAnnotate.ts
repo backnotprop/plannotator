@@ -77,7 +77,7 @@ import {
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
-import { inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
+import { htmlAssetContext, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
@@ -130,7 +130,7 @@ function firstHeader(value: string | string[] | undefined): string | null {
 	return value ?? null;
 }
 
-function createHtmlAssetRegistry() {
+function createHtmlAssetRegistry(folderPath?: string) {
 	const rootsByToken = new Map<string, string>();
 	const tokensByRoot = new Map<string, string>();
 
@@ -147,13 +147,14 @@ function createHtmlAssetRegistry() {
 	function rewriteHtml(htmlContent: string, htmlFilePath: string): string {
 		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
 		try {
-			const token = register(dirname(resolvePath(htmlFilePath)));
+			const { root, basePath } = htmlAssetContext(htmlFilePath, folderPath);
+			const token = register(root);
 			return rewriteHtmlAssetReferences(
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
 				// Root-relative on purpose: a srcdoc document resolves its own
 				// <base href> against the PARENT's URL, which is this server.
-				{ baseHref: htmlAssetBaseHref(token) },
+				{ baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath },
 			);
 		} catch {
 			return htmlContent;
@@ -161,7 +162,7 @@ function createHtmlAssetRegistry() {
 	}
 
 	function inlineHtml(htmlContent: string, htmlFilePath: string): string {
-		return inlineHtmlLocalAssets(htmlContent, htmlFilePath);
+		return inlineHtmlLocalAssets(htmlContent, htmlFilePath, folderPath);
 	}
 
 	function assetError(
@@ -518,7 +519,7 @@ export async function startAnnotateServer(options: {
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
 	const aiRuntime = resolveAIEnabled() ? await createPiAIRuntime() : null;
-	const htmlAssets = createHtmlAssetRegistry();
+	const htmlAssets = createHtmlAssetRegistry(options.mode === "annotate-folder" ? options.folderPath : undefined);
 	let agentTerminalCapability: AgentTerminalCapability = {
 		enabled: false,
 		reason: "unsupported-runtime",
