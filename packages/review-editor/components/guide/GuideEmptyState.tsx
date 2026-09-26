@@ -10,6 +10,7 @@ import { PI_THINKING, REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/Age
 // Ask AI use (useGuideLaunch → useModelCatalogs).
 import { effortSelectOptions, modelSelectOptions } from '@plannotator/ui/hooks/useModelCatalogs';
 import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from '@plannotator/ui/components/AgentControls';
+import { ModelSourceHint } from '@plannotator/ui/components/ModelSourceHint';
 import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
 
 type Option = { value: string; label: string };
@@ -494,6 +495,13 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 <InlinePicker label="Thinking" value={guidePiThinking} options={PI_THINKING} onChange={setGuidePiThinking} />
               )}
             </div>
+            {(engine === 'claude' || engine === 'codex') && catalogs[engine].settled && (
+              <ModelSourceHint
+                tool={engine}
+                info={catalogs[engine]}
+                className="mt-2.5 text-[11px] leading-snug text-muted-foreground/60"
+              />
+            )}
             <p className="mt-2.5 text-[11px] leading-snug text-muted-foreground/60">
               Newer models with lower effort are recommended — guides generate quicker.
             </p>

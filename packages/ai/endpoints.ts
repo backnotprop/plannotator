@@ -220,6 +220,7 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
           capabilities: p.capabilities,
           models: p.models ?? [],
           ...(p.modelsSource ? { modelsSource: p.modelsSource } : {}),
+          ...(p.toolVersion ? { toolVersion: p.toolVersion } : {}),
         };
       });
       return Response.json({

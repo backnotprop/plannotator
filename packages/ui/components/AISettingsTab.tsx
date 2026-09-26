@@ -1,5 +1,6 @@
 import type React from 'react';
 import { getProviderMeta } from './ProviderIcons';
+import { ModelSourceHint, modelSourceToolForProvider } from './ModelSourceHint';
 import {
   getAIProviderSettings,
   resolveAIProviderSelection,
@@ -121,6 +122,11 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
                       ))}
                     </select>
                   </label>
+                  <ModelSourceHint
+                    tool={modelSourceToolForProvider(p.name)}
+                    info={p}
+                    className="mt-1.5 text-[10px] text-muted-foreground/60"
+                  />
                 </div>
               )}
 

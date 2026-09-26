@@ -4,6 +4,7 @@ import {
   CODEX_FALLBACK_MODELS,
   claudeCatalogFromSdk,
   claudeModelVersion,
+  cliVersionFrom,
   modelSelectOptions,
   resolveEffortChoice,
   resolveModelChoice,
@@ -211,4 +212,29 @@ test("claudeModelVersion reads major.minor and ignores date and [1m] suffixes", 
   expect(claudeModelVersion("claude-sonnet-4-20250514")).toBe("4");
   expect(claudeModelVersion("gpt-6-sol")).toBeUndefined();
   expect(claudeModelVersion(undefined)).toBeUndefined();
+});
+
+test("the Codex fallback defaults to GPT-6-Sol, which codex >= 0.155 lists", () => {
+  expect(CODEX_FALLBACK_MODELS.filter((m) => m.default).map((m) => m.id)).toEqual(["gpt-6-sol"]);
+});
+
+test("cliVersionFrom reads the version from claude --version and the codex userAgent", () => {
+  expect(cliVersionFrom("2.1.282 (Claude Code)\n")).toBe("2.1.282");
+  expect(cliVersionFrom("plannotator/0.155.1 (Mac OS 26.3.0; arm64) ghostty/1.3.1 (plannotator; 0)")).toBe("0.155.1");
+  expect(cliVersionFrom("codex_cli_rs/0.156.0-alpha.2 (Linux)")).toBe("0.156.0-alpha.2");
+  expect(cliVersionFrom("")).toBeUndefined();
+  expect(cliVersionFrom(undefined)).toBeUndefined();
+});
+
+test("cliVersionFrom prefers the line naming the tool, else the first line", () => {
+  const noisy = "node 18.2.0 warning: something\n2.1.282 (Claude Code)\n";
+  expect(cliVersionFrom(noisy, /claude code/i)).toBe("2.1.282");
+  // No line names the tool: the first line's version, never a later line's.
+  expect(cliVersionFrom("2.1.282\nnode 18.2.0", /claude code/i)).toBe("2.1.282");
+  expect(cliVersionFrom("no version here\n1.2.3")).toBeUndefined();
+});
+
+test("cliVersionFrom refuses an unbounded prerelease suffix", () => {
+  expect(cliVersionFrom(`0.156.0-${"a".repeat(200)}`)).toBeUndefined();
+  expect(cliVersionFrom("0.156.0-alpha.2")).toBe("0.156.0-alpha.2");
 });

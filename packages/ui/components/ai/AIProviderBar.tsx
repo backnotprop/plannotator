@@ -1,6 +1,7 @@
 import React from 'react';
 import { getProviderMeta } from '../ProviderIcons';
 import { type AIProviderOption } from '../../utils/aiProvider';
+import { ModelSourceHint, modelSourceToolForProvider } from '../ModelSourceHint';
 
 interface AIProviderBarProps {
   providers: AIProviderOption[];
@@ -42,6 +43,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   const showReasoningEffort = !!onReasoningEffortChange && reasoningEfforts.length > 0;
 
   return (
+    <>
     <div className="border-t border-border/50 px-2 py-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
       <Icon className="w-3.5 h-3.5 flex-shrink-0" />
       <select
@@ -91,5 +93,11 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
         </select>
       )}
     </div>
+    <ModelSourceHint
+      tool={modelSourceToolForProvider(currentProvider?.name)}
+      info={currentProvider}
+      className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
+    />
+    </>
   );
 };

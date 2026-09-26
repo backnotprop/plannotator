@@ -208,6 +208,13 @@ export interface AIProvider {
   readonly modelsSource?: 'fallback' | 'discovered';
 
   /**
+   * The installed CLI's version, captured once during model discovery (never
+   * spawned on its own). Absent until discovery has run, or when the tool
+   * did not report one.
+   */
+  readonly toolVersion?: string;
+
+  /**
    * Create a fresh session (no parent history).
    * Context is injected via the system prompt.
    */
