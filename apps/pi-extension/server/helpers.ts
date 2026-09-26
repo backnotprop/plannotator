@@ -3,8 +3,9 @@
  * parseBody, parseJsonBody, json, handleApiNotFound, html, send, toWebRequest
  */
 
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import { openPackedApp } from "../generated/packed-app.ts";
 
 /** The raw request body as text (for endpoints where an empty body is meaningful, e.g. all-optional JSON). */
 export function readBody(req: IncomingMessage): Promise<string> {
@@ -60,6 +61,22 @@ export function html(
 ): void {
 	res.writeHead(200, { "Content-Type": "text/html" });
 	res.end(content);
+}
+
+/**
+ * Serve the built app to every route no handler claimed: one of the chunks and
+ * assets packed into it, or else the page itself (SPA). Mirrors
+ * createAppHandler in packages/server/shared-handlers.ts.
+ */
+export function createAppHandler(
+	htmlContent: string,
+): (req: IncomingMessage, res: ServerResponse, url: URL) => void {
+	const app = openPackedApp(htmlContent);
+	return (req, res, url) => {
+		const asset = app.asset(url.pathname, req.headers["accept-encoding"]);
+		if (asset) send(res, asset.body, 200, asset.headers);
+		else html(res, app.html);
+	};
 }
 
 export function send(
