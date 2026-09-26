@@ -12,6 +12,7 @@
  *                        "opencode", "codex", "copilot-cli", "gemini-cli", "pi", "oh-my-pi".
  */
 
+import { appHtmlResponse, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
@@ -643,9 +644,7 @@ export async function startPlannotatorServer(
           }
 
           // Serve embedded HTML for all other routes (SPA)
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return appHtmlResponse(req, htmlContent, isRemote);
         },
 
         error(err) {
@@ -672,6 +671,10 @@ export async function startPlannotatorServer(
     })();
     return stopPromise;
   };
+
+  // Remote sessions serve the app page compressed (#1617); start the brotli
+  // pass now so the first load does not wait for it.
+  if (isRemote) prewarmAppHtml(htmlContent);
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.

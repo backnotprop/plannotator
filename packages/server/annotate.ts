@@ -11,6 +11,7 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
+import { appHtmlResponse, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
@@ -278,6 +279,9 @@ export async function startAnnotateServer(
   }
 
   const isRemote = isRemoteSession();
+  // The app page is served compressed only to sessions reachable from another
+  // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
+  const compressAppHtml = isRemote || options.tailnetPublished === true;
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
@@ -1281,9 +1285,7 @@ export async function startAnnotateServer(
           if (framedMiss) return framedMiss;
 
           // Serve embedded HTML for all other routes (SPA)
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return appHtmlResponse(req, htmlContent, compressAppHtml);
         },
         websocket: agentTerminal.websocket,
 
@@ -1350,6 +1352,9 @@ export async function startAnnotateServer(
       () => server.stop(),
     );
   };
+
+  // Start the brotli pass now so the first remote load does not wait for it.
+  if (compressAppHtml) prewarmAppHtml(htmlContent);
 
   // Notify caller that server is ready. An async ready handler that rejects
   // (e.g. --tailscale publishing failed) must stop the server and propagate:

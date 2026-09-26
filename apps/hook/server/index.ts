@@ -1210,6 +1210,7 @@ if (args[0] === "sessions") {
     // this CLI's origins may see approve-carrying menu items (spec §6.4).
     approvalNotesSupported: supportsReviewApprovalNotes(detectedOrigin),
     htmlContent: reviewHtmlContent,
+    tailnetPublished: tailscaleFlag,
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
       if (tailscaleFlag) {

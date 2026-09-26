@@ -5,6 +5,7 @@
   "exports": {
     "./agents": "./agents.ts",
     "./annotatable": "./annotatable.ts",
+    "./app-html": "./app-html.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
     "./diff-paths": "./diff-paths.ts",

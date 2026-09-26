@@ -6,6 +6,7 @@
  * launch a browser session, wait, and receive a structured JSON result.
  */
 
+import { appHtmlResponse, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { Origin } from "@plannotator/shared/agents";
 import {
   createFactsResult,
@@ -197,9 +198,7 @@ export async function startGoalSetupServer(
 
           if (url.pathname === "/favicon.png") return handleFavicon();
 
-          return new Response(htmlContent, {
-            headers: { "Content-Type": "text/html" },
-          });
+          return appHtmlResponse(req, htmlContent, isRemote);
         },
 
         error(err) {
@@ -214,6 +213,9 @@ export async function startGoalSetupServer(
 
   const port = server.port!;
   const serverUrl = buildAdvertisedUrl(port);
+  // Remote sessions serve the app page compressed (#1617); start the brotli
+  // pass now so the first load does not wait for it.
+  if (isRemote) prewarmAppHtml(htmlContent);
   onReady?.(serverUrl, isRemote, port);
 
   return {
