@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { createServer } from "node:http";
 
 import { contentHash, deleteDraft } from "../generated/draft.ts";
@@ -39,7 +40,7 @@ import {
 	saveToObsidian,
 	saveToOctarine,
 } from "./integrations.ts";
-import { buildAdvertisedUrl, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 
 import { loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
 import { appendFeedbackRecord, type FeedbackDecision } from "../generated/feedback-archive.ts";
@@ -502,11 +503,14 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
 		} else {
-			html(res, options.htmlContent);
+			await html(req, res, options.htmlContent, isRemoteSession());
 		}
 	});
 
 	const { port, portSource } = await listenOnPort(server);
+	// Remote sessions serve the app page compressed (#1617); start gzip (what
+	// browsers ask for over plain http) now so the first load does not wait.
+	if (isRemoteSession()) prewarmAppHtml(options.htmlContent, likelyAppHtmlEncoding(false));
 
 	// Mirror the Bun server: bind first, then warm through the async shared walk.
 	void warmFileListCache(process.cwd(), "code");
