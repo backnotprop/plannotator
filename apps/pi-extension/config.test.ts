@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildPromptVariables, loadPlannotatorConfig, formatTodoList, renderTemplate, resolveExecutionMode, resolvePhaseProfile, THINKING_LEVELS } from "./config.ts";
+import { buildPromptVariables, loadPlannotatorConfig, formatTodoList, renderTemplate, resolveExecutionMode, resolvePhaseProfile, resolveRenderer, THINKING_LEVELS } from "./config.ts";
+import { isTuiRendererEnabled } from "./plannotator-tui.ts";
 
 const tempDirs: string[] = [];
 const originalHome = process.env.HOME;
@@ -42,6 +43,57 @@ describe("plannotator config", () => {
 
   test("defaults to automatic execution", () => {
     expect(resolveExecutionMode({})).toBe("automatic");
+  });
+
+  test("defaults to the browser renderer", () => {
+    expect(resolveRenderer({})).toBe("browser");
+  });
+
+  test("loads renderer with project precedence, null clears, unknown warns", () => {
+    const homeDir = makeTempDir("plannotator-config-home-renderer-");
+    const cwdDir = makeTempDir("plannotator-config-cwd-renderer-");
+    process.env.HOME = homeDir;
+
+    const globalConfigDir = join(homeDir, ".pi", "agent");
+    const projectConfigDir = join(cwdDir, ".pi");
+    mkdirSync(globalConfigDir, { recursive: true });
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, "plannotator.json"), JSON.stringify({ renderer: "tui" }), "utf-8");
+    writeFileSync(join(projectConfigDir, "plannotator.json"), JSON.stringify({ renderer: null }), "utf-8");
+
+    const cleared = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
+    expect(cleared.warnings).toEqual([]);
+    expect(resolveRenderer(cleared.config)).toBe("browser");
+
+    writeFileSync(join(projectConfigDir, "plannotator.json"), JSON.stringify({ renderer: "tui" }), "utf-8");
+    const projectWins = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
+    expect(resolveRenderer(projectWins.config)).toBe("tui");
+
+    writeFileSync(join(projectConfigDir, "plannotator.json"), JSON.stringify({ renderer: "paper" }), "utf-8");
+    const unknown = loadPlannotatorConfig(cwdDir, { projectTrusted: true });
+    // Unknown values fall through to the inherited value (global "tui" here).
+    expect(resolveRenderer(unknown.config)).toBe("tui");
+    expect(unknown.warnings.some((w) => w.includes("renderer") && w.includes('"paper"'))).toBe(true);
+  });
+
+  test("tui renderer activates via config and the env var overrides it", () => {
+    const previous = process.env.PLANNOTATOR_RENDERER;
+    try {
+      delete process.env.PLANNOTATOR_RENDERER;
+      expect(isTuiRendererEnabled("tui")).toBe(true);
+      expect(isTuiRendererEnabled("browser")).toBe(false);
+      expect(isTuiRendererEnabled(null)).toBe(false);
+
+      process.env.PLANNOTATOR_RENDERER = "browser";
+      expect(isTuiRendererEnabled("tui")).toBe(false);
+      process.env.PLANNOTATOR_RENDERER = "TUI";
+      expect(isTuiRendererEnabled("browser")).toBe(true);
+      process.env.PLANNOTATOR_RENDERER = " ";
+      expect(isTuiRendererEnabled("tui")).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_RENDERER;
+      else process.env.PLANNOTATOR_RENDERER = previous;
+    }
   });
 
   test("loads external execution mode with project precedence", () => {

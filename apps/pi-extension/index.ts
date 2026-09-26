@@ -25,7 +25,7 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
+import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolveExecutionMode, resolvePhaseProfile, resolveRenderer } from "./config.ts";
 import {
 	type ChecklistItem,
 	markCompletedSteps,
@@ -48,6 +48,7 @@ import {
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.ts";
 import { resolveTodoProvider, type TodoProvider } from "./todo-providers/index.ts";
+import { isTuiRendererEnabled, openPlanReviewTui } from "./plannotator-tui.ts";
 import {
 	findAssistantMessageByEntryId,
 	getAssistantMessageText,
@@ -1323,8 +1324,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 			lastSubmittedPath = inputPath;
 			checklistItems = parseChecklist(planContent);
 
-			// Non-interactive or no HTML: auto-approve
-			if (!ctx.hasUI || !hasPlanBrowserHtml()) {
+			// Non-interactive, TUI renderer without browser assets, or no HTML: auto-approve
+			const tuiRenderer = isTuiRendererEnabled(resolveRenderer(plannotatorConfig));
+			if (!ctx.hasUI || (!tuiRenderer && !hasPlanBrowserHtml())) {
 				if (resolveExecutionMode(plannotatorConfig) === "external") {
 					await handoffApprovedPlan(ctx, inputPath, planContent);
 					return {
@@ -1355,7 +1357,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 
 			let result: Awaited<ReturnType<typeof openPlanReviewBrowser>>;
 			try {
-				result = await openPlanReviewBrowser(ctx, planContent, signal);
+				result = tuiRenderer
+					? await openPlanReviewTui(ctx, fullPath, signal)
+					: await openPlanReviewBrowser(ctx, planContent, signal);
 			} catch (err) {
 				// A stopped session is an outcome, not a startup failure: the review
 				// was closed (cancellation or port self-preemption) before a decision.
