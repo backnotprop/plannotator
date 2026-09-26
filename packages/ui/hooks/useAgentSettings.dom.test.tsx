@@ -63,3 +63,50 @@ describe.if(hasDom)('useAgentSettings Codex setters', () => {
     expect(latest!.tourCodexFast).toBe(true);
   });
 });
+
+describe.if(hasDom)('useAgentSettings guide Codex default', () => {
+  const codexCatalog = (ids: string[]): ModelCatalogs => ({
+    claude: { models: [], settled: false },
+    codex: {
+      models: ids.map((id, i) => ({ id, label: id, ...(i === 0 ? { default: true } : {}) })),
+      settled: true,
+    },
+    load: () => {},
+  });
+  let current: Settings | null = null;
+  function GuideHarness({ c }: { c: ModelCatalogs }) {
+    current = hookModule!.useAgentSettings(c);
+    return null;
+  }
+  const render = async (c: ModelCatalogs, saved?: Record<string, unknown>) => {
+    const memory = new Map<string, string>();
+    storage!.setStorageBackend({
+      getItem: (k) => memory.get(k) ?? null,
+      setItem: (k, v) => void memory.set(k, v),
+      removeItem: (k) => void memory.delete(k),
+    });
+    if (saved) storage!.setItem('plannotator.agents', JSON.stringify(saved));
+    root = createRoot(document.createElement('div'));
+    await act(async () => root!.render(<GuideHarness c={c} />));
+    return current!;
+  };
+
+  test('a user with no pick gets gpt-6-luna for guides when Codex offers it; review and tour keep Codex default', async () => {
+    const s = await render(codexCatalog(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']));
+    expect(s.guideCodexModel).toBe('gpt-6-luna');
+    expect(s.codexModel).toBe('gpt-6-astra');
+    expect(s.tourCodexModel).toBe('gpt-6-astra');
+  });
+
+  test("falls back to Codex's own default when gpt-6-luna is not offered", async () => {
+    const s = await render(codexCatalog(['gpt-5.6-sol', 'gpt-5.5']));
+    expect(s.guideCodexModel).toBe('gpt-5.6-sol');
+  });
+
+  test('a saved guide pick wins over the preference', async () => {
+    const s = await render(codexCatalog(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']), {
+      guideCodex: { model: 'gpt-6-sol', perModel: {} },
+    });
+    expect(s.guideCodexModel).toBe('gpt-6-sol');
+  });
+});

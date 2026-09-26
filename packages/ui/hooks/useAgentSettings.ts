@@ -36,6 +36,13 @@ export const DEFAULT_GUIDE_CLAUDE_MODEL = 'sonnet';
 // low effort chapter a diff well. Guide-scoped only — tour/review keep medium.
 export const DEFAULT_GUIDE_CLAUDE_EFFORT = 'low';
 export const DEFAULT_GUIDE_CODEX_MODEL = '';
+/**
+ * The Codex model a guide uses for a user who has not picked one (saved ''),
+ * when the resolved catalog offers it; otherwise Codex's own marked default.
+ * A resolution preference only, never written to the cookie, so a saved pick
+ * always wins. Guide-scoped: review and tour keep Codex's default.
+ */
+export const PREFERRED_GUIDE_CODEX_MODEL = 'gpt-6-luna';
 export const DEFAULT_GUIDE_CODEX_REASONING = 'low';
 // No DEFAULT_GUIDE_CODEX_FAST: fast mode is deliberately not offered for
 // guide (product decision — see AgentsTab's guide codex config block), so
@@ -463,7 +470,7 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   const tourCodexFast = effectiveFast(codexCatalog, state.tourCodex.model, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST);
   const guideClaudeModel = effectiveModel(claudeCatalog, state.guideClaude.model, DEFAULT_GUIDE_CLAUDE_MODEL);
   const guideClaudeEffort = effectiveEffort(claudeCatalog, guideClaudeModel, state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT);
-  const guideCodexModel = effectiveModel(codexCatalog, state.guideCodex.model, DEFAULT_GUIDE_CODEX_MODEL);
+  const guideCodexModel = effectiveModel(codexCatalog, state.guideCodex.model, PREFERRED_GUIDE_CODEX_MODEL);
   const guideCodexReasoning = effectiveEffort(codexCatalog, guideCodexModel, state.guideCodex.perModel[state.guideCodex.model]?.reasoning ?? DEFAULT_GUIDE_CODEX_REASONING);
   // Guide offers no fast toggle; a re-key carries whatever is stored.
   const guideCodexFast = state.guideCodex.perModel[state.guideCodex.model]?.fast ?? DEFAULT_CODEX_FAST;
