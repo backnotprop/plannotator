@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readPlanFile, getAllowedRootPaths, isPathAllowed, resolvePlanLinkedDoc } from "./doc-resolve";
+import { readPlanFile, getAllowedRootPaths, isPathAllowed, planLinkTargets, resolvePlanLinkedDoc } from "./doc-resolve";
 
 const tempDirs: string[] = [];
 
@@ -128,6 +128,23 @@ describe("resolvePlanLinkedDoc", () => {
 		expect(resolvePlanLinkedDoc(join(dir, "evidence.md"), dir, planFile)).toBeNull();
 	});
 
+	test("a mention or a longer link that contains a sibling's name does not unlock it", () => {
+		const dir = realpathSync(makeTempDir("plannotator-plan-docs-substring-"));
+		const plan = "# Plan\n\nSee [evidence](evidence.md) and [[notes-extended]]. Also other-plan.md in prose.\n";
+		writeFileSync(join(dir, "plan.md"), plan);
+		for (const name of ["evidence.md", "e.md", "notes.md", "notes-extended.md", "other-plan.md"]) {
+			writeFileSync(join(dir, name), `${name}\n`);
+		}
+		const planFile = readPlanFile(join(dir, "plan.md"), plan);
+		if (!planFile) throw new Error("plan did not match");
+
+		expect(resolvePlanLinkedDoc("e.md", dir, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc("notes.md", dir, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc("other-plan.md", dir, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc("evidence.md", dir, planFile)).toBe(join(dir, "evidence.md"));
+		expect(resolvePlanLinkedDoc("notes-extended.md", dir, planFile)).toBe(join(dir, "notes-extended.md"));
+	});
+
 	test("applies only when the request's base is the plan directory", () => {
 		const { planFile } = setup();
 		const elsewhere = makeTempDir("plannotator-plan-docs-base-");
@@ -135,5 +152,22 @@ describe("resolvePlanLinkedDoc", () => {
 		expect(resolvePlanLinkedDoc("evidence.md", elsewhere, planFile)).toBeNull();
 		expect(resolvePlanLinkedDoc("evidence.md", null, planFile)).toBeNull();
 		expect(resolvePlanLinkedDoc("evidence.md", planFile.dir, null)).toBeNull();
+	});
+});
+
+describe("planLinkTargets", () => {
+	test("collects the targets the renderer makes clickable, normalized", () => {
+		const plan = [
+			"[a](./a.md#section) [b](b%20c.md?x=1) [[wiki]] [[page.html|Page]] [[guide.txt]]",
+			'<a href="h.html">h</a> [paren](fn_(x).md) ![img](pic.png)',
+		].join("\n");
+
+		expect([...planLinkTargets(plan)].sort()).toEqual(
+			["a.md", "b c.md", "fn_(x).md", "guide.txt", "h.html", "page.html", "pic.png", "wiki.md"].sort(),
+		);
+	});
+
+	test("plain mentions are not link targets", () => {
+		expect(planLinkTargets("Read evidence.md and [not a link] too").size).toBe(0);
 	});
 });

@@ -5,14 +5,23 @@
  * Resolving which file a path names is separated from reading it so
  * authorization sits on one seam: every reachable path comes from
  * `resolveDocTarget`, and `isPathAllowed` alone decides whether it is served.
- * Resolution may `stat`; it never reads contents.
+ * Resolution may `stat`; it never reads contents (`readPlanFile` reads the
+ * plan file once, at server start).
+ *
+ * Plan review adds one path outside the roots: when the harness reports the
+ * plan's own file (Claude Code writes it under `~/.claude/plans/`),
+ * `resolvePlanLinkedDoc` serves the documents the plan links from that
+ * directory. Only exact link targets are served, the directory never becomes
+ * an allowed root, and a named file there shadows a project document of the
+ * same relative name. That base is not used for root resolution.
  */
 
 import { readFileSync, realpathSync, statSync } from "fs";
-import { basename, dirname, join } from "path";
+import { basename, dirname, join, posix } from "path";
 import { parseCodePath, type ParsedCodePath } from "./code-file";
 import {
 	getAnnotatableDocRegex,
+	getExtraMarkdownExtensions,
 	isAbsoluteUserPath,
 	isAnnotatableTextPath,
 	isCodeFilePath,
@@ -154,27 +163,68 @@ export function readPlanFile(planFilePath: unknown, plan: string): PlanFile | nu
 	}
 }
 
-function planNamesPath(plan: string, requestedPath: string): boolean {
-	if (plan.includes(requestedPath)) return true;
-	// Wikilinks name a document without its extension.
-	return /\.md$/i.test(requestedPath) && plan.includes(`[[${requestedPath.slice(0, -3)}`);
+// A link target and a requested path compare equal after this: no fragment or
+// query, percent-decoded, and `./` or `a/../` segments collapsed.
+function normalizeLinkTarget(target: string): string {
+	let path = target.trim().replace(/[?#].*$/, "");
+	try {
+		path = decodeURIComponent(path);
+	} catch {
+		// A malformed escape stays literal.
+	}
+	return path ? posix.normalize(path) : "";
+}
+
+// Wiki-link targets without an extension open as `.md`, as the renderer does.
+const WIKI_LINK_DOC_EXTENSION = /\.(mdx?|txt|html?)$/i;
+
+/**
+ * The link targets the plan text makes clickable: markdown links
+ * `[label](target)`, wiki links `[[target]]` / `[[target|label]]`, and
+ * `href` attributes in raw HTML. Plain mentions of a filename do not count,
+ * and neither does a longer name that contains the requested one.
+ */
+export function planLinkTargets(plan: string): Set<string> {
+	const targets = new Set<string>();
+	const add = (target: string) => {
+		const normalized = normalizeLinkTarget(target);
+		if (normalized) targets.add(normalized);
+	};
+	// One level of balanced parentheses, as the renderer allows in a destination.
+	for (const match of plan.matchAll(/\]\(((?:[^()\n]|\([^()\n]*\))+)\)/g)) add(match[1]);
+	for (const match of plan.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
+		const target = match[1].trim();
+		const hasExtension =
+			WIKI_LINK_DOC_EXTENSION.test(target) ||
+			getExtraMarkdownExtensions().some((ext) => target.toLowerCase().endsWith(ext));
+		add(hasExtension ? target : `${target}.md`);
+	}
+	for (const match of plan.matchAll(/\bhref\s*=\s*(["'])(.*?)\1/gi)) add(match[2]);
+	return targets;
+}
+
+/** Whether `base` is the plan file's directory, the base the plan review client sends. */
+export function isPlanDirBase(base: string | null | undefined, planFile: PlanFile | null | undefined): boolean {
+	return !!planFile && !!base && resolveUserPath(base) === planFile.dir;
 }
 
 /**
- * A document the plan links relative to its own directory. Only a
- * relative path the plan text names is served, and it must stay inside that
- * directory after symlink resolution, so the directory's other files stay
- * unreachable.
+ * A document the plan links relative to its own directory. Only a relative
+ * path that is exactly one of the plan's link targets is served, and it must
+ * stay inside that directory after symlink resolution, so the directory's
+ * other files (other plans in `~/.claude/plans/`) stay unreachable.
+ *
+ * This runs before root resolution, so a linked file beside the plan shadows
+ * a project document of the same relative name.
  */
 export function resolvePlanLinkedDoc(
 	requestedPath: string,
 	base: string | null | undefined,
 	planFile: PlanFile | null | undefined,
 ): string | null {
-	if (!planFile || !base || isAbsoluteUserPath(requestedPath)) return null;
-	if (resolveUserPath(base) !== planFile.dir) return null;
+	if (!planFile || !isPlanDirBase(base, planFile) || isAbsoluteUserPath(requestedPath)) return null;
 	if (!getAnnotatableDocRegex().test(requestedPath) && !/\.html?$/i.test(requestedPath)) return null;
-	if (!planNamesPath(planFile.plan, requestedPath)) return null;
+	if (!planLinkTargets(planFile.plan).has(normalizeLinkTarget(requestedPath))) return null;
 	const candidate = resolveUserPath(requestedPath, planFile.dir);
 	if (!isPathAllowed(candidate, [planFile.dir])) return null;
 	return isReadableFile(candidate) ? candidate : null;
