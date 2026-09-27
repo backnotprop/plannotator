@@ -684,7 +684,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/reference/obsidian/files` | GET | List vault markdown files as nested tree (`?vaultPath=<path>`) |
 | `/api/reference/obsidian/doc`   | GET | Read a vault markdown file (`?vaultPath=<path>&path=<file>`) |
 | `/api/plan/vscode-diff` | POST   | Open diff in VS Code (body: baseVersion)   |
-| `/api/doc`              | GET    | Serve linked .md/.mdx file (`?path=<path>`) |
+| `/api/doc`              | GET    | Serve linked .md/.mdx file (`?path=<path>`). When the hook reports the plan's own file (Claude Code's `planFilePath`, trusted only when its contents equal the plan), `/api/plan` advertises `planDir` and a request with `base=<planDir>` is also served from that directory, but only for paths that are exactly one of the plan's link targets (`[x](target)`, `[[target]]`, HTML `href`; `resolvePlanLinkedDoc` in `packages/shared/doc-resolve.ts`) — other files there, such as other plans in `~/.claude/plans/`, stay unreachable. A linked file beside the plan shadows a project document of the same relative name; everything else resolves against the project roots exactly as without a base. Bun plan server only (Pi plans live under the project root) |
 | `/api/doc/exists`       | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) returns `{ results: { [path]: { status: "found"\|"ambiguous"\|"missing"\|"unavailable", … } } }` |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |

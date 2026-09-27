@@ -535,4 +535,17 @@ describe("handleDoc with a plan file", () => {
 		expect(res.status).toBe(200);
 		expect((await res.json() as { markdown?: string }).markdown).toContain("# Design");
 	});
+
+	test("a plan directory inside the project keeps the project-root fallback for HTML", async () => {
+		const root = realpathSync(makeTempDir("plannotator-plan-doc-inrepo-"));
+		const planDir = join(root, "plans");
+		const plan = "# Plan\n\n[report](report.html)\n";
+		writeTempFile(planDir, "plan.md", plan);
+		writeTempFile(root, "report.html", "<h1>Report</h1>");
+		const planFile = readPlanFile(join(planDir, "plan.md"), plan);
+		const res = await getPlanDoc("report.html", planDir, [root], planFile);
+
+		expect(res.status).toBe(200);
+		expect((await res.json() as { filepath?: string }).filepath).toBe(join(root, "report.html"));
+	});
 });

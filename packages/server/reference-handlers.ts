@@ -33,6 +33,7 @@ import {
 	getAllowedRootPaths,
 	getTrustedBaseDir,
 	isPathAllowed,
+	isPlanDirBase,
 	relativizeToAllowedRoots,
 	resolveAllowedDocPath,
 	resolvePlanLinkedDoc,
@@ -275,8 +276,12 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 		void warmFileListCache(root, "code");
 	}
 
-	// A base is only honored when it is itself inside an allowed root.
-	const resolvedBase = getTrustedBaseDir(url.searchParams.get("base"), allowedRoots);
+	const base = url.searchParams.get("base");
+	// A base is only honored when it is itself inside an allowed root. The plan
+	// directory base is for the plan's own links (below): root resolution runs
+	// without it, so a plan stored inside the project keeps the project-root
+	// fallback, HTML links included.
+	const resolvedBase = isPlanDirBase(base, options.planFile) ? null : getTrustedBaseDir(base, allowedRoots);
 	// HTML renders raw by default; `?convert=1` (set by the frontend when the session's
 	// --markdown preference is on) forces Turndown conversion instead.
 	const convert = url.searchParams.get("convert") === "1";
@@ -286,9 +291,10 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	// popout response, so code-file links inside documents are unaffected.
 	const forceDoc = url.searchParams.get("doc") === "1";
 
-	// The plan's own directory is outside every root, so a document it links
-	// is served here rather than through root resolution.
-	const planDoc = resolvePlanLinkedDoc(requestedPath, url.searchParams.get("base"), options.planFile);
+	// The plan's own directory is usually outside every root, so a document it
+	// links is served here rather than through root resolution. A linked file
+	// beside the plan shadows a project document of the same relative name.
+	const planDoc = resolvePlanLinkedDoc(requestedPath, base, options.planFile);
 	if (planDoc) return readDocument(planDoc, convert, options);
 
 	const resolution = await resolveDocTarget(requestedPath, {
