@@ -81,7 +81,7 @@ describe("readPlanFile", () => {
 		const planPath = join(dir, "plan.md");
 		writeFileSync(planPath, plan);
 
-		expect(readPlanFile(planPath, plan)).toEqual({ dir, plan });
+		expect(readPlanFile(planPath, plan)?.dir).toBe(dir);
 	});
 
 	test("refuses a path whose file holds something other than the plan", () => {
@@ -196,6 +196,15 @@ describe("planLinkTargets", () => {
 		const plan = "```md\n[a](a.md)\n```\n\n~~~\n[[b]]\n~~~\n\nInline `[c](c.md)` and [d](d.md)\n";
 
 		expect([...planLinkTargets(plan)]).toEqual(["d.md"]);
+	});
+
+	test("stays linear on long runs of fence and link characters", () => {
+		const n = 200_000;
+		for (const plan of ["`".repeat(n), "~".repeat(n), "`".repeat(n) + "\n" + "x\n".repeat(1000), "[[a".repeat(n / 3), "](".repeat(n / 2)]) {
+			const start = performance.now();
+			planLinkTargets(plan);
+			expect(performance.now() - start).toBeLessThan(200);
+		}
 	});
 
 	test("plain mentions are not link targets", () => {

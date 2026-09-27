@@ -140,7 +140,8 @@ export function getTrustedBaseDir(base: string | null | undefined, roots: string
  */
 export interface PlanFile {
 	dir: string;
-	plan: string;
+	/** The plan's link targets, computed once (`planLinkTargets`). */
+	targets: Set<string>;
 }
 
 /**
@@ -157,7 +158,7 @@ export function readPlanFile(planFilePath: unknown, plan: string): PlanFile | nu
 		if (!stat.isFile() || stat.size > MAX_ANNOTATABLE_FILE_BYTES) return null;
 		if (readFileSync(path, "utf8").trimEnd() !== plan.trimEnd()) return null;
 		const real = realpathSync(path);
-		return { dir: dirname(real), plan };
+		return { dir: dirname(real), targets: planLinkTargets(plan) };
 	} catch {
 		return null;
 	}
@@ -175,6 +176,28 @@ function normalizeLinkTarget(target: string): string {
 	return path ? posix.normalize(path) : "";
 }
 
+// Code renders as text, so a link written inside a fence or a code span is not
+// one. A line scan rather than one regex: a fence regex backtracks
+// quadratically on a long run of backticks or tildes.
+function stripCode(plan: string): string {
+	const kept: string[] = [];
+	let fence: string | null = null;
+	for (const line of plan.split("\n")) {
+		const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+		if (fence) {
+			if (opener && opener[1][0] === fence[0] && opener[1].length >= fence.length && !opener[2].trim()) fence = null;
+			continue;
+		}
+		// A backtick fence's info string cannot contain a backtick (CommonMark).
+		if (opener && !(opener[1][0] === "`" && opener[2].includes("`"))) {
+			fence = opener[1];
+			continue;
+		}
+		kept.push(line);
+	}
+	return kept.join("\n").replace(/`[^`\n]*`/g, "");
+}
+
 // Wiki-link targets without an extension open as `.md`, as the renderer does.
 const WIKI_LINK_DOC_EXTENSION = /\.(mdx?|txt|html?)$/i;
 
@@ -187,24 +210,21 @@ const WIKI_LINK_DOC_EXTENSION = /\.(mdx?|txt|html?)$/i;
  */
 export function planLinkTargets(plan: string): Set<string> {
 	const targets = new Set<string>();
-	// Code renders as text, so a link written inside a fence or a code span is not one.
-	const text = plan
-		.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm, "")
-		.replace(/`[^`\n]*`/g, "");
+	const text = stripCode(plan);
 	const add = (target: string) => {
 		const normalized = normalizeLinkTarget(target);
 		if (normalized) targets.add(normalized);
 	};
 	// One level of balanced parentheses, as the renderer allows in a destination.
 	for (const match of text.matchAll(/\]\(((?:[^()\n]|\([^()\n]*\))+)\)/g)) add(match[1]);
-	for (const match of text.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
+	for (const match of text.matchAll(/\[\[([^\]|[\n]+)(?:\|[^\]\n]+)?\]\]/g)) {
 		const target = match[1].trim();
 		const hasExtension =
 			WIKI_LINK_DOC_EXTENSION.test(target) ||
 			getExtraMarkdownExtensions().some((ext) => target.toLowerCase().endsWith(ext));
 		add(hasExtension ? target : `${target}.md`);
 	}
-	for (const match of text.matchAll(/\bhref\s*=\s*(["'])(.*?)\1/gi)) add(match[2]);
+	for (const match of text.matchAll(/\bhref\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')/gi)) add(match[1] ?? match[2]);
 	return targets;
 }
 
@@ -234,7 +254,7 @@ export function resolvePlanLinkedDoc(
 	const key = normalizeLinkTarget(requestedPath);
 	if (!key || isAbsoluteUserPath(key)) return null;
 	if (!getAnnotatableDocRegex().test(key) && !/\.html?$/i.test(key)) return null;
-	if (!planLinkTargets(planFile.plan).has(key)) return null;
+	if (!planFile.targets.has(key)) return null;
 	const candidate = resolveUserPath(key, planFile.dir);
 	if (!isPathAllowed(candidate, [planFile.dir])) return null;
 	return isReadableFile(candidate) ? candidate : null;
