@@ -35,8 +35,10 @@ import {
 	isPathAllowed,
 	relativizeToAllowedRoots,
 	resolveAllowedDocPath,
+	resolvePlanLinkedDoc,
 	resolveCodeFileInRoots,
 	resolveDocTarget,
+	type PlanFile,
 	type DocErrorPayload,
 	type ResolveAllowedDocPathResult,
 } from "@plannotator/shared/doc-resolve";
@@ -75,6 +77,8 @@ export interface HandleDocOptions {
 	sourceSaveFolderPath?: string;
 	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
+	/** Plan review: the plan file on disk, whose directory serves the documents the plan links. */
+	planFile?: PlanFile | null;
 	/**
 	 * When set, /api/doc runs annotate's per-file version-history pipeline for
 	 * eligible markdown-branch documents (local file under an allowed root,
@@ -281,6 +285,11 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	// .xml). Without it, those paths keep the syntax-highlighted code-file
 	// popout response, so code-file links inside documents are unaffected.
 	const forceDoc = url.searchParams.get("doc") === "1";
+
+	// The plan's own directory is outside every root, so a document it links
+	// is served here rather than through root resolution.
+	const planDoc = resolvePlanLinkedDoc(requestedPath, url.searchParams.get("base"), options.planFile);
+	if (planDoc) return readDocument(planDoc, convert, options);
 
 	const resolution = await resolveDocTarget(requestedPath, {
 		base: resolvedBase,

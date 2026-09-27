@@ -8,7 +8,7 @@
  * Resolution may `stat`; it never reads contents.
  */
 
-import { realpathSync, statSync } from "fs";
+import { readFileSync, realpathSync, statSync } from "fs";
 import { basename, dirname, join } from "path";
 import { parseCodePath, type ParsedCodePath } from "./code-file";
 import {
@@ -17,6 +17,7 @@ import {
 	isAnnotatableTextPath,
 	isCodeFilePath,
 	isWithinProjectRoot,
+	MAX_ANNOTATABLE_FILE_BYTES,
 	resolveCodeFile,
 	resolveMarkdownFile,
 	resolveUserPath,
@@ -122,6 +123,61 @@ export function getTrustedBaseDir(base: string | null | undefined, roots: string
 	if (!base) return null;
 	const resolvedBase = resolveUserPath(base);
 	return isPathAllowed(resolvedBase, roots) ? resolvedBase : null;
+}
+
+/**
+ * A plan file on disk whose contents match the plan under review. Its
+ * directory serves the documents the plan links, but is never an allowed root.
+ */
+export interface PlanFile {
+	dir: string;
+	plan: string;
+}
+
+/**
+ * Read a harness-supplied plan path, returning null unless the file holds the
+ * plan under review. The path is model-generated tool input, so without the
+ * content check it could name any directory as the plan's own.
+ */
+export function readPlanFile(planFilePath: unknown, plan: string): PlanFile | null {
+	if (typeof planFilePath !== "string" || !plan) return null;
+	if (!isAbsoluteUserPath(planFilePath) || !/\.md$/i.test(planFilePath)) return null;
+	const path = resolveUserPath(planFilePath);
+	try {
+		const stat = statSync(path);
+		if (!stat.isFile() || stat.size > MAX_ANNOTATABLE_FILE_BYTES) return null;
+		if (readFileSync(path, "utf8").trimEnd() !== plan.trimEnd()) return null;
+		const real = realpathSync(path);
+		return { dir: dirname(real), plan };
+	} catch {
+		return null;
+	}
+}
+
+function planNamesPath(plan: string, requestedPath: string): boolean {
+	if (plan.includes(requestedPath)) return true;
+	// Wikilinks name a document without its extension.
+	return /\.md$/i.test(requestedPath) && plan.includes(`[[${requestedPath.slice(0, -3)}`);
+}
+
+/**
+ * A document the plan links relative to its own directory. Only a
+ * relative path the plan text names is served, and it must stay inside that
+ * directory after symlink resolution, so the directory's other files stay
+ * unreachable.
+ */
+export function resolvePlanLinkedDoc(
+	requestedPath: string,
+	base: string | null | undefined,
+	planFile: PlanFile | null | undefined,
+): string | null {
+	if (!planFile || !base || isAbsoluteUserPath(requestedPath)) return null;
+	if (resolveUserPath(base) !== planFile.dir) return null;
+	if (!getAnnotatableDocRegex().test(requestedPath) && !/\.html?$/i.test(requestedPath)) return null;
+	if (!planNamesPath(planFile.plan, requestedPath)) return null;
+	const candidate = resolveUserPath(requestedPath, planFile.dir);
+	if (!isPathAllowed(candidate, [planFile.dir])) return null;
+	return isReadableFile(candidate) ? candidate : null;
 }
 
 export type ResolveAllowedDocPathResult =

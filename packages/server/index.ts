@@ -58,6 +58,7 @@ import { isWSL } from "./browser";
 import { AI_QUERY_ENDPOINT, createAIRuntime } from "./ai-runtime";
 import { isAIEndpointPath, type AIEndpoints } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
+import { readPlanFile } from "@plannotator/shared/doc-resolve";
 
 // Re-export utilities
 export { isRemoteSession, getServerPort } from "./remote";
@@ -92,6 +93,8 @@ export interface ServerOptions {
   mode?: "archive";
   /** Custom plan save path — used by archive mode to find saved plans */
   customPlanPath?: string | null;
+  /** The plan's file on disk as the harness reported it, trusted only when it holds `plan` */
+  planFilePath?: string;
 }
 
 export interface ServerResult {
@@ -129,7 +132,8 @@ export interface ServerResult {
 export async function startPlannotatorServer(
   options: ServerOptions
 ): Promise<ServerResult> {
-  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath } = options;
+  const { plan, origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath, planFilePath } = options;
+  const planFile = mode === "archive" ? null : readPlanFile(planFilePath, plan);
 
   const isRemote = isRemoteSession();
   const wslFlag = await isWSL();
@@ -332,12 +336,12 @@ export async function startPlannotatorServer(
                 serverConfig: getServerConfig(gitUser),
               });
             }
-            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
+            return Response.json({ plan, origin, permissionMode, sharingEnabled, shareBaseUrl, pasteApiUrl, repoInfo, previousPlan, versionInfo, projectRoot: process.cwd(), planDir: planFile?.dir, isWSL: wslFlag, serverConfig: getServerConfig(gitUser) });
           }
 
           // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
-            return handleDoc(req);
+            return handleDoc(req, { planFile });
           }
 
           // API: Batch existence check for code-file paths the renderer detected

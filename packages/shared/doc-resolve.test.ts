@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getAllowedRootPaths, isPathAllowed } from "./doc-resolve";
+import { readPlanFile, getAllowedRootPaths, isPathAllowed, resolvePlanLinkedDoc } from "./doc-resolve";
 
 const tempDirs: string[] = [];
 
@@ -70,5 +70,70 @@ describe("isPathAllowed", () => {
 		expect(isPathAllowed(join(root, "real", "absent.md"), roots)).toBe(true);
 		expect(isPathAllowed(join(root, "absent", "deeper", "absent.md"), roots)).toBe(true);
 		expect(isPathAllowed(join(root, "linkdir", "absent.md"), roots)).toBe(false);
+	});
+});
+
+describe("readPlanFile", () => {
+	const plan = "# Plan\n\nSee [evidence](evidence.md).\n";
+
+	test("trusts a plan file whose contents match the plan under review", () => {
+		const dir = realpathSync(makeTempDir("plannotator-plan-file-"));
+		const planPath = join(dir, "plan.md");
+		writeFileSync(planPath, plan);
+
+		expect(readPlanFile(planPath, plan)).toEqual({ dir, plan });
+	});
+
+	test("refuses a path whose file holds something other than the plan", () => {
+		const dir = makeTempDir("plannotator-plan-file-mismatch-");
+		const planPath = join(dir, "plan.md");
+		writeFileSync(planPath, "# Another plan\n");
+
+		expect(readPlanFile(planPath, plan)).toBeNull();
+		expect(readPlanFile(join(dir, "missing.md"), plan)).toBeNull();
+		expect(readPlanFile("plan.md", plan)).toBeNull();
+		expect(readPlanFile(42, plan)).toBeNull();
+	});
+});
+
+describe("resolvePlanLinkedDoc", () => {
+	function setup() {
+		const dir = realpathSync(makeTempDir("plannotator-plan-docs-"));
+		const outside = makeTempDir("plannotator-plan-docs-outside-");
+		const plan = "# Plan\n\n[evidence](evidence.md), [[notes]], [up](../up.md), [link](linked.md)\n";
+		writeFileSync(join(dir, "plan.md"), plan);
+		writeFileSync(join(dir, "evidence.md"), "evidence\n");
+		writeFileSync(join(dir, "notes.md"), "notes\n");
+		writeFileSync(join(dir, "other-plan.md"), "other\n");
+		writeFileSync(join(outside, "secret.md"), "secret\n");
+		symlinkSync(join(outside, "secret.md"), join(dir, "linked.md"));
+		const planFile = readPlanFile(join(dir, "plan.md"), plan);
+		if (!planFile) throw new Error("plan did not match");
+		return { dir, planFile };
+	}
+
+	test("serves a sibling the plan links, including by wikilink", () => {
+		const { dir, planFile } = setup();
+
+		expect(resolvePlanLinkedDoc("evidence.md", dir, planFile)).toBe(join(dir, "evidence.md"));
+		expect(resolvePlanLinkedDoc("notes.md", dir, planFile)).toBe(join(dir, "notes.md"));
+	});
+
+	test("keeps the rest of the plan directory unreachable", () => {
+		const { dir, planFile } = setup();
+
+		expect(resolvePlanLinkedDoc("other-plan.md", dir, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc("../up.md", dir, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc("linked.md", dir, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc(join(dir, "evidence.md"), dir, planFile)).toBeNull();
+	});
+
+	test("applies only when the request's base is the plan directory", () => {
+		const { planFile } = setup();
+		const elsewhere = makeTempDir("plannotator-plan-docs-base-");
+
+		expect(resolvePlanLinkedDoc("evidence.md", elsewhere, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc("evidence.md", null, planFile)).toBeNull();
+		expect(resolvePlanLinkedDoc("evidence.md", planFile.dir, null)).toBeNull();
 	});
 });

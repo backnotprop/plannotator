@@ -2593,6 +2593,8 @@ if (args[0] === "sessions") {
   const server = await startPlannotatorServer({
     plan: planContent,
     origin: isGemini ? "gemini-cli" : detectedOrigin,
+    // Claude Code writes the plan to disk before the hook fires.
+    planFilePath: isGemini ? undefined : event.tool_input?.planFilePath,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
