@@ -10,7 +10,9 @@ import fs from "node:fs";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { loadConfig, resolveUseGlimpse } from "@plannotator/shared/config";
 
-const IPC_REGISTRY = path.join(getPlannotatorDataDir(), "vscode-ipc.json");
+function ipcRegistryPath(): string {
+  return path.join(getPlannotatorDataDir(), "vscode-ipc.json");
+}
 
 /**
  * Common "no-op" values for $BROWSER used by headless/background environments
@@ -30,10 +32,10 @@ export function isNoOpBrowserSentinel(value: string | undefined): boolean {
  * Try opening URL via VS Code extension IPC registry.
  * Falls back when env vars (PLANNOTATOR_BROWSER) aren't available to the process.
  */
-async function tryVscodeIpc(url: string): Promise<boolean> {
+export async function tryVscodeIpc(url: string): Promise<boolean> {
   try {
     const registry: Record<string, number> = JSON.parse(
-      fs.readFileSync(IPC_REGISTRY, "utf-8"),
+      fs.readFileSync(ipcRegistryPath(), "utf-8"),
     );
     const cwd = process.cwd();
     // Find the best matching workspace (longest prefix match)
