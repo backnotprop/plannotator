@@ -182,24 +182,29 @@ const WIKI_LINK_DOC_EXTENSION = /\.(mdx?|txt|html?)$/i;
  * The link targets the plan text makes clickable: markdown links
  * `[label](target)`, wiki links `[[target]]` / `[[target|label]]`, and
  * `href` attributes in raw HTML. Plain mentions of a filename do not count,
- * and neither does a longer name that contains the requested one.
+ * and neither does a longer name that contains the requested one, or a link
+ * written inside code.
  */
 export function planLinkTargets(plan: string): Set<string> {
 	const targets = new Set<string>();
+	// Code renders as text, so a link written inside a fence or a code span is not one.
+	const text = plan
+		.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm, "")
+		.replace(/`[^`\n]*`/g, "");
 	const add = (target: string) => {
 		const normalized = normalizeLinkTarget(target);
 		if (normalized) targets.add(normalized);
 	};
 	// One level of balanced parentheses, as the renderer allows in a destination.
-	for (const match of plan.matchAll(/\]\(((?:[^()\n]|\([^()\n]*\))+)\)/g)) add(match[1]);
-	for (const match of plan.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
+	for (const match of text.matchAll(/\]\(((?:[^()\n]|\([^()\n]*\))+)\)/g)) add(match[1]);
+	for (const match of text.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
 		const target = match[1].trim();
 		const hasExtension =
 			WIKI_LINK_DOC_EXTENSION.test(target) ||
 			getExtraMarkdownExtensions().some((ext) => target.toLowerCase().endsWith(ext));
 		add(hasExtension ? target : `${target}.md`);
 	}
-	for (const match of plan.matchAll(/\bhref\s*=\s*(["'])(.*?)\1/gi)) add(match[2]);
+	for (const match of text.matchAll(/\bhref\s*=\s*(["'])(.*?)\1/gi)) add(match[2]);
 	return targets;
 }
 
@@ -222,10 +227,15 @@ export function resolvePlanLinkedDoc(
 	base: string | null | undefined,
 	planFile: PlanFile | null | undefined,
 ): string | null {
-	if (!planFile || !isPlanDirBase(base, planFile) || isAbsoluteUserPath(requestedPath)) return null;
-	if (!getAnnotatableDocRegex().test(requestedPath) && !/\.html?$/i.test(requestedPath)) return null;
-	if (!planLinkTargets(planFile.plan).has(normalizeLinkTarget(requestedPath))) return null;
-	const candidate = resolveUserPath(requestedPath, planFile.dir);
+	if (!planFile || !isPlanDirBase(base, planFile)) return null;
+	// Everything below reads the normalized key, never the raw request: the raw
+	// string's `?` or `#` suffix would still reach the path join, where
+	// `linked.md?/../other.md` collapses to a sibling the plan never linked.
+	const key = normalizeLinkTarget(requestedPath);
+	if (!key || isAbsoluteUserPath(key)) return null;
+	if (!getAnnotatableDocRegex().test(key) && !/\.html?$/i.test(key)) return null;
+	if (!planLinkTargets(planFile.plan).has(key)) return null;
+	const candidate = resolveUserPath(key, planFile.dir);
 	if (!isPathAllowed(candidate, [planFile.dir])) return null;
 	return isReadableFile(candidate) ? candidate : null;
 }

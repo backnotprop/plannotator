@@ -548,4 +548,12 @@ describe("handleDoc with a plan file", () => {
 		expect(res.status).toBe(200);
 		expect((await res.json() as { filepath?: string }).filepath).toBe(join(root, "report.html"));
 	});
+
+	test("a query suffix on a linked name cannot reach an unlinked sibling", async () => {
+		const { root, planDir, planFile } = setup();
+		const res = await getPlanDoc("evidence.md?/../other-plan.md", planDir, [root], planFile);
+
+		const body = await res.json() as { markdown?: string };
+		expect(body.markdown ?? "").not.toContain("# Other");
+	});
 });

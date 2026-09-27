@@ -145,6 +145,31 @@ describe("resolvePlanLinkedDoc", () => {
 		expect(resolvePlanLinkedDoc("notes-extended.md", dir, planFile)).toBe(join(dir, "notes-extended.md"));
 	});
 
+	test("a query or fragment suffix cannot walk from a linked target to an unlinked sibling", () => {
+		const { dir, planFile } = setup();
+
+		for (const path of [
+			"evidence.md?/../other-plan.md",
+			"evidence.md#/../other-plan.md",
+			"evidence.md%3F/../other-plan.md",
+		]) {
+			expect(resolvePlanLinkedDoc(path, dir, planFile)).not.toBe(join(dir, "other-plan.md"));
+		}
+		// The suffix is dropped, so the linked target itself is what is served.
+		expect(resolvePlanLinkedDoc("evidence.md?/../other-plan.md", dir, planFile)).toBe(join(dir, "evidence.md"));
+	});
+
+	test("a percent-encoded link opens the decoded file name", () => {
+		const dir = realpathSync(makeTempDir("plannotator-plan-docs-encoded-"));
+		const plan = "# Plan\n\n[doc](my%20doc.md)\n";
+		writeFileSync(join(dir, "plan.md"), plan);
+		writeFileSync(join(dir, "my doc.md"), "doc\n");
+		const planFile = readPlanFile(join(dir, "plan.md"), plan);
+		if (!planFile) throw new Error("plan did not match");
+
+		expect(resolvePlanLinkedDoc("my%20doc.md", dir, planFile)).toBe(join(dir, "my doc.md"));
+	});
+
 	test("applies only when the request's base is the plan directory", () => {
 		const { planFile } = setup();
 		const elsewhere = makeTempDir("plannotator-plan-docs-base-");
@@ -165,6 +190,12 @@ describe("planLinkTargets", () => {
 		expect([...planLinkTargets(plan)].sort()).toEqual(
 			["a.md", "b c.md", "fn_(x).md", "guide.txt", "h.html", "page.html", "pic.png", "wiki.md"].sort(),
 		);
+	});
+
+	test("links written inside code are not link targets", () => {
+		const plan = "```md\n[a](a.md)\n```\n\n~~~\n[[b]]\n~~~\n\nInline `[c](c.md)` and [d](d.md)\n";
+
+		expect([...planLinkTargets(plan)]).toEqual(["d.md"]);
 	});
 
 	test("plain mentions are not link targets", () => {
