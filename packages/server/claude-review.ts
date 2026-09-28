@@ -432,17 +432,53 @@ function isBashRefusal(content: unknown): boolean {
   return /permission to use bash has been denied|sandbox/i.test(text);
 }
 
+/** `Bash(<pattern>)` entries of an `--allowedTools` value, as matchers for one
+ *  whole command: `git log:*` is the prefix `git log` followed by nothing or
+ *  whitespace; `*` elsewhere matches any run of characters. */
+function allowlistMatchers(allowedTools: string): RegExp[] {
+  const out: RegExp[] = [];
+  for (const m of allowedTools.matchAll(/Bash\(([^)]*)\)/g)) {
+    let pattern = m[1].trim();
+    const prefixForm = pattern.endsWith(":*");
+    if (prefixForm) pattern = pattern.slice(0, -2);
+    if (!pattern) continue;
+    const body = pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+    out.push(new RegExp(`^${body}${prefixForm ? "(\\s|$)" : "$"}`));
+  }
+  return out;
+}
+
+/** A command the job's allowlist admits outright: one invocation with no shell
+ *  operators, substitutions, redirects or variables, matching a `Bash(...)`
+ *  entry. `dontAsk` never refuses such a command unless the shell itself is
+ *  unavailable (the sandbox cannot start and the unsandboxed fallback needs a
+ *  permission prompt). */
+function isPlainAllowlistedCommand(command: unknown, matchers: RegExp[]): boolean {
+  if (typeof command !== "string") return false;
+  const cmd = command.trim();
+  if (!cmd || /[|&;<>`$\n\\(){}]/.test(cmd)) return false;
+  return matchers.some((re) => re.test(cmd));
+}
+
 /**
  * Decide from a Claude job's stream-json stdout whether its shell was blocked
- * outright, the #1627 shape. Rule: at least TWO Bash calls were refused (listed
- * in the result event's `permission_denials`, or answered by an error
- * tool_result that reads as a permission/sandbox refusal) AND not one Bash
- * call succeeded. A single refused compound command followed by working
- * single commands is the model's own mistake, not a blocked shell, and a job
- * that never needed Bash has no refusals at all, so neither warns.
+ * outright, the #1627 shape. Rule: at least one refused Bash call was a PLAIN
+ * command its own allowlist admits (see isPlainAllowlistedCommand; refused
+ * means listed in the result event's `permission_denials`, or answered by an
+ * error tool_result that reads as a permission/sandbox refusal) AND not one
+ * Bash call succeeded.
+ *
+ * Refusals of compound commands, variables or commands outside the allowlist
+ * never count: `dontAsk` refuses those by design and the model's next single
+ * command usually works. A plain allowlisted command is only refused when the
+ * shell cannot run at all, so one such refusal is the signal; requiring zero
+ * successes on top keeps a transient oddity from warning. `allowedTools` is
+ * the job's own `--allowedTools` value; without it nothing counts.
  */
-export function detectClaudeShellBlocked(stdout: string): boolean {
-  const bashIds = new Set<string>();
+export function detectClaudeShellBlocked(stdout: string, allowedTools: string): boolean {
+  const matchers = allowlistMatchers(allowedTools);
+  if (matchers.length === 0) return false;
+  const bashCommands = new Map<string, unknown>();
   const refused = new Set<string>();
   let succeeded = 0;
   for (const raw of stdout.split("\n")) {
@@ -452,19 +488,34 @@ export function detectClaudeShellBlocked(stdout: string): boolean {
     try { event = JSON.parse(line); } catch { continue; }
     if (event?.type === "assistant" && Array.isArray(event.message?.content)) {
       for (const block of event.message.content) {
-        if (block?.type === "tool_use" && block.name === "Bash" && typeof block.id === "string") bashIds.add(block.id);
+        if (block?.type === "tool_use" && block.name === "Bash" && typeof block.id === "string") {
+          bashCommands.set(block.id, block.input?.command);
+        }
       }
     } else if (event?.type === "user" && Array.isArray(event.message?.content)) {
       for (const block of event.message.content) {
-        if (block?.type !== "tool_result" || !bashIds.has(block.tool_use_id)) continue;
+        if (block?.type !== "tool_result" || !bashCommands.has(block.tool_use_id)) continue;
         if (block.is_error !== true) succeeded++;
         else if (isBashRefusal(block.content)) refused.add(block.tool_use_id);
       }
     } else if (event?.type === "result" && Array.isArray(event.permission_denials)) {
       for (const d of event.permission_denials) {
-        if (d?.tool_name === "Bash") refused.add(typeof d.tool_use_id === "string" ? d.tool_use_id : `denial-${refused.size}`);
+        if (d?.tool_name !== "Bash" || typeof d.tool_use_id !== "string") continue;
+        refused.add(d.tool_use_id);
+        // A denial carries its own input; keep it when the tool_use line was missed.
+        if (!bashCommands.has(d.tool_use_id)) bashCommands.set(d.tool_use_id, d.tool_input?.command);
       }
     }
   }
-  return succeeded === 0 && refused.size >= 2;
+  if (succeeded > 0) return false;
+  for (const id of refused) {
+    if (isPlainAllowlistedCommand(bashCommands.get(id), matchers)) return true;
+  }
+  return false;
+}
+
+/** The `--allowedTools` value of a spawned command, or "" when absent. */
+export function allowedToolsOf(command: readonly string[]): string {
+  const i = command.indexOf("--allowedTools");
+  return i === -1 ? "" : (command[i + 1] ?? "");
 }

@@ -272,7 +272,8 @@ describe("Claude blocked-shell warning (#1627)", () => {
       getServerUrl: () => "http://localhost:1234",
       getCwd: () => tmpdir(),
       async buildCommand() {
-        return { command: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stream)})`], captureStdout: true };
+        // Trailing flags are ignored by `bun -e`; the runner reads the allowlist from them.
+        return { command: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stream)})`, "--allowedTools", "Bash(git merge-base:*),Bash(git diff:*)"], captureStdout: true };
       },
       async onJobComplete(job) {
         seen = { warning: job.warning };

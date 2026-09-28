@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildClaudeCommand, detectClaudeShellBlocked } from "./claude-review";
+import { allowedToolsOf, buildClaudeCommand, detectClaudeShellBlocked } from "./claude-review";
 import { buildTourClaudeCommand } from "./tour/tour-review";
 import { buildGuideClaudeCommand } from "./guide/guide-review";
 import type { ClaudeJobCommandOptions } from "./claude-review";
@@ -60,55 +60,61 @@ const bashUse = (id: string, command: string) =>
 const toolResult = (id: string, content: string, isError: boolean) =>
   JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content, is_error: isError }] } });
 const DENIED = "Permission to use Bash has been denied because Claude Code is running in don't ask mode.";
-const result = (denials: Array<{ tool_name: string; tool_use_id: string }>) =>
+const result = (denials: Array<{ tool_name: string; tool_use_id: string; tool_input?: unknown }>) =>
   JSON.stringify({ type: "result", is_error: false, permission_denials: denials });
 
+// The real allowlist a Code Tour job launches with, so the rule is tested
+// against what the runner actually passes.
+const TOUR_ALLOWED = allowedToolsOf(buildTourClaudeCommand("p").command);
+const denial = (id: string, command: string) => ({ tool_name: "Bash", tool_use_id: id, tool_input: { command } });
+
 describe("detectClaudeShellBlocked (#1627)", () => {
-  test("warns for the reported shape: every Bash call refused", () => {
+  test("warns for the reported shape: compound refused, then a plain allowlisted git command refused", () => {
+    const compound = "MB=$(git merge-base origin/master HEAD) && echo $MB";
     const stdout = [
-      bashUse("a", "MB=$(git merge-base origin/master HEAD) && echo $MB"),
-      toolResult("a", DENIED, true),
-      bashUse("b", "git merge-base origin/master HEAD"),
-      toolResult("b", DENIED, true),
-      result([{ tool_name: "Bash", tool_use_id: "a" }, { tool_name: "Bash", tool_use_id: "b" }]),
+      bashUse("a", compound), toolResult("a", DENIED, true),
+      bashUse("b", "git merge-base origin/master HEAD"), toolResult("b", DENIED, true),
+      result([denial("a", compound), denial("b", "git merge-base origin/master HEAD")]),
     ].join("\n");
-    expect(detectClaudeShellBlocked(stdout)).toBe(true);
+    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(true);
   });
 
-  test("counts refusals from tool results when the result event lists none", () => {
+  test("a sandbox refusal answered only in a tool result counts too", () => {
     const stdout = [
       bashUse("a", "git status"), toolResult("a", "sandbox failed to start: bubblewrap (bwrap) not installed", true),
-      bashUse("b", "git diff"), toolResult("b", DENIED, true),
       result([]),
     ].join("\n");
-    expect(detectClaudeShellBlocked(stdout)).toBe(true);
+    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(true);
+  });
+
+  test("refusals of compound, variable-bearing, or non-allowlisted commands never count", () => {
+    const cmds = ["git log --oneline | head", "git diff $MB", "git push origin HEAD", "echo hi", "npm test"];
+    const stdout = [
+      ...cmds.flatMap((c, i) => [bashUse(`c${i}`, c), toolResult(`c${i}`, DENIED, true)]),
+      result(cmds.map((c, i) => denial(`c${i}`, c))),
+    ].join("\n");
+    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(false);
   });
 
   test("does not warn once any Bash call succeeded", () => {
     const stdout = [
-      bashUse("a", "MB=$(git merge-base main HEAD) && git log $MB"), toolResult("a", DENIED, true),
+      bashUse("a", "git merge-base main HEAD"), toolResult("a", DENIED, true),
       bashUse("b", "git merge-base main HEAD"), toolResult("b", "8ce0d729", false),
-      bashUse("c", "git log --oneline -1 8ce0d729 && echo"), toolResult("c", DENIED, true),
-      result([{ tool_name: "Bash", tool_use_id: "a" }, { tool_name: "Bash", tool_use_id: "c" }]),
+      result([denial("a", "git merge-base main HEAD")]),
     ].join("\n");
-    expect(detectClaudeShellBlocked(stdout)).toBe(false);
+    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(false);
   });
 
-  test("does not warn for a single refusal, a command's own failure, or no Bash at all", () => {
-    const single = [bashUse("a", "git log | head"), toolResult("a", DENIED, true), result([{ tool_name: "Bash", tool_use_id: "a" }])].join("\n");
-    expect(detectClaudeShellBlocked(single)).toBe(false);
-    const ownFailures = [
-      bashUse("a", "git show nope"), toolResult("a", "fatal: bad object nope", true),
-      bashUse("b", "git show nope2"), toolResult("b", "fatal: bad object nope2", true),
-      result([]),
-    ].join("\n");
-    expect(detectClaudeShellBlocked(ownFailures)).toBe(false);
-    expect(detectClaudeShellBlocked(result([]))).toBe(false);
-    expect(detectClaudeShellBlocked("")).toBe(false);
+  test("a command's own failure, no Bash, or no allowlist never warns", () => {
+    const ownFailure = [bashUse("a", "git show nope"), toolResult("a", "fatal: bad object nope", true), result([])].join("\n");
+    expect(detectClaudeShellBlocked(ownFailure, TOUR_ALLOWED)).toBe(false);
+    expect(detectClaudeShellBlocked(result([]), TOUR_ALLOWED)).toBe(false);
+    const refusedPlain = [bashUse("a", "git status"), toolResult("a", DENIED, true), result([denial("a", "git status")])].join("\n");
+    expect(detectClaudeShellBlocked(refusedPlain, "")).toBe(false);
   });
 
   test("ignores refusals of non-Bash tools", () => {
-    const stdout = result([{ tool_name: "mcp__idea__git_status", tool_use_id: "x" }, { tool_name: "WebFetch", tool_use_id: "y" }]);
-    expect(detectClaudeShellBlocked(stdout)).toBe(false);
+    const stdout = result([{ tool_name: "mcp__idea__git_status", tool_use_id: "x", tool_input: { command: "git status" } }]);
+    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(false);
   });
 });

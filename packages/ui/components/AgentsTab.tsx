@@ -431,7 +431,7 @@ function JobCard({
       )}
 
       {job.warning && (
-        <p role="status" data-agent-job-warning className="mt-1.5 ml-5 text-[10px] leading-snug text-warning">
+        <p role="status" data-agent-job-warning className="mt-1.5 ml-4 text-[10px] leading-snug text-warning">
           {job.warning}
         </p>
       )}
