@@ -6,7 +6,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateSlug, getPlanDir, savePlan, saveToHistory, getPlanVersion, getVersionCount, listVersions } from "./storage";
 
@@ -61,9 +61,11 @@ describe("getPlanDir", () => {
   });
 
   test("expands tilde in custom path", () => {
-    const result = getPlanDir("~/.plannotator/test-plans");
+    // getPlanDir mkdirs its result, and os.homedir() ignores a HOME override, so
+    // expand bare "~": the real home already exists and nothing is created in it.
+    const result = getPlanDir("~");
     expect(result).not.toContain("~");
-    expect(result).toMatch(/\.plannotator\/test-plans$/);
+    expect(result).toBe(homedir());
   });
 
   test("uses default when no custom path", () => {
