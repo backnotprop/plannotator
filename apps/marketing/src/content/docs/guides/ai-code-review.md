@@ -199,8 +199,9 @@ claude -p \
   --no-session-persistence \
   --model opus \
   --tools Agent,Bash,Read,Glob,Grep \
-  --allowedTools Agent,Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh api repos/*/*/pulls/*),Bash(gh api repos/*/*/pulls/*/files*),Bash(gh api repos/*/*/pulls/*/comments*),Bash(gh api repos/*/*/issues/*/comments*),Bash(glab mr view:*),Bash(glab mr diff:*),Bash(glab mr list:*),Bash(glab api:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git branch:*),Bash(git grep:*),Bash(git ls-remote:*),Bash(git ls-tree:*),Bash(git merge-base:*),Bash(git remote:*),Bash(git rev-parse:*),Bash(git show-ref:*),Bash(jj status:*),Bash(jj diff:*),Bash(jj log:*),Bash(jj show:*),Bash(jj file show:*),Bash(jj cat:*),Bash(jj bookmark list:*),Bash(wc:*) \
-  --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(python:*),Bash(python3:*),Bash(node:*),Bash(npx:*),Bash(bun:*),Bash(bunx:*),Bash(sh:*),Bash(bash:*),Bash(zsh:*),Bash(curl:*),Bash(wget:*) \
+  --allowedTools 'Agent,Read,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git merge-base:*),Bash(git rev-parse:*),Bash(git ls-files:*),Bash(git ls-tree:*),Bash(git branch),Bash(git branch --show-current),Bash(git remote),Bash(git remote -v),Bash(git remote get-url:*),Bash(jj status:*),Bash(jj diff:*),Bash(jj log:*),Bash(jj show:*),Bash(jj file show:*),Bash(jj cat:*),Bash(jj bookmark list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(glab mr view:*),Bash(glab mr diff:*),Bash(glab issue view:*),Bash(wc:*)' \
+  --disallowedTools 'Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(python:*),Bash(python3:*),Bash(node:*),Bash(npx:*),Bash(bun:*),Bash(bunx:*),Bash(sh:*),Bash(bash:*),Bash(zsh:*),Bash(curl:*),Bash(wget:*),Bash(git * --out*),Bash(git -c *),Bash(git --config-env*),Bash(git * --config-env*),Bash(git grep *),Bash(git ls-remote *),Bash(gh api *),Bash(glab api *),Bash(jj --config*),Bash(jj * --config*),Bash(jj * --tool*)' \
+  --setting-sources user \
   --strict-mcp-config \
   --append-system-prompt '<run one simple command at a time: no &&, pipes, $(...) or variables>'
   # with PLANNOTATOR_CLAUDE_SANDBOX=0 also: --settings '{"sandbox":{"enabled":false}}'
@@ -333,3 +334,7 @@ Add `CLAUDE.md` or `REVIEW.md` to your repo root or any subdirectory. The Claude
 ```
 
 Both files are additive. REVIEW.md extends CLAUDE.md for review-specific guidance.
+
+### Skills as reviews
+
+When a skill you enabled as a review (Agents tab, **Add a review**) runs on Claude Code, it runs with the same command rules shown above. The job can only run that read-only command allowlist, so any other command the skill tells it to run (running tests, a build, a linter) is refused.

@@ -190,3 +190,15 @@ describe("Claude job allowlist vs the commands the prompts instruct", () => {
     expect(detectClaudeShellBlocked(plain, ALLOWED, DISALLOWED)).toBe(true);
   });
 });
+
+// The marketing guide prints the exact Claude review command; keep its
+// allow/deny lists and setting-sources flag in step with the builder.
+describe("ai-code-review guide documents the real Claude job rules", () => {
+  test("guide contains the current allow and deny lists", async () => {
+    const doc = await Bun.file(new URL("../../apps/marketing/src/content/docs/guides/ai-code-review.md", import.meta.url)).text();
+    const command = buildClaudeCommand("p").command;
+    expect(doc).toContain(`--allowedTools '${allowedToolsOf(command)}'`);
+    expect(doc).toContain(`--disallowedTools '${disallowedToolsOf(command)}'`);
+    expect(doc).toContain("--setting-sources user");
+  });
+});

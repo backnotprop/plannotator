@@ -305,7 +305,8 @@ export const CLAUDE_JOB_ALLOWED_TOOLS: readonly string[] = [
  * over allow rules AND over Claude Code's built-in read-only command set, and
  * they match past a leading environment assignment, so these close options
  * that would turn an allowed read into a write or a program launch:
- * `--output` on git's diff family writes a file; `git -c` / `--config-env`
+ * `--output` on git's diff family writes a file (the `--out*` pattern also
+ * catches the harmless `--output-indicator-*` options; accepted); `git -c` / `--config-env`
  * and jj's `--config*` inject configuration (pagers, diff/merge tools);
  * jj's `--tool` runs an external diff program.
  *
