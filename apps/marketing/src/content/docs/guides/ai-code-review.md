@@ -70,6 +70,7 @@ Review-agent permissions depend on the engine:
 - **Claude** gets Read, Glob, Grep, Agent, and command patterns intended for inspection through `git`, `gh`, `glab`, `jj`, and `wc`. Direct file-writing tools, WebFetch, WebSearch, general-purpose shells, curl, and wget are denied. Some allowed patterns, including `glab api` and `git -C`, are broader than a strict subcommand-by-subcommand read-only list.
 - **GitHub Copilot CLI** has its write tool denied. Plannotator also denies specific high-risk Git operations and outward-facing GitHub and GitLab writes, allows the `git`, `gh`, `glab`, `jj`, and `wc` command families, and relies on Copilot's non-interactive mode to deny other shell tools.
 - **Codex** runs with `--approve-for-me`, which uses Codex's workspace-write sandbox and automatic approval review. It is not a read-only file sandbox.
+- **Claude** jobs load no MCP servers (`--strict-mcp-config`) and are told to run one simple command at a time, because `dontAsk` refuses compound commands. If your Claude Code settings enable its sandbox and it cannot start (for example Linux without `bubblewrap`), `PLANNOTATOR_CLAUDE_SANDBOX=0` turns the sandbox off for these jobs only; the allowlist above still applies.
 - **Cursor** runs in ask mode with its sandbox enabled by default. `PLANNOTATOR_CURSOR_SANDBOX=0` removes the explicit sandbox flag and defers to the user's Cursor configuration.
 - **OpenCode** runs its plan agent, but Plannotator does not add a shell restriction flag. Its permissions come from the user's OpenCode configuration.
 - **Pi** excludes the direct edit and write tools, but retains Bash and its other inspection paths under Pi's runtime controls.
@@ -199,7 +200,10 @@ claude -p \
   --model opus \
   --tools Agent,Bash,Read,Glob,Grep \
   --allowedTools Agent,Read,Glob,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh api repos/*/*/pulls/*),Bash(gh api repos/*/*/pulls/*/files*),Bash(gh api repos/*/*/pulls/*/comments*),Bash(gh api repos/*/*/issues/*/comments*),Bash(glab mr view:*),Bash(glab mr diff:*),Bash(glab mr list:*),Bash(glab api:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(git branch:*),Bash(git grep:*),Bash(git ls-remote:*),Bash(git ls-tree:*),Bash(git merge-base:*),Bash(git remote:*),Bash(git rev-parse:*),Bash(git show-ref:*),Bash(jj status:*),Bash(jj diff:*),Bash(jj log:*),Bash(jj show:*),Bash(jj file show:*),Bash(jj cat:*),Bash(jj bookmark list:*),Bash(wc:*) \
-  --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(python:*),Bash(python3:*),Bash(node:*),Bash(npx:*),Bash(bun:*),Bash(bunx:*),Bash(sh:*),Bash(bash:*),Bash(zsh:*),Bash(curl:*),Bash(wget:*)
+  --disallowedTools Edit,Write,NotebookEdit,WebFetch,WebSearch,Bash(python:*),Bash(python3:*),Bash(node:*),Bash(npx:*),Bash(bun:*),Bash(bunx:*),Bash(sh:*),Bash(bash:*),Bash(zsh:*),Bash(curl:*),Bash(wget:*) \
+  --strict-mcp-config \
+  --append-system-prompt '<run one simple command at a time: no &&, pipes, $(...) or variables>'
+  # with PLANNOTATOR_CLAUDE_SANDBOX=0 also: --settings '{"sandbox":{"enabled":false}}'
 ```
 
 Prompt is written to stdin.

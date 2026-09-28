@@ -72,6 +72,8 @@ for f in tour-review; do
     | sed 's|from "\.\./vcs"|from "./review-core.ts"|' \
     | sed 's|from "\.\./pr"|from "./pr-provider.ts"|' \
     | sed 's|from "\.\./agent-review-message"|from "./agent-review-message.ts"|' \
+    | sed 's|from "\.\./claude-review"|from "./claude-review.ts"|' \
+    | sed 's|from "\.\./config"|from "./config.ts"|' \
     | sed 's|from "@plannotator/shared/tour"|from "./tour.ts"|' \
     | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
     > "generated/$f.ts"
@@ -88,6 +90,7 @@ for f in guide-review; do
     | sed 's|from "\.\./pr"|from "./pr-provider.ts"|' \
     | sed 's|from "\.\./agent-review-message"|from "./agent-review-message.ts"|' \
     | sed 's|from "\.\./marker-review"|from "./marker-review.ts"|' \
+    | sed 's|from "\.\./claude-review"|from "./claude-review.ts"|' \
     | sed 's|from "\.\./config"|from "./config.ts"|' \
     | sed 's|from "@plannotator/shared/guide"|from "./guide.ts"|' \
     | sed 's|from "@plannotator/shared/guide-format"|from "./guide-format.ts"|' \

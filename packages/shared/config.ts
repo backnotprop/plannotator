@@ -252,6 +252,19 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
+   * Let Claude Code agent jobs (code review, Code Tour, Guided Review) run
+   * under the user's own Claude Code sandbox setting. When true (default),
+   * Plannotator passes nothing sandbox-related and the user's settings decide.
+   * Set to false on systems where Claude Code's sandbox cannot start (Linux
+   * without bubblewrap/socat, AppArmor-restricted user namespaces): jobs run
+   * with `--permission-mode dontAsk`, so the unsandboxed fallback is refused
+   * and every Bash call dead-ends (#1627). False passes
+   * `--settings {"sandbox":{"enabled":false}}` for the job only; the job stays
+   * read-only through its tool allowlist. Managed (enterprise) settings still
+   * win. Mirrors the PLANNOTATOR_CLAUDE_SANDBOX env var, which takes precedence.
+   */
+  claudeSandbox?: boolean;
+  /**
    * Query the git remote during code review (issue #1553). When true
    * (default), a local git review runs `git ls-remote --symref origin HEAD`
    * to discover the remote default branch and to tell whether the baseline is
@@ -865,6 +878,25 @@ export function resolveCursorSandbox(config: PlannotatorConfig): boolean {
     return v !== "0" && v !== "false" && v !== "disabled";
   }
   return coerceConfigBoolean(config.cursorSandbox, true);
+}
+
+/**
+ * Resolve whether Claude Code review jobs defer to the user's own Claude Code
+ * sandbox setting (true) or run with the sandbox turned off for the job (false).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_CLAUDE_SANDBOX env var  →  config.claudeSandbox  →  default true
+ *
+ * Env values `0` / `false` / `disabled` turn it off; anything else keeps the
+ * default. See `claudeSandbox` on PlannotatorConfig for why (#1627).
+ */
+export function resolveClaudeSandbox(config: PlannotatorConfig): boolean {
+  const envVal = process.env.PLANNOTATOR_CLAUDE_SANDBOX;
+  if (envVal !== undefined) {
+    const v = envVal.toLowerCase();
+    return v !== "0" && v !== "false" && v !== "disabled";
+  }
+  return coerceConfigBoolean(config.claudeSandbox, true);
 }
 
 /**

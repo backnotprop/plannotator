@@ -207,6 +207,54 @@ export function composeClaudeReviewPrompt(
 // Command builder
 // ---------------------------------------------------------------------------
 
+/** Options shared by every Claude Code agent-job command builder. */
+export interface ClaudeJobCommandOptions {
+  /** False turns Claude Code's sandbox off for this job only (see
+   *  `claudeJobIsolationArgs`). Callers resolve this via
+   *  resolveClaudeSandbox() (PLANNOTATOR_CLAUDE_SANDBOX / config.json
+   *  `claudeSandbox`); the builders stay env-free. Default: the user's own
+   *  Claude Code sandbox setting applies. */
+  sandbox?: boolean;
+}
+
+/**
+ * Appended to the system prompt of every Claude agent job. Jobs run under
+ * `--permission-mode dontAsk` with a prefix allowlist, so a compound shell
+ * command (`MB=$(git merge-base ...) && git log $MB`) is refused as a whole
+ * even when every part is allowlisted, and models reach for exactly that
+ * shape (#1627).
+ */
+export const CLAUDE_JOB_SHELL_GUIDANCE =
+  "Shell access in this session is limited to an allowlist of read-only commands, " +
+  "and anything outside it is refused without a prompt. Run each command on its own " +
+  "as one simple invocation: no `&&`, `||`, `;`, pipes, redirects, `$(...)` or shell " +
+  "variables. If you need a value from one command (such as a merge-base sha), run it, " +
+  "read the output, then pass the literal value to the next command.";
+
+/**
+ * Arguments that keep a Claude agent job hermetic and runnable (#1627):
+ *
+ * - `--strict-mcp-config` with no `--mcp-config`: loads NO MCP servers, so the
+ *   user's own servers (IDE bridges, SaaS connectors) never reach a review
+ *   job. The allowlist already refuses them; without this flag the model
+ *   still sees them and wanders off to them when Bash fails.
+ * - `--append-system-prompt`: the single-command guidance above.
+ * - `sandbox: false` → `--settings {"sandbox":{"enabled":false}}`. Where
+ *   Claude Code's sandbox cannot start (Linux without bubblewrap/socat,
+ *   AppArmor-restricted user namespaces), a command falls back to running
+ *   unsandboxed only with permission, which dontAsk refuses, so every Bash
+ *   call fails. The job stays read-only through `--tools`, the allowlist and
+ *   the disallow list; `--settings` outranks user/project settings but not
+ *   managed policy, so an enterprise-enforced sandbox still wins.
+ */
+export function claudeJobIsolationArgs(opts?: ClaudeJobCommandOptions): string[] {
+  return [
+    "--strict-mcp-config",
+    "--append-system-prompt", CLAUDE_JOB_SHELL_GUIDANCE,
+    ...(opts?.sandbox === false ? ["--settings", JSON.stringify({ sandbox: { enabled: false } })] : []),
+  ];
+}
+
 export interface ClaudeCommandResult {
   command: string[];
   /** Prompt text to write to stdin (Claude reads prompt from stdin, not argv). */
@@ -217,7 +265,12 @@ export interface ClaudeCommandResult {
  * Build the `claude -p` command. Prompt is passed via stdin, not as a
  * positional arg — avoids quoting issues, argv limits, and variadic flag conflicts.
  */
-export function buildClaudeCommand(prompt: string, model: string = "opus", effort?: string): ClaudeCommandResult {
+export function buildClaudeCommand(
+  prompt: string,
+  model: string = "opus",
+  effort?: string,
+  opts?: ClaudeJobCommandOptions,
+): ClaudeCommandResult {
   const allowedTools = [
     "Agent", "Read", "Glob", "Grep",
     // GitHub CLI
@@ -261,6 +314,7 @@ export function buildClaudeCommand(prompt: string, model: string = "opus", effor
       "--tools", "Agent,Bash,Read,Glob,Grep",
       "--allowedTools", allowedTools,
       "--disallowedTools", disallowedTools,
+      ...claudeJobIsolationArgs(opts),
     ],
     stdinPrompt: prompt,
   };

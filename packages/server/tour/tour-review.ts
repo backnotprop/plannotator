@@ -5,6 +5,8 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
 import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
+import { claudeJobIsolationArgs, type ClaudeJobCommandOptions } from "../claude-review";
+import { loadConfig, resolveClaudeSandbox } from "../config";
 import type {
   CodeTourOutput,
   TourDiffAnchor,
@@ -367,7 +369,12 @@ export interface TourClaudeCommandResult {
   stdinPrompt: string;
 }
 
-export function buildTourClaudeCommand(prompt: string, model: string = "sonnet", effort?: string): TourClaudeCommandResult {
+export function buildTourClaudeCommand(
+  prompt: string,
+  model: string = "sonnet",
+  effort?: string,
+  opts?: ClaudeJobCommandOptions,
+): TourClaudeCommandResult {
   const allowedTools = [
     "Agent", "Read", "Glob", "Grep",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
@@ -408,6 +415,7 @@ export function buildTourClaudeCommand(prompt: string, model: string = "sonnet",
       "--tools", "Agent,Bash,Read,Glob,Grep",
       "--allowedTools", allowedTools,
       "--disallowedTools", disallowedTools,
+      ...claudeJobIsolationArgs(opts),
     ],
     stdinPrompt: prompt,
   };
@@ -584,7 +592,7 @@ export function createTourSession(): TourSession {
         return { command, outputPath, prompt, label: "Code Tour", engine: "codex", model, reasoningEffort, fastMode: fastMode || undefined };
       }
 
-      const { command, stdinPrompt } = buildTourClaudeCommand(prompt, model, effort);
+      const { command, stdinPrompt } = buildTourClaudeCommand(prompt, model, effort, { sandbox: resolveClaudeSandbox(loadConfig()) });
       return { command, stdinPrompt, prompt, cwd, label: "Code Tour", captureStdout: true, engine: "claude", model, effort };
     },
 

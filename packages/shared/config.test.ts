@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   resolveAIEnabled,
+  resolveClaudeSandbox,
   resolveCursorSandbox,
   resolveGitRemoteCheck,
   resolveUseGlimpse,
@@ -267,6 +268,36 @@ describe("resolveCursorSandbox", () => {
   });
 });
 
+describe("resolveClaudeSandbox (#1627)", () => {
+  const CLAUDE_ENV = "PLANNOTATOR_CLAUDE_SANDBOX";
+  const original = process.env[CLAUDE_ENV];
+  beforeEach(() => {
+    delete process.env[CLAUDE_ENV];
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env[CLAUDE_ENV];
+    else process.env[CLAUDE_ENV] = original;
+  });
+
+  test("defaults to true (defer to the user's Claude Code sandbox setting)", () => {
+    expect(resolveClaudeSandbox({})).toBe(true);
+  });
+
+  test("config.claudeSandbox is honored when the env var is unset", () => {
+    expect(resolveClaudeSandbox({ claudeSandbox: false })).toBe(false);
+    expect(resolveClaudeSandbox({ claudeSandbox: true })).toBe(true);
+  });
+
+  test("env values 0 / false / disabled turn it off, and env wins over config", () => {
+    for (const v of ["0", "false", "disabled", "FALSE"]) {
+      process.env[CLAUDE_ENV] = v;
+      expect(resolveClaudeSandbox({ claudeSandbox: true })).toBe(false);
+    }
+    process.env[CLAUDE_ENV] = "1";
+    expect(resolveClaudeSandbox({ claudeSandbox: false })).toBe(true);
+  });
+});
+
 // config.json is hand-edited, so boolean settings often arrive as quoted
 // strings ("false" instead of false). Each boolean resolver must coerce those
 // instead of passing the raw string through to `=== false` checks downstream.
@@ -306,6 +337,12 @@ describe("config.json boolean coercion", () => {
       envVar: "PLANNOTATOR_CURSOR_SANDBOX",
       key: "cursorSandbox",
       resolve: resolveCursorSandbox,
+    },
+    {
+      name: "resolveClaudeSandbox",
+      envVar: "PLANNOTATOR_CLAUDE_SANDBOX",
+      key: "claudeSandbox",
+      resolve: resolveClaudeSandbox,
     },
     {
       name: "resolveGitRemoteCheck",

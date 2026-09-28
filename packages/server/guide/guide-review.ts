@@ -2,7 +2,8 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { loadConfig, resolveCursorSandbox } from "../config";
+import { loadConfig, resolveClaudeSandbox, resolveCursorSandbox } from "../config";
+import { claudeJobIsolationArgs, type ClaudeJobCommandOptions } from "../claude-review";
 import {
   GUIDE_NO_SECTIONS_ERROR,
   GUIDE_REVIEW_PROMPT,
@@ -88,7 +89,12 @@ export interface GuideClaudeCommandResult {
   stdinPrompt: string;
 }
 
-export function buildGuideClaudeCommand(prompt: string, model: string = "sonnet", effort?: string): GuideClaudeCommandResult {
+export function buildGuideClaudeCommand(
+  prompt: string,
+  model: string = "sonnet",
+  effort?: string,
+  opts?: ClaudeJobCommandOptions,
+): GuideClaudeCommandResult {
   const allowedTools = [
     "Agent", "Read", "Glob", "Grep",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
@@ -129,6 +135,7 @@ export function buildGuideClaudeCommand(prompt: string, model: string = "sonnet"
       "--tools", "Agent,Bash,Read,Glob,Grep",
       "--allowedTools", allowedTools,
       "--disallowedTools", disallowedTools,
+      ...claudeJobIsolationArgs(opts),
     ],
     stdinPrompt: prompt,
   };
@@ -766,7 +773,7 @@ export function createGuideSession(): GuideSession {
           return { command, outputPath, prompt: repairPrompt, label: "Guide Repair", engine: "codex", model, reasoningEffort: "low" };
         }
 
-        const { command, stdinPrompt } = buildGuideClaudeCommand(repairPrompt, model, "low");
+        const { command, stdinPrompt } = buildGuideClaudeCommand(repairPrompt, model, "low", { sandbox: resolveClaudeSandbox(loadConfig()) });
         return { command, stdinPrompt, prompt: repairPrompt, cwd, label: "Guide Repair", captureStdout: true, engine: "claude", model, effort: "low" };
       }
 
@@ -804,7 +811,7 @@ export function createGuideSession(): GuideSession {
         return { command, outputPath, prompt, label: "Guided Review", engine: "codex", model, reasoningEffort, fastMode: fastMode || undefined };
       }
 
-      const { command, stdinPrompt } = buildGuideClaudeCommand(prompt, model, effort);
+      const { command, stdinPrompt } = buildGuideClaudeCommand(prompt, model, effort, { sandbox: resolveClaudeSandbox(loadConfig()) });
       return { command, stdinPrompt, prompt, cwd, label: "Guided Review", captureStdout: true, engine: "claude", model, effort };
     },
 
