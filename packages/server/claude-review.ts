@@ -247,15 +247,94 @@ export const CLAUDE_JOB_SHELL_GUIDANCE =
  *   exactly like any user who never enabled Claude's sandbox (Claude Code's
  *   default). `--tools`, the command allowlist and the disallow list are
  *   unchanged, but the allowlist LIMITS what the model can run; it does not
- *   contain it (allowlisted prefixes such as `git -C` or `gh api` accept
- *   arguments that execute or write). `--settings` outranks user/project
- *   settings but not managed policy, so an enterprise-enforced sandbox wins.
+ *   contain it (see CLAUDE_JOB_DISALLOWED_TOOLS for what rule text can and
+ *   cannot express). `--settings` outranks user/project settings but not
+ *   managed policy, so an enterprise-enforced sandbox wins.
+ * - `--setting-sources user`: load the user's own settings (auth, env,
+ *   sandbox preference) and managed policy, but NOT the project/local
+ *   `.claude/settings*.json` of the directory the job runs in. In PR mode
+ *   that directory is a checkout of someone else's branch, and its settings
+ *   could otherwise add allow rules or hooks to the job. Claude Code's
+ *   permissions docs recommend exactly this for `claude -p` in a repository
+ *   you did not write. Project-scoped skills/agents and `.mcp.json` are not
+ *   loaded either, which the job never needed.
  */
 export function claudeJobIsolationArgs(opts?: ClaudeJobCommandOptions): string[] {
   return [
+    "--setting-sources", "user",
     "--strict-mcp-config",
     "--append-system-prompt", CLAUDE_JOB_SHELL_GUIDANCE,
     ...(opts?.sandbox === false ? ["--settings", JSON.stringify({ sandbox: { enabled: false } })] : []),
+  ];
+}
+
+/**
+ * The Bash commands every Claude agent job (code review, Code Tour, Guided
+ * Review and guide repair) may run without a prompt: exactly the read-only
+ * commands the job prompts instruct (`packages/core/review-prompt.ts`, the
+ * PR-mode messages in `agent-review-message.ts`, and the review/tour/guide
+ * system prompts), plus a few read-only lookups those prompts imply (history,
+ * blame, file listings). One list for all three builders so they cannot drift.
+ *
+ * Deliberately absent: `git -C` (it prefixes ANY git subcommand; workspace
+ * reviews inline the combined diff instead), `git grep` / `git ls-remote`
+ * (unused, and both take an option that runs another program), `gh api` /
+ * `glab api` (unused, and they issue non-GET requests), open-ended
+ * `git branch` / `git remote` (they create, rename and delete), and the
+ * `gh`/`glab` list commands (the prompts forbid browsing issues).
+ */
+export const CLAUDE_JOB_ALLOWED_TOOLS: readonly string[] = [
+  "Agent", "Read", "Glob", "Grep",
+  // Git (read-only). `git ls-files` lists untracked files for since-base.
+  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+  "Bash(git blame:*)", "Bash(git merge-base:*)", "Bash(git rev-parse:*)",
+  "Bash(git ls-files:*)", "Bash(git ls-tree:*)",
+  "Bash(git branch)", "Bash(git branch --show-current)",
+  "Bash(git remote)", "Bash(git remote -v)", "Bash(git remote get-url:*)",
+  // JJ (read-only). `jj cat` is the pre-0.19 name of `jj file show`.
+  "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)", "Bash(jj show:*)",
+  "Bash(jj file show:*)", "Bash(jj cat:*)", "Bash(jj bookmark list:*)",
+  // PR/MR context in PR mode, and the issues a PR body links to.
+  "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh issue view:*)",
+  "Bash(glab mr view:*)", "Bash(glab mr diff:*)", "Bash(glab issue view:*)",
+  "Bash(wc:*)",
+];
+
+/**
+ * Tools and command shapes every Claude agent job refuses. Deny rules win
+ * over allow rules AND over Claude Code's built-in read-only command set, and
+ * they match past a leading environment assignment, so these close options
+ * that would turn an allowed read into a write or a program launch:
+ * `--output` on git's diff family writes a file; `git -c` / `--config-env`
+ * and jj's `--config*` inject configuration (pagers, diff/merge tools);
+ * jj's `--tool` runs an external diff program.
+ *
+ * Limitation, stated plainly: Claude Code matches rule TEXT, so these rules
+ * cover the spellings a model normally writes, not every spelling a program
+ * accepts (quoted option names, unusual abbreviations, a program reached by
+ * absolute path). They narrow the model's reach; they are not a containment
+ * boundary. Claude Code's sandbox is that boundary where it is enabled.
+ */
+export const CLAUDE_JOB_DISALLOWED_TOOLS: readonly string[] = [
+  "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch",
+  "Bash(python:*)", "Bash(python3:*)", "Bash(node:*)", "Bash(npx:*)",
+  "Bash(bun:*)", "Bash(bunx:*)", "Bash(sh:*)", "Bash(bash:*)", "Bash(zsh:*)",
+  "Bash(curl:*)", "Bash(wget:*)",
+  // git: file-writing output and config injection, in any subcommand position.
+  "Bash(git * --out*)", "Bash(git -c *)", "Bash(git --config-env*)",
+  "Bash(git * --config-env*)",
+  // Commands no job needs whose options run programs or write remotely.
+  "Bash(git grep *)", "Bash(git ls-remote *)", "Bash(gh api *)", "Bash(glab api *)",
+  // jj: config injection (global flags, accepted anywhere) and external tools.
+  "Bash(jj --config*)", "Bash(jj * --config*)", "Bash(jj * --tool*)",
+];
+
+/** `--tools` / `--allowedTools` / `--disallowedTools` for a Claude agent job. */
+export function claudeJobToolArgs(): string[] {
+  return [
+    "--tools", "Agent,Bash,Read,Glob,Grep",
+    "--allowedTools", CLAUDE_JOB_ALLOWED_TOOLS.join(","),
+    "--disallowedTools", CLAUDE_JOB_DISALLOWED_TOOLS.join(","),
   ];
 }
 
@@ -275,36 +354,6 @@ export function buildClaudeCommand(
   effort?: string,
   opts?: ClaudeJobCommandOptions,
 ): ClaudeCommandResult {
-  const allowedTools = [
-    "Agent", "Read", "Glob", "Grep",
-    // GitHub CLI
-    "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr list:*)",
-    "Bash(gh issue view:*)", "Bash(gh issue list:*)",
-    "Bash(gh api repos/*/*/pulls/*)", "Bash(gh api repos/*/*/pulls/*/files*)",
-    "Bash(gh api repos/*/*/pulls/*/comments*)", "Bash(gh api repos/*/*/issues/*/comments*)",
-    // GitLab CLI
-    "Bash(glab mr view:*)", "Bash(glab mr diff:*)", "Bash(glab mr list:*)",
-    "Bash(glab api:*)",
-    // Git (read-only)
-    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
-    "Bash(git show:*)", "Bash(git blame:*)", "Bash(git branch:*)",
-    "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
-    "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
-    "Bash(git show-ref:*)", "Bash(git -C:*)",
-    // JJ (read-only)
-    "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
-    "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
-    "Bash(jj bookmark list:*)",
-    "Bash(wc:*)",
-  ].join(",");
-
-  const disallowedTools = [
-    "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch",
-    "Bash(python:*)", "Bash(python3:*)", "Bash(node:*)", "Bash(npx:*)",
-    "Bash(bun:*)", "Bash(bunx:*)", "Bash(sh:*)", "Bash(bash:*)", "Bash(zsh:*)",
-    "Bash(curl:*)", "Bash(wget:*)",
-  ].join(",");
-
   return {
     command: [
       "claude", "-p",
@@ -315,9 +364,7 @@ export function buildClaudeCommand(
       "--no-session-persistence",
       "--model", model,
       ...(effort ? ["--effort", effort] : []),
-      "--tools", "Agent,Bash,Read,Glob,Grep",
-      "--allowedTools", allowedTools,
-      "--disallowedTools", disallowedTools,
+      ...claudeJobToolArgs(),
       ...claudeJobIsolationArgs(opts),
     ],
     stdinPrompt: prompt,
@@ -432,15 +479,23 @@ function isBashRefusal(content: unknown): boolean {
   return /permission to use bash has been denied|sandbox/i.test(text);
 }
 
-/** `Bash(<pattern>)` entries of an `--allowedTools` value, as matchers for one
- *  whole command: `git log:*` is the prefix `git log` followed by nothing or
- *  whitespace; `*` elsewhere matches any run of characters. */
-function allowlistMatchers(allowedTools: string): RegExp[] {
+/** `Bash(<pattern>)` entries of an `--allowedTools` / `--disallowedTools`
+ *  value, as matchers for one whole command. Claude Code's rule shapes:
+ *  `git log:*` and `git log *` (a trailing ` *` that is the rule's only
+ *  wildcard) are the prefix `git log` followed by nothing or whitespace;
+ *  `*` elsewhere matches any run of characters; no `*` is an exact command. */
+function ruleMatchers(tools: string): RegExp[] {
   const out: RegExp[] = [];
-  for (const m of allowedTools.matchAll(/Bash\(([^)]*)\)/g)) {
+  for (const m of tools.matchAll(/Bash\(([^)]*)\)/g)) {
     let pattern = m[1].trim();
-    const prefixForm = pattern.endsWith(":*");
-    if (prefixForm) pattern = pattern.slice(0, -2);
+    let prefixForm = false;
+    if (pattern.endsWith(":*")) {
+      prefixForm = true;
+      pattern = pattern.slice(0, -2);
+    } else if (pattern.endsWith(" *") && pattern.indexOf("*") === pattern.length - 1) {
+      prefixForm = true;
+      pattern = pattern.slice(0, -2);
+    }
     if (!pattern) continue;
     const body = pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*");
     out.push(new RegExp(`^${body}${prefixForm ? "(\\s|$)" : "$"}`));
@@ -448,16 +503,28 @@ function allowlistMatchers(allowedTools: string): RegExp[] {
   return out;
 }
 
+/**
+ * Whether a single command's text is admitted by a job's rules: it matches a
+ * `Bash(...)` allow entry and no deny entry. Rule text only; it does not model
+ * compound-command splitting, wrapper stripping, or Claude Code's built-in
+ * read-only set. `allowedTools` / `disallowedTools` are the comma-joined
+ * `--allowedTools` / `--disallowedTools` values.
+ */
+export function claudeRulesAdmit(command: string, allowedTools: string, disallowedTools = ""): boolean {
+  const cmd = command.trim();
+  return ruleMatchers(allowedTools).some((re) => re.test(cmd)) && !ruleMatchers(disallowedTools).some((re) => re.test(cmd));
+}
+
 /** A command the job's allowlist admits outright: one invocation with no shell
  *  operators, substitutions, redirects or variables, matching a `Bash(...)`
- *  entry. `dontAsk` never refuses such a command unless the shell itself is
- *  unavailable (the sandbox cannot start and the unsandboxed fallback needs a
- *  permission prompt). */
-function isPlainAllowlistedCommand(command: unknown, matchers: RegExp[]): boolean {
+ *  allow entry and no deny entry. `dontAsk` never refuses such a command
+ *  unless the shell itself is unavailable (the sandbox cannot start and the
+ *  unsandboxed fallback needs a permission prompt). */
+function isPlainAllowlistedCommand(command: unknown, allow: RegExp[], deny: RegExp[]): boolean {
   if (typeof command !== "string") return false;
   const cmd = command.trim();
   if (!cmd || /[|&;<>`$\n\\(){}]/.test(cmd)) return false;
-  return matchers.some((re) => re.test(cmd));
+  return allow.some((re) => re.test(cmd)) && !deny.some((re) => re.test(cmd));
 }
 
 /**
@@ -472,12 +539,15 @@ function isPlainAllowlistedCommand(command: unknown, matchers: RegExp[]): boolea
  * never count: `dontAsk` refuses those by design and the model's next single
  * command usually works. A plain allowlisted command is only refused when the
  * shell cannot run at all, so one such refusal is the signal; requiring zero
- * successes on top keeps a transient oddity from warning. `allowedTools` is
- * the job's own `--allowedTools` value; without it nothing counts.
+ * successes on top keeps a transient oddity from warning. `allowedTools` /
+ * `disallowedTools` are the job's own `--allowedTools` / `--disallowedTools`
+ * values; without an allowlist nothing counts, and a command a deny rule
+ * refuses by design never counts.
  */
-export function detectClaudeShellBlocked(stdout: string, allowedTools: string): boolean {
-  const matchers = allowlistMatchers(allowedTools);
+export function detectClaudeShellBlocked(stdout: string, allowedTools: string, disallowedTools = ""): boolean {
+  const matchers = ruleMatchers(allowedTools);
   if (matchers.length === 0) return false;
+  const denyMatchers = ruleMatchers(disallowedTools);
   const bashCommands = new Map<string, unknown>();
   const refused = new Set<string>();
   let succeeded = 0;
@@ -509,7 +579,7 @@ export function detectClaudeShellBlocked(stdout: string, allowedTools: string): 
   }
   if (succeeded > 0) return false;
   for (const id of refused) {
-    if (isPlainAllowlistedCommand(bashCommands.get(id), matchers)) return true;
+    if (isPlainAllowlistedCommand(bashCommands.get(id), matchers, denyMatchers)) return true;
   }
   return false;
 }
@@ -517,5 +587,11 @@ export function detectClaudeShellBlocked(stdout: string, allowedTools: string): 
 /** The `--allowedTools` value of a spawned command, or "" when absent. */
 export function allowedToolsOf(command: readonly string[]): string {
   const i = command.indexOf("--allowedTools");
+  return i === -1 ? "" : (command[i + 1] ?? "");
+}
+
+/** The `--disallowedTools` value of a spawned command, or "" when absent. */
+export function disallowedToolsOf(command: readonly string[]): string {
+  const i = command.indexOf("--disallowedTools");
   return i === -1 ? "" : (command[i + 1] ?? "");
 }

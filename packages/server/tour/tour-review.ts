@@ -5,7 +5,7 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import type { DiffType } from "../vcs";
 import type { PRMetadata } from "../pr";
 import { buildWorkspacePromptContextLines, getLocalDiffInstruction, type WorkspaceReviewPromptContext } from "../agent-review-message";
-import { claudeJobIsolationArgs, type ClaudeJobCommandOptions } from "../claude-review";
+import { claudeJobIsolationArgs, claudeJobToolArgs, type ClaudeJobCommandOptions } from "../claude-review";
 import { loadConfig, resolveClaudeSandbox } from "../config";
 import type {
   CodeTourOutput,
@@ -375,33 +375,6 @@ export function buildTourClaudeCommand(
   effort?: string,
   opts?: ClaudeJobCommandOptions,
 ): TourClaudeCommandResult {
-  const allowedTools = [
-    "Agent", "Read", "Glob", "Grep",
-    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
-    "Bash(git show:*)", "Bash(git blame:*)", "Bash(git branch:*)",
-    "Bash(git grep:*)", "Bash(git ls-remote:*)", "Bash(git ls-tree:*)",
-    "Bash(git merge-base:*)", "Bash(git remote:*)", "Bash(git rev-parse:*)",
-    "Bash(git show-ref:*)", "Bash(git -C:*)",
-    "Bash(jj status:*)", "Bash(jj diff:*)", "Bash(jj log:*)",
-    "Bash(jj show:*)", "Bash(jj file show:*)", "Bash(jj cat:*)",
-    "Bash(jj bookmark list:*)",
-    "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr list:*)",
-    "Bash(gh api repos/*/*/pulls/*)", "Bash(gh api repos/*/*/pulls/*/files*)",
-    // The tour prompt follows linked issues (`Fixes #123`, `Closes owner/repo#456`),
-    // so the allowlist has to permit the issue-read commands.
-    "Bash(gh issue view:*)", "Bash(gh api repos/*/*/issues/*)",
-    "Bash(glab mr view:*)", "Bash(glab mr diff:*)",
-    "Bash(glab issue view:*)",
-    "Bash(wc:*)",
-  ].join(",");
-
-  const disallowedTools = [
-    "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch",
-    "Bash(python:*)", "Bash(python3:*)", "Bash(node:*)", "Bash(npx:*)",
-    "Bash(bun:*)", "Bash(bunx:*)", "Bash(sh:*)", "Bash(bash:*)", "Bash(zsh:*)",
-    "Bash(curl:*)", "Bash(wget:*)",
-  ].join(",");
-
   return {
     command: [
       "claude", "-p",
@@ -412,9 +385,7 @@ export function buildTourClaudeCommand(
       "--no-session-persistence",
       "--model", model,
       ...(effort ? ["--effort", effort] : []),
-      "--tools", "Agent,Bash,Read,Glob,Grep",
-      "--allowedTools", allowedTools,
-      "--disallowedTools", disallowedTools,
+      ...claudeJobToolArgs(),
       ...claudeJobIsolationArgs(opts),
     ],
     stdinPrompt: prompt,

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { allowedToolsOf, buildClaudeCommand, detectClaudeShellBlocked } from "./claude-review";
+import { allowedToolsOf, buildClaudeCommand, claudeRulesAdmit, detectClaudeShellBlocked, disallowedToolsOf } from "./claude-review";
+import { buildAgentReviewUserMessage, getLocalDiffInstruction } from "./agent-review-message";
+import type { DiffType } from "./vcs";
+import type { PRMetadata } from "./pr";
 import { buildTourClaudeCommand } from "./tour/tour-review";
 import { buildGuideClaudeCommand } from "./guide/guide-review";
 import type { ClaudeJobCommandOptions } from "./claude-review";
@@ -23,6 +26,17 @@ describe.each(builders)("%s job isolation (#1627)", (_name, build) => {
     const command = build();
     expect(command).toContain("--strict-mcp-config");
     expect(command).not.toContain("--mcp-config");
+  });
+
+  test("loads only user settings, so a checkout's own .claude/settings*.json cannot add rules or hooks", () => {
+    expect(valueOf(build(), "--setting-sources")).toBe("user");
+    expect(valueOf(build({ sandbox: false }), "--setting-sources")).toBe("user");
+  });
+
+  test("uses the same allow and deny lists as the review job", () => {
+    const review = buildClaudeCommand("p").command;
+    expect(allowedToolsOf(build())).toBe(allowedToolsOf(review));
+    expect(disallowedToolsOf(build())).toBe(disallowedToolsOf(review));
   });
 
   test("passes shell guidance as a non-empty value to --append-system-prompt", () => {
@@ -116,5 +130,63 @@ describe("detectClaudeShellBlocked (#1627)", () => {
   test("ignores refusals of non-Bash tools", () => {
     const stdout = result([{ tool_name: "mcp__idea__git_status", tool_use_id: "x", tool_input: { command: "git status" } }]);
     expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(false);
+  });
+});
+
+// The job allowlist must admit every command the job prompts tell the model to
+// run, or the job fails under dontAsk (the since-base prompt once asked for
+// `git ls-files`, which no allowlist carried). Commands are read out of the
+// real prompt text, so a new instruction that outgrows the allowlist fails.
+describe("Claude job allowlist vs the commands the prompts instruct", () => {
+  const command = buildClaudeCommand("p").command;
+  const ALLOWED = allowedToolsOf(command);
+  const DISALLOWED = disallowedToolsOf(command);
+  const admitted = (cmd: string) => claudeRulesAdmit(cmd, ALLOWED, DISALLOWED);
+
+  // Backticked git/jj commands in a prompt, with the prompt's placeholders
+  // filled by literal values the model would substitute.
+  const promptCommands = (text: string): string[] =>
+    [...text.matchAll(/`((?:git|jj) [^`]+)`/g)]
+      .map((m) => m[1].replace("<merge-base>", "8ce0d729").replace("<upstream>", "origin/main"));
+
+  const diffTypes: DiffType[] = [
+    "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base",
+    "since-base", "local-vs-remote", "all", "jj-current", "jj-last", "jj-line",
+    "jj-evolog", "jj-all", "commit:8ce0d729aa11bb22cc33dd44ee55ff6677889900" as DiffType,
+  ];
+
+  test("every local diff instruction's commands are admitted", () => {
+    const cmds = diffTypes.flatMap((t) => promptCommands(getLocalDiffInstruction(t, "main")?.inspect ?? ""));
+    expect(cmds).toContain("git ls-files --others --exclude-standard");
+    for (const cmd of cmds) expect([cmd, admitted(cmd)]).toEqual([cmd, true]);
+  });
+
+  test("PR-mode instructions and PR/issue context commands are admitted", () => {
+    const pr = { url: "https://github.com/o/r/pull/7", baseBranch: "main" } as PRMetadata;
+    const text = buildAgentReviewUserMessage("", "branch" as DiffType, { hasLocalAccess: true }, pr);
+    const diffCmd = text.match(/git diff origin\/\S+/)?.[0];
+    expect(diffCmd).toBeDefined();
+    for (const cmd of [
+      diffCmd!, "gh pr view https://github.com/o/r/pull/7", "gh pr diff 7",
+      "gh issue view 123", "glab mr view 7", "glab mr diff 7", "glab issue view 12",
+    ]) expect([cmd, admitted(cmd)]).toEqual([cmd, true]);
+  });
+
+  test("broad prefixes the prompts never use are not admitted", () => {
+    for (const cmd of ["git -C api diff", "gh api repos/o/r/pulls/7", "glab api projects", "git branch topic", "git remote add up x"]) {
+      expect([cmd, admitted(cmd)]).toEqual([cmd, false]);
+    }
+    // Deny rules win over an allowed prefix.
+    expect(admitted("git diff --output=review.patch")).toBe(false);
+    expect(admitted("git diff HEAD --output review.patch")).toBe(false);
+  });
+
+  test("a refused command that a deny rule covers never reads as a blocked shell", () => {
+    const cmd = "git diff --output=review.patch";
+    const stdout = [bashUse("a", cmd), toolResult("a", DENIED, true), result([denial("a", cmd)])].join("\n");
+    expect(detectClaudeShellBlocked(stdout, ALLOWED, DISALLOWED)).toBe(false);
+    // The same stdout for an allowed command is the blocked-shell signal.
+    const plain = [bashUse("a", "git diff HEAD"), toolResult("a", DENIED, true), result([denial("a", "git diff HEAD")])].join("\n");
+    expect(detectClaudeShellBlocked(plain, ALLOWED, DISALLOWED)).toBe(true);
   });
 });

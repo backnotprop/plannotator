@@ -57,9 +57,8 @@ export function buildWorkspacePromptContextLines(
     "The workspace root is not itself the VCS repository for these changes.",
     "Each changed path in the diff is prefixed with the child repository folder, such as `api/src/file.ts`.",
     "If any repository is marked failed, treat this as a partial workspace review and say so.",
-    "For Git child repos, inspect with `git -C <child-repo-folder> ...` from the workspace root.",
-    "For JJ child repos, treat the inline diff and prefixed files as authoritative review context.",
-    "For GitButler child repos, treat the inline diff and prefixed files as authoritative; ordinary Git commands can include other applied stacks.",
+    "The inline diff below is the complete combined changeset for every child repository (Git, JJ, or GitButler); treat it as authoritative and do not re-derive it with VCS commands.",
+    "For surrounding context, read and search files by their folder-prefixed paths (such as `api/src/file.ts`) from the workspace root.",
   ];
 
   if (options.includeReportingInstruction) {
