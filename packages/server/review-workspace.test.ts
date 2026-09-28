@@ -5,7 +5,7 @@
  * Run: bun test packages/server/review-workspace.test.ts
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -137,6 +137,14 @@ async function waitForFile(path: string): Promise<void> {
   }
   throw new Error(`Timed out waiting for ${path}`);
 }
+
+// Sandbox every test's data dir so a contributor's ~/.plannotator/config.json
+// (e.g. reviewAnalysis.semanticDiff: false) can never change server behavior.
+// The root bunfig preload does this too, but not when bun runs from this
+// package directory. Tests that need a specific dir still override it.
+beforeEach(() => {
+  process.env.PLANNOTATOR_DATA_DIR = makeTempDir("plannotator-review-workspace-data-");
+});
 
 afterEach(() => {
   if (originalSemPath === undefined) {
