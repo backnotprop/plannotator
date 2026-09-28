@@ -1215,6 +1215,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: PLAN_SUBMIT_TOOL,
 		label: "Submit Plan",
+		// Pi runs one assistant message's tool calls in parallel by default, and
+		// its write/edit tools apply changes through an async per-file mutation
+		// queue, while this tool reads the plan file synchronously as soon as it
+		// starts. An "edit plan + submit plan" batch could therefore review (and
+		// save to history) the pre-edit plan. A sequential tool makes pi run the
+		// WHOLE batch one call at a time, in order, so the edit lands first
+		// (#1622). Supported by every pi in our peer range (>= 0.79.1).
+		executionMode: "sequential",
 		description:
 			"Submit your Plannotator plan for user review. " +
 			"Call this only while Plannotator planning mode is active, after writing your plan as a markdown file anywhere inside the working directory. " +

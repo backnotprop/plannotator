@@ -86,6 +86,7 @@ function createRuntime(initialTools: string[]) {
 	const commands = new Map<string, { handler: (args: string, context: ReturnType<typeof createContext>) => unknown }>();
 	const handlers = new Map<string, Handler[]>();
 	const persisted: Array<Record<string, unknown>> = [];
+	const tools = new Map<string, Record<string, unknown>>();
 	let activeTools = [...initialTools];
 
 	const pi = {
@@ -104,7 +105,9 @@ function createRuntime(initialTools: string[]) {
 		},
 		registerFlag: () => undefined,
 		registerShortcut: () => undefined,
-		registerTool: () => undefined,
+		registerTool: (tool: Record<string, unknown>) => {
+			tools.set(tool.name as string, tool);
+		},
 		sendMessage: () => undefined,
 		sendUserMessage: () => undefined,
 		setActiveTools: (tools: string[]) => {
@@ -126,10 +129,20 @@ function createRuntime(initialTools: string[]) {
 		setActiveTools: (tools: string[]) => {
 			activeTools = [...tools];
 		},
+		tools,
 	};
 }
 
 describe("Plannotator phase tool ownership", () => {
+	// Deliberate pin (#1622): pi's agent loop runs a batch sequentially only when
+	// some tool in it declares executionMode "sequential". Without it, an
+	// "edit plan + plannotator_submit_plan" batch runs in parallel and the submit
+	// reads the plan file before pi's queued edit lands, reviewing a stale plan.
+	test("the submit tool forces pi to run its tool batch sequentially", () => {
+		const runtime = createRuntime([]);
+		expect(runtime.tools.get("plannotator_submit_plan")?.executionMode).toBe("sequential");
+	});
+
 	test("leaving planning removes only tools Plannotator added", async () => {
 		const cwd = makeWorkspace();
 		const runtime = createRuntime([
